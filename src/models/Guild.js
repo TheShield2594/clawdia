@@ -119,6 +119,43 @@ const guildSchema = new Schema({
         openMessage: { type: String, default: 'A support agent will be with you shortly.' },
         count: { type: Number, default: 0 }
     },
+
+    starboard: {
+        enabled: { type: Boolean, default: false },
+        channelId: { type: String, default: null },
+        emoji: { type: String, default: '⭐' },
+        threshold: { type: Number, default: 3 },
+        starredMessages: [{ type: String }]
+    },
+
+    giveaways: [{
+        messageId: { type: String, required: true },
+        channelId: { type: String, required: true },
+        prize: { type: String, required: true },
+        winners: { type: Number, default: 1 },
+        endsAt: { type: Date, required: true },
+        hostId: { type: String, required: true },
+        ended: { type: Boolean, default: false },
+        winnerIds: [{ type: String }]
+    }],
+
+    tempVoice: {
+        enabled: { type: Boolean, default: false },
+        lobbyChannelId: { type: String, default: null },
+        categoryId: { type: String, default: null },
+        activeChannels: [{ type: String }]
+    },
+
+    eventLog: {
+        enabled: { type: Boolean, default: false },
+        channelId: { type: String, default: null },
+        logMessageEdit: { type: Boolean, default: true },
+        logMessageDelete: { type: Boolean, default: true },
+        logMemberJoin: { type: Boolean, default: true },
+        logMemberLeave: { type: Boolean, default: true },
+        logRoleChanges: { type: Boolean, default: true },
+        logChannelChanges: { type: Boolean, default: true }
+    },
     
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }

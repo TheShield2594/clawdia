@@ -25,6 +25,21 @@ module.exports = {
                 .setTimestamp();
             
             await channel.send({ embeds: [embed] });
+            if (guildSettings.eventLog?.enabled && guildSettings.eventLog.logMemberLeave) {
+                const logChannel = member.guild.channels.cache.get(guildSettings.eventLog.channelId);
+                if (logChannel) {
+                    const logEmbed = new EmbedBuilder()
+                        .setColor('#ff0000')
+                        .setTitle('Member Left')
+                        .setAuthor({ name: member.user.tag, iconURL: member.user.displayAvatarURL({ dynamic: true }) })
+                        .addFields(
+                            { name: 'Joined', value: member.joinedAt ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : 'Unknown', inline: true },
+                            { name: 'Member Count', value: member.guild.memberCount.toString(), inline: true }
+                        )
+                        .setTimestamp();
+                    await logChannel.send({ embeds: [logEmbed] }).catch(console.error);
+                }
+            }
         } catch (error) {
             console.error('Error in guildMemberRemove:', error);
         }

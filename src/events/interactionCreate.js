@@ -1,5 +1,6 @@
 const Guild = require('../models/Guild');
 const { closeTicket } = require('../commands/moderation/ticket');
+const { handlePollVote } = require('../commands/utility/poll');
 
 module.exports = {
     name: 'interactionCreate',
@@ -9,6 +10,24 @@ module.exports = {
                 const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
                 await closeTicket(interaction, guildSettings);
             }
+
+            if (interaction.customId === 'giveaway_enter') {
+                const msg = interaction.message;
+                if (!msg.giveawayEntrants) msg.giveawayEntrants = [];
+
+                if (msg.giveawayEntrants.includes(interaction.user.id)) {
+                    msg.giveawayEntrants = msg.giveawayEntrants.filter(id => id !== interaction.user.id);
+                    await interaction.reply({ content: 'You have left the giveaway.', ephemeral: true });
+                } else {
+                    msg.giveawayEntrants.push(interaction.user.id);
+                    await interaction.reply({ content: `${interaction.user}, you have entered the giveaway! Good luck!`, ephemeral: true });
+                }
+            }
+
+            if (interaction.customId.startsWith('poll_')) {
+                await handlePollVote(interaction);
+            }
+
             return;
         }
 

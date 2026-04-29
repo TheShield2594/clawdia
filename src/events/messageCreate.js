@@ -48,6 +48,10 @@ module.exports = {
             if (guildSettings?.moderation.enabled) {
                 await handleAutoModeration(message, guildSettings);
             }
+
+            if (guildSettings?.customCommands?.length) {
+                await handleCustomCommands(message, guildSettings);
+            }
         } catch (error) {
             console.error('Error in messageCreate:', error);
         }
@@ -207,4 +211,25 @@ async function applyAutoModAction(message, guildSettings, reason) {
     } catch (err) {
         console.error('AutoMod action error:', err);
     }
+}
+
+async function handleCustomCommands(message, guildSettings) {
+    const content = message.content.trim().toLowerCase();
+    const prefix = guildSettings.prefix || '!';
+
+    if (!content.startsWith(prefix) && !content.startsWith('/')) return;
+
+    const commandName = content.startsWith(prefix)
+        ? content.slice(prefix.length).split(/\s+/)[0]
+        : content.slice(1).split(/\s+/)[0];
+
+    const cmd = guildSettings.customCommands.find(c => c.name === commandName);
+    if (!cmd) return;
+
+    const response = cmd.response
+        .replace(/{user}/g, `<@${message.author.id}>`)
+        .replace(/{server}/g, message.guild.name)
+        .replace(/{memberCount}/g, message.guild.memberCount);
+
+    await message.reply(response).catch(console.error);
 }
