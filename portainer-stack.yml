@@ -34,6 +34,7 @@ services:
       - CLIENT_ID=${CLIENT_ID}
       - CLIENT_SECRET=${CLIENT_SECRET}
       - SESSION_SECRET=${SESSION_SECRET}
+      - DASHBOARD_URL=${DASHBOARD_URL}
       # --- Optional: AI ---
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -42,7 +43,6 @@ services:
       # --- Defaults (override if needed) ---
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
       - DASHBOARD_PORT=${DASHBOARD_PORT:-3000}
-      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:3000}
       - NODE_ENV=${NODE_ENV:-production}
     ports:
       - "3000:3000"
@@ -54,7 +54,7 @@ services:
     networks:
       - ultrabot-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => { process.exit(r.statusCode < 500 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
