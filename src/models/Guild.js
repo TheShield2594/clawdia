@@ -25,9 +25,15 @@ const guildSchema = new Schema({
         muteRoleId: { type: String, default: null },
         autoModEnabled: { type: Boolean, default: false },
         spamProtection: { type: Boolean, default: false },
+        spamThreshold: { type: Number, default: 5 },
+        spamWindow: { type: Number, default: 5 },
         inviteFilter: { type: Boolean, default: false },
         linkFilter: { type: Boolean, default: false },
-        profanityFilter: { type: Boolean, default: false }
+        profanityFilter: { type: Boolean, default: false },
+        customBadWords: [{ type: String }],
+        warnThreshold: { type: Number, default: 3 },
+        kickThreshold: { type: Number, default: 5 },
+        banThreshold: { type: Number, default: 0 }
     },
     
     leveling: {
@@ -80,10 +86,39 @@ const guildSchema = new Schema({
         name: { type: String, required: true },
         response: { type: String, required: true }
     }],
-    
+
     autoRoles: [{
         roleId: { type: String, required: true }
     }],
+
+    reactionRoles: [{
+        messageId: { type: String, required: true },
+        channelId: { type: String, required: true },
+        emoji: { type: String, required: true },
+        roleId: { type: String, required: true }
+    }],
+
+    levelRoles: [{
+        level: { type: Number, required: true },
+        roleId: { type: String, required: true }
+    }],
+
+    shop: [{
+        name: { type: String, required: true },
+        description: { type: String, default: '' },
+        price: { type: Number, required: true },
+        roleId: { type: String, default: null },
+        stock: { type: Number, default: -1 }
+    }],
+
+    tickets: {
+        enabled: { type: Boolean, default: false },
+        categoryId: { type: String, default: null },
+        logChannelId: { type: String, default: null },
+        supportRoleId: { type: String, default: null },
+        openMessage: { type: String, default: 'A support agent will be with you shortly.' },
+        count: { type: Number, default: 0 }
+    },
     
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }

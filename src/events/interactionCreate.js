@@ -1,6 +1,17 @@
+const Guild = require('../models/Guild');
+const { closeTicket } = require('../commands/moderation/ticket');
+
 module.exports = {
     name: 'interactionCreate',
     async execute(interaction, client) {
+        if (interaction.isButton()) {
+            if (interaction.customId === 'ticket_close') {
+                const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+                await closeTicket(interaction, guildSettings);
+            }
+            return;
+        }
+
         if (!interaction.isChatInputCommand()) return;
 
         const command = client.commands.get(interaction.commandName);

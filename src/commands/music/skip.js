@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { checkDjPermission } = require('../../utils/musicPermissions');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -9,6 +10,10 @@ module.exports = {
 
         if (!member.voice.channel) {
             return interaction.reply({ content: 'You need to be in a voice channel!', ephemeral: true });
+        }
+
+        if (!await checkDjPermission(interaction)) {
+            return interaction.reply({ content: 'You need the DJ role to use music commands!', ephemeral: true });
         }
 
         const queue = client.musicQueues.get(interaction.guild.id);
