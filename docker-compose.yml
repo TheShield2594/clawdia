@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: ultrabot-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - ultrabot-network
+
+  bot:
+    build: .
+    container_name: ultrabot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongodb
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - ultrabot-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  ultrabot-network:
+    driver: bridge

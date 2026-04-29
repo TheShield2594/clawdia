@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= guild.name %> - Settings</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #2c2f33;
+            color: #fff;
+        }
+
+        nav {
+            background: #23272a;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            background: #7289da;
+            color: #fff;
+            text-decoration: none;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn:hover {
+            background: #5b6eae;
+        }
+
+        .btn-success {
+            background: #43b581;
+        }
+
+        .btn-danger {
+            background: #f04747;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid #23272a;
+        }
+
+        .tab {
+            padding: 1rem 2rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            background: #23272a;
+            border-radius: 5px 5px 0 0;
+        }
+
+        .tab-content {
+            display: none;
+            background: #23272a;
+            padding: 2rem;
+            border-radius: 10px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .setting {
+            margin-bottom: 2rem;
+        }
+
+        .setting label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: bold;
+        }
+
+        .setting input[type="text"],
+        .setting select,
+        .setting textarea {
+            width: 100%;
+            padding: 0.5rem;
+            background: #2c2f33;
+            border: 1px solid #444;
+            border-radius: 5px;
+            color: #fff;
+        }
+
+        .setting input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+        }
+
+        .save-btn {
+            margin-top: 2rem;
+        }
+
+        .rss-feed {
+            background: #2c2f33;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="logo">🤖 <%= guild.name %></div>
+        <a href="/dashboard" class="btn">Back to Dashboard</a>
+    </nav>
+
+    <div class="container">
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('welcome')">Welcome</div>
+            <div class="tab" onclick="showTab('moderation')">Moderation</div>
+            <div class="tab" onclick="showTab('leveling')">Leveling</div>
+            <div class="tab" onclick="showTab('economy')">Economy</div>
+            <div class="tab" onclick="showTab('music')">Music</div>
+            <div class="tab" onclick="showTab('rss')">RSS Feeds</div>
+            <div class="tab" onclick="showTab('dailynews')">Daily News</div>
+            <div class="tab" onclick="showTab('ai')">AI Chat</div>
+        </div>
+
+        <div id="welcome" class="tab-content active">
+            <h2>Welcome Settings</h2>
+            <div class="setting">
+                <label><input type="checkbox" id="welcome-enabled" <%= settings.welcome.enabled ? 'checked' : '' %>> Enable Welcome Messages</label>
+            </div>
+            <div class="setting">
+                <label>Welcome Channel</label>
+                <select id="welcome-channel">
+                    <option value="">Select Channel</option>
+                    <% channels.forEach(channel => { %>
+                        <option value="<%= channel.id %>" <%= settings.welcome.channelId === channel.id ? 'selected' : '' %>><%= channel.name %></option>
+                    <% }); %>
+                </select>
+            </div>
+            <div class="setting">
+                <label>Welcome Message</label>
+                <textarea id="welcome-message" rows="3"><%= settings.welcome.message %></textarea>
+                <small>Use {user} for mention, {server} for server name, {memberCount} for member count</small>
+            </div>
+            <div class="setting">
+                <label><input type="checkbox" id="welcome-card" <%= settings.welcome.cardEnabled ? 'checked' : '' %>> Enable Welcome Card</label>
+            </div>
+            <button class="btn btn-success save-btn" onclick="saveSettings('welcome')">Save Welcome Settings</button>
+        </div>
+
+        <div id="moderation" class="tab-content">
+            <h2>Moderation Settings</h2>
+            <div class="setting">
+                <label><input type="checkbox" id="mod-enabled" <%= settings.moderation.enabled ? 'checked' : '' %>> Enable Moderation</label>
+            </div>
+            <div class="setting">
+                <label>Log Channel</label>
+                <select id="mod-log-channel">
+                    <option value="">Select Channel</option>
+                    <% channels.forEach(channel => { %>
+                        <option value="<%= channel.id %>" <%= settings.moderation.logChannelId === channel.id ? 'selected' : '' %>><%= channel.name %></option>
+                    <% }); %>
+                </select>
+            </div>
+            <div class="setting">
+                <label><input type="checkbox" id="mod-automod" <%= settings.moderation.autoModEnabled ? 'checked' : '' %>> Enable Auto-Moderation</label>
+            </div>
+            <div class="setting">
+                <label><input type="checkbox" id="mod-spam" <%= settings.moderation.spamProtection ? 'checked' : '' %>> Spam Protection</label>
+            </div>
+            <div class="setting">
+                <label><input type="checkbox" id="mod-invites" <%= settings.moderation.inviteFilter ? 'checked' : '' %>> Filter Invite Links</label>
+            </div>
+            <div class="setting">
+                <label><input type="checkbox" id="mod-links" <%= settings.moderation.linkFilter ? 'checked' : '' %>> Filter Links</label>
+            </div>
+            <button class="btn btn-success save-btn" onclick="saveSettings('moderation')">Save Moderation Settings</button>
+        </div>
+
+        <div id="leveling" class="tab-content">
+            <h2>Leveling Settings</h2>
+            <div class="setting">
+                <label><input type="checkbox" id="level-enabled" <%= settings.leveling.enabled ? 'checked' : '' %>> Enable Leveling</label>
+            </div>
+            <div class="setting">
+                <label>XP Rate Multiplier</label>
+                <input type="text" id="level-xp-rate" value="<%= settings.leveling.xpRate %>">
+            </div>
+            <div class="setting">
+                <label>Level Up Message</label>
+                <textarea id="level-message" rows="2"><%= settings.leveling.levelUpMessage %></textarea>
+                <small>Use {user} for mention, {level} for level number</small>
+            </div>
+            <button class="btn btn-success save-btn" onclick="saveSettings('leveling')">Save Leveling Settings</button>
+        </div>
+
+        <div id="economy" class="tab-content">
+            <h2>Economy Settings</h2>
+            <div class="setting">
+                <label><input type="checkbox" id="economy-enabled" <%= settings.economy.enabled ? 'checked' : '' %>> Enable Economy</label>
+            </div>
+            <div class="setting">
+                <label>Currency Symbol</label>
+                <input type="text" id="economy-currency" value="<%= settings.economy.currency %>">
+            </div>
+            <div class="setting">
+                <label>Daily Reward Amount</label>
+                <input type="text" id="economy-daily" value="<%= settings.economy.dailyAmount %>">
+            </div>
+            <div class="setting">
+                <label>Work Reward (Min)</label>
+                <input type="text" id="economy-work-min" value="<%= settings.economy.workMin %>">
+            </div>
+            <div class="setting">
+                <label>Work Reward (Max)</label>
+                <input type="text" id="economy-work-max" value="<%= settings.economy.workMax %>">
+            </div>
+            <button class="btn btn-success save-btn" onclick="saveSettings('economy')">Save Economy Settings</button>
+        </div>
+
+        <div id="music" class="tab-content">
+            <h2>Music Settings</h2>
+            <div class="setting">
+                <label>DJ Role</label>
+                <select id="music-dj-role">
+                    <option value="">None (Anyone)</option>
+                    <% roles.forEach(role => { %>
+                        <option value="<%= role.id %>" <%= settings.music.djRoleId === role.id ? 'selected' : '' %>><%= role.name %></option>
+                    <% }); %>
+                </select>
+            </div>
+            <div class="setting">
+                <label>Default Volume (0-100)</label>
+                <input type="text" id="music-volume" value="<%= settings.music.defaultVolume %>">
+            </div>
+            <button class="btn btn-success save-btn" onclick="saveSettings('music')">Save Music Settings</button>
+        </div>
+
+        <div id="rss" class="tab-content">
+            <h2>RSS Feed Settings</h2>
+            <div id="rss-feeds">
+                <% settings.rssFeeds.forEach((feed, index) => { %>
+                    <div class="rss-feed">
+                        <div>
+                            <strong><%= feed.url %></strong> → <%= channels.find(c => c.id === feed.channelId)?.name || 'Unknown Channel' %>
+                        </div>
+                        <button class="btn btn-danger" onclick="deleteRssFeed(<%= index %>)">Delete</button>
+                    </div>
+                <% }); %>
+            </div>
+            <div class="setting">
+                <label>RSS Feed URL</label>
+                <input type="text" id="rss-url" placeholder="https://example.com/feed.xml">
+            </div>
+            <div class="setting">
+                <label>Post to Channel</label>
+                <select id="rss-channel">
+                    <option value="">Select Channel</option>
+                    <% channels.forEach(channel => { %>
+                        <option value="<%= channel.id %>"><%= channel.name %></option>
+                    <% }); %>
+                </select>
+            </div>
+            <button class="btn btn-success" onclick="addRssFeed()">Add RSS Feed</button>
+        </div>
+
+        <div id="dailynews" class="tab-content">
+            <h2>Daily News Digest</h2>
+            <p>Compile multiple RSS feeds into a single daily digest</p>
+            <div class="setting">
+                <label><input type="checkbox" id="dailynews-enabled" <%= settings.dailyNews?.enabled ? 'checked' : '' %>> Enable Daily News Digest</label>
+            </div>
+            <div class="setting">
+                <label>Post to Channel</label>
+                <select id="dailynews-channel">
+                    <option value="">Select Channel</option>
+                    <% channels.forEach(channel => { %>
+                        <option value="<%= channel.id %>" <%= settings.dailyNews?.channelId === channel.id ? 'selected' : '' %>><%= channel.name %></option>
+                    <% }); %>
+                </select>
+            </div>
+            <div class="setting">
+                <label>Delivery Time (24-hour format, e.g., 09:00)</label>
+                <input type="text" id="dailynews-time" value="<%= settings.dailyNews?.time || '09:00' %>" placeholder="09:00">
+            </div>
+            <div class="setting">
+                <label>Digest Title</label>
+                <input type="text" id="dailynews-title" value="<%= settings.dailyNews?.title || '📰 Daily News Digest' %>">
+            </div>
+            <div class="setting">
+                <label>Max Items Per Feed</label>
+                <input type="number" id="dailynews-max-items" value="<%= settings.dailyNews?.maxItemsPerFeed || 3 %>" min="1" max="10">
+            </div>
+            <div class="setting">
+                <label>RSS Feed URLs (one per line)</label>
+                <textarea id="dailynews-feeds" rows="6" placeholder="https://example.com/feed1.xml
+https://example.com/feed2.xml"><%= settings.dailyNews?.feeds?.join('\n') || '' %></textarea>
+            </div>
+            <button class="btn btn-success save-btn" onclick="saveSettings('dailynews')">Save Daily News Settings</button>
+        </div>
+
+        <div id="ai" class="tab-content">
+            <h2>AI Chat Settings</h2>
+            <div class="setting">
+                <label><input type="checkbox" id="ai-enabled" <%= settings.ai.enabled ? 'checked' : '' %>> Enable AI Chat</label>
+            </div>
+            <div class="setting">
+                <label>AI Provider</label>
+                <select id="ai-provider">
+                    <option value="openai" <%= settings.ai.provider === 'openai' || !settings.ai.provider ? 'selected' : '' %>>OpenAI (GPT-3.5/4)</option>
+                    <option value="gemini" <%= settings.ai.provider === 'gemini' ? 'selected' : '' %>>Google Gemini</option>
+                </select>
+            </div>
+            <div class="setting">
+                <label>OpenAI API Key</label>
+                <input type="password" id="ai-openai-key" value="<%= settings.ai.openaiKey || '' %>" placeholder="sk-...">
+                <small>Leave empty to use bot's default key</small>
+            </div>
+            <div class="setting">
+                <label>Gemini API Key</label>
+                <input type="password" id="ai-gemini-key" value="<%= settings.ai.geminiKey || '' %>" placeholder="AIza...">
+                <small>Leave empty to use bot's default key</small>
+            </div>
+            <div class="setting">
+                <label>AI Chat Channel</label>
+                <select id="ai-channel">
+                    <option value="">Select Channel</option>
+                    <% channels.forEach(channel => { %>
+                        <option value="<%= channel.id %>" <%= settings.ai.channelId === channel.id ? 'selected' : '' %>><%= channel.name %></option>
+                    <% }); %>
+                </select>
+            </div>
+            <div class="setting">
+                <label>System Prompt</label>
+                <textarea id="ai-prompt" rows="3"><%= settings.ai.systemPrompt %></textarea>
+            </div>
+            <button class="btn btn-success save-btn" onclick="saveSettings('ai')">Save AI Settings</button>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tabName).classList.add('active');
+        }
+
+        async function saveSettings(section) {
+            const guildId = '<%= guild.id %>';
+            let data = {};
+
+            if (section === 'welcome') {
+                data = {
+                    'welcome.enabled': document.getElementById('welcome-enabled').checked,
+                    'welcome.channelId': document.getElementById('welcome-channel').value,
+                    'welcome.message': document.getElementById('welcome-message').value,
+                    'welcome.cardEnabled': document.getElementById('welcome-card').checked
+                };
+            } else if (section === 'moderation') {
+                data = {
+                    'moderation.enabled': document.getElementById('mod-enabled').checked,
+                    'moderation.logChannelId': document.getElementById('mod-log-channel').value,
+                    'moderation.autoModEnabled': document.getElementById('mod-automod').checked,
+                    'moderation.spamProtection': document.getElementById('mod-spam').checked,
+                    'moderation.inviteFilter': document.getElementById('mod-invites').checked,
+                    'moderation.linkFilter': document.getElementById('mod-links').checked
+                };
+            } else if (section === 'leveling') {
+                data = {
+                    'leveling.enabled': document.getElementById('level-enabled').checked,
+                    'leveling.xpRate': parseFloat(document.getElementById('level-xp-rate').value),
+                    'leveling.levelUpMessage': document.getElementById('level-message').value
+                };
+            } else if (section === 'economy') {
+                data = {
+                    'economy.enabled': document.getElementById('economy-enabled').checked,
+                    'economy.currency': document.getElementById('economy-currency').value,
+                    'economy.dailyAmount': parseInt(document.getElementById('economy-daily').value),
+                    'economy.workMin': parseInt(document.getElementById('economy-work-min').value),
+                    'economy.workMax': parseInt(document.getElementById('economy-work-max').value)
+                };
+            } else if (section === 'music') {
+                data = {
+                    'music.djRoleId': document.getElementById('music-dj-role').value,
+                    'music.defaultVolume': parseInt(document.getElementById('music-volume').value)
+                };
+            } else if (section === 'ai') {
+                data = {
+                    'ai.enabled': document.getElementById('ai-enabled').checked,
+                    'ai.provider': document.getElementById('ai-provider').value,
+                    'ai.openaiKey': document.getElementById('ai-openai-key').value,
+                    'ai.geminiKey': document.getElementById('ai-gemini-key').value,
+                    'ai.channelId': document.getElementById('ai-channel').value,
+                    'ai.systemPrompt': document.getElementById('ai-prompt').value
+                };
+            } else if (section === 'dailynews') {
+                const feedsText = document.getElementById('dailynews-feeds').value;
+                const feeds = feedsText.split('\n').filter(f => f.trim() !== '');
+                
+                data = {
+                    'dailyNews.enabled': document.getElementById('dailynews-enabled').checked,
+                    'dailyNews.channelId': document.getElementById('dailynews-channel').value,
+                    'dailyNews.time': document.getElementById('dailynews-time').value,
+                    'dailyNews.title': document.getElementById('dailynews-title').value,
+                    'dailyNews.maxItemsPerFeed': parseInt(document.getElementById('dailynews-max-items').value),
+                    'dailyNews.feeds': feeds
+                };
+            }
+
+            try {
+                const response = await fetch(`/api/guild/${guildId}/settings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    alert('Settings saved successfully!');
+                } else {
+                    alert('Failed to save settings');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred');
+            }
+        }
+
+        async function addRssFeed() {
+            const guildId = '<%= guild.id %>';
+            const url = document.getElementById('rss-url').value;
+            const channelId = document.getElementById('rss-channel').value;
+
+            if (!url || !channelId) {
+                alert('Please fill in all fields');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/guild/${guildId}/rss/add`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, channelId })
+                });
+
+                if (response.ok) {
+                    alert('RSS feed added successfully!');
+                    location.reload();
+                } else {
+                    alert('Failed to add RSS feed');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred');
+            }
+        }
+
+        async function deleteRssFeed(index) {
+            const guildId = '<%= guild.id %>';
+            
+            try {
+                const response = await fetch(`/api/guild/${guildId}/rss/${index}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('RSS feed deleted successfully!');
+                    location.reload();
+                } else {
+                    alert('Failed to delete RSS feed');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred');
+            }
+        }
+    </script>
+</body>
+</html>

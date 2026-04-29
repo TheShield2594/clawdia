@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UltraBot - Home</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        nav {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .hero {
+            text-align: center;
+            padding: 4rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .hero h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .hero p {
+            font-size: 1.3rem;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 1rem 2rem;
+            background: #fff;
+            color: #667eea;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            transition: transform 0.3s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .feature {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2rem;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+
+        .feature h3 {
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="logo">🤖 UltraBot</div>
+        <div>
+            <% if (user) { %>
+                <a href="/dashboard" class="btn">Dashboard</a>
+            <% } else { %>
+                <a href="/auth/login" class="btn">Login with Discord</a>
+            <% } %>
+        </div>
+    </nav>
+
+    <div class="hero">
+        <h1>Welcome to UltraBot</h1>
+        <p>The Ultimate All-in-One Discord Bot</p>
+        <% if (!user) { %>
+            <a href="/auth/login" class="btn">Get Started</a>
+        <% } %>
+    </div>
+
+    <div class="features">
+        <div class="feature">
+            <h3>⚔️ Moderation</h3>
+            <p>Powerful moderation tools to keep your server safe</p>
+        </div>
+        <div class="feature">
+            <h3>🎵 Music</h3>
+            <p>24/7 high-quality music streaming</p>
+        </div>
+        <div class="feature">
+            <h3>💰 Economy</h3>
+            <p>Engaging economy system with work, daily rewards, and more</p>
+        </div>
+        <div class="feature">
+            <h3>📊 Leveling</h3>
+            <p>Reward active members with XP and levels</p>
+        </div>
+        <div class="feature">
+            <h3>🤖 AI Chat</h3>
+            <p>Integrated AI assistant powered by OpenAI</p>
+        </div>
+        <div class="feature">
+            <h3>📰 RSS Feeds</h3>
+            <p>Stay updated with your favorite RSS feeds</p>
+        </div>
+    </div>
+</body>
+</html>
