@@ -1,6 +1,8 @@
 const cron = require('node-cron');
 const { checkRssFeeds, scheduleDailyNews } = require('../services/rssService');
 const { checkReminders } = require('../services/reminderService');
+const { checkGiveaways } = require('../services/giveawayService');
+const { checkTempVoice } = require('../services/tempVoiceService');
 
 module.exports = {
     name: 'ready',
@@ -23,7 +25,15 @@ module.exports = {
         });
         
         scheduleDailyNews(client);
-        
+
+        cron.schedule('* * * * *', async () => {
+            await checkGiveaways(client);
+        });
+
+        cron.schedule('*/2 * * * *', async () => {
+            await checkTempVoice(client);
+        });
+
         console.log('[READY] Background services started');
     }
 };

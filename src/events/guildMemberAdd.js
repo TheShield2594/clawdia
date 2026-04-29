@@ -48,6 +48,22 @@ module.exports = {
                     }
                 }
             }
+
+            if (guildSettings.eventLog?.enabled && guildSettings.eventLog.logMemberJoin) {
+                const logChannel = member.guild.channels.cache.get(guildSettings.eventLog.channelId);
+                if (logChannel) {
+                    const logEmbed = new EmbedBuilder()
+                        .setColor('#00ff00')
+                        .setTitle('Member Joined')
+                        .setAuthor({ name: member.user.tag, iconURL: member.user.displayAvatarURL({ dynamic: true }) })
+                        .addFields(
+                            { name: 'Account Created', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: true },
+                            { name: 'Member Count', value: member.guild.memberCount.toString(), inline: true }
+                        )
+                        .setTimestamp();
+                    await logChannel.send({ embeds: [logEmbed] }).catch(console.error);
+                }
+            }
         } catch (error) {
             console.error('Error in guildMemberAdd:', error);
         }
