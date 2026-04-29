@@ -1,0 +1,69 @@
+version: '3.8'
+
+# Deploy this file via Portainer > Stacks > Add Stack > Web Editor.
+# Before deploying, build and push the bot image to a registry:
+#   docker build -t ghcr.io/theshield2594/ultrabot:latest .
+#   docker push ghcr.io/theshield2594/ultrabot:latest
+#
+# Then set all variables marked (required) in the "Environment variables"
+# section of the Portainer Stack form before clicking Deploy.
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: ultrabot-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - ultrabot-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  bot:
+    image: ghcr.io/theshield2594/ultrabot:latest  # change to your registry image
+    container_name: ultrabot
+    restart: unless-stopped
+    environment:
+      # --- Required ---
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - CLIENT_ID=${CLIENT_ID}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+      - SESSION_SECRET=${SESSION_SECRET}
+      # --- Optional: AI ---
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # --- Optional: Music ---
+      - YOUTUBE_COOKIE=${YOUTUBE_COOKIE}
+      # --- Defaults (override if needed) ---
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
+      - DASHBOARD_PORT=${DASHBOARD_PORT:-3000}
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:3000}
+      - NODE_ENV=${NODE_ENV:-production}
+    ports:
+      - "3000:3000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ultrabot_logs:/app/logs
+    networks:
+      - ultrabot-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => { process.exit(r.statusCode < 500 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  mongodb_data:
+  ultrabot_logs:
+
+networks:
+  ultrabot-network:
+    driver: bridge
