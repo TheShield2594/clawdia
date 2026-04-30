@@ -278,7 +278,7 @@
                 <section id="ai" class="panel">
                     <div class="panel-head">
                         <h2>AI Chat</h2>
-                        <p>Plug in OpenAI or Google Gemini for intelligent chat in a designated channel.</p>
+                        <p>Connect OpenAI, Gemini, Anthropic Claude, OpenRouter, or a self-hosted Ollama instance for chat in a designated channel.</p>
                     </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable AI chat</strong><span>Respond to messages in the AI channel</span></span>
@@ -286,20 +286,43 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="ai-provider">Provider</label>
-                        <select id="ai-provider">
-                            <option value="openai" <%= settings.ai.provider === 'openai' || !settings.ai.provider ? 'selected' : '' %>>OpenAI (GPT-3.5 / GPT-4)</option>
+                        <select id="ai-provider" onchange="updateAiProviderUI()">
+                            <option value="openai" <%= settings.ai.provider === 'openai' || !settings.ai.provider ? 'selected' : '' %>>OpenAI</option>
+                            <option value="anthropic" <%= settings.ai.provider === 'anthropic' ? 'selected' : '' %>>Anthropic (Claude)</option>
                             <option value="gemini" <%= settings.ai.provider === 'gemini' ? 'selected' : '' %>>Google Gemini</option>
+                            <option value="openrouter" <%= settings.ai.provider === 'openrouter' ? 'selected' : '' %>>OpenRouter</option>
+                            <option value="ollama" <%= settings.ai.provider === 'ollama' ? 'selected' : '' %>>Ollama (self-hosted)</option>
                         </select>
                     </div>
                     <div class="field">
+                        <label class="field-label" for="ai-model">Model</label>
+                        <input type="text" id="ai-model" value="<%= settings.ai.model || '' %>" placeholder="Leave empty for provider default">
+                        <small id="ai-model-hint">Default: gpt-4o-mini</small>
+                    </div>
+                    <div class="field ai-key-field" data-provider="openai">
                         <label class="field-label" for="ai-openai-key">OpenAI API key</label>
                         <input type="password" id="ai-openai-key" value="<%= settings.ai.openaiKey || '' %>" placeholder="sk-…">
                         <small>Leave empty to use the bot's default key</small>
                     </div>
-                    <div class="field">
+                    <div class="field ai-key-field" data-provider="anthropic">
+                        <label class="field-label" for="ai-anthropic-key">Anthropic API key</label>
+                        <input type="password" id="ai-anthropic-key" value="<%= settings.ai.anthropicKey || '' %>" placeholder="sk-ant-…">
+                        <small>Leave empty to use the bot's default key</small>
+                    </div>
+                    <div class="field ai-key-field" data-provider="gemini">
                         <label class="field-label" for="ai-gemini-key">Gemini API key</label>
                         <input type="password" id="ai-gemini-key" value="<%= settings.ai.geminiKey || '' %>" placeholder="AIza…">
                         <small>Leave empty to use the bot's default key</small>
+                    </div>
+                    <div class="field ai-key-field" data-provider="openrouter">
+                        <label class="field-label" for="ai-openrouter-key">OpenRouter API key</label>
+                        <input type="password" id="ai-openrouter-key" value="<%= settings.ai.openrouterKey || '' %>" placeholder="sk-or-…">
+                        <small>Get a key at openrouter.ai. Use any model OpenRouter supports (e.g. <code>anthropic/claude-3.5-sonnet</code>, <code>meta-llama/llama-3.1-70b-instruct</code>).</small>
+                    </div>
+                    <div class="field ai-key-field" data-provider="ollama">
+                        <label class="field-label" for="ai-ollama-url">Ollama base URL</label>
+                        <input type="text" id="ai-ollama-url" value="<%= settings.ai.ollamaBaseUrl || 'http://localhost:11434' %>" placeholder="http://localhost:11434">
+                        <small>Point this at the host running <code>ollama serve</code>. Set the model field above to a tag you've pulled (e.g. <code>llama3.2</code>, <code>qwen2.5</code>, <code>mistral</code>).</small>
                     </div>
                     <div class="field">
                         <label class="field-label" for="ai-channel">AI chat channel</label>
@@ -313,6 +336,32 @@
                     <div class="field">
                         <label class="field-label" for="ai-prompt">System prompt</label>
                         <textarea id="ai-prompt" rows="3"><%= settings.ai.systemPrompt %></textarea>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="ai-temperature">Temperature (<span id="ai-temp-display"><%= settings.ai.temperature ?? 0.7 %></span>)</label>
+                        <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="<%= settings.ai.temperature ?? 0.7 %>" oninput="document.getElementById('ai-temp-display').textContent = this.value">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="ai-max-tokens">Max output tokens</label>
+                        <input type="number" id="ai-max-tokens" min="32" max="8192" value="<%= settings.ai.maxTokens ?? 1024 %>">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="ai-max-history">Conversation history length</label>
+                        <input type="number" id="ai-max-history" min="0" max="100" value="<%= settings.ai.maxHistory ?? 20 %>">
+                        <small>Number of past messages remembered per user. 0 disables history.</small>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates them</span></span>
+                        <span class="switch"><input type="checkbox" id="ai-streaming" <%= settings.ai.streaming !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="ai-rate-limit">Rate limit (requests per user)</label>
+                        <input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>">
+                        <small>0 disables rate limiting.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label>
+                        <input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>">
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('ai')">Save changes</button>
@@ -352,6 +401,24 @@
             clearTimeout(toastTimer);
             toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2800);
         }
+
+        const AI_MODEL_DEFAULTS = {
+            openai: 'gpt-4o-mini',
+            anthropic: 'claude-haiku-4-5-20251001',
+            gemini: 'gemini-1.5-flash',
+            openrouter: 'openai/gpt-4o-mini',
+            ollama: 'llama3.2'
+        };
+
+        function updateAiProviderUI() {
+            const provider = document.getElementById('ai-provider').value;
+            document.querySelectorAll('.ai-key-field').forEach(el => {
+                el.style.display = el.dataset.provider === provider ? '' : 'none';
+            });
+            const hint = document.getElementById('ai-model-hint');
+            if (hint) hint.textContent = 'Default: ' + (AI_MODEL_DEFAULTS[provider] || '');
+        }
+        if (document.getElementById('ai-provider')) updateAiProviderUI();
 
         async function saveSettings(section) {
             const guildId = '<%= guild.id %>';
@@ -396,10 +463,20 @@
                 data = {
                     'ai.enabled': document.getElementById('ai-enabled').checked,
                     'ai.provider': document.getElementById('ai-provider').value,
+                    'ai.model': document.getElementById('ai-model').value.trim(),
                     'ai.openaiKey': document.getElementById('ai-openai-key').value,
+                    'ai.anthropicKey': document.getElementById('ai-anthropic-key').value,
                     'ai.geminiKey': document.getElementById('ai-gemini-key').value,
+                    'ai.openrouterKey': document.getElementById('ai-openrouter-key').value,
+                    'ai.ollamaBaseUrl': document.getElementById('ai-ollama-url').value.trim(),
                     'ai.channelId': document.getElementById('ai-channel').value,
-                    'ai.systemPrompt': document.getElementById('ai-prompt').value
+                    'ai.systemPrompt': document.getElementById('ai-prompt').value,
+                    'ai.temperature': parseFloat(document.getElementById('ai-temperature').value),
+                    'ai.maxTokens': parseInt(document.getElementById('ai-max-tokens').value, 10),
+                    'ai.maxHistory': parseInt(document.getElementById('ai-max-history').value, 10),
+                    'ai.streaming': document.getElementById('ai-streaming').checked,
+                    'ai.rateLimitPerUser': parseInt(document.getElementById('ai-rate-limit').value, 10),
+                    'ai.rateLimitWindowMin': parseInt(document.getElementById('ai-rate-window').value, 10)
                 };
             } else if (section === 'dailynews') {
                 const feedsText = document.getElementById('dailynews-feeds').value;
