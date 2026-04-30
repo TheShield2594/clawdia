@@ -27,7 +27,20 @@
 1. In the same application, go to "OAuth2" > "General"
 2. Copy your "Client ID" (this is your `CLIENT_ID`)
 3. Copy your "Client Secret" (this is your `CLIENT_SECRET`)
-4. Add redirect URL: `http://localhost:3000/auth/callback` (or your domain)
+4. Add a redirect URL — it MUST be the full callback path, not just the domain:
+   - Local dev: `http://localhost:3000/auth/callback`
+   - Production: `https://YOUR-DOMAIN/auth/callback` (e.g. `https://bot.theshieldit.com/auth/callback`)
+
+> ⚠️ **"Invalid OAuth2 Redirect URI" troubleshooting**
+>
+> Discord rejects the login if the redirect URI sent by the bot does not exactly match one registered in the Developer Portal. The dashboard always sends `${DASHBOARD_URL}/auth/callback`, so:
+>
+> - The value registered in Discord must include the `/auth/callback` path.
+> - The scheme must match (`https://` in production, `http://` only for `localhost`).
+> - No trailing slash after `/auth/callback`.
+> - `DASHBOARD_URL` in your `.env` must be **only the scheme + host**, with no path and no trailing slash. Example: `DASHBOARD_URL=https://bot.theshieldit.com` — *not* `https://bot.theshieldit.com/something`, and *not* two URLs concatenated.
+>
+> If your error URL contains something like `redirect_uri=http://bot.example.com/another-host.com/auth/callback`, your `DASHBOARD_URL` env var has two hosts mashed together — fix it to a single canonical URL. The dashboard now refuses to start with a `DASHBOARD_URL` that contains a path, and prints the exact callback URL to the console at startup; copy that exact string into the Discord Developer Portal.
 
 ### 3. Invite Bot to Server
 

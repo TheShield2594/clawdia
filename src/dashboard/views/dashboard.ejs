@@ -3,132 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - UltraBot</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #2c2f33;
-            color: #fff;
-        }
-
-        nav {
-            background: #23272a;
-            padding: 1rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .logo {
-            font-size: 1.5rem;
-            font-weight: bold;
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .user-info img {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-        }
-
-        .btn {
-            padding: 0.5rem 1rem;
-            background: #7289da;
-            color: #fff;
-            text-decoration: none;
-            border-radius: 5px;
-            border: none;
-            cursor: pointer;
-        }
-
-        .btn:hover {
-            background: #5b6eae;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 2rem auto;
-            padding: 0 2rem;
-        }
-
-        h1 {
-            margin-bottom: 2rem;
-        }
-
-        .guilds {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .guild-card {
-            background: #23272a;
-            padding: 1.5rem;
-            border-radius: 10px;
-            text-align: center;
-            transition: transform 0.3s;
-        }
-
-        .guild-card:hover {
-            transform: translateY(-5px);
-        }
-
-        .guild-icon {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            margin-bottom: 1rem;
-        }
-
-        .guild-name {
-            font-size: 1.2rem;
-            margin-bottom: 1rem;
-        }
-    </style>
+    <title>Dashboard — UltraBot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-    <nav>
-        <div class="logo">🤖 UltraBot Dashboard</div>
-        <div class="user-info">
-            <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" alt="Avatar">
-            <span><%= user.username %></span>
-            <a href="/auth/logout" class="btn">Logout</a>
-        </div>
-    </nav>
+    <div class="mesh-bg"><div class="grid"></div><div class="blob-3"></div></div>
 
-    <div class="container">
-        <h1>Select a Server</h1>
-        
+    <header class="topbar">
+        <a href="/" class="brand" style="text-decoration:none;color:inherit;">
+            <span class="brand-mark"></span>
+            <span>UltraBot</span>
+        </a>
+        <div class="topbar-right">
+            <div class="user-chip">
+                <% if (user.avatar) { %>
+                    <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" alt="">
+                <% } else { %>
+                    <img src="https://cdn.discordapp.com/embed/avatars/0.png" alt="">
+                <% } %>
+                <span><%= user.username %></span>
+            </div>
+            <a href="/auth/logout" class="btn btn-sm">Logout</a>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="page-head">
+            <h1>Your Servers</h1>
+            <p>Pick a server to configure UltraBot. You'll only see servers where you have <strong>Manage Server</strong> and the bot is present.</p>
+        </div>
+
         <% if (guilds.length === 0) { %>
-            <p>No servers found. Make sure the bot is in your server and you have Manage Server permissions.</p>
+            <div class="empty-state">
+                <h3>No matching servers yet</h3>
+                <p>Invite UltraBot to a server you manage, then refresh this page.</p>
+                <div style="margin-top:1.25rem;">
+                    <a href="/" class="btn btn-sm">Back home</a>
+                </div>
+            </div>
         <% } else { %>
-            <div class="guilds">
+            <div class="guild-grid">
                 <% guilds.forEach(guild => { %>
                     <div class="guild-card">
                         <% if (guild.icon) { %>
                             <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png" alt="<%= guild.name %>" class="guild-icon">
                         <% } else { %>
-                            <div class="guild-icon" style="background: #7289da; display: flex; align-items: center; justify-content: center; font-size: 2rem;">
-                                <%= guild.name.charAt(0) %>
-                            </div>
+                            <div class="guild-icon guild-icon-fallback"><%= guild.name.charAt(0).toUpperCase() %></div>
                         <% } %>
                         <div class="guild-name"><%= guild.name %></div>
-                        <a href="/dashboard/guild/<%= guild.id %>" class="btn">Manage</a>
+                        <a href="/dashboard/guild/<%= guild.id %>" class="btn btn-primary btn-sm">Manage</a>
                     </div>
                 <% }); %>
             </div>
         <% } %>
-    </div>
+    </main>
 </body>
 </html>
