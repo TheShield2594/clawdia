@@ -1,30 +1,9 @@
-const { REST, Routes } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
 const cron = require('node-cron');
+const { deployCommands } = require('../utils/commandDeployer');
 const { checkRssFeeds, scheduleDailyNews } = require('../services/rssService');
 const { checkReminders } = require('../services/reminderService');
 const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
-
-async function deployCommands(clientId) {
-    const commands = [];
-    const foldersPath = path.join(__dirname, '../commands');
-
-    for (const folder of fs.readdirSync(foldersPath)) {
-        const commandsPath = path.join(foldersPath, folder);
-        for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) {
-            const command = require(path.join(commandsPath, file));
-            if ('data' in command && 'execute' in command) {
-                commands.push(command.data.toJSON());
-            }
-        }
-    }
-
-    const rest = new REST().setToken(process.env.DISCORD_TOKEN);
-    await rest.put(Routes.applicationCommands(clientId), { body: commands });
-    return commands.length;
-}
 
 module.exports = {
     name: 'ready',
@@ -34,7 +13,7 @@ module.exports = {
         console.log(`[READY] Serving ${client.guilds.cache.size} guilds`);
 
         try {
-            const count = await deployCommands(client.user.id);
+            const count = await deployCommands(client.user.id, process.env.DISCORD_TOKEN);
             console.log(`[READY] Deployed ${count} slash commands`);
         } catch (error) {
             console.error('[READY] Failed to deploy slash commands:', error);
