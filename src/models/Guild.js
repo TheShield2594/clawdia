@@ -1,5 +1,18 @@
 const { Schema, model } = require('mongoose');
 
+function distinctProfileIds(profiles) {
+    if (!Array.isArray(profiles)) return true;
+
+    const seen = new Set();
+    for (const profile of profiles) {
+        if (!profile || !profile.profileId) continue;
+        if (seen.has(profile.profileId)) return false;
+        seen.add(profile.profileId);
+    }
+
+    return true;
+}
+
 const guildSchema = new Schema({
     guildId: { type: String, required: true, unique: true },
     name: { type: String, required: true },
@@ -71,6 +84,23 @@ const guildSchema = new Schema({
         feeds: [{ type: String }],
         title: { type: String, default: '📰 Daily News Digest' },
         maxItemsPerFeed: { type: Number, default: 3 }
+    },
+
+    dailyNewsProfiles: {
+        type: [{
+            profileId: { type: String, required: true },
+            enabled: { type: Boolean, default: false },
+            channelId: { type: String, default: null },
+            time: { type: String, default: '09:00' },
+            timezone: { type: String, default: null },
+            feeds: [{ type: String }],
+            title: { type: String, default: '📰 Daily News Digest' },
+            maxItemsPerFeed: { type: Number, default: 3 }
+        }],
+        validate: {
+            validator: distinctProfileIds,
+            message: 'dailyNewsProfiles contains duplicate profileId values.'
+        }
     },
     
     ai: {
