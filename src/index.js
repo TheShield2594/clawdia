@@ -84,7 +84,12 @@ async function startBot() {
     await loadCommands();
     await loadEvents();
     await startDashboard();
-    
+
+    client.once('ready', () => {
+        const { startSummaryService } = require('./services/summaryService');
+        startSummaryService(client);
+    });
+
     client.login(process.env.DISCORD_TOKEN);
 }
 

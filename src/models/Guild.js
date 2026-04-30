@@ -125,7 +125,15 @@ const guildSchema = new Schema({
         maxHistory: { type: Number, default: 20, min: 0, max: 100 },
         streaming: { type: Boolean, default: true },
         rateLimitPerUser: { type: Number, default: 20 },
-        rateLimitWindowMin: { type: Number, default: 10 }
+        rateLimitWindowMin: { type: Number, default: 10 },
+        // Per-channel personas: each entry overrides systemPrompt for that channel
+        channelPersonas: [{
+            channelId:    { type: String, required: true },
+            personaName:  { type: String, default: 'Assistant' },
+            systemPrompt: { type: String, required: true }
+        }],
+        // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
+        actionsEnabled: { type: Boolean, default: false }
     },
     
     customCommands: [{

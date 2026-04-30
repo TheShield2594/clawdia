@@ -34,9 +34,19 @@ module.exports = {
                 });
             }
 
-            if (guildSettings?.ai.enabled && message.channel.id === guildSettings.ai.channelId) {
-                await handleAIChat(message, guildSettings.ai);
-                return;
+            if (guildSettings?.ai?.enabled) {
+                const ai = guildSettings.ai;
+                const isDefaultChannel = message.channel.id === ai.channelId;
+                const persona = ai.channelPersonas?.find(p => p.channelId === message.channel.id);
+
+                if (isDefaultChannel || persona) {
+                    // Merge persona system prompt over the guild default when present
+                    const effectiveSettings = persona
+                        ? Object.assign({}, ai.toObject ? ai.toObject() : ai, { systemPrompt: persona.systemPrompt })
+                        : ai;
+                    await handleAIChat(message, effectiveSettings);
+                    return;
+                }
             }
 
             if (guildSettings?.leveling.enabled) {
