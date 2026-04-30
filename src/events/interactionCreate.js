@@ -1,6 +1,8 @@
 const Guild = require('../models/Guild');
+const User = require('../models/User');
 const { closeTicket } = require('../commands/moderation/ticket');
 const { handlePollVote } = require('../commands/utility/poll');
+const { ensureQuests, onCommandUse } = require('../services/questService');
 async function logCommandMetric(interaction, success, reason = null) {
     try {
         const entry = {
@@ -28,6 +30,26 @@ async function logCommandMetric(interaction, success, reason = null) {
         );
     } catch (error) {
         console.error('Command metric error:', error);
+    }
+}
+
+async function trackQuestCommandUse(interaction) {
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    if (!guildSettings?.quests?.enabled) return;
+
+    let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+    if (!user) return;
+
+    await ensureQuests(user, guildSettings);
+    const completed = await onCommandUse(user, guildSettings);
+    await user.save();
+
+    for (const reward of completed) {
+        if (!reward) continue;
+        const ch = interaction.channel;
+        if (ch) {
+            await ch.send(`${interaction.user} completed a quest! **+${reward.xp} XP, +${reward.coins} coins**`).catch(() => {});
+        }
     }
 }
 
@@ -99,6 +121,9 @@ module.exports = {
         try {
             await command.execute(interaction, client);
             await logCommandMetric(interaction, true);
+
+            // Quest: track command usage (fire-and-forget)
+            trackQuestCommandUse(interaction).catch(console.error);
         } catch (error) {
             console.error(`Error executing ${interaction.commandName}:`, error);
             await logCommandMetric(interaction, false, error.name || 'execution_error');

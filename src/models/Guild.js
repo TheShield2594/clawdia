@@ -61,7 +61,15 @@ const guildSchema = new Schema({
         customBadWords: [{ type: String }],
         warnThreshold: { type: Number, default: 3 },
         kickThreshold: { type: Number, default: 5 },
-        banThreshold: { type: Number, default: 0 }
+        banThreshold: { type: Number, default: 0 },
+        // Behavioral score escalation thresholds (0 = disabled)
+        behaviorScoreMuteAt: { type: Number, default: 10 },
+        behaviorScoreKickAt: { type: Number, default: 20 },
+        behaviorScoreBanAt: { type: Number, default: 30 },
+        behaviorScoreDecayDays: { type: Number, default: 7 },
+        // Appeals
+        appealsEnabled: { type: Boolean, default: false },
+        appealChannelId: { type: String, default: null }
     },
     
     leveling: {
@@ -191,6 +199,59 @@ const guildSchema = new Schema({
         supportRoleId: { type: String, default: null },
         openMessage: { type: String, default: 'A support agent will be with you shortly.' },
         count: { type: Number, default: 0 }
+    },
+
+    raidDetection: {
+        enabled: { type: Boolean, default: false },
+        threshold: { type: Number, default: 10 },
+        windowSeconds: { type: Number, default: 60 },
+        minAccountAgeDays: { type: Number, default: 7 },
+        action: {
+            type: String,
+            enum: ['alert', 'quarantine', 'kick'],
+            default: 'alert'
+        },
+        quarantineRoleId: { type: String, default: null },
+        alertChannelId: { type: String, default: null },
+        caseIdCounter: { type: Number, default: 0 }
+    },
+
+    caseSettings: {
+        slaHours: { type: Number, default: 48 },
+        slaChannelId: { type: String, default: null },
+        nextCaseId: { type: Number, default: 1 }
+    },
+
+    quests: {
+        enabled: { type: Boolean, default: false },
+        dailyXpReward: { type: Number, default: 50 },
+        dailyCoinReward: { type: Number, default: 25 },
+        weeklyXpReward: { type: Number, default: 300 },
+        weeklyCoinReward: { type: Number, default: 150 }
+    },
+
+    season: {
+        enabled: { type: Boolean, default: false },
+        seasonId: { type: String, default: null },
+        name: { type: String, default: 'Season 1' },
+        startDate: { type: Date, default: null },
+        endDate: { type: Date, default: null },
+        xpPerTier: { type: Number, default: 100 },
+        maxTiers: { type: Number, default: 50 },
+        tierRewards: [{
+            tier: { type: Number, required: true },
+            coins: { type: Number, default: 0 },
+            roleId: { type: String, default: null },
+            label: { type: String, default: '' }
+        }]
+    },
+
+    progressionTracks: {
+        enabled: { type: Boolean, default: false },
+        helperChannels: [{ type: String }],
+        creatorBonus: { type: Number, default: 20 },
+        helperBonus: { type: Number, default: 20 },
+        raiderBonus: { type: Number, default: 20 }
     },
 
     starboard: {
