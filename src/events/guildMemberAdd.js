@@ -18,6 +18,17 @@ module.exports = {
             const guildSettings = await Guild.findOne({ guildId: member.guild.id });
 
             if (!guildSettings) return;
+            const dateKey = new Date().toISOString().slice(0, 10);
+            const day = guildSettings.analytics?.memberEvents?.find(d => d.date === dateKey);
+            if (day) {
+                day.joins += 1;
+            } else {
+                guildSettings.analytics = guildSettings.analytics || {};
+                guildSettings.analytics.memberEvents = guildSettings.analytics.memberEvents || [];
+                guildSettings.analytics.memberEvents.push({ date: dateKey, joins: 1, leaves: 0 });
+            }
+            guildSettings.analytics.memberEvents = guildSettings.analytics.memberEvents.slice(-120);
+            await guildSettings.save();
 
             if (guildSettings.welcome.enabled) {
                 const channel = member.guild.channels.cache.get(guildSettings.welcome.channelId);

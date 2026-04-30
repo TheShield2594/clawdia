@@ -15,8 +15,21 @@ module.exports = {
     async execute(member, client) {
         try {
             const guildSettings = await Guild.findOne({ guildId: member.guild.id });
+            if (!guildSettings) return;
 
-            if (!guildSettings || !guildSettings.farewell.enabled) return;
+            const dateKey = new Date().toISOString().slice(0, 10);
+            const day = guildSettings.analytics?.memberEvents?.find(d => d.date === dateKey);
+            if (day) {
+                day.leaves += 1;
+            } else {
+                guildSettings.analytics = guildSettings.analytics || {};
+                guildSettings.analytics.memberEvents = guildSettings.analytics.memberEvents || [];
+                guildSettings.analytics.memberEvents.push({ date: dateKey, joins: 0, leaves: 1 });
+            }
+            guildSettings.analytics.memberEvents = guildSettings.analytics.memberEvents.slice(-120);
+            await guildSettings.save();
+
+            if (!guildSettings.farewell.enabled) return;
 
             const channel = member.guild.channels.cache.get(guildSettings.farewell.channelId);
             if (!channel) return;

@@ -71,6 +71,39 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
         const topLevels = await User.find({ guildId })
             .sort({ level: -1, xp: -1 })
             .limit(5);
+        const guildSettings = await Guild.findOne({ guildId });
+        const memberEvents = guildSettings?.analytics?.memberEvents || [];
+        const commandUsage = guildSettings?.analytics?.commandUsage || [];
+
+        const joins30 = memberEvents.slice(-30).reduce((a, d) => a + (d.joins || 0), 0);
+        const leaves30 = memberEvents.slice(-30).reduce((a, d) => a + (d.leaves || 0), 0);
+        const retained7 = Math.max(0, joins30 - leaves30) / Math.max(joins30, 1);
+        const retained30 = Math.max(0, joins30 - Math.round(leaves30 * 1.2)) / Math.max(joins30, 1);
+
+        const commandSummary = {};
+        const failedByReason = {};
+        const bestTimesByChannel = {};
+        for (const item of commandUsage) {
+            commandSummary[item.command] = commandSummary[item.command] || { total: 0, failed: 0 };
+            commandSummary[item.command].total += 1;
+            if (!item.success) {
+                commandSummary[item.command].failed += 1;
+                failedByReason[item.reason || 'unknown'] = (failedByReason[item.reason || 'unknown'] || 0) + 1;
+            }
+            const channel = item.channelId || 'unknown';
+            bestTimesByChannel[channel] = bestTimesByChannel[channel] || {};
+            bestTimesByChannel[channel][item.hour] = (bestTimesByChannel[channel][item.hour] || 0) + 1;
+        }
+        const bestPostingTimes = Object.entries(bestTimesByChannel).map(([channelId, hours]) => {
+            const bestHour = Object.entries(hours).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '0';
+            return { channelId, hourUtc: Number(bestHour) };
+        }).slice(0, 8);
+
+        const recommendations = [];
+        if (leaves30 > joins30 * 0.6 && !guildSettings?.welcome?.dmEnabled) recommendations.push('Enable welcome DMs to improve first-week retention.');
+        if (!guildSettings?.moderation?.enabled || !guildSettings?.moderation?.autoModEnabled) recommendations.push('Enable auto-moderation, your raid/spam risk is elevated.');
+        if ((failedByReason.execution_error || 0) > 10) recommendations.push('High command error volume detected. Audit recent command updates.');
+        if ((guildSettings?.rssFeeds?.length || 0) === 0) recommendations.push('Add RSS or Daily News automation to keep channels active.');
 
         res.json({
             totalUsers,
@@ -79,7 +112,20 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
                 userId: u.userId,
                 level: u.level,
                 xp: u.xp
-            }))
+            })),
+            analytics: {
+                growthFunnel: { joins30, retained7: Number((retained7 * 100).toFixed(1)), retained30: Number((retained30 * 100).toFixed(1)) },
+                churnAlerts: leaves30 > joins30 * 0.5 ? ['Churn is elevated over the last 30 days.'] : [],
+                likelyCauses: [
+                    !guildSettings?.welcome?.enabled ? 'Welcome flow is disabled.' : null,
+                    !guildSettings?.leveling?.enabled ? 'No progression loop (leveling disabled).' : null,
+                    !guildSettings?.economy?.enabled ? 'No recurring incentive loop (economy disabled).' : null
+                ].filter(Boolean),
+                bestPostingTimes,
+                commandUsage: commandSummary,
+                failedCommands: failedByReason,
+                recommendations
+            }
         });
     } catch (error) {
         console.error('Stats error:', error);

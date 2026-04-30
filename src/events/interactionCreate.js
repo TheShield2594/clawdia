@@ -1,6 +1,25 @@
 const Guild = require('../models/Guild');
 const { closeTicket } = require('../commands/moderation/ticket');
 const { handlePollVote } = require('../commands/utility/poll');
+async function logCommandMetric(interaction, success, reason = null) {
+    try {
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        if (!guildSettings) return;
+        guildSettings.analytics = guildSettings.analytics || {};
+        guildSettings.analytics.commandUsage = guildSettings.analytics.commandUsage || [];
+        guildSettings.analytics.commandUsage.push({
+            command: interaction.commandName,
+            channelId: interaction.channelId || null,
+            hour: new Date().getUTCHours(),
+            success,
+            reason
+        });
+        guildSettings.analytics.commandUsage = guildSettings.analytics.commandUsage.slice(-3000);
+        await guildSettings.save();
+    } catch (error) {
+        console.error('Command metric error:', error);
+    }
+}
 
 module.exports = {
     name: 'interactionCreate',
@@ -37,6 +56,7 @@ module.exports = {
 
         if (!command) {
             console.error(`No command matching ${interaction.commandName} was found.`);
+            await logCommandMetric(interaction, false, 'unknown_command');
             return;
         }
 
@@ -68,8 +88,10 @@ module.exports = {
 
         try {
             await command.execute(interaction, client);
+            await logCommandMetric(interaction, true);
         } catch (error) {
             console.error(`Error executing ${interaction.commandName}:`, error);
+            await logCommandMetric(interaction, false, error.name || 'execution_error');
             const errorMessage = { content: 'There was an error while executing this command!', ephemeral: true };
             
             if (interaction.replied || interaction.deferred) {
