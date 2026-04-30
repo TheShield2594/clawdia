@@ -24,7 +24,7 @@
     "rss-parser": "^3.13.0",
     "node-cron": "^3.0.3",
     "@discordjs/voice": "^0.16.1",
-    "@discordjs/opus": "^0.9.0",
+    "opusscript": "^0.0.8",
     "play-dl": "^1.9.7",
     "openai": "^4.24.1",
     "@google/generative-ai": "^0.2.1",
