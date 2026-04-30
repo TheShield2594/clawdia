@@ -35,9 +35,7 @@ module.exports = {
             }
 
             if (guildSettings?.ai.enabled && message.channel.id === guildSettings.ai.channelId) {
-                const provider = guildSettings.ai.provider || 'openai';
-                const apiKey = provider === 'openai' ? guildSettings.ai.openaiKey : guildSettings.ai.geminiKey;
-                await handleAIChat(message, guildSettings.ai.systemPrompt, provider, apiKey);
+                await handleAIChat(message, guildSettings.ai);
                 return;
             }
 

@@ -105,11 +105,25 @@ const guildSchema = new Schema({
     
     ai: {
         enabled: { type: Boolean, default: false },
-        provider: { type: String, enum: ['openai', 'gemini'], default: 'openai' },
+        provider: {
+            type: String,
+            enum: ['openai', 'gemini', 'anthropic', 'ollama', 'openrouter'],
+            default: 'openai'
+        },
+        model: { type: String, default: null },
         openaiKey: { type: String, default: null },
         geminiKey: { type: String, default: null },
+        anthropicKey: { type: String, default: null },
+        openrouterKey: { type: String, default: null },
+        ollamaBaseUrl: { type: String, default: 'http://localhost:11434' },
         channelId: { type: String, default: null },
-        systemPrompt: { type: String, default: 'You are a helpful Discord bot assistant.' }
+        systemPrompt: { type: String, default: 'You are a helpful Discord bot assistant.' },
+        temperature: { type: Number, default: 0.7, min: 0, max: 2 },
+        maxTokens: { type: Number, default: 1024, min: 32, max: 8192 },
+        maxHistory: { type: Number, default: 20, min: 0, max: 100 },
+        streaming: { type: Boolean, default: true },
+        rateLimitPerUser: { type: Number, default: 20 },
+        rateLimitWindowMin: { type: Number, default: 10 }
     },
     
     customCommands: [{
