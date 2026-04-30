@@ -7,28 +7,58 @@ function checkAuth(req, res, next) {
     res.redirect('/auth/login');
 }
 
-function getUserGuilds(req) {
-    const userGuilds = req.user.guilds.filter(guild => 
-        (guild.permissions & 0x20) === 0x20
-    );
-    
+const MANAGE_GUILD = 0x20n;
+const ADMINISTRATOR = 0x8n;
+
+function hasManagePermission(guild) {
+    if (guild.owner === true) return true;
+    try {
+        const perms = BigInt(guild.permissions ?? 0);
+        return (perms & ADMINISTRATOR) === ADMINISTRATOR
+            || (perms & MANAGE_GUILD) === MANAGE_GUILD;
+    } catch {
+        return false;
+    }
+}
+
+function getManageableGuilds(req) {
     const botGuilds = req.client.guilds.cache;
-    const mutualGuilds = userGuilds.filter(guild => 
-        botGuilds.has(guild.id)
-    );
-    
-    return mutualGuilds;
+    return req.user.guilds
+        .filter(hasManagePermission)
+        .map(guild => ({
+            id: guild.id,
+            name: guild.name,
+            icon: guild.icon,
+            owner: guild.owner === true,
+            botPresent: botGuilds.has(guild.id)
+        }));
+}
+
+function buildInviteUrl(guildId) {
+    const clientId = process.env.CLIENT_ID;
+    if (!clientId) return null;
+    const params = new URLSearchParams({
+        client_id: clientId,
+        scope: 'bot applications.commands',
+        permissions: '8',
+        guild_id: guildId,
+        disable_guild_select: 'true'
+    });
+    return `https://discord.com/api/oauth2/authorize?${params.toString()}`;
 }
 
 router.get('/', checkAuth, (req, res) => {
-    const guilds = getUserGuilds(req);
+    const guilds = getManageableGuilds(req).map(g => ({
+        ...g,
+        inviteUrl: buildInviteUrl(g.id)
+    }));
     res.render('dashboard', { user: req.user, guilds });
 });
 
 router.get('/guild/:guildId', checkAuth, async (req, res) => {
     const { guildId } = req.params;
-    const userGuilds = getUserGuilds(req);
-    
+    const userGuilds = getManageableGuilds(req);
+
     if (!userGuilds.find(g => g.id === guildId)) {
         return res.status(403).send('You do not have permission to manage this guild.');
     }

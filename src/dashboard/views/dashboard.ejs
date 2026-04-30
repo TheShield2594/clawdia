@@ -33,14 +33,15 @@
     <main class="container">
         <div class="page-head">
             <h1>Your Servers</h1>
-            <p>Pick a server to configure UltraBot. You'll only see servers where you have <strong>Manage Server</strong> and the bot is present.</p>
+            <p>Pick a server to configure UltraBot. You'll see every server where you have <strong>Manage Server</strong> permission — invite the bot if it isn't there yet.</p>
         </div>
 
         <% if (guilds.length === 0) { %>
             <div class="empty-state">
-                <h3>No matching servers yet</h3>
-                <p>Invite UltraBot to a server you manage, then refresh this page.</p>
+                <h3>No manageable servers found</h3>
+                <p>You need <strong>Manage Server</strong> permission (or to be the owner) on at least one server. If you just got the role, log out and back in to refresh your Discord session.</p>
                 <div style="margin-top:1.25rem;">
+                    <a href="/auth/logout" class="btn btn-sm">Refresh login</a>
                     <a href="/" class="btn btn-sm">Back home</a>
                 </div>
             </div>
@@ -54,7 +55,13 @@
                             <div class="guild-icon guild-icon-fallback"><%= guild.name.charAt(0).toUpperCase() %></div>
                         <% } %>
                         <div class="guild-name"><%= guild.name %></div>
-                        <a href="/dashboard/guild/<%= guild.id %>" class="btn btn-primary btn-sm">Manage</a>
+                        <% if (guild.botPresent) { %>
+                            <a href="/dashboard/guild/<%= guild.id %>" class="btn btn-primary btn-sm">Manage</a>
+                        <% } else if (guild.inviteUrl) { %>
+                            <a href="<%= guild.inviteUrl %>" class="btn btn-primary btn-sm">Invite bot</a>
+                        <% } else { %>
+                            <span class="btn btn-sm" style="opacity:.6;cursor:not-allowed;">Bot not configured</span>
+                        <% } %>
                     </div>
                 <% }); %>
             </div>
