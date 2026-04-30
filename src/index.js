@@ -88,6 +88,12 @@ async function startBot() {
     client.once('ready', () => {
         const { startSummaryService } = require('./services/summaryService');
         startSummaryService(client);
+
+        const { startSlaMonitor } = require('./services/caseService');
+        startSlaMonitor(client);
+
+        const { startQuestService } = require('./services/questService');
+        startQuestService();
     });
 
     client.login(process.env.DISCORD_TOKEN);

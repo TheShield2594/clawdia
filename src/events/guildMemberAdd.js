@@ -1,6 +1,7 @@
 const Guild = require('../models/Guild');
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createWelcomeCard } = require('../utils/cardGenerator');
+const { handleMemberJoin: raidCheck } = require('../services/raidService');
 async function trackMemberEvent(guildSettings, dateKey, field) {
     const result = await guildSettings.constructor.updateOne(
         { guildId: guildSettings.guildId, 'analytics.memberEvents.date': dateKey },
@@ -37,6 +38,9 @@ module.exports = {
     name: 'guildMemberAdd',
     async execute(member, client) {
         try {
+            // Raid detection runs first, independently of guild settings load below
+            await raidCheck(member, client).catch(console.error);
+
             const guildSettings = await Guild.findOne({ guildId: member.guild.id });
 
             if (!guildSettings) return;
