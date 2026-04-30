@@ -9,11 +9,33 @@ const app = express();
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
+function resolveDashboardUrl() {
+    const raw = (process.env.DASHBOARD_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3000}`).trim();
+    let parsed;
+    try {
+        parsed = new URL(raw);
+    } catch {
+        throw new Error(`[DASHBOARD] DASHBOARD_URL is not a valid URL: "${raw}"`);
+    }
+    if (parsed.hostname !== 'localhost' && parsed.protocol !== 'https:') {
+        console.warn(`[DASHBOARD] WARNING: DASHBOARD_URL "${raw}" is not HTTPS. Discord OAuth will reject non-HTTPS redirect URIs in production.`);
+    }
+    if (parsed.pathname && parsed.pathname !== '/' && parsed.pathname !== '') {
+        throw new Error(`[DASHBOARD] DASHBOARD_URL must be just a scheme + host (e.g. https://bot.example.com), with no path. Got: "${raw}"`);
+    }
+    return `${parsed.protocol}//${parsed.host}`;
+}
+
 function setupPassport() {
+    const baseUrl = resolveDashboardUrl();
+    const callbackURL = `${baseUrl}/auth/callback`;
+    console.log(`[DASHBOARD] OAuth callback URL: ${callbackURL}`);
+    console.log('[DASHBOARD] This EXACT URL must be added under "OAuth2 → Redirects" in the Discord Developer Portal.');
+
     passport.use(new DiscordStrategy({
         clientID: process.env.CLIENT_ID,
         clientSecret: process.env.CLIENT_SECRET,
-        callbackURL: `${process.env.DASHBOARD_URL}/auth/callback`,
+        callbackURL,
         scope: ['identify', 'guilds']
     }, (accessToken, refreshToken, profile, done) => {
         process.nextTick(() => done(null, profile));
