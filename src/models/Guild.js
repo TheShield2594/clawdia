@@ -23,7 +23,9 @@ const guildSchema = new Schema({
         enabled: { type: Boolean, default: false },
         channelId: { type: String, default: null },
         message: { type: String, default: 'Welcome {user} to {server}!' },
-        cardEnabled: { type: Boolean, default: true }
+        cardEnabled: { type: Boolean, default: true },
+        dmEnabled: { type: Boolean, default: false },
+        dmMessage: { type: String, default: 'Welcome to {server}! We\'re glad to have you here.' }
     },
     
     farewell: {
