@@ -1,5 +1,27 @@
 const Guild = require('../models/Guild');
 const { EmbedBuilder } = require('discord.js');
+async function trackMemberEvent(guildSettings, dateKey, field) {
+    const result = await guildSettings.constructor.updateOne(
+        { guildId: guildSettings.guildId, 'analytics.memberEvents.date': dateKey },
+        {
+            $inc: { [`analytics.memberEvents.$.${field}`]: 1 },
+            $push: { 'analytics.memberEvents': { $each: [], $slice: -120 } }
+        }
+    );
+    if (!result.matchedCount) {
+        await guildSettings.constructor.updateOne(
+            { guildId: guildSettings.guildId, 'analytics.memberEvents.date': { $ne: dateKey } },
+            {
+                $push: {
+                    'analytics.memberEvents': {
+                        $each: [{ date: dateKey, joins: field === 'joins' ? 1 : 0, leaves: field === 'leaves' ? 1 : 0 }],
+                        $slice: -120
+                    }
+                }
+            }
+        );
+    }
+}
 
 function applyVariables(template, member) {
     return template
@@ -15,8 +37,16 @@ module.exports = {
     async execute(member, client) {
         try {
             const guildSettings = await Guild.findOne({ guildId: member.guild.id });
+            if (!guildSettings) return;
 
-            if (!guildSettings || !guildSettings.farewell.enabled) return;
+            const dateKey = new Date().toISOString().slice(0, 10);
+            try {
+                await trackMemberEvent(guildSettings, dateKey, 'leaves');
+            } catch (analyticsError) {
+                console.error('Member leave analytics error:', analyticsError);
+            }
+
+            if (!guildSettings.farewell.enabled) return;
 
             const channel = member.guild.channels.cache.get(guildSettings.farewell.channelId);
             if (!channel) return;

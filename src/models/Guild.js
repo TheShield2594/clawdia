@@ -205,6 +205,22 @@ const guildSchema = new Schema({
         logRoleChanges: { type: Boolean, default: true },
         logChannelChanges: { type: Boolean, default: true }
     },
+
+    analytics: {
+        memberEvents: [{
+            date: { type: String, required: true },
+            joins: { type: Number, default: 0 },
+            leaves: { type: Number, default: 0 }
+        }],
+        commandUsage: [{
+            command: { type: String, required: true },
+            channelId: { type: String, default: null },
+            hour: { type: Number, required: true },
+            success: { type: Boolean, default: true },
+            reason: { type: String, default: null },
+            createdAt: { type: Date, default: Date.now }
+        }]
+    },
     
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }

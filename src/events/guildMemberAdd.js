@@ -1,6 +1,28 @@
 const Guild = require('../models/Guild');
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createWelcomeCard } = require('../utils/cardGenerator');
+async function trackMemberEvent(guildSettings, dateKey, field) {
+    const result = await guildSettings.constructor.updateOne(
+        { guildId: guildSettings.guildId, 'analytics.memberEvents.date': dateKey },
+        {
+            $inc: { [`analytics.memberEvents.$.${field}`]: 1 },
+            $push: { 'analytics.memberEvents': { $each: [], $slice: -120 } }
+        }
+    );
+    if (!result.matchedCount) {
+        await guildSettings.constructor.updateOne(
+            { guildId: guildSettings.guildId, 'analytics.memberEvents.date': { $ne: dateKey } },
+            {
+                $push: {
+                    'analytics.memberEvents': {
+                        $each: [{ date: dateKey, joins: field === 'joins' ? 1 : 0, leaves: field === 'leaves' ? 1 : 0 }],
+                        $slice: -120
+                    }
+                }
+            }
+        );
+    }
+}
 
 function applyVariables(template, member) {
     return template
@@ -18,6 +40,12 @@ module.exports = {
             const guildSettings = await Guild.findOne({ guildId: member.guild.id });
 
             if (!guildSettings) return;
+            const dateKey = new Date().toISOString().slice(0, 10);
+            try {
+                await trackMemberEvent(guildSettings, dateKey, 'joins');
+            } catch (analyticsError) {
+                console.error('Member join analytics error:', analyticsError);
+            }
 
             if (guildSettings.welcome.enabled) {
                 const channel = member.guild.channels.cache.get(guildSettings.welcome.channelId);

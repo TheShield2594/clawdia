@@ -36,6 +36,7 @@
                 <button class="nav-item" data-tab="music"><span class="nav-emoji">🎵</span> Music</button>
                 <button class="nav-item" data-tab="rss"><span class="nav-emoji">📰</span> RSS Feeds</button>
                 <button class="nav-item" data-tab="dailynews"><span class="nav-emoji">🗞️</span> Daily News</button>
+                <button class="nav-item" data-tab="analytics"><span class="nav-emoji">📊</span> Analytics</button>
                 <button class="nav-item" data-tab="ai"><span class="nav-emoji">🧠</span> AI Chat</button>
                 <button class="nav-item" data-tab="tempvoice"><span class="nav-emoji">🔊</span> Temp Voice</button>
             </aside>
@@ -479,6 +480,16 @@
                         <button class="btn btn-primary" onclick="saveSettings('ai')">Save changes</button>
                     </div>
                 </section>
+
+                <section id="analytics" class="panel">
+                    <div class="panel-head">
+                        <h2>Analytics & Recommendations</h2>
+                        <p>Track retention, churn, command reliability, and next-best actions.</p>
+                    </div>
+                    <div id="analytics-content" class="empty-state" style="padding:1rem;">
+                        <p>Loading analytics...</p>
+                    </div>
+                </section>
             </div>
         </div>
     </main>
@@ -496,6 +507,7 @@
                 panels.forEach(p => p.classList.remove('active'));
                 item.classList.add('active');
                 document.getElementById(tab).classList.add('active');
+                if (tab === 'analytics') loadAnalytics();
                 if (history.replaceState) history.replaceState(null, '', '#' + tab);
             });
         });
@@ -696,6 +708,60 @@
             } catch (error) {
                 console.error(error);
                 toast('An error occurred', 'error');
+            }
+        }
+
+        async function loadAnalytics() {
+            const guildId = '<%= guild.id %>';
+            const container = document.getElementById('analytics-content');
+            const addListItem = (label, value) => {
+                const row = document.createElement('div');
+                row.className = 'list-item';
+                const strong = document.createElement('strong');
+                strong.textContent = label;
+                const span = document.createElement('span');
+                span.textContent = value;
+                row.appendChild(strong);
+                row.appendChild(span);
+                container.appendChild(row);
+            };
+            const addHeading = (title) => {
+                const head = document.createElement('div');
+                head.className = 'panel-head';
+                head.style.marginTop = '1rem';
+                const h3 = document.createElement('h3');
+                h3.textContent = title;
+                head.appendChild(h3);
+                container.appendChild(head);
+            };
+            const addParagraph = (text) => {
+                const p = document.createElement('p');
+                p.textContent = text;
+                container.appendChild(p);
+            };
+            try {
+                const response = await fetch(`/api/guild/${guildId}/stats`);
+                const data = await response.json();
+                const a = data.analytics || {};
+                const commandRows = Object.entries(a.commandUsage || {}).sort((x, y) => y[1].total - x[1].total).slice(0, 8);
+                const failedRows = Object.entries(a.failedCommands || {}).sort((x, y) => y[1] - x[1]).slice(0, 6);
+                container.textContent = '';
+                addListItem('Growth funnel', `${a.growthFunnel?.joins30 || 0} joins → ${a.growthFunnel?.retained7 || 0}% retained @7d → ${a.growthFunnel?.retained30 || 0}% @30d`);
+                addListItem('Churn alerts', (a.churnAlerts || ['No active alerts']).join(' · '));
+                addListItem('Likely causes', (a.likelyCauses || ['No immediate causes detected']).join(' · '));
+                addListItem('Best posting times (UTC)', (a.bestPostingTimes || []).map(t => `#${t.channelId} @ ${String(t.hourUtc).padStart(2, '0')}:00`).join(' · ') || 'Not enough data yet');
+                addHeading('Command usage / failures');
+                if (!commandRows.length) addParagraph('No command data yet.');
+                for (const [cmd, m] of commandRows) addListItem(`/${cmd}`, `${m.total} runs · ${m.failed} failed`);
+                addHeading('Failed-command causes');
+                if (!failedRows.length) addParagraph('No failures recorded.');
+                for (const [reason, count] of failedRows) addListItem(reason, String(count));
+                addHeading('Auto-recommendations');
+                if (!(a.recommendations || []).length) addParagraph('No recommendations right now.');
+                for (const recommendation of (a.recommendations || [])) addListItem('💡', recommendation);
+            } catch (error) {
+                container.textContent = '';
+                addParagraph('Failed to load analytics.');
             }
         }
     </script>
