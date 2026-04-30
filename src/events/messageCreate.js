@@ -116,6 +116,9 @@ async function handleLeveling(message, guildSettings) {
 async function handleAutoModeration(message, guildSettings) {
     const content = message.content.toLowerCase();
     const mod = guildSettings.moderation;
+    const isModerator = message.member.permissions.has('ManageMessages');
+
+    if (!mod.autoModEnabled) return;
 
     if (mod.spamProtection) {
         const guildId = message.guild.id;
@@ -142,7 +145,7 @@ async function handleAutoModeration(message, guildSettings) {
         }
     }
 
-    if (mod.inviteFilter && content.includes('discord.gg/')) {
+    if (mod.inviteFilter && !isModerator && /(discord\.gg\/|discord\.com\/invite\/)/i.test(content)) {
         await message.delete().catch(console.error);
         const warn = await message.channel.send(`${message.author}, invite links are not allowed!`);
         setTimeout(() => warn.delete().catch(() => {}), 5000);
@@ -151,7 +154,7 @@ async function handleAutoModeration(message, guildSettings) {
     }
 
     if (mod.linkFilter && (content.includes('http://') || content.includes('https://'))) {
-        if (!message.member.permissions.has('ManageMessages')) {
+        if (!isModerator) {
             await message.delete().catch(console.error);
             const warn = await message.channel.send(`${message.author}, links are not allowed!`);
             setTimeout(() => warn.delete().catch(() => {}), 5000);
@@ -160,9 +163,12 @@ async function handleAutoModeration(message, guildSettings) {
         }
     }
 
-    if (mod.profanityFilter) {
+    if (mod.profanityFilter && !isModerator) {
         const badWords = [...BASE_BAD_WORDS, ...(mod.customBadWords || [])];
-        const hasBadWord = badWords.some(word => content.includes(word.toLowerCase()));
+        const hasBadWord = badWords.some((word) => {
+            const escaped = word.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return new RegExp(`\\b${escaped}\\b`, 'i').test(content);
+        });
 
         if (hasBadWord) {
             await message.delete().catch(console.error);
