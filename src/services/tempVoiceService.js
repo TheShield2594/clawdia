@@ -8,15 +8,23 @@ async function handleVoiceStateUpdate(oldState, newState, client) {
     const guildSettings = await Guild.findOne({ guildId: guild.id });
     if (!guildSettings?.tempVoice?.enabled) return;
 
-    const { lobbyChannelId, categoryId } = guildSettings.tempVoice;
+    const { lobbyChannelId, categoryId, channelName, userLimit, bitrate } = guildSettings.tempVoice;
 
     // Member joined the lobby → create their channel
     if (newState.channelId === lobbyChannelId && newState.member) {
         const member = newState.member;
+        const nameTemplate = channelName || "{username}'s VC";
+        const resolvedName = nameTemplate
+            .replace(/{username}/gi, member.user.username)
+            .replace(/{displayname}/gi, member.displayName)
+            .replace(/{tag}/gi, member.user.tag ?? member.user.username);
+
         const channel = await guild.channels.create({
-            name: `${member.displayName}'s VC`,
+            name: resolvedName,
             type: ChannelType.GuildVoice,
             parent: categoryId ?? null,
+            userLimit: userLimit ?? 0,
+            bitrate: (bitrate ?? 64) * 1000,
             permissionOverwrites: [
                 { id: member.id, allow: [PermissionFlagsBits.ManageChannels, PermissionFlagsBits.MuteMembers, PermissionFlagsBits.DeafenMembers] }
             ]

@@ -189,7 +189,10 @@ const guildSchema = new Schema({
         enabled: { type: Boolean, default: false },
         lobbyChannelId: { type: String, default: null },
         categoryId: { type: String, default: null },
-        activeChannels: [{ type: String }]
+        activeChannels: [{ type: String }],
+        channelName: { type: String, default: "{username}'s VC" },
+        userLimit: { type: Number, default: 0 },
+        bitrate: { type: Number, default: 64 }
     },
 
     eventLog: {

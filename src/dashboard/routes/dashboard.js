@@ -82,6 +82,14 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
             .filter(c => c.type === 0)
             .map(c => ({ id: c.id, name: c.name }));
 
+        const voiceChannels = guild.channels.cache
+            .filter(c => c.type === 2)
+            .map(c => ({ id: c.id, name: c.name }));
+
+        const categories = guild.channels.cache
+            .filter(c => c.type === 4)
+            .map(c => ({ id: c.id, name: c.name }));
+
         const roles = guild.roles.cache
             .filter(r => r.name !== '@everyone')
             .map(r => ({ id: r.id, name: r.name }));
@@ -91,6 +99,8 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
             guild: guild,
             settings: guildSettings,
             channels: channels,
+            voiceChannels: voiceChannels,
+            categories: categories,
             roles: roles
         });
     } catch (error) {
