@@ -37,14 +37,14 @@ function getManageableGuilds(req) {
 function buildInviteUrl(guildId) {
     const clientId = process.env.CLIENT_ID;
     if (!clientId) return null;
-    const params = new URLSearchParams({
-        client_id: clientId,
-        scope: 'bot applications.commands',
-        permissions: '8',
-        guild_id: guildId,
-        disable_guild_select: 'true'
-    });
-    return `https://discord.com/api/oauth2/authorize?${params.toString()}`;
+    const query = [
+        `client_id=${encodeURIComponent(clientId)}`,
+        `permissions=8`,
+        `scope=${encodeURIComponent('bot applications.commands')}`,
+        `guild_id=${encodeURIComponent(guildId)}`,
+        `disable_guild_select=true`
+    ].join('&');
+    return `https://discord.com/oauth2/authorize?${query}`;
 }
 
 router.get('/', checkAuth, (req, res) => {
