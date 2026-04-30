@@ -77,6 +77,29 @@
                         <textarea id="welcome-dm-message" rows="3"><%= settings.welcome.dmMessage %></textarea>
                         <small>Variables: <code>{username}</code> · <code>{tag}</code> · <code>{server}</code> · <code>{memberCount}</code></small>
                     </div>
+                    <div class="panel-head" style="margin-top:1.5rem">
+                        <h3>Role to New Users</h3>
+                        <p>Automatically assign roles when a member joins.</p>
+                    </div>
+                    <div class="field">
+                        <div id="autorole-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.autoRoles || []).forEach(r => { %>
+                                <% const role = roles.find(ro => ro.id === r.roleId); %>
+                                <% if (role) { %>
+                                    <span class="role-tag" data-role-id="<%= r.roleId %>">@<%= role.name %> <button onclick="removeAutoRole('<%= r.roleId %>')" title="Remove">&times;</button></span>
+                                <% } %>
+                            <% }); %>
+                        </div>
+                        <div style="display:flex;gap:.5rem;align-items:center">
+                            <select id="autorole-select">
+                                <option value="">Select a role</option>
+                                <% roles.forEach(role => { %>
+                                    <option value="<%= role.id %>">@<%= role.name %></option>
+                                <% }); %>
+                            </select>
+                            <button class="btn btn-primary" onclick="addAutoRole()">Add role</button>
+                        </div>
+                    </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('welcome')">Save changes</button>
                     </div>
@@ -547,6 +570,39 @@
                 });
                 if (response.ok) toast('Settings saved', 'success');
                 else toast('Failed to save settings', 'error');
+            } catch (error) {
+                console.error(error);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        async function addAutoRole() {
+            const guildId = '<%= guild.id %>';
+            const roleId = document.getElementById('autorole-select').value;
+            if (!roleId) { toast('Please select a role', 'error'); return; }
+            if (document.querySelector(`#autorole-list [data-role-id="${roleId}"]`)) {
+                toast('Role already added', 'error'); return;
+            }
+            try {
+                const response = await fetch(`/api/guild/${guildId}/autorole`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roleId })
+                });
+                if (response.ok) { toast('Role added', 'success'); setTimeout(() => location.reload(), 600); }
+                else toast('Failed to add role', 'error');
+            } catch (error) {
+                console.error(error);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        async function removeAutoRole(roleId) {
+            const guildId = '<%= guild.id %>';
+            try {
+                const response = await fetch(`/api/guild/${guildId}/autorole/${roleId}`, { method: 'DELETE' });
+                if (response.ok) { toast('Role removed', 'success'); setTimeout(() => location.reload(), 600); }
+                else toast('Failed to remove role', 'error');
             } catch (error) {
                 console.error(error);
                 toast('An error occurred', 'error');

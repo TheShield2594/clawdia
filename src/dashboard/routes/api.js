@@ -87,6 +87,45 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
     }
 });
 
+router.post('/guild/:guildId/autorole', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const { roleId } = req.body;
+
+    if (!roleId) return res.status(400).json({ error: 'roleId required' });
+
+    try {
+        const guildSettings = await Guild.findOne({ guildId });
+        if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
+
+        if (!guildSettings.autoRoles.some(r => r.roleId === roleId)) {
+            guildSettings.autoRoles.push({ roleId });
+            await guildSettings.save();
+        }
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Autorole add error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.delete('/guild/:guildId/autorole/:roleId', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId, roleId } = req.params;
+
+    try {
+        const guildSettings = await Guild.findOne({ guildId });
+        if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
+
+        guildSettings.autoRoles = guildSettings.autoRoles.filter(r => r.roleId !== roleId);
+        await guildSettings.save();
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Autorole remove error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const { url, channelId } = req.body;

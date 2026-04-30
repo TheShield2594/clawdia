@@ -201,6 +201,29 @@ body {
 .btn-ghost { background: transparent; }
 .btn-sm { padding: 0.45rem 0.85rem; font-size: 0.82rem; }
 
+.role-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.65rem;
+    background: rgba(88, 101, 242, 0.18);
+    border: 1px solid rgba(88, 101, 242, 0.4);
+    border-radius: 99px;
+    font-size: 0.85rem;
+    color: #c3c8ff;
+}
+.role-tag button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    opacity: 0.7;
+    padding: 0;
+}
+.role-tag button:hover { opacity: 1; }
+
 /* Layout */
 .container {
     max-width: 1200px;
