@@ -714,26 +714,54 @@
         async function loadAnalytics() {
             const guildId = '<%= guild.id %>';
             const container = document.getElementById('analytics-content');
+            const addListItem = (label, value) => {
+                const row = document.createElement('div');
+                row.className = 'list-item';
+                const strong = document.createElement('strong');
+                strong.textContent = label;
+                const span = document.createElement('span');
+                span.textContent = value;
+                row.appendChild(strong);
+                row.appendChild(span);
+                container.appendChild(row);
+            };
+            const addHeading = (title) => {
+                const head = document.createElement('div');
+                head.className = 'panel-head';
+                head.style.marginTop = '1rem';
+                const h3 = document.createElement('h3');
+                h3.textContent = title;
+                head.appendChild(h3);
+                container.appendChild(head);
+            };
+            const addParagraph = (text) => {
+                const p = document.createElement('p');
+                p.textContent = text;
+                container.appendChild(p);
+            };
             try {
                 const response = await fetch(`/api/guild/${guildId}/stats`);
                 const data = await response.json();
                 const a = data.analytics || {};
                 const commandRows = Object.entries(a.commandUsage || {}).sort((x, y) => y[1].total - x[1].total).slice(0, 8);
                 const failedRows = Object.entries(a.failedCommands || {}).sort((x, y) => y[1] - x[1]).slice(0, 6);
-                container.innerHTML = `
-                    <div class="list-item"><strong>Growth funnel</strong><span>${a.growthFunnel?.joins30 || 0} joins → ${a.growthFunnel?.retained7 || 0}% retained @7d → ${a.growthFunnel?.retained30 || 0}% @30d</span></div>
-                    <div class="list-item"><strong>Churn alerts</strong><span>${(a.churnAlerts || ['No active alerts']).join(' · ')}</span></div>
-                    <div class="list-item"><strong>Likely causes</strong><span>${(a.likelyCauses || ['No immediate causes detected']).join(' · ')}</span></div>
-                    <div class="list-item"><strong>Best posting times (UTC)</strong><span>${(a.bestPostingTimes || []).map(t => `#${t.channelId} @ ${String(t.hourUtc).padStart(2, '0')}:00`).join(' · ') || 'Not enough data yet'}</span></div>
-                    <div class="panel-head" style="margin-top:1rem"><h3>Command usage / failures</h3></div>
-                    ${commandRows.map(([cmd, m]) => `<div class="list-item"><span>/${cmd}</span><span>${m.total} runs · ${m.failed} failed</span></div>`).join('') || '<p>No command data yet.</p>'}
-                    <div class="panel-head" style="margin-top:1rem"><h3>Failed-command causes</h3></div>
-                    ${failedRows.map(([reason, count]) => `<div class="list-item"><span>${reason}</span><span>${count}</span></div>`).join('') || '<p>No failures recorded.</p>'}
-                    <div class="panel-head" style="margin-top:1rem"><h3>Auto-recommendations</h3></div>
-                    ${(a.recommendations || []).map(r => `<div class="list-item"><span>💡 ${r}</span></div>`).join('') || '<p>No recommendations right now.</p>'}
-                `;
+                container.textContent = '';
+                addListItem('Growth funnel', `${a.growthFunnel?.joins30 || 0} joins → ${a.growthFunnel?.retained7 || 0}% retained @7d → ${a.growthFunnel?.retained30 || 0}% @30d`);
+                addListItem('Churn alerts', (a.churnAlerts || ['No active alerts']).join(' · '));
+                addListItem('Likely causes', (a.likelyCauses || ['No immediate causes detected']).join(' · '));
+                addListItem('Best posting times (UTC)', (a.bestPostingTimes || []).map(t => `#${t.channelId} @ ${String(t.hourUtc).padStart(2, '0')}:00`).join(' · ') || 'Not enough data yet');
+                addHeading('Command usage / failures');
+                if (!commandRows.length) addParagraph('No command data yet.');
+                for (const [cmd, m] of commandRows) addListItem(`/${cmd}`, `${m.total} runs · ${m.failed} failed`);
+                addHeading('Failed-command causes');
+                if (!failedRows.length) addParagraph('No failures recorded.');
+                for (const [reason, count] of failedRows) addListItem(reason, String(count));
+                addHeading('Auto-recommendations');
+                if (!(a.recommendations || []).length) addParagraph('No recommendations right now.');
+                for (const recommendation of (a.recommendations || [])) addListItem('💡', recommendation);
             } catch (error) {
-                container.innerHTML = '<p>Failed to load analytics.</p>';
+                container.textContent = '';
+                addParagraph('Failed to load analytics.');
             }
         }
     </script>

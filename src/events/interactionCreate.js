@@ -3,19 +3,29 @@ const { closeTicket } = require('../commands/moderation/ticket');
 const { handlePollVote } = require('../commands/utility/poll');
 async function logCommandMetric(interaction, success, reason = null) {
     try {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-        if (!guildSettings) return;
-        guildSettings.analytics = guildSettings.analytics || {};
-        guildSettings.analytics.commandUsage = guildSettings.analytics.commandUsage || [];
-        guildSettings.analytics.commandUsage.push({
+        const entry = {
             command: interaction.commandName,
             channelId: interaction.channelId || null,
             hour: new Date().getUTCHours(),
             success,
             reason
-        });
-        guildSettings.analytics.commandUsage = guildSettings.analytics.commandUsage.slice(-3000);
-        await guildSettings.save();
+        };
+        await Guild.updateOne(
+            { guildId: interaction.guild.id },
+            {
+                $push: {
+                    'analytics.commandUsage': {
+                        $each: [entry],
+                        $slice: -3000
+                    }
+                },
+                $setOnInsert: {
+                    guildId: interaction.guild.id,
+                    name: interaction.guild.name || 'Unknown Guild'
+                }
+            },
+            { upsert: true }
+        );
     } catch (error) {
         console.error('Command metric error:', error);
     }

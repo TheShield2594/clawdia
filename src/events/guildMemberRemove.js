@@ -1,5 +1,27 @@
 const Guild = require('../models/Guild');
 const { EmbedBuilder } = require('discord.js');
+async function trackMemberEvent(guildSettings, dateKey, field) {
+    const result = await guildSettings.constructor.updateOne(
+        { guildId: guildSettings.guildId, 'analytics.memberEvents.date': dateKey },
+        {
+            $inc: { [`analytics.memberEvents.$.${field}`]: 1 },
+            $push: { 'analytics.memberEvents': { $each: [], $slice: -120 } }
+        }
+    );
+    if (!result.matchedCount) {
+        await guildSettings.constructor.updateOne(
+            { guildId: guildSettings.guildId, 'analytics.memberEvents.date': { $ne: dateKey } },
+            {
+                $push: {
+                    'analytics.memberEvents': {
+                        $each: [{ date: dateKey, joins: field === 'joins' ? 1 : 0, leaves: field === 'leaves' ? 1 : 0 }],
+                        $slice: -120
+                    }
+                }
+            }
+        );
+    }
+}
 
 function applyVariables(template, member) {
     return template
@@ -18,16 +40,11 @@ module.exports = {
             if (!guildSettings) return;
 
             const dateKey = new Date().toISOString().slice(0, 10);
-            const day = guildSettings.analytics?.memberEvents?.find(d => d.date === dateKey);
-            if (day) {
-                day.leaves += 1;
-            } else {
-                guildSettings.analytics = guildSettings.analytics || {};
-                guildSettings.analytics.memberEvents = guildSettings.analytics.memberEvents || [];
-                guildSettings.analytics.memberEvents.push({ date: dateKey, joins: 0, leaves: 1 });
+            try {
+                await trackMemberEvent(guildSettings, dateKey, 'leaves');
+            } catch (analyticsError) {
+                console.error('Member leave analytics error:', analyticsError);
             }
-            guildSettings.analytics.memberEvents = guildSettings.analytics.memberEvents.slice(-120);
-            await guildSettings.save();
 
             if (!guildSettings.farewell.enabled) return;
 
