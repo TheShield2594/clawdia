@@ -37,6 +37,7 @@
                 <button class="nav-item" data-tab="rss"><span class="nav-emoji">📰</span> RSS Feeds</button>
                 <button class="nav-item" data-tab="dailynews"><span class="nav-emoji">🗞️</span> Daily News</button>
                 <button class="nav-item" data-tab="ai"><span class="nav-emoji">🧠</span> AI Chat</button>
+                <button class="nav-item" data-tab="tempvoice"><span class="nav-emoji">🔊</span> Temp Voice</button>
             </aside>
 
             <div class="settings-content">
@@ -336,6 +337,55 @@
                     </div>
                 </section>
 
+                <!-- Temp Voice -->
+                <section id="tempvoice" class="panel">
+                    <div class="panel-head">
+                        <h2>Temporary Voice Channels</h2>
+                        <p>Members join a lobby channel and instantly get their own private voice channel. It's deleted automatically when empty.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable temp voice channels</strong><span>Create a private VC for each member that joins the lobby</span></span>
+                        <span class="switch"><input type="checkbox" id="tv-enabled" <%= settings.tempVoice?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="tv-lobby">Lobby voice channel</label>
+                        <select id="tv-lobby">
+                            <option value="">Select a voice channel</option>
+                            <% (voiceChannels || []).forEach(vc => { %>
+                                <option value="<%= vc.id %>" <%= settings.tempVoice?.lobbyChannelId === vc.id ? 'selected' : '' %>>🔊 <%= vc.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Members who join this channel will have a private VC created for them.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tv-category">Category for new channels</label>
+                        <select id="tv-category">
+                            <option value="">Same as lobby (default)</option>
+                            <% (categories || []).forEach(cat => { %>
+                                <option value="<%= cat.id %>" <%= settings.tempVoice?.categoryId === cat.id ? 'selected' : '' %>><%= cat.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>New temp channels are placed in this category.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tv-channel-name">Channel name template</label>
+                        <input type="text" id="tv-channel-name" value="<%= settings.tempVoice?.channelName || '{username}\'s VC' %>" placeholder="{username}'s VC">
+                        <small>Variables: <code>{username}</code> · <code>{displayname}</code> · <code>{tag}</code></small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tv-user-limit">User limit <span style="color:var(--text-mute);font-weight:400;">(0 = unlimited)</span></label>
+                        <input type="number" id="tv-user-limit" min="0" max="99" value="<%= settings.tempVoice?.userLimit ?? 0 %>">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tv-bitrate">Bitrate (kbps)</label>
+                        <input type="number" id="tv-bitrate" min="8" max="384" value="<%= settings.tempVoice?.bitrate ?? 64 %>">
+                        <small>Standard servers: up to 96 kbps · Boosted servers: up to 384 kbps.</small>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('tempvoice')">Save changes</button>
+                    </div>
+                </section>
+
                 <!-- AI -->
                 <section id="ai" class="panel">
                     <div class="panel-head">
@@ -547,6 +597,15 @@
                     'ai.streaming': document.getElementById('ai-streaming').checked,
                     'ai.rateLimitPerUser': parseInt(document.getElementById('ai-rate-limit').value, 10),
                     'ai.rateLimitWindowMin': parseInt(document.getElementById('ai-rate-window').value, 10)
+                };
+            } else if (section === 'tempvoice') {
+                data = {
+                    'tempVoice.enabled': document.getElementById('tv-enabled').checked,
+                    'tempVoice.lobbyChannelId': document.getElementById('tv-lobby').value || null,
+                    'tempVoice.categoryId': document.getElementById('tv-category').value || null,
+                    'tempVoice.channelName': document.getElementById('tv-channel-name').value.trim() || "{username}'s VC",
+                    'tempVoice.userLimit': parseInt(document.getElementById('tv-user-limit').value, 10) || 0,
+                    'tempVoice.bitrate': parseInt(document.getElementById('tv-bitrate').value, 10) || 64
                 };
             } else if (section === 'dailynews') {
                 const feedsText = document.getElementById('dailynews-feeds').value;
