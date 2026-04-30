@@ -202,7 +202,13 @@ async function executeAction(action, message) {
             }
 
             case 'create_reminder': {
-                const delayMs = Math.max(1, action.delayMinutes || 60) * 60 * 1000;
+                const MIN_MINUTES = 1;
+                const MAX_MINUTES = 525600; // 1 year
+                const rawMinutes = Number(action.delayMinutes);
+                const minutes = Number.isFinite(rawMinutes)
+                    ? Math.min(MAX_MINUTES, Math.max(MIN_MINUTES, rawMinutes))
+                    : 60;
+                const delayMs = minutes * 60 * 1000;
                 const remindAt = new Date(Date.now() + delayMs);
                 await Reminder.create({
                     userId: message.author.id,
@@ -507,15 +513,19 @@ async function handleAIChat(message, aiSettings) {
                 if (currentBuf) await currentMsg.edit(currentBuf).catch(() => {});
             });
 
-            // Post-process: strip ACTION block from every sent chunk, then execute it
+            // Post-process: reconcile sentMessages against the canonical cleanText chunks
             if (aiSettings.actionsEnabled) {
                 const { cleanText, action } = extractAction(fullResponse);
                 if (action) {
-                    for (const msg of sentMessages) {
-                        const content = msg.content || '';
-                        if (content.includes('ACTION:')) {
-                            const cleaned = content.replace(/\nACTION:\{.*\}\s*$/s, '').trimEnd();
-                            await msg.edit(cleaned || '…').catch(() => {});
+                    // Derive the canonical chunks from cleanText so every sent message
+                    // reflects exactly the visible response (no ACTION payload leaking out).
+                    const canonicalChunks = cleanText.trim() ? chunkText(cleanText) : [];
+                    for (let i = 0; i < sentMessages.length; i++) {
+                        if (i < canonicalChunks.length) {
+                            await sentMessages[i].edit(canonicalChunks[i]).catch(() => {});
+                        } else {
+                            // Extra messages that existed only to hold overflow or ACTION text
+                            await sentMessages[i].delete().catch(() => {});
                         }
                     }
                     fullResponse = cleanText;
@@ -535,10 +545,12 @@ async function handleAIChat(message, aiSettings) {
             }
 
             fullResponse = response;
-            const chunks = chunkText(fullResponse);
-            await message.reply(chunks[0]);
-            for (let i = 1; i < chunks.length; i++) {
-                await message.channel.send(chunks[i]);
+            if (fullResponse.trim()) {
+                const chunks = chunkText(fullResponse);
+                await message.reply(chunks[0]);
+                for (let i = 1; i < chunks.length; i++) {
+                    await message.channel.send(chunks[i]);
+                }
             }
         }
 

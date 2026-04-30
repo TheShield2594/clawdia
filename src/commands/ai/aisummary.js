@@ -38,10 +38,10 @@ module.exports = {
             const label  = interaction.options.getString('label')   || `Daily Summary of #${source.name}`;
 
             const botMember = interaction.guild.members.me;
-            if (!source.isTextBased()) {
+            if (!source.isTextBased() || source.isThreadOnly()) {
                 return interaction.reply({ content: 'The source channel must be a text-based channel.', ephemeral: true });
             }
-            if (!target.isTextBased()) {
+            if (!target.isTextBased() || target.isThreadOnly()) {
                 return interaction.reply({ content: 'The target channel must be a text-based channel.', ephemeral: true });
             }
             if (!source.permissionsFor(botMember)?.has('ViewChannel')) {
@@ -118,8 +118,12 @@ module.exports = {
 
             await interaction.deferReply({ ephemeral: true });
             try {
-                await runSummaryJob(job, interaction.client);
-                await interaction.editReply(`Summary posted successfully to <#${job.targetChannelId}>.`);
+                const posted = await runSummaryJob(job, interaction.client);
+                if (posted) {
+                    await interaction.editReply(`Summary posted successfully to <#${job.targetChannelId}>.`);
+                } else {
+                    await interaction.editReply('No summary posted — no new content to summarize or AI is not configured.');
+                }
             } catch (err) {
                 console.error('[aisummary run]', err);
                 await interaction.editReply(`Error running summary: ${err.message}`);

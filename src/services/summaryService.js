@@ -7,11 +7,11 @@ const MAX_TRANSCRIPT_CHARS = 6000;
 
 async function runSummaryJob(job, client) {
     const guild = await client.guilds.fetch(job.guildId).catch(() => null);
-    if (!guild) return;
+    if (!guild) return false;
 
     const srcChannel = guild.channels.cache.get(job.sourceChannelId)
         || await guild.channels.fetch(job.sourceChannelId).catch(() => null);
-    if (!srcChannel || !srcChannel.isTextBased()) return;
+    if (!srcChannel || !srcChannel.isTextBased()) return false;
 
     const fetched = await srcChannel.messages.fetch({ limit: 100 });
     const transcript = [...fetched.values()]
@@ -21,10 +21,10 @@ async function runSummaryJob(job, client) {
         .join('\n')
         .slice(-MAX_TRANSCRIPT_CHARS);
 
-    if (!transcript) return;
+    if (!transcript) return false;
 
     const guildSettings = await Guild.findOne({ guildId: job.guildId });
-    if (!guildSettings?.ai?.enabled) return;
+    if (!guildSettings?.ai?.enabled) return false;
 
     const config = resolveProviderConfig(guildSettings.ai);
     const summary = await getCompletion({
@@ -36,7 +36,7 @@ async function runSummaryJob(job, client) {
 
     const dstChannel = guild.channels.cache.get(job.targetChannelId)
         || await guild.channels.fetch(job.targetChannelId).catch(() => null);
-    if (!dstChannel || !dstChannel.isTextBased()) return;
+    if (!dstChannel || !dstChannel.isTextBased()) return false;
 
     const date = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const header = `**${job.label}** — <#${job.sourceChannelId}>\n${date}\n\n`;
@@ -55,6 +55,7 @@ async function runSummaryJob(job, client) {
 
     job.lastRun = new Date();
     await job.save();
+    return true;
 }
 
 function startSummaryService(client) {
@@ -62,10 +63,11 @@ function startSummaryService(client) {
     cron.schedule('* * * * *', async () => {
         try {
             const now = new Date();
-            const jobs = await SummaryJob.find({ enabled: true });
+            const utcHour = now.getUTCHours();
+            const utcMinute = now.getUTCMinutes();
+            const jobs = await SummaryJob.find({ enabled: true, hour: utcHour, minute: utcMinute });
 
             for (const job of jobs) {
-                if (now.getUTCHours() !== job.hour || now.getUTCMinutes() !== job.minute) continue;
                 // Skip if already ran within the last 23 hours
                 if (job.lastRun && now - job.lastRun < 23 * 60 * 60 * 1000) continue;
 
