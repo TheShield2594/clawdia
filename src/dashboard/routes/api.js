@@ -45,7 +45,8 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, async (req,
 
         await guildSettings.save();
         
-        if (updates['dailyNews.enabled'] !== undefined || updates['dailyNews.time'] !== undefined) {
+        const shouldRescheduleDailyNews = Object.keys(updates).some(key => key.startsWith('dailyNews.') || key === 'dailyNewsProfiles');
+        if (shouldRescheduleDailyNews) {
             rescheduleDailyNews(req.client, guildId);
         }
         

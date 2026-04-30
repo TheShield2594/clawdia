@@ -72,6 +72,17 @@ const guildSchema = new Schema({
         title: { type: String, default: '📰 Daily News Digest' },
         maxItemsPerFeed: { type: Number, default: 3 }
     },
+
+    dailyNewsProfiles: [{
+        profileId: { type: String, required: true },
+        enabled: { type: Boolean, default: false },
+        channelId: { type: String, default: null },
+        time: { type: String, default: '09:00' },
+        timezone: { type: String, default: 'UTC' },
+        feeds: [{ type: String }],
+        title: { type: String, default: '📰 Daily News Digest' },
+        maxItemsPerFeed: { type: Number, default: 3 }
+    }],
     
     ai: {
         enabled: { type: Boolean, default: false },
