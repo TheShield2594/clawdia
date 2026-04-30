@@ -5,6 +5,7 @@ const cron = require('node-cron');
 
 const parser = new Parser();
 let dailyNewsJobs = new Map();
+const runtimeTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 function createLegacyProfile(guild) {
     const legacy = guild.dailyNews || {};
@@ -13,7 +14,7 @@ function createLegacyProfile(guild) {
         enabled: Boolean(legacy.enabled),
         channelId: legacy.channelId || null,
         time: legacy.time || '09:00',
-        timezone: 'UTC',
+        timezone: runtimeTimezone || undefined,
         feeds: Array.isArray(legacy.feeds) ? legacy.feeds : [],
         title: legacy.title || '📰 Daily News Digest',
         maxItemsPerFeed: legacy.maxItemsPerFeed || 3
@@ -42,6 +43,21 @@ function normalizeArticleLink(link = '') {
     }
 }
 
+
+async function fetchSendableChannel(client, channelId) {
+    let channel = null;
+
+    try {
+        channel = await client.channels.fetch(channelId);
+    } catch {
+        channel = client.channels.cache.get(channelId) || null;
+    }
+
+    if (!channel || typeof channel.send !== 'function') return null;
+    if (typeof channel.isTextBased === 'function' && !channel.isTextBased()) return null;
+
+    return channel;
+}
 async function checkRssFeeds(client) {
     try {
         const guilds = await Guild.find({ 'rssFeeds.0': { $exists: true } });
@@ -57,7 +73,7 @@ async function checkRssFeeds(client) {
                     const itemDate = new Date(latestItem.pubDate || latestItem.isoDate);
 
                     if (!feed.lastPublished || itemDate > feed.lastPublished) {
-                        const channel = client.channels.cache.get(feed.channelId);
+                        const channel = await fetchSendableChannel(client, feed.channelId);
                         
                         if (channel) {
                             const embed = new EmbedBuilder()
@@ -88,7 +104,7 @@ async function checkRssFeeds(client) {
 }
 
 async function sendDailyNewsForProfile(client, guild, profile) {
-    const channel = client.channels.cache.get(profile.channelId);
+    const channel = await fetchSendableChannel(client, profile.channelId);
     if (!channel) {
         console.error(`Daily news channel not found for guild ${guild.guildId}, profile ${profile.profileId}`);
         return;
@@ -110,6 +126,7 @@ async function sendDailyNewsForProfile(client, guild, profile) {
                     date: new Date(item.pubDate || item.isoDate)
                 }))
                 .filter(item => !Number.isNaN(item.date.getTime()) && item.date.getTime() >= cutoffMs)
+                .sort((a, b) => b.date.getTime() - a.date.getTime())
                 .slice(0, profile.maxItemsPerFeed || 3);
 
             allItems.push(...feedItems);
@@ -179,7 +196,8 @@ async function sendDailyNews(client, guildId, profileId = null) {
 }
 
 function scheduleProfileJob(client, guildId, profile) {
-    const [hour, minute] = (profile.time || '09:00').split(':').map(Number);
+    const safeTime = /^([01]\d|2[0-3]):([0-5]\d)$/.test(profile.time || '') ? profile.time : '09:00';
+    const [hour, minute] = safeTime.split(':').map(Number);
     const cronExpression = `${minute} ${hour} * * *`;
     const jobKey = `${guildId}:${profile.profileId}`;
 
@@ -187,14 +205,16 @@ function scheduleProfileJob(client, guildId, profile) {
         dailyNewsJobs.get(jobKey).stop();
     }
 
-    const job = cron.schedule(cronExpression, () => {
-        sendDailyNews(client, guildId, profile.profileId);
-    }, {
-        timezone: profile.timezone || 'UTC'
-    });
+    try {
+        const job = cron.schedule(cronExpression, () => {
+            sendDailyNews(client, guildId, profile.profileId);
+        }, profile.timezone ? { timezone: profile.timezone } : undefined);
 
-    dailyNewsJobs.set(jobKey, job);
-    console.log(`Scheduled daily news for guild ${guildId}, profile ${profile.profileId} at ${profile.time} (${profile.timezone || 'UTC'})`);
+        dailyNewsJobs.set(jobKey, job);
+        console.log(`Scheduled daily news for guild ${guildId}, profile ${profile.profileId} at ${safeTime}${profile.timezone ? ` (${profile.timezone})` : ''}`);
+    } catch (error) {
+        console.error(`Failed to schedule daily news for guild ${guildId}, profile ${profile.profileId}:`, error.message);
+    }
 }
 
 function scheduleDailyNews(client) {
