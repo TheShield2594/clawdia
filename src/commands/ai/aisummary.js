@@ -37,6 +37,20 @@ module.exports = {
             const minute = interaction.options.getInteger('minute') ?? 0;
             const label  = interaction.options.getString('label')   || `Daily Summary of #${source.name}`;
 
+            const botMember = interaction.guild.members.me;
+            if (!source.isTextBased()) {
+                return interaction.reply({ content: 'The source channel must be a text-based channel.', ephemeral: true });
+            }
+            if (!target.isTextBased()) {
+                return interaction.reply({ content: 'The target channel must be a text-based channel.', ephemeral: true });
+            }
+            if (!source.permissionsFor(botMember)?.has('ViewChannel')) {
+                return interaction.reply({ content: `I don't have permission to view <#${source.id}>.`, ephemeral: true });
+            }
+            if (!target.permissionsFor(botMember)?.has('SendMessages')) {
+                return interaction.reply({ content: `I don't have permission to send messages in <#${target.id}>.`, ephemeral: true });
+            }
+
             const job = await SummaryJob.create({
                 guildId: interaction.guild.id,
                 sourceChannelId: source.id,

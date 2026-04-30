@@ -73,6 +73,9 @@ module.exports = {
 
         } else if (sub === 'sync-pins') {
             const channel = interaction.options.getChannel('channel');
+            if (!channel.isTextBased()) {
+                return interaction.reply({ content: 'Only text-based channels have pinned messages.', ephemeral: true });
+            }
             await interaction.deferReply({ ephemeral: true });
 
             const pins = await channel.messages.fetchPinned().catch(() => null);

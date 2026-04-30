@@ -10,5 +10,6 @@ const knowledgeBaseSchema = new Schema({
 });
 
 knowledgeBaseSchema.index({ guildId: 1, createdAt: -1 });
+knowledgeBaseSchema.index({ title: 'text', content: 'text', tags: 'text' });
 
 module.exports = model('KnowledgeBase', knowledgeBaseSchema);

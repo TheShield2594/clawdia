@@ -13,6 +13,19 @@ function distinctProfileIds(profiles) {
     return true;
 }
 
+function distinctChannelPersonaIds(personas) {
+    if (!Array.isArray(personas)) return true;
+
+    const seen = new Set();
+    for (const persona of personas) {
+        if (!persona || !persona.channelId) continue;
+        if (seen.has(persona.channelId)) return false;
+        seen.add(persona.channelId);
+    }
+
+    return true;
+}
+
 const guildSchema = new Schema({
     guildId: { type: String, required: true, unique: true },
     name: { type: String, required: true },
@@ -127,11 +140,17 @@ const guildSchema = new Schema({
         rateLimitPerUser: { type: Number, default: 20 },
         rateLimitWindowMin: { type: Number, default: 10 },
         // Per-channel personas: each entry overrides systemPrompt for that channel
-        channelPersonas: [{
-            channelId:    { type: String, required: true },
-            personaName:  { type: String, default: 'Assistant' },
-            systemPrompt: { type: String, required: true }
-        }],
+        channelPersonas: {
+            type: [{
+                channelId:    { type: String, required: true },
+                personaName:  { type: String, default: 'Assistant' },
+                systemPrompt: { type: String, required: true }
+            }],
+            validate: {
+                validator: distinctChannelPersonaIds,
+                message: 'channelPersonas contains duplicate channelId values.'
+            }
+        },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
         actionsEnabled: { type: Boolean, default: false }
     },

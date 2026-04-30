@@ -44,6 +44,11 @@ module.exports = {
                     const effectiveSettings = persona
                         ? Object.assign({}, ai.toObject ? ai.toObject() : ai, { systemPrompt: persona.systemPrompt })
                         : ai;
+                    // Automod runs on AI-channel messages too; abort if a violation was found
+                    if (guildSettings.moderation?.enabled) {
+                        const blocked = await handleAutoModeration(message, guildSettings);
+                        if (blocked) return;
+                    }
                     await handleAIChat(message, effectiveSettings);
                     return;
                 }
@@ -149,7 +154,7 @@ async function handleAutoModeration(message, guildSettings) {
             const warn = await message.channel.send(`${message.author}, slow down! You're sending messages too fast.`);
             setTimeout(() => warn.delete().catch(() => {}), 5000);
             await applyAutoModAction(message, guildSettings, 'spam');
-            return;
+            return true;
         }
     }
 
@@ -158,7 +163,7 @@ async function handleAutoModeration(message, guildSettings) {
         const warn = await message.channel.send(`${message.author}, invite links are not allowed!`);
         setTimeout(() => warn.delete().catch(() => {}), 5000);
         await applyAutoModAction(message, guildSettings, 'posting an invite link');
-        return;
+        return true;
     }
 
     if (mod.linkFilter && (content.includes('http://') || content.includes('https://'))) {
@@ -167,7 +172,7 @@ async function handleAutoModeration(message, guildSettings) {
             const warn = await message.channel.send(`${message.author}, links are not allowed!`);
             setTimeout(() => warn.delete().catch(() => {}), 5000);
             await applyAutoModAction(message, guildSettings, 'posting a link');
-            return;
+            return true;
         }
     }
 
@@ -183,6 +188,7 @@ async function handleAutoModeration(message, guildSettings) {
             const warn = await message.channel.send(`${message.author}, please watch your language!`);
             setTimeout(() => warn.delete().catch(() => {}), 5000);
             await applyAutoModAction(message, guildSettings, 'using prohibited language');
+            return true;
         }
     }
 }

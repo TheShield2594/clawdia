@@ -29,6 +29,9 @@ module.exports = {
 
         if (sub === 'set') {
             const channel = interaction.options.getChannel('channel');
+            if (!channel.isTextBased()) {
+                return interaction.reply({ content: 'Personas can only be set on text-based channels (text, thread, announcement, etc.).', ephemeral: true });
+            }
             const name = interaction.options.getString('name');
             const prompt = interaction.options.getString('prompt');
 

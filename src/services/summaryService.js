@@ -19,7 +19,7 @@ async function runSummaryJob(job, client) {
         .filter(m => !m.author.bot && m.content?.trim())
         .map(m => `[${m.author.displayName || m.author.username}]: ${m.content}`)
         .join('\n')
-        .slice(0, MAX_TRANSCRIPT_CHARS);
+        .slice(-MAX_TRANSCRIPT_CHARS);
 
     if (!transcript) return;
 
@@ -69,9 +69,11 @@ function startSummaryService(client) {
                 // Skip if already ran within the last 23 hours
                 if (job.lastRun && now - job.lastRun < 23 * 60 * 60 * 1000) continue;
 
-                runSummaryJob(job, client).catch(err =>
-                    console.error(`[SummaryService] Job ${job._id} failed:`, err.message)
-                );
+                try {
+                    await runSummaryJob(job, client);
+                } catch (err) {
+                    console.error(`[SummaryService] Job ${job._id} failed:`, err.message);
+                }
             }
         } catch (err) {
             console.error('[SummaryService] Scheduler error:', err.message);
