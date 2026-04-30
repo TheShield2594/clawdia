@@ -1,12 +1,20 @@
 version: '3.8'
 
 # Deploy this file via Portainer > Stacks > Add Stack > Web Editor.
-# Before deploying, build and push the bot image to a registry:
-#   docker build -t ghcr.io/theshield2594/ultrabot:latest .
-#   docker push ghcr.io/theshield2594/ultrabot:latest
 #
-# Then set all variables marked (required) in the "Environment variables"
-# section of the Portainer Stack form before clicking Deploy.
+# BEFORE DEPLOYING:
+#   1. Build and push the image to GHCR:
+#        docker build -t ghcr.io/theshield2594/ultrabot:latest .
+#        docker push ghcr.io/theshield2594/ultrabot:latest
+#
+#   2. If the GHCR package is private, add registry credentials in Portainer first:
+#        Portainer > Registries > Add registry > Custom registry
+#        URL: ghcr.io
+#        Username: your GitHub username
+#        Password: GitHub PAT with read:packages scope
+#
+#   3. Set all required variables in the Portainer Stack "Environment variables"
+#      section before clicking Deploy.
 
 services:
   mongodb:
@@ -25,7 +33,7 @@ services:
       start_period: 30s
 
   bot:
-    image: ghcr.io/theshield2594/ultrabot:latest  # change to your registry image
+    image: ghcr.io/theshield2594/ultrabot:latest
     container_name: ultrabot
     restart: unless-stopped
     environment:
@@ -34,7 +42,7 @@ services:
       - CLIENT_ID=${CLIENT_ID}
       - CLIENT_SECRET=${CLIENT_SECRET}
       - SESSION_SECRET=${SESSION_SECRET}
-      - DASHBOARD_URL=${DASHBOARD_URL}
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:7001}
       # --- Optional: AI ---
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -42,10 +50,10 @@ services:
       - YOUTUBE_COOKIE=${YOUTUBE_COOKIE}
       # --- Defaults (override if needed) ---
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
-      - DASHBOARD_PORT=${DASHBOARD_PORT:-3000}
+      - DASHBOARD_PORT=7001
       - NODE_ENV=${NODE_ENV:-production}
     ports:
-      - "3000:3000"
+      - "7001:7001"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -54,7 +62,7 @@ services:
     networks:
       - ultrabot-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:7001', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
