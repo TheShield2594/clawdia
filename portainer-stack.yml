@@ -42,7 +42,7 @@ services:
       - CLIENT_ID=${CLIENT_ID}
       - CLIENT_SECRET=${CLIENT_SECRET}
       - SESSION_SECRET=${SESSION_SECRET}
-      - DASHBOARD_URL=${DASHBOARD_URL}
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:7001}
       # --- Optional: AI ---
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
