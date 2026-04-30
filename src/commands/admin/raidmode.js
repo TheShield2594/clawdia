@@ -93,6 +93,13 @@ module.exports = {
             if (appealsEnabled != null) update['moderation.appealsEnabled'] = appealsEnabled;
             if (appealChannel) update['moderation.appealChannelId'] = appealChannel.id;
 
+            if (Object.keys(update).length === 0) {
+                return interaction.reply({
+                    content: 'Please provide at least one option to update (sla_hours, sla_channel, appeals_enabled, or appeal_channel).',
+                    ephemeral: true
+                });
+            }
+
             await Guild.updateOne({ guildId: interaction.guild.id }, { $set: update });
 
             return interaction.reply({

@@ -1,4 +1,3 @@
-const cron = require('node-cron');
 const User = require('../models/User');
 const Guild = require('../models/Guild');
 
@@ -36,7 +35,8 @@ function getAllQuestDefs() {
     ];
 }
 
-// Ensure active quest entries exist for the user, pruning expired ones
+// Ensure active quest entries exist for the user, pruning expired ones.
+// NOTE: does not call user.save() — callers must persist after this.
 async function ensureQuests(user, guildSettings) {
     if (!guildSettings?.quests?.enabled) return;
 
@@ -146,7 +146,6 @@ async function onStreakUpdate(user, guildSettings) {
     const completed = [];
 
     if (streak >= 5) {
-        const wkStreak = await incrementQuest(user, 'weekly_streak_5', 0); // just check, set to target
         const entry = user.quests?.find(q => q.questId === 'weekly_streak_5' && !q.completedAt && q.expiresAt > new Date());
         if (entry) {
             const def = getAllQuestDefs().find(d => d.questId === 'weekly_streak_5');

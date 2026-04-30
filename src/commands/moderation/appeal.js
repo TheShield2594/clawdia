@@ -57,8 +57,15 @@ module.exports = {
             || guildSettings?.moderation?.logChannelId;
         if (!alertChannelId) return;
 
-        const channel = interaction.guild.channels.cache.get(alertChannelId);
-        if (!channel) return;
+        let channel = interaction.guild.channels.cache.get(alertChannelId);
+        if (!channel) {
+            try {
+                channel = await interaction.guild.channels.fetch(alertChannelId);
+            } catch {
+                return;
+            }
+        }
+        if (!channel || !channel.isTextBased()) return;
 
         const embed = new EmbedBuilder()
             .setColor('#5865F2')

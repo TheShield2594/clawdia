@@ -35,23 +35,36 @@ module.exports = {
             const xpPerTier = interaction.options.getInteger('xp_per_tier') ?? 100;
             const maxTiers = interaction.options.getInteger('max_tiers') ?? 50;
 
-            const endDate = new Date(endDateStr);
-            if (isNaN(endDate)) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(endDateStr)) {
+                return interaction.reply({ content: 'Invalid date format. Use YYYY-MM-DD.', ephemeral: true });
+            }
+            const [year, month, day] = endDateStr.split('-').map(Number);
+            const endDate = new Date(Date.UTC(year, month - 1, day));
+            if (
+                endDate.getUTCFullYear() !== year ||
+                endDate.getUTCMonth() + 1 !== month ||
+                endDate.getUTCDate() !== day
+            ) {
                 return interaction.reply({ content: 'Invalid date format. Use YYYY-MM-DD.', ephemeral: true });
             }
 
             const seasonId = `season_${Date.now()}`;
-            await Guild.updateOne({ guildId: interaction.guild.id }, {
-                $set: {
-                    'season.enabled': true,
-                    'season.seasonId': seasonId,
-                    'season.name': name,
-                    'season.startDate': new Date(),
-                    'season.endDate': endDate,
-                    'season.xpPerTier': xpPerTier,
-                    'season.maxTiers': maxTiers
-                }
-            });
+            await Guild.findOneAndUpdate(
+                { guildId: interaction.guild.id },
+                {
+                    $set: {
+                        'season.enabled': true,
+                        'season.seasonId': seasonId,
+                        'season.name': name,
+                        'season.startDate': new Date(),
+                        'season.endDate': endDate,
+                        'season.xpPerTier': xpPerTier,
+                        'season.maxTiers': maxTiers
+                    },
+                    $setOnInsert: { guildId: interaction.guild.id, name: interaction.guild.name }
+                },
+                { upsert: true, new: true }
+            );
 
             return interaction.reply({
                 embeds: [new EmbedBuilder()

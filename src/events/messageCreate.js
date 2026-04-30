@@ -34,8 +34,8 @@ function normalizeToxic(text) {
     for (const [char, replacement] of Object.entries(LEET_MAP)) {
         s = s.split(char).join(replacement);
     }
-    // Collapse repeated characters (fuuuuck -> fuck)
-    s = s.replace(/(.)\1{2,}/g, '$1$1');
+    // Collapse 3+ repeated characters to one (fuuuuck -> fuck)
+    s = s.replace(/(.)\1{2,}/g, '$1');
     // Strip spaces/dots/dashes between individual letters (f u c k, f.u.c.k)
     s = s.replace(/\b(\w)([\s.\-_*]{1,2}(?=\w))+/g, (m) => m.replace(/[\s.\-_*]/g, ''));
     return s;

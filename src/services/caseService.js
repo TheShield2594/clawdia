@@ -7,9 +7,10 @@ async function getNextCaseId(guildId) {
     const result = await Guild.findOneAndUpdate(
         { guildId },
         { $inc: { 'caseSettings.nextCaseId': 1 } },
-        { new: false, projection: { 'caseSettings.nextCaseId': 1 } }
+        { upsert: true, new: true, projection: { 'caseSettings.nextCaseId': 1 } }
     );
-    return result?.caseSettings?.nextCaseId ?? 1;
+    // new:true returns the post-increment value; subtract 1 for the id we're assigning now
+    return (result?.caseSettings?.nextCaseId ?? 2) - 1;
 }
 
 async function createCase({ guildId, type, targetUserId, moderatorId, reason, evidence = null, duration = null }) {
@@ -83,8 +84,13 @@ function startSlaMonitor(client) {
                 slaDeadline: { $lte: now }
             });
 
+            // Batch-fetch all guild settings to avoid N+1 queries
+            const uniqueGuildIds = [...new Set(overdueCases.map(c => c.guildId))];
+            const guildDocs = await Guild.find({ guildId: { $in: uniqueGuildIds } });
+            const guildMap = new Map(guildDocs.map(g => [g.guildId, g]));
+
             for (const modCase of overdueCases) {
-                const guildSettings = await Guild.findOne({ guildId: modCase.guildId });
+                const guildSettings = guildMap.get(modCase.guildId);
                 const slaChannelId = guildSettings?.caseSettings?.slaChannelId
                     || guildSettings?.moderation?.logChannelId;
                 if (!slaChannelId) continue;
@@ -101,8 +107,8 @@ function startSlaMonitor(client) {
                     .addFields(
                         { name: 'Type', value: modCase.type.toUpperCase(), inline: true },
                         { name: 'Target', value: `<@${modCase.targetUserId}>`, inline: true },
-                        { name: 'Opened', value: `<t:${Math.floor(modCase.createdAt / 1000)}:R>`, inline: true },
-                        { name: 'Reason', value: modCase.reason }
+                        { name: 'Opened', value: `<t:${Math.floor(modCase.createdAt.getTime() / 1000)}:R>`, inline: true },
+                        { name: 'Reason', value: modCase.reason ?? 'No reason provided' }
                     )
                     .setTimestamp();
 

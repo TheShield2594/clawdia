@@ -54,7 +54,7 @@ module.exports = {
             embed.addFields({ name: 'Assigned To', value: `<@${modCase.assignedModId}>`, inline: true });
         }
         if (modCase.slaDeadline && modCase.status === 'open') {
-            embed.addFields({ name: 'SLA Deadline', value: `<t:${Math.floor(modCase.slaDeadline / 1000)}:R>`, inline: true });
+            embed.addFields({ name: 'SLA Deadline', value: `<t:${Math.floor(modCase.slaDeadline.getTime() / 1000)}:R>`, inline: true });
         }
         if (modCase.resolution) {
             embed.addFields({ name: 'Resolution', value: modCase.resolution });

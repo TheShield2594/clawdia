@@ -28,7 +28,7 @@ module.exports = {
         }
 
         const lines = cases.map(c =>
-            `\`#${String(c.caseId).padStart(4, '0')}\` ${TYPE_EMOJI[c.type] || '•'} **${c.type.toUpperCase()}** — ${c.reason.slice(0, 60)} — <t:${Math.floor(c.createdAt / 1000)}:d>`
+            `\`#${String(c.caseId).padStart(4, '0')}\` ${TYPE_EMOJI[c.type] || '•'} **${c.type.toUpperCase()}** — ${(c.reason ?? 'No reason provided').slice(0, 60)} — <t:${Math.floor(c.createdAt / 1000)}:d>`
         );
 
         const embed = new EmbedBuilder()

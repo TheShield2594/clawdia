@@ -38,7 +38,9 @@ async function trackQuestCommandUse(interaction) {
     if (!guildSettings?.quests?.enabled) return;
 
     let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-    if (!user) return;
+    if (!user) {
+        user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
+    }
 
     await ensureQuests(user, guildSettings);
     const completed = await onCommandUse(user, guildSettings);

@@ -63,10 +63,10 @@ const guildSchema = new Schema({
         kickThreshold: { type: Number, default: 5 },
         banThreshold: { type: Number, default: 0 },
         // Behavioral score escalation thresholds (0 = disabled)
-        behaviorScoreMuteAt: { type: Number, default: 10 },
-        behaviorScoreKickAt: { type: Number, default: 20 },
-        behaviorScoreBanAt: { type: Number, default: 30 },
-        behaviorScoreDecayDays: { type: Number, default: 7 },
+        behaviorScoreMuteAt: { type: Number, default: 10, min: 0 },
+        behaviorScoreKickAt: { type: Number, default: 20, min: 0 },
+        behaviorScoreBanAt: { type: Number, default: 30, min: 0 },
+        behaviorScoreDecayDays: { type: Number, default: 7, min: 1 },
         // Appeals
         appealsEnabled: { type: Boolean, default: false },
         appealChannelId: { type: String, default: null }
@@ -203,9 +203,9 @@ const guildSchema = new Schema({
 
     raidDetection: {
         enabled: { type: Boolean, default: false },
-        threshold: { type: Number, default: 10 },
-        windowSeconds: { type: Number, default: 60 },
-        minAccountAgeDays: { type: Number, default: 7 },
+        threshold: { type: Number, default: 10, min: 1 },
+        windowSeconds: { type: Number, default: 60, min: 1 },
+        minAccountAgeDays: { type: Number, default: 7, min: 0 },
         action: {
             type: String,
             enum: ['alert', 'quarantine', 'kick'],
@@ -213,13 +213,13 @@ const guildSchema = new Schema({
         },
         quarantineRoleId: { type: String, default: null },
         alertChannelId: { type: String, default: null },
-        caseIdCounter: { type: Number, default: 0 }
+        caseIdCounter: { type: Number, default: 0, min: 0 }
     },
 
     caseSettings: {
-        slaHours: { type: Number, default: 48 },
+        slaHours: { type: Number, default: 48, min: 1 },
         slaChannelId: { type: String, default: null },
-        nextCaseId: { type: Number, default: 1 }
+        nextCaseId: { type: Number, default: 1, min: 1 }
     },
 
     quests: {

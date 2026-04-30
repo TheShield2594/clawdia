@@ -2,6 +2,9 @@ const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 
 // guildId -> [{timestamp, userId, accountAgeDays}]
+// NOTE: in-memory only — data is lost on restart and not shared across shards.
+// For multi-shard or high-availability deployments, replace with a Redis-backed
+// store using sorted sets (ZADD/ZRANGEBYSCORE with TTL) for atomic, shared state.
 const joinLog = new Map();
 
 function pruneLog(guildId, windowMs) {
@@ -17,7 +20,10 @@ async function handleMemberJoin(member, client) {
     let guildSettings;
     try {
         guildSettings = await Guild.findOne({ guildId });
-    } catch { return; }
+    } catch (err) {
+        console.error(`[RaidService] DB error fetching guild ${guildId}:`, err);
+        return;
+    }
 
     if (!guildSettings?.raidDetection?.enabled) return;
 
