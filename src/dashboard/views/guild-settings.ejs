@@ -34,6 +34,12 @@
                 <button class="nav-item" data-tab="leveling"><span class="nav-emoji">📈</span> Leveling</button>
                 <button class="nav-item" data-tab="economy"><span class="nav-emoji">💎</span> Economy</button>
                 <button class="nav-item" data-tab="music"><span class="nav-emoji">🎵</span> Music</button>
+                <button class="nav-item" data-tab="tickets"><span class="nav-emoji">🎫</span> Tickets</button>
+                <button class="nav-item" data-tab="raiddetection"><span class="nav-emoji">🚨</span> Raid Detection</button>
+                <button class="nav-item" data-tab="starboard"><span class="nav-emoji">⭐</span> Starboard</button>
+                <button class="nav-item" data-tab="eventlog"><span class="nav-emoji">📋</span> Event Log</button>
+                <button class="nav-item" data-tab="quests"><span class="nav-emoji">🗺️</span> Quests</button>
+                <button class="nav-item" data-tab="suggestions"><span class="nav-emoji">💡</span> Suggestions</button>
                 <button class="nav-item" data-tab="rss"><span class="nav-emoji">📰</span> RSS Feeds</button>
                 <button class="nav-item" data-tab="dailynews"><span class="nav-emoji">🗞️</span> Daily News</button>
                 <button class="nav-item" data-tab="analytics"><span class="nav-emoji">📊</span> Analytics</button>
@@ -80,7 +86,7 @@
                         <small>Variables: <code>{username}</code> · <code>{tag}</code> · <code>{server}</code> · <code>{memberCount}</code></small>
                     </div>
                     <div class="panel-head" style="margin-top:1.5rem">
-                        <h3>Role to New Users</h3>
+                        <h3>Auto-assign roles on join</h3>
                         <p>Automatically assign roles when a member joins.</p>
                     </div>
                     <div class="field">
@@ -140,7 +146,7 @@
                 <section id="moderation" class="panel">
                     <div class="panel-head">
                         <h2>Moderation</h2>
-                        <p>Auto-mod, spam protection, link &amp; invite filtering, and audit logging.</p>
+                        <p>Auto-mod, spam protection, link &amp; invite filtering, escalation, and audit logging.</p>
                     </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable moderation</strong><span>Master switch for all moderation features</span></span>
@@ -155,14 +161,39 @@
                             <% }); %>
                         </select>
                     </div>
+                    <div class="field">
+                        <label class="field-label" for="mod-mute-role">Mute role</label>
+                        <select id="mod-mute-role">
+                            <option value="">Select a role (or use Discord timeout)</option>
+                            <% roles.forEach(role => { %>
+                                <option value="<%= role.id %>" <%= settings.moderation.muteRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Assigned when a member is muted. Leave empty to use Discord's native timeout.</small>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Auto-Moderation</h3></div>
                     <label class="toggle">
-                        <span class="toggle-text"><strong>Auto-moderation</strong><span>Automatically delete or warn on rule violations</span></span>
+                        <span class="toggle-text"><strong>Enable auto-moderation</strong><span>Automatically delete or warn on rule violations</span></span>
                         <span class="switch"><input type="checkbox" id="mod-automod" <%= settings.moderation.autoModEnabled ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
+                    <div class="field">
+                        <label class="field-label" for="mod-immunity-roles">Immunity roles</label>
+                        <select id="mod-immunity-roles" multiple size="4" style="height:auto;">
+                            <% roles.forEach(role => { %>
+                                <option value="<%= role.id %>" <%= (settings.moderation.immunityRoleIds || []).includes(role.id) ? 'selected' : '' %>>@<%= role.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Members with these roles bypass auto-moderation. Hold Ctrl/Cmd to select multiple.</small>
+                    </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Spam protection</strong><span>Throttle rapid repeat messages</span></span>
                         <span class="switch"><input type="checkbox" id="mod-spam" <%= settings.moderation.spamProtection ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="mod-spam-threshold">Spam threshold (messages)</label><input type="number" id="mod-spam-threshold" value="<%= settings.moderation.spamThreshold || 5 %>" min="2" max="30"></div>
+                        <div><label class="field-label" for="mod-spam-window">Spam window (seconds)</label><input type="number" id="mod-spam-window" value="<%= settings.moderation.spamWindow || 5 %>" min="1" max="60"></div>
+                    </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Filter invite links</strong><span>Block other Discord server invites</span></span>
                         <span class="switch"><input type="checkbox" id="mod-invites" <%= settings.moderation.inviteFilter ? 'checked' : '' %>><span class="slider"></span></span>
@@ -171,6 +202,11 @@
                         <span class="toggle-text"><strong>Filter links</strong><span>Block external URLs in messages</span></span>
                         <span class="switch"><input type="checkbox" id="mod-links" <%= settings.moderation.linkFilter ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Filter profanity</strong><span>Delete messages containing blocked words (uses built-in + custom list)</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-profanity" <%= settings.moderation.profanityFilter ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field"><label class="field-label" for="mod-bad-words">Custom blocked words</label><textarea id="mod-bad-words" rows="3"><%= (settings.moderation.customBadWords || []).join('\n') %></textarea><small>One word/phrase per line. Added on top of the built-in list.</small></div>
                     <label class="toggle"><span class="toggle-text"><strong>Filter repeated text</strong></span><span class="switch"><input type="checkbox" id="mod-repeated" <%= settings.moderation.repeatedTextFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text"><strong>Filter excessive caps</strong></span><span class="switch"><input type="checkbox" id="mod-caps" <%= settings.moderation.excessiveCapsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <div class="field"><label class="field-label" for="mod-caps-threshold">Caps threshold %</label><input type="number" id="mod-caps-threshold" value="<%= settings.moderation.capsThresholdPercent || 70 %>" min="1" max="100"></div>
@@ -179,7 +215,36 @@
                     <label class="toggle"><span class="toggle-text"><strong>Filter Zalgo text</strong></span><span class="switch"><input type="checkbox" id="mod-zalgo" <%= settings.moderation.zalgoFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text"><strong>Filter excessive mentions</strong></span><span class="switch"><input type="checkbox" id="mod-mentions" <%= settings.moderation.excessiveMentionsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <div class="field"><label class="field-label" for="mod-mention-threshold">Mention threshold</label><input type="number" id="mod-mention-threshold" value="<%= settings.moderation.mentionThreshold || 5 %>" min="1" max="25"></div>
-                    <div class="field"><label class="field-label" for="mod-bad-words">Blocked words</label><textarea id="mod-bad-words" rows="3"><%= (settings.moderation.customBadWords || []).join('\n') %></textarea><small>One word/phrase per line</small></div>
+
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Escalation Thresholds</h3><p>Auto-actions taken as warning count rises. Set 0 to disable an action.</p></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="mod-warn-threshold">Warn count</label><input type="number" id="mod-warn-threshold" value="<%= settings.moderation.warnThreshold || 3 %>" min="1" max="50"><small>DM user at this many warnings</small></div>
+                        <div><label class="field-label" for="mod-kick-threshold">Kick at (warnings)</label><input type="number" id="mod-kick-threshold" value="<%= settings.moderation.kickThreshold || 5 %>" min="0" max="50"><small>0 = disabled</small></div>
+                        <div><label class="field-label" for="mod-ban-threshold">Ban at (warnings)</label><input type="number" id="mod-ban-threshold" value="<%= settings.moderation.banThreshold || 0 %>" min="0" max="50"><small>0 = disabled</small></div>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Behavior Score Escalation</h3><p>Separate score system that decays over time. Each automod violation adds to the score.</p></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="mod-score-mute">Mute at score</label><input type="number" id="mod-score-mute" value="<%= settings.moderation.behaviorScoreMuteAt ?? 10 %>" min="0"><small>0 = disabled</small></div>
+                        <div><label class="field-label" for="mod-score-kick">Kick at score</label><input type="number" id="mod-score-kick" value="<%= settings.moderation.behaviorScoreKickAt ?? 20 %>" min="0"><small>0 = disabled</small></div>
+                        <div><label class="field-label" for="mod-score-ban">Ban at score</label><input type="number" id="mod-score-ban" value="<%= settings.moderation.behaviorScoreBanAt ?? 30 %>" min="0"><small>0 = disabled</small></div>
+                        <div><label class="field-label" for="mod-score-decay">Decay (days)</label><input type="number" id="mod-score-decay" value="<%= settings.moderation.behaviorScoreDecayDays ?? 7 %>" min="1"><small>Score halves every N days</small></div>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Appeals</h3></div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable ban/mute appeals</strong><span>Allow users to submit appeals via <code>/appeal</code></span></span>
+                        <span class="switch"><input type="checkbox" id="mod-appeals-enabled" <%= settings.moderation.appealsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="mod-appeal-channel">Appeals channel</label>
+                        <select id="mod-appeal-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.moderation.appealChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
                     </div>
@@ -200,7 +265,7 @@
                         <span class="switch"><input type="checkbox" id="level-rewards-enabled" <%= settings.leveling.rewardsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
                     <div class="field">
-                        <label class="field-label" for="level-xp-rate">XP rate multiplier</label>
+                        <label class="field-label" for="level-xp-rate">Message XP rate multiplier</label>
                         <input type="text" id="level-xp-rate" value="<%= settings.leveling.xpRate %>">
                         <small>Default 1.0 · higher values award more XP per message</small>
                     </div>
@@ -209,10 +274,20 @@
                         <textarea id="level-message" rows="2"><%= settings.leveling.levelUpMessage %></textarea>
                         <small>Variables: <code>{user}</code> · <code>{level}</code></small>
                     </div>
-                    <div class="field"><label class="field-label" for="level-reward-channel">Reward announcement channel</label><select id="level-reward-channel"><option value="">Use level-up channel/default</option><% channels.forEach(channel => { %><option value="<%= channel.id %>" <%= settings.leveling.rewardChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option><% }); %></select></div>
-                    <div class="field"><label class="field-label" for="level-no-xp-roles">No-XP roles</label><textarea id="level-no-xp-roles" rows="3" placeholder="One role ID per line"><%= (settings.leveling.noXpRoleIds || []).join('\n') %></textarea></div>
-                    <div class="field"><label class="field-label" for="level-no-xp-channels">No-XP channels</label><textarea id="level-no-xp-channels" rows="3" placeholder="One channel ID per line"><%= (settings.leveling.noXpChannelIds || []).join('\n') %></textarea></div>
-                    <div class="field"><label class="field-label" for="level-role-rewards">Role rewards</label><textarea id="level-role-rewards" rows="4" placeholder="level|roleId"><%= (settings.levelRoles || []).map(r => `${r.level}|${r.roleId}`).join('\n') %></textarea></div>
+                    <div class="field"><label class="field-label" for="level-reward-channel">Reward announcement channel</label><select id="level-reward-channel"><option value="">Use current channel</option><% channels.forEach(channel => { %><option value="<%= channel.id %>" <%= settings.leveling.rewardChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option><% }); %></select></div>
+                    <div class="field"><label class="field-label" for="level-no-xp-roles">No-XP roles (one role ID per line)</label><textarea id="level-no-xp-roles" rows="3" placeholder="One role ID per line"><%= (settings.leveling.noXpRoleIds || []).join('\n') %></textarea></div>
+                    <div class="field"><label class="field-label" for="level-no-xp-channels">No-XP channels (one channel ID per line)</label><textarea id="level-no-xp-channels" rows="3" placeholder="One channel ID per line"><%= (settings.leveling.noXpChannelIds || []).join('\n') %></textarea></div>
+                    <div class="field"><label class="field-label" for="level-role-rewards">Level role rewards</label><textarea id="level-role-rewards" rows="4" placeholder="level|roleId (e.g. 5|123456789)"><%= (settings.levelRoles || []).map(r => `${r.level}|${r.roleId}`).join('\n') %></textarea><small>Format: <code>level|roleId</code> — one per line</small></div>
+
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Voice XP</h3><p>Award XP for time spent in voice channels (3 XP/minute × rate).</p></div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable voice XP</strong><span>Members earn XP while in voice channels</span></span>
+                        <span class="switch"><input type="checkbox" id="level-voice-xp" <%= settings.leveling.voiceXpEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="level-voice-rate">Voice XP rate multiplier</label>
+                        <input type="number" id="level-voice-rate" value="<%= settings.leveling.voiceXpRate ?? 1.0 %>" min="0.1" max="10" step="0.1">
+                    </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('leveling')">Save changes</button>
                     </div>
@@ -236,27 +311,23 @@
                         <label class="field-label" for="economy-daily">Daily reward amount</label>
                         <input type="text" id="economy-daily" value="<%= settings.economy.dailyAmount %>">
                     </div>
-                    <div class="field">
-                        <label class="field-label" for="economy-work-min">Work payout (min)</label>
-                        <input type="text" id="economy-work-min" value="<%= settings.economy.workMin %>">
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="economy-work-max">Work payout (max)</label>
-                        <input type="text" id="economy-work-max" value="<%= settings.economy.workMax %>">
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="economy-work-min">Work payout (min)</label><input type="text" id="economy-work-min" value="<%= settings.economy.workMin %>"></div>
+                        <div><label class="field-label" for="economy-work-max">Work payout (max)</label><input type="text" id="economy-work-max" value="<%= settings.economy.workMax %>"></div>
                     </div>
                     <label class="toggle">
-                        <span class="toggle-text"><strong>Enable economy store</strong><span>Allow using the shop/store economy features</span></span>
+                        <span class="toggle-text"><strong>Enable economy store</strong></span>
                         <span class="switch"><input type="checkbox" id="economy-shop-enabled" <%= settings.economy.shopEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
                     <label class="toggle">
-                        <span class="toggle-text"><strong>Enable economy games</strong><span>Allow economy mini-games and wagering features</span></span>
+                        <span class="toggle-text"><strong>Enable economy games</strong></span>
                         <span class="switch"><input type="checkbox" id="economy-games-enabled" <%= settings.economy.gamesEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
                     <label class="toggle">
-                        <span class="toggle-text"><strong>Enable economy jobs</strong><span>Allow job/work-style earning systems</span></span>
+                        <span class="toggle-text"><strong>Enable economy jobs</strong></span>
                         <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
-                    <div class="field"><label class="field-label" for="economy-store-items">Store items</label><textarea id="economy-store-items" rows="6" placeholder="name|price|description|roleId|stock"><%= (settings.shop || []).map(i => `${i.name}|${i.price}|${i.description || ''}|${i.roleId || ''}|${typeof i.stock === 'number' ? i.stock : -1}`).join('\n') %></textarea><small>One item per line: <code>name|price|description|roleId|stock</code></small></div>
+                    <div class="field"><label class="field-label" for="economy-store-items">Store items</label><textarea id="economy-store-items" rows="6" placeholder="name|price|description|roleId|stock"><%= (settings.shop || []).map(i => `${i.name}|${i.price}|${i.description || ''}|${i.roleId || ''}|${typeof i.stock === 'number' ? i.stock : -1}`).join('\n') %></textarea><small>One item per line: <code>name|price|description|roleId|stock</code> (-1 stock = unlimited)</small></div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
                     </div>
@@ -279,10 +350,243 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="music-volume">Default volume (0–100)</label>
-                        <input type="text" id="music-volume" value="<%= settings.music.defaultVolume %>">
+                        <input type="number" id="music-volume" value="<%= settings.music.defaultVolume %>" min="0" max="100">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="music-queue-size">Max queue size</label>
+                        <input type="number" id="music-queue-size" value="<%= settings.music.maxQueueSize || 100 %>" min="1" max="500">
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('music')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Tickets -->
+                <section id="tickets" class="panel">
+                    <div class="panel-head">
+                        <h2>Ticket System</h2>
+                        <p>Let members open private support channels via <code>/ticket open</code>.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable ticket system</strong></span>
+                        <span class="switch"><input type="checkbox" id="tickets-enabled" <%= settings.tickets?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="tickets-category">Ticket category</label>
+                        <select id="tickets-category">
+                            <option value="">Select a category</option>
+                            <% (categories || []).forEach(cat => { %>
+                                <option value="<%= cat.id %>" <%= settings.tickets?.categoryId === cat.id ? 'selected' : '' %>><%= cat.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>New ticket channels are created inside this category.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tickets-support-role">Support role</label>
+                        <select id="tickets-support-role">
+                            <option value="">Select a role</option>
+                            <% roles.forEach(role => { %>
+                                <option value="<%= role.id %>" <%= settings.tickets?.supportRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>This role can see and manage all ticket channels.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tickets-log-channel">Ticket log channel</label>
+                        <select id="tickets-log-channel">
+                            <option value="">None</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.tickets?.logChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Closed ticket summaries and transcripts are posted here.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="tickets-open-message">Opening message</label>
+                        <textarea id="tickets-open-message" rows="3"><%= settings.tickets?.openMessage || 'A support agent will be with you shortly.' %></textarea>
+                        <small>Shown inside the ticket channel when it's created.</small>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('tickets')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Raid Detection -->
+                <section id="raiddetection" class="panel">
+                    <div class="panel-head">
+                        <h2>Raid Detection</h2>
+                        <p>Automatically detect and respond to mass-join events. Use <code>/raidmode</code> to toggle manually.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable raid detection</strong></span>
+                        <span class="switch"><input type="checkbox" id="raid-enabled" <%= settings.raidDetection?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="raid-threshold">Join threshold</label>
+                            <input type="number" id="raid-threshold" value="<%= settings.raidDetection?.threshold || 10 %>" min="2" max="100">
+                            <small>Joins to trigger detection</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="raid-window">Time window (seconds)</label>
+                            <input type="number" id="raid-window" value="<%= settings.raidDetection?.windowSeconds || 60 %>" min="5" max="600">
+                            <small>Within this many seconds</small>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="raid-min-age">Min account age (days)</label>
+                        <input type="number" id="raid-min-age" value="<%= settings.raidDetection?.minAccountAgeDays ?? 7 %>" min="0" max="365">
+                        <small>Flag accounts newer than this as suspicious. 0 = disabled.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="raid-action">Action</label>
+                        <select id="raid-action">
+                            <option value="alert" <%= (settings.raidDetection?.action || 'alert') === 'alert' ? 'selected' : '' %>>Alert only</option>
+                            <option value="quarantine" <%= settings.raidDetection?.action === 'quarantine' ? 'selected' : '' %>>Quarantine (assign role)</option>
+                            <option value="kick" <%= settings.raidDetection?.action === 'kick' ? 'selected' : '' %>>Kick raiders</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="raid-quarantine-role">Quarantine role</label>
+                        <select id="raid-quarantine-role">
+                            <option value="">None</option>
+                            <% roles.forEach(role => { %>
+                                <option value="<%= role.id %>" <%= settings.raidDetection?.quarantineRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Assigned to raiders when action is "Quarantine".</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="raid-alert-channel">Alert channel</label>
+                        <select id="raid-alert-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.raidDetection?.alertChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('raiddetection')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Starboard -->
+                <section id="starboard" class="panel">
+                    <div class="panel-head">
+                        <h2>Starboard</h2>
+                        <p>Highlight popular messages when they receive enough reactions.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable starboard</strong></span>
+                        <span class="switch"><input type="checkbox" id="starboard-enabled" <%= settings.starboard?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="starboard-channel">Starboard channel</label>
+                        <select id="starboard-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.starboard?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="starboard-emoji">Trigger emoji</label>
+                            <input type="text" id="starboard-emoji" value="<%= settings.starboard?.emoji || '⭐' %>">
+                            <small>Standard emoji or custom <code>&lt;:name:id&gt;</code></small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="starboard-threshold">Reaction threshold</label>
+                            <input type="number" id="starboard-threshold" value="<%= settings.starboard?.threshold || 3 %>" min="1" max="100">
+                            <small>Reactions needed to post</small>
+                        </div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('starboard')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Event Log -->
+                <section id="eventlog" class="panel">
+                    <div class="panel-head">
+                        <h2>Event Log</h2>
+                        <p>Record server activity to a dedicated log channel.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable event logging</strong></span>
+                        <span class="switch"><input type="checkbox" id="eventlog-enabled" <%= settings.eventLog?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="eventlog-channel">Log channel</label>
+                        <select id="eventlog-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.eventLog?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="panel-head" style="margin-top:1rem"><h3>Events to log</h3></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Message edits</strong></span><span class="switch"><input type="checkbox" id="log-msg-edit" <%= settings.eventLog?.logMessageEdit !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Message deletions</strong></span><span class="switch"><input type="checkbox" id="log-msg-delete" <%= settings.eventLog?.logMessageDelete !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Member joins</strong></span><span class="switch"><input type="checkbox" id="log-member-join" <%= settings.eventLog?.logMemberJoin !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Member leaves</strong></span><span class="switch"><input type="checkbox" id="log-member-leave" <%= settings.eventLog?.logMemberLeave !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Role changes</strong></span><span class="switch"><input type="checkbox" id="log-role-changes" <%= settings.eventLog?.logRoleChanges !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Channel changes</strong></span><span class="switch"><input type="checkbox" id="log-channel-changes" <%= settings.eventLog?.logChannelChanges !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('eventlog')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Quests -->
+                <section id="quests" class="panel">
+                    <div class="panel-head">
+                        <h2>Quests</h2>
+                        <p>Daily and weekly quests keep members engaged. Use <code>/quests</code> to view progress.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable quests</strong></span>
+                        <span class="switch"><input type="checkbox" id="quests-enabled" <%= settings.quests?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="panel-head" style="margin-top:1rem"><h3>Daily quest rewards</h3></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="quests-daily-xp">XP reward</label><input type="number" id="quests-daily-xp" value="<%= settings.quests?.dailyXpReward || 50 %>" min="0"></div>
+                        <div><label class="field-label" for="quests-daily-coins">Coin reward</label><input type="number" id="quests-daily-coins" value="<%= settings.quests?.dailyCoinReward || 25 %>" min="0"></div>
+                    </div>
+                    <div class="panel-head" style="margin-top:1rem"><h3>Weekly quest rewards</h3></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="quests-weekly-xp">XP reward</label><input type="number" id="quests-weekly-xp" value="<%= settings.quests?.weeklyXpReward || 300 %>" min="0"></div>
+                        <div><label class="field-label" for="quests-weekly-coins">Coin reward</label><input type="number" id="quests-weekly-coins" value="<%= settings.quests?.weeklyCoinReward || 150 %>" min="0"></div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('quests')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Suggestions -->
+                <section id="suggestions" class="panel">
+                    <div class="panel-head">
+                        <h2>Suggestions</h2>
+                        <p>Designate a channel where members post suggestions. The bot auto-adds upvote/downvote reactions.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable suggestions</strong></span>
+                        <span class="switch"><input type="checkbox" id="suggestions-enabled" <%= settings.suggestions?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="suggestions-channel">Suggestions channel</label>
+                        <select id="suggestions-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.suggestions?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="suggestions-upvote">Upvote emoji</label><input type="text" id="suggestions-upvote" value="<%= settings.suggestions?.upvoteEmoji || '👍' %>"></div>
+                        <div><label class="field-label" for="suggestions-downvote">Downvote emoji</label><input type="text" id="suggestions-downvote" value="<%= settings.suggestions?.downvoteEmoji || '👎' %>"></div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('suggestions')">Save changes</button>
                     </div>
                 </section>
 
@@ -346,14 +650,15 @@
                             <% }); %>
                         </select>
                     </div>
-                    <div class="field">
-                        <label class="field-label" for="dailynews-time">Delivery time (24h)</label>
-                        <input type="text" id="dailynews-time" value="<%= settings.dailyNews?.time || '09:00' %>" placeholder="09:00">
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="dailynews-timezone">Timezone</label>
-                        <input type="text" id="dailynews-timezone" value="<%= settings.dailyNews?.timezone || 'UTC' %>" placeholder="America/New_York">
-                        <small>Use an IANA timezone like <code>America/New_York</code> or <code>UTC</code>.</small>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="dailynews-time">Delivery time (24h)</label>
+                            <input type="text" id="dailynews-time" value="<%= settings.dailyNews?.time || '09:00' %>" placeholder="09:00">
+                        </div>
+                        <div>
+                            <label class="field-label" for="dailynews-timezone">Timezone</label>
+                            <input type="text" id="dailynews-timezone" value="<%= settings.dailyNews?.timezone || 'UTC' %>" placeholder="America/New_York">
+                        </div>
                     </div>
                     <div class="field">
                         <label class="field-label" for="dailynews-title">Digest title</label>
@@ -364,9 +669,8 @@
                         <input type="number" id="dailynews-max-items" value="<%= settings.dailyNews?.maxItemsPerFeed || 3 %>" min="1" max="10">
                     </div>
                     <div class="field">
-                        <label class="field-label" for="dailynews-feeds">RSS feed URLs</label>
+                        <label class="field-label" for="dailynews-feeds">RSS feed URLs (one per line)</label>
                         <textarea id="dailynews-feeds" rows="6" placeholder="https://example.com/feed1.xml&#10;https://example.com/feed2.xml"><%= settings.dailyNews?.feeds?.join('\n') || '' %></textarea>
-                        <small>One URL per line</small>
                     </div>
                     <div class="field">
                         <label class="field-label">Additional delivery profiles</label>
@@ -386,7 +690,7 @@
                         <p>Members join a lobby channel and instantly get their own private voice channel. It's deleted automatically when empty.</p>
                     </div>
                     <label class="toggle">
-                        <span class="toggle-text"><strong>Enable temp voice channels</strong><span>Create a private VC for each member that joins the lobby</span></span>
+                        <span class="toggle-text"><strong>Enable temp voice channels</strong></span>
                         <span class="switch"><input type="checkbox" id="tv-enabled" <%= settings.tempVoice?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
                     <div class="field">
@@ -407,21 +711,21 @@
                                 <option value="<%= cat.id %>" <%= settings.tempVoice?.categoryId === cat.id ? 'selected' : '' %>><%= cat.name %></option>
                             <% }); %>
                         </select>
-                        <small>New temp channels are placed in this category.</small>
                     </div>
                     <div class="field">
                         <label class="field-label" for="tv-channel-name">Channel name template</label>
                         <input type="text" id="tv-channel-name" value="<%= settings.tempVoice?.channelName || '{username}\'s VC' %>" placeholder="{username}'s VC">
                         <small>Variables: <code>{username}</code> · <code>{displayname}</code> · <code>{tag}</code></small>
                     </div>
-                    <div class="field">
-                        <label class="field-label" for="tv-user-limit">User limit <span style="color:var(--text-mute);font-weight:400;">(0 = unlimited)</span></label>
-                        <input type="number" id="tv-user-limit" min="0" max="99" value="<%= settings.tempVoice?.userLimit ?? 0 %>">
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="tv-bitrate">Bitrate (kbps)</label>
-                        <input type="number" id="tv-bitrate" min="8" max="384" value="<%= settings.tempVoice?.bitrate ?? 64 %>">
-                        <small>Standard servers: up to 96 kbps · Boosted servers: up to 384 kbps.</small>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="tv-user-limit">User limit <span style="color:var(--text-mute);font-weight:400;">(0 = unlimited)</span></label>
+                            <input type="number" id="tv-user-limit" min="0" max="99" value="<%= settings.tempVoice?.userLimit ?? 0 %>">
+                        </div>
+                        <div>
+                            <label class="field-label" for="tv-bitrate">Bitrate (kbps)</label>
+                            <input type="number" id="tv-bitrate" min="8" max="384" value="<%= settings.tempVoice?.bitrate ?? 64 %>">
+                        </div>
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('tempvoice')">Save changes</button>
@@ -471,12 +775,12 @@
                     <div class="field ai-key-field" data-provider="openrouter">
                         <label class="field-label" for="ai-openrouter-key">OpenRouter API key</label>
                         <input type="password" id="ai-openrouter-key" value="<%= settings.ai.openrouterKey || '' %>" placeholder="sk-or-…">
-                        <small>Get a key at openrouter.ai. Use any model OpenRouter supports (e.g. <code>anthropic/claude-3.5-sonnet</code>, <code>meta-llama/llama-3.1-70b-instruct</code>).</small>
+                        <small>Get a key at openrouter.ai. Use any model OpenRouter supports (e.g. <code>anthropic/claude-3.5-sonnet</code>).</small>
                     </div>
                     <div class="field ai-key-field" data-provider="ollama">
                         <label class="field-label" for="ai-ollama-url">Ollama base URL</label>
                         <input type="text" id="ai-ollama-url" value="<%= settings.ai.ollamaBaseUrl || 'http://localhost:11434' %>" placeholder="http://localhost:11434">
-                        <small>Point this at the host running <code>ollama serve</code>. Set the model field above to a tag you've pulled (e.g. <code>llama3.2</code>, <code>qwen2.5</code>, <code>mistral</code>).</small>
+                        <small>Point this at the host running <code>ollama serve</code>. Set the model field above to a tag you've pulled (e.g. <code>llama3.2</code>).</small>
                     </div>
                     <div class="field">
                         <label class="field-label" for="ai-channel">AI chat channel</label>
@@ -495,27 +799,17 @@
                         <label class="field-label" for="ai-temperature">Temperature (<span id="ai-temp-display"><%= settings.ai.temperature ?? 0.7 %></span>)</label>
                         <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="<%= settings.ai.temperature ?? 0.7 %>" oninput="document.getElementById('ai-temp-display').textContent = this.value">
                     </div>
-                    <div class="field">
-                        <label class="field-label" for="ai-max-tokens">Max output tokens</label>
-                        <input type="number" id="ai-max-tokens" min="32" max="8192" value="<%= settings.ai.maxTokens ?? 1024 %>">
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="ai-max-history">Conversation history length</label>
-                        <input type="number" id="ai-max-history" min="0" max="100" value="<%= settings.ai.maxHistory ?? 20 %>">
-                        <small>Number of past messages remembered per user. 0 disables history.</small>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="ai-max-tokens">Max output tokens</label><input type="number" id="ai-max-tokens" min="32" max="8192" value="<%= settings.ai.maxTokens ?? 1024 %>"></div>
+                        <div><label class="field-label" for="ai-max-history">Conversation history length</label><input type="number" id="ai-max-history" min="0" max="100" value="<%= settings.ai.maxHistory ?? 20 %>"><small>0 disables history</small></div>
                     </div>
                     <label class="toggle">
-                        <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates them</span></span>
+                        <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates</span></span>
                         <span class="switch"><input type="checkbox" id="ai-streaming" <%= settings.ai.streaming !== false ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
-                    <div class="field">
-                        <label class="field-label" for="ai-rate-limit">Rate limit (requests per user)</label>
-                        <input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>">
-                        <small>0 disables rate limiting.</small>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label>
-                        <input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>">
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables</small></div>
+                        <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('ai')">Save changes</button>
@@ -540,6 +834,7 @@
     <script>
         const DAILY_NEWS_INITIAL_PROFILES = <%- JSON.stringify(settings.dailyNewsProfiles || []) %>;
         const DAILY_NEWS_CHANNELS = <%- JSON.stringify(channels || []) %>;
+
         // Sidebar tab navigation
         const navItems = document.querySelectorAll('.nav-item');
         const panels = document.querySelectorAll('.panel');
@@ -685,13 +980,20 @@
                     'farewell.message': document.getElementById('farewell-message').value
                 };
             } else if (section === 'moderation') {
+                const immunityRoleIds = Array.from(document.getElementById('mod-immunity-roles').selectedOptions).map(o => o.value);
                 data = {
                     'moderation.enabled': document.getElementById('mod-enabled').checked,
-                    'moderation.logChannelId': document.getElementById('mod-log-channel').value,
+                    'moderation.logChannelId': document.getElementById('mod-log-channel').value || null,
+                    'moderation.muteRoleId': document.getElementById('mod-mute-role').value || null,
                     'moderation.autoModEnabled': document.getElementById('mod-automod').checked,
+                    'moderation.immunityRoleIds': immunityRoleIds,
                     'moderation.spamProtection': document.getElementById('mod-spam').checked,
+                    'moderation.spamThreshold': parseInt(document.getElementById('mod-spam-threshold').value, 10) || 5,
+                    'moderation.spamWindow': parseInt(document.getElementById('mod-spam-window').value, 10) || 5,
                     'moderation.inviteFilter': document.getElementById('mod-invites').checked,
                     'moderation.linkFilter': document.getElementById('mod-links').checked,
+                    'moderation.profanityFilter': document.getElementById('mod-profanity').checked,
+                    'moderation.customBadWords': document.getElementById('mod-bad-words').value.split('\n').map(w => w.trim()).filter(Boolean),
                     'moderation.repeatedTextFilter': document.getElementById('mod-repeated').checked,
                     'moderation.excessiveCapsFilter': document.getElementById('mod-caps').checked,
                     'moderation.capsThresholdPercent': parseInt(document.getElementById('mod-caps-threshold').value, 10) || 70,
@@ -700,7 +1002,15 @@
                     'moderation.zalgoFilter': document.getElementById('mod-zalgo').checked,
                     'moderation.excessiveMentionsFilter': document.getElementById('mod-mentions').checked,
                     'moderation.mentionThreshold': parseInt(document.getElementById('mod-mention-threshold').value, 10) || 5,
-                    'moderation.customBadWords': document.getElementById('mod-bad-words').value.split('\n').map(w => w.trim()).filter(Boolean)
+                    'moderation.warnThreshold': parseInt(document.getElementById('mod-warn-threshold').value, 10) || 3,
+                    'moderation.kickThreshold': parseInt(document.getElementById('mod-kick-threshold').value, 10) || 0,
+                    'moderation.banThreshold': parseInt(document.getElementById('mod-ban-threshold').value, 10) || 0,
+                    'moderation.behaviorScoreMuteAt': parseInt(document.getElementById('mod-score-mute').value, 10) || 0,
+                    'moderation.behaviorScoreKickAt': parseInt(document.getElementById('mod-score-kick').value, 10) || 0,
+                    'moderation.behaviorScoreBanAt': parseInt(document.getElementById('mod-score-ban').value, 10) || 0,
+                    'moderation.behaviorScoreDecayDays': parseInt(document.getElementById('mod-score-decay').value, 10) || 7,
+                    'moderation.appealsEnabled': document.getElementById('mod-appeals-enabled').checked,
+                    'moderation.appealChannelId': document.getElementById('mod-appeal-channel').value || null
                 };
             } else if (section === 'leveling') {
                 const noXpRoleIds = document.getElementById('level-no-xp-roles').value.split('\n').map(v => v.trim()).filter(Boolean);
@@ -711,12 +1021,14 @@
                 }).filter(item => item.level > 0 && item.roleId);
                 data = {
                     'leveling.enabled': document.getElementById('level-enabled').checked,
-                    'leveling.xpRate': parseFloat(document.getElementById('level-xp-rate').value),
+                    'leveling.xpRate': parseFloat(document.getElementById('level-xp-rate').value) || 1.0,
                     'leveling.levelUpMessage': document.getElementById('level-message').value,
                     'leveling.rewardsEnabled': document.getElementById('level-rewards-enabled').checked,
                     'leveling.noXpRoleIds': noXpRoleIds,
                     'leveling.noXpChannelIds': noXpChannelIds,
                     'leveling.rewardChannelId': document.getElementById('level-reward-channel').value || null,
+                    'leveling.voiceXpEnabled': document.getElementById('level-voice-xp').checked,
+                    'leveling.voiceXpRate': parseFloat(document.getElementById('level-voice-rate').value) || 1.0,
                     levelRoles
                 };
             } else if (section === 'economy') {
@@ -724,21 +1036,83 @@
                     const [name, price, description = '', roleId = '', stock = '-1'] = line.split('|');
                     return { name: (name || '').trim(), price: parseInt(price, 10), description: description.trim(), roleId: roleId.trim() || null, stock: parseInt(stock, 10) };
                 }).filter(item => item.name && Number.isFinite(item.price));
+                const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
                 data = {
                     'economy.enabled': document.getElementById('economy-enabled').checked,
                     'economy.currency': document.getElementById('economy-currency').value,
-                    'economy.dailyAmount': parseInt(document.getElementById('economy-daily').value),
-                    'economy.workMin': parseInt(document.getElementById('economy-work-min').value),
-                    'economy.workMax': parseInt(document.getElementById('economy-work-max').value),
+                    'economy.dailyAmount': safeInt('economy-daily', 100),
+                    'economy.workMin': safeInt('economy-work-min', 50),
+                    'economy.workMax': safeInt('economy-work-max', 150),
                     'economy.shopEnabled': document.getElementById('economy-shop-enabled').checked,
                     'economy.gamesEnabled': document.getElementById('economy-games-enabled').checked,
                     'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked,
                     shop
                 };
             } else if (section === 'music') {
+                const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
                 data = {
-                    'music.djRoleId': document.getElementById('music-dj-role').value,
-                    'music.defaultVolume': parseInt(document.getElementById('music-volume').value)
+                    'music.djRoleId': document.getElementById('music-dj-role').value || null,
+                    'music.defaultVolume': safeInt('music-volume', 50),
+                    'music.maxQueueSize': safeInt('music-queue-size', 100)
+                };
+            } else if (section === 'tickets') {
+                const ticketsEnabled = document.getElementById('tickets-enabled').checked;
+                const ticketsCategoryId = document.getElementById('tickets-category').value || null;
+                const ticketsSupportRoleId = document.getElementById('tickets-support-role').value || null;
+                if (ticketsEnabled && (!ticketsCategoryId || !ticketsSupportRoleId)) {
+                    toast('A category and support role are required to enable tickets.', 'error');
+                    return;
+                }
+                data = {
+                    'tickets.enabled': ticketsEnabled,
+                    'tickets.categoryId': ticketsCategoryId,
+                    'tickets.supportRoleId': ticketsSupportRoleId,
+                    'tickets.logChannelId': document.getElementById('tickets-log-channel').value || null,
+                    'tickets.openMessage': document.getElementById('tickets-open-message').value
+                };
+            } else if (section === 'raiddetection') {
+                data = {
+                    'raidDetection.enabled': document.getElementById('raid-enabled').checked,
+                    'raidDetection.threshold': parseInt(document.getElementById('raid-threshold').value, 10) || 10,
+                    'raidDetection.windowSeconds': parseInt(document.getElementById('raid-window').value, 10) || 60,
+                    'raidDetection.minAccountAgeDays': parseInt(document.getElementById('raid-min-age').value, 10) || 0,
+                    'raidDetection.action': document.getElementById('raid-action').value,
+                    'raidDetection.quarantineRoleId': document.getElementById('raid-quarantine-role').value || null,
+                    'raidDetection.alertChannelId': document.getElementById('raid-alert-channel').value || null
+                };
+            } else if (section === 'starboard') {
+                data = {
+                    'starboard.enabled': document.getElementById('starboard-enabled').checked,
+                    'starboard.channelId': document.getElementById('starboard-channel').value || null,
+                    'starboard.emoji': document.getElementById('starboard-emoji').value || '⭐',
+                    'starboard.threshold': parseInt(document.getElementById('starboard-threshold').value, 10) || 3
+                };
+            } else if (section === 'eventlog') {
+                data = {
+                    'eventLog.enabled': document.getElementById('eventlog-enabled').checked,
+                    'eventLog.channelId': document.getElementById('eventlog-channel').value || null,
+                    'eventLog.logMessageEdit': document.getElementById('log-msg-edit').checked,
+                    'eventLog.logMessageDelete': document.getElementById('log-msg-delete').checked,
+                    'eventLog.logMemberJoin': document.getElementById('log-member-join').checked,
+                    'eventLog.logMemberLeave': document.getElementById('log-member-leave').checked,
+                    'eventLog.logRoleChanges': document.getElementById('log-role-changes').checked,
+                    'eventLog.logChannelChanges': document.getElementById('log-channel-changes').checked
+                };
+            } else if (section === 'quests') {
+                const safeReward = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
+                data = {
+                    'quests.enabled': document.getElementById('quests-enabled').checked,
+                    'quests.dailyXpReward': safeReward('quests-daily-xp', 50),
+                    'quests.dailyCoinReward': safeReward('quests-daily-coins', 25),
+                    'quests.weeklyXpReward': safeReward('quests-weekly-xp', 300),
+                    'quests.weeklyCoinReward': safeReward('quests-weekly-coins', 150)
+                };
+            } else if (section === 'suggestions') {
+                data = {
+                    'suggestions.enabled': document.getElementById('suggestions-enabled').checked,
+                    'suggestions.channelId': document.getElementById('suggestions-channel').value || null,
+                    'suggestions.upvoteEmoji': document.getElementById('suggestions-upvote').value || '👍',
+                    'suggestions.downvoteEmoji': document.getElementById('suggestions-downvote').value || '👎'
                 };
             } else if (section === 'ai') {
                 data = {
@@ -771,7 +1145,6 @@
             } else if (section === 'dailynews') {
                 const feedsText = document.getElementById('dailynews-feeds').value;
                 const feeds = feedsText.split('\n').filter(f => f.trim() !== '');
-
                 const profiles = JSON.parse(document.getElementById('dailynews-profiles-list').dataset.profiles || '[]')
                     .map((p, index) => ({
                         profileId: p.profileId || `profile-${index + 1}`,
@@ -784,7 +1157,6 @@
                         maxItemsPerFeed: parseInt(document.getElementById('dailynews-max-items').value, 10) || 3
                     }))
                     .filter(p => p.channelId && p.feeds.length);
-
                 data = {
                     'dailyNews.enabled': document.getElementById('dailynews-enabled').checked,
                     'dailyNews.channelId': document.getElementById('dailynews-channel').value,
@@ -803,8 +1175,11 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
-                if (response.ok) toast('Settings saved', 'success');
-                else toast('Failed to save settings', 'error');
+                if (response.ok) toast('Settings saved ✓', 'success');
+                else {
+                    const err = await response.json().catch(() => ({}));
+                    toast(err.error || 'Failed to save settings', 'error');
+                }
             } catch (error) {
                 console.error(error);
                 toast('An error occurred', 'error');
@@ -824,7 +1199,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ roleId })
                 });
-                if (response.ok) { toast('Role added', 'success'); setTimeout(() => location.reload(), 600); }
+                if (response.ok) { toast('Role added ✓', 'success'); setTimeout(() => location.reload(), 600); }
                 else toast('Failed to add role', 'error');
             } catch (error) {
                 console.error(error);
@@ -836,7 +1211,7 @@
             const guildId = '<%= guild.id %>';
             try {
                 const response = await fetch(`/api/guild/${guildId}/autorole/${roleId}`, { method: 'DELETE' });
-                if (response.ok) { toast('Role removed', 'success'); setTimeout(() => location.reload(), 600); }
+                if (response.ok) { toast('Role removed ✓', 'success'); setTimeout(() => location.reload(), 600); }
                 else toast('Failed to remove role', 'error');
             } catch (error) {
                 console.error(error);
@@ -855,7 +1230,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url, channelId })
                 });
-                if (response.ok) { toast('RSS feed added', 'success'); setTimeout(() => location.reload(), 600); }
+                if (response.ok) { toast('RSS feed added ✓', 'success'); setTimeout(() => location.reload(), 600); }
                 else toast('Failed to add RSS feed', 'error');
             } catch (error) {
                 console.error(error);
@@ -867,7 +1242,7 @@
             const guildId = '<%= guild.id %>';
             try {
                 const response = await fetch(`/api/guild/${guildId}/rss/${index}`, { method: 'DELETE' });
-                if (response.ok) { toast('RSS feed removed', 'success'); setTimeout(() => location.reload(), 600); }
+                if (response.ok) { toast('RSS feed removed ✓', 'success'); setTimeout(() => location.reload(), 600); }
                 else toast('Failed to delete RSS feed', 'error');
             } catch (error) {
                 console.error(error);

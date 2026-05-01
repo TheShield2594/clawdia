@@ -34,10 +34,13 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, async (req,
 
         Object.keys(updates).forEach(key => {
             if (key.includes('.')) {
-                const [parent, child] = key.split('.');
-                if (guildSettings[parent]) {
-                    guildSettings[parent][child] = updates[key];
+                const parts = key.split('.');
+                const parent = parts[0];
+                const child = parts.slice(1).join('.');
+                if (guildSettings[parent] == null) {
+                    guildSettings[parent] = {};
                 }
+                guildSettings[parent][child] = updates[key];
             } else {
                 guildSettings[key] = updates[key];
             }

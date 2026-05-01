@@ -156,6 +156,19 @@ async function closeTicket(interaction, guildSettings) {
     if (guildSettings.tickets.logChannelId) {
         const logChannel = interaction.guild.channels.cache.get(guildSettings.tickets.logChannelId);
         if (logChannel) {
+            const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+            let transcript = `Ticket Transcript: #${channel.name}\nClosed by: ${interaction.user.tag}\nDate: ${new Date().toUTCString()}\n${'─'.repeat(60)}\n`;
+            if (messages) {
+                const sorted = [...messages.values()].reverse();
+                for (const msg of sorted) {
+                    const time = msg.createdAt.toUTCString();
+                    transcript += `[${time}] ${msg.author.tag}: ${msg.content || ''}`;
+                    if (msg.attachments.size) transcript += ` [${msg.attachments.map(a => a.url).join(', ')}]`;
+                    transcript += '\n';
+                }
+            }
+            const { AttachmentBuilder } = require('discord.js');
+            const file = new AttachmentBuilder(Buffer.from(transcript, 'utf-8'), { name: `${channel.name}-transcript.txt` });
             const embed = new EmbedBuilder()
                 .setColor('#ff0000')
                 .setTitle('Ticket Closed')
@@ -164,7 +177,7 @@ async function closeTicket(interaction, guildSettings) {
                     { name: 'Closed by', value: interaction.user.toString(), inline: true }
                 )
                 .setTimestamp();
-            await logChannel.send({ embeds: [embed] }).catch(console.error);
+            await logChannel.send({ embeds: [embed], files: [file] }).catch(console.error);
         }
     }
 
