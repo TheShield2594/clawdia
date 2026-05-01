@@ -60,15 +60,28 @@ module.exports = {
                 const persona = ai.channelPersonas?.find(p => p.channelId === message.channel.id);
 
                 if (isDefaultChannel || persona) {
-                    const effectiveSettings = persona
-                        ? Object.assign({}, ai.toObject ? ai.toObject() : ai, { systemPrompt: persona.systemPrompt })
-                        : ai;
-                    if (guildSettings.moderation?.enabled) {
-                        const blocked = await handleAutoModeration(message, guildSettings);
-                        if (blocked) return;
+                    const isBotMentioned = message.mentions.has(client.user.id, { ignoreEveryone: true, ignoreRoles: true });
+                    let isReplyToBot = false;
+                    if (message.reference?.messageId) {
+                        try {
+                            const replied = await message.channel.messages.fetch(message.reference.messageId);
+                            isReplyToBot = replied.author.id === client.user.id;
+                        } catch {}
                     }
-                    await handleAIChat(message, effectiveSettings);
-                    return;
+
+                    if (!isBotMentioned && !isReplyToBot) {
+                        // Fall through to non-AI handlers (leveling, moderation, etc.)
+                    } else {
+                        const effectiveSettings = persona
+                            ? Object.assign({}, ai.toObject ? ai.toObject() : ai, { systemPrompt: persona.systemPrompt })
+                            : ai;
+                        if (guildSettings.moderation?.enabled) {
+                            const blocked = await handleAutoModeration(message, guildSettings);
+                            if (blocked) return;
+                        }
+                        await handleAIChat(message, effectiveSettings);
+                        return;
+                    }
                 }
             }
 
