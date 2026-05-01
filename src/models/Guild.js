@@ -77,7 +77,8 @@ const guildSchema = new Schema({
         announceChannel: { type: String, default: null },
         announceInChannel: { type: Boolean, default: true },
         xpRate: { type: Number, default: 1.0 },
-        levelUpMessage: { type: String, default: 'Congratulations {user}! You reached level {level}!' }
+        levelUpMessage: { type: String, default: 'Congratulations {user}! You reached level {level}!' },
+        rewardsEnabled: { type: Boolean, default: true }
     },
     
     economy: {
@@ -85,7 +86,10 @@ const guildSchema = new Schema({
         currency: { type: String, default: '💰' },
         dailyAmount: { type: Number, default: 100 },
         workMin: { type: Number, default: 50 },
-        workMax: { type: Number, default: 150 }
+        workMax: { type: Number, default: 150 },
+        shopEnabled: { type: Boolean, default: true },
+        gamesEnabled: { type: Boolean, default: true },
+        jobsEnabled: { type: Boolean, default: true }
     },
     
     music: {
@@ -106,7 +110,8 @@ const guildSchema = new Schema({
         time: { type: String, default: '09:00' },
         feeds: [{ type: String }],
         title: { type: String, default: '📰 Daily News Digest' },
-        maxItemsPerFeed: { type: Number, default: 3 }
+        maxItemsPerFeed: { type: Number, default: 3 },
+        timezone: { type: String, default: 'UTC' }
     },
 
     dailyNewsProfiles: {

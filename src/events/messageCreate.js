@@ -148,6 +148,8 @@ async function handleStreakAndQuests(message, guildSettings) {
 }
 
 async function handleLeveling(message, guildSettings) {
+    if (!guildSettings?.leveling?.rewardsEnabled) return;
+
     let user = await User.findOne({ userId: message.author.id, guildId: message.guild.id });
 
     const now = Date.now();

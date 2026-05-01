@@ -186,6 +186,10 @@
                         <span class="toggle-text"><strong>Enable leveling</strong><span>Track XP and level progression</span></span>
                         <span class="switch"><input type="checkbox" id="level-enabled" <%= settings.leveling.enabled ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable XP rewards</strong><span>Award XP from messages and unlock level rewards</span></span>
+                        <span class="switch"><input type="checkbox" id="level-rewards-enabled" <%= settings.leveling.rewardsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
                     <div class="field">
                         <label class="field-label" for="level-xp-rate">XP rate multiplier</label>
                         <input type="text" id="level-xp-rate" value="<%= settings.leveling.xpRate %>">
@@ -227,6 +231,18 @@
                         <label class="field-label" for="economy-work-max">Work payout (max)</label>
                         <input type="text" id="economy-work-max" value="<%= settings.economy.workMax %>">
                     </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable economy store</strong><span>Allow using the shop/store economy features</span></span>
+                        <span class="switch"><input type="checkbox" id="economy-shop-enabled" <%= settings.economy.shopEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable economy games</strong><span>Allow economy mini-games and wagering features</span></span>
+                        <span class="switch"><input type="checkbox" id="economy-games-enabled" <%= settings.economy.gamesEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable economy jobs</strong><span>Allow job/work-style earning systems</span></span>
+                        <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
                     </div>
@@ -321,6 +337,11 @@
                         <input type="text" id="dailynews-time" value="<%= settings.dailyNews?.time || '09:00' %>" placeholder="09:00">
                     </div>
                     <div class="field">
+                        <label class="field-label" for="dailynews-timezone">Timezone</label>
+                        <input type="text" id="dailynews-timezone" value="<%= settings.dailyNews?.timezone || 'UTC' %>" placeholder="America/New_York">
+                        <small>Use an IANA timezone like <code>America/New_York</code> or <code>UTC</code>.</small>
+                    </div>
+                    <div class="field">
                         <label class="field-label" for="dailynews-title">Digest title</label>
                         <input type="text" id="dailynews-title" value="<%= settings.dailyNews?.title || '📰 Daily News Digest' %>">
                     </div>
@@ -332,6 +353,11 @@
                         <label class="field-label" for="dailynews-feeds">RSS feed URLs</label>
                         <textarea id="dailynews-feeds" rows="6" placeholder="https://example.com/feed1.xml&#10;https://example.com/feed2.xml"><%= settings.dailyNews?.feeds?.join('\n') || '' %></textarea>
                         <small>One URL per line</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="dailynews-profiles">Additional delivery profiles</label>
+                        <textarea id="dailynews-profiles" rows="5" placeholder="channelId|09:00|America/New_York|🗞️ Morning Brief|https://feed.one/rss,https://feed.two/rss"><%= (settings.dailyNewsProfiles || []).map(p => `${p.channelId || ''}|${p.time || '09:00'}|${p.timezone || 'UTC'}|${p.title || '📰 Daily News Digest'}|${(p.feeds || []).join(',')}`).join('\n') %></textarea>
+                        <small>One profile per line: <code>channelId|time|timezone|title|comma-separated-feeds</code>.</small>
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('dailynews')">Save changes</button>
@@ -576,7 +602,8 @@
                 data = {
                     'leveling.enabled': document.getElementById('level-enabled').checked,
                     'leveling.xpRate': parseFloat(document.getElementById('level-xp-rate').value),
-                    'leveling.levelUpMessage': document.getElementById('level-message').value
+                    'leveling.levelUpMessage': document.getElementById('level-message').value,
+                    'leveling.rewardsEnabled': document.getElementById('level-rewards-enabled').checked
                 };
             } else if (section === 'economy') {
                 data = {
@@ -584,7 +611,10 @@
                     'economy.currency': document.getElementById('economy-currency').value,
                     'economy.dailyAmount': parseInt(document.getElementById('economy-daily').value),
                     'economy.workMin': parseInt(document.getElementById('economy-work-min').value),
-                    'economy.workMax': parseInt(document.getElementById('economy-work-max').value)
+                    'economy.workMax': parseInt(document.getElementById('economy-work-max').value),
+                    'economy.shopEnabled': document.getElementById('economy-shop-enabled').checked,
+                    'economy.gamesEnabled': document.getElementById('economy-games-enabled').checked,
+                    'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked
                 };
             } else if (section === 'music') {
                 data = {
@@ -623,13 +653,30 @@
                 const feedsText = document.getElementById('dailynews-feeds').value;
                 const feeds = feedsText.split('\n').filter(f => f.trim() !== '');
 
+                const profilesRaw = document.getElementById('dailynews-profiles').value.split('\n').map(line => line.trim()).filter(Boolean);
+                const profiles = profilesRaw.map((line, index) => {
+                    const [channelId = '', time = '09:00', timezone = 'UTC', title = '📰 Daily News Digest', feedsCsv = ''] = line.split('|');
+                    return {
+                        profileId: `profile-${index + 1}`,
+                        enabled: true,
+                        channelId: channelId.trim(),
+                        time: time.trim() || '09:00',
+                        timezone: timezone.trim() || 'UTC',
+                        title: title.trim() || '📰 Daily News Digest',
+                        feeds: feedsCsv.split(',').map(f => f.trim()).filter(Boolean),
+                        maxItemsPerFeed: parseInt(document.getElementById('dailynews-max-items').value, 10) || 3
+                    };
+                }).filter(p => p.channelId && p.feeds.length);
+
                 data = {
                     'dailyNews.enabled': document.getElementById('dailynews-enabled').checked,
                     'dailyNews.channelId': document.getElementById('dailynews-channel').value,
                     'dailyNews.time': document.getElementById('dailynews-time').value,
+                    'dailyNews.timezone': document.getElementById('dailynews-timezone').value.trim() || 'UTC',
                     'dailyNews.title': document.getElementById('dailynews-title').value,
                     'dailyNews.maxItemsPerFeed': parseInt(document.getElementById('dailynews-max-items').value),
-                    'dailyNews.feeds': feeds
+                    'dailyNews.feeds': feeds,
+                    dailyNewsProfiles: profiles
                 };
             }
 
