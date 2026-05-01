@@ -85,6 +85,8 @@ module.exports = {
                 await handleCustomCommands(message, guildSettings);
             }
 
+            await handleSuggestions(message, guildSettings);
+
             // Streak + quests (only for non-blocked messages)
             await handleStreakAndQuests(message, guildSettings);
 
@@ -224,9 +226,20 @@ async function handleLeveling(message, guildSettings) {
 // Offense weights for behavioral scoring
 const OFFENSE_WEIGHTS = { spam: 1, invite: 2, link: 1, profanity: 2 };
 
+async function handleSuggestions(message, guildSettings) {
+    const s = guildSettings.suggestions;
+    if (!s?.enabled || !s.channelId) return;
+    if (message.channel.id !== s.channelId) return;
+    try {
+        await message.react(s.upvoteEmoji || '👍').catch(() => {});
+        await message.react(s.downvoteEmoji || '👎').catch(() => {});
+    } catch {}
+}
+
 async function handleAutoModeration(message, guildSettings) {
     const mod = guildSettings.moderation;
-    const isModerator = message.member.permissions.has('ManageMessages');
+    const isModerator = message.member.permissions.has('ManageMessages')
+        || (mod.immunityRoleIds?.length && message.member.roles.cache.some(r => mod.immunityRoleIds.includes(r.id)));
 
     if (!mod.autoModEnabled) return false;
 

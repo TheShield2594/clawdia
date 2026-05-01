@@ -52,6 +52,7 @@ const guildSchema = new Schema({
         logChannelId: { type: String, default: null },
         muteRoleId: { type: String, default: null },
         autoModEnabled: { type: Boolean, default: false },
+        immunityRoleIds: [{ type: String }],
         spamProtection: { type: Boolean, default: false },
         spamThreshold: { type: Number, default: 5 },
         spamWindow: { type: Number, default: 5 },
@@ -70,12 +71,10 @@ const guildSchema = new Schema({
         warnThreshold: { type: Number, default: 3 },
         kickThreshold: { type: Number, default: 5 },
         banThreshold: { type: Number, default: 0 },
-        // Behavioral score escalation thresholds (0 = disabled)
         behaviorScoreMuteAt: { type: Number, default: 10, min: 0 },
         behaviorScoreKickAt: { type: Number, default: 20, min: 0 },
         behaviorScoreBanAt: { type: Number, default: 30, min: 0 },
         behaviorScoreDecayDays: { type: Number, default: 7, min: 1 },
-        // Appeals
         appealsEnabled: { type: Boolean, default: false },
         appealChannelId: { type: String, default: null }
     },
@@ -89,7 +88,9 @@ const guildSchema = new Schema({
         rewardsEnabled: { type: Boolean, default: true },
         noXpRoleIds: [{ type: String }],
         noXpChannelIds: [{ type: String }],
-        rewardChannelId: { type: String, default: null }
+        rewardChannelId: { type: String, default: null },
+        voiceXpEnabled: { type: Boolean, default: false },
+        voiceXpRate: { type: Number, default: 1.0 }
     },
     
     economy: {
@@ -309,6 +310,13 @@ const guildSchema = new Schema({
         logMemberLeave: { type: Boolean, default: true },
         logRoleChanges: { type: Boolean, default: true },
         logChannelChanges: { type: Boolean, default: true }
+    },
+
+    suggestions: {
+        enabled: { type: Boolean, default: false },
+        channelId: { type: String, default: null },
+        upvoteEmoji: { type: String, default: '👍' },
+        downvoteEmoji: { type: String, default: '👎' }
     },
 
     analytics: {
