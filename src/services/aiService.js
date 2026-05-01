@@ -21,6 +21,14 @@ const STREAM_EDIT_INTERVAL_MS = 1200;
 // userId -> [timestamps] for sliding-window rate limiting (in-memory)
 const rateLimits = new Map();
 
+// Periodically remove entries whose timestamps have all expired (2-hour max window)
+setInterval(() => {
+    const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+    for (const [userId, timestamps] of rateLimits) {
+        if (timestamps.every(t => t < cutoff)) rateLimits.delete(userId);
+    }
+}, 15 * 60 * 1000).unref();
+
 function checkRateLimit(userId, limit, windowMin) {
     if (!limit || limit <= 0) return true;
     const now = Date.now();
@@ -171,33 +179,23 @@ async function executeAction(action, message) {
                 const options = (action.options || []).slice(0, 5);
                 if (!action.question || options.length < 2) break;
 
-                const EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+                const { buildPollEmbed, buildPollRows } = require('../commands/utility/poll');
+                const Poll = require('../models/Poll');
+
                 const counts = new Array(options.length).fill(0);
-                const total = 0;
+                const embed = buildPollEmbed(action.question, options, counts, null, 'AI', false);
+                const rows = buildPollRows(options);
 
-                const lines = options.map((opt, i) => {
-                    const bar = '░'.repeat(10);
-                    return `**${i + 1}. ${opt}**\n${bar} 0% (0 votes)`;
+                const pollMsg = await message.channel.send({ embeds: [embed], components: rows });
+                await Poll.create({
+                    messageId: pollMsg.id,
+                    guildId: message.guild.id,
+                    channelId: message.channel.id,
+                    question: action.question,
+                    options,
+                    votes: new Map(),
+                    createdBy: 'AI'
                 });
-
-                const embed = new EmbedBuilder()
-                    .setColor('#5865F2')
-                    .setTitle(`📊 ${action.question}`)
-                    .setDescription(lines.join('\n\n'))
-                    .addFields({ name: 'Total votes', value: '0', inline: true })
-                    .setFooter({ text: `Poll suggested by AI • React to vote` });
-
-                const row = new ActionRowBuilder();
-                options.forEach((opt, i) => {
-                    row.addComponents(
-                        new ButtonBuilder()
-                            .setCustomId(`poll_${i}`)
-                            .setLabel(`${i + 1}. ${opt.substring(0, 77)}`)
-                            .setStyle(ButtonStyle.Secondary)
-                    );
-                });
-
-                await message.channel.send({ embeds: [embed], components: [row] });
                 break;
             }
 

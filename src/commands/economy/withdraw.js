@@ -37,7 +37,13 @@ module.exports = {
 
         userData.bank -= amount;
         userData.balance += amount;
-        await userData.save();
+
+        try {
+            await userData.save();
+        } catch (err) {
+            console.error('[withdraw] save error:', err);
+            return interaction.reply({ content: 'Failed to save your withdrawal. Please try again.', ephemeral: true });
+        }
 
         const embed = new EmbedBuilder()
             .setColor('#00ff00')

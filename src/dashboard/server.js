@@ -52,8 +52,12 @@ function start(client) {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
+    if (!process.env.SESSION_SECRET) {
+        throw new Error('[DASHBOARD] SESSION_SECRET is not set. Add a strong random value to your .env file.');
+    }
+
     app.use(session({
-        secret: process.env.SESSION_SECRET || 'your-secret-key',
+        secret: process.env.SESSION_SECRET,
         resave: false,
         saveUninitialized: false,
         cookie: { maxAge: 86400000 }
