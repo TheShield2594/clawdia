@@ -86,6 +86,11 @@ async function startBot() {
     await startDashboard();
 
     client.once('ready', () => {
+        const { deployCommands } = require('./utils/commandDeployer');
+        deployCommands(process.env.CLIENT_ID, process.env.DISCORD_TOKEN)
+            .then(count => console.log(`[COMMANDS] Deployed ${count} slash commands`))
+            .catch(err => console.error('[COMMANDS] Failed to deploy slash commands:', err));
+
         const { startSummaryService } = require('./services/summaryService');
         startSummaryService(client);
 
