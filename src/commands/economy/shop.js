@@ -20,7 +20,18 @@ module.exports = {
                 .addIntegerOption(o => o.setName('price').setDescription('Price in coins').setRequired(true).setMinValue(1))
                 .addStringOption(o => o.setName('description').setDescription('Item description'))
                 .addRoleOption(o => o.setName('role').setDescription('Role to grant on purchase'))
-                .addIntegerOption(o => o.setName('stock').setDescription('Stock limit (-1 = unlimited)').setMinValue(-1)))
+                .addIntegerOption(o => o.setName('stock').setDescription('Stock limit (-1 = unlimited)').setMinValue(-1))
+                .addStringOption(o => o.setName('image_url').setDescription('Image URL shown for this item')))
+        .addSubcommand(sub =>
+            sub.setName('edit')
+                .setDescription('Edit an existing shop item (admin only)')
+                .addStringOption(o => o.setName('name').setDescription('Existing item name').setRequired(true))
+                .addStringOption(o => o.setName('new_name').setDescription('Updated item name'))
+                .addIntegerOption(o => o.setName('price').setDescription('Updated price in coins').setMinValue(1))
+                .addStringOption(o => o.setName('description').setDescription('Updated item description'))
+                .addRoleOption(o => o.setName('role').setDescription('Updated role to grant on purchase'))
+                .addIntegerOption(o => o.setName('stock').setDescription('Updated stock (-1 = unlimited)').setMinValue(-1))
+                .addStringOption(o => o.setName('image_url').setDescription('Updated image URL')))
         .addSubcommand(sub =>
             sub.setName('remove')
                 .setDescription('Remove an item from the shop (admin only)')
@@ -45,7 +56,8 @@ module.exports = {
             const lines = guildSettings.shop.map((item, i) => {
                 const stock = item.stock === -1 ? '∞' : item.stock;
                 const roleTag = item.roleId ? ` → <@&${item.roleId}>` : '';
-                return `**${i + 1}. ${item.name}** — ${currency}${item.price} (Stock: ${stock})${roleTag}\n${item.description || ''}`;
+                const imageTag = item.imageUrl ? `\nImage: ${item.imageUrl}` : '';
+                return `**${i + 1}. ${item.name}** — ${currency}${item.price} (Stock: ${stock})${roleTag}\n${item.description || ''}${imageTag}`;
             });
 
             const embed = new EmbedBuilder()
@@ -105,6 +117,10 @@ module.exports = {
                 .setDescription(`You bought **${item.name}** for ${currency}${item.price}.`)
                 .addFields({ name: 'New Balance', value: `${currency}${userData.balance}`, inline: true });
 
+            if (item.imageUrl) {
+                embed.setThumbnail(item.imageUrl);
+            }
+
             return interaction.reply({ embeds: [embed] });
         }
 
@@ -118,6 +134,7 @@ module.exports = {
             const description = interaction.options.getString('description') ?? '';
             const role = interaction.options.getRole('role');
             const stock = interaction.options.getInteger('stock') ?? -1;
+            const imageUrl = interaction.options.getString('image_url') ?? '';
 
             if (guildSettings.shop.find(i => i.name.toLowerCase() === name.toLowerCase())) {
                 return interaction.reply({ content: 'An item with that name already exists.', ephemeral: true });
@@ -128,11 +145,49 @@ module.exports = {
                 description,
                 price,
                 roleId: role?.id ?? null,
-                stock
+                stock,
+                imageUrl
             });
             await guildSettings.save();
 
             await interaction.reply({ content: `Added **${name}** to the shop for ${currency}${price}.` });
+        }
+
+        if (sub === 'edit') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({ content: 'You need Manage Server permission to edit the shop.', ephemeral: true });
+            }
+
+            const name = interaction.options.getString('name').toLowerCase();
+            const item = guildSettings.shop.find(i => i.name.toLowerCase() === name);
+
+            if (!item) {
+                return interaction.reply({ content: `Item \`${name}\` not found.`, ephemeral: true });
+            }
+
+            const newName = interaction.options.getString('new_name');
+            const price = interaction.options.getInteger('price');
+            const description = interaction.options.getString('description');
+            const role = interaction.options.getRole('role');
+            const stock = interaction.options.getInteger('stock');
+            const imageUrl = interaction.options.getString('image_url');
+
+            if (newName && newName.toLowerCase() !== name) {
+                const duplicate = guildSettings.shop.find(i => i.name.toLowerCase() === newName.toLowerCase());
+                if (duplicate) {
+                    return interaction.reply({ content: 'An item with that new name already exists.', ephemeral: true });
+                }
+                item.name = newName;
+            }
+
+            if (price !== null) item.price = price;
+            if (description !== null) item.description = description;
+            if (stock !== null) item.stock = stock;
+            if (imageUrl !== null) item.imageUrl = imageUrl;
+            if (role) item.roleId = role.id;
+
+            await guildSettings.save();
+            await interaction.reply({ content: `Updated **${item.name}**.` });
         }
 
         if (sub === 'remove') {
