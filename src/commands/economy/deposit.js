@@ -37,7 +37,13 @@ module.exports = {
 
         userData.balance -= amount;
         userData.bank += amount;
-        await userData.save();
+
+        try {
+            await userData.save();
+        } catch (err) {
+            console.error('[deposit] save error:', err);
+            return interaction.reply({ content: 'Failed to save your deposit. Please try again.', ephemeral: true });
+        }
 
         const embed = new EmbedBuilder()
             .setColor('#00ff00')

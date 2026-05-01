@@ -1,7 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-
-// messageId -> Map<userId, optionIndex>
-const pollVotes = new Map();
+const Poll = require('../../models/Poll');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -30,25 +28,25 @@ module.exports = {
         }
 
         const counts = new Array(options.length).fill(0);
-
         const embed = buildPollEmbed(question, options, counts, endsAt, interaction.user);
-
-        const rows = buildPollRows(options, new Map());
+        const rows = buildPollRows(options);
 
         await interaction.reply({ embeds: [embed], components: rows });
         const msg = await interaction.fetchReply();
 
-        pollVotes.set(msg.id, new Map());
+        await Poll.create({
+            messageId: msg.id,
+            guildId: interaction.guild.id,
+            channelId: interaction.channel.id,
+            question,
+            options,
+            votes: new Map(),
+            endsAt,
+            createdBy: interaction.user.tag
+        });
 
         if (endsAt) {
-            const delay = endsAt.getTime() - Date.now();
-            setTimeout(async () => {
-                const votes = pollVotes.get(msg.id) ?? new Map();
-                const finalCounts = tallyVotes(votes, options.length);
-                const closedEmbed = buildPollEmbed(question, options, finalCounts, endsAt, interaction.user, true);
-                await msg.edit({ embeds: [closedEmbed], components: [] }).catch(console.error);
-                pollVotes.delete(msg.id);
-            }, delay);
+            scheduleExpiry(msg, question, options, endsAt, interaction.user.tag);
         }
     }
 };
@@ -75,12 +73,14 @@ function buildPollEmbed(question, options, counts, endsAt, author, closed = fals
         return `**${i + 1}. ${opt}**\n${bar} ${pct}% (${counts[i]} vote${counts[i] !== 1 ? 's' : ''})`;
     });
 
+    const authorTag = typeof author === 'string' ? author : author.tag;
+
     const embed = new EmbedBuilder()
         .setColor(closed ? '#ff0000' : '#5865F2')
         .setTitle(`${closed ? '🔒 ' : '📊 '}${question}`)
         .setDescription(lines.join('\n\n'))
         .addFields({ name: 'Total votes', value: total.toString(), inline: true })
-        .setFooter({ text: `Created by ${author.tag}${closed ? ' • Poll closed' : ''}` });
+        .setFooter({ text: `Created by ${authorTag}${closed ? ' • Poll closed' : ''}` });
 
     if (endsAt && !closed) {
         embed.addFields({ name: 'Ends', value: `<t:${Math.floor(endsAt.getTime() / 1000)}:R>`, inline: true });
@@ -89,7 +89,7 @@ function buildPollEmbed(question, options, counts, endsAt, author, closed = fals
     return embed;
 }
 
-function buildPollRows(options, voteMap) {
+function buildPollRows(options) {
     const rows = [];
     for (let i = 0; i < options.length; i += 5) {
         const row = new ActionRowBuilder();
@@ -106,47 +106,79 @@ function buildPollRows(options, voteMap) {
     return rows;
 }
 
+function scheduleExpiry(msg, question, options, endsAt, createdBy) {
+    const delay = endsAt.getTime() - Date.now();
+    if (delay <= 0) return;
+    setTimeout(async () => {
+        try {
+            const poll = await Poll.findOne({ messageId: msg.id });
+            if (!poll || poll.closed) return;
+
+            const counts = tallyVotes(poll.votes, options.length);
+            const closedEmbed = buildPollEmbed(question, options, counts, endsAt, createdBy, true);
+            await msg.edit({ embeds: [closedEmbed], components: [] }).catch(() => {});
+
+            poll.closed = true;
+            await poll.save();
+        } catch (err) {
+            console.error('[poll] expiry error:', err);
+        }
+    }, delay);
+}
+
 async function handlePollVote(interaction) {
     const optionIndex = parseInt(interaction.customId.split('_')[1]);
     const messageId = interaction.message.id;
 
-    if (!pollVotes.has(messageId)) {
+    const poll = await Poll.findOne({ messageId });
+    if (!poll) {
         return interaction.reply({ content: 'This poll is no longer active.', ephemeral: true });
     }
-
-    const votes = pollVotes.get(messageId);
-    const existing = votes.get(interaction.user.id);
-
-    if (existing === optionIndex) {
-        votes.delete(interaction.user.id);
-        await interaction.reply({ content: 'Your vote has been removed.', ephemeral: true });
-    } else {
-        votes.set(interaction.user.id, optionIndex);
-        await interaction.reply({ content: `You voted for option **${optionIndex + 1}**.`, ephemeral: true });
+    if (poll.closed) {
+        return interaction.reply({ content: 'This poll is closed.', ephemeral: true });
     }
 
-    const embed = interaction.message.embeds[0];
-    if (!embed) return;
+    const existing = poll.votes.get(interaction.user.id);
+    if (existing === optionIndex) {
+        poll.votes.delete(interaction.user.id);
+        await interaction.reply({ content: 'Your vote has been removed.', ephemeral: true });
+    } else {
+        poll.votes.set(interaction.user.id, optionIndex);
+        await interaction.reply({ content: `You voted for option **${optionIndex + 1}**.`, ephemeral: true });
+    }
+    poll.markModified('votes');
+    await poll.save();
 
-    const question = embed.title.replace(/^[🔒📊] /, '');
-    const options = embed.description.split('\n\n').map(block => {
-        const match = block.match(/^\*\*\d+\. (.+)\*\*/);
-        return match ? match[1] : '';
-    }).filter(Boolean);
+    const counts = tallyVotes(poll.votes, poll.options.length);
+    const newEmbed = buildPollEmbed(poll.question, poll.options, counts, poll.endsAt, poll.createdBy);
+    const rows = buildPollRows(poll.options);
+    await interaction.message.edit({ embeds: [newEmbed], components: rows }).catch(() => {});
+}
 
-    const counts = tallyVotes(votes, options.length);
-    const author = { tag: embed.footer.text.replace('Created by ', '').replace(/ • Poll closed$/, '') };
-    const endsAtField = interaction.message.embeds[0].fields.find(f => f.name === 'Ends');
-    const endsAt = endsAtField ? new Date(parseInt(endsAtField.value.match(/\d+/)[0]) * 1000) : null;
-
-    const newEmbed = buildPollEmbed(question, options, counts, endsAt, author);
-    const rows = buildPollRows(options, votes);
-
-    await interaction.message.edit({ embeds: [newEmbed], components: rows }).catch(console.error);
+async function scheduleActivePollExpirations(client) {
+    try {
+        const active = await Poll.find({ closed: false, endsAt: { $gt: new Date() } });
+        for (const poll of active) {
+            try {
+                const guild = client.guilds.cache.get(poll.guildId);
+                if (!guild) continue;
+                const channel = guild.channels.cache.get(poll.channelId);
+                if (!channel) continue;
+                const msg = await channel.messages.fetch(poll.messageId).catch(() => null);
+                if (!msg) continue;
+                scheduleExpiry(msg, poll.question, poll.options, poll.endsAt, poll.createdBy);
+            } catch (err) {
+                console.error('[poll] failed to reschedule poll', poll.messageId, err);
+            }
+        }
+        if (active.length) console.log(`[POLL] Rescheduled ${active.length} active poll(s).`);
+    } catch (err) {
+        console.error('[poll] scheduleActivePollExpirations error:', err);
+    }
 }
 
 module.exports.handlePollVote = handlePollVote;
-module.exports.pollVotes = pollVotes;
 module.exports.buildPollEmbed = buildPollEmbed;
 module.exports.buildPollRows = buildPollRows;
 module.exports.tallyVotes = tallyVotes;
+module.exports.scheduleActivePollExpirations = scheduleActivePollExpirations;

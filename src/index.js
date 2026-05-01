@@ -94,6 +94,9 @@ async function startBot() {
 
         const { startQuestService } = require('./services/questService');
         startQuestService();
+
+        const { scheduleActivePollExpirations } = require('./commands/utility/poll');
+        scheduleActivePollExpirations(client);
     });
 
     client.login(process.env.DISCORD_TOKEN);
