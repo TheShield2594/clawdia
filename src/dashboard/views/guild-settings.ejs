@@ -1036,28 +1036,37 @@
                     const [name, price, description = '', roleId = '', stock = '-1'] = line.split('|');
                     return { name: (name || '').trim(), price: parseInt(price, 10), description: description.trim(), roleId: roleId.trim() || null, stock: parseInt(stock, 10) };
                 }).filter(item => item.name && Number.isFinite(item.price));
+                const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
                 data = {
                     'economy.enabled': document.getElementById('economy-enabled').checked,
                     'economy.currency': document.getElementById('economy-currency').value,
-                    'economy.dailyAmount': parseInt(document.getElementById('economy-daily').value, 10),
-                    'economy.workMin': parseInt(document.getElementById('economy-work-min').value, 10),
-                    'economy.workMax': parseInt(document.getElementById('economy-work-max').value, 10),
+                    'economy.dailyAmount': safeInt('economy-daily', 100),
+                    'economy.workMin': safeInt('economy-work-min', 50),
+                    'economy.workMax': safeInt('economy-work-max', 150),
                     'economy.shopEnabled': document.getElementById('economy-shop-enabled').checked,
                     'economy.gamesEnabled': document.getElementById('economy-games-enabled').checked,
                     'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked,
                     shop
                 };
             } else if (section === 'music') {
+                const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
                 data = {
                     'music.djRoleId': document.getElementById('music-dj-role').value || null,
-                    'music.defaultVolume': parseInt(document.getElementById('music-volume').value, 10),
-                    'music.maxQueueSize': parseInt(document.getElementById('music-queue-size').value, 10) || 100
+                    'music.defaultVolume': safeInt('music-volume', 50),
+                    'music.maxQueueSize': safeInt('music-queue-size', 100)
                 };
             } else if (section === 'tickets') {
+                const ticketsEnabled = document.getElementById('tickets-enabled').checked;
+                const ticketsCategoryId = document.getElementById('tickets-category').value || null;
+                const ticketsSupportRoleId = document.getElementById('tickets-support-role').value || null;
+                if (ticketsEnabled && (!ticketsCategoryId || !ticketsSupportRoleId)) {
+                    toast('A category and support role are required to enable tickets.', 'error');
+                    return;
+                }
                 data = {
-                    'tickets.enabled': document.getElementById('tickets-enabled').checked,
-                    'tickets.categoryId': document.getElementById('tickets-category').value || null,
-                    'tickets.supportRoleId': document.getElementById('tickets-support-role').value || null,
+                    'tickets.enabled': ticketsEnabled,
+                    'tickets.categoryId': ticketsCategoryId,
+                    'tickets.supportRoleId': ticketsSupportRoleId,
                     'tickets.logChannelId': document.getElementById('tickets-log-channel').value || null,
                     'tickets.openMessage': document.getElementById('tickets-open-message').value
                 };
@@ -1090,12 +1099,13 @@
                     'eventLog.logChannelChanges': document.getElementById('log-channel-changes').checked
                 };
             } else if (section === 'quests') {
+                const safeReward = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
                 data = {
                     'quests.enabled': document.getElementById('quests-enabled').checked,
-                    'quests.dailyXpReward': parseInt(document.getElementById('quests-daily-xp').value, 10) || 50,
-                    'quests.dailyCoinReward': parseInt(document.getElementById('quests-daily-coins').value, 10) || 25,
-                    'quests.weeklyXpReward': parseInt(document.getElementById('quests-weekly-xp').value, 10) || 300,
-                    'quests.weeklyCoinReward': parseInt(document.getElementById('quests-weekly-coins').value, 10) || 150
+                    'quests.dailyXpReward': safeReward('quests-daily-xp', 50),
+                    'quests.dailyCoinReward': safeReward('quests-daily-coins', 25),
+                    'quests.weeklyXpReward': safeReward('quests-weekly-xp', 300),
+                    'quests.weeklyCoinReward': safeReward('quests-weekly-coins', 150)
                 };
             } else if (section === 'suggestions') {
                 data = {

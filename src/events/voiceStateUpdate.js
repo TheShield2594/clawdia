@@ -38,6 +38,9 @@ async function handleVoiceXp(oldState, newState) {
     try {
         const guildSettings = await Guild.findOne({ guildId });
         if (!guildSettings?.leveling?.enabled || !guildSettings.leveling.voiceXpEnabled) return;
+        if (!guildSettings.leveling.rewardsEnabled) return;
+        if (guildSettings.leveling.noXpRoleIds?.length &&
+            member.roles.cache.some(r => guildSettings.leveling.noXpRoleIds.includes(r.id))) return;
 
         const minutesSpent = (Date.now() - joinedAt) / 60000;
         if (minutesSpent < 1) return;
@@ -52,16 +55,19 @@ async function handleVoiceXp(oldState, newState) {
         }
 
         user.xp += xpGain;
-        const requiredXp = user.level * 100 + 100;
-        if (user.xp >= requiredXp) {
+        const guild = newState.guild || oldState.guild;
+        const rewardChannelId = guildSettings.leveling.rewardChannelId || guildSettings.leveling.announceChannel;
+
+        while (user.xp >= user.level * 100 + 100) {
+            const threshold = user.level * 100 + 100;
+            user.xp -= threshold;
             user.level += 1;
-            user.xp = 0;
+
             const levelUpMsg = (guildSettings.leveling.levelUpMessage || 'Congratulations {user}! You reached level {level}!')
                 .replace(/{user}/g, `<@${member.id}>`)
                 .replace(/{level}/g, user.level);
-            const rewardChannelId = guildSettings.leveling.rewardChannelId || guildSettings.leveling.announceChannel;
             if (rewardChannelId) {
-                const ch = (newState.guild || oldState.guild).channels.cache.get(rewardChannelId);
+                const ch = guild.channels.cache.get(rewardChannelId);
                 if (ch) await ch.send(levelUpMsg).catch(() => {});
             }
             if (guildSettings.levelRoles?.length) {
@@ -69,6 +75,7 @@ async function handleVoiceXp(oldState, newState) {
                 if (reward) await member.roles.add(reward.roleId).catch(() => {});
             }
         }
+
         await user.save();
     } catch (err) {
         console.error('Voice XP error:', err);

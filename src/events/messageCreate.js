@@ -244,6 +244,7 @@ async function handleAutoModeration(message, guildSettings) {
     if (!mod.autoModEnabled) return false;
 
     if (mod.spamProtection) {
+        if (isModerator) return false;
         const guildId = message.guild.id;
         const userId = message.author.id;
         const now = Date.now();
@@ -441,9 +442,19 @@ async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 
                 }
             }
         } else {
-            // Score warning only
             const warnCount = await Warning.countDocuments({ guildId: message.guild.id, userId: member.id });
-            if (warnCount >= (mod.warnThreshold || 3)) {
+            const kickThreshold = mod.kickThreshold || 0;
+            const banThreshold = mod.banThreshold || 0;
+
+            if (banThreshold > 0 && warnCount >= banThreshold && member.bannable) {
+                await member.ban({ reason: `[AutoMod] Warning count ${warnCount} reached ban threshold (${banThreshold})` });
+                await logModeration(message.guild.id, 'ban', message.author, message.client.user,
+                    `[AutoMod] Warning count ${warnCount} >= ban threshold ${banThreshold}`);
+            } else if (kickThreshold > 0 && warnCount >= kickThreshold && member.kickable) {
+                await member.kick(`[AutoMod] Warning count ${warnCount} reached kick threshold (${kickThreshold})`);
+                await logModeration(message.guild.id, 'kick', message.author, message.client.user,
+                    `[AutoMod] Warning count ${warnCount} >= kick threshold ${kickThreshold}`);
+            } else if (warnCount >= (mod.warnThreshold || 3)) {
                 await message.author.send(
                     `You have received **${warnCount}** warnings in **${message.guild.name}**. ` +
                     `Further violations may result in a mute or kick.`
