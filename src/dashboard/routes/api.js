@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Guild = require('../../models/Guild');
 const { rescheduleDailyNews } = require('../../services/rssService');
+const { rescheduleBibleVerse } = require('../../services/dailyBibleService');
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -51,6 +52,11 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, async (req,
         const shouldRescheduleDailyNews = Object.keys(updates).some(key => key.startsWith('dailyNews.') || key === 'dailyNewsProfiles');
         if (shouldRescheduleDailyNews) {
             rescheduleDailyNews(req.client, guildId);
+        }
+
+        const shouldRescheduleBible = Object.keys(updates).some(key => key.startsWith('bibleVerse.'));
+        if (shouldRescheduleBible) {
+            rescheduleBibleVerse(req.client, guildId);
         }
         
         res.json({ success: true, settings: guildSettings });

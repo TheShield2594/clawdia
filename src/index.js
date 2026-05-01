@@ -97,6 +97,9 @@ async function startBot() {
 
         const { scheduleActivePollExpirations } = require('./commands/utility/poll');
         scheduleActivePollExpirations(client);
+
+        const { startDailyBibleService } = require('./services/dailyBibleService');
+        startDailyBibleService(client);
     });
 
     client.login(process.env.DISCORD_TOKEN);
