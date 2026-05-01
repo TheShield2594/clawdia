@@ -37,13 +37,36 @@ module.exports = {
                 return interaction.reply({ content: 'Economy games are disabled in this server.', ephemeral: true });
             }
 
-            let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+            const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+
+            await User.findOneAndUpdate(
+                userFilter,
+                { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id, balance: 0 } },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+
+            let user = await User.findOneAndUpdate(
+                { ...userFilter, balance: { $gte: bet } },
+                { $inc: { balance: -bet } },
+                { new: true }
+            );
+
             if (!user) {
-                user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
+                await User.findOneAndUpdate(
+                    userFilter,
+                    { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id, balance: 0 } },
+                    { upsert: true, new: true, setDefaultsOnInsert: true }
+                );
+
+                user = await User.findOneAndUpdate(
+                    { ...userFilter, balance: { $gte: bet } },
+                    { $inc: { balance: -bet } },
+                    { new: true }
+                );
             }
 
-            if (user.balance < bet) {
-                return interaction.reply({ content: `You need ${bet.toLocaleString()} coins, but only have ${user.balance.toLocaleString()}.`, ephemeral: true });
+            if (!user) {
+                return interaction.reply({ content: `Insufficient funds. You need ${bet.toLocaleString()} coins to place this bet.`, ephemeral: true });
             }
 
             const current = rollCard();
@@ -71,51 +94,75 @@ module.exports = {
             });
 
             collector.on('collect', async i => {
-                const next = rollCard();
-                const pickedHigher = i.customId === upId;
-
-                let resultText;
                 let delta = 0;
-                let color = '#f1c40f';
 
-                if (next === current) {
-                    resultText = 'Push! Same value — your coins are returned.';
-                } else {
-                    const won = pickedHigher ? next > current : next < current;
-                    if (won) {
+                try {
+                    const next = rollCard();
+                    const pickedHigher = i.customId === upId;
+
+                    let resultText;
+                    let color = '#f1c40f';
+
+                    if (next === current) {
                         delta = bet;
-                        color = '#2ecc71';
-                        resultText = `You won **${bet.toLocaleString()}** coins!`;
+                        resultText = 'Push! Same value — your coins are returned.';
                     } else {
-                        delta = -bet;
-                        color = '#e74c3c';
-                        resultText = `You lost **${bet.toLocaleString()}** coins.`;
+                        const won = pickedHigher ? next > current : next < current;
+                        if (won) {
+                            delta = bet * 2;
+                            color = '#2ecc71';
+                            resultText = `You won **${bet.toLocaleString()}** coins!`;
+                        } else {
+                            resultText = `You lost **${bet.toLocaleString()}** coins.`;
+                        }
+                    }
+
+                    user = await User.findOneAndUpdate(
+                        userFilter,
+                        { $inc: { balance: delta } },
+                        { new: true }
+                    );
+
+                    const resultEmbed = new EmbedBuilder()
+                        .setColor(color)
+                        .setTitle('Higher or Lower — Result')
+                        .setDescription(
+                            `Your pick: **${pickedHigher ? 'Higher' : 'Lower'}**\n` +
+                            `Current card: **${cardLabel(current)}**\n` +
+                            `Next card: **${cardLabel(next)}**\n\n` +
+                            `${resultText}`
+                        )
+                        .addFields({ name: 'New Balance', value: `${user.balance.toLocaleString()} coins` })
+                        .setTimestamp();
+
+                    await i.update({ embeds: [resultEmbed], components: [] });
+                } catch (collectError) {
+                    console.error('HigherLower collect error:', collectError);
+
+                    if (delta !== 0) {
+                        try {
+                            await User.findOneAndUpdate(userFilter, { $inc: { balance: -delta } });
+                        } catch (revertError) {
+                            console.error('HigherLower revert error:', revertError);
+                        }
+                    }
+
+                    try {
+                        await i.update({ content: 'Something went wrong while processing your pick. Your wager was refunded.', embeds: [], components: [] });
+                    } catch (updateError) {
+                        try {
+                            await i.reply({ content: 'Something went wrong while processing your pick. Your wager was refunded.', ephemeral: true });
+                        } catch (replyError) {}
                     }
                 }
-
-                user.balance += delta;
-                await user.save();
-
-                const resultEmbed = new EmbedBuilder()
-                    .setColor(color)
-                    .setTitle('Higher or Lower — Result')
-                    .setDescription(
-                        `Your pick: **${pickedHigher ? 'Higher' : 'Lower'}**\n` +
-                        `Current card: **${cardLabel(current)}**\n` +
-                        `Next card: **${cardLabel(next)}**\n\n` +
-                        `${resultText}`
-                    )
-                    .addFields({ name: 'New Balance', value: `${user.balance.toLocaleString()} coins` })
-                    .setTimestamp();
-
-                await i.update({ embeds: [resultEmbed], components: [] });
             });
 
             collector.on('end', async collected => {
                 if (collected.size === 0) {
                     const timeoutEmbed = EmbedBuilder.from(embed)
                         .setColor('#95a5a6')
-                        .setDescription(`Current card: **${cardLabel(current)}**\nBet: **${bet.toLocaleString()}** coins\n⏱️ Timed out. No coins were won or lost.`);
+                        .setDescription(`Current card: **${cardLabel(current)}**\nBet: **${bet.toLocaleString()}** coins\n⏱️ Timed out. Your wager was refunded.`);
+                    await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(() => {});
                     await interaction.editReply({ embeds: [timeoutEmbed], components: [] }).catch(() => {});
                 }
             });
