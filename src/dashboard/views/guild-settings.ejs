@@ -46,6 +46,7 @@
                 <button class="nav-item" data-tab="quests"><span class="nav-emoji">🗺️</span> Quests</button>
                 <button class="nav-item" data-tab="starboard"><span class="nav-emoji">⭐</span> Starboard</button>
                 <button class="nav-item" data-tab="suggestions"><span class="nav-emoji">💡</span> Suggestions</button>
+                <button class="nav-item" data-tab="reactionroles"><span class="nav-emoji">🎭</span> Reaction Roles</button>
 
                 <!-- Tools & Support -->
                 <div class="nav-section-header">Tools &amp; Support</div>
@@ -715,6 +716,80 @@
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('suggestions')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Reaction Roles -->
+                <section id="reactionroles" class="panel">
+                    <div class="panel-head">
+                        <h2>Reaction Roles</h2>
+                        <p>Let members self-assign roles by reacting to a message you publish in any channel. No commands needed.</p>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:.5rem"><h3>Active panels</h3></div>
+                    <div id="rr-panels-list">
+                        <%
+                        const rrMap = {};
+                        (settings.reactionRoles || []).forEach(function(rr) {
+                            if (!rrMap[rr.messageId]) rrMap[rr.messageId] = { channelId: rr.channelId, mappings: [] };
+                            rrMap[rr.messageId].mappings.push({ emoji: rr.emoji, roleId: rr.roleId });
+                        });
+                        const rrPanels = Object.entries(rrMap);
+                        %>
+                        <% if (!rrPanels.length) { %>
+                            <p style="color:var(--text-dim);font-size:.88rem;padding:.25rem 0">No reaction role panels yet — create one below.</p>
+                        <% } else { %>
+                            <% rrPanels.forEach(function([messageId, panel]) { %>
+                                <% const panelChannel = channels.find(function(c) { return c.id === panel.channelId; }); %>
+                                <div class="store-card">
+                                    <div class="store-card-body">
+                                        <div class="store-card-name">#<%= panelChannel ? panelChannel.name : panel.channelId %></div>
+                                        <div style="margin-top:.35rem;display:flex;flex-wrap:wrap;gap:.35rem;">
+                                            <% panel.mappings.forEach(function(m) { %>
+                                                <% const mappingRole = roles.find(function(r) { return r.id === m.roleId; }); %>
+                                                <span class="store-meta-tag role-meta"><%= m.emoji %> → @<%= mappingRole ? mappingRole.name : m.roleId %></span>
+                                            <% }); %>
+                                        </div>
+                                        <div style="margin-top:.4rem;font-size:.78rem;color:var(--text-dim)">Message ID: <%= messageId %></div>
+                                    </div>
+                                    <div class="store-card-actions">
+                                        <button class="btn btn-sm btn-danger" onclick="deleteRrPanel('<%= messageId %>')">Delete panel</button>
+                                    </div>
+                                </div>
+                            <% }); %>
+                        <% } %>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem">
+                        <h3>Create new panel</h3>
+                        <p>The bot will post an embed to your chosen channel and add the reactions automatically.</p>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="rr-channel">Target channel</label>
+                        <select id="rr-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(function(channel) { %>
+                                <option value="<%= channel.id %>">#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="rr-title">Embed title</label>
+                        <input type="text" id="rr-title" placeholder="React to get a role!" maxlength="256">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="rr-description">Embed description <small style="font-weight:400">(optional)</small></label>
+                        <textarea id="rr-description" rows="3" placeholder="Click a reaction below to assign yourself a role."></textarea>
+                        <small>The emoji → role list is appended automatically below your description.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Emoji → Role mappings</label>
+                        <div id="rr-mappings-list" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.5rem;"></div>
+                        <button class="btn btn-sm" type="button" onclick="addRrMapping()">+ Add mapping</button>
+                        <small style="display:block;margin-top:.4rem">Use a standard emoji (e.g. <code>👍</code>) or a custom Discord emoji (<code>&lt;:name:id&gt;</code>).</small>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="publishRrPanel()">Publish to channel</button>
                     </div>
                 </section>
 
@@ -1579,6 +1654,78 @@
             if (e.target.id === 'item-modal') closeItemModal();
             if (e.target.id === 'job-modal') closeJobModal();
         });
+
+        // ── Reaction Roles ─────────────────────────────────────────────────────────
+        var rrRoles = <%- JSON.stringify(roles || []) %>;
+
+        function addRrMapping() {
+            var list = document.getElementById('rr-mappings-list');
+            var row = document.createElement('div');
+            row.style.cssText = 'display:grid;grid-template-columns:1fr 2fr auto;gap:.5rem;align-items:center;';
+            row.innerHTML =
+                '<input type="text" placeholder="Emoji (e.g. 👍)" class="rr-emoji" style="font-size:1.1rem;">' +
+                '<select class="rr-role"><option value="">Select role</option>' +
+                rrRoles.map(function(r) { return '<option value="' + r.id + '">@' + escHtml(r.name) + '</option>'; }).join('') +
+                '</select>' +
+                '<button class="btn btn-sm btn-danger" type="button" onclick="this.parentElement.remove()">×</button>';
+            list.appendChild(row);
+        }
+
+        async function publishRrPanel() {
+            var channelId = document.getElementById('rr-channel').value;
+            if (!channelId) { toast('Select a target channel', 'error'); return; }
+
+            var rows = document.querySelectorAll('#rr-mappings-list > div');
+            var mappings = [];
+            rows.forEach(function(row) {
+                var emoji = row.querySelector('.rr-emoji').value.trim();
+                var roleId = row.querySelector('.rr-role').value;
+                if (emoji && roleId) mappings.push({ emoji: emoji, roleId: roleId });
+            });
+
+            if (!mappings.length) { toast('Add at least one emoji → role mapping', 'error'); return; }
+
+            var guildId = '<%= guild.id %>';
+            try {
+                var response = await fetch('/api/guild/' + guildId + '/reactionrole/panel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        channelId: channelId,
+                        title: document.getElementById('rr-title').value.trim() || null,
+                        description: document.getElementById('rr-description').value.trim() || null,
+                        mappings: mappings
+                    })
+                });
+                var data = await response.json();
+                if (response.ok) {
+                    toast('Panel published ✓', 'success');
+                    setTimeout(function() { location.reload(); }, 800);
+                } else {
+                    toast(data.error || 'Failed to publish panel', 'error');
+                }
+            } catch (error) {
+                console.error(error);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        async function deleteRrPanel(messageId) {
+            if (!confirm('Delete this reaction role panel? The Discord message will also be deleted.')) return;
+            var guildId = '<%= guild.id %>';
+            try {
+                var response = await fetch('/api/guild/' + guildId + '/reactionrole/panel/' + messageId, { method: 'DELETE' });
+                if (response.ok) {
+                    toast('Panel deleted ✓', 'success');
+                    setTimeout(function() { location.reload(); }, 600);
+                } else {
+                    toast('Failed to delete panel', 'error');
+                }
+            } catch (error) {
+                console.error(error);
+                toast('An error occurred', 'error');
+            }
+        }
 
         async function loadAnalytics() {
             const guildId = '<%= guild.id %>';

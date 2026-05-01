@@ -181,6 +181,87 @@ router.delete('/guild/:guildId/autorole/:roleId', checkAuth, checkGuildAccess, a
     }
 });
 
+router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const { channelId, title, description, mappings } = req.body;
+
+    if (!channelId) return res.status(400).json({ error: 'channelId is required' });
+    if (!Array.isArray(mappings) || !mappings.length) return res.status(400).json({ error: 'At least one emoji/role mapping is required' });
+
+    try {
+        const guild = req.client.guilds.cache.get(guildId);
+        if (!guild) return res.status(404).json({ error: 'Guild not found' });
+
+        const channel = guild.channels.cache.get(channelId);
+        if (!channel) return res.status(404).json({ error: 'Channel not found' });
+
+        const { EmbedBuilder } = require('discord.js');
+        const embed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle(title || 'React to get a role!')
+            .setDescription(
+                (description ? description + '\n\n' : '') +
+                mappings.map(m => `${m.emoji} — <@&${m.roleId}>`).join('\n')
+            )
+            .setFooter({ text: 'React below to assign yourself a role' });
+
+        const message = await channel.send({ embeds: [embed] });
+
+        for (const mapping of mappings) {
+            const reactArg = mapping.emoji.match(/^<a?:(\w+):(\d+)>$/)
+                ? mapping.emoji.match(/^<a?:(\w+):(\d+)>$/)[1] + ':' + mapping.emoji.match(/^<a?:(\w+):(\d+)>$/)[2]
+                : mapping.emoji;
+            await message.react(reactArg).catch(() => null);
+        }
+
+        const guildSettings = await Guild.findOne({ guildId });
+        if (!guildSettings) return res.status(404).json({ error: 'Guild settings not found' });
+
+        for (const mapping of mappings) {
+            guildSettings.reactionRoles.push({
+                messageId: message.id,
+                channelId,
+                emoji: mapping.emoji,
+                roleId: mapping.roleId
+            });
+        }
+
+        await guildSettings.save();
+        res.json({ success: true, messageId: message.id });
+    } catch (error) {
+        console.error('Reaction role panel create error:', error);
+        res.status(500).json({ error: error.message || 'Internal server error' });
+    }
+});
+
+router.delete('/guild/:guildId/reactionrole/panel/:messageId', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId, messageId } = req.params;
+
+    try {
+        const guildSettings = await Guild.findOne({ guildId });
+        if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
+
+        const entry = guildSettings.reactionRoles.find(r => r.messageId === messageId);
+        if (entry) {
+            const guild = req.client.guilds.cache.get(guildId);
+            if (guild) {
+                const channel = guild.channels.cache.get(entry.channelId);
+                if (channel) {
+                    await channel.messages.fetch(messageId).then(m => m.delete()).catch(() => null);
+                }
+            }
+        }
+
+        guildSettings.reactionRoles = guildSettings.reactionRoles.filter(r => r.messageId !== messageId);
+        await guildSettings.save();
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Reaction role panel delete error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const { url, channelId } = req.body;
