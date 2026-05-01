@@ -533,6 +533,16 @@ body {
     border: 1px solid var(--border-strong);
 }
 .nav-item .nav-emoji { font-size: 1.05rem; }
+.nav-section-header {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted, var(--text-dim));
+    padding: 0.9rem 0.85rem 0.25rem;
+    opacity: 0.6;
+}
+.nav-section-header:first-child { padding-top: 0.25rem; }
 
 .settings-content { min-width: 0; }
 .panel {
