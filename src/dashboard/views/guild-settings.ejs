@@ -1021,8 +1021,8 @@
 
                 <section id="analytics" class="panel">
                     <div class="panel-head">
-                        <h2>Analytics & Recommendations</h2>
-                        <p>Track retention, churn, command reliability, and next-best actions.</p>
+                        <h2>Insights & Recommendations</h2>
+                        <p>Track retention, active hours, toxic channels, mod SLA trends, and next-best actions.</p>
                     </div>
                     <div id="analytics-content" class="empty-state" style="padding:1rem;">
                         <p>Loading analytics...</p>
@@ -1756,13 +1756,29 @@
                 container.appendChild(p);
             };
             try {
-                const response = await fetch(`/api/guild/${guildId}/stats`);
-                const data = await response.json();
+                const [statsResp, insightsResp] = await Promise.all([
+                    fetch(`/api/guild/${guildId}/stats`),
+                    fetch(`/api/guild/${guildId}/insights`)
+                ]);
+                const data = await statsResp.json();
+                const insights = await insightsResp.json();
                 const a = data.analytics || {};
                 const commandRows = Object.entries(a.commandUsage || {}).sort((x, y) => y[1].total - x[1].total).slice(0, 8);
                 const failedRows = Object.entries(a.failedCommands || {}).sort((x, y) => y[1] - x[1]).slice(0, 6);
                 container.textContent = '';
                 addListItem('Growth funnel', `${a.growthFunnel?.joins30 || 0} joins → ${a.growthFunnel?.retained7 || 0}% retained @7d → ${a.growthFunnel?.retained30 || 0}% @30d`);
+                addHeading('Insights layer');
+                addListItem('Retention', `${insights.retention?.retained7Pct || 0}% @ 7d · ${insights.retention?.retained30Pct || 0}% @ 30d`);
+                addListItem('Newcomer conversion', `${insights.newcomerConversion?.days7?.pct || 0}% @ 7d · ${insights.newcomerConversion?.days30?.pct || 0}% @ 30d`);
+                addListItem('Mod SLA (median)', insights.modSla?.medianResolutionHours == null ? 'Not enough resolved cases' : `${insights.modSla.medianResolutionHours}h`);
+                addListItem('Top active hours (UTC)', (insights.activeHours?.topHours || []).map(t => `${String(t.hourUtc).padStart(2, '0')}:00 (${t.count})`).join(' · ') || 'Not enough data yet');
+                const toxic = (insights.toxicChannels || []).slice(0, 5).map(c => `#${c.channelId} (score ${c.score})`).join(' · ');
+                addListItem('Toxic channel hotspots', toxic || 'No hotspots detected');
+                addHeading('Mod SLA trend (last 6 months)');
+                if (!(insights.modSla?.trends || []).length) addParagraph('No resolved-case trend data yet.');
+                for (const trend of (insights.modSla?.trends || [])) {
+                    addListItem(trend.month, `${trend.medianResolutionHours}h median (${trend.resolvedCases} resolved)`);
+                }
                 addListItem('Churn alerts', (a.churnAlerts || ['No active alerts']).join(' · '));
                 addListItem('Likely causes', (a.likelyCauses || ['No immediate causes detected']).join(' · '));
                 addListItem('Best posting times (UTC)', (a.bestPostingTimes || []).map(t => `#${t.channelId} @ ${String(t.hourUtc).padStart(2, '0')}:00`).join(' · ') || 'Not enough data yet');
