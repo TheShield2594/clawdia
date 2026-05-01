@@ -59,6 +59,14 @@ const guildSchema = new Schema({
         linkFilter: { type: Boolean, default: false },
         profanityFilter: { type: Boolean, default: false },
         customBadWords: [{ type: String }],
+        repeatedTextFilter: { type: Boolean, default: false },
+        excessiveCapsFilter: { type: Boolean, default: false },
+        capsThresholdPercent: { type: Number, default: 70 },
+        excessiveEmojisFilter: { type: Boolean, default: false },
+        emojiThreshold: { type: Number, default: 8 },
+        zalgoFilter: { type: Boolean, default: false },
+        excessiveMentionsFilter: { type: Boolean, default: false },
+        mentionThreshold: { type: Number, default: 5 },
         warnThreshold: { type: Number, default: 3 },
         kickThreshold: { type: Number, default: 5 },
         banThreshold: { type: Number, default: 0 },
@@ -78,7 +86,10 @@ const guildSchema = new Schema({
         announceInChannel: { type: Boolean, default: true },
         xpRate: { type: Number, default: 1.0 },
         levelUpMessage: { type: String, default: 'Congratulations {user}! You reached level {level}!' },
-        rewardsEnabled: { type: Boolean, default: true }
+        rewardsEnabled: { type: Boolean, default: true },
+        noXpRoleIds: [{ type: String }],
+        noXpChannelIds: [{ type: String }],
+        rewardChannelId: { type: String, default: null }
     },
     
     economy: {
