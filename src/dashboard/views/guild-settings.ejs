@@ -315,8 +315,10 @@
                 <section id="economy" class="panel">
                     <div class="panel-head">
                         <h2>Economy</h2>
-                        <p>Tune currency rewards for daily check-ins and the work command.</p>
+                        <p>Tune currency rewards, manage the store, games, and jobs.</p>
                     </div>
+
+                    <!-- General -->
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable economy</strong><span>Allow members to earn and spend currency</span></span>
                         <span class="switch"><input type="checkbox" id="economy-enabled" <%= settings.economy.enabled ? 'checked' : '' %>><span class="slider"></span></span>
@@ -333,23 +335,131 @@
                         <div><label class="field-label" for="economy-work-min">Work payout (min)</label><input type="text" id="economy-work-min" value="<%= settings.economy.workMin %>"></div>
                         <div><label class="field-label" for="economy-work-max">Work payout (max)</label><input type="text" id="economy-work-max" value="<%= settings.economy.workMax %>"></div>
                     </div>
-                    <label class="toggle">
-                        <span class="toggle-text"><strong>Enable economy store</strong></span>
-                        <span class="switch"><input type="checkbox" id="economy-shop-enabled" <%= settings.economy.shopEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
-                    </label>
-                    <label class="toggle">
-                        <span class="toggle-text"><strong>Enable economy games</strong></span>
-                        <span class="switch"><input type="checkbox" id="economy-games-enabled" <%= settings.economy.gamesEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
-                    </label>
-                    <label class="toggle">
-                        <span class="toggle-text"><strong>Enable economy jobs</strong></span>
-                        <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
-                    </label>
-                    <div class="field"><label class="field-label" for="economy-store-items">Store items</label><textarea id="economy-store-items" rows="6" placeholder="name|price|description|roleId|stock"><%= (settings.shop || []).map(i => `${i.name}|${i.price}|${i.description || ''}|${i.roleId || ''}|${typeof i.stock === 'number' ? i.stock : -1}`).join('\n') %></textarea><small>One item per line: <code>name|price|description|roleId|stock</code> (-1 stock = unlimited)</small></div>
+
+                    <!-- Store -->
+                    <div class="eco-section-head">
+                        <label class="toggle" style="margin:0;flex:1">
+                            <span class="toggle-text"><strong>Store</strong><span>Items available for purchase with /shop buy</span></span>
+                            <span class="switch"><input type="checkbox" id="economy-shop-enabled" <%= settings.economy.shopEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <button class="btn btn-sm btn-primary" onclick="openItemModal(-1)">+ Add item</button>
+                    </div>
+                    <div id="store-items-grid" class="store-grid"></div>
+
+                    <!-- Games -->
+                    <div class="eco-section-head" style="margin-top:1.75rem">
+                        <label class="toggle" style="margin:0;flex:1">
+                            <span class="toggle-text"><strong>Games</strong><span>Economy mini-games members can play for coins</span></span>
+                            <span class="switch"><input type="checkbox" id="economy-games-enabled" <%= settings.economy.gamesEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                    </div>
+                    <div class="games-grid">
+                        <div class="game-card">
+                            <div class="game-card-icon">🪙</div>
+                            <div class="game-card-info">
+                                <span class="game-card-name">Coinflip</span>
+                                <span class="game-card-desc">Bet coins — heads or tails wins double</span>
+                            </div>
+                            <label class="switch"><input type="checkbox" id="economy-coinflip-enabled" <%= settings.economy.coinflipEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                        </div>
+                        <div class="game-card">
+                            <div class="game-card-icon">🎲</div>
+                            <div class="game-card-info">
+                                <span class="game-card-name">Dice Roll</span>
+                                <span class="game-card-desc">Roll dice and multiply your wager</span>
+                            </div>
+                            <label class="switch"><input type="checkbox" id="economy-roll-enabled" <%= settings.economy.rollEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                        </div>
+                        <div class="game-card">
+                            <div class="game-card-icon">🃏</div>
+                            <div class="game-card-info">
+                                <span class="game-card-name">Blackjack</span>
+                                <span class="game-card-desc">Beat the dealer to win your bet</span>
+                            </div>
+                            <label class="switch"><input type="checkbox" id="economy-blackjack-enabled" <%= settings.economy.blackjackEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                        </div>
+                    </div>
+
+                    <!-- Jobs -->
+                    <div class="eco-section-head" style="margin-top:1.75rem">
+                        <label class="toggle" style="margin:0;flex:1">
+                            <span class="toggle-text"><strong>Jobs</strong><span>Jobs shown when members use /work</span></span>
+                            <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <button class="btn btn-sm btn-primary" onclick="openJobModal(-1)">+ Add job</button>
+                    </div>
+                    <div id="jobs-list" class="jobs-list"></div>
+
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
                     </div>
                 </section>
+
+                <!-- Store Item Modal -->
+                <div id="item-modal" class="modal-overlay" style="display:none">
+                    <div class="modal-box">
+                        <div class="modal-head">
+                            <h3 id="item-modal-title">Add Store Item</h3>
+                            <button class="modal-close" onclick="closeItemModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="field">
+                                <label class="field-label">Item name *</label>
+                                <input type="text" id="modal-item-name" placeholder="e.g. VIP Role">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Description</label>
+                                <input type="text" id="modal-item-desc" placeholder="e.g. Access to the VIP channel">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Price *</label>
+                                <input type="number" id="modal-item-price" placeholder="500" min="0">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Role to grant on purchase</label>
+                                <select id="modal-item-role">
+                                    <option value="">None</option>
+                                    <% roles.forEach(role => { %>
+                                        <option value="<%= role.id %>">@<%= role.name %></option>
+                                    <% }); %>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Stock</label>
+                                <input type="number" id="modal-item-stock" value="-1">
+                                <small>-1 = unlimited stock</small>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn" onclick="closeItemModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="saveItemModal()">Save item</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Job Modal -->
+                <div id="job-modal" class="modal-overlay" style="display:none">
+                    <div class="modal-box" style="max-width:400px">
+                        <div class="modal-head">
+                            <h3 id="job-modal-title">Add Job</h3>
+                            <button class="modal-close" onclick="closeJobModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="field">
+                                <label class="field-label">Job name *</label>
+                                <input type="text" id="modal-job-name" placeholder="e.g. Astronaut">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Emoji (optional)</label>
+                                <input type="text" id="modal-job-emoji" placeholder="🚀" maxlength="4">
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn" onclick="closeJobModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="saveJobModal()">Save job</button>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Music -->
                 <section id="music" class="panel">
@@ -1105,10 +1215,6 @@
                     levelRoles
                 };
             } else if (section === 'economy') {
-                const shop = document.getElementById('economy-store-items').value.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
-                    const [name, price, description = '', roleId = '', stock = '-1'] = line.split('|');
-                    return { name: (name || '').trim(), price: parseInt(price, 10), description: description.trim(), roleId: roleId.trim() || null, stock: parseInt(stock, 10) };
-                }).filter(item => item.name && Number.isFinite(item.price));
                 const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
                 data = {
                     'economy.enabled': document.getElementById('economy-enabled').checked,
@@ -1118,8 +1224,12 @@
                     'economy.workMax': safeInt('economy-work-max', 150),
                     'economy.shopEnabled': document.getElementById('economy-shop-enabled').checked,
                     'economy.gamesEnabled': document.getElementById('economy-games-enabled').checked,
+                    'economy.coinflipEnabled': document.getElementById('economy-coinflip-enabled').checked,
+                    'economy.rollEnabled': document.getElementById('economy-roll-enabled').checked,
+                    'economy.blackjackEnabled': document.getElementById('economy-blackjack-enabled').checked,
                     'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked,
-                    shop
+                    shop: storeItems,
+                    jobs: jobsList
                 };
             } else if (section === 'music') {
                 const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
@@ -1331,6 +1441,144 @@
                 toast('An error occurred', 'error');
             }
         }
+
+        // ── Economy Store & Jobs ───────────────────────────────────────────────
+        var storeItems = <%- JSON.stringify(settings.shop || []) %>;
+        var _serverJobs = <%- JSON.stringify(settings.jobs || []) %>;
+        var jobsList = _serverJobs.length > 0 ? _serverJobs : [
+            { name: 'Developer', emoji: '💻' }, { name: 'Designer', emoji: '🎨' },
+            { name: 'Teacher', emoji: '📚' }, { name: 'Chef', emoji: '👨‍🍳' },
+            { name: 'Driver', emoji: '🚗' }, { name: 'Doctor', emoji: '🏥' },
+            { name: 'Engineer', emoji: '⚙️' }, { name: 'Artist', emoji: '🖌️' },
+            { name: 'Musician', emoji: '🎵' }, { name: 'Writer', emoji: '✍️' }
+        ];
+        var _roleMap = {};
+        <% roles.forEach(r => { %>_roleMap['<%= r.id %>'] = '<%= r.name.replace(/'/g, "\\'") %>';<% }); %>
+        var editingItemIdx = -1;
+        var editingJobIdx = -1;
+
+        function escHtml(s) {
+            if (!s) return '';
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function renderStoreItems() {
+            var grid = document.getElementById('store-items-grid');
+            if (!storeItems.length) {
+                grid.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;padding:.25rem 0">No items yet — click <strong>+ Add item</strong> to get started.</p>';
+                return;
+            }
+            grid.innerHTML = storeItems.map(function(item, i) {
+                var roleName = item.roleId ? (_roleMap[item.roleId] || item.roleId) : null;
+                var stockText = (item.stock === -1 || item.stock == null) ? '∞ Unlimited' : item.stock + ' left';
+                return '<div class="store-card">' +
+                    '<div class="store-card-body">' +
+                        '<div class="store-card-name">' + escHtml(item.name) + '</div>' +
+                        '<div class="store-card-desc">' + (item.description ? escHtml(item.description) : '<em style="color:var(--text-mute)">No description</em>') + '</div>' +
+                        '<div class="store-card-meta">' +
+                            '<span class="store-meta-tag price-tag">💰 ' + Number(item.price).toLocaleString() + '</span>' +
+                            '<span class="store-meta-tag">' + stockText + '</span>' +
+                            (roleName ? '<span class="store-meta-tag role-meta">@' + escHtml(roleName) + '</span>' : '') +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="store-card-actions">' +
+                        '<button class="btn btn-sm" onclick="openItemModal(' + i + ')">Edit</button>' +
+                        '<button class="btn btn-sm btn-danger" onclick="deleteItem(' + i + ')">Remove</button>' +
+                    '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        function openItemModal(idx) {
+            editingItemIdx = idx;
+            document.getElementById('item-modal-title').textContent = idx === -1 ? 'Add Store Item' : 'Edit Store Item';
+            var item = idx === -1 ? {} : storeItems[idx];
+            document.getElementById('modal-item-name').value = item.name || '';
+            document.getElementById('modal-item-desc').value = item.description || '';
+            document.getElementById('modal-item-price').value = item.price != null ? item.price : '';
+            document.getElementById('modal-item-role').value = item.roleId || '';
+            document.getElementById('modal-item-stock').value = (item.stock == null) ? -1 : item.stock;
+            document.getElementById('item-modal').style.display = 'flex';
+        }
+
+        function closeItemModal() { document.getElementById('item-modal').style.display = 'none'; }
+
+        function saveItemModal() {
+            var name = document.getElementById('modal-item-name').value.trim();
+            var price = parseInt(document.getElementById('modal-item-price').value, 10);
+            if (!name) { toast('Item name is required', 'error'); return; }
+            if (!Number.isFinite(price) || price < 0) { toast('Enter a valid price', 'error'); return; }
+            var item = {
+                name: name,
+                description: document.getElementById('modal-item-desc').value.trim(),
+                price: price,
+                roleId: document.getElementById('modal-item-role').value || null,
+                stock: parseInt(document.getElementById('modal-item-stock').value, 10) || -1
+            };
+            if (editingItemIdx === -1) storeItems.push(item);
+            else storeItems[editingItemIdx] = item;
+            closeItemModal();
+            renderStoreItems();
+        }
+
+        function deleteItem(idx) {
+            if (!confirm('Remove "' + storeItems[idx].name + '" from the store?')) return;
+            storeItems.splice(idx, 1);
+            renderStoreItems();
+        }
+
+        function renderJobs() {
+            var list = document.getElementById('jobs-list');
+            if (!jobsList.length) {
+                list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;padding:.25rem 0">No jobs — click <strong>+ Add job</strong> to add one.</p>';
+                return;
+            }
+            list.innerHTML = jobsList.map(function(job, i) {
+                return '<div class="job-chip">' +
+                    (job.emoji ? '<span>' + escHtml(job.emoji) + '</span>' : '') +
+                    '<span class="job-name">' + escHtml(job.name) + '</span>' +
+                    '<button class="job-btn" onclick="openJobModal(' + i + ')" title="Edit">✏️</button>' +
+                    '<button class="job-btn" onclick="deleteJob(' + i + ')" title="Remove" style="font-size:1rem">×</button>' +
+                '</div>';
+            }).join('');
+        }
+
+        function openJobModal(idx) {
+            editingJobIdx = idx;
+            document.getElementById('job-modal-title').textContent = idx === -1 ? 'Add Job' : 'Edit Job';
+            var job = idx === -1 ? {} : jobsList[idx];
+            document.getElementById('modal-job-name').value = job.name || '';
+            document.getElementById('modal-job-emoji').value = job.emoji || '';
+            document.getElementById('job-modal').style.display = 'flex';
+        }
+
+        function closeJobModal() { document.getElementById('job-modal').style.display = 'none'; }
+
+        function saveJobModal() {
+            var name = document.getElementById('modal-job-name').value.trim();
+            if (!name) { toast('Job name is required', 'error'); return; }
+            var job = { name: name, emoji: document.getElementById('modal-job-emoji').value.trim() };
+            if (editingJobIdx === -1) jobsList.push(job);
+            else jobsList[editingJobIdx] = job;
+            closeJobModal();
+            renderJobs();
+        }
+
+        function deleteJob(idx) {
+            jobsList.splice(idx, 1);
+            renderJobs();
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            renderStoreItems();
+            renderJobs();
+        });
+
+        // Close modals on overlay click
+        document.addEventListener('click', function(e) {
+            if (e.target.id === 'item-modal') closeItemModal();
+            if (e.target.id === 'job-modal') closeJobModal();
+        });
 
         async function loadAnalytics() {
             const guildId = '<%= guild.id %>';

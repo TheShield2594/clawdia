@@ -101,6 +101,9 @@ const guildSchema = new Schema({
         workMax: { type: Number, default: 150 },
         shopEnabled: { type: Boolean, default: true },
         gamesEnabled: { type: Boolean, default: true },
+        coinflipEnabled: { type: Boolean, default: true },
+        rollEnabled: { type: Boolean, default: true },
+        blackjackEnabled: { type: Boolean, default: true },
         jobsEnabled: { type: Boolean, default: true }
     },
     
@@ -208,6 +211,11 @@ const guildSchema = new Schema({
         roleId: { type: String, default: null },
         stock: { type: Number, default: -1 },
         imageUrl: { type: String, default: '' }
+    }],
+
+    jobs: [{
+        name: { type: String, required: true },
+        emoji: { type: String, default: '' }
     }],
 
     tickets: {
