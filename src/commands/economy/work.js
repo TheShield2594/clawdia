@@ -36,11 +36,14 @@ module.exports = {
             const workMax = guildSettings?.economy.workMax || 150;
             const earned = Math.floor(Math.random() * (workMax - workMin + 1)) + workMin;
 
-            const jobs = [
+            const defaultJobs = [
                 'developer', 'designer', 'teacher', 'chef', 'driver',
                 'doctor', 'engineer', 'artist', 'musician', 'writer'
             ];
-            const job = jobs[Math.floor(Math.random() * jobs.length)];
+            const guildJobs = guildSettings?.jobs?.length > 0
+                ? guildSettings.jobs.map(j => j.emoji ? `${j.emoji} ${j.name}` : j.name)
+                : defaultJobs;
+            const job = guildJobs[Math.floor(Math.random() * guildJobs.length)];
 
             user.balance += earned;
             user.lastWork = new Date();
