@@ -79,8 +79,19 @@ function start(client) {
     app.use('/dashboard', dashboardRoutes);
     app.use('/api', apiRoutes);
 
+    app.get('/health', (req, res) => {
+        const { getStatus } = require('../health');
+        const status = getStatus();
+        res.status(status.status === 'unhealthy' ? 503 : 200).json(status);
+    });
+
     app.get('/', (req, res) => {
         res.render('index', { user: req.user });
+    });
+
+    app.use((err, req, res, next) => {
+        console.error('[DASHBOARD] Unhandled error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     });
 
     const PORT = process.env.DASHBOARD_PORT || 3000;

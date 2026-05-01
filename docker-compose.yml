@@ -29,14 +29,51 @@ services:
         condition: service_healthy
     volumes:
       - ultrabot_logs:/app/logs
+      - ./backups:/app/backups
     networks:
       - ultrabot-network
+    # Dedicated JSON health endpoint; 503 when mongo is down
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e",
+        "require('http').get('http://localhost:3000/health', (r) => { let b=''; r.on('data', d => b+=d); r.on('end', () => { try { const s = JSON.parse(b).status; process.exit(s === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    stop_grace_period: 30s
+
+  # Optional scheduled backup (runs mongodump once a day at 03:00 UTC)
+  backup:
+    image: mongo:7
+    container_name: ultrabot-backup
+    profiles:
+      - backup
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./backups:/backups
+    networks:
+      - ultrabot-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: >
+      sh -c 'while true; do
+        TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
+        echo "[backup] Starting backup at $$TIMESTAMP";
+        mongodump --uri="$$MONGODB_URI" --gzip --archive="/backups/ultrabot-$$TIMESTAMP.gz" &&
+          echo "[backup] Done: /backups/ultrabot-$$TIMESTAMP.gz" ||
+          echo "[backup] FAILED";
+        find /backups -name "ultrabot-*.gz" -mtime +30 -delete;
+        sleep 86400;
+      done'
 
 volumes:
   mongodb_data:

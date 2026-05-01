@@ -1,8 +1,10 @@
 const { Client, GatewayIntentBits, Collection, Partials } = require('discord.js');
-const { connect } = require('mongoose');
+const { connect, connection } = require('mongoose');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
+
+const health = require('./health');
 
 const client = new Client({
     intents: [
@@ -65,13 +67,18 @@ async function connectDatabase() {
     try {
         await connect(process.env.MONGODB_URI, {
             useNewUrlParser: true,
-            useUnifiedTopology: true
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 10000,
         });
         console.log('[DATABASE] Connected to MongoDB');
     } catch (error) {
         console.error('[DATABASE] Failed to connect:', error);
         process.exit(1);
     }
+
+    connection.on('disconnected', () => console.warn('[DATABASE] Disconnected from MongoDB'));
+    connection.on('reconnected', () => console.log('[DATABASE] Reconnected to MongoDB'));
+    connection.on('error', err => console.error('[DATABASE] Connection error:', err));
 }
 
 async function startDashboard() {
@@ -79,8 +86,26 @@ async function startDashboard() {
     dashboard.start(client);
 }
 
+// Graceful shutdown: close DB and destroy Discord client before exiting
+async function shutdown(signal) {
+    console.log(`[SHUTDOWN] Received ${signal}. Shutting down gracefully...`);
+    try {
+        client.destroy();
+        await connection.close();
+        console.log('[SHUTDOWN] Clean exit.');
+    } catch (err) {
+        console.error('[SHUTDOWN] Error during shutdown:', err);
+    }
+    process.exit(0);
+}
+
 async function startBot() {
     await connectDatabase();
+
+    // Run pending schema migrations before the bot starts accepting traffic
+    const { runMigrations } = require('./migrations/runner');
+    await runMigrations();
+
     await loadCommands();
     await loadEvents();
     await startDashboard();
@@ -110,8 +135,40 @@ async function startBot() {
     client.login(process.env.DISCORD_TOKEN);
 }
 
-startBot().catch(console.error);
+// --- Process-level reliability guards ---
 
-process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
+// Track repeated unhandled rejections; exit if they spike (indicates a stuck state)
+const REJECTION_WINDOW_MS = 60_000;
+const REJECTION_LIMIT = 10;
+const recentRejections = [];
+
+process.on('unhandledRejection', (error) => {
+    health.incrementUnhandledRejections();
+    console.error('[PROCESS] Unhandled promise rejection:', error);
+
+    const now = Date.now();
+    recentRejections.push(now);
+    // Evict entries outside the window
+    while (recentRejections.length && recentRejections[0] < now - REJECTION_WINDOW_MS) {
+        recentRejections.shift();
+    }
+    if (recentRejections.length >= REJECTION_LIMIT) {
+        console.error(`[PROCESS] ${REJECTION_LIMIT} unhandled rejections in ${REJECTION_WINDOW_MS / 1000}s — forcing exit.`);
+        process.exit(1);
+    }
+});
+
+process.on('uncaughtException', (error) => {
+    health.incrementUncaughtExceptions();
+    console.error('[PROCESS] Uncaught exception:', error);
+    // uncaughtException leaves the process in an undefined state; always exit
+    process.exit(1);
+});
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+startBot().catch(err => {
+    console.error('[STARTUP] Fatal error during bot startup:', err);
+    process.exit(1);
 });

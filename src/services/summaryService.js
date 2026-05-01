@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const SummaryJob = require('../models/SummaryJob');
 const Guild = require('../models/Guild');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
+const { runJob } = require('../utils/jobRunner');
 
 const MAX_TRANSCRIPT_CHARS = 6000;
 
@@ -60,8 +61,8 @@ async function runSummaryJob(job, client) {
 
 function startSummaryService(client) {
     // Check every minute whether any daily job is due
-    cron.schedule('* * * * *', async () => {
-        try {
+    cron.schedule('* * * * *', () =>
+        runJob('summaryService', 'scheduler', async () => {
             const now = new Date();
             const utcHour = now.getUTCHours();
             const utcMinute = now.getUTCMinutes();
@@ -71,16 +72,13 @@ function startSummaryService(client) {
                 // Skip if already ran within the last 23 hours
                 if (job.lastRun && now - job.lastRun < 23 * 60 * 60 * 1000) continue;
 
-                try {
-                    await runSummaryJob(job, client);
-                } catch (err) {
-                    console.error(`[SummaryService] Job ${job._id} failed:`, err.message);
-                }
+                await runJob('summaryService', 'runSummaryJob', () => runSummaryJob(job, client), {
+                    guildId: job.guildId,
+                    payload: { jobId: String(job._id), label: job.label },
+                });
             }
-        } catch (err) {
-            console.error('[SummaryService] Scheduler error:', err.message);
-        }
-    });
+        })
+    );
 
     console.log('[SummaryService] Started');
 }
