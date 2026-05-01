@@ -65,15 +65,23 @@ services:
       mongodb:
         condition: service_healthy
     entrypoint: >
-      sh -c 'while true; do
-        TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
-        echo "[backup] Starting backup at $$TIMESTAMP";
-        mongodump --uri="$$MONGODB_URI" --gzip --archive="/backups/ultrabot-$$TIMESTAMP.gz" &&
-          echo "[backup] Done: /backups/ultrabot-$$TIMESTAMP.gz" ||
-          echo "[backup] FAILED";
-        find /backups -name "ultrabot-*.gz" -mtime +30 -delete;
-        sleep 86400;
-      done'
+      sh -c '
+        NOW=$$(date -u +%s);
+        MIDNIGHT=$$(( ($$NOW / 86400) * 86400 ));
+        TARGET=$$(( $$MIDNIGHT + 10800 ));
+        if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
+        SLEEP=$$(( $$TARGET - $$NOW ));
+        echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
+        sleep $$SLEEP;
+        while true; do
+          TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
+          echo "[backup] Starting backup at $$TIMESTAMP";
+          mongodump --uri="$$MONGODB_URI" --gzip --archive="/backups/ultrabot-$$TIMESTAMP.gz" &&
+            echo "[backup] Done: /backups/ultrabot-$$TIMESTAMP.gz" ||
+            echo "[backup] FAILED";
+          find /backups -name "ultrabot-*.gz" -mtime +30 -delete;
+          sleep 86400;
+        done'
 
 volumes:
   mongodb_data:

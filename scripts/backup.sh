@@ -18,16 +18,20 @@ MONGO_URI="${MONGODB_URI:-mongodb://localhost:27017/ultrabot}"
 
 mkdir -p "${BACKUP_DIR}"
 
+MONGO_URI_MASKED=$(echo "${MONGO_URI}" | sed 's|://[^@]*@|://***@|')
 echo "[backup] Starting backup → ${ARCHIVE}"
-echo "[backup] URI: ${MONGO_URI}"
+echo "[backup] URI: ${MONGO_URI_MASKED}"
 
 if command -v mongodump &>/dev/null; then
     mongodump --uri="${MONGO_URI}" --gzip --archive="${ARCHIVE}"
 else
-    # Fall back to running mongodump inside the Docker container
+    # Fall back to running mongodump inside the Docker container.
+    # Replace 'localhost' with '127.0.0.1' so the URI points to the container's
+    # own loopback interface (the service hostname is not reachable from within).
     echo "[backup] mongodump not found locally; attempting via Docker container 'ultrabot-mongodb'"
+    CONTAINER_URI="${MONGO_URI/localhost/127.0.0.1}"
     docker exec ultrabot-mongodb \
-        mongodump --uri="${MONGO_URI}" --gzip --archive=/tmp/ultrabot-backup.gz
+        mongodump --uri="${CONTAINER_URI}" --gzip --archive=/tmp/ultrabot-backup.gz
     docker cp ultrabot-mongodb:/tmp/ultrabot-backup.gz "${ARCHIVE}"
     docker exec ultrabot-mongodb rm /tmp/ultrabot-backup.gz
 fi

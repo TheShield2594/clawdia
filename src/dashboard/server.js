@@ -3,6 +3,7 @@ const session = require('express-session');
 const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const path = require('path');
+const { getStatus } = require('../health');
 
 const app = express();
 
@@ -80,7 +81,6 @@ function start(client) {
     app.use('/api', apiRoutes);
 
     app.get('/health', (req, res) => {
-        const { getStatus } = require('../health');
         const status = getStatus();
         res.status(status.status === 'unhealthy' ? 503 : 200).json(status);
     });

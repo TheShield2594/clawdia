@@ -53,6 +53,7 @@ async function retryJob(failedJobId, handler, resolvedBy = 'system') {
     const record = await FailedJob.findById(failedJobId);
     if (!record) throw new Error('FailedJob not found');
     if (record.status === 'resolved') throw new Error('Job already resolved');
+    if (record.status === 'exhausted') throw new Error('Job exhausted');
 
     record.attempts += 1;
     record.lastAttemptAt = new Date();

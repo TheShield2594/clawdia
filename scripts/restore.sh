@@ -30,8 +30,9 @@ fi
 
 MONGO_URI="${MONGODB_URI:-mongodb://localhost:27017/ultrabot}"
 
+MONGO_URI_MASKED=$(echo "${MONGO_URI}" | sed 's|://[^@]*@|://***@|')
 echo "[restore] Archive:  ${ARCHIVE}"
-echo "[restore] URI:      ${MONGO_URI}"
+echo "[restore] URI:      ${MONGO_URI_MASKED}"
 
 read -rp "[restore] Confirm restore? This will overwrite data. (yes/no): " CONFIRM
 if [[ "${CONFIRM}" != "yes" ]]; then
@@ -45,9 +46,11 @@ if command -v mongorestore &>/dev/null; then
 else
     echo "[restore] mongorestore not found locally; attempting via Docker container 'ultrabot-mongodb'"
     docker cp "${ARCHIVE}" ultrabot-mongodb:/tmp/ultrabot-restore.gz
+    # Replace 'localhost' with '127.0.0.1' so the URI resolves inside the container.
+    SAFE_URI="${MONGO_URI/localhost/127.0.0.1}"
     # shellcheck disable=SC2086
     docker exec ultrabot-mongodb \
-        mongorestore --uri="${MONGO_URI}" --gzip --archive=/tmp/ultrabot-restore.gz ${DROP_FLAG}
+        mongorestore --uri="${SAFE_URI}" --gzip --archive=/tmp/ultrabot-restore.gz ${DROP_FLAG}
     docker exec ultrabot-mongodb rm /tmp/ultrabot-restore.gz
 fi
 
