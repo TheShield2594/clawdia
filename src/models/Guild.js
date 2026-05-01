@@ -205,7 +205,8 @@ const guildSchema = new Schema({
         description: { type: String, default: '' },
         price: { type: Number, required: true },
         roleId: { type: String, default: null },
-        stock: { type: Number, default: -1 }
+        stock: { type: Number, default: -1 },
+        imageUrl: { type: String, default: '' }
     }],
 
     tickets: {
