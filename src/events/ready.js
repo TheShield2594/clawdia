@@ -4,6 +4,7 @@ const { checkRssFeeds, scheduleDailyNews } = require('../services/rssService');
 const { checkReminders } = require('../services/reminderService');
 const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
+const { runJob } = require('../utils/jobRunner');
 
 module.exports = {
     name: 'ready',
@@ -24,23 +25,23 @@ module.exports = {
             status: 'online'
         });
 
-        cron.schedule('*/5 * * * *', async () => {
-            await checkRssFeeds(client);
-        });
+        cron.schedule('*/5 * * * *', () =>
+            runJob('rssService', 'checkRssFeeds', () => checkRssFeeds(client))
+        );
 
-        cron.schedule('* * * * *', async () => {
-            await checkReminders(client);
-        });
+        cron.schedule('* * * * *', () =>
+            runJob('reminderService', 'checkReminders', () => checkReminders(client))
+        );
 
         scheduleDailyNews(client);
 
-        cron.schedule('* * * * *', async () => {
-            await checkGiveaways(client);
-        });
+        cron.schedule('* * * * *', () =>
+            runJob('giveawayService', 'checkGiveaways', () => checkGiveaways(client))
+        );
 
-        cron.schedule('*/2 * * * *', async () => {
-            await checkTempVoice(client);
-        });
+        cron.schedule('*/2 * * * *', () =>
+            runJob('tempVoiceService', 'checkTempVoice', () => checkTempVoice(client))
+        );
 
         console.log('[READY] Background services started');
     }

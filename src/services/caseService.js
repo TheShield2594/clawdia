@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { EmbedBuilder } = require('discord.js');
 const Case = require('../models/Case');
 const Guild = require('../models/Guild');
+const { runJob } = require('../utils/jobRunner');
 
 async function getNextCaseId(guildId) {
     const result = await Guild.findOneAndUpdate(
@@ -76,9 +77,9 @@ async function getCasesForUser(guildId, targetUserId, limit = 10) {
 
 function startSlaMonitor(client) {
     // Check every 30 minutes for overdue open cases
-    cron.schedule('*/30 * * * *', async () => {
-        try {
-            const now = new Date();
+    cron.schedule('*/30 * * * *', () =>
+        runJob('caseService', 'slaMonitor', async () => {
+        const now = new Date();
             const overdueCases = await Case.find({
                 status: 'open',
                 slaDeadline: { $lte: now }
@@ -121,10 +122,8 @@ function startSlaMonitor(client) {
                     { slaDeadline: new Date(Date.now() + slaHours * 3600000) }
                 );
             }
-        } catch (err) {
-            console.error('SLA monitor error:', err);
-        }
-    });
+        })
+    );
 }
 
 module.exports = { createCase, addNote, closeCase, getCase, getCasesForUser, startSlaMonitor };
