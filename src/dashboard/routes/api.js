@@ -188,6 +188,18 @@ router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, a
     if (!channelId) return res.status(400).json({ error: 'channelId is required' });
     if (!Array.isArray(mappings) || !mappings.length) return res.status(400).json({ error: 'At least one emoji/role mapping is required' });
 
+    for (const m of mappings) {
+        if (!m || typeof m.emoji !== 'string' || !m.emoji.trim() ||
+            typeof m.roleId !== 'string' || !m.roleId.trim()) {
+            return res.status(400).json({ error: 'Each mapping must have a non-empty emoji and roleId' });
+        }
+    }
+
+    const emojiValues = mappings.map(m => m.emoji.trim());
+    if (new Set(emojiValues).size !== emojiValues.length) {
+        return res.status(400).json({ error: 'Duplicate emoji values are not allowed within the same panel' });
+    }
+
     try {
         const guild = req.client.guilds.cache.get(guildId);
         if (!guild) return res.status(404).json({ error: 'Guild not found' });
@@ -195,42 +207,48 @@ router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, a
         const channel = guild.channels.cache.get(channelId);
         if (!channel) return res.status(404).json({ error: 'Channel not found' });
 
+        const guildSettings = await Guild.findOne({ guildId });
+        if (!guildSettings) return res.status(404).json({ error: 'Guild settings not found' });
+
         const { EmbedBuilder } = require('discord.js');
         const embed = new EmbedBuilder()
             .setColor(0x5865F2)
             .setTitle(title || 'React to get a role!')
             .setDescription(
                 (description ? description + '\n\n' : '') +
-                mappings.map(m => `${m.emoji} — <@&${m.roleId}>`).join('\n')
+                mappings.map(m => `${m.emoji.trim()} — <@&${m.roleId.trim()}>`).join('\n')
             )
             .setFooter({ text: 'React below to assign yourself a role' });
 
         const message = await channel.send({ embeds: [embed] });
 
-        for (const mapping of mappings) {
-            const reactArg = mapping.emoji.match(/^<a?:(\w+):(\d+)>$/)
-                ? mapping.emoji.match(/^<a?:(\w+):(\d+)>$/)[1] + ':' + mapping.emoji.match(/^<a?:(\w+):(\d+)>$/)[2]
-                : mapping.emoji;
-            await message.react(reactArg).catch(() => null);
+        try {
+            for (const mapping of mappings) {
+                const emojiStr = mapping.emoji.trim();
+                const match = emojiStr.match(/^<a?:(\w+):(\d+)>$/);
+                const reactArg = match ? `${match[1]}:${match[2]}` : emojiStr;
+                await message.react(reactArg);
+            }
+
+            for (const mapping of mappings) {
+                guildSettings.reactionRoles.push({
+                    messageId: message.id,
+                    channelId,
+                    emoji: mapping.emoji.trim(),
+                    roleId: mapping.roleId.trim()
+                });
+            }
+
+            await guildSettings.save();
+        } catch (innerError) {
+            await message.delete().catch(() => null);
+            throw innerError;
         }
 
-        const guildSettings = await Guild.findOne({ guildId });
-        if (!guildSettings) return res.status(404).json({ error: 'Guild settings not found' });
-
-        for (const mapping of mappings) {
-            guildSettings.reactionRoles.push({
-                messageId: message.id,
-                channelId,
-                emoji: mapping.emoji,
-                roleId: mapping.roleId
-            });
-        }
-
-        await guildSettings.save();
         res.json({ success: true, messageId: message.id });
     } catch (error) {
         console.error('Reaction role panel create error:', error);
-        res.status(500).json({ error: error.message || 'Internal server error' });
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 

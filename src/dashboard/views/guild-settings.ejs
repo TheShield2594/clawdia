@@ -1656,7 +1656,7 @@
         });
 
         // ── Reaction Roles ─────────────────────────────────────────────────────────
-        var rrRoles = <%- JSON.stringify(roles || []) %>;
+        var rrRoles = <%- JSON.stringify(roles || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
 
         function addRrMapping() {
             var list = document.getElementById('rr-mappings-list');
