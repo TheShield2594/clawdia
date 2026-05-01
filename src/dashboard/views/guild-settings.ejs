@@ -171,6 +171,15 @@
                         <span class="toggle-text"><strong>Filter links</strong><span>Block external URLs in messages</span></span>
                         <span class="switch"><input type="checkbox" id="mod-links" <%= settings.moderation.linkFilter ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter repeated text</strong></span><span class="switch"><input type="checkbox" id="mod-repeated" <%= settings.moderation.repeatedTextFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter excessive caps</strong></span><span class="switch"><input type="checkbox" id="mod-caps" <%= settings.moderation.excessiveCapsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <div class="field"><label class="field-label" for="mod-caps-threshold">Caps threshold %</label><input type="number" id="mod-caps-threshold" value="<%= settings.moderation.capsThresholdPercent || 70 %>" min="1" max="100"></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter excessive emojis</strong></span><span class="switch"><input type="checkbox" id="mod-emojis" <%= settings.moderation.excessiveEmojisFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <div class="field"><label class="field-label" for="mod-emoji-threshold">Emoji threshold</label><input type="number" id="mod-emoji-threshold" value="<%= settings.moderation.emojiThreshold || 8 %>" min="1" max="50"></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter Zalgo text</strong></span><span class="switch"><input type="checkbox" id="mod-zalgo" <%= settings.moderation.zalgoFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter excessive mentions</strong></span><span class="switch"><input type="checkbox" id="mod-mentions" <%= settings.moderation.excessiveMentionsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <div class="field"><label class="field-label" for="mod-mention-threshold">Mention threshold</label><input type="number" id="mod-mention-threshold" value="<%= settings.moderation.mentionThreshold || 5 %>" min="1" max="25"></div>
+                    <div class="field"><label class="field-label" for="mod-bad-words">Blocked words</label><textarea id="mod-bad-words" rows="3"><%= (settings.moderation.customBadWords || []).join('\n') %></textarea><small>One word/phrase per line</small></div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
                     </div>
@@ -200,6 +209,10 @@
                         <textarea id="level-message" rows="2"><%= settings.leveling.levelUpMessage %></textarea>
                         <small>Variables: <code>{user}</code> · <code>{level}</code></small>
                     </div>
+                    <div class="field"><label class="field-label" for="level-reward-channel">Reward announcement channel</label><select id="level-reward-channel"><option value="">Use level-up channel/default</option><% channels.forEach(channel => { %><option value="<%= channel.id %>" <%= settings.leveling.rewardChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option><% }); %></select></div>
+                    <div class="field"><label class="field-label" for="level-no-xp-roles">No-XP roles</label><textarea id="level-no-xp-roles" rows="3" placeholder="One role ID per line"><%= (settings.leveling.noXpRoleIds || []).join('\n') %></textarea></div>
+                    <div class="field"><label class="field-label" for="level-no-xp-channels">No-XP channels</label><textarea id="level-no-xp-channels" rows="3" placeholder="One channel ID per line"><%= (settings.leveling.noXpChannelIds || []).join('\n') %></textarea></div>
+                    <div class="field"><label class="field-label" for="level-role-rewards">Role rewards</label><textarea id="level-role-rewards" rows="4" placeholder="level|roleId"><%= (settings.levelRoles || []).map(r => `${r.level}|${r.roleId}`).join('\n') %></textarea></div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('leveling')">Save changes</button>
                     </div>
@@ -243,6 +256,7 @@
                         <span class="toggle-text"><strong>Enable economy jobs</strong><span>Allow job/work-style earning systems</span></span>
                         <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
+                    <div class="field"><label class="field-label" for="economy-store-items">Store items</label><textarea id="economy-store-items" rows="6" placeholder="name|price|description|roleId|stock"><%= (settings.shop || []).map(i => `${i.name}|${i.price}|${i.description || ''}|${i.roleId || ''}|${typeof i.stock === 'number' ? i.stock : -1}`).join('\n') %></textarea><small>One item per line: <code>name|price|description|roleId|stock</code></small></div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
                     </div>
@@ -355,9 +369,10 @@
                         <small>One URL per line</small>
                     </div>
                     <div class="field">
-                        <label class="field-label" for="dailynews-profiles">Additional delivery profiles</label>
-                        <textarea id="dailynews-profiles" rows="5" placeholder="channelId|09:00|America/New_York|🗞️ Morning Brief|https://feed.one/rss,https://feed.two/rss"><%= (settings.dailyNewsProfiles || []).map(p => `${p.channelId || ''}|${p.time || '09:00'}|${p.timezone || 'UTC'}|${p.title || '📰 Daily News Digest'}|${(p.feeds || []).join(',')}`).join('\n') %></textarea>
-                        <small>One profile per line: <code>channelId|time|timezone|title|comma-separated-feeds</code>.</small>
+                        <label class="field-label">Additional delivery profiles</label>
+                        <div id="dailynews-profiles-list"></div>
+                        <button class="btn btn-sm" type="button" onclick="addDailyNewsProfile()">+ Add profile</button>
+                        <small>Create multiple independent digests (e.g., AI news to one channel, gaming news to another).</small>
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('dailynews')">Save changes</button>
@@ -523,6 +538,8 @@
     <div class="toast" id="toast"></div>
 
     <script>
+        const DAILY_NEWS_INITIAL_PROFILES = <%- JSON.stringify(settings.dailyNewsProfiles || []) %>;
+        const DAILY_NEWS_CHANNELS = <%- JSON.stringify(channels || []) %>;
         // Sidebar tab navigation
         const navItems = document.querySelectorAll('.nav-item');
         const panels = document.querySelectorAll('.panel');
@@ -569,6 +586,84 @@
             if (hint) hint.textContent = 'Default: ' + (AI_MODEL_DEFAULTS[provider] || '');
         }
         if (document.getElementById('ai-provider')) updateAiProviderUI();
+        renderDailyNewsProfiles();
+
+        function dailyNewsChannelOptions(selected = '') {
+            return ['<option value="">Select a channel</option>']
+                .concat(DAILY_NEWS_CHANNELS.map(c => `<option value="${c.id}" ${selected === c.id ? 'selected' : ''}>#${c.name}</option>`))
+                .join('');
+        }
+
+        function renderDailyNewsProfiles() {
+            const container = document.getElementById('dailynews-profiles-list');
+            if (!container) return;
+            if (!container.dataset.initialized) {
+                const seed = (DAILY_NEWS_INITIAL_PROFILES.length ? DAILY_NEWS_INITIAL_PROFILES : []).map((p, idx) => ({
+                    profileId: p.profileId || `profile-${Date.now()}-${idx + 1}`,
+                    enabled: p.enabled !== false,
+                    channelId: p.channelId || '',
+                    time: p.time || '09:00',
+                    timezone: p.timezone || 'UTC',
+                    title: p.title || '📰 Daily News Digest',
+                    feeds: Array.isArray(p.feeds) ? p.feeds : [],
+                    maxItemsPerFeed: p.maxItemsPerFeed || 3
+                }));
+                container.dataset.profiles = JSON.stringify(seed);
+                container.dataset.initialized = '1';
+            }
+
+            const profiles = JSON.parse(container.dataset.profiles || '[]');
+            container.innerHTML = profiles.length ? '' : '<div class="empty-state" style="padding:1rem;"><p>No additional profiles yet.</p></div>';
+            profiles.forEach((profile, idx) => {
+                const card = document.createElement('div');
+                card.className = 'list-item';
+                card.style.display = 'block';
+                card.style.marginBottom = '.75rem';
+                card.innerHTML = `
+                    <div style="display:grid;gap:.5rem;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <strong>Profile ${idx + 1}</strong>
+                            <button class="btn btn-danger btn-sm" type="button" onclick="removeDailyNewsProfile(${idx})">Remove</button>
+                        </div>
+                        <label>Channel</label>
+                        <select onchange="updateDailyNewsProfile(${idx}, 'channelId', this.value)">${dailyNewsChannelOptions(profile.channelId)}</select>
+                        <label>Time (24h)</label>
+                        <input type="text" value="${profile.time || '09:00'}" onchange="updateDailyNewsProfile(${idx}, 'time', this.value)">
+                        <label>Timezone</label>
+                        <input type="text" value="${profile.timezone || 'UTC'}" onchange="updateDailyNewsProfile(${idx}, 'timezone', this.value)">
+                        <label>Title</label>
+                        <input type="text" value="${profile.title || '📰 Daily News Digest'}" onchange="updateDailyNewsProfile(${idx}, 'title', this.value)">
+                        <label>Feeds (one URL per line)</label>
+                        <textarea rows="3" onchange="updateDailyNewsProfile(${idx}, 'feeds', this.value)">${(profile.feeds || []).join('\n')}</textarea>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function addDailyNewsProfile() {
+            const container = document.getElementById('dailynews-profiles-list');
+            const profiles = JSON.parse(container.dataset.profiles || '[]');
+            profiles.push({ profileId: `profile-${Date.now()}`, enabled: true, channelId: '', time: '09:00', timezone: 'UTC', title: '📰 Daily News Digest', feeds: [], maxItemsPerFeed: parseInt(document.getElementById('dailynews-max-items').value, 10) || 3 });
+            container.dataset.profiles = JSON.stringify(profiles);
+            renderDailyNewsProfiles();
+        }
+
+        function removeDailyNewsProfile(index) {
+            const container = document.getElementById('dailynews-profiles-list');
+            const profiles = JSON.parse(container.dataset.profiles || '[]');
+            profiles.splice(index, 1);
+            container.dataset.profiles = JSON.stringify(profiles);
+            renderDailyNewsProfiles();
+        }
+
+        function updateDailyNewsProfile(index, key, value) {
+            const container = document.getElementById('dailynews-profiles-list');
+            const profiles = JSON.parse(container.dataset.profiles || '[]');
+            if (!profiles[index]) return;
+            profiles[index][key] = key === 'feeds' ? value.split('\n').map(f => f.trim()).filter(Boolean) : value;
+            container.dataset.profiles = JSON.stringify(profiles);
+        }
 
         async function saveSettings(section) {
             const guildId = '<%= guild.id %>';
@@ -596,16 +691,39 @@
                     'moderation.autoModEnabled': document.getElementById('mod-automod').checked,
                     'moderation.spamProtection': document.getElementById('mod-spam').checked,
                     'moderation.inviteFilter': document.getElementById('mod-invites').checked,
-                    'moderation.linkFilter': document.getElementById('mod-links').checked
+                    'moderation.linkFilter': document.getElementById('mod-links').checked,
+                    'moderation.repeatedTextFilter': document.getElementById('mod-repeated').checked,
+                    'moderation.excessiveCapsFilter': document.getElementById('mod-caps').checked,
+                    'moderation.capsThresholdPercent': parseInt(document.getElementById('mod-caps-threshold').value, 10) || 70,
+                    'moderation.excessiveEmojisFilter': document.getElementById('mod-emojis').checked,
+                    'moderation.emojiThreshold': parseInt(document.getElementById('mod-emoji-threshold').value, 10) || 8,
+                    'moderation.zalgoFilter': document.getElementById('mod-zalgo').checked,
+                    'moderation.excessiveMentionsFilter': document.getElementById('mod-mentions').checked,
+                    'moderation.mentionThreshold': parseInt(document.getElementById('mod-mention-threshold').value, 10) || 5,
+                    'moderation.customBadWords': document.getElementById('mod-bad-words').value.split('\n').map(w => w.trim()).filter(Boolean)
                 };
             } else if (section === 'leveling') {
+                const noXpRoleIds = document.getElementById('level-no-xp-roles').value.split('\n').map(v => v.trim()).filter(Boolean);
+                const noXpChannelIds = document.getElementById('level-no-xp-channels').value.split('\n').map(v => v.trim()).filter(Boolean);
+                const levelRoles = document.getElementById('level-role-rewards').value.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+                    const [level, roleId] = line.split('|');
+                    return { level: parseInt(level, 10), roleId: (roleId || '').trim() };
+                }).filter(item => item.level > 0 && item.roleId);
                 data = {
                     'leveling.enabled': document.getElementById('level-enabled').checked,
                     'leveling.xpRate': parseFloat(document.getElementById('level-xp-rate').value),
                     'leveling.levelUpMessage': document.getElementById('level-message').value,
-                    'leveling.rewardsEnabled': document.getElementById('level-rewards-enabled').checked
+                    'leveling.rewardsEnabled': document.getElementById('level-rewards-enabled').checked,
+                    'leveling.noXpRoleIds': noXpRoleIds,
+                    'leveling.noXpChannelIds': noXpChannelIds,
+                    'leveling.rewardChannelId': document.getElementById('level-reward-channel').value || null,
+                    levelRoles
                 };
             } else if (section === 'economy') {
+                const shop = document.getElementById('economy-store-items').value.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+                    const [name, price, description = '', roleId = '', stock = '-1'] = line.split('|');
+                    return { name: (name || '').trim(), price: parseInt(price, 10), description: description.trim(), roleId: roleId.trim() || null, stock: parseInt(stock, 10) };
+                }).filter(item => item.name && Number.isFinite(item.price));
                 data = {
                     'economy.enabled': document.getElementById('economy-enabled').checked,
                     'economy.currency': document.getElementById('economy-currency').value,
@@ -614,7 +732,8 @@
                     'economy.workMax': parseInt(document.getElementById('economy-work-max').value),
                     'economy.shopEnabled': document.getElementById('economy-shop-enabled').checked,
                     'economy.gamesEnabled': document.getElementById('economy-games-enabled').checked,
-                    'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked
+                    'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked,
+                    shop
                 };
             } else if (section === 'music') {
                 data = {
@@ -653,20 +772,18 @@
                 const feedsText = document.getElementById('dailynews-feeds').value;
                 const feeds = feedsText.split('\n').filter(f => f.trim() !== '');
 
-                const profilesRaw = document.getElementById('dailynews-profiles').value.split('\n').map(line => line.trim()).filter(Boolean);
-                const profiles = profilesRaw.map((line, index) => {
-                    const [channelId = '', time = '09:00', timezone = 'UTC', title = '📰 Daily News Digest', feedsCsv = ''] = line.split('|');
-                    return {
-                        profileId: `profile-${index + 1}`,
-                        enabled: true,
-                        channelId: channelId.trim(),
-                        time: time.trim() || '09:00',
-                        timezone: timezone.trim() || 'UTC',
-                        title: title.trim() || '📰 Daily News Digest',
-                        feeds: feedsCsv.split(',').map(f => f.trim()).filter(Boolean),
+                const profiles = JSON.parse(document.getElementById('dailynews-profiles-list').dataset.profiles || '[]')
+                    .map((p, index) => ({
+                        profileId: p.profileId || `profile-${index + 1}`,
+                        enabled: p.enabled !== false,
+                        channelId: (p.channelId || '').trim(),
+                        time: (p.time || '09:00').trim(),
+                        timezone: (p.timezone || 'UTC').trim(),
+                        title: (p.title || '📰 Daily News Digest').trim(),
+                        feeds: (Array.isArray(p.feeds) ? p.feeds : []).map(f => f.trim()).filter(Boolean),
                         maxItemsPerFeed: parseInt(document.getElementById('dailynews-max-items').value, 10) || 3
-                    };
-                }).filter(p => p.channelId && p.feeds.length);
+                    }))
+                    .filter(p => p.channelId && p.feeds.length);
 
                 data = {
                     'dailyNews.enabled': document.getElementById('dailynews-enabled').checked,

@@ -149,6 +149,8 @@ async function handleStreakAndQuests(message, guildSettings) {
 
 async function handleLeveling(message, guildSettings) {
     if (!guildSettings?.leveling?.rewardsEnabled) return;
+    if (guildSettings.leveling?.noXpChannelIds?.includes(message.channel.id)) return;
+    if (message.member?.roles?.cache?.some(role => guildSettings.leveling?.noXpRoleIds?.includes(role.id))) return;
 
     let user = await User.findOne({ userId: message.author.id, guildId: message.guild.id });
 
@@ -191,10 +193,11 @@ async function handleLeveling(message, guildSettings) {
                 .replace(/{user}/g, `<@${message.author.id}>`)
                 .replace(/{level}/g, user.level);
 
-            if (guildSettings.leveling.announceInChannel) {
+            const rewardChannelId = guildSettings.leveling.rewardChannelId || guildSettings.leveling.announceChannel;
+            if (guildSettings.leveling.announceInChannel && !rewardChannelId) {
                 await message.reply(levelUpMsg).catch(console.error);
-            } else if (guildSettings.leveling.announceChannel) {
-                const ch = message.guild.channels.cache.get(guildSettings.leveling.announceChannel);
+            } else if (rewardChannelId) {
+                const ch = message.guild.channels.cache.get(rewardChannelId);
                 if (ch) await ch.send(levelUpMsg).catch(console.error);
             }
 
@@ -266,6 +269,64 @@ async function handleAutoModeration(message, guildSettings) {
         setTimeout(() => warn.delete().catch(() => {}), 5000);
         await applyAutoModAction(message, guildSettings, 'posting a link', OFFENSE_WEIGHTS.link);
         return true;
+    }
+
+    if (mod.repeatedTextFilter && !isModerator) {
+        const normalized = message.content.toLowerCase().replace(/\s+/g, ' ').trim();
+        if (normalized.length > 12 && /(.)\1{8,}/.test(normalized)) {
+            await message.delete().catch(console.error);
+            const warn = await message.channel.send(`${message.author}, please avoid repeated/spammy text.`);
+            setTimeout(() => warn.delete().catch(() => {}), 5000);
+            await applyAutoModAction(message, guildSettings, 'repeated text spam', OFFENSE_WEIGHTS.spam);
+            return true;
+        }
+    }
+
+    if (mod.excessiveCapsFilter && !isModerator) {
+        const letters = (message.content.match(/[a-z]/gi) || []);
+        const caps = (message.content.match(/[A-Z]/g) || []);
+        const ratio = letters.length ? (caps.length / letters.length) * 100 : 0;
+        if (letters.length >= 10 && ratio >= (mod.capsThresholdPercent || 70)) {
+            await message.delete().catch(console.error);
+            const warn = await message.channel.send(`${message.author}, please avoid excessive caps.`);
+            setTimeout(() => warn.delete().catch(() => {}), 5000);
+            await applyAutoModAction(message, guildSettings, 'excessive caps', OFFENSE_WEIGHTS.spam);
+            return true;
+        }
+    }
+
+    if (mod.excessiveEmojisFilter && !isModerator) {
+        const unicodeEmojiCount = (message.content.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || []).length;
+        const customEmojiCount = (message.content.match(/<a?:\w+:\d+>/g) || []).length;
+        if ((unicodeEmojiCount + customEmojiCount) >= (mod.emojiThreshold || 8)) {
+            await message.delete().catch(console.error);
+            const warn = await message.channel.send(`${message.author}, too many emojis in one message.`);
+            setTimeout(() => warn.delete().catch(() => {}), 5000);
+            await applyAutoModAction(message, guildSettings, 'excessive emojis', OFFENSE_WEIGHTS.spam);
+            return true;
+        }
+    }
+
+    if (mod.zalgoFilter && !isModerator) {
+        const combiningMarks = (message.content.normalize('NFD').match(/[\u0300-\u036f]/g) || []).length;
+        if (combiningMarks >= 6) {
+            await message.delete().catch(console.error);
+            const warn = await message.channel.send(`${message.author}, zalgo/combining text is not allowed.`);
+            setTimeout(() => warn.delete().catch(() => {}), 5000);
+            await applyAutoModAction(message, guildSettings, 'zalgo text', OFFENSE_WEIGHTS.spam);
+            return true;
+        }
+    }
+
+    if (mod.excessiveMentionsFilter && !isModerator) {
+        const mentionCount = message.mentions.users.size + message.mentions.roles.size;
+        if (mentionCount >= (mod.mentionThreshold || 5)) {
+            await message.delete().catch(console.error);
+            const warn = await message.channel.send(`${message.author}, too many mentions in one message.`);
+            setTimeout(() => warn.delete().catch(() => {}), 5000);
+            await applyAutoModAction(message, guildSettings, 'excessive mentions', OFFENSE_WEIGHTS.spam);
+            return true;
+        }
     }
 
     if (mod.profanityFilter && !isModerator) {
