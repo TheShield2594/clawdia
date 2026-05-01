@@ -324,7 +324,14 @@ const guildSchema = new Schema({
         channelId: { type: String, default: null },
         time: { type: String, default: '08:00' },
         timezone: { type: String, default: 'UTC' },
-        translation: { type: String, default: 'kjv' },
+        translation: {
+            type: String,
+            default: 'kjv',
+            enum: {
+                values: ['kjv', 'asv', 'web', 'ylt', 'darby'],
+                message: 'bibleVerse.translation must be one of: kjv, asv, web, ylt, darby'
+            }
+        },
         autoRespond: { type: Boolean, default: true }
     },
 
