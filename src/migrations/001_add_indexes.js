@@ -17,7 +17,15 @@ function keysEqual(a, b) {
 // by Mongoose's schema.index()), it is dropped first so the named version can
 // be created. Safe to re-run.
 async function ensureIndex(collection, keys, options) {
-    const existing = await collection.indexes();
+    let existing = [];
+    try {
+        existing = await collection.indexes();
+    } catch (err) {
+        // NamespaceNotFound: collection doesn't exist yet. createIndex below
+        // will create it implicitly, so treat as "no existing indexes".
+        if (err && err.code !== 26) throw err;
+    }
+
     const sameName = existing.find(i => i.name === options.name);
     if (sameName) return;
 
