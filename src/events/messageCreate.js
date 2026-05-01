@@ -100,6 +100,10 @@ module.exports = {
 
             await handleSuggestions(message, guildSettings);
 
+            if (guildSettings?.bibleVerse?.autoRespond) {
+                await handleBibleVerseDetection(message, guildSettings);
+            }
+
             // Streak + quests (only for non-blocked messages)
             await handleStreakAndQuests(message, guildSettings);
 
@@ -477,6 +481,18 @@ async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 
     } catch (err) {
         console.error('AutoMod action error:', err);
     }
+}
+
+async function handleBibleVerseDetection(message, guildSettings) {
+    const { detectVerseReferences, lookupVerse, createVerseEmbed } = require('../services/bibleService');
+    const refs = detectVerseReferences(message.content);
+    if (!refs.length) return;
+
+    const translation = guildSettings.bibleVerse?.translation || 'kjv';
+    const verseData = await lookupVerse(refs[0], translation);
+    if (!verseData?.text) return;
+
+    await message.reply({ embeds: [createVerseEmbed(verseData)] }).catch(() => {});
 }
 
 async function handleCustomCommands(message, guildSettings) {

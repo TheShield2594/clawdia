@@ -319,6 +319,22 @@ const guildSchema = new Schema({
         downvoteEmoji: { type: String, default: '👎' }
     },
 
+    bibleVerse: {
+        enabled: { type: Boolean, default: false },
+        channelId: { type: String, default: null },
+        time: { type: String, default: '08:00' },
+        timezone: { type: String, default: 'UTC' },
+        translation: {
+            type: String,
+            default: 'kjv',
+            enum: {
+                values: ['kjv', 'asv', 'web', 'ylt', 'darby'],
+                message: 'bibleVerse.translation must be one of: kjv, asv, web, ylt, darby'
+            }
+        },
+        autoRespond: { type: Boolean, default: true }
+    },
+
     analytics: {
         memberEvents: [{
             date: { type: String, required: true },

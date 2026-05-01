@@ -86,6 +86,11 @@ async function startBot() {
     await startDashboard();
 
     client.once('ready', () => {
+        const { deployCommands } = require('./utils/commandDeployer');
+        deployCommands(process.env.CLIENT_ID, process.env.DISCORD_TOKEN)
+            .then(count => console.log(`[COMMANDS] Deployed ${count} slash commands`))
+            .catch(err => console.error('[COMMANDS] Failed to deploy slash commands:', err));
+
         const { startSummaryService } = require('./services/summaryService');
         startSummaryService(client);
 
@@ -97,6 +102,9 @@ async function startBot() {
 
         const { scheduleActivePollExpirations } = require('./commands/utility/poll');
         scheduleActivePollExpirations(client);
+
+        const { startDailyBibleService } = require('./services/dailyBibleService');
+        startDailyBibleService(client);
     });
 
     client.login(process.env.DISCORD_TOKEN);

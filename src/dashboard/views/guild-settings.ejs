@@ -45,6 +45,7 @@
                 <button class="nav-item" data-tab="analytics"><span class="nav-emoji">📊</span> Analytics</button>
                 <button class="nav-item" data-tab="ai"><span class="nav-emoji">🧠</span> AI Chat</button>
                 <button class="nav-item" data-tab="tempvoice"><span class="nav-emoji">🔊</span> Temp Voice</button>
+                <button class="nav-item" data-tab="bibleverses"><span class="nav-emoji">📖</span> Bible Verses</button>
             </aside>
 
             <div class="settings-content">
@@ -825,6 +826,61 @@
                         <p>Loading analytics...</p>
                     </div>
                 </section>
+
+                <!-- Bible Verses -->
+                <section id="bibleverses" class="panel">
+                    <div class="panel-head">
+                        <h2>Bible Verses</h2>
+                        <p>Post a daily Bible verse to a channel and auto-respond when members mention a verse reference like <code>John 3:16</code>.</p>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Daily Verse</h3></div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable daily Bible verse</strong><span>Post a verse automatically at the scheduled time</span></span>
+                        <span class="switch"><input type="checkbox" id="bv-enabled" <%= (settings.bibleVerse && settings.bibleVerse.enabled) ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="bv-channel">Post to channel</label>
+                        <select id="bv-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= (settings.bibleVerse && settings.bibleVerse.channelId === channel.id) ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="bv-time">Post time (24h)</label>
+                            <input type="text" id="bv-time" placeholder="08:00" value="<%= (settings.bibleVerse && settings.bibleVerse.time) || '08:00' %>">
+                        </div>
+                        <div>
+                            <label class="field-label" for="bv-timezone">Timezone</label>
+                            <input type="text" id="bv-timezone" placeholder="UTC" value="<%= (settings.bibleVerse && settings.bibleVerse.timezone) || 'UTC' %>">
+                            <small>e.g. America/New_York, Europe/London, UTC</small>
+                        </div>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Auto-Response</h3></div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Auto-respond to verse references</strong><span>When a member types a reference like <code>John 3:16</code> the bot replies with the verse</span></span>
+                        <span class="switch"><input type="checkbox" id="bv-autorespond" <%= (!settings.bibleVerse || settings.bibleVerse.autoRespond !== false) ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="bv-translation">Default translation</label>
+                        <select id="bv-translation">
+                            <option value="kjv" <%= (!settings.bibleVerse || settings.bibleVerse.translation === 'kjv') ? 'selected' : '' %>>King James Version (KJV)</option>
+                            <option value="asv" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'asv') ? 'selected' : '' %>>American Standard Version (ASV)</option>
+                            <option value="web" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'web') ? 'selected' : '' %>>World English Bible (WEB)</option>
+                            <option value="ylt" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'ylt') ? 'selected' : '' %>>Young's Literal Translation (YLT)</option>
+                            <option value="darby" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'darby') ? 'selected' : '' %>>Darby</option>
+                        </select>
+                        <small>Used for both the daily verse and auto-responses. No API key required.</small>
+                    </div>
+
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('bibleverses')">Save changes</button>
+                    </div>
+                </section>
             </div>
         </div>
     </main>
@@ -1141,6 +1197,15 @@
                     'tempVoice.channelName': document.getElementById('tv-channel-name').value.trim() || "{username}'s VC",
                     'tempVoice.userLimit': parseInt(document.getElementById('tv-user-limit').value, 10) || 0,
                     'tempVoice.bitrate': parseInt(document.getElementById('tv-bitrate').value, 10) || 64
+                };
+            } else if (section === 'bibleverses') {
+                data = {
+                    'bibleVerse.enabled': document.getElementById('bv-enabled').checked,
+                    'bibleVerse.channelId': document.getElementById('bv-channel').value || null,
+                    'bibleVerse.time': document.getElementById('bv-time').value.trim() || '08:00',
+                    'bibleVerse.timezone': document.getElementById('bv-timezone').value.trim() || 'UTC',
+                    'bibleVerse.translation': document.getElementById('bv-translation').value,
+                    'bibleVerse.autoRespond': document.getElementById('bv-autorespond').checked
                 };
             } else if (section === 'dailynews') {
                 const feedsText = document.getElementById('dailynews-feeds').value;
