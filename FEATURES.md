@@ -233,6 +233,28 @@ Auto-generated cards include:
 - Member count
 - Custom background
 
+
+## 📈 Insights & Analytics Layer
+
+### Decision-Focused Dashboards
+
+UltraBot now provides decision-grade analytics so server owners can move from raw events to clear actions.
+
+### Included Insights
+
+- **Retention Cohorts**: D1/D7/D30 retention segmented by join week
+- **Active Hours**: Hourly and weekday heatmaps for engagement timing
+- **Toxic Channels**: Channels scored by moderation incidents and warning concentration
+- **Mod SLA Trends**: First-response and resolution-time trends for moderation actions
+- **Newcomer Conversion**: 7-day and 30-day conversion from joiner to active member
+
+### Practical Actions
+
+- Move events and announcements to high-engagement windows
+- Rebalance moderator coverage by time block
+- Prioritize intervention in channels with rising toxicity
+- A/B test onboarding and compare conversion gains over time
+
 ## 🔧 Advanced Features
 
 ### Custom Commands

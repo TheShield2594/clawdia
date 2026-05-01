@@ -15,6 +15,7 @@ A feature-rich, self-hosted Discord bot with extensive moderation tools, welcome
 - **Reminders**: Set reminders with flexible time options
 - **Web Dashboard**: Full-featured admin dashboard for configuration
 - **Auto-Moderation**: Spam, invite, and link filtering
+- **Server Insights**: Retention cohorts, active hours, toxic channel hotspots, mod SLA trends, and newcomer conversion
 
 ## Quick Start with Docker (Portainer)
 
@@ -139,6 +140,27 @@ npm start
 6. Enable AI Chat
 
 Users can now chat with AI in the designated channel or use `/ai` command anywhere.
+
+
+## Insights Layer
+
+UltraBot includes an **Insights** view in the dashboard focused on decisions instead of raw event logs.
+
+### Key Metrics
+
+- **Retention Cohorts**: Track D1/D7/D30 member retention by join week
+- **Active Hours Heatmap**: See peak activity hours by day/time (UTC or server timezone)
+- **Toxic Channel Detection**: Rank channels by moderation events, warning density, and repeat offenders
+- **Moderator SLA Trends**: Measure median response time from incident to first mod action
+- **Newcomer Conversion (7/30 days)**: Track how many new members become active contributors
+
+### Why it matters
+
+Server owners can use these metrics to:
+- Schedule events during true peak hours
+- Spot channels that need policy updates or more moderators
+- Improve onboarding flows and newcomer retention
+- Track whether moderation performance is improving over time
 
 ## Daily News Digest
 
