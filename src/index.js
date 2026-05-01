@@ -66,8 +66,6 @@ async function loadEvents() {
 async function connectDatabase() {
     try {
         await connect(process.env.MONGODB_URI, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
             serverSelectionTimeoutMS: 10000,
         });
         console.log('[DATABASE] Connected to MongoDB');

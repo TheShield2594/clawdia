@@ -12,6 +12,6 @@ const summaryJobSchema = new Schema({
     createdAt:       { type: Date, default: Date.now }
 });
 
-summaryJobSchema.index({ enabled: 1, hour: 1, minute: 1 });
+summaryJobSchema.index({ enabled: 1, hour: 1, minute: 1 }, { name: 'idx_summaryjobs_schedule' });
 
 module.exports = model('SummaryJob', summaryJobSchema);
