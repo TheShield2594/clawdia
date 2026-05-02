@@ -40,26 +40,32 @@ module.exports = {
         user.xp = 0;
         await user.save();
 
-        // Assign the highest applicable level role reward
+        let roleSyncStatus = 'no level roles configured';
+
         if (guildSettings.levelRoles?.length) {
             const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
-            if (member) {
-                const applicable = guildSettings.levelRoles
+            if (!member) {
+                roleSyncStatus = 'skipped: user not in guild';
+            } else {
+                const toAdd = guildSettings.levelRoles
                     .filter(lr => lr.level <= newLevel)
-                    .sort((a, b) => b.level - a.level);
+                    .sort((a, b) => b.level - a.level)[0];
 
-                const toAdd = applicable[0];
-                if (toAdd) {
-                    await member.roles.add(toAdd.roleId).catch(console.error);
-                }
+                const toRemove = guildSettings.levelRoles.filter(
+                    lr => lr.level > newLevel && member.roles.cache.has(lr.roleId)
+                );
 
-                // Remove level roles that are above the assigned level
-                const toRemove = guildSettings.levelRoles.filter(lr => lr.level > newLevel);
-                for (const lr of toRemove) {
-                    if (member.roles.cache.has(lr.roleId)) {
-                        await member.roles.remove(lr.roleId).catch(console.error);
-                    }
-                }
+                const addOutcome = toAdd
+                    ? await member.roles.add(toAdd.roleId).then(() => 'fulfilled').catch(err => { console.error(err); return 'rejected'; })
+                    : 'fulfilled';
+
+                const removeOutcomes = await Promise.allSettled(
+                    toRemove.map(lr => member.roles.remove(lr.roleId))
+                );
+                removeOutcomes.filter(r => r.status === 'rejected').forEach(r => console.error(r.reason));
+
+                const anyFailed = addOutcome === 'rejected' || removeOutcomes.some(r => r.status === 'rejected');
+                roleSyncStatus = anyFailed ? 'partial sync: failed to add/remove some roles' : 'roles synced';
             }
         }
 
@@ -67,8 +73,11 @@ module.exports = {
             .setColor('#5865F2')
             .setTitle('Level Assigned')
             .setDescription(`${targetUser} has been set to **level ${newLevel}**.`)
-            .addFields({ name: 'Previous Level', value: `${previousLevel}`, inline: true },
-                       { name: 'New Level', value: `${newLevel}`, inline: true })
+            .addFields(
+                { name: 'Previous Level', value: `${previousLevel}`, inline: true },
+                { name: 'New Level', value: `${newLevel}`, inline: true },
+                { name: 'Role Sync', value: roleSyncStatus, inline: false }
+            )
             .setFooter({ text: `Set by ${interaction.user.tag}` })
             .setTimestamp();
 
