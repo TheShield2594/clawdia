@@ -185,12 +185,20 @@ Set a moderation log channel to track:
 /daily               - Daily reward (24h cooldown)
 /work                - Work for coins (1h cooldown)
 /transfer <user> <amount> - Send coins
+/wheel               - Spin the Wheel of Fortune (free spin per cooldown, or buy extra spins)
 ```
+
+**Wheel of Fortune:**
+- One free spin per cooldown window (default: 24 hours, configurable per server)
+- Optional paid spins at any time using server currency
+- Weighted prize segments — coins, jackpot, free re-spin, or bust
+- Animated reveal in the embed before the result is shown
 
 **Dashboard Settings:**
 - Currency symbol (💰, 🪙, $, etc.)
 - Daily reward amount
 - Work reward range (min-max)
+- Wheel of Fortune: enable/disable, cooldown hours, extra spin cost
 
 ## 👋 Welcome System
 
@@ -361,6 +369,7 @@ Prevent spam with built-in cooldowns:
 | `/ai` | 10 seconds |
 | `/daily` | 24 hours |
 | `/work` | 1 hour |
+| `/wheel` | 24 hours (configurable; bypass with paid spin) |
 | `/play` | 3 seconds |
 | Most others | 3 seconds |
 

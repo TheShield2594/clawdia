@@ -104,7 +104,10 @@ const guildSchema = new Schema({
         coinflipEnabled: { type: Boolean, default: true },
         rollEnabled: { type: Boolean, default: true },
         blackjackEnabled: { type: Boolean, default: true },
-        jobsEnabled: { type: Boolean, default: true }
+        jobsEnabled: { type: Boolean, default: true },
+        wheelEnabled: { type: Boolean, default: true },
+        wheelCooldownHours: { type: Number, default: 24, min: 1, max: 168 },
+        wheelExtraSpinCost: { type: Number, default: 200, min: 1 }
     },
     
     music: {
