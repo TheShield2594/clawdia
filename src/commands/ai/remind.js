@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const Reminder = require('../../models/Reminder');
 
 module.exports = {
+    cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('remind')
         .setDescription('Set a reminder')

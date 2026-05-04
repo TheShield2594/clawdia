@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const { createRankCard } = require('../../utils/cardGenerator');
 
 module.exports = {
+    cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('rank')
         .setDescription('Check your or another user\'s rank')

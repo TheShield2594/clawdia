@@ -260,8 +260,7 @@ async function handleAutoModeration(message, guildSettings) {
 
     if (!mod.autoModEnabled) return false;
 
-    if (mod.spamProtection) {
-        if (isModerator) return false;
+    if (mod.spamProtection && !isModerator) {
         const guildId = message.guild.id;
         const userId = message.author.id;
         const now = Date.now();

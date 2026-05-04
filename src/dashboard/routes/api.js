@@ -26,18 +26,46 @@ function checkAuth(req, res, next) {
 
 function checkGuildAccess(req, res, next) {
     const { guildId } = req.params;
-    const userGuilds = req.user.guilds.filter(guild => 
+    const userGuilds = req.user.guilds.filter(guild =>
         (guild.permissions & 0x20) === 0x20 && req.client.guilds.cache.has(guild.id)
     );
-    
+
     if (!userGuilds.find(g => g.id === guildId)) {
         return res.status(403).json({ error: 'Forbidden' });
     }
-    
+
     next();
 }
 
-router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, async (req, res) => {
+// In-memory rate limiter for write operations: 60 requests per minute per user
+const writeRateLimits = new Map();
+setInterval(() => {
+    const cutoff = Date.now() - 60 * 1000;
+    for (const [userId, timestamps] of writeRateLimits) {
+        if (timestamps.every(t => t < cutoff)) writeRateLimits.delete(userId);
+    }
+}, 5 * 60 * 1000);
+
+function checkWriteRateLimit(req, res, next) {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const now = Date.now();
+    const windowMs = 60 * 1000;
+    const limit = 60;
+    const arr = (writeRateLimits.get(userId) || []).filter(t => now - t < windowMs);
+
+    if (arr.length >= limit) {
+        writeRateLimits.set(userId, arr);
+        return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+    }
+
+    arr.push(now);
+    writeRateLimits.set(userId, arr);
+    next();
+}
+
+router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
 
@@ -254,7 +282,7 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
     }
 });
 
-router.post('/guild/:guildId/autorole', checkAuth, checkGuildAccess, async (req, res) => {
+router.post('/guild/:guildId/autorole', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { roleId } = req.body;
 
@@ -276,7 +304,7 @@ router.post('/guild/:guildId/autorole', checkAuth, checkGuildAccess, async (req,
     }
 });
 
-router.delete('/guild/:guildId/autorole/:roleId', checkAuth, checkGuildAccess, async (req, res) => {
+router.delete('/guild/:guildId/autorole/:roleId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, roleId } = req.params;
 
     try {
@@ -293,7 +321,7 @@ router.delete('/guild/:guildId/autorole/:roleId', checkAuth, checkGuildAccess, a
     }
 });
 
-router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, async (req, res) => {
+router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { channelId, title, description, mappings } = req.body;
 
@@ -364,7 +392,7 @@ router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, a
     }
 });
 
-router.delete('/guild/:guildId/reactionrole/panel/:messageId', checkAuth, checkGuildAccess, async (req, res) => {
+router.delete('/guild/:guildId/reactionrole/panel/:messageId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, messageId } = req.params;
 
     try {
@@ -392,7 +420,7 @@ router.delete('/guild/:guildId/reactionrole/panel/:messageId', checkAuth, checkG
     }
 });
 
-router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, async (req, res) => {
+router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { url, channelId } = req.body;
 
@@ -409,7 +437,7 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, async (req, 
     }
 });
 
-router.delete('/guild/:guildId/rss/:index', checkAuth, checkGuildAccess, async (req, res) => {
+router.delete('/guild/:guildId/rss/:index', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, index } = req.params;
 
     try {

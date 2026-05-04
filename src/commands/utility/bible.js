@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { lookupVerse, getDailyVerse, createVerseEmbed } = require('../../services/bibleService');
 
 module.exports = {
+    cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('bible')
         .setDescription('Look up a Bible verse or get today\'s daily verse')
