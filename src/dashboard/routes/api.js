@@ -5,6 +5,7 @@ const Case = require('../../models/Case');
 const User = require('../../models/User');
 const { rescheduleDailyNews } = require('../../services/rssService');
 const { rescheduleBibleVerse } = require('../../services/dailyBibleService');
+const Parser = require('rss-parser');
 
 function median(nums) {
     if (!nums.length) return null;
@@ -417,6 +418,32 @@ router.delete('/guild/:guildId/reactionrole/panel/:messageId', checkAuth, checkG
     } catch (error) {
         console.error('Reaction role panel delete error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.post('/guild/:guildId/validate-feed', checkAuth, checkGuildAccess, async (req, res) => {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string') {
+        return res.status(400).json({ valid: false, error: 'No URL provided.' });
+    }
+
+    let parsed;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return res.json({ valid: false, error: 'Invalid URL format.' });
+    }
+
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return res.json({ valid: false, error: 'URL must use http or https.' });
+    }
+
+    try {
+        const feedParser = new Parser({ timeout: 8000 });
+        const feed = await feedParser.parseURL(url);
+        return res.json({ valid: true, title: feed.title || '', itemCount: feed.items?.length ?? 0 });
+    } catch (err) {
+        return res.json({ valid: false, error: 'Could not fetch or parse feed. Check the URL and ensure it is a valid RSS/Atom feed.' });
     }
 });
 

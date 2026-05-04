@@ -7,6 +7,10 @@ const parser = new Parser();
 let dailyNewsJobs = new Map();
 const runtimeTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+// Consecutive failure counts per feed URL. Feeds are skipped after DEAD_FEED_THRESHOLD failures.
+const feedFailCounts = new Map();
+const DEAD_FEED_THRESHOLD = 3;
+
 function createLegacyProfile(guild) {
     const legacy = guild.dailyNews || {};
     return {
@@ -114,8 +118,15 @@ async function sendDailyNewsForProfile(client, guild, profile) {
     const cutoffMs = Date.now() - (24 * 60 * 60 * 1000);
 
     for (const feedUrl of profile.feeds) {
+        const failCount = feedFailCounts.get(feedUrl) || 0;
+        if (failCount >= DEAD_FEED_THRESHOLD) {
+            console.warn(`Skipping dead feed (${failCount} consecutive failures): ${feedUrl}`);
+            continue;
+        }
+
         try {
             const parsedFeed = await parser.parseURL(feedUrl);
+            feedFailCounts.delete(feedUrl);
             const feedItems = parsedFeed.items
                 .map(item => ({
                     title: item.title,
@@ -131,7 +142,13 @@ async function sendDailyNewsForProfile(client, guild, profile) {
 
             allItems.push(...feedItems);
         } catch (error) {
-            console.error(`Error parsing daily news feed ${feedUrl}:`, error);
+            const newCount = (feedFailCounts.get(feedUrl) || 0) + 1;
+            feedFailCounts.set(feedUrl, newCount);
+            if (newCount >= DEAD_FEED_THRESHOLD) {
+                console.error(`Feed marked as dead after ${newCount} consecutive failures: ${feedUrl}`);
+            } else {
+                console.error(`Error parsing daily news feed (failure ${newCount}/${DEAD_FEED_THRESHOLD}) ${feedUrl}:`, error.message);
+            }
         }
     }
 
