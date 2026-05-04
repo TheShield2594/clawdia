@@ -55,6 +55,51 @@ async function trackQuestCommandUse(interaction) {
     }
 }
 
+function memberHasAnyRole(member, roleIds = []) {
+    if (!member || !Array.isArray(roleIds) || roleIds.length === 0) return false;
+    return roleIds.some(roleId => member.roles?.cache?.has(roleId));
+}
+
+function isWithinRuleWindow(rule, now) {
+    const day = now.getUTCDay();
+    const hour = now.getUTCHours();
+    if (Array.isArray(rule.daysOfWeek) && rule.daysOfWeek.length > 0 && !rule.daysOfWeek.includes(day)) {
+        return false;
+    }
+    if (rule.startHourUtc == null || rule.endHourUtc == null) return true;
+    if (rule.startHourUtc <= rule.endHourUtc) {
+        return hour >= rule.startHourUtc && hour <= rule.endHourUtc;
+    }
+    return hour >= rule.startHourUtc || hour <= rule.endHourUtc;
+}
+
+function getPolicyDecision(interaction, guildSettings) {
+    const policies = guildSettings?.commandPolicies;
+    if (!policies?.enabled) return { allowed: true };
+    if (policies.exceptions?.userIds?.includes(interaction.user.id)) return { allowed: true };
+    if (memberHasAnyRole(interaction.member, policies.exceptions?.roleIds)) return { allowed: true };
+
+    const cmd = interaction.commandName;
+    const now = new Date();
+    const applicableRules = (policies.rules || []).filter(rule => {
+        if (rule.command !== cmd && rule.command !== '*') return false;
+        if (Array.isArray(rule.roleIds) && rule.roleIds.length > 0 && !memberHasAnyRole(interaction.member, rule.roleIds)) return false;
+        if (Array.isArray(rule.channelIds) && rule.channelIds.length > 0 && !rule.channelIds.includes(interaction.channelId)) return false;
+        return isWithinRuleWindow(rule, now);
+    });
+    const denied = applicableRules.find(rule => rule.effect === 'deny');
+    if (denied) return { allowed: false, reason: 'This command is blocked by server policy for your context.' };
+    return { allowed: true };
+}
+
+function getCooldownSeconds(command, interaction, guildSettings) {
+    const defaultCooldownDuration = command.cooldown ?? 3;
+    const overrides = guildSettings?.commandPolicies?.cooldownOverrides || [];
+    const matches = overrides.filter(entry => entry.command === command.data.name && interaction.member?.roles?.cache?.has(entry.roleId));
+    if (!matches.length) return defaultCooldownDuration;
+    return Math.min(...matches.map(match => match.cooldownSeconds));
+}
+
 module.exports = {
     name: 'interactionCreate',
     async execute(interaction, client) {
@@ -85,6 +130,7 @@ module.exports = {
         }
 
         if (!interaction.isChatInputCommand()) return;
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
         const command = client.commands.get(interaction.commandName);
 
@@ -92,6 +138,12 @@ module.exports = {
             console.error(`No command matching ${interaction.commandName} was found.`);
             await logCommandMetric(interaction, false, 'unknown_command');
             return;
+        }
+
+        const policy = getPolicyDecision(interaction, guildSettings);
+        if (!policy.allowed) {
+            await logCommandMetric(interaction, false, 'policy_denied');
+            return interaction.reply({ content: policy.reason, ephemeral: true });
         }
 
         const { cooldowns } = client;
@@ -102,8 +154,7 @@ module.exports = {
 
         const now = Date.now();
         const timestamps = cooldowns.get(command.data.name);
-        const defaultCooldownDuration = 3;
-        const cooldownAmount = (command.cooldown ?? defaultCooldownDuration) * 1000;
+        const cooldownAmount = getCooldownSeconds(command, interaction, guildSettings) * 1000;
 
         if (timestamps.has(interaction.user.id)) {
             const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
