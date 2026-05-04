@@ -1,10 +1,13 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, AuditLogEvent } = require('discord.js');
 const Guild = require('../models/Guild');
+const { trackAction } = require('../services/antiNukeService');
 
 module.exports = {
     name: 'channelCreate',
     async execute(channel, client) {
         if (!channel.guild) return;
+
+        await trackAction(channel.guild, 'channelCreate', AuditLogEvent.ChannelCreate, channel.id).catch(console.error);
 
         const guildSettings = await Guild.findOne({ guildId: channel.guild.id });
         if (!guildSettings?.eventLog?.enabled || !guildSettings.eventLog.logChannelChanges) return;

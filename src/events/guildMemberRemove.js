@@ -1,5 +1,6 @@
 const Guild = require('../models/Guild');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, AuditLogEvent } = require('discord.js');
+const { trackAction } = require('../services/antiNukeService');
 async function trackMemberEvent(guildSettings, dateKey, field) {
     const result = await guildSettings.constructor.updateOne(
         { guildId: guildSettings.guildId, 'analytics.memberEvents.date': dateKey },
@@ -36,6 +37,9 @@ module.exports = {
     name: 'guildMemberRemove',
     async execute(member, client) {
         try {
+            // Detect kick via audit log; bans fire guildBanAdd separately.
+            await trackAction(member.guild, 'kick', AuditLogEvent.MemberKick, member.id).catch(console.error);
+
             const guildSettings = await Guild.findOne({ guildId: member.guild.id });
             if (!guildSettings) return;
 

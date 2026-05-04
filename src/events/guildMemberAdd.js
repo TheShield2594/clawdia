@@ -2,6 +2,7 @@ const Guild = require('../models/Guild');
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { createWelcomeCard } = require('../utils/cardGenerator');
 const { handleMemberJoin: raidCheck } = require('../services/raidService');
+const { enforceJoinGate } = require('../services/antiNukeService');
 async function trackMemberEvent(guildSettings, dateKey, field) {
     const result = await guildSettings.constructor.updateOne(
         { guildId: guildSettings.guildId, 'analytics.memberEvents.date': dateKey },
@@ -38,7 +39,11 @@ module.exports = {
     name: 'guildMemberAdd',
     async execute(member, client) {
         try {
-            // Raid detection runs first, independently of guild settings load below
+            // Join gate runs first; if it removes the member, skip the rest.
+            const gated = await enforceJoinGate(member).catch(err => { console.error(err); return false; });
+            if (gated) return;
+
+            // Raid detection runs next, independently of guild settings load below
             await raidCheck(member, client).catch(console.error);
 
             const guildSettings = await Guild.findOne({ guildId: member.guild.id });

@@ -242,6 +242,59 @@ const guildSchema = new Schema({
         caseIdCounter: { type: Number, default: 0, min: 0 }
     },
 
+    antiNuke: {
+        enabled: { type: Boolean, default: false },
+        alertChannelId: { type: String, default: null },
+        whitelistUserIds: [{ type: String }],
+        whitelistRoleIds: [{ type: String }],
+        // Per-action thresholds: how many of an action a single user can take
+        // within `windowSeconds` before they trip the punishment.
+        windowSeconds: { type: Number, default: 30, min: 5 },
+        thresholds: {
+            channelDelete: { type: Number, default: 3, min: 1 },
+            channelCreate: { type: Number, default: 5, min: 1 },
+            roleDelete:    { type: Number, default: 3, min: 1 },
+            roleCreate:    { type: Number, default: 5, min: 1 },
+            ban:           { type: Number, default: 3, min: 1 },
+            kick:          { type: Number, default: 5, min: 1 },
+            webhookCreate: { type: Number, default: 2, min: 1 }
+        },
+        // What to do to the offending user (the one whose action burst tripped).
+        punishment: {
+            type: String,
+            enum: ['alert', 'strip-roles', 'kick', 'ban'],
+            default: 'strip-roles'
+        },
+        // If true, the bot will lock all text channels (deny SendMessages for @everyone)
+        // when a nuke event fires, until /lockdown end is run.
+        autoLockdown: { type: Boolean, default: false },
+        // Active lockdown bookkeeping (so we can restore permissions on /lockdown end).
+        lockdown: {
+            active: { type: Boolean, default: false },
+            startedAt: { type: Date, default: null },
+            startedBy: { type: String, default: null },
+            reason: { type: String, default: null },
+            // Channels that had their @everyone SendMessages overwrite changed by the
+            // lockdown so we can revert. Only stores channels the bot touched.
+            affectedChannels: [{
+                channelId: { type: String, required: true },
+                hadOverwrite: { type: Boolean, default: false },
+                previousAllow: { type: String, default: null },
+                previousDeny:  { type: String, default: null }
+            }]
+        },
+        // Optional join gate: refuse joins from accounts younger than N days.
+        joinGate: {
+            enabled: { type: Boolean, default: false },
+            minAccountAgeDays: { type: Number, default: 3, min: 0 },
+            action: {
+                type: String,
+                enum: ['kick', 'ban'],
+                default: 'kick'
+            }
+        }
+    },
+
     caseSettings: {
         slaHours: { type: Number, default: 48, min: 1 },
         slaChannelId: { type: String, default: null },
