@@ -203,17 +203,28 @@ module.exports = {
             // Credit the payout atomically.
             let updated = debited;
             if (payout > 0) {
-                updated = await User.findOneAndUpdate(
+                const credited = await User.findOneAndUpdate(
                     userFilter,
                     { $inc: { balance: payout } },
                     { new: true },
                 );
+                if (credited) {
+                    updated = credited;
+                } else {
+                    // Document vanished between debit and credit (extremely unlikely).
+                    // Attempt a plain read to show the real balance; fall back to 0.
+                    console.error(`[Plinko] credit returned null for userId=${interaction.user.id} (${username})`);
+                    updated = await User.findOne(userFilter) ?? { balance: 0 };
+                }
             }
             settled = true;
 
+            // Safe read: updated is guaranteed non-null at this point.
+            const displayBalance = updated.balance ?? 0;
+
             await delay(400);
             await interaction.editReply({
-                embeds: [resultEmbed(path, positions, bucket, multiplier, bet, payout, updated.balance, username)],
+                embeds: [resultEmbed(path, positions, bucket, multiplier, bet, payout, displayBalance, username)],
             });
 
         } catch (err) {
