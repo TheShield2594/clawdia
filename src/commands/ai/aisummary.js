@@ -27,6 +27,7 @@ module.exports = {
             .setDescription('Run a summary job right now')
             .addStringOption(o => o.setName('id').setDescription('Job ID').setRequired(true))),
 
+    cooldown: 30,
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
 

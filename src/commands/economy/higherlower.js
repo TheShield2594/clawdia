@@ -18,6 +18,7 @@ function cardLabel(value) {
 }
 
 module.exports = {
+    cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('higherlower')
         .setDescription('Bet on whether the next card will be higher or lower')

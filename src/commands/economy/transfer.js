@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 
 module.exports = {
+    cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('transfer')
         .setDescription('Transfer coins to another user')

@@ -18,14 +18,18 @@ const DEFAULT_MODELS = {
 const DISCORD_MAX_LEN = 2000;
 const STREAM_EDIT_INTERVAL_MS = 1200;
 
-// userId -> [timestamps] for sliding-window rate limiting (in-memory)
+// userId -> [timestamps] and channelId -> [timestamps] for sliding-window rate limiting (in-memory)
 const rateLimits = new Map();
+const channelRateLimits = new Map();
 
 // Periodically remove entries whose timestamps have all expired (2-hour max window)
 setInterval(() => {
     const cutoff = Date.now() - 2 * 60 * 60 * 1000;
     for (const [userId, timestamps] of rateLimits) {
         if (timestamps.every(t => t < cutoff)) rateLimits.delete(userId);
+    }
+    for (const [channelId, timestamps] of channelRateLimits) {
+        if (timestamps.every(t => t < cutoff)) channelRateLimits.delete(channelId);
     }
 }, 15 * 60 * 1000).unref();
 
@@ -40,6 +44,20 @@ function checkRateLimit(userId, limit, windowMin) {
     }
     arr.push(now);
     rateLimits.set(userId, arr);
+    return true;
+}
+
+function checkChannelRateLimit(channelId, limit, windowMin) {
+    if (!limit || limit <= 0) return true;
+    const now = Date.now();
+    const windowMs = (windowMin || 10) * 60 * 1000;
+    const arr = (channelRateLimits.get(channelId) || []).filter(t => now - t < windowMs);
+    if (arr.length >= limit) {
+        channelRateLimits.set(channelId, arr);
+        return false;
+    }
+    arr.push(now);
+    channelRateLimits.set(channelId, arr);
     return true;
 }
 
@@ -456,6 +474,10 @@ async function handleAIChat(message, aiSettings) {
         return message.reply(`Rate limit reached (${aiSettings.rateLimitPerUser} per ${aiSettings.rateLimitWindowMin}m). Please slow down.`);
     }
 
+    if (!checkChannelRateLimit(message.channel.id, aiSettings.rateLimitPerChannel, aiSettings.rateLimitWindowMin)) {
+        return message.reply(`This channel has reached the AI request limit. Please wait before sending more AI requests here.`);
+    }
+
     const maxHistory = aiSettings.maxHistory ?? 20;
     const useStreaming = aiSettings.streaming !== false;
 
@@ -572,5 +594,7 @@ module.exports = {
     streamCompletion,
     resolveProviderConfig,
     retrieveKnowledge,
+    checkRateLimit,
+    checkChannelRateLimit,
     DEFAULT_MODELS
 };

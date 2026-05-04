@@ -177,6 +177,7 @@ const guildSchema = new Schema({
         maxHistory: { type: Number, default: 20, min: 0, max: 100 },
         streaming: { type: Boolean, default: true },
         rateLimitPerUser: { type: Number, default: 20 },
+        rateLimitPerChannel: { type: Number, default: 0 },
         rateLimitWindowMin: { type: Number, default: 10 },
         // Per-channel personas: each entry overrides systemPrompt for that channel
         channelPersonas: {

@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 
 module.exports = {
+    cooldown: 10,
     data: new SlashCommandBuilder()
         .setName('leaderboard')
         .setDescription('View the server leaderboard')
