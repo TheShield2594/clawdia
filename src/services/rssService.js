@@ -7,6 +7,13 @@ const parser = new Parser();
 let dailyNewsJobs = new Map();
 const runtimeTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+// Consecutive failure counts per feed URL. Feeds are skipped after DEAD_FEED_THRESHOLD failures,
+// but a retry is allowed once DEAD_FEED_COOLDOWN_MS has elapsed since the last failure.
+const feedFailCounts = new Map();
+const feedLastFailTime = new Map();
+const DEAD_FEED_THRESHOLD = 3;
+const DEAD_FEED_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
 function createLegacyProfile(guild) {
     const legacy = guild.dailyNews || {};
     return {
@@ -114,8 +121,20 @@ async function sendDailyNewsForProfile(client, guild, profile) {
     const cutoffMs = Date.now() - (24 * 60 * 60 * 1000);
 
     for (const feedUrl of profile.feeds) {
+        const failCount = feedFailCounts.get(feedUrl) || 0;
+        if (failCount >= DEAD_FEED_THRESHOLD) {
+            const lastFail = feedLastFailTime.get(feedUrl) || 0;
+            if (Date.now() - lastFail < DEAD_FEED_COOLDOWN_MS) {
+                console.warn(`Skipping dead feed (${failCount} consecutive failures): ${feedUrl}`);
+                continue;
+            }
+            console.log(`Retrying previously dead feed after cooldown: ${feedUrl}`);
+        }
+
         try {
             const parsedFeed = await parser.parseURL(feedUrl);
+            feedFailCounts.delete(feedUrl);
+            feedLastFailTime.delete(feedUrl);
             const feedItems = parsedFeed.items
                 .map(item => ({
                     title: item.title,
@@ -131,7 +150,14 @@ async function sendDailyNewsForProfile(client, guild, profile) {
 
             allItems.push(...feedItems);
         } catch (error) {
-            console.error(`Error parsing daily news feed ${feedUrl}:`, error);
+            const newCount = (feedFailCounts.get(feedUrl) || 0) + 1;
+            feedFailCounts.set(feedUrl, newCount);
+            feedLastFailTime.set(feedUrl, Date.now());
+            if (newCount >= DEAD_FEED_THRESHOLD) {
+                console.error(`Feed marked as dead after ${newCount} consecutive failures: ${feedUrl}`);
+            } else {
+                console.error(`Error parsing daily news feed (failure ${newCount}/${DEAD_FEED_THRESHOLD}) ${feedUrl}:`, error.message);
+            }
         }
     }
 

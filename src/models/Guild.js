@@ -143,6 +143,7 @@ const guildSchema = new Schema({
     dailyNewsProfiles: {
         type: [{
             profileId: { type: String, required: true },
+            name: { type: String, default: '' },
             enabled: { type: Boolean, default: false },
             channelId: { type: String, default: null },
             time: { type: String, default: '09:00' },

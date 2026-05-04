@@ -5,6 +5,96 @@ const Case = require('../../models/Case');
 const User = require('../../models/User');
 const { rescheduleDailyNews } = require('../../services/rssService');
 const { rescheduleBibleVerse } = require('../../services/dailyBibleService');
+const Parser = require('rss-parser');
+const dns = require('dns');
+const net = require('net');
+const http = require('http');
+const https = require('https');
+
+// Returns true for any IP that must not be fetched (loopback, RFC1918, link-local, IPv6 ULA/LL).
+function isPrivateIp(ip) {
+    if (net.isIPv4(ip)) {
+        const [a, b] = ip.split('.').map(Number);
+        return (
+            a === 127 ||
+            a === 10 ||
+            (a === 172 && b >= 16 && b <= 31) ||
+            (a === 192 && b === 168) ||
+            (a === 169 && b === 254) ||
+            a === 0
+        );
+    }
+    if (net.isIPv6(ip)) {
+        const n = ip.toLowerCase();
+        return (
+            n === '::1' ||
+            n.startsWith('fc') ||
+            n.startsWith('fd') ||
+            /^fe[89ab]/i.test(n) ||
+            n === '::' ||
+            n.startsWith('::ffff:')
+        );
+    }
+    return true;
+}
+
+async function assertHostPublic(hostname) {
+    const addrs = await new Promise((resolve, reject) => {
+        dns.lookup(hostname, { all: true }, (err, results) => {
+            if (err) reject(new Error(`DNS lookup failed: ${err.message}`));
+            else resolve(results);
+        });
+    });
+    if (!addrs.length) throw new Error('Hostname resolved to no addresses.');
+    for (const { address } of addrs) {
+        if (isPrivateIp(address)) throw new Error('Feed URL resolves to a private or reserved IP address.');
+    }
+}
+
+// Fetches a feed URL safely: checks DNS on every hop, follows redirects up to maxRedirects.
+// Returns the response body as a string.
+async function safeFetchFeed(urlStr, maxRedirects = 5) {
+    let current = new URL(urlStr);
+
+    for (let hop = 0; hop <= maxRedirects; hop++) {
+        if (!['http:', 'https:'].includes(current.protocol)) {
+            throw new Error('Redirect to non-HTTP protocol rejected.');
+        }
+        await assertHostPublic(current.hostname);
+
+        const result = await new Promise((resolve, reject) => {
+            const mod = current.protocol === 'https:' ? https : http;
+            const port = current.port ? Number(current.port) : (current.protocol === 'https:' ? 443 : 80);
+            const req = mod.request(
+                { hostname: current.hostname, port, path: current.pathname + current.search, method: 'GET',
+                  headers: { 'User-Agent': 'UltraBot-FeedValidator/1.0', Accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
+                  timeout: 8000 },
+                (res) => {
+                    if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                        const loc = res.headers.location;
+                        res.destroy();
+                        return resolve({ redirect: loc });
+                    }
+                    const chunks = [];
+                    res.on('data', c => chunks.push(c));
+                    res.on('end', () => resolve({ body: Buffer.concat(chunks).toString('utf8') }));
+                    res.on('error', reject);
+                }
+            );
+            req.on('timeout', () => { req.destroy(); reject(new Error('Feed request timed out.')); });
+            req.on('error', reject);
+            req.end();
+        });
+
+        if (result.redirect) {
+            if (!result.redirect) throw new Error('Redirect with empty Location header.');
+            current = new URL(result.redirect, current.href);
+            continue;
+        }
+        return result.body;
+    }
+    throw new Error('Too many redirects.');
+}
 
 function median(nums) {
     if (!nums.length) return null;
@@ -417,6 +507,33 @@ router.delete('/guild/:guildId/reactionrole/panel/:messageId', checkAuth, checkG
     } catch (error) {
         console.error('Reaction role panel delete error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.post('/guild/:guildId/validate-feed', checkAuth, checkGuildAccess, async (req, res) => {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string') {
+        return res.status(400).json({ valid: false, error: 'No URL provided.' });
+    }
+
+    let parsed;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return res.json({ valid: false, error: 'Invalid URL format.' });
+    }
+
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return res.json({ valid: false, error: 'URL must use http or https.' });
+    }
+
+    try {
+        const body = await safeFetchFeed(url);
+        const feedParser = new Parser();
+        const feed = await feedParser.parseString(body);
+        return res.json({ valid: true, title: feed.title || '', itemCount: feed.items?.length ?? 0 });
+    } catch (err) {
+        return res.json({ valid: false, error: err.message || 'Could not fetch or parse feed. Check the URL and ensure it is a valid RSS/Atom feed.' });
     }
 });
 
