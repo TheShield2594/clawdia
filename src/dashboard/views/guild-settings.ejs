@@ -55,6 +55,7 @@
                 <!-- Tools & Support -->
                 <div class="nav-section-header">Tools &amp; Support</div>
                 <button class="nav-item" data-tab="ai"><span class="nav-emoji">🧠</span> AI Chat</button>
+                <button class="nav-item" data-tab="knowledgebase"><span class="nav-emoji">📚</span> Knowledge Base</button>
                 <button class="nav-item" data-tab="tempvoice"><span class="nav-emoji">🔊</span> Temp Voice</button>
                 <button class="nav-item" data-tab="tickets"><span class="nav-emoji">🎫</span> Tickets</button>
 
@@ -1068,6 +1069,34 @@
                     </div>
                 </section>
 
+                <section id="knowledgebase" class="panel">
+                    <div class="panel-head">
+                        <h2>Knowledge Base</h2>
+                        <p>Add context entries that the AI references when answering in this server. Changes take effect immediately — no commands needed.</p>
+                    </div>
+                    <div id="kb-list" style="margin-bottom:1.5rem;">
+                        <div class="empty-state" style="padding:2rem 1.5rem;">
+                            <p>Loading entries…</p>
+                        </div>
+                    </div>
+                    <div class="panel-head" style="margin-top:1rem"><h3>Add entry</h3></div>
+                    <div class="field">
+                        <label class="field-label" for="kb-title">Title</label>
+                        <input type="text" id="kb-title" placeholder="e.g. Server Rules">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="kb-content">Content</label>
+                        <textarea id="kb-content" rows="5" placeholder="The information the AI should know…"></textarea>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="kb-tags">Tags <small style="font-weight:normal;opacity:.7;">(comma-separated, optional)</small></label>
+                        <input type="text" id="kb-tags" placeholder="rules, faq, moderation">
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="addKbEntry()">Add entry</button>
+                    </div>
+                </section>
+
                 <section id="analytics" class="panel">
                     <div class="panel-head">
                         <h2>Insights & Recommendations</h2>
@@ -1153,6 +1182,7 @@
                 item.classList.add('active');
                 document.getElementById(tab).classList.add('active');
                 if (tab === 'analytics') loadAnalytics();
+                if (tab === 'knowledgebase') loadKnowledgeBase();
                 if (history.replaceState) history.replaceState(null, '', '#' + tab);
             });
         });
@@ -1830,6 +1860,96 @@
                 }
             } catch (error) {
                 console.error(error);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        // ── Knowledge Base ─────────────────────────────────────────────────────
+        var kbLoaded = false;
+
+        async function loadKnowledgeBase() {
+            if (kbLoaded) return;
+            var guildId = '<%= guild.id %>';
+            var container = document.getElementById('kb-list');
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/knowledge-base');
+                var entries = await resp.json();
+                kbLoaded = true;
+                renderKbEntries(entries);
+            } catch (e) {
+                container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><p>Failed to load entries.</p></div>';
+            }
+        }
+
+        function renderKbEntries(entries) {
+            var container = document.getElementById('kb-list');
+            if (!Array.isArray(entries) || !entries.length) {
+                container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><h3>No entries yet</h3><p>Add your first knowledge base entry below.</p></div>';
+                return;
+            }
+            container.innerHTML = '';
+            entries.forEach(function(entry) {
+                var div = document.createElement('div');
+                div.className = 'list-item';
+                var preview = entry.content.length > 120 ? entry.content.slice(0, 120) + '…' : entry.content;
+                var tagsHtml = (entry.tags && entry.tags.length)
+                    ? '<div style="margin-top:.3rem;">' + entry.tags.map(function(t) { return '<span style="background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:.76rem;margin-right:4px;">' + escHtml(t) + '</span>'; }).join('') + '</div>'
+                    : '';
+                div.innerHTML =
+                    '<div style="min-width:0;flex:1;">' +
+                        '<strong>' + escHtml(entry.title) + '</strong>' +
+                        '<div style="color:var(--text-mute);font-size:.82rem;margin-top:.2rem;">' + escHtml(preview) + '</div>' +
+                        tagsHtml +
+                    '</div>' +
+                    '<button class="btn btn-danger btn-sm" onclick="deleteKbEntry(\'' + entry._id + '\')">Remove</button>';
+                container.appendChild(div);
+            });
+        }
+
+        async function addKbEntry() {
+            var guildId = '<%= guild.id %>';
+            var title = document.getElementById('kb-title').value.trim();
+            var content = document.getElementById('kb-content').value.trim();
+            var tagsRaw = document.getElementById('kb-tags').value.trim();
+            var tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+            if (!title || !content) { toast('Title and content are required', 'error'); return; }
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/knowledge-base', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: title, content: content, tags: tags })
+                });
+                var data = await resp.json();
+                if (resp.ok) {
+                    toast('Entry added ✓', 'success');
+                    document.getElementById('kb-title').value = '';
+                    document.getElementById('kb-content').value = '';
+                    document.getElementById('kb-tags').value = '';
+                    kbLoaded = false;
+                    loadKnowledgeBase();
+                } else {
+                    toast(data.error || 'Failed to add entry', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        async function deleteKbEntry(id) {
+            if (!confirm('Remove this knowledge base entry?')) return;
+            var guildId = '<%= guild.id %>';
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, { method: 'DELETE' });
+                if (resp.ok) {
+                    toast('Entry removed ✓', 'success');
+                    kbLoaded = false;
+                    loadKnowledgeBase();
+                } else {
+                    toast('Failed to remove entry', 'error');
+                }
+            } catch (e) {
+                console.error(e);
                 toast('An error occurred', 'error');
             }
         }
