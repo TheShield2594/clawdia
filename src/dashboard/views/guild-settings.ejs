@@ -1139,8 +1139,8 @@
     <div class="toast" id="toast"></div>
 
     <script>
-        const DAILY_NEWS_INITIAL_PROFILES = <%- JSON.stringify(settings.dailyNewsProfiles || []) %>;
-        const DAILY_NEWS_CHANNELS = <%- JSON.stringify(channels || []) %>;
+        const DAILY_NEWS_INITIAL_PROFILES = <%- JSON.stringify(settings.dailyNewsProfiles || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        const DAILY_NEWS_CHANNELS = <%- JSON.stringify(channels || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
 
         // Sidebar tab navigation
         const navItems = document.querySelectorAll('.nav-item');
@@ -1206,7 +1206,7 @@
                     enabled: p.enabled !== false,
                     channelId: p.channelId || '',
                     time: p.time || '09:00',
-                    timezone: p.timezone || 'UTC',
+                    timezone: p.timezone || '',
                     title: p.title || '📰 Daily News Digest',
                     feeds: Array.isArray(p.feeds) ? p.feeds : [],
                     maxItemsPerFeed: p.maxItemsPerFeed || 3
@@ -1229,18 +1229,18 @@
                             <strong>${escHtml(displayName)}</strong>
                             <button class="btn btn-danger btn-sm" type="button" onclick="removeDailyNewsProfile(${idx})">Remove</button>
                         </div>
-                        <label>Profile name</label>
-                        <input type="text" value="${escHtml(profile.name || '')}" placeholder="e.g. Tech News" oninput="updateDailyNewsProfile(${idx}, 'name', this.value); this.closest('.list-item').querySelector('strong').textContent = this.value || 'Profile ${idx + 1}';">
-                        <label>Channel</label>
-                        <select onchange="updateDailyNewsProfile(${idx}, 'channelId', this.value)">${dailyNewsChannelOptions(profile.channelId)}</select>
-                        <label>Time (24h)</label>
-                        <input type="text" value="${escHtml(profile.time || '09:00')}" onchange="updateDailyNewsProfile(${idx}, 'time', this.value)">
-                        <label>Timezone <small style="font-weight:normal;opacity:.7;">(IANA, e.g. UTC, America/New_York, Europe/London)</small></label>
-                        <input type="text" value="${escHtml(profile.timezone || 'UTC')}" placeholder="UTC" onchange="updateDailyNewsProfile(${idx}, 'timezone', this.value)">
-                        <label>Digest title</label>
-                        <input type="text" value="${escHtml(profile.title || '📰 Daily News Digest')}" onchange="updateDailyNewsProfile(${idx}, 'title', this.value)">
-                        <label>Feeds (one URL per line)</label>
-                        <textarea rows="3" onchange="updateDailyNewsProfile(${idx}, 'feeds', this.value)">${escHtml((profile.feeds || []).join('\n'))}</textarea>
+                        <label for="dn-${idx}-name">Profile name</label>
+                        <input id="dn-${idx}-name" type="text" value="${escHtml(profile.name || '')}" placeholder="e.g. Tech News" oninput="updateDailyNewsProfile(${idx}, 'name', this.value); this.closest('.list-item').querySelector('strong').textContent = this.value || 'Profile ${idx + 1}';">
+                        <label for="dn-${idx}-channel">Channel</label>
+                        <select id="dn-${idx}-channel" onchange="updateDailyNewsProfile(${idx}, 'channelId', this.value)">${dailyNewsChannelOptions(profile.channelId)}</select>
+                        <label for="dn-${idx}-time">Time (24h)</label>
+                        <input id="dn-${idx}-time" type="text" value="${escHtml(profile.time || '09:00')}" onchange="updateDailyNewsProfile(${idx}, 'time', this.value)">
+                        <label for="dn-${idx}-timezone">Timezone <small style="font-weight:normal;opacity:.7;">(IANA, e.g. UTC, America/New_York, Europe/London)</small></label>
+                        <input id="dn-${idx}-timezone" type="text" value="${escHtml(profile.timezone || '')}" placeholder="UTC" onchange="updateDailyNewsProfile(${idx}, 'timezone', this.value)">
+                        <label for="dn-${idx}-title">Digest title</label>
+                        <input id="dn-${idx}-title" type="text" value="${escHtml(profile.title || '📰 Daily News Digest')}" onchange="updateDailyNewsProfile(${idx}, 'title', this.value)">
+                        <label for="dn-${idx}-feeds">Feeds (one URL per line)</label>
+                        <textarea id="dn-${idx}-feeds" rows="3" onchange="updateDailyNewsProfile(${idx}, 'feeds', this.value)">${escHtml((profile.feeds || []).join('\n'))}</textarea>
                         <div id="feed-status-${idx}" style="font-size:.8rem;"></div>
                         <button class="btn btn-sm" type="button" onclick="validateProfileFeeds(${idx})">Validate feeds</button>
                     </div>
@@ -1256,7 +1256,7 @@
         function addDailyNewsProfile() {
             const container = document.getElementById('dailynews-profiles-list');
             const profiles = JSON.parse(container.dataset.profiles || '[]');
-            profiles.push({ profileId: `profile-${Date.now()}`, name: '', enabled: true, channelId: '', time: '09:00', timezone: 'UTC', title: '📰 Daily News Digest', feeds: [], maxItemsPerFeed: parseInt(document.getElementById('dailynews-max-items').value, 10) || 3 });
+            profiles.push({ profileId: `profile-${Date.now()}`, name: '', enabled: true, channelId: '', time: '09:00', timezone: '', title: '📰 Daily News Digest', feeds: [], maxItemsPerFeed: parseInt(document.getElementById('dailynews-max-items').value, 10) || 3 });
             container.dataset.profiles = JSON.stringify(profiles);
             renderDailyNewsProfiles();
         }
@@ -1525,7 +1525,7 @@
                         enabled: p.enabled !== false,
                         channelId: (p.channelId || '').trim(),
                         time: (p.time || '09:00').trim(),
-                        timezone: (p.timezone || 'UTC').trim(),
+                        timezone: (p.timezone || '').trim() || null,
                         title: (p.title || '📰 Daily News Digest').trim(),
                         feeds: (Array.isArray(p.feeds) ? p.feeds : []).map(f => f.trim()).filter(Boolean),
                         maxItemsPerFeed: parseInt(document.getElementById('dailynews-max-items').value, 10) || 3
@@ -1535,7 +1535,7 @@
                     'dailyNews.enabled': document.getElementById('dailynews-enabled').checked,
                     'dailyNews.channelId': document.getElementById('dailynews-channel').value,
                     'dailyNews.time': document.getElementById('dailynews-time').value,
-                    'dailyNews.timezone': document.getElementById('dailynews-timezone').value.trim() || 'UTC',
+                    'dailyNews.timezone': document.getElementById('dailynews-timezone').value.trim() || null,
                     'dailyNews.title': document.getElementById('dailynews-title').value,
                     'dailyNews.maxItemsPerFeed': parseInt(document.getElementById('dailynews-max-items').value),
                     'dailyNews.feeds': feeds,
