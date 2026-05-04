@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
-const Warning = require('../../models/Warning');
+const Case = require('../../models/Case');
 const { logModeration } = require('../../utils/logger');
 
 module.exports = {
@@ -24,16 +24,12 @@ module.exports = {
         }
 
         try {
-            await Warning.create({
-                guildId: interaction.guild.id,
-                userId: user.id,
-                moderatorId: interaction.user.id,
-                reason: reason
-            });
+            await logModeration(interaction.guild.id, 'warn', user, interaction.user, reason);
 
-            const warningCount = await Warning.countDocuments({
+            const warningCount = await Case.countDocuments({
                 guildId: interaction.guild.id,
-                userId: user.id
+                targetUserId: user.id,
+                type: 'warn'
             });
 
             const embed = new EmbedBuilder()
@@ -48,7 +44,6 @@ module.exports = {
                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed] });
-            await logModeration(interaction.guild.id, 'warn', user, interaction.user, reason);
 
             try {
                 await user.send(`You have been warned in **${interaction.guild.name}** for: ${reason}`);
