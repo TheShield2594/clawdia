@@ -136,6 +136,13 @@ module.exports = {
     cooldown: 5,
 
     async execute(interaction) {
+        if (!interaction.guild) {
+            return interaction.reply({
+                content: 'This command can only be used in a server.',
+                ephemeral: true,
+            });
+        }
+
         const betKey = interaction.options.getString('bet');
         const bet    = interaction.options.getInteger('amount');
         const target = interaction.options.getInteger('number');
@@ -149,13 +156,15 @@ module.exports = {
 
         await interaction.deferReply();
 
+        const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+        let debited = null;
+        let settled = false;
+
         try {
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
                 return interaction.editReply({ content: 'Economy games are disabled in this server.' });
             }
-
-            const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
             await User.findOneAndUpdate(
                 userFilter,
@@ -164,7 +173,7 @@ module.exports = {
             );
 
             // Atomic deduct: only succeeds if the balance covers the bet.
-            const debited = await User.findOneAndUpdate(
+            debited = await User.findOneAndUpdate(
                 { ...userFilter, balance: { $gte: bet } },
                 { $inc: { balance: -bet } },
                 { new: true },
@@ -212,6 +221,8 @@ module.exports = {
                     { new: true },
                 );
             }
+            // Stake is now resolved (lost bets need no credit; winning bets credited above).
+            settled = true;
 
             await interaction.editReply({
                 embeds: [resultEmbed({
@@ -227,8 +238,19 @@ module.exports = {
             });
         } catch (err) {
             console.error('[Roulette] error:', err);
+
+            // Compensating rollback: if we debited the stake but never settled the
+            // round, refund the wager so a mid-flight error doesn't silently eat coins.
+            if (debited && !settled) {
+                try {
+                    await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } });
+                } catch (rollbackErr) {
+                    console.error('[Roulette] rollback failed:', rollbackErr);
+                }
+            }
+
             await interaction.editReply({
-                content: 'Something went wrong while spinning the wheel. Please try again.',
+                content: 'Something went wrong while spinning the wheel. Your wager has been refunded — please try again.',
             }).catch(() => {});
         }
     },

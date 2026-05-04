@@ -186,7 +186,7 @@ Set a moderation log channel to track:
 /work                - Work for coins (1h cooldown)
 /transfer <user> <amount> - Send coins
 /wheel               - Spin the Wheel of Fortune (free spin per cooldown, or buy extra spins)
-/roulette            - Bet on Red/Black, Odd/Even, dozens, columns, or a straight number
+/roulette            - Bet on Red/Black, Odd/Even, Low/High, dozens, columns, or a straight number
 ```
 
 **Wheel of Fortune:**
@@ -371,6 +371,7 @@ Prevent spam with built-in cooldowns:
 | `/daily` | 24 hours |
 | `/work` | 1 hour |
 | `/wheel` | 24 hours (configurable; bypass with paid spin) |
+| `/roulette` | 5 seconds |
 | `/play` | 3 seconds |
 | Most others | 3 seconds |
 
