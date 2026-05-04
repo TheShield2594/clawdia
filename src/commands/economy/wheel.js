@@ -22,6 +22,7 @@ const SEGMENTS = [
 ];
 
 const TOTAL_WEIGHT = SEGMENTS.reduce((s, seg) => s + seg.weight, 0);
+const BUY_BUTTON_ID = 'wheel_buy_spin';
 
 function pickSegment() {
     let r = Math.random() * TOTAL_WEIGHT;
@@ -41,11 +42,20 @@ function formatCooldown(ms) {
     return `${m}m ${s}s`;
 }
 
+// Express the configured cooldown as "X hour(s)" or "Y day(s)" when divisible by 24.
+function cooldownLabel(hours) {
+    if (hours > 0 && hours % 24 === 0) {
+        const days = hours / 24;
+        return `${days} day${days === 1 ? '' : 's'}`;
+    }
+    return `${hours} hour${hours === 1 ? '' : 's'}`;
+}
+
 // Builds a visual wheel showing the surrounding segments and a pointer at the
 // chosen index — this is what we display as the "spin" animates.
 function wheelStrip(highlightIndex) {
     const len = SEGMENTS.length;
-    const around = 2; // segments shown on each side of the pointer
+    const around = 2;
     const parts = [];
     for (let offset = -around; offset <= around; offset++) {
         const i = ((highlightIndex + offset) % len + len) % len;
@@ -59,9 +69,9 @@ function wheelStrip(highlightIndex) {
     return parts.join('   ·   ');
 }
 
-function spinningEmbed(currentIndex, username, source, cost) {
+function spinningEmbed(currentIndex, username, source, cost, cooldownHours) {
     const sourceLine = source === 'free'
-        ? '🎟️ Using your **free daily spin**'
+        ? `🎟️ Using your **free spin** (resets every ${cooldownLabel(cooldownHours)})`
         : `🪙 Paid spin · cost **${cost.toLocaleString()}** coins`;
 
     return new EmbedBuilder()
@@ -71,10 +81,10 @@ function spinningEmbed(currentIndex, username, source, cost) {
         .setFooter({ text: `Player: ${username}` });
 }
 
-function resultEmbed(segment, finalIndex, username, balance, source, cost, respinGranted) {
+function resultEmbed(segment, finalIndex, username, balance, source, cost, respinGranted, cooldownHours) {
     let prizeLine;
     if (segment.type === 'respin') {
-        prizeLine = '🔁 You won a **free re-spin** — your daily cooldown has been reset!';
+        prizeLine = '🔁 You won a **free re-spin** — your cooldown has been reset!';
     } else if (segment.value === 0) {
         prizeLine = '💀 The wheel landed on **Bust**. Better luck next time!';
     } else {
@@ -82,7 +92,7 @@ function resultEmbed(segment, finalIndex, username, balance, source, cost, respi
     }
 
     const sourceLine = source === 'free'
-        ? '🎟️ Free daily spin'
+        ? `🎟️ Free spin (every ${cooldownLabel(cooldownHours)})`
         : `🪙 Paid spin (-${cost.toLocaleString()} coins)`;
 
     const fields = [
@@ -111,78 +121,83 @@ function resultEmbed(segment, finalIndex, username, balance, source, cost, respi
 function buyButtonRow(cost) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setCustomId('wheel_buy_spin')
+            .setCustomId(BUY_BUTTON_ID)
             .setLabel(`Buy Extra Spin (${cost.toLocaleString()} coins)`)
             .setEmoji('🪙')
             .setStyle(ButtonStyle.Primary),
     );
 }
 
-async function performSpin(interaction, user, source, cost) {
-    const username = interaction.user.username;
-    const finalSegment = pickSegment();
-    const finalIndex = SEGMENTS.indexOf(finalSegment);
-    const len = SEGMENTS.length;
+// Atomically deduct the buy cost. Returns the updated user, or null if the
+// user couldn't afford it. This prevents double-spend under concurrent clicks.
+async function chargeForSpin(userId, guildId, buyCost) {
+    return User.findOneAndUpdate(
+        { userId, guildId, balance: { $gte: buyCost } },
+        { $inc: { balance: -buyCost } },
+        { new: true },
+    );
+}
 
-    // Animation: rotate through several full revolutions before stopping at finalIndex.
-    const totalSteps = len * 2 + finalIndex; // ~2 full rotations + offset
-    const frames = [];
-    for (let step = 0; step <= totalSteps; step++) {
-        frames.push(step % len);
+// Atomically claim the free spin. Sets `lastWheelSpin` only if the previous
+// timestamp is null or older than the cooldown cutoff. Returns the updated
+// user, or null if the cooldown has not yet elapsed.
+async function claimFreeSpin(userId, guildId, cooldownMs) {
+    const cutoff = new Date(Date.now() - cooldownMs);
+    return User.findOneAndUpdate(
+        {
+            userId,
+            guildId,
+            $or: [{ lastWheelSpin: null }, { lastWheelSpin: { $lte: cutoff } }],
+        },
+        { $set: { lastWheelSpin: new Date() } },
+        { new: true },
+    );
+}
+
+// Apply the result of a spin atomically. For coins: $inc balance. For respin:
+// clear lastWheelSpin so the user can spin again immediately.
+async function applySpinReward(userId, guildId, segment) {
+    if (segment.type === 'respin') {
+        return User.findOneAndUpdate(
+            { userId, guildId },
+            { $set: { lastWheelSpin: null } },
+            { new: true },
+        );
     }
-
-    await interaction.editReply({
-        embeds: [spinningEmbed(frames[0], username, source, cost)],
-        components: [],
-    }).catch(() => {});
-
-    // Animate. Slow down as we approach the final segment to feel like a real wheel.
-    const delay = (ms) => new Promise(r => setTimeout(r, ms));
-    for (let i = 1; i < frames.length; i++) {
-        const remaining = frames.length - 1 - i;
-        // ease-out: more delay near the end
-        const wait = 120 + Math.max(0, 30 - remaining) * 25;
-        await delay(wait);
-        await interaction.editReply({
-            embeds: [spinningEmbed(frames[i], username, source, cost)],
-        }).catch(() => {});
+    if (segment.value > 0) {
+        return User.findOneAndUpdate(
+            { userId, guildId },
+            { $inc: { balance: segment.value } },
+            { new: true },
+        );
     }
+    return User.findOne({ userId, guildId });
+}
 
-    // Apply rewards
-    let respinGranted = false;
-    if (finalSegment.type === 'respin') {
-        user.lastWheelSpin = null; // reset cooldown
-        respinGranted = true;
-    } else if (finalSegment.value > 0) {
-        user.balance += finalSegment.value;
-    }
-    await user.save();
-
-    await interaction.editReply({
-        embeds: [resultEmbed(finalSegment, finalIndex, username, user.balance, source, cost, respinGranted)],
-        components: [buyButtonRow(cost || 0)],
-    }).catch(() => {});
-
-    // Collector for buying additional spins from the result message.
-    try {
-        const message = await interaction.fetchReply();
+// Sets up a one-shot collector for the "Buy Extra Spin" button. Used after
+// both the cooldown reply and the post-spin result reply so the button works
+// in either flow.
+function setupBuySpinCollector(interaction, buyCost, cooldownHours) {
+    interaction.fetchReply().then((message) => {
         const collector = message.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && i.customId === 'wheel_buy_spin',
+            filter: (i) => i.user.id === interaction.user.id && i.customId === BUY_BUTTON_ID,
             time: 60_000,
             max: 1,
         });
 
         collector.on('collect', async (btn) => {
             try {
-                // Re-load fresh state
-                const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-                const buyCost = guildSettings?.economy?.wheelExtraSpinCost ?? 200;
-                const fresh = await User.findOne({
-                    userId: interaction.user.id,
-                    guildId: interaction.guild.id,
-                });
+                const updated = await chargeForSpin(
+                    interaction.user.id,
+                    interaction.guild.id,
+                    buyCost,
+                );
 
-                if (!fresh || fresh.balance < buyCost) {
+                if (!updated) {
+                    const fresh = await User.findOne({
+                        userId: interaction.user.id,
+                        guildId: interaction.guild.id,
+                    });
                     await btn.reply({
                         content: `You need **${buyCost.toLocaleString()}** coins to buy another spin. Your balance: ${(fresh?.balance ?? 0).toLocaleString()}.`,
                         ephemeral: true,
@@ -190,11 +205,8 @@ async function performSpin(interaction, user, source, cost) {
                     return;
                 }
 
-                fresh.balance -= buyCost;
-                await fresh.save();
-
                 await btn.deferUpdate().catch(() => {});
-                await performSpin(interaction, fresh, 'paid', buyCost);
+                await performSpin(interaction, updated, 'paid', buyCost, buyCost, cooldownHours);
             } catch (err) {
                 console.error('[Wheel] buy-spin error:', err);
                 if (!btn.replied) {
@@ -204,21 +216,65 @@ async function performSpin(interaction, user, source, cost) {
         });
 
         collector.on('end', async (_collected, reason) => {
-            // If the user actually clicked the button, performSpin will replace
-            // the components — don't clobber its UI here.
+            // The button was clicked — performSpin replaced the components, don't clobber.
             if (reason === 'limit') return;
             await interaction.editReply({ components: [] }).catch(() => {});
         });
-    } catch (err) {
+    }).catch((err) => {
         console.error('[Wheel] collector setup error:', err);
+    });
+}
+
+async function performSpin(interaction, user, source, cost, buyCost, cooldownHours) {
+    const username = interaction.user.username;
+    const finalSegment = pickSegment();
+    const finalIndex = SEGMENTS.indexOf(finalSegment);
+    const len = SEGMENTS.length;
+
+    // Animation: rotate through several full revolutions before stopping at finalIndex.
+    const totalSteps = len * 2 + finalIndex;
+    const frames = [];
+    for (let step = 0; step <= totalSteps; step++) {
+        frames.push(step % len);
     }
+
+    await interaction.editReply({
+        embeds: [spinningEmbed(frames[0], username, source, cost, cooldownHours)],
+        components: [],
+    }).catch(() => {});
+
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (let i = 1; i < frames.length; i++) {
+        const remaining = frames.length - 1 - i;
+        const wait = 120 + Math.max(0, 30 - remaining) * 25;
+        await delay(wait);
+        await interaction.editReply({
+            embeds: [spinningEmbed(frames[i], username, source, cost, cooldownHours)],
+        }).catch(() => {});
+    }
+
+    // Apply rewards atomically — never save a stale loaded document.
+    const updatedUser = await applySpinReward(
+        interaction.user.id,
+        interaction.guild.id,
+        finalSegment,
+    );
+    const balance = updatedUser?.balance ?? user.balance;
+    const respinGranted = finalSegment.type === 'respin';
+
+    await interaction.editReply({
+        embeds: [resultEmbed(finalSegment, finalIndex, username, balance, source, cost, respinGranted, cooldownHours)],
+        components: [buyButtonRow(buyCost)],
+    }).catch(() => {});
+
+    setupBuySpinCollector(interaction, buyCost, cooldownHours);
 }
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('wheel')
         .setDescription('Spin the Wheel of Fortune for a chance at coins and prizes!')
-        .addBooleanOption(opt =>
+        .addBooleanOption((opt) =>
             opt.setName('buy')
                 .setDescription('Spend coins to buy an extra spin (skip the cooldown).')
                 .setRequired(false)),
@@ -241,60 +297,75 @@ module.exports = {
             const buyCost = guildSettings?.economy?.wheelExtraSpinCost ?? 200;
             const wantsToBuy = interaction.options.getBoolean('buy') === true;
 
-            let user = await User.findOne({
-                userId: interaction.user.id,
-                guildId: interaction.guild.id,
-            });
-            if (!user) {
-                user = await User.create({
+            // Ensure a user document exists so subsequent atomic updates have a target.
+            await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $setOnInsert: {
                     userId: interaction.user.id,
                     guildId: interaction.guild.id,
-                });
-            }
-
-            const now = Date.now();
-            const lastSpin = user.lastWheelSpin ? user.lastWheelSpin.getTime() : 0;
-            const onCooldown = lastSpin && now - lastSpin < cooldownMs;
+                } },
+                { upsert: true, new: true },
+            );
 
             if (wantsToBuy) {
-                if (user.balance < buyCost) {
+                const charged = await chargeForSpin(
+                    interaction.user.id,
+                    interaction.guild.id,
+                    buyCost,
+                );
+                if (!charged) {
+                    const fresh = await User.findOne({
+                        userId: interaction.user.id,
+                        guildId: interaction.guild.id,
+                    });
                     return interaction.editReply({
-                        content: `You need **${buyCost.toLocaleString()}** coins to buy a spin. Your balance: **${user.balance.toLocaleString()}**.`,
+                        content: `You need **${buyCost.toLocaleString()}** coins to buy a spin. Your balance: **${(fresh?.balance ?? 0).toLocaleString()}**.`,
                     });
                 }
-                user.balance -= buyCost;
-                // Paid spins don't reset or consume the daily cooldown.
-                await user.save();
-                await performSpin(interaction, user, 'paid', buyCost);
+                // Paid spins don't consume the free-spin cooldown.
+                await performSpin(interaction, charged, 'paid', buyCost, buyCost, cooldownHours);
                 return;
             }
 
-            if (onCooldown) {
-                const remaining = cooldownMs - (now - lastSpin);
-                const embed = new EmbedBuilder()
-                    .setColor('#ff9900')
-                    .setTitle('🎡 Wheel of Fortune')
-                    .setDescription(
-                        `You've already used your free spin. Come back in **${formatCooldown(remaining)}**.\n\n` +
-                        `Or buy an extra spin for **${buyCost.toLocaleString()}** coins below.`,
-                    )
-                    .addFields({
-                        name: '💰 Balance',
-                        value: `${user.balance.toLocaleString()} coins`,
-                        inline: true,
-                    })
-                    .setFooter({ text: `Cooldown: ${cooldownHours}h` });
+            // Try to claim the free spin atomically.
+            const claimed = await claimFreeSpin(
+                interaction.user.id,
+                interaction.guild.id,
+                cooldownMs,
+            );
 
-                return interaction.editReply({
-                    embeds: [embed],
-                    components: [buyButtonRow(buyCost)],
-                });
+            if (claimed) {
+                await performSpin(interaction, claimed, 'free', 0, buyCost, cooldownHours);
+                return;
             }
 
-            // Free daily spin
-            user.lastWheelSpin = new Date();
-            await user.save();
-            await performSpin(interaction, user, 'free', 0);
+            // Still on cooldown — show remaining time and the buy-extra-spin button.
+            const fresh = await User.findOne({
+                userId: interaction.user.id,
+                guildId: interaction.guild.id,
+            });
+            const lastSpin = fresh?.lastWheelSpin ? fresh.lastWheelSpin.getTime() : 0;
+            const remaining = Math.max(0, cooldownMs - (Date.now() - lastSpin));
+
+            const embed = new EmbedBuilder()
+                .setColor('#ff9900')
+                .setTitle('🎡 Wheel of Fortune')
+                .setDescription(
+                    `You've already used your free spin. Come back in **${formatCooldown(remaining)}**.\n\n` +
+                    `Or buy an extra spin for **${buyCost.toLocaleString()}** coins below.`,
+                )
+                .addFields({
+                    name: '💰 Balance',
+                    value: `${(fresh?.balance ?? 0).toLocaleString()} coins`,
+                    inline: true,
+                })
+                .setFooter({ text: `Cooldown: ${cooldownLabel(cooldownHours)}` });
+
+            await interaction.editReply({
+                embeds: [embed],
+                components: [buyButtonRow(buyCost)],
+            });
+            setupBuySpinCollector(interaction, buyCost, cooldownHours);
 
         } catch (err) {
             console.error('[Wheel] error:', err);
