@@ -12,7 +12,7 @@ module.exports = {
             .addFields(
                 {
                     name: '⚔️ Moderation',
-                    value: '`/ban` `/kick` `/warn` `/mute` `/unmute` `/clear` `/warnings`'
+                    value: '`/ban` `/kick` `/warn` `/mute` `/unmute` `/clear`'
                 },
                 {
                     name: '💰 Economy',

@@ -1,6 +1,6 @@
 const User = require('../models/User');
 const Guild = require('../models/Guild');
-const Warning = require('../models/Warning');
+const Case = require('../models/Case');
 const { handleAIChat } = require('../services/aiService');
 const { logModeration } = require('../utils/logger');
 const { ensureQuests, onMessage } = require('../services/questService');
@@ -385,14 +385,6 @@ async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 
     if (!member) return;
 
     try {
-        // Record warning
-        await Warning.create({
-            guildId: message.guild.id,
-            userId: member.id,
-            moderatorId: message.client.user.id,
-            reason: `[AutoMod] ${reason}`
-        });
-
         const evidence = {
             messageId: message.id,
             jumpUrl: message.url,
@@ -458,7 +450,7 @@ async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 
                 }
             }
         } else {
-            const warnCount = await Warning.countDocuments({ guildId: message.guild.id, userId: member.id });
+            const warnCount = await Case.countDocuments({ guildId: message.guild.id, targetUserId: member.id, type: 'warn' });
             const kickThreshold = mod.kickThreshold || 0;
             const banThreshold = mod.banThreshold || 0;
 
