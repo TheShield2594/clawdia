@@ -4,6 +4,7 @@ const { checkRssFeeds, scheduleDailyNews } = require('../services/rssService');
 const { checkReminders } = require('../services/reminderService');
 const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
+const { checkBirthdays } = require('../services/birthdayService');
 const { runJob } = require('../utils/jobRunner');
 
 module.exports = {
@@ -41,6 +42,10 @@ module.exports = {
 
         cron.schedule('*/2 * * * *', () =>
             runJob('tempVoiceService', 'checkTempVoice', () => checkTempVoice(client))
+        );
+
+        cron.schedule('0 * * * *', () =>
+            runJob('birthdayService', 'checkBirthdays', () => checkBirthdays(client))
         );
 
         console.log('[READY] Background services started');
