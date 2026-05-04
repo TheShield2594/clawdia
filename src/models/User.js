@@ -13,6 +13,7 @@ const userSchema = new Schema({
     bank: { type: Number, default: 0 },
     lastDaily: { type: Date, default: null },
     lastWork: { type: Date, default: null },
+    lastWheelSpin: { type: Date, default: null },
 
     inventory: [{
         itemId: { type: String, required: true },
