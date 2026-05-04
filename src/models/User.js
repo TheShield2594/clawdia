@@ -14,6 +14,7 @@ const userSchema = new Schema({
     lastDaily: { type: Date, default: null },
     lastWork: { type: Date, default: null },
     lastWheelSpin: { type: Date, default: null },
+    shiftsWorked: { type: Number, default: 0 },
 
     inventory: [{
         itemId: { type: String, required: true },
