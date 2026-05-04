@@ -383,6 +383,28 @@ const guildSchema = new Schema({
         downvoteEmoji: { type: String, default: '👎' }
     },
 
+    commandPolicies: {
+        enabled: { type: Boolean, default: false },
+        exceptions: {
+            userIds: [{ type: String }],
+            roleIds: [{ type: String }]
+        },
+        rules: [{
+            command: { type: String, required: true },
+            effect: { type: String, enum: ['allow', 'deny'], default: 'allow' },
+            roleIds: [{ type: String }],
+            channelIds: [{ type: String }],
+            daysOfWeek: [{ type: Number, min: 0, max: 6 }],
+            startHourUtc: { type: Number, min: 0, max: 23, default: null },
+            endHourUtc: { type: Number, min: 0, max: 23, default: null }
+        }],
+        cooldownOverrides: [{
+            command: { type: String, required: true },
+            roleId: { type: String, required: true },
+            cooldownSeconds: { type: Number, min: 0, default: 3 }
+        }]
+    },
+
     bibleVerse: {
         enabled: { type: Boolean, default: false },
         channelId: { type: String, default: null },
