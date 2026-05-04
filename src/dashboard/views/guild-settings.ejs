@@ -35,6 +35,10 @@
                 <button class="nav-item" data-tab="leveling"><span class="nav-emoji">📈</span> Leveling</button>
                 <button class="nav-item active" data-tab="welcome"><span class="nav-emoji">👋</span> Welcome</button>
 
+                
+
+                <button class="nav-item" data-tab="birthdays"><span class="nav-emoji">🎂</span> Birthdays</button>
+
                 <!-- Moderation -->
                 <div class="nav-section-header">Moderation</div>
                 <button class="nav-item" data-tab="moderation"><span class="nav-emoji">🛡️</span> Moderation</button>
@@ -158,6 +162,48 @@
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('farewell')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Birthdays -->
+                <section id="birthdays" class="panel">
+                    <div class="panel-head">
+                        <h2>Birthday Settings</h2>
+                        <p>Configure automated birthday wishes and birthday role assignment.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable birthday system</strong><span>Send automated birthday wishes</span></span>
+                        <span class="switch"><input type="checkbox" id="birthday-enabled" <%= settings.birthdays?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="birthday-channel">Happy birthday wishing channel</label>
+                        <select id="birthday-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.birthdays?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="birthday-hour">Happy birthday wishing hour (UTC)</label>
+                        <input type="number" id="birthday-hour" min="0" max="23" value="<%= settings.birthdays?.wishingHourUtc ?? 9 %>">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="birthday-role">Birthday role</label>
+                        <select id="birthday-role">
+                            <option value="">No birthday role</option>
+                            <% roles.forEach(role => { %>
+                                <option value="<%= role.id %>" <%= settings.birthdays?.roleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="birthday-message">Birthday message template</label>
+                        <textarea id="birthday-message" rows="2"><%= settings.birthdays?.message || "It's the birthday of {user} ({age}) ! 🎂" %></textarea>
+                        <small>Variables: <code>{user}</code> · <code>{age}</code></small>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('birthdays')">Save changes</button>
                     </div>
                 </section>
 
@@ -1236,6 +1282,14 @@
                     'farewell.enabled': document.getElementById('farewell-enabled').checked,
                     'farewell.channelId': document.getElementById('farewell-channel').value,
                     'farewell.message': document.getElementById('farewell-message').value
+                };
+            } else if (section === 'birthdays') {
+                data = {
+                    'birthdays.enabled': document.getElementById('birthday-enabled').checked,
+                    'birthdays.channelId': document.getElementById('birthday-channel').value || null,
+                    'birthdays.wishingHourUtc': parseInt(document.getElementById('birthday-hour').value, 10) || 9,
+                    'birthdays.roleId': document.getElementById('birthday-role').value || null,
+                    'birthdays.message': document.getElementById('birthday-message').value || "It's the birthday of {user} ({age}) ! 🎂"
                 };
             } else if (section === 'moderation') {
                 const immunityRoleIds = Array.from(document.getElementById('mod-immunity-roles').selectedOptions).map(o => o.value);

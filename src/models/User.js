@@ -63,6 +63,13 @@ const userSchema = new Schema({
     dailyMessages: { type: Number, default: 0 },
     lastDailyReset: { type: Date, default: null },
 
+    birthday: {
+        month: { type: Number, min: 1, max: 12, default: null },
+        day: { type: Number, min: 1, max: 31, default: null },
+        year: { type: Number, min: 1900, max: 2100, default: null },
+        lastCelebratedYear: { type: Number, default: null }
+    },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });
