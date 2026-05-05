@@ -30,21 +30,20 @@ module.exports = {
 
         const shopItem = guildSettings?.shop?.find(s => s.name.toLowerCase() === itemName.toLowerCase());
 
-        // Consume one from inventory
-        invEntry.quantity -= 1;
-        if (invEntry.quantity <= 0) {
-            user.inventory = user.inventory.filter(e => e.itemId.toLowerCase() !== itemName.toLowerCase());
-        }
-
         let roleGranted = false;
         if (shopItem?.roleId) {
             const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
             if (member && !member.roles.cache.has(shopItem.roleId)) {
-                await member.roles.add(shopItem.roleId, `Used shop item: ${shopItem.name}`).catch(() => {});
+                await member.roles.add(shopItem.roleId, `Used shop item: ${shopItem.name}`);
                 roleGranted = true;
             }
         }
 
+        // Consume from inventory only after successful effects
+        invEntry.quantity -= 1;
+        if (invEntry.quantity <= 0) {
+            user.inventory = user.inventory.filter(e => e.itemId.toLowerCase() !== itemName.toLowerCase());
+        }
         await user.save();
 
         const embed = new EmbedBuilder()

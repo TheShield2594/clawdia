@@ -54,7 +54,9 @@ module.exports = {
                 await user.send(`You have been warned in **${interaction.guild.name}** for: ${reason}`).catch(() => {});
             } catch (error) {
                 console.error('Warn error:', error);
-                await interaction.reply({ content: 'Failed to warn the user.', ephemeral: true });
+                if (!interaction.replied) {
+                    await interaction.reply({ content: 'Failed to warn the user.', ephemeral: true });
+                }
             }
         }
 
@@ -87,7 +89,9 @@ module.exports = {
                 await interaction.reply({ embeds: [embed] });
             } catch (error) {
                 console.error('Warn list error:', error);
-                await interaction.reply({ content: 'Failed to fetch warnings.', ephemeral: true });
+                if (!interaction.replied) {
+                    await interaction.reply({ content: 'Failed to fetch warnings.', ephemeral: true });
+                }
             }
         }
 
@@ -120,7 +124,9 @@ module.exports = {
                 await interaction.reply({ embeds: [embed] });
             } catch (error) {
                 console.error('Warn remove error:', error);
-                await interaction.reply({ content: 'Failed to remove the warning.', ephemeral: true });
+                if (!interaction.replied) {
+                    await interaction.reply({ content: 'Failed to remove the warning.', ephemeral: true });
+                }
             }
         }
     }

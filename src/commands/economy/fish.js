@@ -43,32 +43,36 @@ module.exports = {
             { upsert: true, new: true }
         );
 
-        const lastFish = user.get('lastFish');
-        if (lastFish && Date.now() - new Date(lastFish).getTime() < COOLDOWN_MS) {
-            const remaining = COOLDOWN_MS - (Date.now() - new Date(lastFish).getTime());
+        if (user.lastFish && Date.now() - user.lastFish.getTime() < COOLDOWN_MS) {
+            const remaining = COOLDOWN_MS - (Date.now() - user.lastFish.getTime());
             const mins = Math.ceil(remaining / 60000);
             return interaction.reply({ content: `Your fishing rod needs a rest. Try again in **${mins} min**.`, ephemeral: true });
         }
 
         await interaction.deferReply();
 
-        const catch_ = roll();
-        user.balance += catch_.payout;
-        user.set('lastFish', new Date());
-        await user.save();
+        try {
+            const catch_ = roll();
+            user.balance += catch_.payout;
+            user.lastFish = new Date();
+            await user.save();
 
-        const embed = new EmbedBuilder()
-            .setColor(catch_.payout === 0 ? '#95a5a6' : catch_.payout >= 350 ? '#f39c12' : '#3498db')
-            .setTitle(`${catch_.emoji} ${catch_.name}`)
-            .setDescription(
-                catch_.payout === 0
-                    ? `You reeled in a **${catch_.name}**. Better luck next time.`
-                    : `You caught a **${catch_.name}** and earned **${currency}${catch_.payout.toLocaleString()}**!`
-            )
-            .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
-            .setFooter({ text: 'Come back in 1 hour to fish again' })
-            .setTimestamp();
+            const embed = new EmbedBuilder()
+                .setColor(catch_.payout === 0 ? '#95a5a6' : catch_.payout >= 350 ? '#f39c12' : '#3498db')
+                .setTitle(`${catch_.emoji} ${catch_.name}`)
+                .setDescription(
+                    catch_.payout === 0
+                        ? `You reeled in a **${catch_.name}**. Better luck next time.`
+                        : `You caught a **${catch_.name}** and earned **${currency}${catch_.payout.toLocaleString()}**!`
+                )
+                .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
+                .setFooter({ text: 'Come back in 1 hour to fish again' })
+                .setTimestamp();
 
-        await interaction.editReply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed] });
+        } catch (error) {
+            console.error('Fish command error:', error);
+            await interaction.editReply({ content: 'Something went wrong while fishing.' });
+        }
     }
 };

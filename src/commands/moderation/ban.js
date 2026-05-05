@@ -72,23 +72,21 @@ module.exports = {
         let durationMs = null;
         if (durationStr) {
             durationMs = parseDuration(durationStr);
-            if (!durationMs) {
+            if (durationMs === null) {
                 return interaction.reply({ content: 'Invalid duration format. Use e.g. `30m`, `12h`, `7d`.', ephemeral: true });
             }
         }
 
         try {
-            await interaction.guild.members.ban(user, { deleteMessageSeconds: deleteDays * 86400, reason });
-
             if (durationMs) {
-                await TempBan.create({
-                    guildId:     interaction.guild.id,
-                    userId:      user.id,
-                    moderatorId: interaction.user.id,
-                    reason,
-                    expiresAt:   new Date(Date.now() + durationMs)
-                });
+                await TempBan.findOneAndUpdate(
+                    { guildId: interaction.guild.id, userId: user.id },
+                    { moderatorId: interaction.user.id, reason, expiresAt: new Date(Date.now() + durationMs) },
+                    { upsert: true }
+                );
             }
+
+            await interaction.guild.members.ban(user, { deleteMessageSeconds: deleteDays * 86400, reason });
 
             const embed = new EmbedBuilder()
                 .setColor('#ff0000')

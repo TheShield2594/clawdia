@@ -47,43 +47,50 @@ module.exports = {
             return interaction.reply({ content: `${target.username} doesn't have enough ${currency} to be worth robbing (minimum ${currency}${MIN_ROB_BALANCE}).`, ephemeral: true });
         }
 
-        const success = Math.random() < SUCCESS_CHANCE;
-        robber.lastWork = new Date();
+        try {
+            const success = Math.random() < SUCCESS_CHANCE;
+            robber.lastWork = new Date();
 
-        let embed;
-        if (success) {
-            const stolen = Math.floor(victim.balance * (0.1 + Math.random() * 0.2));
-            robber.balance += stolen;
-            victim.balance -= stolen;
-            await Promise.all([robber.save(), victim.save()]);
+            let embed;
+            if (success) {
+                const stolen = Math.floor(victim.balance * (0.1 + Math.random() * 0.2));
+                robber.balance += stolen;
+                victim.balance -= stolen;
+                await Promise.all([robber.save(), victim.save()]);
 
-            embed = new EmbedBuilder()
-                .setColor('#f39c12')
-                .setTitle('🦹 Successful Heist!')
-                .setDescription(`You slipped into **${target.username}'s** wallet and made off with **${currency}${stolen.toLocaleString()}**!`)
-                .addFields(
-                    { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true },
-                    { name: 'Their Balance', value: `${currency}${victim.balance.toLocaleString()}`, inline: true }
-                )
-                .setTimestamp();
-        } else {
-            const fine = Math.floor(robber.balance * 0.1);
-            const paid = Math.min(fine, robber.balance);
-            robber.balance = Math.max(0, robber.balance - paid);
-            victim.balance += paid;
-            await Promise.all([robber.save(), victim.save()]);
+                embed = new EmbedBuilder()
+                    .setColor('#f39c12')
+                    .setTitle('🦹 Successful Heist!')
+                    .setDescription(`You slipped into **${target.username}'s** wallet and made off with **${currency}${stolen.toLocaleString()}**!`)
+                    .addFields(
+                        { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true },
+                        { name: 'Their Balance', value: `${currency}${victim.balance.toLocaleString()}`, inline: true }
+                    )
+                    .setTimestamp();
+            } else {
+                const fine = Math.floor(robber.balance * 0.1);
+                const paid = Math.min(fine, robber.balance);
+                robber.balance = Math.max(0, robber.balance - paid);
+                victim.balance += paid;
+                await Promise.all([robber.save(), victim.save()]);
 
-            embed = new EmbedBuilder()
-                .setColor('#e74c3c')
-                .setTitle('🚔 Caught Red-Handed!')
-                .setDescription(`**${target.username}** caught you and you were fined **${currency}${paid.toLocaleString()}**, which went straight to them.`)
-                .addFields(
-                    { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
-                    { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
-                )
-                .setTimestamp();
+                embed = new EmbedBuilder()
+                    .setColor('#e74c3c')
+                    .setTitle('🚔 Caught Red-Handed!')
+                    .setDescription(`**${target.username}** caught you and you were fined **${currency}${paid.toLocaleString()}**, which went straight to them.`)
+                    .addFields(
+                        { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
+                        { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
+                    )
+                    .setTimestamp();
+            }
+
+            await interaction.reply({ embeds: [embed] });
+        } catch (error) {
+            console.error('Rob command error:', error);
+            if (!interaction.replied) {
+                await interaction.reply({ content: 'Something went wrong.', ephemeral: true });
+            }
         }
-
-        await interaction.reply({ embeds: [embed] });
     }
 };

@@ -10,6 +10,6 @@ const tempBanSchema = new Schema({
 });
 
 tempBanSchema.index({ expiresAt: 1 });
-tempBanSchema.index({ guildId: 1, userId: 1 });
+tempBanSchema.index({ guildId: 1, userId: 1 }, { unique: true });
 
 module.exports = model('TempBan', tempBanSchema);

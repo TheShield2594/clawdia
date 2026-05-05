@@ -1646,7 +1646,7 @@
                 data = {
                     'birthdays.enabled': document.getElementById('birthday-enabled').checked,
                     'birthdays.channelId': document.getElementById('birthday-channel').value || null,
-                    'birthdays.wishingHourUtc': parseInt(document.getElementById('birthday-hour').value, 10) || 9,
+                    'birthdays.wishingHourUtc': (() => { const v = parseInt(document.getElementById('birthday-hour').value, 10); return Number.isNaN(v) ? 9 : v; })(),
                     'birthdays.roleId': document.getElementById('birthday-role').value || null,
                     'birthdays.message': document.getElementById('birthday-message').value || "It's the birthday of {user} ({age}) ! 🎂"
                 };
@@ -2004,12 +2004,17 @@
         var _cpRuleIdx = -1;
         var _cpCdIdx   = -1;
 
+        function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
         function renderCpRules() {
             var list = document.getElementById('cp-rules-list');
             if (!_cpRules.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;">No rules — click <strong>+ Add rule</strong> to add one.</p>'; return; }
             list.innerHTML = _cpRules.map(function(r, i) {
+                var color = r.effect === 'allow' ? '#2ecc71' : '#e74c3c';
                 return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
-                    '<span style="flex:1"><strong>' + r.command + '</strong> — <span style="color:' + (r.effect==='allow'?'#2ecc71':'#e74c3c') + '">' + r.effect + '</span></span>' +
+                    '<span style="flex:1"><strong>' + escHtml(r.command) + '</strong> — <span style="color:' + color + '">' + escHtml(r.effect) + '</span></span>' +
                     '<button class="btn btn-sm" onclick="openCpRuleModal(' + i + ')">Edit</button>' +
                     '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpRules.splice(' + i + ',1);renderCpRules()">✕</button></div>';
             }).join('');
@@ -2019,7 +2024,7 @@
             if (!_cpCooldowns.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;">No cooldown overrides — click <strong>+ Add override</strong>.</p>'; return; }
             list.innerHTML = _cpCooldowns.map(function(c, i) {
                 return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
-                    '<span style="flex:1"><strong>' + c.command + '</strong> — Role <code>' + c.roleId + '</code> → ' + c.cooldownSeconds + 's</span>' +
+                    '<span style="flex:1"><strong>' + escHtml(c.command) + '</strong> — Role <code>' + escHtml(c.roleId) + '</code> → ' + escHtml(c.cooldownSeconds) + 's</span>' +
                     '<button class="btn btn-sm" onclick="openCpCooldownModal(' + i + ')">Edit</button>' +
                     '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpCooldowns.splice(' + i + ',1);renderCpCooldowns()">✕</button></div>';
             }).join('');

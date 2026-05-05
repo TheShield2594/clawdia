@@ -48,7 +48,7 @@ function displayHand(hand, hideSecond = false) {
 function embedAuthor(interaction) {
     return {
         name: interaction.member?.displayName || interaction.user.username,
-        iconURL: interaction.user.displayAvatarURL({ dynamic: true }),
+        iconURL: interaction.user.displayAvatarURL(),
     };
 }
 
@@ -122,12 +122,17 @@ module.exports = {
         const dealerHand = [deck.pop(), deck.pop()];
         const gameId     = `${interaction.user.id}_${Date.now()}`;
 
-        // Natural blackjack check
+        // Natural blackjack check — push if dealer also has 21
         if (handTotal(playerHand) === 21) {
+            if (handTotal(dealerHand) === 21) {
+                user.balance += bet;
+                await user.save();
+                const embed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, '🤝 Push — both got blackjack', '#f39c12', false);
+                return interaction.reply({ embeds: [embed], components: [buildButtons(gameId, true)] });
+            }
             const payout = Math.floor(bet * 1.5);
             user.balance += bet + payout;
             await user.save();
-
             const embed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, `🎉 Blackjack! +${currency}${payout.toLocaleString()}`, '#2ecc71', false);
             return interaction.reply({ embeds: [embed], components: [buildButtons(gameId, true)] });
         }

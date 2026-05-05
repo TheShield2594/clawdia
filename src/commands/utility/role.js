@@ -52,8 +52,13 @@ module.exports = {
                 return interaction.reply({ content: `You already have the **${role.name}** role.`, ephemeral: true });
             }
 
-            await member.roles.add(role.id, 'Self-assigned via /role add');
-            return interaction.reply({ content: `You've been given the **${role.name}** role.`, ephemeral: true });
+            try {
+                await member.roles.add(role.id, 'Self-assigned via /role add');
+                return interaction.reply({ content: `You've been given the **${role.name}** role.`, ephemeral: true });
+            } catch (error) {
+                console.error('Role add error:', error);
+                return interaction.reply({ content: 'Failed to assign the role. I may not have permission.', ephemeral: true });
+            }
         }
 
         if (sub === 'remove') {
@@ -61,8 +66,13 @@ module.exports = {
                 return interaction.reply({ content: `You don't have the **${role.name}** role.`, ephemeral: true });
             }
 
-            await member.roles.remove(role.id, 'Self-removed via /role remove');
-            return interaction.reply({ content: `The **${role.name}** role has been removed.`, ephemeral: true });
+            try {
+                await member.roles.remove(role.id, 'Self-removed via /role remove');
+                return interaction.reply({ content: `The **${role.name}** role has been removed.`, ephemeral: true });
+            } catch (error) {
+                console.error('Role remove error:', error);
+                return interaction.reply({ content: 'Failed to remove the role. I may not have permission.', ephemeral: true });
+            }
         }
     }
 };

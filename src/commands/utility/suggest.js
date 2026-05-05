@@ -28,18 +28,21 @@ module.exports = {
             .setColor('#5865F2')
             .setAuthor({
                 name: interaction.member?.displayName || interaction.user.username,
-                iconURL: interaction.user.displayAvatarURL({ dynamic: true })
+                iconURL: interaction.user.displayAvatarURL()
             })
             .setTitle('💡 New Suggestion')
             .setDescription(text)
             .setFooter({ text: `Submitted by ${interaction.user.tag}` })
             .setTimestamp();
 
-        const msg = await channel.send({ embeds: [embed] });
-
-        await msg.react(guildSettings.suggestions.upvoteEmoji || '👍').catch(() => {});
-        await msg.react(guildSettings.suggestions.downvoteEmoji || '👎').catch(() => {});
-
-        await interaction.reply({ content: `Your suggestion has been posted in ${channel}!`, ephemeral: true });
+        try {
+            const msg = await channel.send({ embeds: [embed] });
+            await msg.react(guildSettings.suggestions.upvoteEmoji || '👍').catch(() => {});
+            await msg.react(guildSettings.suggestions.downvoteEmoji || '👎').catch(() => {});
+            await interaction.reply({ content: `Your suggestion has been posted in ${channel}!`, ephemeral: true });
+        } catch (error) {
+            console.error('Suggest command error:', error);
+            await interaction.reply({ content: 'Failed to post your suggestion. I may not have permission to send messages in that channel.', ephemeral: true });
+        }
     }
 };

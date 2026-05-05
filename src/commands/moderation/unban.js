@@ -12,6 +12,7 @@ module.exports = {
         .addStringOption(o =>
             o.setName('reason')
                 .setDescription('Reason for the unban')
+                .setMaxLength(1024)
                 .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 

@@ -50,39 +50,43 @@ module.exports = {
             { upsert: true, new: true }
         );
 
-        const lastMine = user.get('lastMine');
-        if (lastMine && Date.now() - new Date(lastMine).getTime() < COOLDOWN_MS) {
-            const remaining = COOLDOWN_MS - (Date.now() - new Date(lastMine).getTime());
+        if (user.lastMine && Date.now() - user.lastMine.getTime() < COOLDOWN_MS) {
+            const remaining = COOLDOWN_MS - (Date.now() - user.lastMine.getTime());
             const mins = Math.ceil(remaining / 60000);
             return interaction.reply({ content: `The mines are closed for maintenance. Come back in **${mins} min**.`, ephemeral: true });
         }
 
         await interaction.deferReply();
 
-        const ore = roll();
-        const qty = quantity();
-        const earned = ore.payout * qty;
+        try {
+            const ore = roll();
+            const qty = quantity();
+            const earned = ore.payout * qty;
 
-        user.balance += earned;
-        user.set('lastMine', new Date());
-        await user.save();
+            user.balance += earned;
+            user.lastMine = new Date();
+            await user.save();
 
-        const embed = new EmbedBuilder()
-            .setColor(ore.payout >= 600 ? '#f39c12' : ore.payout >= 200 ? '#2ecc71' : '#7f8c8d')
-            .setTitle(`${ore.emoji} Mining Results`)
-            .setDescription(
-                qty > 1
-                    ? `You struck **${qty}x ${ore.name}** and earned **${currency}${earned.toLocaleString()}**!`
-                    : `You found **${ore.name}** and earned **${currency}${earned.toLocaleString()}**!`
-            )
-            .addFields(
-                { name: 'Ore', value: `${ore.emoji} ${ore.name} ×${qty}`, inline: true },
-                { name: 'Earned', value: `${currency}${earned.toLocaleString()}`, inline: true },
-                { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
-            )
-            .setFooter({ text: 'The mines reopen in 2 hours' })
-            .setTimestamp();
+            const embed = new EmbedBuilder()
+                .setColor(ore.payout >= 600 ? '#f39c12' : ore.payout >= 200 ? '#2ecc71' : '#7f8c8d')
+                .setTitle(`${ore.emoji} Mining Results`)
+                .setDescription(
+                    qty > 1
+                        ? `You struck **${qty}x ${ore.name}** and earned **${currency}${earned.toLocaleString()}**!`
+                        : `You found **${ore.name}** and earned **${currency}${earned.toLocaleString()}**!`
+                )
+                .addFields(
+                    { name: 'Ore', value: `${ore.emoji} ${ore.name} ×${qty}`, inline: true },
+                    { name: 'Earned', value: `${currency}${earned.toLocaleString()}`, inline: true },
+                    { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
+                )
+                .setFooter({ text: 'The mines reopen in 2 hours' })
+                .setTimestamp();
 
-        await interaction.editReply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed] });
+        } catch (error) {
+            console.error('Mine command error:', error);
+            await interaction.editReply({ content: 'Something went wrong while mining.' });
+        }
     }
 };

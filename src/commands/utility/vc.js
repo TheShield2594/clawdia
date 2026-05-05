@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const Guild = require('../../models/Guild');
 
 module.exports = {
@@ -44,8 +44,13 @@ module.exports = {
             return interaction.reply({ content: 'You must be in a voice channel to use this command.', ephemeral: true });
         }
 
-        if (!guildSettings.tempVoice.activeChannels.includes(voiceChannel.id)) {
+        if (!(guildSettings.tempVoice.activeChannels ?? []).includes(voiceChannel.id)) {
             return interaction.reply({ content: 'You must be in your own temporary voice channel to use this command.', ephemeral: true });
+        }
+
+        const overwrite = voiceChannel.permissionOverwrites.cache.get(interaction.user.id);
+        if (!overwrite?.allow.has(PermissionFlagsBits.ManageChannels)) {
+            return interaction.reply({ content: 'This is not your temporary voice channel.', ephemeral: true });
         }
 
         try {

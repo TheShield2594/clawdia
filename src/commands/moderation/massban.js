@@ -12,6 +12,7 @@ module.exports = {
         .addStringOption(o =>
             o.setName('reason')
                 .setDescription('Reason applied to all bans')
+                .setMaxLength(1024)
                 .setRequired(false))
         .addIntegerOption(o =>
             o.setName('delete_days')
@@ -65,7 +66,7 @@ module.exports = {
             .addFields(
                 { name: 'Banned', value: `${succeeded.length} user(s)`, inline: true },
                 { name: 'Failed', value: `${failed.length} user(s)`, inline: true },
-                { name: 'Reason', value: reason }
+                { name: 'Reason', value: reason.slice(0, 1024) }
             )
             .setTimestamp();
 
