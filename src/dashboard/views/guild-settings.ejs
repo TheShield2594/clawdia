@@ -2049,6 +2049,10 @@
             var container = document.getElementById('summary-jobs-list');
             try {
                 var resp = await fetch('/api/guild/' + guildId + '/summary-jobs');
+                if (!resp.ok) {
+                    container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><p>Failed to load summary jobs.</p></div>';
+                    return;
+                }
                 var jobs = await resp.json();
                 summaryJobsLoaded = true;
                 renderSummaryJobs(jobs);
@@ -2069,8 +2073,8 @@
                 div.className = 'list-item';
                 var hh = String(job.hour).padStart(2, '0');
                 var mm = String(job.minute).padStart(2, '0');
-                var srcName = _channelNameMap[job.sourceChannelId] ? '#' + escHtml(_channelNameMap[job.sourceChannelId]) : job.sourceChannelId;
-                var tgtName = _channelNameMap[job.targetChannelId] ? '#' + escHtml(_channelNameMap[job.targetChannelId]) : job.targetChannelId;
+                var srcName = _channelNameMap[job.sourceChannelId] ? '#' + escHtml(_channelNameMap[job.sourceChannelId]) : escHtml(job.sourceChannelId);
+                var tgtName = _channelNameMap[job.targetChannelId] ? '#' + escHtml(_channelNameMap[job.targetChannelId]) : escHtml(job.targetChannelId);
                 var lastRun = job.lastRun ? new Date(job.lastRun).toLocaleString() : 'Never';
                 div.innerHTML =
                     '<div style="min-width:0;flex:1;">' +
@@ -2149,7 +2153,7 @@
             _personas.forEach(function(p) {
                 var div = document.createElement('div');
                 div.className = 'list-item';
-                var chanName = _channelNameMap[p.channelId] ? '#' + escHtml(_channelNameMap[p.channelId]) : p.channelId;
+                var chanName = _channelNameMap[p.channelId] ? '#' + escHtml(_channelNameMap[p.channelId]) : escHtml(p.channelId);
                 var preview = p.systemPrompt.length > 120 ? p.systemPrompt.slice(0, 120) + '…' : p.systemPrompt;
                 div.innerHTML =
                     '<div style="min-width:0;flex:1;">' +

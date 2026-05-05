@@ -728,7 +728,8 @@ router.post('/guild/:guildId/persona', checkAuth, checkGuildAccess, checkWriteRa
         const guildSettings = await Guild.findOne({ guildId });
         if (!guildSettings) return res.status(404).json({ error: 'Guild settings not found' });
 
-        if (!guildSettings.ai.channelPersonas) guildSettings.ai.channelPersonas = [];
+        if (!guildSettings.ai) guildSettings.ai = {};
+        if (!Array.isArray(guildSettings.ai.channelPersonas)) guildSettings.ai.channelPersonas = [];
 
         const existing = guildSettings.ai.channelPersonas.find(p => p.channelId === channelId.trim());
         if (existing) {
@@ -758,8 +759,10 @@ router.delete('/guild/:guildId/persona/:channelId', checkAuth, checkGuildAccess,
         const guildSettings = await Guild.findOne({ guildId });
         if (!guildSettings) return res.status(404).json({ error: 'Guild settings not found' });
 
-        const before = (guildSettings.ai.channelPersonas || []).length;
-        guildSettings.ai.channelPersonas = (guildSettings.ai.channelPersonas || []).filter(p => p.channelId !== channelId);
+        if (!guildSettings.ai) guildSettings.ai = {};
+        if (!Array.isArray(guildSettings.ai.channelPersonas)) guildSettings.ai.channelPersonas = [];
+        const before = guildSettings.ai.channelPersonas.length;
+        guildSettings.ai.channelPersonas = guildSettings.ai.channelPersonas.filter(p => p.channelId !== channelId);
         if (guildSettings.ai.channelPersonas.length === before) {
             return res.status(404).json({ error: 'Persona not found for that channel' });
         }
