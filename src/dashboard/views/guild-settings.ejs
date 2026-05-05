@@ -56,6 +56,8 @@
                 <div class="nav-section-header">Tools &amp; Support</div>
                 <button class="nav-item" data-tab="ai"><span class="nav-emoji">🧠</span> AI Chat</button>
                 <button class="nav-item" data-tab="knowledgebase"><span class="nav-emoji">📚</span> Knowledge Base</button>
+                <button class="nav-item" data-tab="aisummaries"><span class="nav-emoji">📝</span> AI Summaries</button>
+                <button class="nav-item" data-tab="aipersonas"><span class="nav-emoji">👤</span> AI Personas</button>
                 <button class="nav-item" data-tab="tempvoice"><span class="nav-emoji">🔊</span> Temp Voice</button>
                 <button class="nav-item" data-tab="tickets"><span class="nav-emoji">🎫</span> Tickets</button>
 
@@ -1097,6 +1099,86 @@
                     </div>
                 </section>
 
+                <!-- AI Summaries -->
+                <section id="aisummaries" class="panel">
+                    <div class="panel-head">
+                        <h2>AI Summaries</h2>
+                        <p>Schedule automatic AI-generated summaries of channel activity. The bot fetches recent messages and posts a digest to a target channel at the specified UTC time each day.</p>
+                    </div>
+                    <div id="summary-jobs-list" style="margin-bottom:1.5rem;">
+                        <div class="empty-state" style="padding:2rem 1.5rem;">
+                            <p>Loading summary jobs…</p>
+                        </div>
+                    </div>
+                    <div class="panel-head" style="margin-top:1rem"><h3>Add summary job</h3></div>
+                    <div class="field">
+                        <label class="field-label" for="summary-source">Source channel (channel to summarize)</label>
+                        <select id="summary-source">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>">#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="summary-target">Target channel (where the summary is posted)</label>
+                        <select id="summary-target">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>">#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="summary-hour">UTC hour (0–23)</label>
+                            <input type="number" id="summary-hour" min="0" max="23" value="9">
+                        </div>
+                        <div>
+                            <label class="field-label" for="summary-minute">UTC minute (0–59)</label>
+                            <input type="number" id="summary-minute" min="0" max="59" value="0">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="summary-label">Label <small style="font-weight:normal;opacity:.7;">(optional)</small></label>
+                        <input type="text" id="summary-label" placeholder="e.g. Daily Summary of #general">
+                        <small>Defaults to "Daily Summary of #channel" if left empty.</small>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="addSummaryJob()">Add summary job</button>
+                    </div>
+                </section>
+
+                <!-- AI Personas -->
+                <section id="aipersonas" class="panel">
+                    <div class="panel-head">
+                        <h2>AI Personas</h2>
+                        <p>Assign a custom AI persona to specific channels. When the bot is active in a channel with a persona, it uses that persona's system prompt instead of the server-wide default.</p>
+                    </div>
+                    <div id="personas-list" style="margin-bottom:1.5rem;"></div>
+                    <div class="panel-head" style="margin-top:1rem"><h3>Add / update persona</h3></div>
+                    <div class="field">
+                        <label class="field-label" for="persona-channel">Channel</label>
+                        <select id="persona-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>">#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="persona-name">Persona name</label>
+                        <input type="text" id="persona-name" placeholder="e.g. Support Bot">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="persona-prompt">System prompt</label>
+                        <textarea id="persona-prompt" rows="4" placeholder="You are a helpful support assistant…"></textarea>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="addPersona()">Save persona</button>
+                    </div>
+                </section>
+
                 <section id="analytics" class="panel">
                     <div class="panel-head">
                         <h2>Insights & Recommendations</h2>
@@ -1183,6 +1265,8 @@
                 document.getElementById(tab).classList.add('active');
                 if (tab === 'analytics') loadAnalytics();
                 if (tab === 'knowledgebase') loadKnowledgeBase();
+                if (tab === 'aisummaries') loadSummaryJobs();
+                if (tab === 'aipersonas') renderPersonas();
                 if (history.replaceState) history.replaceState(null, '', '#' + tab);
             });
         });
@@ -1953,6 +2037,182 @@
                 toast('An error occurred', 'error');
             }
         }
+
+        // ── AI Summaries ──────────────────────────────────────────────────────────
+        var summaryJobsLoaded = false;
+        var _channelNameMap = <%- JSON.stringify(Object.fromEntries(channels.map(c => [c.id, c.name]))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+
+        async function loadSummaryJobs() {
+            if (summaryJobsLoaded) return;
+            var guildId = '<%= guild.id %>';
+            var container = document.getElementById('summary-jobs-list');
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/summary-jobs');
+                if (!resp.ok) {
+                    container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><p>Failed to load summary jobs.</p></div>';
+                    return;
+                }
+                var jobs = await resp.json();
+                summaryJobsLoaded = true;
+                renderSummaryJobs(jobs);
+            } catch (e) {
+                container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><p>Failed to load summary jobs.</p></div>';
+            }
+        }
+
+        function renderSummaryJobs(jobs) {
+            var container = document.getElementById('summary-jobs-list');
+            if (!Array.isArray(jobs) || !jobs.length) {
+                container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><h3>No summary jobs yet</h3><p>Add your first scheduled summary below.</p></div>';
+                return;
+            }
+            container.innerHTML = '';
+            jobs.forEach(function(job) {
+                var div = document.createElement('div');
+                div.className = 'list-item';
+                var hh = String(job.hour).padStart(2, '0');
+                var mm = String(job.minute).padStart(2, '0');
+                var srcName = _channelNameMap[job.sourceChannelId] ? '#' + escHtml(_channelNameMap[job.sourceChannelId]) : escHtml(job.sourceChannelId);
+                var tgtName = _channelNameMap[job.targetChannelId] ? '#' + escHtml(_channelNameMap[job.targetChannelId]) : escHtml(job.targetChannelId);
+                var lastRun = job.lastRun ? new Date(job.lastRun).toLocaleString() : 'Never';
+                div.innerHTML =
+                    '<div style="min-width:0;flex:1;">' +
+                        '<strong>' + escHtml(job.label) + '</strong>' +
+                        '<div style="color:var(--text-mute);font-size:.82rem;margin-top:.2rem;">' +
+                            srcName + ' → ' + tgtName + ' · Daily at ' + hh + ':' + mm + ' UTC · Last run: ' + escHtml(lastRun) +
+                        '</div>' +
+                    '</div>' +
+                    '<button class="btn btn-danger btn-sm" onclick="deleteSummaryJob(\'' + escHtml(job._id) + '\')">Remove</button>';
+                container.appendChild(div);
+            });
+        }
+
+        async function addSummaryJob() {
+            var guildId = '<%= guild.id %>';
+            var sourceChannelId = document.getElementById('summary-source').value;
+            var targetChannelId = document.getElementById('summary-target').value;
+            var hour = parseInt(document.getElementById('summary-hour').value, 10);
+            var minute = parseInt(document.getElementById('summary-minute').value, 10);
+            var label = document.getElementById('summary-label').value.trim();
+            if (!sourceChannelId || !targetChannelId) { toast('Please select both source and target channels', 'error'); return; }
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/summary-jobs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sourceChannelId: sourceChannelId, targetChannelId: targetChannelId, hour: hour, minute: minute, label: label })
+                });
+                var data = await resp.json();
+                if (resp.ok) {
+                    toast('Summary job added ✓', 'success');
+                    document.getElementById('summary-source').value = '';
+                    document.getElementById('summary-target').value = '';
+                    document.getElementById('summary-hour').value = '9';
+                    document.getElementById('summary-minute').value = '0';
+                    document.getElementById('summary-label').value = '';
+                    summaryJobsLoaded = false;
+                    loadSummaryJobs();
+                } else {
+                    toast(data.error || 'Failed to add summary job', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        async function deleteSummaryJob(jobId) {
+            if (!confirm('Remove this summary job?')) return;
+            var guildId = '<%= guild.id %>';
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/summary-jobs/' + jobId, { method: 'DELETE' });
+                if (resp.ok) {
+                    toast('Summary job removed ✓', 'success');
+                    summaryJobsLoaded = false;
+                    loadSummaryJobs();
+                } else {
+                    toast('Failed to remove summary job', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        // ── AI Personas ───────────────────────────────────────────────────────────
+        var _personas = <%- JSON.stringify((settings.ai && settings.ai.channelPersonas) || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+
+        function renderPersonas() {
+            var container = document.getElementById('personas-list');
+            if (!container) return;
+            if (!_personas.length) {
+                container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><h3>No personas configured</h3><p>Add a persona below to give the AI a distinct identity in specific channels.</p></div>';
+                return;
+            }
+            container.innerHTML = '';
+            _personas.forEach(function(p) {
+                var div = document.createElement('div');
+                div.className = 'list-item';
+                var chanName = _channelNameMap[p.channelId] ? '#' + escHtml(_channelNameMap[p.channelId]) : escHtml(p.channelId);
+                var preview = p.systemPrompt.length > 120 ? p.systemPrompt.slice(0, 120) + '…' : p.systemPrompt;
+                div.innerHTML =
+                    '<div style="min-width:0;flex:1;">' +
+                        '<strong>' + escHtml(p.personaName) + '</strong> <span style="color:var(--text-mute);font-size:.85rem;">(' + chanName + ')</span>' +
+                        '<div style="color:var(--text-mute);font-size:.82rem;margin-top:.2rem;">' + escHtml(preview) + '</div>' +
+                    '</div>' +
+                    '<button class="btn btn-danger btn-sm" onclick="removePersona(\'' + escHtml(p.channelId) + '\')">Remove</button>';
+                container.appendChild(div);
+            });
+        }
+
+        async function addPersona() {
+            var guildId = '<%= guild.id %>';
+            var channelId = document.getElementById('persona-channel').value;
+            var personaName = document.getElementById('persona-name').value.trim();
+            var systemPrompt = document.getElementById('persona-prompt').value.trim();
+            if (!channelId || !personaName || !systemPrompt) { toast('All fields are required', 'error'); return; }
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/persona', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channelId: channelId, personaName: personaName, systemPrompt: systemPrompt })
+                });
+                var data = await resp.json();
+                if (resp.ok) {
+                    toast('Persona saved ✓', 'success');
+                    document.getElementById('persona-channel').value = '';
+                    document.getElementById('persona-name').value = '';
+                    document.getElementById('persona-prompt').value = '';
+                    _personas = data.personas || [];
+                    renderPersonas();
+                } else {
+                    toast(data.error || 'Failed to save persona', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        async function removePersona(channelId) {
+            if (!confirm('Remove this persona?')) return;
+            var guildId = '<%= guild.id %>';
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
+                if (resp.ok) {
+                    toast('Persona removed ✓', 'success');
+                    _personas = _personas.filter(function(p) { return p.channelId !== channelId; });
+                    renderPersonas();
+                } else {
+                    toast('Failed to remove persona', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        // Initialize personas on page load (data already available from template)
+        renderPersonas();
 
         async function loadAnalytics() {
             const guildId = '<%= guild.id %>';
