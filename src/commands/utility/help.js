@@ -36,11 +36,15 @@ module.exports = {
                 },
                 {
                     name: '🤖 AI',
-                    value: '`/ai` `/remind`'
+                    value: '`/remind` - Ping the bot to chat with AI'
                 },
                 {
                     name: '⚙️ Admin',
                     value: '`/settings` - Configure the bot via the web dashboard'
+                },
+                {
+                    name: '🖥️ Dashboard Features',
+                    value: 'Temp Voices, Reaction Roles, Knowledge Base, Event Logs, Auto Roles, and Anti-Nuke are configured in the dashboard'
                 }
             )
             .setFooter({ text: 'Use /command to see details about each command' })

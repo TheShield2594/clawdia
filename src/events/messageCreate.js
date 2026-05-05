@@ -94,10 +94,6 @@ module.exports = {
                 if (blocked) return;
             }
 
-            if (guildSettings?.customCommands?.length) {
-                await handleCustomCommands(message, guildSettings);
-            }
-
             await handleSuggestions(message, guildSettings);
 
             if (guildSettings?.bibleVerse?.autoRespond) {
@@ -486,23 +482,3 @@ async function handleBibleVerseDetection(message, guildSettings) {
     await message.reply({ embeds: [createVerseEmbed(verseData)] }).catch(() => {});
 }
 
-async function handleCustomCommands(message, guildSettings) {
-    const content = message.content.trim().toLowerCase();
-    const prefix = guildSettings.prefix || '!';
-
-    if (!content.startsWith(prefix) && !content.startsWith('/')) return;
-
-    const commandName = content.startsWith(prefix)
-        ? content.slice(prefix.length).split(/\s+/)[0]
-        : content.slice(1).split(/\s+/)[0];
-
-    const cmd = guildSettings.customCommands.find(c => c.name === commandName);
-    if (!cmd) return;
-
-    const response = cmd.response
-        .replace(/{user}/g, `<@${message.author.id}>`)
-        .replace(/{server}/g, message.guild.name)
-        .replace(/{memberCount}/g, message.guild.memberCount);
-
-    await message.reply(response).catch(console.error);
-}
