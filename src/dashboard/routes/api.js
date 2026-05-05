@@ -5,6 +5,8 @@ const Case = require('../../models/Case');
 const User = require('../../models/User');
 const KnowledgeBase = require('../../models/KnowledgeBase');
 const SummaryJob = require('../../models/SummaryJob');
+
+const MAX_SUMMARY_JOBS_PER_GUILD = 10;
 const { rescheduleDailyNews } = require('../../services/rssService');
 const { rescheduleBibleVerse } = require('../../services/dailyBibleService');
 const Parser = require('rss-parser');
@@ -666,9 +668,14 @@ router.post('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, checkWr
         const tgtChannel = guild.channels.cache.get(targetChannelId.trim());
         if (!srcChannel || !tgtChannel) return res.status(400).json({ error: 'One or both channels not found in this guild' });
 
+        const jobCount = await SummaryJob.countDocuments({ guildId });
+        if (jobCount >= MAX_SUMMARY_JOBS_PER_GUILD) {
+            return res.status(400).json({ error: `Maximum of ${MAX_SUMMARY_JOBS_PER_GUILD} summary jobs per server reached.` });
+        }
+
         const jobLabel = (typeof label === 'string' && label.trim())
             ? label.trim().slice(0, 100)
-            : `Daily Summary of #${srcChannel.name}`;
+            : `Daily Summary of #${srcChannel.name}`.slice(0, 100);
 
         const job = await SummaryJob.create({
             guildId,
@@ -725,27 +732,28 @@ router.post('/guild/:guildId/persona', checkAuth, checkGuildAccess, checkWriteRa
         const channel = guild.channels.cache.get(channelId.trim());
         if (!channel) return res.status(400).json({ error: 'Channel not found in this guild' });
 
-        const guildSettings = await Guild.findOne({ guildId });
-        if (!guildSettings) return res.status(404).json({ error: 'Guild settings not found' });
+        const cid = channelId.trim();
+        const pName = personaName.trim().slice(0, 100);
+        const pPrompt = systemPrompt.trim().slice(0, 4000);
 
-        if (!guildSettings.ai) guildSettings.ai = {};
-        if (!Array.isArray(guildSettings.ai.channelPersonas)) guildSettings.ai.channelPersonas = [];
+        // Try to update an existing persona for this channel atomically.
+        let result = await Guild.findOneAndUpdate(
+            { guildId, 'ai.channelPersonas.channelId': cid },
+            { $set: { 'ai.channelPersonas.$.personaName': pName, 'ai.channelPersonas.$.systemPrompt': pPrompt } },
+            { new: true }
+        );
 
-        const existing = guildSettings.ai.channelPersonas.find(p => p.channelId === channelId.trim());
-        if (existing) {
-            existing.personaName = personaName.trim().slice(0, 100);
-            existing.systemPrompt = systemPrompt.trim().slice(0, 4000);
-        } else {
-            guildSettings.ai.channelPersonas.push({
-                channelId: channelId.trim(),
-                personaName: personaName.trim().slice(0, 100),
-                systemPrompt: systemPrompt.trim().slice(0, 4000)
-            });
+        // No matching persona — push a new one.
+        if (!result) {
+            result = await Guild.findOneAndUpdate(
+                { guildId },
+                { $push: { 'ai.channelPersonas': { channelId: cid, personaName: pName, systemPrompt: pPrompt } } },
+                { new: true }
+            );
         }
 
-        guildSettings.markModified('ai');
-        await guildSettings.save();
-        res.json({ success: true, personas: guildSettings.ai.channelPersonas });
+        if (!result) return res.status(404).json({ error: 'Guild settings not found' });
+        res.json({ success: true, personas: result.ai?.channelPersonas || [] });
     } catch (error) {
         console.error('Persona set error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -756,19 +764,11 @@ router.delete('/guild/:guildId/persona/:channelId', checkAuth, checkGuildAccess,
     const { guildId, channelId } = req.params;
 
     try {
-        const guildSettings = await Guild.findOne({ guildId });
-        if (!guildSettings) return res.status(404).json({ error: 'Guild settings not found' });
-
-        if (!guildSettings.ai) guildSettings.ai = {};
-        if (!Array.isArray(guildSettings.ai.channelPersonas)) guildSettings.ai.channelPersonas = [];
-        const before = guildSettings.ai.channelPersonas.length;
-        guildSettings.ai.channelPersonas = guildSettings.ai.channelPersonas.filter(p => p.channelId !== channelId);
-        if (guildSettings.ai.channelPersonas.length === before) {
-            return res.status(404).json({ error: 'Persona not found for that channel' });
-        }
-
-        guildSettings.markModified('ai');
-        await guildSettings.save();
+        const result = await Guild.findOneAndUpdate(
+            { guildId, 'ai.channelPersonas.channelId': channelId },
+            { $pull: { 'ai.channelPersonas': { channelId } } }
+        );
+        if (!result) return res.status(404).json({ error: 'Persona not found for that channel' });
         res.json({ success: true });
     } catch (error) {
         console.error('Persona remove error:', error);

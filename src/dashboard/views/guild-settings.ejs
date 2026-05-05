@@ -2040,8 +2040,7 @@
 
         // ── AI Summaries ──────────────────────────────────────────────────────────
         var summaryJobsLoaded = false;
-        var _channelNameMap = {};
-        <% channels.forEach(c => { %>_channelNameMap['<%= c.id %>'] = '<%= c.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'") %>';<% }); %>
+        var _channelNameMap = <%- JSON.stringify(Object.fromEntries(channels.map(c => [c.id, c.name]))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
 
         async function loadSummaryJobs() {
             if (summaryJobsLoaded) return;
