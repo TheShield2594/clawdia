@@ -114,32 +114,44 @@ module.exports = {
         .setDescription('Spin the slot machine and try your luck!')
         .addIntegerOption(opt =>
             opt.setName('bet')
-                .setDescription('Amount of coins to bet (10–1000)')
+                .setDescription('Amount of coins to bet (10–5,000)')
                 .setMinValue(10)
-                .setMaxValue(1000)
+                .setMaxValue(5000)
                 .setRequired(true)),
     cooldown: 5,
     async execute(interaction) {
         const bet = interaction.options.getInteger('bet');
         await interaction.deferReply();
 
+        const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+
         try {
-            let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            if (!user) user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
+            await User.findOneAndUpdate(
+                userFilter,
+                { $setOnInsert: { ...userFilter, balance: 0 } },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
 
-            if (user.balance < bet) {
-                return interaction.editReply({
-                    content: `You don't have enough coins! Wallet: **${user.balance.toLocaleString()}** coins.`,
-                });
-            }
-
-            // Determine result before animation so the balance is correct regardless of
-            // whether subsequent edits succeed.
+            // Determine result before touching the balance so the outcome is fixed
+            // regardless of whether subsequent DB/Discord calls succeed.
             const reels  = [spinReel(), spinReel(), spinReel()];
             const result = evaluate(reels, bet);
+            const net    = result.payout - bet;
 
-            user.balance = user.balance - bet + result.payout;
-            await user.save();
+            // Atomic: debit bet and credit payout in one step; only proceeds if the
+            // balance covers the wager.
+            const user = await User.findOneAndUpdate(
+                { ...userFilter, balance: { $gte: bet } },
+                { $inc: { balance: net } },
+                { new: true }
+            );
+
+            if (!user) {
+                const fresh = await User.findOne(userFilter);
+                return interaction.editReply({
+                    content: `You don't have enough coins! Wallet: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
+                });
+            }
 
             const delay = ms => new Promise(r => setTimeout(r, ms));
             const u = interaction.user.username;

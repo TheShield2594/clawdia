@@ -230,21 +230,29 @@ module.exports = {
             const chosenAnswer  = allAnswers[selectedIndex];
             const isCorrect     = chosenAnswer === correctAnswer;
 
-            const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+            const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+            let netChange, updated;
 
-            let netChange;
             if (isCorrect) {
                 netChange = rewards.win;
-                freshUser.balance += rewards.win;
+                updated   = await User.findOneAndUpdate(
+                    userFilter,
+                    { $inc: { balance: rewards.win } },
+                    { new: true }
+                );
             } else {
-                const actual = Math.min(rewards.lose, freshUser.balance);
-                netChange = -actual;
-                freshUser.balance = Math.max(0, freshUser.balance - rewards.lose);
+                const freshUser = await User.findOne(userFilter);
+                const penalty   = Math.min(rewards.lose, freshUser?.balance ?? 0);
+                netChange = -penalty;
+                updated   = await User.findOneAndUpdate(
+                    userFilter,
+                    { $inc: { balance: -penalty } },
+                    { new: true }
+                );
             }
-            await freshUser.save();
 
             await i.update({
-                embeds:     [resultEmbed(isCorrect, question, correctAnswer, chosenAnswer, difficulty, rewards, netChange, freshUser.balance, interaction.user.username)],
+                embeds:     [resultEmbed(isCorrect, question, correctAnswer, chosenAnswer, difficulty, rewards, netChange, updated?.balance ?? 0, interaction.user.username)],
                 components: [],
             });
         });
@@ -253,13 +261,17 @@ module.exports = {
         collector.on('end', async (collected, reason) => {
             if (reason === 'limit') return; // answered — handled above
 
-            const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            const penalty   = Math.min(rewards.lose, freshUser.balance);
-            freshUser.balance = Math.max(0, freshUser.balance - rewards.lose);
-            await freshUser.save();
+            const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+            const freshUser  = await User.findOne(userFilter);
+            const penalty    = Math.min(rewards.lose, freshUser?.balance ?? 0);
+            const updated    = await User.findOneAndUpdate(
+                userFilter,
+                { $inc: { balance: -penalty } },
+                { new: true }
+            );
 
             await interaction.editReply({
-                embeds:     [timeoutEmbed(question, correctAnswer, difficulty, penalty, freshUser.balance, interaction.user.username)],
+                embeds:     [timeoutEmbed(question, correctAnswer, difficulty, penalty, updated?.balance ?? 0, interaction.user.username)],
                 components: [],
             }).catch(() => {});
         });

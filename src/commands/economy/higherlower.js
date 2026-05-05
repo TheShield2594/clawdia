@@ -25,8 +25,9 @@ module.exports = {
         .addIntegerOption(option =>
             option
                 .setName('bet')
-                .setDescription('How many coins to wager')
-                .setMinValue(1)
+                .setDescription('How many coins to wager (10–5,000)')
+                .setMinValue(10)
+                .setMaxValue(5000)
                 .setRequired(true)
         ),
     async execute(interaction) {
@@ -40,31 +41,18 @@ module.exports = {
 
             const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
+            // Ensure the user document exists before the atomic debit.
             await User.findOneAndUpdate(
                 userFilter,
-                { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id, balance: 0 } },
+                { $setOnInsert: { ...userFilter, balance: 0 } },
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             );
 
-            let user = await User.findOneAndUpdate(
+            const user = await User.findOneAndUpdate(
                 { ...userFilter, balance: { $gte: bet } },
                 { $inc: { balance: -bet } },
                 { new: true }
             );
-
-            if (!user) {
-                await User.findOneAndUpdate(
-                    userFilter,
-                    { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id, balance: 0 } },
-                    { upsert: true, new: true, setDefaultsOnInsert: true }
-                );
-
-                user = await User.findOneAndUpdate(
-                    { ...userFilter, balance: { $gte: bet } },
-                    { $inc: { balance: -bet } },
-                    { new: true }
-                );
-            }
 
             if (!user) {
                 return interaction.reply({ content: `Insufficient funds. You need ${bet.toLocaleString()} coins to place this bet.`, ephemeral: true });

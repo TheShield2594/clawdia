@@ -113,19 +113,27 @@ module.exports = {
         await interaction.deferReply();
 
         try {
-            // --- Load / create user ---
-            let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            if (!user) user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
+            const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
-            if (user.balance < bet) {
+            await User.findOneAndUpdate(
+                userFilter,
+                { $setOnInsert: { ...userFilter, balance: 0 } },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+
+            // Atomic debit: only proceeds if balance covers the bet.
+            const debited = await User.findOneAndUpdate(
+                { ...userFilter, balance: { $gte: bet } },
+                { $inc: { balance: -bet } },
+                { new: true }
+            );
+
+            if (!debited) {
+                const fresh = await User.findOne(userFilter);
                 return interaction.editReply({
-                    content: `You don't have enough coins! Wallet: **${user.balance.toLocaleString()}** coins.`,
+                    content: `You don't have enough coins! Wallet: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
                 });
             }
-
-            // Deduct bet up front; payout is credited on cash-out or withheld on crash.
-            user.balance -= bet;
-            await user.save();
 
             const crash     = generateCrashPoint();
             const username  = interaction.user.username;
