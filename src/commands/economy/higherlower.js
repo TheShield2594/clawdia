@@ -151,10 +151,13 @@ module.exports = {
 
     async execute(interaction) {
         const bet = interaction.options.getInteger('bet');
+        // Acknowledge immediately so Discord doesn't reject the interaction
+        // while Guild.findOne / User.findOneAndUpdate run.
+        await interaction.deferReply();
         try {
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
-                return interaction.reply({ content: 'Economy games are disabled in this server.', ephemeral: true });
+                return interaction.editReply({ content: 'Economy games are disabled in this server.' });
             }
 
             const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
@@ -165,16 +168,15 @@ module.exports = {
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             );
 
-            let user = await User.findOneAndUpdate(
+            const debited = await User.findOneAndUpdate(
                 { ...userFilter, balance: { $gte: bet } },
                 { $inc: { balance: -bet } },
                 { new: true }
             );
 
-            if (!user) {
-                return interaction.reply({
+            if (!debited) {
+                return interaction.editReply({
                     content: `❌ Insufficient funds. You need **${bet.toLocaleString()}** coins to place this bet.`,
-                    ephemeral: true,
                 });
             }
 
@@ -182,11 +184,7 @@ module.exports = {
 
         } catch (err) {
             console.error('[HigherLower] error:', err);
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content: 'Failed to run Higher or Lower.', ephemeral: true });
-            } else {
-                await interaction.reply({ content: 'Failed to run Higher or Lower.', ephemeral: true });
-            }
+            await interaction.editReply({ content: 'Failed to run Higher or Lower.' }).catch(() => {});
         }
     },
 };
@@ -201,19 +199,10 @@ async function playHigherLower(interaction, bet, userFilter, history) {
         new ButtonBuilder().setCustomId(downId).setLabel('⬇️ Lower').setStyle(ButtonStyle.Danger),
     );
 
-    // First play uses reply; replays use editReply
-    const isFirstPlay = !interaction.replied && !interaction.deferred;
-    if (isFirstPlay) {
-        await interaction.reply({
-            embeds:     [questionEmbed(current, bet, history, interaction)],
-            components: [row],
-        });
-    } else {
-        await interaction.editReply({
-            embeds:     [questionEmbed(current, bet, history, interaction)],
-            components: [row],
-        });
-    }
+    await interaction.editReply({
+        embeds:     [questionEmbed(current, bet, history, interaction)],
+        components: [row],
+    });
 
     const message   = await interaction.fetchReply();
     const collector = message.createMessageComponentCollector({
@@ -261,21 +250,26 @@ async function playHigherLower(interaction, bet, userFilter, history) {
                 max: 1,
                 time: 60_000,
             }).on('collect', async ri => {
-                const newDebited = await User.findOneAndUpdate(
-                    { ...userFilter, balance: { $gte: bet } },
-                    { $inc: { balance: -bet } },
-                    { new: true }
-                );
-                if (!newDebited) {
-                    const fresh = await User.findOne(userFilter);
-                    await ri.update({
-                        content: `❌ Not enough coins! Balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
-                        embeds: [], components: [],
-                    });
-                    return;
+                try {
+                    const newDebited = await User.findOneAndUpdate(
+                        { ...userFilter, balance: { $gte: bet } },
+                        { $inc: { balance: -bet } },
+                        { new: true }
+                    );
+                    if (!newDebited) {
+                        const fresh = await User.findOne(userFilter);
+                        await ri.update({
+                            content: `❌ Not enough coins! Balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
+                            embeds: [], components: [],
+                        });
+                        return;
+                    }
+                    await ri.deferUpdate();
+                    await playHigherLower(interaction, bet, userFilter, newHistory.slice(-5));
+                } catch (replayErr) {
+                    console.error('[HigherLower] replay error:', replayErr);
+                    await interaction.editReply({ content: 'Something went wrong on replay. Please try again.', embeds: [], components: [] }).catch(() => {});
                 }
-                await ri.deferUpdate();
-                await playHigherLower(interaction, bet, userFilter, newHistory.slice(-5));
             }).on('end', (_, reason) => {
                 if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
             });

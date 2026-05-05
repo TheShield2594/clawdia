@@ -136,12 +136,13 @@ module.exports = {
 
     async execute(interaction) {
         const bet = interaction.options.getInteger('bet');
+        await interaction.deferReply();
         const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
         try {
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
-                return interaction.reply({ content: 'Economy games are disabled in this server.', ephemeral: true });
+                return interaction.editReply({ content: 'Economy games are disabled in this server.' });
             }
 
             await User.findOneAndUpdate(
@@ -157,9 +158,8 @@ module.exports = {
             );
 
             if (!debited) {
-                return interaction.reply({
+                return interaction.editReply({
                     content: `❌ Insufficient funds. You need **${bet.toLocaleString()}** coins to play.`,
-                    ephemeral: true,
                 });
             }
 
@@ -168,12 +168,7 @@ module.exports = {
         } catch (err) {
             console.error('[DoubleOrNothing] error:', err);
             await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(() => {});
-            const msg = { content: 'Something went wrong. Your wager was refunded.', ephemeral: true };
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp(msg).catch(() => {});
-            } else {
-                await interaction.reply(msg).catch(() => {});
-            }
+            await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', components: [] }).catch(() => {});
         }
     },
 };
@@ -187,12 +182,7 @@ async function playDoubleOrNothing(interaction, bet, userFilter, debited) {
     let streak  = 0;
     let settled = false;
 
-    // Use reply for the very first game; editReply for replays
-    const sendFn = (interaction.replied || interaction.deferred)
-        ? opts => interaction.editReply(opts)
-        : opts => interaction.reply(opts);
-
-    await sendFn({
+    await interaction.editReply({
         embeds:     [liveEmbed(interaction, bet, round, pot, streak)],
         components: [buildGameRow(doubleId, cashOutId)],
     });

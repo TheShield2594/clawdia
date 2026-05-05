@@ -217,6 +217,9 @@ module.exports = {
 };
 
 async function playBaccarat(interaction, pick, bet) {
+    let debited       = null;
+    let payoutApplied = false;
+
     try {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
@@ -231,7 +234,7 @@ async function playBaccarat(interaction, pick, bet) {
             { upsert: true, new: true, setDefaultsOnInsert: true },
         );
 
-        const debited = await User.findOneAndUpdate(
+        debited = await User.findOneAndUpdate(
             { ...userFilter, balance: { $gte: bet } },
             { $inc: { balance: -bet } },
             { new: true },
@@ -279,6 +282,8 @@ async function playBaccarat(interaction, pick, bet) {
                 { new: true },
             );
         }
+        // Outcome resolved — a loss is intentional, so no rollback from here onward.
+        payoutApplied = true;
 
         const replayId = `baccarat_replay_${interaction.id}_${Date.now()}`;
         const row = new ActionRowBuilder().addComponents(
@@ -306,6 +311,11 @@ async function playBaccarat(interaction, pick, bet) {
 
     } catch (err) {
         console.error('[Baccarat] error:', err);
+        if (debited && !payoutApplied) {
+            const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+            await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(e =>
+                console.error('[Baccarat] rollback failed:', e));
+        }
         await interaction.editReply({ content: 'Something went wrong while dealing the cards. Please try again.', components: [] }).catch(() => {});
     }
 }

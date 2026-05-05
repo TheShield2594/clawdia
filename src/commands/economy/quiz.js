@@ -24,7 +24,7 @@ function decodeHtml(str) {
     return str
         .replace(/&amp;/g,   '&').replace(/&lt;/g,    '<').replace(/&gt;/g,    '>')
         .replace(/&quot;/g,  '"').replace(/&#039;/g,  "'").replace(/&ldquo;/g, '"')
-        .replace(/&rdquo;/g, '"').replace(/&lsquo;/g, ''').replace(/&rsquo;/g, ''')
+        .replace(/&rdquo;/g, '"').replace(/&lsquo;/g, '‘').replace(/&rsquo;/g, '’')
         .replace(/&ndash;/g, '–').replace(/&mdash;/g, '—').replace(/&deg;/g,   '°')
         .replace(/&hellip;/g,'…');
 }
@@ -181,187 +181,112 @@ module.exports = {
     async execute(interaction) {
         const diffChoice = interaction.options.getString('difficulty') ?? 'any';
         await interaction.deferReply();
-
-        let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        if (!user) user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
-
-        let raw;
-        try {
-            raw = await fetchQuestion(diffChoice);
-        } catch (err) {
-            console.error('[Quiz] fetch error:', err.message);
-            return interaction.editReply({ content: '⚠️ Couldn\'t reach the trivia server right now. Please try again in a moment.' });
-        }
-
-        const difficulty    = raw.difficulty;
-        const rewards       = REWARDS[difficulty] ?? REWARDS.medium;
-        const category      = decodeHtml(raw.category);
-        const question      = decodeHtml(raw.question);
-        const correctAnswer = decodeHtml(raw.correct_answer);
-        const allAnswers    = shuffleArray([correctAnswer, ...raw.incorrect_answers.map(decodeHtml)]);
-        const menuId        = `quiz_${interaction.id}`;
-
-        const select = new StringSelectMenuBuilder()
-            .setCustomId(menuId)
-            .setPlaceholder('Choose your answer…')
-            .addOptions(allAnswers.map((ans, idx) =>
-                new StringSelectMenuOptionBuilder().setLabel(truncate(ans)).setValue(`a${idx}`),
-            ));
-
-        const menuRow = new ActionRowBuilder().addComponents(select);
-
-        const startTime = Date.now();
-        await interaction.editReply({
-            embeds:     [questionEmbed(question, category, difficulty, rewards, user.balance, interaction, 0)],
-            components: [menuRow],
-        });
-
-        // Update the timer bar every ~8 seconds (safe under rate limits)
-        const timerInterval = setInterval(async () => {
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            if (elapsed >= TIMER_SECONDS) { clearInterval(timerInterval); return; }
-            await interaction.editReply({
-                embeds:     [questionEmbed(question, category, difficulty, rewards, user.balance, interaction, elapsed)],
-                components: [menuRow],
-            }).catch(() => clearInterval(timerInterval));
-        }, 8_000);
-
-        const message   = await interaction.fetchReply();
-        const collector = message.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && i.customId === menuId,
-            max:    1,
-            time:   TIMER_SECONDS * 1000,
-        });
-
-        collector.on('collect', async i => {
-            clearInterval(timerInterval);
-            const selectedIndex = parseInt(i.values[0].slice(1), 10);
-            const chosenAnswer  = allAnswers[selectedIndex];
-            const isCorrect     = chosenAnswer === correctAnswer;
-            const userFilter    = { userId: interaction.user.id, guildId: interaction.guild.id };
-            let netChange, updated;
-
-            if (isCorrect) {
-                netChange = rewards.win;
-                updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: rewards.win } }, { new: true });
-            } else {
-                const freshUser = await User.findOne(userFilter);
-                const penalty   = Math.min(rewards.lose, freshUser?.balance ?? 0);
-                netChange = -penalty;
-                updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
-            }
-
-            const replayId = `quiz_replay_${interaction.id}_${Date.now()}`;
-            const replayRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(replayId).setLabel('🎓 Play Again').setStyle(ButtonStyle.Primary),
-            );
-
-            await i.update({
-                embeds:     [resultEmbed(interaction, isCorrect, question, correctAnswer, chosenAnswer, difficulty, rewards, netChange, updated?.balance ?? 0)],
-                components: [replayRow],
-            });
-
-            message.createMessageComponentCollector({
-                filter: ri => ri.user.id === interaction.user.id && ri.customId === replayId,
-                max: 1, time: 60_000,
-            }).on('collect', async ri => {
-                await ri.deferUpdate();
-                // Re-run the command's execute logic by re-fetching a question
-                let newRaw;
-                try { newRaw = await fetchQuestion(diffChoice); }
-                catch { return interaction.editReply({ content: '⚠️ Couldn\'t reach the trivia server. Try again.', components: [] }); }
-
-                const newDiff    = newRaw.difficulty;
-                const newRewards = REWARDS[newDiff] ?? REWARDS.medium;
-                const newCat     = decodeHtml(newRaw.category);
-                const newQ       = decodeHtml(newRaw.question);
-                const newCorrect = decodeHtml(newRaw.correct_answer);
-                const newAnswers = shuffleArray([newCorrect, ...newRaw.incorrect_answers.map(decodeHtml)]);
-                const newMenuId  = `quiz_${interaction.id}_r${Date.now()}`;
-
-                const freshUser  = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-                const newSelect  = new StringSelectMenuBuilder()
-                    .setCustomId(newMenuId)
-                    .setPlaceholder('Choose your answer…')
-                    .addOptions(newAnswers.map((ans, idx) =>
-                        new StringSelectMenuOptionBuilder().setLabel(truncate(ans)).setValue(`a${idx}`),
-                    ));
-                const newMenuRow = new ActionRowBuilder().addComponents(newSelect);
-
-                await interaction.editReply({
-                    embeds:     [questionEmbed(newQ, newCat, newDiff, newRewards, freshUser?.balance ?? 0, interaction, 0)],
-                    components: [newMenuRow],
-                });
-
-                const newMsg       = await interaction.fetchReply();
-                const newStartTime = Date.now();
-
-                const newTimerInterval = setInterval(async () => {
-                    const elapsed = Math.floor((Date.now() - newStartTime) / 1000);
-                    if (elapsed >= TIMER_SECONDS) { clearInterval(newTimerInterval); return; }
-                    await interaction.editReply({
-                        embeds: [questionEmbed(newQ, newCat, newDiff, newRewards, freshUser?.balance ?? 0, interaction, elapsed)],
-                        components: [newMenuRow],
-                    }).catch(() => clearInterval(newTimerInterval));
-                }, 8_000);
-
-                const newCollector = newMsg.createMessageComponentCollector({
-                    filter: ni => ni.user.id === interaction.user.id && ni.customId === newMenuId,
-                    max: 1, time: TIMER_SECONDS * 1000,
-                });
-
-                newCollector.on('collect', async ni => {
-                    clearInterval(newTimerInterval);
-                    const idx       = parseInt(ni.values[0].slice(1), 10);
-                    const chosen    = newAnswers[idx];
-                    const correct   = chosen === newCorrect;
-                    const uf        = { userId: interaction.user.id, guildId: interaction.guild.id };
-                    let nc, upd;
-                    if (correct) {
-                        nc  = newRewards.win;
-                        upd = await User.findOneAndUpdate(uf, { $inc: { balance: newRewards.win } }, { new: true });
-                    } else {
-                        const fu  = await User.findOne(uf);
-                        const pen = Math.min(newRewards.lose, fu?.balance ?? 0);
-                        nc  = -pen;
-                        upd = await User.findOneAndUpdate(uf, { $inc: { balance: -pen } }, { new: true });
-                    }
-                    await ni.update({
-                        embeds:     [resultEmbed(interaction, correct, newQ, newCorrect, chosen, newDiff, newRewards, nc, upd?.balance ?? 0)],
-                        components: [],
-                    });
-                });
-
-                newCollector.on('end', async (col, reason) => {
-                    clearInterval(newTimerInterval);
-                    if (reason === 'limit') return;
-                    const uf  = { userId: interaction.user.id, guildId: interaction.guild.id };
-                    const fu  = await User.findOne(uf);
-                    const pen = Math.min(newRewards.lose, fu?.balance ?? 0);
-                    const upd = await User.findOneAndUpdate(uf, { $inc: { balance: -pen } }, { new: true });
-                    await interaction.editReply({
-                        embeds:     [timeoutEmbed(interaction, newQ, newCorrect, newDiff, pen, upd?.balance ?? 0)],
-                        components: [],
-                    }).catch(() => {});
-                });
-            }).on('end', (_, reason) => {
-                if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
-            });
-        });
-
-        collector.on('end', async (collected, reason) => {
-            clearInterval(timerInterval);
-            if (reason === 'limit') return;
-
-            const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
-            const freshUser  = await User.findOne(userFilter);
-            const penalty    = Math.min(rewards.lose, freshUser?.balance ?? 0);
-            const updated    = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
-
-            await interaction.editReply({
-                embeds:     [timeoutEmbed(interaction, question, correctAnswer, difficulty, penalty, updated?.balance ?? 0)],
-                components: [],
-            }).catch(() => {});
-        });
+        await runQuiz(interaction, diffChoice);
     },
 };
+
+async function runQuiz(interaction, diffChoice) {
+    const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+
+    let user = await User.findOne(userFilter);
+    if (!user) user = await User.create(userFilter);
+
+    let raw;
+    try {
+        raw = await fetchQuestion(diffChoice);
+    } catch (err) {
+        console.error('[Quiz] fetch error:', err.message);
+        return interaction.editReply({ content: '⚠️ Couldn\'t reach the trivia server right now. Please try again in a moment.', components: [] });
+    }
+
+    const difficulty    = raw.difficulty;
+    const rewards       = REWARDS[difficulty] ?? REWARDS.medium;
+    const category      = decodeHtml(raw.category);
+    const question      = decodeHtml(raw.question);
+    const correctAnswer = decodeHtml(raw.correct_answer);
+    const allAnswers    = shuffleArray([correctAnswer, ...raw.incorrect_answers.map(decodeHtml)]);
+    const menuId        = `quiz_${interaction.id}_${Date.now()}`;
+
+    const select = new StringSelectMenuBuilder()
+        .setCustomId(menuId)
+        .setPlaceholder('Choose your answer…')
+        .addOptions(allAnswers.map((ans, idx) =>
+            new StringSelectMenuOptionBuilder().setLabel(truncate(ans)).setValue(`a${idx}`),
+        ));
+
+    const menuRow = new ActionRowBuilder().addComponents(select);
+
+    const startTime = Date.now();
+    await interaction.editReply({
+        embeds:     [questionEmbed(question, category, difficulty, rewards, user.balance, interaction, 0)],
+        components: [menuRow],
+    });
+
+    const timerInterval = setInterval(async () => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        if (elapsed >= TIMER_SECONDS) { clearInterval(timerInterval); return; }
+        await interaction.editReply({
+            embeds:     [questionEmbed(question, category, difficulty, rewards, user.balance, interaction, elapsed)],
+            components: [menuRow],
+        }).catch(() => clearInterval(timerInterval));
+    }, 8_000);
+
+    const message   = await interaction.fetchReply();
+    const collector = message.createMessageComponentCollector({
+        filter: i => i.user.id === interaction.user.id && i.customId === menuId,
+        max:    1,
+        time:   TIMER_SECONDS * 1000,
+    });
+
+    collector.on('collect', async i => {
+        clearInterval(timerInterval);
+        const selectedIndex = parseInt(i.values[0].slice(1), 10);
+        const chosenAnswer  = allAnswers[selectedIndex];
+        const isCorrect     = chosenAnswer === correctAnswer;
+        let netChange, updated;
+
+        if (isCorrect) {
+            netChange = rewards.win;
+            updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: rewards.win } }, { new: true });
+        } else {
+            const freshUser = await User.findOne(userFilter);
+            const penalty   = Math.min(rewards.lose, freshUser?.balance ?? 0);
+            netChange = -penalty;
+            updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
+        }
+
+        const replayId = `quiz_replay_${interaction.id}_${Date.now()}`;
+        const replayRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(replayId).setLabel('🎓 Play Again').setStyle(ButtonStyle.Primary),
+        );
+
+        await i.update({
+            embeds:     [resultEmbed(interaction, isCorrect, question, correctAnswer, chosenAnswer, difficulty, rewards, netChange, updated?.balance ?? 0)],
+            components: [replayRow],
+        });
+
+        message.createMessageComponentCollector({
+            filter: ri => ri.user.id === interaction.user.id && ri.customId === replayId,
+            max: 1, time: 60_000,
+        }).on('collect', async ri => {
+            await ri.deferUpdate();
+            await runQuiz(interaction, diffChoice);
+        }).on('end', (_, reason) => {
+            if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
+        });
+    });
+
+    collector.on('end', async (collected, reason) => {
+        clearInterval(timerInterval);
+        if (reason === 'limit') return;
+
+        const freshUser = await User.findOne(userFilter);
+        const penalty   = Math.min(rewards.lose, freshUser?.balance ?? 0);
+        const updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
+
+        await interaction.editReply({
+            embeds:     [timeoutEmbed(interaction, question, correctAnswer, difficulty, penalty, updated?.balance ?? 0)],
+            components: [],
+        }).catch(() => {});
+    });
+}

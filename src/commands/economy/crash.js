@@ -59,7 +59,8 @@ function progressBar(m) {
     const total  = 20;
     const filled = Math.min(total, Math.round((Math.log(m) / Math.log(100)) * total));
     const empty  = total - filled;
-    const bar    = (m < 5 ? '▰' : m < 15 ? '▰' : '▰').repeat(filled) + '▱'.repeat(empty);
+    const glyph  = m < 5 ? '▰' : m < 15 ? '▮' : '█';
+    const bar    = glyph.repeat(filled) + '▱'.repeat(empty);
     return `\`${bar}\``;
 }
 
@@ -264,7 +265,7 @@ async function playCrash(interaction, bet) {
                 const replayId   = `crash_replay_${interaction.id}_${Date.now()}`;
 
                 await interaction.editReply({
-                    embeds:     [crashedEmbed(crash, bet, cashedOut, cashedOutAt, freshUser.balance, interaction)],
+                    embeds:     [crashedEmbed(crash, bet, cashedOut, cashedOutAt, freshUser?.balance ?? debited.balance, interaction)],
                     components: [buildResultRow(replayId)],
                 }).catch(() => {});
 
