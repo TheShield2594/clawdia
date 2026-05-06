@@ -97,9 +97,9 @@ module.exports = {
                 .setStyle(ButtonStyle.Secondary)
         );
 
-        await interaction.reply({ embeds: [confirmEmbed], components: [row] });
+        const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], fetchReply: true });
 
-        const collector = interaction.channel.createMessageComponentCollector({
+        const collector = reply.createMessageComponentCollector({
             filter: i => i.user.id === interaction.user.id &&
                          ['fishprestige_confirm', 'fishprestige_cancel'].includes(i.customId),
             time:   30_000,

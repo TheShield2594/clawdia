@@ -148,7 +148,7 @@ module.exports = {
         }
 
         if (prestige === 0 && f.level >= 50) {
-            embed.setFooter({ text: 'Max level reached! Use /prestige to reset and unlock new bonuses.' });
+            embed.setFooter({ text: 'Max level reached! Use /fishprestige to reset and unlock new bonuses.' });
         } else if (isSelf) {
             embed.setFooter({ text: `Daily: ${f.dailyCasts} casts · ${currency}${f.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
         }
@@ -160,11 +160,10 @@ module.exports = {
 
 function buildXpBar(f, toNext) {
     if (toNext === null) return '████████████████████ MAX';
-    const currentLevelXp = FISHER_LEVELS[f.level - 1]?.xpRequired ?? 0;
-    const nextLevelXp    = FISHER_LEVELS[f.level]?.xpRequired ?? 1;
-    const denominator    = nextLevelXp - currentLevelXp;
-    const progress       = denominator > 0 ? (f.xp - currentLevelXp) / denominator : 0;
-    const filled         = Math.min(20, Math.max(0, Math.round(progress * 20)));
-    const pct            = Math.min(100, Math.max(0, Math.round(progress * 100)));
+    // Use absolute progress (f.xp / next-level threshold) to match the "X / Y XP" display text
+    const nextLevelXp = FISHER_LEVELS[f.level]?.xpRequired ?? 1;
+    const progress    = nextLevelXp > 0 ? Math.min(1, f.xp / nextLevelXp) : 0;
+    const filled      = Math.min(20, Math.max(0, Math.round(progress * 20)));
+    const pct         = Math.min(100, Math.max(0, Math.round(progress * 100)));
     return `${'█'.repeat(filled)}${'░'.repeat(20 - filled)} ${pct}%`;
 }

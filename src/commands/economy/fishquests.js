@@ -3,8 +3,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
-const { FISH_QUEST_TEMPLATES, LIMITS } = require('../../data/fishData');
-const { ensureFishingData, assignDailyFishQuests, formatMs } = require('../../services/fishService');
+const { FISH_QUEST_TEMPLATES } = require('../../data/fishData');
+const { ensureFishingData, assignDailyFishQuests, formatMs, applyXp, getLevelData } = require('../../services/fishService');
 
 module.exports = {
     cooldown: 5,
@@ -125,18 +125,13 @@ async function claimQuest(interaction, user, currency) {
     }
 
     // Grant rewards
+    const oldLevel      = user.fishing.level;
     user.balance       += template.reward.coins;
-    user.fishing.xp    += template.reward.xp;
     questEntry.progress = -1; // mark claimed
 
-    // Apply XP level-up
-    const { applyXp, getLevelData } = require('../../services/fishService');
-    const lvResult = applyXp(user, 0); // XP already added directly; just check level
-    // Recalculate level from stored XP
-    const { levelFromXp } = require('../../services/fishService');
-    const newLevel = levelFromXp(user.fishing.xp);
-    const leveledUp = newLevel > user.fishing.level;
-    if (leveledUp) user.fishing.level = newLevel;
+    // applyXp adds XP, recalculates level, and marks fishing modified
+    const lvResult = applyXp(user, template.reward.xp);
+    const leveledUp = lvResult.leveledUp;
 
     user.markModified('quests');
     user.markModified('fishing');
@@ -160,8 +155,8 @@ async function claimQuest(interaction, user, currency) {
         .setTimestamp();
 
     if (leveledUp) {
-        const ld = getLevelData(newLevel);
-        embed.addFields({ name: '⬆️ Level Up!', value: `Fisher Level **${user.fishing.level - 1}** → **${newLevel}** (${ld.title})`, inline: false });
+        const ld = getLevelData(lvResult.newLevel);
+        embed.addFields({ name: '⬆️ Level Up!', value: `Fisher Level **${oldLevel}** → **${lvResult.newLevel}** (${ld.title})`, inline: false });
     }
 
     return interaction.reply({ embeds: [embed] });

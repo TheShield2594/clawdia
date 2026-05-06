@@ -123,27 +123,35 @@ async function handleBuy(interaction, user, currency) {
             return interaction.reply({ content: `You can't carry more than 200 of that bait type.`, ephemeral: true });
         }
 
-        user.balance -= totalCost;
-        f.bait[baitPack.baitType] = (f.bait[baitPack.baitType] ?? 0) + baitPack.quantity * quantity;
-        user.markModified('fishing');
+        const baitField = `fishing.bait.${baitPack.baitType}`;
+        const addedQty  = baitPack.quantity * quantity;
 
-        try {
-            await user.save();
-        } catch (err) {
-            console.error('[fishshop buy bait] save error:', err);
-            return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
+        const updated = await User.findOneAndUpdate(
+            {
+                userId:   interaction.user.id,
+                guildId:  interaction.guild.id,
+                balance:  { $gte: totalCost },
+                $expr: { $lte: [{ $add: [{ $ifNull: [`$${baitField}`, 0] }, addedQty] }, 200] }
+            },
+            { $inc: { balance: -totalCost, [baitField]: addedQty } },
+            { new: true }
+        );
+
+        if (!updated) {
+            return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', ephemeral: true });
         }
 
+        const newBaitQty = updated.fishing?.bait?.[baitPack.baitType] ?? addedQty;
         return interaction.reply({
             embeds: [
                 new EmbedBuilder()
                     .setColor('#2ecc71')
                     .setTitle(`${baitPack.emoji} Purchased!`)
-                    .setDescription(`Bought **${quantity}x ${baitPack.name}** (+${baitPack.quantity * quantity} ${baitPack.baitType.replace(/_/g, ' ')}).`)
+                    .setDescription(`Bought **${quantity}x ${baitPack.name}** (+${addedQty} ${baitPack.baitType.replace(/_/g, ' ')}).`)
                     .addFields(
-                        { name: 'Spent',   value: `${currency}${totalCost.toLocaleString()}`,                inline: true },
-                        { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`,             inline: true },
-                        { name: 'Stock',   value: `${f.bait[baitPack.baitType]} ${baitPack.baitType.replace(/_/g, ' ')}`, inline: true }
+                        { name: 'Spent',   value: `${currency}${totalCost.toLocaleString()}`,              inline: true },
+                        { name: 'Balance', value: `${currency}${updated.balance.toLocaleString()}`,        inline: true },
+                        { name: 'Stock',   value: `${newBaitQty} ${baitPack.baitType.replace(/_/g, ' ')}`, inline: true }
                     )
                     .setTimestamp()
             ]
@@ -170,15 +178,22 @@ async function handleBuy(interaction, user, currency) {
         return interaction.reply({ content: `You can only carry ${consumable.maxStack} **${consumable.name}** at a time.`, ephemeral: true });
     }
 
-    user.balance -= totalCost;
-    f.consumables[itemId] = newQty;
-    user.markModified('fishing');
+    const consumableField = `fishing.consumables.${itemId}`;
+    const stackCap        = consumable.maxStack ?? 99;
 
-    try {
-        await user.save();
-    } catch (err) {
-        console.error('[fishshop buy consumable] save error:', err);
-        return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
+    const updated = await User.findOneAndUpdate(
+        {
+            userId:  interaction.user.id,
+            guildId: interaction.guild.id,
+            balance: { $gte: totalCost },
+            $expr: { $lte: [{ $add: [{ $ifNull: [`$${consumableField}`, 0] }, quantity] }, stackCap] }
+        },
+        { $inc: { balance: -totalCost, [consumableField]: quantity } },
+        { new: true }
+    );
+
+    if (!updated) {
+        return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', ephemeral: true });
     }
 
     return interaction.reply({
@@ -188,9 +203,9 @@ async function handleBuy(interaction, user, currency) {
                 .setTitle(`${consumable.emoji} Purchased!`)
                 .setDescription(`Bought **${quantity}x ${consumable.name}**.`)
                 .addFields(
-                    { name: 'Spent',   value: `${currency}${totalCost.toLocaleString()}`, inline: true },
-                    { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true },
-                    { name: 'Stock',   value: `${newQty} owned`, inline: true }
+                    { name: 'Spent',   value: `${currency}${totalCost.toLocaleString()}`,                                              inline: true },
+                    { name: 'Balance', value: `${currency}${updated.balance.toLocaleString()}`,                                        inline: true },
+                    { name: 'Stock',   value: `${updated.fishing?.consumables?.[itemId] ?? quantity} owned`,                           inline: true }
                 )
                 .setFooter({ text: `Use /fishshop use ${consumable.id} to activate it` })
                 .setTimestamp()

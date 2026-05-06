@@ -322,22 +322,23 @@ function applyRepair(rod, requestedAmount) {
     if (rod.status === 'condemned') {
         return { error: 'This rod is condemned and cannot be repaired. Replace it.' };
     }
-    if (rod.status !== 'broken' && rod.currentDurability >= rod.maxDurability) {
+    // Compute post-degradation max FIRST so cost and restoredAmount are accurate
+    const degradation = Math.floor(rod.baseDurability * 0.10);
+    const newMax      = Math.max(Math.floor(rod.baseDurability * 0.10), rod.maxDurability - degradation);
+
+    if (rod.status !== 'broken' && rod.currentDurability >= newMax) {
         return { error: 'Rod is already at full durability.' };
     }
 
-    const needed = rod.maxDurability - rod.currentDurability;
+    const needed = Math.max(0, newMax - rod.currentDurability);
     const amount = Math.min(requestedAmount ?? needed, needed);
     const units  = Math.ceil(amount / 20);
     const cost   = units * rodData.repairCostPer20;
 
-    rod.currentDurability = Math.min(rod.maxDurability, rod.currentDurability + amount);
+    rod.maxDurability     = newMax;
+    rod.currentDurability = Math.min(newMax, rod.currentDurability + amount);
+    rod.repairCount      += 1;
 
-    const degradation  = Math.floor(rod.baseDurability * 0.10);
-    rod.maxDurability  = Math.max(Math.floor(rod.baseDurability * 0.10), rod.maxDurability - degradation);
-    rod.repairCount   += 1;
-
-    rod.currentDurability = Math.min(rod.currentDurability, rod.maxDurability);
     updateRodStatus(rod);
 
     return { cost, restoredAmount: amount, newStatus: rod.status, condemned: rod.status === 'condemned' };
@@ -402,6 +403,8 @@ function activateConsumable(user, consumableId) {
         f.consumables[consumableId] -= 1;
         f.activeXpScroll = true;
     } else if (def.type === 'stamina') {
+        // Apply passive regen first so the "already full" check reflects real current stamina
+        applyStaminaRegen(user);
         const now = Date.now();
         const drinkWindowOk = f.lastDrinkDayReset && (now - f.lastDrinkDayReset.getTime() < LIMITS.DAILY_WINDOW_MS);
         if (!drinkWindowOk) {
@@ -628,7 +631,10 @@ function executeCast(user, locationId) {
 
         let xpGain = severity.xp;
         if (f.activeXpScroll && xpGain > 0) xpGain = Math.round(xpGain * 1.5);
-        if (xpGain > 0) applyXp(user, xpGain);
+        if (xpGain > 0) {
+            const lvResult = applyXp(user, xpGain);
+            result.levelUp = lvResult.leveledUp ? lvResult : null;
+        }
 
         result.xpEarned = xpGain;
         result.failure  = { severity, message: severity.msg };
