@@ -12,6 +12,8 @@ const {
     getMaxStamina,
     calculateSuccessChance,
     executeHunt,
+    assignDailyHuntQuests,
+    updateHuntQuestProgress,
     formatMs,
     weaponStatusEmoji,
     durabilityBar,
@@ -52,9 +54,9 @@ module.exports = {
         ensureHuntData(user);
         applyStaminaRegen(user);
         applyDailyReset(user);
+        assignDailyHuntQuests(user);
 
-        // Persist stamina regen / daily-reset mutations before any early return
-        // so the computed state is not re-derived on every rejected call.
+        // Persist stamina regen / daily-reset / quest assignment before any early return.
         if (user.isModified()) {
             await user.save().catch(e => console.error('[hunt] pre-check save error:', e));
         }
@@ -145,6 +147,7 @@ module.exports = {
 
         // ── Execute hunt ───────────────────────────────────────────────────
         const result = executeHunt(user, zoneId);
+        updateHuntQuestProgress(user, result, zoneId);
 
         try {
             await user.save();

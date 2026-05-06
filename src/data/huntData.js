@@ -515,6 +515,229 @@ const PRESTIGE_BONUSES = [
     { prestige: 5, critBonus: 0.02, staminaBonus: 1, payoutBonus: 0.10, rarityBonus: 0.02 }
 ];
 
+// ─── MATERIAL NAMES ──────────────────────────────────────────────────────────
+
+const MATERIAL_NAMES = {
+    rabbits_foot:       "Rabbit's Foot",
+    acorn_cache:        'Acorn Cache',
+    feather:            'Feather',
+    down_feather:       'Down Feather',
+    antler_fragment:    'Antler Fragment',
+    tusk_shard:         'Tusk Shard',
+    badger_pelt:        'Badger Pelt',
+    beaver_pelt:        'Beaver Pelt',
+    coyote_fang:        'Coyote Fang',
+    wolf_pelt:          'Wolf Pelt',
+    elk_antler:         'Grand Antler',
+    lynx_fang:          'Lynx Fang',
+    eagle_talon:        'Eagle Talon',
+    mountain_horn:      'Mountain Horn',
+    bear_claw:          'Bear Claw',
+    moose_rack:         'Moose Rack',
+    lion_tooth:         "Lion's Tooth",
+    wolverine_fur:      'Wolverine Fur',
+    spirit_pelt:        'Spirit Pelt',
+    megaloceros_crown:  'Megaloceros Crown',
+    golden_fur:         'Golden Fur',
+    spirit_essence:     'Spirit Essence',
+    ancient_claw:       'Ancient Claw',
+    thunderfeather:     'Thunderfeather',
+    spectral_bone:      'Spectral Bone',
+    bandit_mask:        'Bandit Mask'
+};
+
+// ─── CRAFTING RECIPES ─────────────────────────────────────────────────────────
+
+const CRAFT_RECIPES = {
+    basic_bait_3x: {
+        id: 'basic_bait_3x', name: 'Basic Bait ×3', emoji: '🪱',
+        description: "Craft 3 Basic Bait from Rabbit's Feet",
+        ingredients: [{ material: 'rabbits_foot', qty: 3 }],
+        output: { type: 'consumable', id: 'basic_bait', qty: 3 }
+    },
+    premium_bait_1x: {
+        id: 'premium_bait_1x', name: 'Premium Bait ×1', emoji: '🎣',
+        description: 'Craft Premium Bait from rare trophies',
+        ingredients: [
+            { material: 'antler_fragment', qty: 2 },
+            { material: 'wolf_pelt',       qty: 1 }
+        ],
+        output: { type: 'consumable', id: 'premium_bait', qty: 1 }
+    },
+    luck_charm_1x: {
+        id: 'luck_charm_1x', name: 'Luck Charm ×1', emoji: '🍀',
+        description: 'Craft a Luck Charm from lucky drops',
+        ingredients: [
+            { material: 'rabbits_foot', qty: 3 },
+            { material: 'coyote_fang',  qty: 2 }
+        ],
+        output: { type: 'consumable', id: 'luck_charm', qty: 1 }
+    },
+    stamina_tonic_1x: {
+        id: 'stamina_tonic_1x', name: 'Stamina Tonic ×1', emoji: '⚡',
+        description: 'Brew a Stamina Tonic from natural ingredients',
+        ingredients: [
+            { material: 'acorn_cache', qty: 3 },
+            { material: 'feather',     qty: 2 }
+        ],
+        output: { type: 'consumable', id: 'stamina_tonic', qty: 1 }
+    },
+    xp_scroll_1x: {
+        id: 'xp_scroll_1x', name: 'XP Scroll ×1', emoji: '📜',
+        description: 'Craft an XP Scroll from rare trophy materials',
+        ingredients: [
+            { material: 'elk_antler',  qty: 1 },
+            { material: 'eagle_talon', qty: 1 }
+        ],
+        output: { type: 'consumable', id: 'xp_scroll', qty: 1 }
+    },
+    hunters_focus_3x: {
+        id: 'hunters_focus_3x', name: "Hunter's Focus ×3", emoji: '🎯',
+        description: "Craft 3 Hunter's Focus from predator fangs",
+        ingredients: [
+            { material: 'lynx_fang',   qty: 1 },
+            { material: 'coyote_fang', qty: 2 }
+        ],
+        output: { type: 'consumable', id: 'hunters_focus', qty: 3 }
+    },
+    repair_kit_small_2x: {
+        id: 'repair_kit_small_2x', name: 'Repair Kit (Small) ×2', emoji: '🔧',
+        description: 'Craft 2 small repair kits from animal pelts',
+        ingredients: [
+            { material: 'badger_pelt', qty: 2 },
+            { material: 'beaver_pelt', qty: 1 }
+        ],
+        output: { type: 'consumable', id: 'repair_kit_small', qty: 2 }
+    },
+    repair_kit_large_1x: {
+        id: 'repair_kit_large_1x', name: 'Repair Kit (Large) ×1', emoji: '🔨',
+        description: 'Craft a large repair kit from epic trophies',
+        ingredients: [
+            { material: 'bear_claw',  qty: 1 },
+            { material: 'moose_rack', qty: 1 }
+        ],
+        output: { type: 'consumable', id: 'repair_kit_large', qty: 1 }
+    },
+    iron_shot_40x: {
+        id: 'iron_shot_40x', name: 'Iron Shot ×40', emoji: '🔶',
+        description: 'Forge 40 iron rounds from bone and tusk',
+        ingredients: [
+            { material: 'antler_fragment', qty: 2 },
+            { material: 'tusk_shard',      qty: 1 }
+        ],
+        output: { type: 'ammo', id: 'iron_shot', qty: 40 }
+    },
+    steel_shot_40x: {
+        id: 'steel_shot_40x', name: 'Steel Shot ×40', emoji: '⚫',
+        description: 'Forge 40 steel rounds from durable pelts',
+        ingredients: [
+            { material: 'wolf_pelt',   qty: 2 },
+            { material: 'badger_pelt', qty: 1 }
+        ],
+        output: { type: 'ammo', id: 'steel_shot', qty: 40 }
+    },
+    lucky_paw: {
+        id: 'lucky_paw', name: 'Lucky Paw', emoji: '🐾',
+        description: 'A permanent upgrade granting +1% critical hit chance',
+        ingredients: [
+            { material: 'rabbits_foot',   qty: 5 },
+            { material: 'golden_fur',     qty: 1 },
+            { material: 'spirit_essence', qty: 1 }
+        ],
+        output: { type: 'permanent', id: 'luckyPaw' },
+        unique: true
+    }
+};
+
+// ─── HUNT DAILY QUEST TEMPLATES ───────────────────────────────────────────────
+
+const HUNT_QUEST_TEMPLATES = [
+    {
+        id: 'hq_hunt5',   name: 'First Outing',      emoji: '🎯',
+        description: 'Complete 5 hunts',
+        type: 'total_hunts', target: 5,
+        reward: { coins: 200, xp: 50 }, minLevel: 1
+    },
+    {
+        id: 'hq_hunt15',  name: 'Dedicated Hunter',   emoji: '🏹',
+        description: 'Complete 15 hunts',
+        type: 'total_hunts', target: 15,
+        reward: { coins: 500, xp: 150 }, minLevel: 1
+    },
+    {
+        id: 'hq_rare3',   name: 'Trophy Hunter',      emoji: '⭐',
+        description: 'Kill 3 rare (or better) animals',
+        type: 'rare_plus_kills', target: 3,
+        reward: { coins: 300, xp: 100 }, minLevel: 1
+    },
+    {
+        id: 'hq_epic2',   name: 'Epic Chase',         emoji: '💜',
+        description: 'Kill 2 epic animals',
+        type: 'epic_plus_kills', target: 2,
+        reward: { coins: 600, xp: 200 }, minLevel: 15
+    },
+    {
+        id: 'hq_leg1',    name: 'Legend Seeker',      emoji: '✨',
+        description: 'Kill 1 legendary animal',
+        type: 'legendary_plus_kills', target: 1,
+        reward: { coins: 1000, xp: 300 }, minLevel: 25
+    },
+    {
+        id: 'hq_crit5',   name: 'Critical Eye',       emoji: '🎯',
+        description: 'Land 5 critical hits',
+        type: 'crits', target: 5,
+        reward: { coins: 350, xp: 100 }, minLevel: 1
+    },
+    {
+        id: 'hq_earn1k',  name: 'Bounty Run',         emoji: '💰',
+        description: 'Earn 1,000 coins from hunting',
+        type: 'earn_coins', target: 1000,
+        reward: { coins: 250, xp: 75 }, minLevel: 1
+    },
+    {
+        id: 'hq_earn5k',  name: 'Big Haul',           emoji: '💸',
+        description: 'Earn 5,000 coins from hunting',
+        type: 'earn_coins', target: 5000,
+        reward: { coins: 800, xp: 200 }, minLevel: 10
+    },
+    {
+        id: 'hq_mat3',    name: 'Collector',          emoji: '🪨',
+        description: 'Collect 3 crafting material drops',
+        type: 'material_drops', target: 3,
+        reward: { coins: 400, xp: 125 }, minLevel: 1
+    },
+    {
+        id: 'hq_streak5', name: 'On a Roll',          emoji: '🔥',
+        description: 'Succeed on 5 consecutive hunts without failing',
+        type: 'success_streak', target: 5,
+        reward: { coins: 450, xp: 150 }, minLevel: 1
+    },
+    {
+        id: 'hq_desert5', name: 'Desert Expedition',  emoji: '🏜️',
+        description: 'Complete 5 hunts in the Desert Wastes',
+        type: 'zone_hunts', zone: 'desert_wastes', target: 5,
+        reward: { coins: 300, xp: 100 }, minLevel: 10
+    },
+    {
+        id: 'hq_arctic5', name: 'Frozen Frontiers',   emoji: '🏔️',
+        description: 'Complete 5 hunts in the Arctic Tundra',
+        type: 'zone_hunts', zone: 'arctic_tundra', target: 5,
+        reward: { coins: 500, xp: 150 }, minLevel: 20
+    },
+    {
+        id: 'hq_swamp5',  name: 'Into the Murk',      emoji: '🌿',
+        description: 'Complete 5 hunts in the Murky Swamp',
+        type: 'zone_hunts', zone: 'murky_swamp', target: 5,
+        reward: { coins: 700, xp: 200 }, minLevel: 30
+    },
+    {
+        id: 'hq_peaks5',  name: 'Peak Performance',   emoji: '⛰️',
+        description: 'Complete 5 hunts in the Legendary Peaks',
+        type: 'zone_hunts', zone: 'legendary_peaks', target: 5,
+        reward: { coins: 1200, xp: 350 }, minLevel: 50
+    }
+];
+
 module.exports = {
     WEAPON_TIERS,
     WEAPON_BY_SLUG,
@@ -529,5 +752,8 @@ module.exports = {
     HUNTER_LEVELS,
     TIER_COLORS,
     LIMITS,
-    PRESTIGE_BONUSES
+    PRESTIGE_BONUSES,
+    MATERIAL_NAMES,
+    CRAFT_RECIPES,
+    HUNT_QUEST_TEMPLATES
 };

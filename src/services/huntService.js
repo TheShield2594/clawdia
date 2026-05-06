@@ -9,8 +9,11 @@ const {
     ANIMALS_BY_TIER,
     HUNTER_LEVELS,
     LIMITS,
-    PRESTIGE_BONUSES
+    PRESTIGE_BONUSES,
+    HUNT_QUEST_TEMPLATES
 } = require('../data/huntData');
+
+const DAILY_QUEST_COUNT = 3;
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
@@ -709,6 +712,108 @@ function executeHunt(user, zoneId) {
     return result;
 }
 
+// ─── HUNT DAILY QUESTS ───────────────────────────────────────────────────────
+
+/**
+ * Assigns up to DAILY_QUEST_COUNT hunt quests if the player currently has none.
+ * Eligible templates are filtered by hunter level and unlocked zones.
+ * Called at the start of each hunt command execution.
+ */
+function assignDailyHuntQuests(user) {
+    const h = user.hunt;
+    const now = Date.now();
+
+    // Expire old hunt quests
+    user.quests = user.quests.filter(q =>
+        !q.questId.startsWith('hq_') ||
+        (q.expiresAt && q.expiresAt.getTime() > now)
+    );
+
+    // Count active (non-expired) hunt quests — claimed ones have progress === -1
+    const activeCount = user.quests.filter(q => q.questId.startsWith('hq_')).length;
+
+    // Only assign a fresh batch when the player has no hunt quests at all
+    if (activeCount > 0) return;
+
+    const eligible = HUNT_QUEST_TEMPLATES.filter(t =>
+        h.level >= t.minLevel &&
+        (t.type !== 'zone_hunts' || h.unlockedZones.includes(t.zone))
+    );
+
+    // Shuffle and take up to DAILY_QUEST_COUNT
+    const shuffled  = eligible.slice().sort(() => Math.random() - 0.5);
+    const toAssign  = shuffled.slice(0, DAILY_QUEST_COUNT);
+    const expiresAt = new Date(now + LIMITS.DAILY_WINDOW_MS);
+
+    for (const template of toAssign) {
+        user.quests.push({ questId: template.id, progress: 0, completedAt: null, expiresAt });
+    }
+
+    if (toAssign.length) user.markModified('quests');
+}
+
+/**
+ * Updates progress for all active hunt quests based on the hunt result.
+ * Must be called after executeHunt, before user.save().
+ */
+function updateHuntQuestProgress(user, result, zoneId) {
+    const now = Date.now();
+    const huntQuests = user.quests.filter(q =>
+        q.questId.startsWith('hq_') &&
+        !q.completedAt &&
+        q.progress !== -1 &&
+        q.expiresAt?.getTime() > now
+    );
+
+    if (!huntQuests.length) return;
+
+    for (const quest of huntQuests) {
+        const template = HUNT_QUEST_TEMPLATES.find(t => t.id === quest.questId);
+        if (!template) continue;
+
+        switch (template.type) {
+            case 'total_hunts':
+                quest.progress += 1;
+                break;
+            case 'rare_plus_kills':
+                if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier))
+                    quest.progress += 1;
+                break;
+            case 'epic_plus_kills':
+                if (result.success && ['epic', 'legendary', 'event'].includes(result.tier))
+                    quest.progress += 1;
+                break;
+            case 'legendary_plus_kills':
+                if (result.success && ['legendary', 'event'].includes(result.tier))
+                    quest.progress += 1;
+                break;
+            case 'crits':
+                if (result.success && result.isCrit) quest.progress += 1;
+                break;
+            case 'earn_coins':
+                if (result.success && result.finalPayout > 0)
+                    quest.progress = Math.min(quest.progress + result.finalPayout, template.target);
+                break;
+            case 'material_drops':
+                if (result.success && result.specialDrop) quest.progress += 1;
+                break;
+            case 'success_streak':
+                if (result.success) quest.progress += 1;
+                else               quest.progress  = 0;
+                break;
+            case 'zone_hunts':
+                if (zoneId === template.zone) quest.progress += 1;
+                break;
+        }
+
+        if (quest.progress >= template.target && !quest.completedAt) {
+            quest.completedAt = new Date(now);
+        }
+    }
+
+    user.markModified('quests');
+}
+
 // ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
 
 function formatMs(ms) {
@@ -752,6 +857,8 @@ module.exports = {
     activateConsumable,
     tickConsumables,
     executeHunt,
+    assignDailyHuntQuests,
+    updateHuntQuestProgress,
     formatMs,
     weaponStatusEmoji,
     durabilityBar
