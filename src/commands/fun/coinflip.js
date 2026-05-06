@@ -5,6 +5,7 @@ const {
     ButtonBuilder,
     ButtonStyle,
 } = require('discord.js');
+const Guild = require('../../models/Guild');
 
 const HEADS_THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1fa99.png';
 
@@ -54,6 +55,10 @@ module.exports = {
         .setDescription('Flip a coin — heads or tails?'),
 
     async execute(interaction) {
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.coinflipEnabled === false) {
+            return interaction.reply({ content: 'Coinflip is disabled on this server.', ephemeral: true });
+        }
         await interaction.deferReply();
         await playCoinFlip(interaction);
     },

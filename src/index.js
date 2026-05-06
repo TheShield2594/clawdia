@@ -130,6 +130,9 @@ async function startBot() {
 
         const { startDailyBibleService } = require('./services/dailyBibleService');
         startDailyBibleService(client);
+
+        const { startTempBanService } = require('./services/tempBanService');
+        startTempBanService(client);
     });
 
     client.login(process.env.DISCORD_TOKEN);

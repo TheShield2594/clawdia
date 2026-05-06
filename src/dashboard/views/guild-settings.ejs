@@ -43,17 +43,22 @@
                 <div class="nav-section-header">Moderation</div>
                 <button class="nav-item" data-tab="moderation"><span class="nav-emoji">🛡️</span> Moderation</button>
                 <button class="nav-item" data-tab="raiddetection"><span class="nav-emoji">🚨</span> Raid Detection</button>
+                <button class="nav-item" data-tab="antinuke"><span class="nav-emoji">🔒</span> Anti-Nuke</button>
+                <button class="nav-item" data-tab="casesettings"><span class="nav-emoji">📁</span> Case Settings</button>
 
                 <!-- Engagement -->
                 <div class="nav-section-header">Engagement</div>
                 <button class="nav-item" data-tab="music"><span class="nav-emoji">🎵</span> Music</button>
                 <button class="nav-item" data-tab="quests"><span class="nav-emoji">🗺️</span> Quests</button>
+                <button class="nav-item" data-tab="season"><span class="nav-emoji">🏆</span> Season Pass</button>
+                <button class="nav-item" data-tab="progressiontracks"><span class="nav-emoji">🧭</span> Progression Tracks</button>
                 <button class="nav-item" data-tab="starboard"><span class="nav-emoji">⭐</span> Starboard</button>
                 <button class="nav-item" data-tab="suggestions"><span class="nav-emoji">💡</span> Suggestions</button>
                 <button class="nav-item" data-tab="reactionroles"><span class="nav-emoji">🎭</span> Reaction Roles</button>
 
                 <!-- Tools & Support -->
                 <div class="nav-section-header">Tools &amp; Support</div>
+                <button class="nav-item" data-tab="commandpolicies"><span class="nav-emoji">⚙️</span> Command Policies</button>
                 <button class="nav-item" data-tab="ai"><span class="nav-emoji">🧠</span> AI Chat</button>
                 <button class="nav-item" data-tab="knowledgebase"><span class="nav-emoji">📚</span> Knowledge Base</button>
                 <button class="nav-item" data-tab="aisummaries"><span class="nav-emoji">📝</span> AI Summaries</button>
@@ -648,6 +653,85 @@
                     </div>
                 </section>
 
+                <!-- Anti-Nuke -->
+                <section id="antinuke" class="panel">
+                    <div class="panel-head">
+                        <h2>Anti-Nuke</h2>
+                        <p>Detect and punish coordinated destructive actions (mass channel/role deletion, mass bans, webhook spam) before they cause permanent damage.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable anti-nuke</strong></span>
+                        <span class="switch"><input type="checkbox" id="an-enabled" <%= settings.antiNuke?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="an-alert-channel">Alert channel</label>
+                        <select id="an-alert-channel">
+                            <option value="">None</option>
+                            <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.antiNuke?.alertChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                        </select>
+                    </div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="an-window">Detection window (seconds)</label>
+                            <input type="number" id="an-window" value="<%= settings.antiNuke?.windowSeconds ?? 30 %>" min="5">
+                        </div>
+                        <div>
+                            <label class="field-label" for="an-punishment">Punishment</label>
+                            <select id="an-punishment">
+                                <% ['alert','strip-roles','kick','ban'].forEach(p => { %><option value="<%= p %>" <%= settings.antiNuke?.punishment === p ? 'selected' : '' %>><%= p %></option><% }); %>
+                            </select>
+                        </div>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Auto-lockdown</strong><span>Lock all text channels when a nuke event fires</span></span>
+                        <span class="switch"><input type="checkbox" id="an-auto-lockdown" <%= settings.antiNuke?.autoLockdown ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Action Thresholds <small style="font-weight:400;color:var(--text-dim)">(per window)</small></div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.6rem;">
+                        <% [['channelDelete','Channel Delete'],['channelCreate','Channel Create'],['roleDelete','Role Delete'],['roleCreate','Role Create'],['ban','Ban'],['kick','Kick'],['webhookCreate','Webhook Create']].forEach(([k,label]) => { %>
+                        <div><label class="field-label" for="an-t-<%= k %>"><%= label %></label><input type="number" id="an-t-<%= k %>" value="<%= settings.antiNuke?.thresholds?.[k] ?? 3 %>" min="1"></div>
+                        <% }); %>
+                    </div>
+                    <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Join Gate</div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable join gate</strong><span>Reject accounts younger than a minimum age</span></span>
+                        <span class="switch"><input type="checkbox" id="an-jg-enabled" <%= settings.antiNuke?.joinGate?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.5rem;">
+                        <div><label class="field-label" for="an-jg-age">Min account age (days)</label><input type="number" id="an-jg-age" value="<%= settings.antiNuke?.joinGate?.minAccountAgeDays ?? 3 %>" min="0"></div>
+                        <div><label class="field-label" for="an-jg-action">Action</label><select id="an-jg-action"><option value="kick" <%= settings.antiNuke?.joinGate?.action === 'kick' ? 'selected' : '' %>>Kick</option><option value="ban" <%= settings.antiNuke?.joinGate?.action === 'ban' ? 'selected' : '' %>>Ban</option></select></div>
+                    </div>
+                    <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Whitelist <small style="font-weight:400;color:var(--text-dim)">— one ID per line</small></div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="an-whitelist-users">User IDs</label><textarea id="an-whitelist-users" rows="3" placeholder="One user ID per line"><%= (settings.antiNuke?.whitelistUserIds||[]).join('\n') %></textarea></div>
+                        <div><label class="field-label" for="an-whitelist-roles">Role IDs</label><textarea id="an-whitelist-roles" rows="3" placeholder="One role ID per line"><%= (settings.antiNuke?.whitelistRoleIds||[]).join('\n') %></textarea></div>
+                    </div>
+                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('antinuke')">Save changes</button></div>
+                </section>
+
+                <!-- Case Settings -->
+                <section id="casesettings" class="panel">
+                    <div class="panel-head">
+                        <h2>Case Settings</h2>
+                        <p>Configure SLA monitoring for open moderation cases.</p>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="cs-sla-hours">SLA deadline (hours)</label>
+                            <input type="number" id="cs-sla-hours" value="<%= settings.caseSettings?.slaHours ?? 48 %>" min="1">
+                            <small>Cases open longer than this trigger an alert</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="cs-sla-channel">SLA alert channel</label>
+                            <select id="cs-sla-channel">
+                                <option value="">None</option>
+                                <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.caseSettings?.slaChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('casesettings')">Save changes</button></div>
+                </section>
+
                 <!-- Starboard -->
                 <section id="starboard" class="panel">
                     <div class="panel-head">
@@ -738,6 +822,56 @@
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('quests')">Save changes</button>
                     </div>
+                </section>
+
+                <!-- Season Pass -->
+                <section id="season" class="panel">
+                    <div class="panel-head">
+                        <h2>Season Pass</h2>
+                        <p>Run a seasonal progression system. Members earn season XP through quests and activity, unlocking tier rewards.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable season pass</strong></span>
+                        <span class="switch"><input type="checkbox" id="season-enabled" <%= settings.season?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.75rem;">
+                        <div><label class="field-label" for="season-name">Season name</label><input type="text" id="season-name" value="<%= settings.season?.name || 'Season 1' %>"></div>
+                        <div><label class="field-label" for="season-id">Season ID <small>(unique slug)</small></label><input type="text" id="season-id" value="<%= settings.season?.seasonId || '' %>" placeholder="e.g. s1-2025"></div>
+                        <div><label class="field-label" for="season-start">Start date</label><input type="date" id="season-start" value="<%= settings.season?.startDate ? new Date(settings.season.startDate).toISOString().slice(0,10) : '' %>"></div>
+                        <div><label class="field-label" for="season-end">End date</label><input type="date" id="season-end" value="<%= settings.season?.endDate ? new Date(settings.season.endDate).toISOString().slice(0,10) : '' %>"></div>
+                        <div><label class="field-label" for="season-xp-per-tier">XP per tier</label><input type="number" id="season-xp-per-tier" value="<%= settings.season?.xpPerTier ?? 100 %>" min="1"></div>
+                        <div><label class="field-label" for="season-max-tiers">Max tiers</label><input type="number" id="season-max-tiers" value="<%= settings.season?.maxTiers ?? 50 %>" min="1"></div>
+                    </div>
+                    <div class="field" style="margin-top:.75rem;">
+                        <label class="field-label" for="season-tier-rewards">Tier rewards <small>— format: <code>tier|coins|roleId|label</code>, one per line (roleId and label optional)</small></label>
+                        <textarea id="season-tier-rewards" rows="6" placeholder="5|100||Bronze Tier&#10;10|250|ROLE_ID|Silver Tier&#10;25|500|ROLE_ID|Gold Tier"><%= (settings.season?.tierRewards || []).map(r => `${r.tier}|${r.coins}|${r.roleId||''}|${r.label||''}`).join('\n') %></textarea>
+                    </div>
+                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('season')">Save changes</button></div>
+                </section>
+
+                <!-- Progression Tracks -->
+                <section id="progressiontracks" class="panel">
+                    <div class="panel-head">
+                        <h2>Progression Tracks</h2>
+                        <p>Members choose a track (Creator, Helper, or Raider) that gives them a bonus XP multiplier for activity matching their role.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable progression tracks</strong></span>
+                        <span class="switch"><input type="checkbox" id="pt-enabled" <%= settings.progressionTracks?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-top:.75rem;">
+                        <div><label class="field-label" for="pt-creator-bonus">Creator bonus %</label><input type="number" id="pt-creator-bonus" value="<%= settings.progressionTracks?.creatorBonus ?? 20 %>" min="0" max="200"><small>XP bonus for posts with attachments</small></div>
+                        <div><label class="field-label" for="pt-helper-bonus">Helper bonus %</label><input type="number" id="pt-helper-bonus" value="<%= settings.progressionTracks?.helperBonus ?? 20 %>" min="0" max="200"><small>XP bonus for activity in helper channels</small></div>
+                        <div><label class="field-label" for="pt-raider-bonus">Raider bonus %</label><input type="number" id="pt-raider-bonus" value="<%= settings.progressionTracks?.raiderBonus ?? 20 %>" min="0" max="200"><small>XP bonus for first 10 daily messages</small></div>
+                    </div>
+                    <div class="field" style="margin-top:.75rem;">
+                        <label class="field-label" for="pt-helper-channels">Helper channels <small>— select channels that count for the Helper track bonus</small></label>
+                        <select id="pt-helper-channels" multiple style="height:120px;">
+                            <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= (settings.progressionTracks?.helperChannels||[]).includes(ch.id) ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                        </select>
+                        <small>Hold Ctrl/Cmd to select multiple channels</small>
+                    </div>
+                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('progressiontracks')">Save changes</button></div>
                 </section>
 
                 <!-- Suggestions -->
@@ -986,6 +1120,65 @@
                         <button class="btn btn-primary" onclick="saveSettings('tempvoice')">Save changes</button>
                     </div>
                 </section>
+
+                <!-- Command Policies -->
+                <section id="commandpolicies" class="panel">
+                    <div class="panel-head">
+                        <h2>Command Policies</h2>
+                        <p>Restrict or allow commands by role, channel, or time of day. Also override per-role cooldowns.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable command policies</strong></span>
+                        <span class="switch"><input type="checkbox" id="cp-enabled" <%= settings.commandPolicies?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Global Exceptions <small style="font-weight:400;color:var(--text-dim)">— these users/roles bypass all rules</small></div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="cp-exc-users">Exempt user IDs <small>(one per line)</small></label><textarea id="cp-exc-users" rows="3" placeholder="One user ID per line"><%= (settings.commandPolicies?.exceptions?.userIds||[]).join('\n') %></textarea></div>
+                        <div><label class="field-label" for="cp-exc-roles">Exempt role IDs <small>(one per line)</small></label><textarea id="cp-exc-roles" rows="3" placeholder="One role ID per line"><%= (settings.commandPolicies?.exceptions?.roleIds||[]).join('\n') %></textarea></div>
+                    </div>
+                    <div class="eco-section-head" style="margin-top:1.25rem;">
+                        <span style="font-weight:600;font-size:.95rem;">Allow / Deny Rules</span>
+                        <button class="btn btn-sm btn-primary" onclick="openCpRuleModal(-1)">+ Add rule</button>
+                    </div>
+                    <div id="cp-rules-list" style="margin-top:.6rem;"></div>
+                    <div class="eco-section-head" style="margin-top:1.25rem;">
+                        <span style="font-weight:600;font-size:.95rem;">Cooldown Overrides</span>
+                        <button class="btn btn-sm btn-primary" onclick="openCpCooldownModal(-1)">+ Add override</button>
+                    </div>
+                    <div id="cp-cooldowns-list" style="margin-top:.6rem;"></div>
+                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('commandpolicies')">Save changes</button></div>
+                </section>
+
+                <!-- Command Policies — Rule Modal -->
+                <div id="cp-rule-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeCpRuleModal()">
+                    <div class="modal-box" style="max-width:520px;">
+                        <div class="modal-head"><span id="cp-rule-modal-title">Add Rule</span><button class="modal-close" onclick="closeCpRuleModal()">✕</button></div>
+                        <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
+                            <div class="field"><label class="field-label">Command name</label><input type="text" id="cp-r-command" placeholder="e.g. ban"></div>
+                            <div class="field"><label class="field-label">Effect</label><select id="cp-r-effect"><option value="allow">Allow</option><option value="deny">Deny</option></select></div>
+                            <div class="field"><label class="field-label">Role IDs <small>(comma-separated)</small></label><input type="text" id="cp-r-roles" placeholder="Leave blank for all roles"></div>
+                            <div class="field"><label class="field-label">Channel IDs <small>(comma-separated)</small></label><input type="text" id="cp-r-channels" placeholder="Leave blank for all channels"></div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                                <div class="field"><label class="field-label">Start hour UTC (0–23)</label><input type="number" id="cp-r-start-hour" min="0" max="23" placeholder="Any"></div>
+                                <div class="field"><label class="field-label">End hour UTC (0–23)</label><input type="number" id="cp-r-end-hour" min="0" max="23" placeholder="Any"></div>
+                            </div>
+                        </div>
+                        <div class="modal-foot"><button class="btn" onclick="closeCpRuleModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpRuleModal()">Save</button></div>
+                    </div>
+                </div>
+
+                <!-- Command Policies — Cooldown Modal -->
+                <div id="cp-cooldown-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeCpCooldownModal()">
+                    <div class="modal-box" style="max-width:420px;">
+                        <div class="modal-head"><span>Cooldown Override</span><button class="modal-close" onclick="closeCpCooldownModal()">✕</button></div>
+                        <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
+                            <div class="field"><label class="field-label">Command name</label><input type="text" id="cp-cd-command" placeholder="e.g. daily"></div>
+                            <div class="field"><label class="field-label">Role ID</label><input type="text" id="cp-cd-role" placeholder="Role ID"></div>
+                            <div class="field"><label class="field-label">Cooldown (seconds)</label><input type="number" id="cp-cd-seconds" min="0" placeholder="0 = no cooldown"></div>
+                        </div>
+                        <div class="modal-foot"><button class="btn" onclick="closeCpCooldownModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpCooldownModal()">Save</button></div>
+                    </div>
+                </div>
 
                 <!-- AI -->
                 <section id="ai" class="panel">
@@ -1453,7 +1646,7 @@
                 data = {
                     'birthdays.enabled': document.getElementById('birthday-enabled').checked,
                     'birthdays.channelId': document.getElementById('birthday-channel').value || null,
-                    'birthdays.wishingHourUtc': parseInt(document.getElementById('birthday-hour').value, 10) || 9,
+                    'birthdays.wishingHourUtc': (() => { const v = parseInt(document.getElementById('birthday-hour').value, 10); return Number.isNaN(v) ? 9 : v; })(),
                     'birthdays.roleId': document.getElementById('birthday-role').value || null,
                     'birthdays.message': document.getElementById('birthday-message').value || "It's the birthday of {user} ({age}) ! 🎂"
                 };
@@ -1591,6 +1784,72 @@
                     'suggestions.channelId': document.getElementById('suggestions-channel').value || null,
                     'suggestions.upvoteEmoji': document.getElementById('suggestions-upvote').value || '👍',
                     'suggestions.downvoteEmoji': document.getElementById('suggestions-downvote').value || '👎'
+                };
+            } else if (section === 'antinuke') {
+                const splitIds = id => document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
+                data = {
+                    'antiNuke.enabled': document.getElementById('an-enabled').checked,
+                    'antiNuke.alertChannelId': document.getElementById('an-alert-channel').value || null,
+                    'antiNuke.windowSeconds': parseInt(document.getElementById('an-window').value, 10) || 30,
+                    'antiNuke.punishment': document.getElementById('an-punishment').value,
+                    'antiNuke.autoLockdown': document.getElementById('an-auto-lockdown').checked,
+                    'antiNuke.thresholds': {
+                        channelDelete: parseInt(document.getElementById('an-t-channelDelete').value, 10) || 3,
+                        channelCreate: parseInt(document.getElementById('an-t-channelCreate').value, 10) || 5,
+                        roleDelete:    parseInt(document.getElementById('an-t-roleDelete').value, 10) || 3,
+                        roleCreate:    parseInt(document.getElementById('an-t-roleCreate').value, 10) || 5,
+                        ban:           parseInt(document.getElementById('an-t-ban').value, 10) || 3,
+                        kick:          parseInt(document.getElementById('an-t-kick').value, 10) || 5,
+                        webhookCreate: parseInt(document.getElementById('an-t-webhookCreate').value, 10) || 2
+                    },
+                    'antiNuke.whitelistUserIds': splitIds('an-whitelist-users'),
+                    'antiNuke.whitelistRoleIds': splitIds('an-whitelist-roles'),
+                    'antiNuke.joinGate': {
+                        enabled:           document.getElementById('an-jg-enabled').checked,
+                        minAccountAgeDays: parseInt(document.getElementById('an-jg-age').value, 10) || 3,
+                        action:            document.getElementById('an-jg-action').value
+                    }
+                };
+            } else if (section === 'casesettings') {
+                data = {
+                    'caseSettings.slaHours':    parseInt(document.getElementById('cs-sla-hours').value, 10) || 48,
+                    'caseSettings.slaChannelId': document.getElementById('cs-sla-channel').value || null
+                };
+            } else if (section === 'season') {
+                const tierText = document.getElementById('season-tier-rewards').value;
+                const tierRewards = tierText.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+                    const [tier, coins, roleId, ...labelParts] = l.split('|');
+                    return { tier: parseInt(tier, 10), coins: parseInt(coins, 10) || 0, roleId: roleId || null, label: labelParts.join('|') || '' };
+                }).filter(r => !isNaN(r.tier));
+                data = {
+                    'season.enabled':    document.getElementById('season-enabled').checked,
+                    'season.name':       document.getElementById('season-name').value.trim() || 'Season 1',
+                    'season.seasonId':   document.getElementById('season-id').value.trim() || null,
+                    'season.startDate':  document.getElementById('season-start').value || null,
+                    'season.endDate':    document.getElementById('season-end').value || null,
+                    'season.xpPerTier':  parseInt(document.getElementById('season-xp-per-tier').value, 10) || 100,
+                    'season.maxTiers':   parseInt(document.getElementById('season-max-tiers').value, 10) || 50,
+                    'season.tierRewards': tierRewards
+                };
+            } else if (section === 'progressiontracks') {
+                const helperChannels = Array.from(document.getElementById('pt-helper-channels').selectedOptions).map(o => o.value);
+                data = {
+                    'progressionTracks.enabled':       document.getElementById('pt-enabled').checked,
+                    'progressionTracks.creatorBonus':  parseInt(document.getElementById('pt-creator-bonus').value, 10) || 20,
+                    'progressionTracks.helperBonus':   parseInt(document.getElementById('pt-helper-bonus').value, 10) || 20,
+                    'progressionTracks.raiderBonus':   parseInt(document.getElementById('pt-raider-bonus').value, 10) || 20,
+                    'progressionTracks.helperChannels': helperChannels
+                };
+            } else if (section === 'commandpolicies') {
+                const splitIds = id => document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
+                data = {
+                    'commandPolicies.enabled': document.getElementById('cp-enabled').checked,
+                    'commandPolicies.exceptions': {
+                        userIds: splitIds('cp-exc-users'),
+                        roleIds: splitIds('cp-exc-roles')
+                    },
+                    'commandPolicies.rules':            _cpRules,
+                    'commandPolicies.cooldownOverrides': _cpCooldowns
                 };
             } else if (section === 'ai') {
                 data = {
@@ -1739,6 +1998,90 @@
         }
 
         // ── Economy Store & Jobs ───────────────────────────────────────────────
+        // Command Policies state
+        var _cpRules     = <%- JSON.stringify(settings.commandPolicies?.rules || []) %>;
+        var _cpCooldowns = <%- JSON.stringify(settings.commandPolicies?.cooldownOverrides || []) %>;
+        var _cpRuleIdx = -1;
+        var _cpCdIdx   = -1;
+
+        function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function renderCpRules() {
+            var list = document.getElementById('cp-rules-list');
+            if (!_cpRules.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;">No rules — click <strong>+ Add rule</strong> to add one.</p>'; return; }
+            list.innerHTML = _cpRules.map(function(r, i) {
+                var color = r.effect === 'allow' ? '#2ecc71' : '#e74c3c';
+                return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
+                    '<span style="flex:1"><strong>' + escHtml(r.command) + '</strong> — <span style="color:' + color + '">' + escHtml(r.effect) + '</span></span>' +
+                    '<button class="btn btn-sm" onclick="openCpRuleModal(' + i + ')">Edit</button>' +
+                    '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpRules.splice(' + i + ',1);renderCpRules()">✕</button></div>';
+            }).join('');
+        }
+        function renderCpCooldowns() {
+            var list = document.getElementById('cp-cooldowns-list');
+            if (!_cpCooldowns.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;">No cooldown overrides — click <strong>+ Add override</strong>.</p>'; return; }
+            list.innerHTML = _cpCooldowns.map(function(c, i) {
+                return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
+                    '<span style="flex:1"><strong>' + escHtml(c.command) + '</strong> — Role <code>' + escHtml(c.roleId) + '</code> → ' + escHtml(c.cooldownSeconds) + 's</span>' +
+                    '<button class="btn btn-sm" onclick="openCpCooldownModal(' + i + ')">Edit</button>' +
+                    '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpCooldowns.splice(' + i + ',1);renderCpCooldowns()">✕</button></div>';
+            }).join('');
+        }
+        function openCpRuleModal(idx) {
+            _cpRuleIdx = idx;
+            var r = idx === -1 ? {} : _cpRules[idx];
+            document.getElementById('cp-rule-modal-title').textContent = idx === -1 ? 'Add Rule' : 'Edit Rule';
+            document.getElementById('cp-r-command').value   = r.command || '';
+            document.getElementById('cp-r-effect').value    = r.effect || 'allow';
+            document.getElementById('cp-r-roles').value     = (r.roleIds || []).join(', ');
+            document.getElementById('cp-r-channels').value  = (r.channelIds || []).join(', ');
+            document.getElementById('cp-r-start-hour').value = r.startHourUtc != null ? r.startHourUtc : '';
+            document.getElementById('cp-r-end-hour').value   = r.endHourUtc   != null ? r.endHourUtc   : '';
+            document.getElementById('cp-rule-modal').style.display = 'flex';
+        }
+        function closeCpRuleModal() { document.getElementById('cp-rule-modal').style.display = 'none'; }
+        function saveCpRuleModal() {
+            var cmd = document.getElementById('cp-r-command').value.trim();
+            if (!cmd) { toast('Command name is required', 'error'); return; }
+            var splitCsv = function(s) { return s.split(',').map(function(x){return x.trim();}).filter(Boolean); };
+            var sh = document.getElementById('cp-r-start-hour').value;
+            var eh = document.getElementById('cp-r-end-hour').value;
+            var rule = {
+                command: cmd,
+                effect: document.getElementById('cp-r-effect').value,
+                roleIds: splitCsv(document.getElementById('cp-r-roles').value),
+                channelIds: splitCsv(document.getElementById('cp-r-channels').value),
+                startHourUtc: sh !== '' ? parseInt(sh, 10) : null,
+                endHourUtc:   eh !== '' ? parseInt(eh, 10) : null,
+                daysOfWeek: []
+            };
+            if (_cpRuleIdx === -1) _cpRules.push(rule); else _cpRules[_cpRuleIdx] = rule;
+            closeCpRuleModal(); renderCpRules();
+        }
+        function openCpCooldownModal(idx) {
+            _cpCdIdx = idx;
+            var c = idx === -1 ? {} : _cpCooldowns[idx];
+            document.getElementById('cp-cd-command').value = c.command || '';
+            document.getElementById('cp-cd-role').value    = c.roleId  || '';
+            document.getElementById('cp-cd-seconds').value = c.cooldownSeconds != null ? c.cooldownSeconds : '';
+            document.getElementById('cp-cooldown-modal').style.display = 'flex';
+        }
+        function closeCpCooldownModal() { document.getElementById('cp-cooldown-modal').style.display = 'none'; }
+        function saveCpCooldownModal() {
+            var cmd = document.getElementById('cp-cd-command').value.trim();
+            var role = document.getElementById('cp-cd-role').value.trim();
+            if (!cmd || !role) { toast('Command and role are required', 'error'); return; }
+            var entry = { command: cmd, roleId: role, cooldownSeconds: parseInt(document.getElementById('cp-cd-seconds').value, 10) || 0 };
+            if (_cpCdIdx === -1) _cpCooldowns.push(entry); else _cpCooldowns[_cpCdIdx] = entry;
+            closeCpCooldownModal(); renderCpCooldowns();
+        }
+
+        // Initialize CP lists
+        renderCpRules();
+        renderCpCooldowns();
+
         var storeItems = <%- JSON.stringify(settings.shop || []) %>;
         var _serverJobs = <%- JSON.stringify(settings.jobs || []) %>;
         var jobsList = _serverJobs.length > 0 ? _serverJobs : [

@@ -5,6 +5,7 @@ const {
     ButtonBuilder,
     ButtonStyle,
 } = require('discord.js');
+const Guild = require('../../models/Guild');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b2.png';
 
@@ -78,6 +79,10 @@ module.exports = {
                 .setMaxValue(100)),
 
     async execute(interaction) {
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.rollEnabled === false) {
+            return interaction.reply({ content: 'Dice roll is disabled on this server.', ephemeral: true });
+        }
         const sides = interaction.options.getInteger('sides') || 6;
         await interaction.deferReply();
         await playRoll(interaction, sides);
