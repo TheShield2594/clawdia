@@ -83,10 +83,14 @@ function applyStaminaRegen(user) {
     const max = getMaxStamina(user);
     if (h.stamina >= max) {
         h.stamina = max;
+        // Reset the clock so accumulated "full" time doesn't grant free regen later
+        h.staminaLastRegen = new Date();
+        user.markModified('hunt');
         return;
     }
     if (!h.staminaLastRegen) {
         h.staminaLastRegen = new Date();
+        user.markModified('hunt');
         return;
     }
     const elapsed = Date.now() - h.staminaLastRegen.getTime();
@@ -165,10 +169,10 @@ function calculateSuccessChance(user, weapon, zone) {
         chance += WEAPON_UPGRADES.rifled_barrel.effect.successBonus;
     }
 
-    // Durability penalty: kicks in below 30%
+    // Durability penalty: ramps from 0 at 30% → −0.20 at 0% durability
     const durPct = weapon.currentDurability / weapon.maxDurability;
     if (durPct < 0.30) {
-        chance -= (0.30 - durPct) * (20 / 0.30);
+        chance -= (0.30 - durPct) * (0.20 / 0.30);
     }
 
     // Pity system: consecutive failure streak bonus
@@ -580,9 +584,16 @@ function tickConsumables(user) {
  * }
  */
 function executeHunt(user, zoneId) {
-    const h   = user.hunt;
-    const zone = ZONES[zoneId ?? h.activeZone];
+    const h      = user.hunt;
+    const zone   = ZONES[zoneId ?? h.activeZone];
     const weapon = h.weapons[h.equippedWeaponIndex];
+
+    if (!zone || !weapon) {
+        return {
+            success: false, xpEarned: 0, durabilityLost: 0, weaponBroke: false,
+            failure: { severity: { id: 'error', durLoss: 0, injuryMs: 0, xp: 0 }, message: 'Invalid hunt state.' }
+        };
+    }
 
     const successChance = calculateSuccessChance(user, weapon, zone);
     const success = Math.random() < successChance;
@@ -687,18 +698,13 @@ function executeHunt(user, zoneId) {
     // Ammo deduction (handled by caller after pre-check)
 
     // Tick consumables; record expiry for result embed
-    const baitHuntsBefore  = h.activeBaitHuntsLeft;
-    const charmHuntsBefore = h.activeCharmHuntsLeft;
     tickConsumables(user);
-    result.expiredBait    = baitBefore  && !h.activeBait  ? baitBefore  : null;
-    result.expiredCharm   = charmBefore && !h.activeCharm ? charmBefore : null;
+    result.expiredBait      = baitBefore  && !h.activeBait  ? baitBefore  : null;
+    result.expiredCharm     = charmBefore && !h.activeCharm ? charmBefore : null;
     result.activeBaitAfter  = h.activeBait;
     result.activeCharmAfter = h.activeCharm;
-    // keep lint happy
-    void baitHuntsBefore; void charmHuntsBefore;
 
     user.markModified('hunt');
-    user.markModified('balance');
 
     return result;
 }

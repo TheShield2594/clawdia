@@ -170,7 +170,9 @@ function buildXpBar(h, toNext) {
     if (toNext === null) return '████████████████████ MAX';
     const currentLevelXp = HUNTER_LEVELS[h.level - 1]?.xpRequired ?? 0;
     const nextLevelXp    = HUNTER_LEVELS[h.level]?.xpRequired ?? 1;
-    const progress       = (h.xp - currentLevelXp) / (nextLevelXp - currentLevelXp);
-    const filled         = Math.round(progress * 20);
-    return `${'█'.repeat(filled)}${'░'.repeat(20 - filled)} ${Math.round(progress * 100)}%`;
+    const denominator    = nextLevelXp - currentLevelXp;
+    const progress       = denominator > 0 ? (h.xp - currentLevelXp) / denominator : 0;
+    const filled         = Math.min(20, Math.max(0, Math.round(progress * 20)));
+    const pct            = Math.min(100, Math.max(0, Math.round(progress * 100)));
+    return `${'█'.repeat(filled)}${'░'.repeat(20 - filled)} ${pct}%`;
 }

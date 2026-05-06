@@ -62,6 +62,9 @@ module.exports = {
         const sub = interaction.options.getSubcommand();
 
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        if (guildSettings?.economy?.enabled === false) {
+            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        }
         const currency = guildSettings?.economy?.currency ?? '💰';
 
         const user = await User.findOneAndUpdate(

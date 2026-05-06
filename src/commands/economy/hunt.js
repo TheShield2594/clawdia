@@ -53,6 +53,12 @@ module.exports = {
         applyStaminaRegen(user);
         applyDailyReset(user);
 
+        // Persist stamina regen / daily-reset mutations before any early return
+        // so the computed state is not re-derived on every rejected call.
+        if (user.isModified()) {
+            await user.save().catch(e => console.error('[hunt] pre-check save error:', e));
+        }
+
         const h = user.hunt;
 
         // ── Zone resolution ────────────────────────────────────────────────
@@ -143,6 +149,9 @@ module.exports = {
         try {
             await user.save();
         } catch (err) {
+            if (err.name === 'VersionError') {
+                return interaction.editReply({ content: 'A simultaneous request conflicted with your hunt. Please try `/hunt` again.' });
+            }
             console.error('[hunt] save error:', err);
             return interaction.editReply({ content: 'Something went wrong saving your hunt. Please try again.' });
         }

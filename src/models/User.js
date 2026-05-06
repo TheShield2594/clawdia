@@ -172,6 +172,9 @@ const userSchema = new Schema({
         // Permanent account upgrades
         luckyPaw: { type: Boolean, default: false },
 
+        // Trophy collection (displayed on /huntprofile; awarded on legendary/event kills)
+        trophies: [{ type: String }],
+
         // Hunt statistics
         totalHunts:        { type: Number, default: 0 },
         successfulHunts:   { type: Number, default: 0 },
@@ -191,6 +194,8 @@ const userSchema = new Schema({
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });
+
+userSchema.set('optimisticConcurrency', true);
 
 userSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 

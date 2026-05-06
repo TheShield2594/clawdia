@@ -407,7 +407,7 @@ const ANIMALS = {
         id: 'ghost_stag', name: 'Ghost Stag', emoji: '👻', tier: 'event',
         payoutMin: 1900, payoutMax: 3100, xp: 1000,
         specialDrop: { itemId: 'spectral_bone', name: 'Spectral Bone', chance: 0.40 },
-        zones: ['legendary_peaks', 'all'],
+        zones: ['all'],
         flavor: 'A translucent stag shimmers in the silver moonlight, barely real.'
     }
 };

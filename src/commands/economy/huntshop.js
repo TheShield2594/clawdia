@@ -4,7 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { CONSUMABLES, AMMO_PACKS } = require('../../data/huntData');
-const { ensureHuntData, activateConsumable } = require('../../services/huntService');
+const { ensureHuntData, activateConsumable, getMaxStamina } = require('../../services/huntService');
 
 // Flat list for buy choices (consumables + ammo packs)
 const ALL_ITEMS = [
@@ -191,7 +191,7 @@ module.exports = {
             if (def.type === 'charm')  statusMsg = `Active for **${h.activeCharmHuntsLeft}** hunts.`;
             if (def.type === 'instant' && itemId === 'hunters_focus')  statusMsg = `Will apply on your next hunt.`;
             if (def.type === 'instant' && itemId === 'xp_scroll')      statusMsg = `Will apply on your next hunt.`;
-            if (def.type === 'stamina') statusMsg = `Stamina: **${h.stamina}/${h.stamina + (def.staminaRestore ?? 0)}** — restored ${def.staminaRestore} points.`;
+            if (def.type === 'stamina') statusMsg = `Stamina: **${h.stamina}/${getMaxStamina(user)}** — restored ${def.staminaRestore} points.`;
 
             const embed = new EmbedBuilder()
                 .setColor('#2ecc71')

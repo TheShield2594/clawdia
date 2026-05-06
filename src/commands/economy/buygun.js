@@ -139,6 +139,7 @@ module.exports = {
                     }
                 });
 
+                return; // prevent fall-through to subsequent sub-handlers
             } else {
                 // Small purchases go through immediately
                 await interaction.deferReply();
