@@ -73,9 +73,129 @@ const userSchema = new Schema({
         lastCelebratedYear: { type: Number, default: null }
     },
 
+    // ── Hunt System ──────────────────────────────────────────────────────────
+    hunt: {
+        // Stamina (regenerates over time, gates how often you can hunt)
+        stamina:             { type: Number, default: 10 },
+        staminaLastRegen:    { type: Date,   default: null },
+        staminaTonicsToday:  { type: Number, default: 0 },
+        lastTonicDayReset:   { type: Date,   default: null },
+
+        // Hunter progression (separate from Discord leveling XP)
+        xp:       { type: Number, default: 0 },
+        level:    { type: Number, default: 1 },
+        prestige: { type: Number, default: 0 },
+
+        // Cooldowns
+        lastHunt:     { type: Date, default: null },
+        injuryUntil:  { type: Date, default: null },
+
+        // Active zone & unlocked zones
+        activeZone:    { type: String, default: 'beginner_forest' },
+        unlockedZones: [{ type: String }],
+
+        // Equipped weapon (index into weapons array; -1 = none)
+        equippedWeaponIndex: { type: Number, default: -1 },
+
+        // Weapons inventory (each weapon has persistent state)
+        weapons: [{
+            name:             { type: String },
+            tier:             { type: Number },
+            slug:             { type: String },
+            currentDurability:{ type: Number },
+            maxDurability:    { type: Number },
+            baseDurability:   { type: Number },
+            repairCount:      { type: Number, default: 0 },
+            upgrade:          { type: String, default: null },
+            status:           { type: String, default: 'good' }, // good|degraded|condemned|broken
+            acquiredAt:       { type: Date,   default: Date.now }
+        }],
+
+        // Ammo stock (per type)
+        ammo: {
+            iron_shot:        { type: Number, default: 0 },
+            steel_shot:       { type: Number, default: 0 },
+            composite_round:  { type: Number, default: 0 },
+            titanium_round:   { type: Number, default: 0 }
+        },
+
+        // Hunt consumables stock
+        consumables: {
+            basic_bait:        { type: Number, default: 0 },
+            premium_bait:      { type: Number, default: 0 },
+            luck_charm:        { type: Number, default: 0 },
+            hunters_focus:     { type: Number, default: 0 },
+            repair_kit_small:  { type: Number, default: 0 },
+            repair_kit_large:  { type: Number, default: 0 },
+            stamina_tonic:     { type: Number, default: 0 },
+            xp_scroll:         { type: Number, default: 0 }
+        },
+
+        // Active consumable buffs
+        activeBait:           { type: String, default: null },
+        activeBaitHuntsLeft:  { type: Number, default: 0 },
+        activeCharm:          { type: String, default: null },
+        activeCharmHuntsLeft: { type: Number, default: 0 },
+        activeFocus:          { type: Boolean, default: false },
+        activeXpScroll:       { type: Boolean, default: false },
+
+        // Crafting materials (special drops from animals)
+        materials: {
+            rabbits_foot:      { type: Number, default: 0 },
+            acorn_cache:       { type: Number, default: 0 },
+            feather:           { type: Number, default: 0 },
+            down_feather:      { type: Number, default: 0 },
+            antler_fragment:   { type: Number, default: 0 },
+            tusk_shard:        { type: Number, default: 0 },
+            badger_pelt:       { type: Number, default: 0 },
+            beaver_pelt:       { type: Number, default: 0 },
+            coyote_fang:       { type: Number, default: 0 },
+            wolf_pelt:         { type: Number, default: 0 },
+            elk_antler:        { type: Number, default: 0 },
+            lynx_fang:         { type: Number, default: 0 },
+            eagle_talon:       { type: Number, default: 0 },
+            mountain_horn:     { type: Number, default: 0 },
+            bear_claw:         { type: Number, default: 0 },
+            moose_rack:        { type: Number, default: 0 },
+            lion_tooth:        { type: Number, default: 0 },
+            wolverine_fur:     { type: Number, default: 0 },
+            spirit_pelt:       { type: Number, default: 0 },
+            megaloceros_crown: { type: Number, default: 0 },
+            golden_fur:        { type: Number, default: 0 },
+            spirit_essence:    { type: Number, default: 0 },
+            ancient_claw:      { type: Number, default: 0 },
+            thunderfeather:    { type: Number, default: 0 },
+            spectral_bone:     { type: Number, default: 0 },
+            bandit_mask:       { type: Number, default: 0 }
+        },
+
+        // Permanent account upgrades
+        luckyPaw: { type: Boolean, default: false },
+
+        // Trophy collection (displayed on /huntprofile; awarded on legendary/event kills)
+        trophies: [{ type: String }],
+
+        // Hunt statistics
+        totalHunts:        { type: Number, default: 0 },
+        successfulHunts:   { type: Number, default: 0 },
+        totalEarned:       { type: Number, default: 0 },
+        legendaryKills:    { type: Number, default: 0 },
+        eventKills:        { type: Number, default: 0 },
+        bestPayout:        { type: Number, default: 0 },
+        consecutiveFails:  { type: Number, default: 0 },
+
+        // Anti-exploit: rolling 24-hour window tracking
+        dailyCoins:        { type: Number, default: 0 },
+        dailyHunts:        { type: Number, default: 0 },
+        dailyWindowStart:  { type: Date,   default: null }
+    },
+    // ─────────────────────────────────────────────────────────────────────────
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });
+
+userSchema.set('optimisticConcurrency', true);
 
 userSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 
