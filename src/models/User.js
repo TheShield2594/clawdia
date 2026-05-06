@@ -191,6 +191,91 @@ const userSchema = new Schema({
     },
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ── Fishing System ───────────────────────────────────────────────────────
+    fishing: {
+        stamina:             { type: Number, default: 10 },
+        staminaLastRegen:    { type: Date,   default: null },
+        energyDrinksToday:   { type: Number, default: 0 },
+        lastDrinkDayReset:   { type: Date,   default: null },
+
+        xp:       { type: Number, default: 0 },
+        level:    { type: Number, default: 1 },
+        prestige: { type: Number, default: 0 },
+
+        lastCast:     { type: Date, default: null },
+        injuryUntil:  { type: Date, default: null },
+
+        activeLocation:    { type: String, default: 'pond' },
+        unlockedLocations: [{ type: String }],
+
+        equippedRodIndex: { type: Number, default: -1 },
+
+        rods: [{
+            name:              { type: String },
+            tier:              { type: Number },
+            slug:              { type: String },
+            currentDurability: { type: Number },
+            maxDurability:     { type: Number },
+            baseDurability:    { type: Number },
+            repairCount:       { type: Number, default: 0 },
+            upgrade:           { type: String, default: null },
+            status:            { type: String, default: 'good' },
+            acquiredAt:        { type: Date,   default: Date.now }
+        }],
+
+        bait: {
+            worm_bait:      { type: Number, default: 0 },
+            shrimp_bait:    { type: Number, default: 0 },
+            lure:           { type: Number, default: 0 },
+            enchanted_lure: { type: Number, default: 0 }
+        },
+
+        consumables: {
+            chum_bait:        { type: Number, default: 0 },
+            premium_chum:     { type: Number, default: 0 },
+            anglers_luck:     { type: Number, default: 0 },
+            fish_xp_scroll:   { type: Number, default: 0 },
+            repair_kit_small: { type: Number, default: 0 },
+            repair_kit_large: { type: Number, default: 0 },
+            energy_drink:     { type: Number, default: 0 }
+        },
+
+        activeBait:          { type: String,  default: null },
+        activeBaitCastsLeft: { type: Number,  default: 0 },
+        activeLuck:          { type: Boolean, default: false },
+        activeXpScroll:      { type: Boolean, default: false },
+
+        materials: {
+            fish_scale:     { type: Number, default: 0 },
+            rare_scale:     { type: Number, default: 0 },
+            mythic_scale:   { type: Number, default: 0 },
+            pearl:          { type: Number, default: 0 },
+            seaweed_bundle: { type: Number, default: 0 },
+            driftwood:      { type: Number, default: 0 },
+            old_coin:       { type: Number, default: 0 },
+            shark_tooth:    { type: Number, default: 0 },
+            tentacle_ink:   { type: Number, default: 0 },
+            coral_fragment: { type: Number, default: 0 }
+        },
+
+        luckyHook: { type: Boolean, default: false },
+
+        trophies: [{ type: String }],
+
+        totalCasts:       { type: Number, default: 0 },
+        successfulCasts:  { type: Number, default: 0 },
+        totalEarned:      { type: Number, default: 0 },
+        legendaryCatches: { type: Number, default: 0 },
+        eventCatches:     { type: Number, default: 0 },
+        bestPayout:       { type: Number, default: 0 },
+        consecutiveFails: { type: Number, default: 0 },
+
+        dailyCoins:       { type: Number, default: 0 },
+        dailyCasts:       { type: Number, default: 0 },
+        dailyWindowStart: { type: Date,   default: null }
+    },
+    // ─────────────────────────────────────────────────────────────────────────
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });
