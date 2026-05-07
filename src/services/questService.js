@@ -96,9 +96,12 @@ async function ensureQuests(user, guildSettings) {
     const dailyExpiry  = getDailyExpiry();
     const weeklyExpiry = getWeeklyExpiry();
 
-    // Check how many of each type are still active
-    const activeDailyIds  = user.quests.filter(q => q.expiresAt.getTime() === dailyExpiry.getTime() || q.expiresAt < weeklyExpiry).map(q => q.questId);
-    const activeWeeklyIds = user.quests.filter(q => q.expiresAt.getTime() >= weeklyExpiry.getTime()).map(q => q.questId);
+    // Mutually exclusive by type: daily expires before the weekly cutoff, weekly at or after.
+    // Using getTime() avoids the Saturday edge case where dailyExpiry === weeklyExpiry.
+    const dailyExpiryMs  = dailyExpiry.getTime();
+    const weeklyExpiryMs = weeklyExpiry.getTime();
+    const activeDailyIds  = user.quests.filter(q => { const t = q.expiresAt.getTime(); return t === dailyExpiryMs && t < weeklyExpiryMs; }).map(q => q.questId);
+    const activeWeeklyIds = user.quests.filter(q => q.expiresAt.getTime() >= weeklyExpiryMs).map(q => q.questId);
 
     const dailyNeeded  = dailyCount  - activeDailyIds.length;
     const weeklyNeeded = weeklyCount - activeWeeklyIds.length;
@@ -259,7 +262,8 @@ async function onStreakUpdate(user, guildSettings) {
 async function notifyQuestComplete(guild, member, rewards, fallbackChannel) {
     if (!rewards?.length) return;
 
-    const notifChannelId = guild.settings?.quests?.notificationChannelId;
+    const settings = guild.settings ?? guild;
+    const notifChannelId = settings.quests?.notificationChannelId;
     const channel = notifChannelId
         ? (member.guild.channels.cache.get(notifChannelId) ?? fallbackChannel)
         : fallbackChannel;
