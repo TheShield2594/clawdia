@@ -11,11 +11,18 @@ A feature-rich, self-hosted Discord bot with extensive moderation tools, welcome
 - **Music Player**: 24/7 music streaming with queue management
 - **RSS Feeds**: Automatic RSS feed monitoring and posting
 - **Daily News Digest**: Compile multiple RSS feeds into a daily summary
-- **AI Chat**: OpenAI GPT and Google Gemini integration for AI-powered conversations
+- **AI Chat**: OpenAI GPT, Google Gemini, or optional local Ollama integration
 - **Reminders**: Set reminders with flexible time options
 - **Web Dashboard**: Full-featured admin dashboard for configuration
 - **Auto-Moderation**: Spam, invite, and link filtering
 - **Server Insights**: Retention cohorts, active hours, toxic channel hotspots, mod SLA trends, and newcomer conversion
+
+## Prerequisites
+
+- Node.js 18+ 
+- MongoDB (local or cloud)
+- Discord Application with Bot & OAuth2 scopes enabled
+- (Optional) OpenAI API Key, Google Gemini API Key, or local Ollama instance
 
 ## Quick Start with Docker (Portainer)
 
@@ -32,7 +39,7 @@ docker-compose up -d
 
 ```bash
 npm install
-npm run deploy  # Deploy slash commands
+npm run deploy  # Deploy slash commands globally
 npm start
 ```
 
@@ -40,20 +47,21 @@ npm start
 
 1. Invite the bot to your server
 2. Visit the dashboard at `http://localhost:3000`
-3. Login with Discord
-4. Select your server and configure settings
+3. Login with Discord OAuth2
+4. Select your server and configure modules
 
 ## Environment Variables
 
 - `DISCORD_TOKEN` - Your Discord bot token
 - `CLIENT_ID` - Discord application client ID
 - `CLIENT_SECRET` - Discord OAuth2 client secret
-- `MONGODB_URI` - MongoDB connection string
+- `MONGODB_URI` - MongoDB connection string (required)
 - `DASHBOARD_PORT` - Web dashboard port (default: 3000)
 - `DASHBOARD_URL` - Public URL for the dashboard
 - `SESSION_SECRET` - Random string for session encryption
 - `OPENAI_API_KEY` - (Optional) OpenAI API key for AI features
 - `GEMINI_API_KEY` - (Optional) Google Gemini API key for AI features
+- `OLLAMA_BASE_URL` - (Optional) Local Ollama endpoint (e.g., `http://localhost:11434`)
 
 ## Commands
 
@@ -96,7 +104,7 @@ npm start
 - `/ping` - Bot latency
 
 ### AI
-- `/ai` - Ask AI a question (supports OpenAI GPT or Google Gemini)
+- `/ai` - Ask AI a question
 - `/remind` - Set a reminder
 
 ### Admin
@@ -110,8 +118,7 @@ npm start
 - MongoDB with Mongoose
 - Express.js
 - Passport (Discord OAuth2)
-- OpenAI API
-- Google Gemini API
+- OpenAI API / Google Gemini API / Ollama (optional)
 - play-dl (Music streaming)
 - RSS Parser
 - Canvas (Image generation)
@@ -130,17 +137,21 @@ npm start
    - Add to `.env` as `GEMINI_API_KEY` or configure per-server in dashboard
    - Models: Gemini Pro
 
+3. **Local (Ollama)**
+   - Point `OLLAMA_BASE_URL` to your local instance
+   - Configure `OLLAMA_MODEL` in dashboard (e.g., `llama3.2`, `mistral`)
+   - Ideal for private, zero-cost inference
+
 ### Setup
 
 1. Go to the dashboard AI Chat section
 2. Select your preferred AI provider
-3. (Optional) Add server-specific API keys
+3. (Optional) Add server-specific API keys or local endpoint
 4. Choose a channel for AI chat
 5. Customize the system prompt
 6. Enable AI Chat
 
 Users can now chat with AI in the designated channel or use `/ai` command anywhere.
-
 
 ## Insights Layer
 
@@ -171,7 +182,7 @@ The Daily News feature compiles multiple RSS feeds into a single daily post.
 1. Go to the dashboard Daily News section
 2. Enable Daily News Digest
 3. Select a channel for posting
-4. Set delivery time (24-hour format, e.g., 09:00)
+4. Set delivery time (24-hour format, e.g., `09:00`)
 5. Add RSS feed URLs (one per line)
 6. Configure title and max items per feed
 7. Save settings
@@ -184,6 +195,12 @@ Admin users can manually trigger the digest with:
 ```
 /dailynews
 ```
+
+## Troubleshooting
+
+- **Slash commands not appearing**: Run `npm run deploy` and ensure the bot has `applications.commands` scope.
+- **Portainer/Docker startup fails**: Verify `MONGODB_URI` is reachable from the container network and `.env` is properly mounted.
+- **AI commands timeout**: Check API key validity or Ollama endpoint accessibility from the bot container.
 
 ## License
 
