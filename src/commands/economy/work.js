@@ -1,11 +1,50 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const DEFAULT_JOBS = require('../../data/defaultJobs');
+const DEFAULT_TIERS = require('../../data/defaultTiers');
+
+function resolveTiers(guildSettings) {
+    const saved = guildSettings?.jobTiers;
+    if (saved?.length === 4) return [...saved].sort((a, b) => a.tier - b.tier);
+    return DEFAULT_TIERS;
+}
+
+// Random scenario lines — {job} is replaced with the formatted job name
+const WORK_SCENARIOS = [
+    'You showed up early and crushed it as a {job}.',
+    'A tough shift as a {job}, but you pulled through.',
+    'You went above and beyond as a {job} and the boss noticed.',
+    'You kept things running smoothly as a {job}.',
+    'You clocked in, did the work, and clocked out as a {job}. Solid.',
+    'You impressed a client while working as a {job}.',
+    'Chaos reigned at work today, but you held it together as a {job}.',
+    'You trained a new hire while working as a {job}. Multi-tasker.',
+    'You caught an expensive mistake before it happened as a {job}.',
+    'The grind never stops — another shift done as a {job}.',
+];
+
+const PERFORMANCE_TIERS = [
+    { label: '💀 Rough Shift',   color: '#e74c3c', multiplier: 0.75, chance: 0.10 },
+    { label: '😐 Average Shift', color: '#95a5a6', multiplier: 1.00, chance: 0.45 },
+    { label: '😊 Good Shift',    color: '#2ecc71', multiplier: 1.25, chance: 0.35 },
+    { label: '🔥 Exceptional!',  color: '#f39c12', multiplier: 1.60, chance: 0.10 },
+];
+
+function rollPerformance() {
+    const roll = Math.random();
+    let cumulative = 0;
+    for (const p of PERFORMANCE_TIERS) {
+        cumulative += p.chance;
+        if (roll < cumulative) return p;
+    }
+    return PERFORMANCE_TIERS[1];
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('work')
-        .setDescription('Work to earn some coins'),
+        .setDescription('Work a shift to earn coins'),
     cooldown: 3600,
     async execute(interaction) {
         try {
@@ -13,75 +52,68 @@ module.exports = {
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
             if (!user) {
-                user = await User.create({
-                    userId: interaction.user.id,
-                    guildId: interaction.guild.id
-                });
+                user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
             }
 
             const now = Date.now();
-            const workCooldown = 3600000;
-
-            if (user.lastWork && now - user.lastWork.getTime() < workCooldown) {
-                const timeLeft = workCooldown - (now - user.lastWork.getTime());
-                const minutes = Math.floor(timeLeft / 60000);
-                
-                return interaction.reply({
-                    content: `You're too tired to work! Rest for ${minutes} more minutes.`,
-                    ephemeral: true
-                });
+            if (user.lastWork && now - user.lastWork.getTime() < 3600000) {
+                const minutes = Math.floor((3600000 - (now - user.lastWork.getTime())) / 60000);
+                return interaction.reply({ content: `You're too tired to work! Rest for **${minutes}** more minutes.`, ephemeral: true });
             }
 
-            const workMin = guildSettings?.economy.workMin || 50;
-            const workMax = guildSettings?.economy.workMax || 150;
-
-            const jobTiers = [
-                { name: 'Intern', minShifts: 0, payMultiplier: 1, jobs: ['assistant', 'cashier', 'dishwasher', 'courier'] },
-                { name: 'Skilled Worker', minShifts: 10, payMultiplier: 1.2, jobs: ['developer', 'designer', 'teacher', 'chef', 'driver'] },
-                { name: 'Senior Specialist', minShifts: 25, payMultiplier: 1.45, jobs: ['engineer', 'artist', 'musician', 'writer', 'analyst'] },
-                { name: 'Executive', minShifts: 50, payMultiplier: 1.8, jobs: ['director', 'architect', 'surgeon', 'producer', 'founder'] }
-            ];
-
+            const tierInfo = resolveTiers(guildSettings);
             const currentShifts = user.shiftsWorked || 0;
-            const activeTier = [...jobTiers].reverse().find(tier => currentShifts >= tier.minShifts) || jobTiers[0];
-            const nextTier = jobTiers.find(tier => tier.minShifts > currentShifts);
+            const userTier = [...tierInfo].reverse().find(t => currentShifts >= t.minShifts) || tierInfo[0];
+            const nextTier = tierInfo.find(t => t.minShifts > currentShifts);
 
-            const tierMin = Math.floor(workMin * activeTier.payMultiplier);
-            const tierMax = Math.floor(workMax * activeTier.payMultiplier);
-            const earned = Math.floor(Math.random() * (tierMax - tierMin + 1)) + tierMin;
+            // Dashboard jobs are the source of truth; fall back to defaults if none configured
+            const allJobs = guildSettings?.jobs?.length > 0 ? guildSettings.jobs : DEFAULT_JOBS;
+            const availableJobs = allJobs.filter(j => (j.tier || 1) <= userTier.tier);
+            const jobPool = availableJobs.length > 0 ? availableJobs : allJobs;
+            const job = jobPool[Math.floor(Math.random() * jobPool.length)];
 
-            const guildJobs = guildSettings?.jobs?.length > 0
-                ? guildSettings.jobs.map(j => j.emoji ? `${j.emoji} ${j.name}` : j.name)
-                : activeTier.jobs;
-            const job = guildJobs[Math.floor(Math.random() * guildJobs.length)];
+            const minPay = job.minPay ?? guildSettings?.economy?.workMin ?? 50;
+            const maxPay = job.maxPay ?? guildSettings?.economy?.workMax ?? 150;
+            const basePay = Math.floor(Math.random() * (maxPay - minPay + 1)) + minPay;
+
+            const performance = rollPerformance();
+            const earned = Math.max(1, Math.floor(basePay * performance.multiplier));
+
+            const jobLabel = job.emoji ? `${job.emoji} ${job.name}` : job.name;
+            const scenario = WORK_SCENARIOS[Math.floor(Math.random() * WORK_SCENARIOS.length)]
+                .replace('{job}', `**${jobLabel}**`);
 
             user.balance += earned;
             user.shiftsWorked = currentShifts + 1;
             user.lastWork = new Date();
             await user.save();
 
-            const leveledUpTier = jobTiers.find(tier => tier.minShifts === user.shiftsWorked);
+            const promotedTo = tierInfo.find(t => t.minShifts === user.shiftsWorked);
+            const currency = guildSettings?.economy?.currency || '💰';
 
             const embed = new EmbedBuilder()
-                .setColor('#00ff00')
-                .setTitle('Work Complete!')
-                .setDescription(`You worked as a **${job}** and earned **${earned}** coins!`)
+                .setColor(performance.color)
+                .setTitle(`${performance.label} — Work Complete!`)
+                .setDescription(scenario)
                 .addFields(
-                    { name: 'Career Tier', value: `${activeTier.name} (${user.shiftsWorked.toLocaleString()} shifts worked)` },
-                    { name: 'New Balance', value: `${user.balance.toLocaleString()} coins` },
+                    { name: 'Earned',       value: `${currency} **${earned.toLocaleString()}** coins`, inline: true },
+                    { name: 'Performance',  value: performance.label, inline: true },
+                    { name: 'Career Tier',  value: `${userTier.name} · ${user.shiftsWorked.toLocaleString()} shifts`, inline: false },
                     {
                         name: 'Next Promotion',
                         value: nextTier
                             ? `${nextTier.name} in **${(nextTier.minShifts - user.shiftsWorked).toLocaleString()}** shifts`
-                            : 'You have reached the highest career tier!'
-                    }
+                            : '✅ Max tier reached!',
+                        inline: false
+                    },
+                    { name: 'Balance', value: `${currency} ${user.balance.toLocaleString()}`, inline: false }
                 )
                 .setTimestamp();
 
-            if (leveledUpTier && leveledUpTier.minShifts > 0) {
+            if (promotedTo && promotedTo.minShifts > 0) {
                 embed.addFields({
-                    name: '🎉 Promotion Unlocked!',
-                    value: `You advanced to **${leveledUpTier.name}** and now earn higher pay per shift!`
+                    name: '🎉 Promotion!',
+                    value: `You've been promoted to **${promotedTo.name}** — new jobs and higher pay are now available!`
                 });
             }
 
