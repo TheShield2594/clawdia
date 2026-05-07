@@ -228,7 +228,10 @@ const guildSchema = new Schema({
 
     jobs: [{
         name: { type: String, required: true },
-        emoji: { type: String, default: '' }
+        emoji: { type: String, default: '' },
+        tier: { type: Number, default: 1, min: 1, max: 4 },
+        minPay: { type: Number, default: 50, min: 0 },
+        maxPay: { type: Number, default: 150, min: 0 }
     }],
 
     tickets: {
