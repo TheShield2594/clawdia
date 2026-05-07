@@ -3,7 +3,7 @@ const Guild = require('../models/Guild');
 const Case = require('../models/Case');
 const { handleAIChat } = require('../services/aiService');
 const { logModeration } = require('../utils/logger');
-const { ensureQuests, onMessage } = require('../services/questService');
+const { ensureQuests, onMessage, notifyQuestComplete } = require('../services/questService');
 
 const BASE_BAD_WORDS = [
     'nigger', 'nigga', 'faggot', 'fag', 'retard', 'chink', 'spic', 'kike',
@@ -150,13 +150,7 @@ async function handleStreakAndQuests(message, guildSettings) {
 
         await user.save();
 
-        // Notify completed quests
-        for (const reward of completedQuests) {
-            if (!reward) continue;
-            await message.channel.send(
-                `${message.author} completed a quest! **+${reward.xp} XP, +${reward.coins} coins**`
-            ).catch(() => {});
-        }
+        await notifyQuestComplete(guildSettings, message.member, completedQuests, message.channel);
     } catch (err) {
         console.error('Streak/quest error:', err);
     }
