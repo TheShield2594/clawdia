@@ -2449,21 +2449,77 @@
             }
             container.innerHTML = '';
             entries.forEach(function(entry) {
-                var div = document.createElement('div');
-                div.className = 'list-item';
-                var preview = entry.content.length > 120 ? entry.content.slice(0, 120) + '…' : entry.content;
-                var tagsHtml = (entry.tags && entry.tags.length)
-                    ? '<div style="margin-top:.3rem;">' + entry.tags.map(function(t) { return '<span style="background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:.76rem;margin-right:4px;">' + escHtml(t) + '</span>'; }).join('') + '</div>'
-                    : '';
-                div.innerHTML =
-                    '<div style="min-width:0;flex:1;">' +
-                        '<strong>' + escHtml(entry.title) + '</strong>' +
-                        '<div style="color:var(--text-mute);font-size:.82rem;margin-top:.2rem;">' + escHtml(preview) + '</div>' +
-                        tagsHtml +
-                    '</div>' +
-                    '<button class="btn btn-danger btn-sm" onclick="deleteKbEntry(\'' + entry._id + '\')">Remove</button>';
-                container.appendChild(div);
+                container.appendChild(buildKbRow(entry));
             });
+        }
+
+        function buildKbRow(entry) {
+            var div = document.createElement('div');
+            div.className = 'list-item';
+            div.id = 'kb-row-' + entry._id;
+            var preview = entry.content.length > 120 ? entry.content.slice(0, 120) + '…' : entry.content;
+            var tagsHtml = (entry.tags && entry.tags.length)
+                ? '<div style="margin-top:.3rem;">' + entry.tags.map(function(t) { return '<span style="background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:.76rem;margin-right:4px;">' + escHtml(t) + '</span>'; }).join('') + '</div>'
+                : '';
+            div.innerHTML =
+                '<div style="min-width:0;flex:1;">' +
+                    '<strong>' + escHtml(entry.title) + '</strong>' +
+                    '<div style="color:var(--text-mute);font-size:.82rem;margin-top:.2rem;">' + escHtml(preview) + '</div>' +
+                    tagsHtml +
+                '</div>' +
+                '<div style="display:flex;gap:.5rem;flex-shrink:0;">' +
+                    '<button class="btn btn-sm" onclick="editKbEntry(\'' + entry._id + '\',\'' + escHtml(entry.title).replace(/'/g,"&#39;") + '\',\'' + encodeURIComponent(entry.content) + '\',\'' + escHtml((entry.tags||[]).join(',')).replace(/'/g,"&#39;") + '\')">Edit</button>' +
+                    '<button class="btn btn-danger btn-sm" onclick="deleteKbEntry(\'' + entry._id + '\')">Remove</button>' +
+                '</div>';
+            return div;
+        }
+
+        function editKbEntry(id, title, encodedContent, tags) {
+            var row = document.getElementById('kb-row-' + id);
+            if (!row) return;
+            var content = decodeURIComponent(encodedContent);
+            row.innerHTML =
+                '<div style="flex:1;display:flex;flex-direction:column;gap:.5rem;">' +
+                    '<input id="kb-edit-title-' + id + '" class="field-input" value="' + escHtml(title) + '" placeholder="Title" style="width:100%;">' +
+                    '<textarea id="kb-edit-content-' + id + '" rows="4" style="width:100%;resize:vertical;" placeholder="Content">' + escHtml(content) + '</textarea>' +
+                    '<input id="kb-edit-tags-' + id + '" class="field-input" value="' + escHtml(tags) + '" placeholder="Tags (comma-separated)" style="width:100%;">' +
+                    '<div style="display:flex;gap:.5rem;">' +
+                        '<button class="btn btn-primary btn-sm" onclick="saveKbEntry(\'' + id + '\')">Save</button>' +
+                        '<button class="btn btn-sm" onclick="cancelKbEdit()">Cancel</button>' +
+                    '</div>' +
+                '</div>';
+        }
+
+        function cancelKbEdit() {
+            kbLoaded = false;
+            loadKnowledgeBase();
+        }
+
+        async function saveKbEntry(id) {
+            var guildId = '<%= guild.id %>';
+            var title = document.getElementById('kb-edit-title-' + id).value.trim();
+            var content = document.getElementById('kb-edit-content-' + id).value.trim();
+            var tagsRaw = document.getElementById('kb-edit-tags-' + id).value.trim();
+            var tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+            if (!title || !content) { toast('Title and content are required', 'error'); return; }
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: title, content: content, tags: tags })
+                });
+                var data = await resp.json();
+                if (resp.ok) {
+                    toast('Entry updated ✓', 'success');
+                    kbLoaded = false;
+                    loadKnowledgeBase();
+                } else {
+                    toast(data.error || 'Failed to update entry', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                toast('An error occurred', 'error');
+            }
         }
 
         async function addKbEntry() {
