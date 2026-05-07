@@ -10,7 +10,7 @@ module.exports = {
     cooldown: 3,
 
     data: new SlashCommandBuilder()
-        .setName('repair')
+        .setName('huntrepair')
         .setDescription('Repair your equipped weapon')
         .addSubcommand(sub =>
             sub.setName('gun')
@@ -50,7 +50,7 @@ module.exports = {
         const h = user.hunt;
 
         if (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex]) {
-            return interaction.reply({ content: 'No weapon equipped. Buy one with `/buygun` first.', ephemeral: true });
+            return interaction.reply({ content: 'No weapon equipped. Buy one with `/huntbuygun` first.', ephemeral: true });
         }
 
         const weapon = h.weapons[h.equippedWeaponIndex];
@@ -69,7 +69,7 @@ module.exports = {
             }
 
             if (weapon.status === 'condemned') {
-                return interaction.reply({ content: 'This weapon is condemned and cannot be repaired. Replace it with `/buygun`.', ephemeral: true });
+                return interaction.reply({ content: 'This weapon is condemned and cannot be repaired. Replace it with `/huntbuygun`.', ephemeral: true });
             }
 
             if (weapon.currentDurability >= weapon.maxDurability) {
@@ -101,7 +101,7 @@ module.exports = {
         // ── SHOP REPAIR ────────────────────────────────────────────────────
         if (sub === 'gun') {
             if (weapon.status === 'condemned') {
-                return interaction.reply({ content: 'This weapon is **condemned** and cannot be repaired. Replace it with `/buygun`.', ephemeral: true });
+                return interaction.reply({ content: 'This weapon is **condemned** and cannot be repaired. Replace it with `/huntbuygun`.', ephemeral: true });
             }
 
             if (weapon.currentDurability >= weapon.maxDurability && weapon.status !== 'broken') {
@@ -154,7 +154,7 @@ module.exports = {
                 embed.addFields({ name: '⚠️ Degraded', value: `Max durability is below 50% of original. Performance is reduced.` });
             }
 
-            embed.setFooter({ text: `Each shop repair permanently reduces max durability by 10% • Use repair kits (/repair kit) to avoid degradation` });
+            embed.setFooter({ text: `Each shop repair permanently reduces max durability by 10% • Use repair kits (/huntrepair kit) to avoid degradation` });
 
             return interaction.reply({ embeds: [embed] });
         }

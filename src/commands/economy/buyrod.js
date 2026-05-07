@@ -13,7 +13,7 @@ module.exports = {
     cooldown: 5,
 
     data: new SlashCommandBuilder()
-        .setName('buyrod')
+        .setName('fishbuyrod')
         .setDescription('Purchase a fishing rod or upgrade an existing one')
         .addSubcommand(sub =>
             sub.setName('rod')

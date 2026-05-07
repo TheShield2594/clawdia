@@ -41,7 +41,7 @@ module.exports = {
         if (!userData) {
             return interaction.reply({
                 content: isSelf
-                    ? "You haven't started hunting yet! Buy a weapon with `/buygun` and use `/hunt` to begin."
+                    ? "You haven't started hunting yet! Buy a weapon with `/huntbuygun` and use `/hunt` to begin."
                     : `${target.username} hasn't started hunting yet.`,
                 ephemeral: true
             });
