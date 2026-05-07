@@ -126,14 +126,14 @@ const KB_CANDIDATE_LIMIT = 50;
 const KB_SMALL_THRESHOLD = 15; // include all entries when KB is this size or smaller
 
 async function retrieveKnowledge(guildId, query, limit = 5) {
-    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    if (!queryWords.length) return [];
-
     // For small knowledge bases, include every entry — no retrieval needed.
     const totalCount = await KnowledgeBase.countDocuments({ guildId });
     if (totalCount <= KB_SMALL_THRESHOLD) {
         return KnowledgeBase.find({ guildId }).sort({ createdAt: -1 }).lean();
     }
+
+    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    if (!queryWords.length) return [];
 
     // Use the MongoDB text index for a bounded candidate set; fall back to a
     // capped scan if the text index doesn't exist yet (e.g., fresh deployment).

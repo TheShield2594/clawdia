@@ -2468,16 +2468,18 @@
                     tagsHtml +
                 '</div>' +
                 '<div style="display:flex;gap:.5rem;flex-shrink:0;">' +
-                    '<button class="btn btn-sm" onclick="editKbEntry(\'' + entry._id + '\',\'' + escHtml(entry.title).replace(/'/g,"&#39;") + '\',\'' + encodeURIComponent(entry.content) + '\',\'' + escHtml((entry.tags||[]).join(',')).replace(/'/g,"&#39;") + '\')">Edit</button>' +
+                    '<button class="btn btn-sm" onclick="editKbEntry(\'' + entry._id + '\',\'' + encodeURIComponent(entry.title) + '\',\'' + encodeURIComponent(entry.content) + '\',\'' + encodeURIComponent((entry.tags||[]).join(',')) + '\')">Edit</button>' +
                     '<button class="btn btn-danger btn-sm" onclick="deleteKbEntry(\'' + entry._id + '\')">Remove</button>' +
                 '</div>';
             return div;
         }
 
-        function editKbEntry(id, title, encodedContent, tags) {
+        function editKbEntry(id, encodedTitle, encodedContent, encodedTags) {
             var row = document.getElementById('kb-row-' + id);
             if (!row) return;
+            var title = decodeURIComponent(encodedTitle);
             var content = decodeURIComponent(encodedContent);
+            var tags = decodeURIComponent(encodedTags);
             row.innerHTML =
                 '<div style="flex:1;display:flex;flex-direction:column;gap:.5rem;">' +
                     '<input id="kb-edit-title-' + id + '" class="field-input" value="' + escHtml(title) + '" placeholder="Title" style="width:100%;">' +
