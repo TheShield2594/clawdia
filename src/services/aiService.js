@@ -123,8 +123,15 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
 // ---------- Knowledge Base RAG ----------
 
 const KB_CANDIDATE_LIMIT = 50;
+const KB_SMALL_THRESHOLD = 15; // include all entries when KB is this size or smaller
 
-async function retrieveKnowledge(guildId, query, limit = 3) {
+async function retrieveKnowledge(guildId, query, limit = 5) {
+    // For small knowledge bases, include every entry — no retrieval needed.
+    const totalCount = await KnowledgeBase.countDocuments({ guildId });
+    if (totalCount <= KB_SMALL_THRESHOLD) {
+        return KnowledgeBase.find({ guildId }).sort({ createdAt: -1 }).lean();
+    }
+
     const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
     if (!queryWords.length) return [];
 
@@ -141,17 +148,20 @@ async function retrieveKnowledge(guildId, query, limit = 3) {
     }
     if (!candidates.length) return [];
 
+    // Combine MongoDB textScore (handles stemming) with exact keyword hit count
+    // for a more reliable relevance ranking.
     const scored = candidates.map(entry => {
         const text = `${entry.title} ${entry.content} ${(entry.tags || []).join(' ')}`.toLowerCase();
-        const score = queryWords.reduce((acc, word) => {
+        const keywordHits = queryWords.reduce((acc, word) => {
             return acc + (text.match(new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')) || []).length;
         }, 0);
-        return { entry, score };
+        const combined = (entry.score || 0) * 2 + keywordHits;
+        return { entry, combined };
     });
 
     return scored
-        .filter(s => s.score > 0)
-        .sort((a, b) => b.score - a.score)
+        .filter(s => s.combined > 0)
+        .sort((a, b) => b.combined - a.combined)
         .slice(0, limit)
         .map(s => s.entry);
 }
