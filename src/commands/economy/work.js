@@ -2,13 +2,13 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
+const DEFAULT_TIERS = require('../../data/defaultTiers');
 
-const TIER_INFO = [
-    { tier: 1, name: 'Intern',           minShifts: 0  },
-    { tier: 2, name: 'Skilled Worker',   minShifts: 10 },
-    { tier: 3, name: 'Senior Specialist',minShifts: 25 },
-    { tier: 4, name: 'Executive',        minShifts: 50 },
-];
+function resolveTiers(guildSettings) {
+    const saved = guildSettings?.jobTiers;
+    if (saved?.length === 4) return [...saved].sort((a, b) => a.tier - b.tier);
+    return DEFAULT_TIERS;
+}
 
 // Random scenario lines — {job} is replaced with the formatted job name
 const WORK_SCENARIOS = [
@@ -61,9 +61,10 @@ module.exports = {
                 return interaction.reply({ content: `You're too tired to work! Rest for **${minutes}** more minutes.`, ephemeral: true });
             }
 
+            const tierInfo = resolveTiers(guildSettings);
             const currentShifts = user.shiftsWorked || 0;
-            const userTier = [...TIER_INFO].reverse().find(t => currentShifts >= t.minShifts) || TIER_INFO[0];
-            const nextTier = TIER_INFO.find(t => t.minShifts > currentShifts);
+            const userTier = [...tierInfo].reverse().find(t => currentShifts >= t.minShifts) || tierInfo[0];
+            const nextTier = tierInfo.find(t => t.minShifts > currentShifts);
 
             // Dashboard jobs are the source of truth; fall back to defaults if none configured
             const allJobs = guildSettings?.jobs?.length > 0 ? guildSettings.jobs : DEFAULT_JOBS;
@@ -87,7 +88,7 @@ module.exports = {
             user.lastWork = new Date();
             await user.save();
 
-            const promotedTo = TIER_INFO.find(t => t.minShifts === user.shiftsWorked);
+            const promotedTo = tierInfo.find(t => t.minShifts === user.shiftsWorked);
             const currency = guildSettings?.economy?.currency || '💰';
 
             const embed = new EmbedBuilder()

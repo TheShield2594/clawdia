@@ -226,10 +226,16 @@ const guildSchema = new Schema({
         imageUrl: { type: String, default: '' }
     }],
 
+    jobTiers: [{
+        tier:      { type: Number, required: true, min: 1, max: 4 },
+        name:      { type: String, required: true },
+        minShifts: { type: Number, default: 0, min: 0 }
+    }],
+
     jobs: [{
-        name: { type: String, required: true },
-        emoji: { type: String, default: '' },
-        tier: { type: Number, default: 1, min: 1, max: 4 },
+        name:   { type: String, required: true },
+        emoji:  { type: String, default: '' },
+        tier:   { type: Number, default: 1, min: 1, max: 4 },
         minPay: { type: Number, default: 50, min: 0 },
         maxPay: { type: Number, default: 150, min: 0 }
     }],

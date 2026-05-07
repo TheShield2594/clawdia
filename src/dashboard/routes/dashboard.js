@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Guild = require('../../models/Guild');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
+const DEFAULT_TIERS = require('../../data/defaultTiers');
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -103,7 +104,8 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
             voiceChannels: voiceChannels,
             categories: categories,
             roles: roles,
-            defaultJobs: DEFAULT_JOBS
+            defaultJobs: DEFAULT_JOBS,
+            defaultTiers: DEFAULT_TIERS
         });
     } catch (error) {
         console.error('Dashboard error:', error);

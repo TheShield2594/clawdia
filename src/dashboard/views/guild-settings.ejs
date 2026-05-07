@@ -435,8 +435,14 @@
                         </div>
                     </div>
 
-                    <!-- Jobs -->
+                    <!-- Career Tiers -->
                     <div class="eco-section-head" style="margin-top:1.75rem">
+                        <span class="toggle-text"><strong>Career Tiers</strong><span>Rename tiers and set how many shifts unlock each one</span></span>
+                    </div>
+                    <div id="job-tiers-grid" class="job-tiers-grid"></div>
+
+                    <!-- Jobs -->
+                    <div class="eco-section-head" style="margin-top:1.5rem">
                         <label class="toggle" style="margin:0;flex:1">
                             <span class="toggle-text"><strong>Jobs</strong><span>Jobs shown when members use /work</span></span>
                             <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
@@ -1738,7 +1744,8 @@
                     'economy.blackjackEnabled': document.getElementById('economy-blackjack-enabled').checked,
                     'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked,
                     shop: storeItems,
-                    jobs: jobsList
+                    jobs: jobsList,
+                    jobTiers: jobTiersList
                 };
             } else if (section === 'music') {
                 const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
@@ -2106,6 +2113,12 @@
         var storeItems = <%- JSON.stringify(settings.shop || []) %>;
         var _serverJobs = <%- JSON.stringify(settings.jobs || []) %>;
         var jobsList = _serverJobs.length > 0 ? _serverJobs.slice() : <%- JSON.stringify(defaultJobs) %>;
+
+        var _savedTiers = <%- JSON.stringify(settings.jobTiers || []) %>;
+        var jobTiersList = _savedTiers.length === 4
+            ? _savedTiers.slice().sort(function(a,b){return a.tier-b.tier;})
+            : <%- JSON.stringify(defaultTiers) %>;
+
         var _roleMap = {};
         <% roles.forEach(r => { %>_roleMap['<%= r.id %>'] = '<%= r.name.replace(/'/g, "\\'") %>';<% }); %>
         var editingItemIdx = -1;
@@ -2181,6 +2194,32 @@
             renderStoreItems();
         }
 
+        var JOB_TIER_COLORS = ['#2ecc71','#3498db','#9b59b6','#f39c12'];
+        var JOB_TIER_BADGES = ['🟢','🔵','🟣','🟡'];
+
+        function renderJobTiers() {
+            var grid = document.getElementById('job-tiers-grid');
+            grid.innerHTML = jobTiersList.map(function(t, i) {
+                var color = JOB_TIER_COLORS[i] || '#888';
+                var badge = JOB_TIER_BADGES[i] || '⚪';
+                var isFirst = t.minShifts === 0;
+                return '<div class="job-tier-row" style="border-left:3px solid ' + color + '">' +
+                    '<span class="job-tier-row-badge">' + badge + ' Tier ' + t.tier + '</span>' +
+                    '<input class="job-tier-name-input" data-tier-idx="' + i + '" data-field="name" value="' + escHtml(t.name) + '" placeholder="Tier name" oninput="updateTierField(this)">' +
+                    '<div class="job-tier-row-shifts">' +
+                        '<input type="number" class="job-tier-shifts-input" data-tier-idx="' + i + '" data-field="minShifts" value="' + t.minShifts + '" min="0"' + (isFirst ? ' disabled title="Tier 1 always starts at 0 shifts"' : '') + ' oninput="updateTierField(this)">' +
+                        '<span class="job-tier-shifts-label">shifts to unlock</span>' +
+                    '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        function updateTierField(el) {
+            var idx = parseInt(el.dataset.tierIdx, 10);
+            var field = el.dataset.field;
+            jobTiersList[idx][field] = field === 'minShifts' ? (parseInt(el.value, 10) || 0) : el.value;
+        }
+
         var JOB_TIER_META = [
             { tier: 1, label: 'Tier 1 · Intern',            color: '#2ecc71', badge: '🟢' },
             { tier: 2, label: 'Tier 2 · Skilled Worker',    color: '#3498db', badge: '🔵' },
@@ -2202,18 +2241,24 @@
                 return ta !== tb ? ta - tb : a.job.name.localeCompare(b.job.name);
             });
 
+            // Build tier name lookup from live jobTiersList so names stay in sync
+            var tierNameMap = {};
+            jobTiersList.forEach(function(t) { tierNameMap[t.tier] = t.name; });
+
             // Group into tiers
             var html = '';
             var lastTier = null;
             sorted.forEach(function(entry) {
                 var job = entry.job, i = entry.idx;
                 var tier = job.tier || 1;
-                var meta = JOB_TIER_META[tier - 1] || JOB_TIER_META[0];
+                var color = JOB_TIER_COLORS[tier - 1] || '#888';
+                var badge = JOB_TIER_BADGES[tier - 1] || '⚪';
+                var tierName = tierNameMap[tier] || ('Tier ' + tier);
                 if (tier !== lastTier) {
                     if (lastTier !== null) html += '</div>';
                     html += '<div class="job-tier-group">' +
-                        '<div class="job-tier-header" style="border-left:3px solid ' + meta.color + '">' +
-                            meta.badge + ' <strong>' + meta.label + '</strong>' +
+                        '<div class="job-tier-header" style="border-left:3px solid ' + color + '">' +
+                            badge + ' <strong>Tier ' + tier + ' · ' + escHtml(tierName) + '</strong>' +
                         '</div>';
                     lastTier = tier;
                 }
@@ -2272,6 +2317,7 @@
 
         document.addEventListener('DOMContentLoaded', function() {
             renderStoreItems();
+            renderJobTiers();
             renderJobs();
         });
 

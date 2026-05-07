@@ -799,6 +799,28 @@ textarea { resize: vertical; min-height: 80px; }
 .game-card-name { font-weight: 600; font-size: .9rem; }
 .game-card-desc { font-size: .78rem; color: var(--text-mute); }
 
+/* Career tier config grid */
+.job-tiers-grid { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .25rem; }
+.job-tier-row {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .45rem .75rem; border-radius: 8px;
+    background: var(--bg-1); border: 1px solid var(--border-strong);
+}
+.job-tier-row-badge { font-size: .8rem; color: var(--text-dim); white-space: nowrap; min-width: 70px; }
+.job-tier-name-input {
+    flex: 1; background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: .3rem .55rem; color: var(--text); font-size: .875rem;
+}
+.job-tier-name-input:focus { outline: none; border-color: var(--accent); }
+.job-tier-row-shifts { display: flex; align-items: center; gap: .4rem; }
+.job-tier-shifts-input {
+    width: 70px; background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: .3rem .5rem; color: var(--text); font-size: .875rem; text-align: center;
+}
+.job-tier-shifts-input:focus { outline: none; border-color: var(--accent); }
+.job-tier-shifts-input:disabled { opacity: .45; cursor: not-allowed; }
+.job-tier-shifts-label { font-size: .78rem; color: var(--text-dim); white-space: nowrap; }
+
 /* Jobs list */
 .jobs-list { display: flex; flex-direction: column; gap: .75rem; margin-bottom: .5rem; min-height: 38px; }
 .job-tier-group { display: flex; flex-direction: column; gap: .4rem; }
