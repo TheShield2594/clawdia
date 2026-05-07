@@ -1,34 +1,13 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const DEFAULT_JOBS = require('../../data/defaultJobs');
 
 const TIER_INFO = [
     { tier: 1, name: 'Intern',            minShifts: 0,  emoji: '🟢' },
     { tier: 2, name: 'Skilled Worker',    minShifts: 10, emoji: '🔵' },
     { tier: 3, name: 'Senior Specialist', minShifts: 25, emoji: '🟣' },
     { tier: 4, name: 'Executive',         minShifts: 50, emoji: '🟡' },
-];
-
-const DEFAULT_JOBS = [
-    { name: 'Assistant',  emoji: '📋', tier: 1, minPay: 30,  maxPay: 60  },
-    { name: 'Cashier',    emoji: '🏪', tier: 1, minPay: 35,  maxPay: 70  },
-    { name: 'Dishwasher', emoji: '🍽️', tier: 1, minPay: 25,  maxPay: 55  },
-    { name: 'Courier',    emoji: '📦', tier: 1, minPay: 40,  maxPay: 75  },
-    { name: 'Developer',  emoji: '💻', tier: 2, minPay: 80,  maxPay: 140 },
-    { name: 'Designer',   emoji: '🎨', tier: 2, minPay: 75,  maxPay: 130 },
-    { name: 'Teacher',    emoji: '📚', tier: 2, minPay: 70,  maxPay: 120 },
-    { name: 'Chef',       emoji: '👨‍🍳', tier: 2, minPay: 80,  maxPay: 135 },
-    { name: 'Driver',     emoji: '🚗', tier: 2, minPay: 65,  maxPay: 115 },
-    { name: 'Engineer',   emoji: '⚙️', tier: 3, minPay: 120, maxPay: 200 },
-    { name: 'Artist',     emoji: '🖌️', tier: 3, minPay: 110, maxPay: 185 },
-    { name: 'Musician',   emoji: '🎵', tier: 3, minPay: 105, maxPay: 180 },
-    { name: 'Writer',     emoji: '✍️', tier: 3, minPay: 115, maxPay: 190 },
-    { name: 'Analyst',    emoji: '📊', tier: 3, minPay: 125, maxPay: 205 },
-    { name: 'Director',   emoji: '🎬', tier: 4, minPay: 200, maxPay: 350 },
-    { name: 'Architect',  emoji: '🏛️', tier: 4, minPay: 210, maxPay: 360 },
-    { name: 'Surgeon',    emoji: '🏥', tier: 4, minPay: 250, maxPay: 400 },
-    { name: 'Producer',   emoji: '🎤', tier: 4, minPay: 195, maxPay: 345 },
-    { name: 'Founder',    emoji: '👑', tier: 4, minPay: 220, maxPay: 380 },
 ];
 
 module.exports = {

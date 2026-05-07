@@ -2105,7 +2105,7 @@
 
         var storeItems = <%- JSON.stringify(settings.shop || []) %>;
         var _serverJobs = <%- JSON.stringify(settings.jobs || []) %>;
-        var jobsList = _serverJobs.slice();
+        var jobsList = _serverJobs.length > 0 ? _serverJobs.slice() : <%- JSON.stringify(defaultJobs) %>;
         var _roleMap = {};
         <% roles.forEach(r => { %>_roleMap['<%= r.id %>'] = '<%= r.name.replace(/'/g, "\\'") %>';<% }); %>
         var editingItemIdx = -1;
@@ -2191,7 +2191,7 @@
         function renderJobs() {
             var list = document.getElementById('jobs-list');
             if (!jobsList.length) {
-                list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;padding:.5rem 0">No jobs configured — click <strong>+ Add job</strong> to add one. Jobs from all tiers will appear here as the source of truth for /work.</p>';
+                list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;padding:.5rem 0">No jobs — click <strong>+ Add job</strong> to add one.</p>';
                 return;
             }
 
