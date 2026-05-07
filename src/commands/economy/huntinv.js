@@ -79,7 +79,7 @@ module.exports = {
         if (sub === 'weapons') {
             if (!h.weapons.length) {
                 return interaction.reply({
-                    content: "You don't own any weapons! Buy one with `/buygun buy <tier>`.",
+                    content: "You don't own any weapons! Buy one with `/huntbuygun buy <tier>`.",
                     ephemeral: true
                 });
             }
@@ -102,7 +102,7 @@ module.exports = {
                 .setColor('#3498db')
                 .setTitle('🔫 Your Weapons')
                 .setDescription(lines.join('\n\n'))
-                .setFooter({ text: 'Use /huntinv equip <#> to change weapon • /repair gun to restore durability • /buygun upgrade for modules' });
+                .setFooter({ text: 'Use /huntinv equip <#> to change weapon • /huntrepair gun to restore durability • /huntbuygun upgrade for modules' });
 
             return interaction.reply({ embeds: [embed] });
         }
@@ -118,7 +118,7 @@ module.exports = {
 
             const weapon = h.weapons[index];
             if (weapon.status === 'broken') {
-                return interaction.reply({ content: `**${weapon.name}** is broken and cannot be equipped. Repair it first with \`/repair gun\`.`, ephemeral: true });
+                return interaction.reply({ content: `**${weapon.name}** is broken and cannot be equipped. Repair it first with \`/huntrepair gun\`.`, ephemeral: true });
             }
 
             h.equippedWeaponIndex = index;
@@ -252,7 +252,7 @@ module.exports = {
                 .setColor('#e74c3c')
                 .setTitle('🗑️ Weapon Discarded')
                 .setDescription(`**${weapon.name}** has been discarded.`)
-                .setFooter({ text: h.weapons.length === 0 ? 'Buy a new weapon with /buygun' : 'Use /huntinv weapons to view remaining weapons' });
+                .setFooter({ text: h.weapons.length === 0 ? 'Buy a new weapon with /huntbuygun' : 'Use /huntinv weapons to view remaining weapons' });
 
             return interaction.reply({ embeds: [embed] });
         }

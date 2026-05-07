@@ -12,7 +12,7 @@ module.exports = {
     cooldown: 5,
 
     data: new SlashCommandBuilder()
-        .setName('buygun')
+        .setName('huntbuygun')
         .setDescription('Purchase a weapon for hunting')
         .addSubcommand(sub =>
             sub.setName('list')
@@ -69,7 +69,7 @@ module.exports = {
                 .setTitle('🔫 Weapon Shop')
                 .setDescription(lines.join('\n\n'))
                 .addFields({ name: '🔧 Available Upgrades (one per weapon)', value: upgradeLines.join('\n') })
-                .setFooter({ text: 'Use /buygun buy <tier> to purchase • /buygun upgrade <module> for upgrades' });
+                .setFooter({ text: 'Use /huntbuygun buy <tier> to purchase • /huntbuygun upgrade <module> for upgrades' });
 
             return interaction.reply({ embeds: [embed] });
         }

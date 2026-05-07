@@ -65,11 +65,11 @@ module.exports = {
         const location     = LOCATIONS[locationId];
 
         if (!location) {
-            return interaction.reply({ content: `Unknown location. Use \`/location list\` to see available spots.`, ephemeral: true });
+            return interaction.reply({ content: `Unknown location. Use \`/fishlocation list\` to see available spots.`, ephemeral: true });
         }
         if (!f.unlockedLocations.includes(locationId)) {
             return interaction.reply({
-                content: `You haven't unlocked **${location.name}** yet. Use \`/location unlock ${locationId}\` to unlock it.`,
+                content: `You haven't unlocked **${location.name}** yet. Use \`/fishlocation unlock ${locationId}\` to unlock it.`,
                 ephemeral: true
             });
         }
@@ -110,7 +110,7 @@ module.exports = {
         // ── Rod check ─────────────────────────────────────────────────────
         if (f.equippedRodIndex < 0 || !f.rods[f.equippedRodIndex]) {
             return interaction.reply({
-                content: `You don't have a rod equipped! Buy one with \`/buyrod\` and equip it with \`/fishinv equip 1\`.`,
+                content: `You don't have a rod equipped! Buy one with \`/fishbuyrod\` and equip it with \`/fishinv equip 1\`.`,
                 ephemeral: true
             });
         }
@@ -119,7 +119,7 @@ module.exports = {
 
         if (rod.status === 'broken' || rod.currentDurability <= 0) {
             return interaction.reply({
-                content: `Your **${rod.name}** is broken! Repair it with \`/fishrepair\` or buy a new one with \`/buyrod\`.`,
+                content: `Your **${rod.name}** is broken! Repair it with \`/fishrepair\` or buy a new one with \`/fishbuyrod\`.`,
                 ephemeral: true
             });
         }

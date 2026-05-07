@@ -36,7 +36,7 @@ module.exports = {
     cooldown: 10,
 
     data: new SlashCommandBuilder()
-        .setName('prestige')
+        .setName('huntprestige')
         .setDescription('Reset your hunter level for permanent prestige bonuses (requires Level 50)'),
 
     async execute(interaction) {

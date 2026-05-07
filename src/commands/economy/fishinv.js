@@ -66,7 +66,7 @@ async function showRods(interaction, user) {
     const f = user.fishing;
 
     if (!f.rods.length) {
-        return interaction.reply({ content: `You don't own any rods yet. Buy one with \`/buyrod\`.`, ephemeral: true });
+        return interaction.reply({ content: `You don't own any rods yet. Buy one with \`/fishbuyrod\`.`, ephemeral: true });
     }
 
     const { ROD_BY_TIER } = require('../../data/fishData');

@@ -50,7 +50,7 @@ module.exports = {
         const f = user.fishing;
 
         if (f.equippedRodIndex < 0 || !f.rods[f.equippedRodIndex]) {
-            return interaction.reply({ content: `You don't have a rod equipped. Buy one with \`/buyrod\`.`, ephemeral: true });
+            return interaction.reply({ content: `You don't have a rod equipped. Buy one with \`/fishbuyrod\`.`, ephemeral: true });
         }
 
         const rod = f.rods[f.equippedRodIndex];

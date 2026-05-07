@@ -69,11 +69,11 @@ module.exports = {
         const zone   = ZONES[zoneId];
 
         if (!zone) {
-            return interaction.reply({ content: `Unknown zone \`${zoneId}\`. Use \`/zone list\` to see available zones.`, ephemeral: true });
+            return interaction.reply({ content: `Unknown zone \`${zoneId}\`. Use \`/huntzone list\` to see available zones.`, ephemeral: true });
         }
         if (!h.unlockedZones.includes(zoneId)) {
             return interaction.reply({
-                content: `You haven't unlocked **${zone.name}** yet. Use \`/zone unlock ${zoneId}\` to unlock it.`,
+                content: `You haven't unlocked **${zone.name}** yet. Use \`/huntzone unlock ${zoneId}\` to unlock it.`,
                 ephemeral: true
             });
         }
@@ -114,7 +114,7 @@ module.exports = {
         // ── Weapon check ───────────────────────────────────────────────────
         if (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex]) {
             return interaction.reply({
-                content: `You don't have a weapon equipped! Buy one with \`/buygun\` and equip it with \`/huntinv equip 1\`.`,
+                content: `You don't have a weapon equipped! Buy one with \`/huntbuygun\` and equip it with \`/huntinv equip 1\`.`,
                 ephemeral: true
             });
         }
@@ -123,7 +123,7 @@ module.exports = {
 
         if (weapon.status === 'broken' || weapon.currentDurability <= 0) {
             return interaction.reply({
-                content: `Your **${weapon.name}** is broken! Repair it with \`/repair\` or buy a new one with \`/buygun\`.`,
+                content: `Your **${weapon.name}** is broken! Repair it with \`/huntrepair\` or buy a new one with \`/huntbuygun\`.`,
                 ephemeral: true
             });
         }
@@ -207,7 +207,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         if (result.expiredCharm) embed.addFields({ name: '🍀 Charm Expired', value: `Your luck charm has worn off.`, inline: false });
 
         if (weapon.status === 'broken') {
-            embed.addFields({ name: '⚠️ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/repair\` before hunting again.`, inline: false });
+            embed.addFields({ name: '⚠️ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/huntrepair\` before hunting again.`, inline: false });
         } else if (weapon.currentDurability <= Math.floor(weapon.maxDurability * 0.20)) {
             embed.addFields({ name: '⚠️ Low Durability', value: `Your **${weapon.name}** is nearly worn out (${weapon.currentDurability}/${weapon.maxDurability}). Repair soon!`, inline: false });
         }
@@ -244,7 +244,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     }
 
     if (weapon.status === 'broken') {
-        embed.addFields({ name: '❌ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/repair\` before hunting again.`, inline: false });
+        embed.addFields({ name: '❌ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/huntrepair\` before hunting again.`, inline: false });
     }
 
     embed.setFooter({ text: 'Tip: Use consumables from /huntshop to boost your success chance' });

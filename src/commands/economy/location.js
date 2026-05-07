@@ -15,7 +15,7 @@ module.exports = {
     cooldown: 5,
 
     data: new SlashCommandBuilder()
-        .setName('location')
+        .setName('fishlocation')
         .setDescription('Manage your fishing locations')
         .addSubcommand(sub =>
             sub.setName('list')
@@ -83,7 +83,7 @@ async function showList(interaction, user, currency) {
         .setColor('#3498db')
         .setTitle('🗺️ Fishing Locations')
         .setDescription(locationLines.join('\n\n'))
-        .setFooter({ text: 'Use /location unlock <location> to unlock • /location set <location> to switch' })
+        .setFooter({ text: 'Use /fishlocation unlock <location> to unlock • /fishlocation set <location> to switch' })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -101,7 +101,7 @@ async function setLocation(interaction, user) {
     }
     if (!f.unlockedLocations.includes(locationId)) {
         return interaction.reply({
-            content: `**${location.name}** is locked. Use \`/location unlock ${locationId}\` to unlock it first.`,
+            content: `**${location.name}** is locked. Use \`/fishlocation unlock ${locationId}\` to unlock it first.`,
             ephemeral: true
         });
     }

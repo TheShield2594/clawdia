@@ -12,7 +12,7 @@ module.exports = {
     cooldown: 3,
 
     data: new SlashCommandBuilder()
-        .setName('zone')
+        .setName('huntzone')
         .setDescription('Manage your hunting zones')
         .addSubcommand(sub =>
             sub.setName('list')
@@ -95,7 +95,7 @@ module.exports = {
             if (!h.unlockedZones.includes(zoneId)) {
                 const costStr = zone.unlockCost > 0 ? ` for ${currency}${zone.unlockCost.toLocaleString()}` : '';
                 return interaction.reply({
-                    content: `**${zone.name}** is locked. Use \`/zone unlock ${zoneId}\`${costStr} to unlock it first.`,
+                    content: `**${zone.name}** is locked. Use \`/huntzone unlock ${zoneId}\`${costStr} to unlock it first.`,
                     ephemeral: true
                 });
             }
@@ -172,7 +172,7 @@ module.exports = {
                     { name: 'Unlock Cost',  value: `${currency}${zone.unlockCost.toLocaleString()}`,   inline: true },
                     { name: 'New Balance',  value: `${currency}${user.balance.toLocaleString()}`,      inline: true }
                 )
-                .setFooter({ text: `Switch to it with /zone set ${zoneId}` });
+                .setFooter({ text: `Switch to it with /huntzone set ${zoneId}` });
 
             return interaction.reply({ embeds: [embed] });
         }
