@@ -156,7 +156,7 @@ module.exports = {
         }
 
         if (prestige === 0 && h.level >= 50) {
-            embed.setFooter({ text: 'Max level reached! Use /prestige to reset and unlock new bonuses.' });
+            embed.setFooter({ text: 'Max level reached! Use /huntprestige to reset and unlock new bonuses.' });
         } else if (isSelf) {
             embed.setFooter({ text: `Daily: ${h.dailyHunts} hunts · ${currency}${h.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
         }
