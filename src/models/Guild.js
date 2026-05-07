@@ -325,6 +325,9 @@ const guildSchema = new Schema({
 
     quests: {
         enabled: { type: Boolean, default: false },
+        notificationChannelId: { type: String, default: null },
+        questsPerDay: { type: Number, default: 3, min: 1, max: 6 },
+        questsPerWeek: { type: Number, default: 2, min: 1, max: 4 },
         dailyXpReward: { type: Number, default: 50 },
         dailyCoinReward: { type: Number, default: 25 },
         weeklyXpReward: { type: Number, default: 300 },

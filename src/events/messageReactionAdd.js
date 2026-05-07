@@ -1,5 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
+const User = require('../models/User');
+const { ensureQuests, onReaction, notifyQuestComplete } = require('../services/questService');
 
 module.exports = {
     name: 'messageReactionAdd',
@@ -21,8 +23,22 @@ module.exports = {
 
         await handleReactionRole(reaction, user, guild, guildSettings);
         await handleStarboard(reaction, user, guild, guildSettings);
+        await handleReactionQuests(reaction, user, guild, guildSettings);
     }
 };
+
+async function handleReactionQuests(reaction, discordUser, guild, guildSettings) {
+    if (!guildSettings?.quests?.enabled) return;
+    let userDoc = await User.findOne({ userId: discordUser.id, guildId: guild.id });
+    if (!userDoc) return;
+    await ensureQuests(userDoc, guildSettings);
+    const completed = await onReaction(userDoc, guildSettings);
+    await userDoc.save();
+    const member = await guild.members.fetch(discordUser.id).catch(() => null);
+    if (member) {
+        await notifyQuestComplete(guildSettings, member, completed, reaction.message.channel);
+    }
+}
 
 async function handleReactionRole(reaction, user, guild, guildSettings) {
     if (!guildSettings.reactionRoles?.length) return;

@@ -2,7 +2,7 @@ const Guild = require('../models/Guild');
 const User = require('../models/User');
 const { closeTicket } = require('../commands/moderation/ticket');
 const { handlePollVote } = require('../commands/utility/poll');
-const { ensureQuests, onCommandUse } = require('../services/questService');
+const { ensureQuests, onCommandUse, notifyQuestComplete } = require('../services/questService');
 async function logCommandMetric(interaction, success, reason = null) {
     try {
         const entry = {
@@ -46,13 +46,7 @@ async function trackQuestCommandUse(interaction) {
     const completed = await onCommandUse(user, guildSettings);
     await user.save();
 
-    for (const reward of completed) {
-        if (!reward) continue;
-        const ch = interaction.channel;
-        if (ch) {
-            await ch.send(`${interaction.user} completed a quest! **+${reward.xp} XP, +${reward.coins} coins**`).catch(() => {});
-        }
-    }
+    await notifyQuestComplete(guildSettings, interaction.member, completed, interaction.channel);
 }
 
 function memberHasAnyRole(member, roleIds = []) {
