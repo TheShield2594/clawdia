@@ -9,18 +9,16 @@ const {
 } = require('discord.js');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
+const { chunkArray, paginate } = require('../../utils/paginator');
 
 const PAGE_SIZE = 5;
 const CONFIRM_THRESHOLD = 500;
 
-function buildViewEmbed(items, page, totalPages, guildName, currency, userBalance) {
-    const start = page * PAGE_SIZE;
-    const slice = items.slice(start, start + PAGE_SIZE);
-
+function buildViewEmbed(slice, guildName, currency, userBalance, absoluteStart) {
     const lines = slice.map((item, i) => {
         const stock = item.stock === -1 ? '∞' : item.stock;
         const roleTag = item.roleId ? ` → <@&${item.roleId}>` : '';
-        return `**${start + i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})${roleTag}\n${item.description || '*No description*'}`;
+        return `**${absoluteStart + i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})${roleTag}\n${item.description || '*No description*'}`;
     });
 
     const embed = new EmbedBuilder()
@@ -30,25 +28,9 @@ function buildViewEmbed(items, page, totalPages, guildName, currency, userBalanc
 
     const footerParts = [`Use /shop buy <item name> to purchase`];
     if (userBalance !== null) footerParts.push(`Your balance: ${currency}${userBalance.toLocaleString()}`);
-    if (totalPages > 1) footerParts.push(`Page ${page + 1}/${totalPages}`);
     embed.setFooter({ text: footerParts.join(' · ') });
 
     return embed;
-}
-
-function buildPageRow(page, totalPages) {
-    return new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId('shop_prev')
-            .setLabel('◀ Previous')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(page === 0),
-        new ButtonBuilder()
-            .setCustomId('shop_next')
-            .setLabel('Next ▶')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(page >= totalPages - 1)
-    );
 }
 
 module.exports = {
@@ -107,40 +89,10 @@ module.exports = {
 
             const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             const userBalance = userData?.balance ?? 0;
-            const items = guildSettings.shop;
-            const totalPages = Math.ceil(items.length / PAGE_SIZE);
-
-            let page = 0;
-            const embed = buildViewEmbed(items, page, totalPages, interaction.guild.name, currency, userBalance);
-
-            if (totalPages <= 1) {
-                return interaction.reply({ embeds: [embed] });
-            }
-
-            const row = buildPageRow(page, totalPages);
-            const msg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
-
-            const collector = msg.createMessageComponentCollector({
-                componentType: ComponentType.Button,
-                filter: i => i.user.id === interaction.user.id,
-                time: 120_000
-            });
-
-            collector.on('collect', async btn => {
-                if (btn.customId === 'shop_prev') page = Math.max(0, page - 1);
-                else page = Math.min(totalPages - 1, page + 1);
-
-                await btn.update({
-                    embeds: [buildViewEmbed(items, page, totalPages, interaction.guild.name, currency, userBalance)],
-                    components: [buildPageRow(page, totalPages)]
-                });
-            });
-
-            collector.on('end', () => {
-                interaction.editReply({ components: [] }).catch(() => {});
-            });
-
-            return;
+            const pages = chunkArray(guildSettings.shop, PAGE_SIZE).map((slice, page) =>
+                buildViewEmbed(slice, interaction.guild.name, currency, userBalance, page * PAGE_SIZE)
+            );
+            return paginate(interaction, pages);
         }
 
         // ── BUY ───────────────────────────────────────────────────────────────
