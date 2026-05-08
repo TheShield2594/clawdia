@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const Guild = require('../../models/Guild');
+const { setRaidMode, raidModeActive, raidModeActivatedBy } = require('../../services/raidService');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -20,7 +21,22 @@ module.exports = {
                             { name: 'Kick new accounts', value: 'kick' }
                         ))
                 .addChannelOption(o => o.setName('alert_channel').setDescription('Channel for raid alerts (default: mod log)').setRequired(false))
-                .addRoleOption(o => o.setName('quarantine_role').setDescription('Role applied when action is quarantine').setRequired(false)))
+                .addRoleOption(o => o.setName('quarantine_role').setDescription('Role applied when action is quarantine').setRequired(false))
+                .addBooleanOption(o => o.setName('auto_disable').setDescription('Automatically disable raid mode when server calms down (default: true)').setRequired(false))
+                .addIntegerOption(o => o.setName('calm_window').setDescription('Seconds of low join activity before auto-disable (default 300)').setMinValue(30).setRequired(false))
+                .addBooleanOption(o => o.setName('require_manual_disable').setDescription('Require a moderator to manually turn raid mode off (default: false)').setRequired(false)))
+        .addSubcommand(sub =>
+            sub.setName('toggle')
+                .setDescription('Manually enable or disable raid mode — always overrides auto detection')
+                .addStringOption(o =>
+                    o.setName('status').setDescription('Turn raid mode on or off').setRequired(true)
+                        .addChoices(
+                            { name: 'On', value: 'on' },
+                            { name: 'Off', value: 'off' }
+                        )))
+        .addSubcommand(sub =>
+            sub.setName('status')
+                .setDescription('Show current raid mode state and detection settings'))
         .addSubcommand(sub =>
             sub.setName('cases')
                 .setDescription('Configure case SLA and appeals')
@@ -57,6 +73,9 @@ module.exports = {
             const action = interaction.options.getString('action');
             const alertChannel = interaction.options.getChannel('alert_channel');
             const quarantineRole = interaction.options.getRole('quarantine_role');
+            const autoDisable = interaction.options.getBoolean('auto_disable');
+            const calmWindow = interaction.options.getInteger('calm_window');
+            const requireManualDisable = interaction.options.getBoolean('require_manual_disable');
 
             const update = { 'raidDetection.enabled': enabled };
             if (threshold != null) update['raidDetection.threshold'] = threshold;
@@ -65,6 +84,9 @@ module.exports = {
             if (action) update['raidDetection.action'] = action;
             if (alertChannel) update['raidDetection.alertChannelId'] = alertChannel.id;
             if (quarantineRole) update['raidDetection.quarantineRoleId'] = quarantineRole.id;
+            if (autoDisable != null) update['raidDetection.autoDisable'] = autoDisable;
+            if (calmWindow != null) update['raidDetection.calmWindowSeconds'] = calmWindow;
+            if (requireManualDisable != null) update['raidDetection.requireManualDisable'] = requireManualDisable;
 
             await Guild.updateOne({ guildId: interaction.guild.id }, { $set: update });
 
@@ -74,10 +96,82 @@ module.exports = {
                 .addFields(
                     { name: 'Threshold', value: (threshold ?? 10).toString(), inline: true },
                     { name: 'Window', value: `${window ?? 60}s`, inline: true },
-                    { name: 'Action', value: action ?? 'alert', inline: true }
+                    { name: 'Action', value: action ?? 'alert', inline: true },
+                    { name: 'Auto-Disable', value: autoDisable != null ? (autoDisable ? 'Yes' : 'No') : 'Yes (default)', inline: true },
+                    { name: 'Calm Window', value: `${calmWindow ?? 300}s`, inline: true },
+                    { name: 'Require Manual Disable', value: requireManualDisable != null ? (requireManualDisable ? 'Yes' : 'No') : 'No (default)', inline: true }
                 )
                 .setTimestamp();
 
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        if (sub === 'toggle') {
+            const status = interaction.options.getString('status');
+            const active = status === 'on';
+
+            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+            if (!guildSettings?.raidDetection?.enabled) {
+                return interaction.reply({
+                    content: 'Raid detection is not enabled. Use `/raidmode raid enabled:true` first.',
+                    ephemeral: true
+                });
+            }
+
+            await setRaidMode(interaction.guild.id, interaction.guild, active, guildSettings);
+
+            const embed = new EmbedBuilder()
+                .setColor(active ? '#ff0000' : '#00ff00')
+                .setTitle(active ? '🔒 Raid Mode Enabled' : '🔓 Raid Mode Disabled')
+                .setDescription(
+                    active
+                        ? 'Raid mode manually enabled. All new joins will have the configured action applied.'
+                        : 'Raid mode manually disabled. Auto-detection resumes normally.'
+                )
+                .addFields({ name: 'Triggered By', value: 'Manual (moderator override)', inline: true })
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        if (sub === 'status') {
+            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+            const rd = guildSettings?.raidDetection;
+
+            if (!rd?.enabled) {
+                return interaction.reply({
+                    embeds: [new EmbedBuilder()
+                        .setColor('#888888')
+                        .setTitle('Raid Detection: Disabled')
+                        .setDescription('Raid detection is not configured. Use `/raidmode raid enabled:true` to set it up.')
+                        .setTimestamp()]
+                });
+            }
+
+            const isActive = raidModeActive.has(interaction.guild.id) || rd.raidModeActive;
+            const activatedBy = raidModeActivatedBy.get(interaction.guild.id) || rd.raidModeActivatedBy;
+            const activatedAt = rd.raidModeActivatedAt;
+
+            const embed = new EmbedBuilder()
+                .setColor(isActive ? '#ff0000' : '#00ff00')
+                .setTitle(`Raid Detection Status`)
+                .addFields(
+                    { name: 'Detection Enabled', value: 'Yes', inline: true },
+                    { name: 'Raid Mode Active', value: isActive ? '🔴 YES' : '🟢 No', inline: true },
+                    { name: 'Triggered By', value: isActive ? (activatedBy === 'manual' ? 'Manual' : 'Automatic') : 'N/A', inline: true },
+                    { name: 'Threshold', value: `${rd.threshold} joins / ${rd.windowSeconds}s`, inline: true },
+                    { name: 'Action', value: rd.action.toUpperCase(), inline: true },
+                    { name: 'Min Account Age', value: `${rd.minAccountAgeDays} days`, inline: true },
+                    { name: 'Auto-Disable', value: rd.autoDisable ? 'Yes' : 'No', inline: true },
+                    { name: 'Calm Window', value: `${rd.calmWindowSeconds}s`, inline: true },
+                    { name: 'Require Manual Disable', value: rd.requireManualDisable ? 'Yes' : 'No', inline: true }
+                );
+
+            if (isActive && activatedAt) {
+                embed.addFields({ name: 'Active Since', value: `<t:${Math.floor(new Date(activatedAt).getTime() / 1000)}:R>`, inline: true });
+            }
+
+            embed.setTimestamp();
             return interaction.reply({ embeds: [embed] });
         }
 

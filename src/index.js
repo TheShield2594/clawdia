@@ -133,6 +133,9 @@ async function startBot() {
 
         const { startTempBanService } = require('./services/tempBanService');
         startTempBanService(client);
+
+        const { startRaidMonitor } = require('./services/raidService');
+        startRaidMonitor(client);
     });
 
     client.login(process.env.DISCORD_TOKEN);

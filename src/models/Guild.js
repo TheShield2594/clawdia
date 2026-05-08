@@ -269,7 +269,13 @@ const guildSchema = new Schema({
         },
         quarantineRoleId: { type: String, default: null },
         alertChannelId: { type: String, default: null },
-        caseIdCounter: { type: Number, default: 0, min: 0 }
+        caseIdCounter: { type: Number, default: 0, min: 0 },
+        autoDisable: { type: Boolean, default: true },
+        calmWindowSeconds: { type: Number, default: 300, min: 30 },
+        requireManualDisable: { type: Boolean, default: false },
+        raidModeActive: { type: Boolean, default: false },
+        raidModeActivatedBy: { type: String, enum: ['auto', 'manual', null], default: null },
+        raidModeActivatedAt: { type: Date, default: null }
     },
 
     antiNuke: {
