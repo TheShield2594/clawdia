@@ -6,6 +6,7 @@ const {
     ButtonStyle,
 } = require('discord.js');
 const User = require('../../models/User');
+const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f4a5.png';
@@ -169,6 +170,9 @@ module.exports = {
 
     async execute(interaction) {
         const bet = interaction.options.getInteger('bet');
+        const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        const wallet = user?.balance ?? 0;
+        if (!await confirmBet(interaction, bet, wallet, 'Crash')) return;
         await interaction.deferReply();
         await playCrash(interaction, bet);
     },

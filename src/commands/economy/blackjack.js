@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
@@ -113,6 +114,8 @@ module.exports = {
         if (user.balance < bet) {
             return interaction.reply({ content: `You don't have enough ${currency}. Your balance: **${currency}${user.balance.toLocaleString()}**`, ephemeral: true });
         }
+
+        if (!await confirmBet(interaction, bet, user.balance, 'Blackjack', guildSettings)) return;
 
         // Deduct bet upfront
         user.balance -= bet;
