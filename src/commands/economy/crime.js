@@ -25,7 +25,7 @@ const FINES = [
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('crime')
-        .setDescription('Attempt a crime for a big payout (80–1,500 coins). 40% success rate — get caught and you pay a fine instead. Cooldown: 4h.'),
+        .setDescription('Attempt a crime for 80–1,500 coins (40% success). Caught? You pay a fine instead. Cooldown: 4h.'),
 
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });

@@ -9,7 +9,7 @@ const MIN_ROB_BALANCE = 50;
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('rob')
-        .setDescription('Steal 10–30% of a member\'s wallet on success (45% success rate). Get caught and lose 10% of your own balance. Cooldown: 2h.')
+        .setDescription('Steal 10–30% of a member\'s wallet (45% success). Caught: you lose 10% of your balance. Cooldown: 2h.')
         .addUserOption(o =>
             o.setName('target')
                 .setDescription('The member to rob. Target must have at least 50 coins in their wallet.')
@@ -37,10 +37,10 @@ module.exports = {
         ]);
 
         // Cooldown
-        if (robber.lastWork && Date.now() - new Date(robber.lastWork).getTime() < COOLDOWN_MS) {
-            const remaining = COOLDOWN_MS - (Date.now() - new Date(robber.lastWork).getTime());
+        if (robber.lastRob && Date.now() - new Date(robber.lastRob).getTime() < COOLDOWN_MS) {
+            const remaining = COOLDOWN_MS - (Date.now() - new Date(robber.lastRob).getTime());
             const mins = Math.ceil(remaining / 60000);
-            return interaction.reply({ content: `You're lying low after your last job. Try again in **${mins} min**.`, ephemeral: true });
+            return interaction.reply({ content: `You're laying low after your last heist. Try again in **${mins} min**.`, ephemeral: true });
         }
 
         if (!victim || victim.balance < MIN_ROB_BALANCE) {
@@ -49,7 +49,7 @@ module.exports = {
 
         try {
             const success = Math.random() < SUCCESS_CHANCE;
-            robber.lastWork = new Date();
+            robber.lastRob = new Date();
 
             let embed;
             if (success) {

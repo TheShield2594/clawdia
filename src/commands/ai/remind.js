@@ -9,6 +9,7 @@ module.exports = {
         .addStringOption(option =>
             option.setName('message')
                 .setDescription('What to remind you about. Max 500 characters.')
+                .setMaxLength(500)
                 .setRequired(true))
         .addIntegerOption(option =>
             option.setName('minutes')

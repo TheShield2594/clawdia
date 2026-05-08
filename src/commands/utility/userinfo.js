@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('userinfo')
-        .setDescription('Display user info: account age, server join date, roles, and ID.')
+        .setDescription('Show username, ID, account age, server join date, nickname, and role count for a user.')
         .addUserOption(option =>
             option.setName('user')
                 .setDescription('User to look up (defaults to yourself).')
