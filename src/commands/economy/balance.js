@@ -4,10 +4,10 @@ const User = require('../../models/User');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('balance')
-        .setDescription('Check your or another user\'s balance')
+        .setDescription('Check your wallet and bank balance, or look up another member\'s balance.')
         .addUserOption(option =>
             option.setName('user')
-                .setDescription('The user to check balance for')
+                .setDescription('User whose balance to check (defaults to yourself).')
                 .setRequired(false)),
     async execute(interaction) {
         const targetUser = interaction.options.getUser('user') || interaction.user;

@@ -11,7 +11,7 @@ module.exports = {
                 .setRequired(true))
         .addIntegerOption(option =>
             option.setName('duration')
-                .setDescription('Duration in minutes')
+                .setDescription('Timeout duration in minutes (min: 1, max: 40,320 = 28 days)')
                 .setRequired(true)
                 .setMinValue(1)
                 .setMaxValue(40320))

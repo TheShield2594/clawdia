@@ -6,10 +6,10 @@ const { checkDjPermission } = require('../../utils/musicPermissions');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('play')
-        .setDescription('Play a song or add to queue')
+        .setDescription('Play a song in your voice channel or add it to the queue. Requires DJ role.')
         .addStringOption(option =>
             option.setName('query')
-                .setDescription('Song name or URL')
+                .setDescription('Song title to search for, or a direct YouTube URL.')
                 .setRequired(true)),
     async execute(interaction, client) {
         const query = interaction.options.getString('query');

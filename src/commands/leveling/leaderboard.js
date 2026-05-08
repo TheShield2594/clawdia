@@ -5,10 +5,10 @@ module.exports = {
     cooldown: 10,
     data: new SlashCommandBuilder()
         .setName('leaderboard')
-        .setDescription('View the server leaderboard')
+        .setDescription('View the top 10 members on the server leaderboard.')
         .addStringOption(option =>
             option.setName('type')
-                .setDescription('Type of leaderboard')
+                .setDescription('Which leaderboard to show (default: Levels).')
                 .setRequired(false)
                 .addChoices(
                     { name: 'Levels', value: 'levels' },

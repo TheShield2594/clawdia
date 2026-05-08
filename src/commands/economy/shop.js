@@ -60,8 +60,8 @@ module.exports = {
                 .setDescription('Browse available items'))
         .addSubcommand(sub =>
             sub.setName('buy')
-                .setDescription('Purchase an item')
-                .addStringOption(o => o.setName('item').setDescription('Item name').setRequired(true)))
+                .setDescription('Purchase an item from the shop')
+                .addStringOption(o => o.setName('item').setDescription('Exact name of the item to buy (see /shop view for the full list)').setRequired(true)))
         .addSubcommand(sub =>
             sub.setName('add')
                 .setDescription('Add an item to the shop (admin only)')

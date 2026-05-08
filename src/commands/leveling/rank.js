@@ -6,10 +6,10 @@ module.exports = {
     cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('rank')
-        .setDescription('Check your or another user\'s rank')
+        .setDescription('View your rank card showing level, XP, and server position.')
         .addUserOption(option =>
             option.setName('user')
-                .setDescription('The user to check rank for')
+                .setDescription('User whose rank to display (defaults to yourself).')
                 .setRequired(false)),
     async execute(interaction) {
         const targetUser = interaction.options.getUser('user') || interaction.user;

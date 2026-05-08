@@ -5,7 +5,7 @@ const Guild = require('../../models/Guild');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('daily')
-        .setDescription('Claim your daily coins'),
+        .setDescription('Claim your daily coin reward (amount set by server admins, default 100). Resets every 24 hours.'),
     cooldown: 5,
     async execute(interaction) {
         try {

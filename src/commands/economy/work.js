@@ -44,7 +44,7 @@ function rollPerformance() {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('work')
-        .setDescription('Work a shift to earn coins'),
+        .setDescription('Earn coins by working a shift (25–400/tier). Cooldown: 1h. More shifts unlock better jobs.'),
     cooldown: 3600,
     async execute(interaction) {
         try {
