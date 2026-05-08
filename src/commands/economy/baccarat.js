@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { hasEffect } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b4.png';
 const MIN_BET = 10;
@@ -265,11 +266,16 @@ async function playBaccarat(interaction, pick, bet) {
         // Resolve payout
         let credit = 0;
         let profit = -bet;
+        const isNaturalLoss = winner !== pick && !(winner === 'tie' && (pick === 'player' || pick === 'banker'));
+        const luckyActive   = hasEffect(debited, 'lucky_charm');
+        // Lucky Charm: on a loss, 20% chance to push (return bet)
+        const charmPush = isNaturalLoss && luckyActive && Math.random() < 0.20;
+        const effectiveWinner = charmPush ? 'tie' : winner;
 
-        if (winner === pick) {
+        if (effectiveWinner === pick) {
             profit = Math.floor(bet * PAYOUT[pick].profitMult);
             credit = bet + profit;
-        } else if (winner === 'tie' && (pick === 'player' || pick === 'banker')) {
+        } else if (effectiveWinner === 'tie' && (pick === 'player' || pick === 'banker')) {
             credit = bet;
             profit = 0;
         }
@@ -290,8 +296,13 @@ async function playBaccarat(interaction, pick, bet) {
             new ButtonBuilder().setCustomId(replayId).setLabel('🎴 Play Again').setStyle(ButtonStyle.Primary),
         );
 
+        const baccaratEmbed = resultEmbed({ pick, winner: effectiveWinner, player, banker, natural: charmPush ? false : natural, bet, profit, balance: updated.balance, interaction });
+        if (charmPush) {
+            const desc = baccaratEmbed.data.description ?? '';
+            baccaratEmbed.setDescription(desc + '\n> 🍀 *Lucky Charm saved your bet — push!*');
+        }
         await interaction.editReply({
-            embeds: [resultEmbed({ pick, winner, player, banker, natural, bet, profit, balance: updated.balance, interaction })],
+            embeds: [baccaratEmbed],
             components: [row],
         });
 

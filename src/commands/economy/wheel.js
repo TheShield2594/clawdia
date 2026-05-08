@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { hasEffect } = require('../../services/effectsService');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a1.png';
 
@@ -227,7 +228,11 @@ function setupBuySpinCollector(interaction, buyCost, cooldownHours) {
 }
 
 async function performSpin(interaction, user, source, cost, buyCost, cooldownHours) {
-    const finalSegment = pickSegment();
+    let finalSegment = pickSegment();
+    // Lucky Charm: on Bust, 20% chance to re-spin
+    if (finalSegment.value === 0 && finalSegment.type === 'coins' && hasEffect(user, 'lucky_charm') && Math.random() < 0.20) {
+        finalSegment = pickSegment();
+    }
     const finalIndex   = SEGMENTS.indexOf(finalSegment);
     const len          = SEGMENTS.length;
     const totalSteps   = len * 2 + finalIndex;

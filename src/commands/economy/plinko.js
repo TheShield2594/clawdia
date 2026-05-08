@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { hasEffect } = require('../../services/effectsService');
 
 const THUMB    = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b1.png';
 const ROWS     = 8;
@@ -186,10 +187,17 @@ async function playPlinko(interaction, bet) {
             });
         }
 
-        const path       = generatePath();
-        const positions  = computePositions(path);
-        const bucket     = positions[ROWS];
-        const multiplier = MULTIPLIERS[bucket];
+        let path       = generatePath();
+        let positions  = computePositions(path);
+        let bucket     = positions[ROWS];
+        let multiplier = MULTIPLIERS[bucket];
+        // Lucky Charm: on lowest-tier bucket, 20% chance to re-roll the path
+        if (multiplier < 1.0 && hasEffect(debited, 'lucky_charm') && Math.random() < 0.20) {
+            path       = generatePath();
+            positions  = computePositions(path);
+            bucket     = positions[ROWS];
+            multiplier = MULTIPLIERS[bucket];
+        }
         const payout     = Math.floor(bet * multiplier);
         const delay      = ms => new Promise(r => setTimeout(r, ms));
 

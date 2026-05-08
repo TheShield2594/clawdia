@@ -6,6 +6,7 @@ const {
     ButtonStyle,
 } = require('discord.js');
 const User = require('../../models/User');
+const { hasEffect } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f4a5.png';
 const GROWTH  = 1.12;
@@ -197,7 +198,11 @@ async function playCrash(interaction, bet) {
             });
         }
 
-        const crash    = generateCrashPoint();
+        // Lucky Charm: boost crash point by 20% (higher crash = more time to cash out)
+        const luckyActive = hasEffect(debited, 'lucky_charm');
+        const crash    = luckyActive
+            ? Math.min(100.00, parseFloat((generateCrashPoint() * 1.2).toFixed(2)))
+            : generateCrashPoint();
         const cashOutId = `crash_co_${interaction.id}_${Date.now()}`;
 
         // Instant crash — no time to react

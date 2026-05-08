@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { hasEffect } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a1.png';
 const MIN_BET = 10;
@@ -215,9 +216,16 @@ async function playRoulette(interaction, betKey, bet, target) {
             });
         }
 
-        const result   = spin();
+        let result   = spin();
         const betDef   = BETS[betKey];
-        const won      = betDef.matches(result, target);
+        let won        = betDef.matches(result, target);
+        // Lucky Charm: on loss, 20% chance to re-spin
+        let charmTriggered = false;
+        if (!won && hasEffect(debited, 'lucky_charm') && Math.random() < 0.20) {
+            result = spin();
+            won    = betDef.matches(result, target);
+            charmTriggered = true;
+        }
         const profit   = won ? bet * betDef.payout : -bet;
         const credit   = won ? bet + profit : 0;
         const delay    = ms => new Promise(r => setTimeout(r, ms));
@@ -256,8 +264,13 @@ async function playRoulette(interaction, betKey, bet, target) {
             new ButtonBuilder().setCustomId(replayId).setLabel('🎡 Spin Again').setStyle(ButtonStyle.Primary),
         );
 
+        const rouletteResultEmbed = resultEmbed({ result, won, betKey, target, bet, profit, balance: updated.balance, interaction });
+        if (charmTriggered) {
+            const desc = rouletteResultEmbed.data.description ?? '';
+            rouletteResultEmbed.setDescription(desc + (won ? '\n> 🍀 *Lucky Charm re-spun the wheel for you!*' : ''));
+        }
         await interaction.editReply({
-            embeds: [resultEmbed({ result, won, betKey, target, bet, profit, balance: updated.balance, interaction })],
+            embeds: [rouletteResultEmbed],
             components: [row],
         });
 

@@ -6,6 +6,7 @@ const {
     ButtonStyle,
 } = require('discord.js');
 const User = require('../../models/User');
+const { hasEffect } = require('../../services/effectsService');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
 
@@ -171,14 +172,22 @@ module.exports = {
 async function playSlots(interaction, bet) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     try {
-        await User.findOneAndUpdate(
+        const userDoc = await User.findOneAndUpdate(
             userFilter,
             { $setOnInsert: { ...userFilter, balance: 0 } },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
+        const luckyActive = hasEffect(userDoc, 'lucky_charm');
 
-        const reels  = [spinReel(), spinReel(), spinReel()];
-        const result = evaluate(reels, bet);
+        let reels  = [spinReel(), spinReel(), spinReel()];
+        let result = evaluate(reels, bet);
+        // Lucky Charm: on loss, 20% chance to re-spin
+        let charmTriggered = false;
+        if (result.outcome === 'lose' && luckyActive && Math.random() < 0.20) {
+            reels  = [spinReel(), spinReel(), spinReel()];
+            result = evaluate(reels, bet);
+            charmTriggered = true;
+        }
         const net    = result.payout - bet;
 
         const user = await User.findOneAndUpdate(
@@ -212,8 +221,13 @@ async function playSlots(interaction, bet) {
             new ButtonBuilder().setCustomId(paytableId).setLabel('📊 Paytable').setStyle(ButtonStyle.Secondary),
         );
 
+        const finalEmbed = resultEmbed(reels, result, bet, user.balance, interaction);
+        if (charmTriggered) {
+            const desc = finalEmbed.data.description ?? '';
+            finalEmbed.setDescription(desc + '\n> 🍀 *Lucky Charm gave you a second chance!*');
+        }
         await interaction.editReply({
-            embeds: [resultEmbed(reels, result, bet, user.balance, interaction)],
+            embeds: [finalEmbed],
             components: [row],
         });
 

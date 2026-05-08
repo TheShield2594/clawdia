@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { hasEffect } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -180,7 +181,8 @@ module.exports = {
                 });
             }
 
-            await playHigherLower(interaction, bet, userFilter, []);
+            const luckyActive = hasEffect(debited, 'lucky_charm');
+            await playHigherLower(interaction, bet, userFilter, [], luckyActive);
 
         } catch (err) {
             console.error('[HigherLower] error:', err);
@@ -189,7 +191,7 @@ module.exports = {
     },
 };
 
-async function playHigherLower(interaction, bet, userFilter, history) {
+async function playHigherLower(interaction, bet, userFilter, history, luckyActive = false) {
     const current = rollCard();
     const upId    = `hl_up_${interaction.id}_${Date.now()}`;
     const downId  = `hl_down_${interaction.id}_${Date.now()}`;
@@ -222,8 +224,14 @@ async function playHigherLower(interaction, bet, userFilter, history) {
                 delta   = bet; // refund
             } else {
                 const won = pickedHigher ? next.value > current.value : next.value < current.value;
-                outcome   = won ? 'win' : 'loss';
-                delta     = won ? bet * 2 : 0;
+                // Lucky Charm: on loss, 20% chance to push (return bet)
+                if (!won && luckyActive && Math.random() < 0.20) {
+                    outcome = 'push';
+                    delta   = bet;
+                } else {
+                    outcome = won ? 'win' : 'loss';
+                    delta   = won ? bet * 2 : 0;
+                }
             }
 
             const updated = await User.findOneAndUpdate(
@@ -265,7 +273,7 @@ async function playHigherLower(interaction, bet, userFilter, history) {
                         return;
                     }
                     await ri.deferUpdate();
-                    await playHigherLower(interaction, bet, userFilter, newHistory.slice(-5));
+                    await playHigherLower(interaction, bet, userFilter, newHistory.slice(-5), luckyActive);
                 } catch (replayErr) {
                     console.error('[HigherLower] replay error:', replayErr);
                     await interaction.editReply({ content: 'Something went wrong on replay. Please try again.', embeds: [], components: [] }).catch(() => {});
