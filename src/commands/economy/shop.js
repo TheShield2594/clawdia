@@ -14,13 +14,11 @@ const { chunkArray, paginate } = require('../../utils/paginator');
 const PAGE_SIZE = 5;
 const CONFIRM_THRESHOLD = 500;
 
-function buildViewEmbed(slice, page, totalPages, guildName, currency, userBalance, absoluteStart) {
-    const start = absoluteStart;
-
+function buildViewEmbed(slice, guildName, currency, userBalance, absoluteStart) {
     const lines = slice.map((item, i) => {
         const stock = item.stock === -1 ? '∞' : item.stock;
         const roleTag = item.roleId ? ` → <@&${item.roleId}>` : '';
-        return `**${start + i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})${roleTag}\n${item.description || '*No description*'}`;
+        return `**${absoluteStart + i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})${roleTag}\n${item.description || '*No description*'}`;
     });
 
     const embed = new EmbedBuilder()
@@ -30,7 +28,6 @@ function buildViewEmbed(slice, page, totalPages, guildName, currency, userBalanc
 
     const footerParts = [`Use /shop buy <item name> to purchase`];
     if (userBalance !== null) footerParts.push(`Your balance: ${currency}${userBalance.toLocaleString()}`);
-    if (totalPages > 1) footerParts.push(`Page ${page + 1}/${totalPages}`);
     embed.setFooter({ text: footerParts.join(' · ') });
 
     return embed;
@@ -93,7 +90,7 @@ module.exports = {
             const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             const userBalance = userData?.balance ?? 0;
             const pages = chunkArray(guildSettings.shop, PAGE_SIZE).map((slice, page) =>
-                buildViewEmbed(slice, page, Math.ceil(guildSettings.shop.length / PAGE_SIZE), interaction.guild.name, currency, userBalance, page * PAGE_SIZE)
+                buildViewEmbed(slice, interaction.guild.name, currency, userBalance, page * PAGE_SIZE)
             );
             return paginate(interaction, pages);
         }

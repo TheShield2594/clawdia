@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, EmbedBuilder } = require('discord.js');
 
 function chunkArray(items, chunkSize) {
     if (!Array.isArray(items) || chunkSize <= 0) return [];
@@ -36,8 +36,11 @@ async function paginate(interaction, pages) {
     }
 
     const normalizedPages = pages.map((embed, index) => {
-        const clone = embed.data ? embed.constructor.from(embed) : embed;
-        return clone.setFooter({ text: `Page ${index + 1} / ${pages.length}` });
+        const clone = EmbedBuilder.from(embed);
+        const originalFooterText = clone.data?.footer?.text;
+        const pageText = `Page ${index + 1} / ${pages.length}`;
+        const footerText = originalFooterText ? `${originalFooterText} • ${pageText}` : pageText;
+        return clone.setFooter({ text: footerText });
     });
 
     if (normalizedPages.length === 1) {
