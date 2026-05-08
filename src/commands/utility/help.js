@@ -215,9 +215,9 @@ function buildCategoryEmbed(cat, page) {
         .setFooter({ text: `Page ${page + 1} of ${totalPages} • ${cat.commands.length} commands total` });
 }
 
-function buildSelectRow(id, disabled = false) {
+function buildSelectRow(disabled = false) {
     const menu = new StringSelectMenuBuilder()
-        .setCustomId(`help_cat_${id}`)
+        .setCustomId('help_category')
         .setPlaceholder('Select a category…')
         .setDisabled(disabled)
         .addOptions(
@@ -268,7 +268,7 @@ module.exports = {
 
         await interaction.reply({
             embeds: [buildLandingEmbed()],
-            components: [buildSelectRow(id)],
+            components: [buildSelectRow()],
         });
 
         const message = await interaction.fetchReply();
@@ -279,7 +279,7 @@ module.exports = {
         });
 
         collector.on('collect', async i => {
-            if (i.customId === `help_cat_${id}`) {
+            if (i.customId === 'help_category') {
                 const cat = CATEGORIES.find(c => c.id === i.values[0]);
                 state.view = 'category';
                 state.catId = cat.id;
@@ -294,18 +294,20 @@ module.exports = {
                 state.page = 0;
                 await i.update({
                     embeds: [buildLandingEmbed()],
-                    components: [buildSelectRow(id)],
+                    components: [buildSelectRow()],
                 });
             } else if (i.customId === `help_prev_${id}`) {
-                state.page -= 1;
                 const cat = CATEGORIES.find(c => c.id === state.catId);
+                const totalPages = Math.ceil(cat.commands.length / PAGE_SIZE);
+                state.page = Math.max(0, Math.min(state.page - 1, totalPages - 1));
                 await i.update({
                     embeds: [buildCategoryEmbed(cat, state.page)],
                     components: [buildNavRow(id, cat, state.page)],
                 });
             } else if (i.customId === `help_next_${id}`) {
-                state.page += 1;
                 const cat = CATEGORIES.find(c => c.id === state.catId);
+                const totalPages = Math.ceil(cat.commands.length / PAGE_SIZE);
+                state.page = Math.max(0, Math.min(state.page + 1, totalPages - 1));
                 await i.update({
                     embeds: [buildCategoryEmbed(cat, state.page)],
                     components: [buildNavRow(id, cat, state.page)],
@@ -316,7 +318,7 @@ module.exports = {
         collector.on('end', async (_, reason) => {
             if (reason !== 'time') return;
             if (state.view === 'landing') {
-                await interaction.editReply({ components: [buildSelectRow(id, true)] }).catch(() => {});
+                await interaction.editReply({ components: [buildSelectRow(true)] }).catch(() => {});
             } else {
                 const cat = CATEGORIES.find(c => c.id === state.catId);
                 await interaction.editReply({
