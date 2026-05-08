@@ -2,16 +2,13 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const mongoose = require('mongoose');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { hasEffect, consumeEffect, timeRemaining } = require('../../services/effectsService');
 
 const ROBBER_COOLDOWN_MS = 1 * 3_600_000; // 1 hour
 const VICTIM_IMMUNITY_MS = 30 * 60_000;   // 30 minutes
 const BASE_SUCCESS_CHANCE = 0.40;
 const ROB_STEAL_MIN = 0.10;
 const ROB_STEAL_MAX = 0.40;
-
-function hasItem(user, itemName) {
-    return user.inventory?.some(i => i.itemId?.toLowerCase() === itemName.toLowerCase() && i.quantity > 0);
-}
 
 async function saveRobState(robber, victim) {
     const session = await mongoose.startSession();
@@ -43,10 +40,10 @@ module.exports = {
             return interaction.reply({ content: 'Robbing is disabled on this server.', ephemeral: true });
         }
 
-        const currency = guildSettings?.economy?.currency || '💰';
+        const currency     = guildSettings?.economy?.currency || '💰';
         const minRobWallet = guildSettings?.economy?.robMinWallet ?? 100;
         const failFineRate = guildSettings?.economy?.robFailFineRate ?? 0.2;
-        const target   = interaction.options.getUser('target');
+        const target       = interaction.options.getUser('target');
 
         if (target.id === interaction.user.id) {
             return interaction.reply({ content: "You can't rob yourself.", ephemeral: true });
@@ -64,15 +61,15 @@ module.exports = {
             User.findOne({ userId: target.id, guildId: interaction.guild.id })
         ]);
 
-        // Cooldown
+        // Cooldown check
         if (robber.lastRob && Date.now() - new Date(robber.lastRob).getTime() < ROBBER_COOLDOWN_MS) {
             const remaining = ROBBER_COOLDOWN_MS - (Date.now() - new Date(robber.lastRob).getTime());
-            const mins = Math.ceil(remaining / 60000);
+            const mins = Math.ceil(remaining / 60_000);
             return interaction.reply({ content: `You're laying low after your last heist. Try again in **${mins} min**.`, ephemeral: true });
         }
         if (victim?.lastRobbedAt && Date.now() - new Date(victim.lastRobbedAt).getTime() < VICTIM_IMMUNITY_MS) {
             const remaining = VICTIM_IMMUNITY_MS - (Date.now() - new Date(victim.lastRobbedAt).getTime());
-            const mins = Math.ceil(remaining / 60000);
+            const mins = Math.ceil(remaining / 60_000);
             return interaction.reply({ content: `${target.username} is under rob immunity for **${mins} min**.`, ephemeral: true });
         }
 
@@ -81,30 +78,54 @@ module.exports = {
         }
 
         try {
-            let successChance = BASE_SUCCESS_CHANCE;
-            if (hasItem(robber, 'knife')) successChance += 0.15;
-            const victimHasShield = hasItem(victim, 'shield');
-            successChance = Math.max(0, Math.min(0.95, successChance));
             robber.lastRob = new Date();
 
-            if (victimHasShield) {
+            // ── Invisibility Cloak: victim cannot be targeted ─────────────────
+            if (victim && hasEffect(victim, 'invisibility_cloak')) {
+                const cloak = victim.activeEffects.find(e => e.type === 'invisibility_cloak');
                 await robber.save();
-                const embed = new EmbedBuilder()
-                    .setColor('#3498db')
-                    .setTitle('🛡️ Robbery Blocked!')
-                    .setDescription(`**${target.username}** blocked your robbery attempt with a shield.`)
-                    .setTimestamp();
-                return interaction.reply({ embeds: [embed] });
+                return interaction.reply({
+                    embeds: [new EmbedBuilder()
+                        .setColor('#9b59b6')
+                        .setTitle('🧥 Target Invisible!')
+                        .setDescription(`**${target.username}** is wearing an Invisibility Cloak. You can't find them! (${timeRemaining(cloak?.expiresAt)} remaining)`)
+                        .setTimestamp()]
+                });
             }
+
+            // ── Shield: blocks rob entirely ───────────────────────────────────
+            if (victim && hasEffect(victim, 'shield')) {
+                const shield = victim.activeEffects.find(e => e.type === 'shield');
+                await robber.save();
+                return interaction.reply({
+                    embeds: [new EmbedBuilder()
+                        .setColor('#3498db')
+                        .setTitle('🛡️ Robbery Blocked!')
+                        .setDescription(`**${target.username}** blocked your robbery attempt with a Shield. (${timeRemaining(shield?.expiresAt)} remaining)`)
+                        .setTimestamp()]
+                });
+            }
+
+            // ── Build success chance ──────────────────────────────────────────
+            let successChance = BASE_SUCCESS_CHANCE;
+            if (hasEffect(robber, 'knife'))       successChance += 0.15;  // Knife: +15%
+            successChance = Math.max(0, Math.min(0.95, successChance));
 
             const success = Math.random() < successChance;
 
             let embed;
             if (success) {
-                const maxRobbableWallet = hasItem(victim, 'padlock') ? victim.balance : (victim.balance + victim.bank);
-                const stolen = Math.floor(maxRobbableWallet * (ROB_STEAL_MIN + Math.random() * (ROB_STEAL_MAX - ROB_STEAL_MIN)));
+                // Padlock: only wallet accessible (bank protected)
+                const padlockActive = hasEffect(victim, 'padlock');
+                const stealablePool = padlockActive ? victim.balance : (victim.balance + victim.bank);
+                let stolen = Math.floor(stealablePool * (ROB_STEAL_MIN + Math.random() * (ROB_STEAL_MAX - ROB_STEAL_MIN)));
+
+                // Robbery Bag: +10% stolen
+                if (hasEffect(robber, 'robbery_bag')) stolen = Math.floor(stolen * 1.10);
+
                 robber.balance += stolen;
-                if (hasItem(victim, 'padlock')) {
+
+                if (padlockActive) {
                     victim.balance = Math.max(0, victim.balance - stolen);
                 } else {
                     const fromWallet = Math.min(victim.balance, stolen);
@@ -114,15 +135,20 @@ module.exports = {
                 victim.lastRobbedAt = new Date();
                 await saveRobState(robber, victim);
 
+                const bagNote = hasEffect(robber, 'robbery_bag') ? '\n> 💼 *Robbery Bag boosted your haul by 10%!*' : '';
                 embed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .setTitle('🦹 Successful Heist!')
-                    .setDescription(`You slipped past **${target.username}** and stole **${currency}${stolen.toLocaleString()}**!`)
+                    .setDescription(`You slipped past **${target.username}** and stole **${currency}${stolen.toLocaleString()}**!${bagNote}`)
                     .addFields(
                         { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true },
                         { name: 'Their Balance', value: `${currency}${victim.balance.toLocaleString()}`, inline: true }
                     )
                     .setTimestamp();
+
+                if (padlockActive) {
+                    embed.addFields({ name: '🔒 Padlock Active', value: `${target.username}'s bank was protected!`, inline: false });
+                }
             } else {
                 const fine = Math.floor(robber.balance * failFineRate);
                 const paid = Math.min(fine, robber.balance);

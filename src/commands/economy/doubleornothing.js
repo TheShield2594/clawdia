@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { hasEffect } = require('../../services/effectsService');
 
 const THUMB          = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b2.png';
 const MIN_BET        = 10;
@@ -43,7 +44,7 @@ function embedAuthor(interaction) {
     };
 }
 
-function liveEmbed(interaction, bet, round, pot, streak) {
+function liveEmbed(interaction, bet, round, pot, streak, luckyActive = false) {
     const nextPot    = pot * 2;
     const roundsLeft = MAX_ROUNDS - round;
     const atMax      = round >= MAX_ROUNDS;
@@ -68,7 +69,7 @@ function liveEmbed(interaction, bet, round, pot, streak) {
             { name: '📈 If Win',      value: `**${nextPot.toLocaleString()}** coins`, inline: true },
             { name: '🔥 Streak',      value: streak > 0 ? `**${streak}** win${streak === 1 ? '' : 's'}` : '*None yet*', inline: true },
             { name: '💸 Initial Bet', value: `${bet.toLocaleString()} coins`,       inline: true },
-            { name: '🎲 Win Chance',  value: '**50%** per flip',                    inline: true },
+            { name: '🎲 Win Chance',  value: luckyActive ? '**70%** per flip 🍀' : '**50%** per flip', inline: true },
         )
         .setFooter({ text: 'Green button = safe. Red button = risk everything.' });
 }
@@ -163,7 +164,8 @@ module.exports = {
                 });
             }
 
-            await playDoubleOrNothing(interaction, bet, userFilter, debited);
+            const luckyActive = hasEffect(debited, 'lucky_charm');
+            await playDoubleOrNothing(interaction, bet, userFilter, debited, luckyActive);
 
         } catch (err) {
             console.error('[DoubleOrNothing] error:', err);
@@ -173,7 +175,7 @@ module.exports = {
     },
 };
 
-async function playDoubleOrNothing(interaction, bet, userFilter, debited) {
+async function playDoubleOrNothing(interaction, bet, userFilter, debited, luckyActive = false) {
     const doubleId  = `don_double_${interaction.id}_${Date.now()}`;
     const cashOutId = `don_cash_${interaction.id}_${Date.now()}`;
 
@@ -183,7 +185,7 @@ async function playDoubleOrNothing(interaction, bet, userFilter, debited) {
     let settled = false;
 
     await interaction.editReply({
-        embeds:     [liveEmbed(interaction, bet, round, pot, streak)],
+        embeds:     [liveEmbed(interaction, bet, round, pot, streak, luckyActive)],
         components: [buildGameRow(doubleId, cashOutId)],
     });
 
@@ -232,7 +234,7 @@ async function playDoubleOrNothing(interaction, bet, userFilter, debited) {
                     });
                     return;
                 }
-                await playDoubleOrNothing(interaction, bet, userFilter, newDebited);
+                await playDoubleOrNothing(interaction, bet, userFilter, newDebited, luckyActive);
             });
             collector.on('end', (_, reason) => {
                 if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
@@ -256,8 +258,9 @@ async function playDoubleOrNothing(interaction, bet, userFilter, debited) {
                 return;
             }
 
-            // Double — flip the coin
-            const won = Math.random() < WIN_CHANCE;
+            // Double — flip the coin (Lucky Charm boosts win chance to 70%)
+            const effectiveWinChance = luckyActive ? Math.min(0.95, WIN_CHANCE + 0.20) : WIN_CHANCE;
+            const won = Math.random() < effectiveWinChance;
             if (!won) {
                 pot = 0;
                 await i.update({ components: [buildGameRow(doubleId, cashOutId, true)] }).catch(() => {});
@@ -276,7 +279,7 @@ async function playDoubleOrNothing(interaction, bet, userFilter, debited) {
             }
 
             await i.update({
-                embeds:     [liveEmbed(interaction, bet, round, pot, streak)],
+                embeds:     [liveEmbed(interaction, bet, round, pot, streak, luckyActive)],
                 components: [buildGameRow(doubleId, cashOutId)],
             }).catch(() => {});
 

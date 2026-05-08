@@ -278,6 +278,13 @@ const userSchema = new Schema({
     },
     // ─────────────────────────────────────────────────────────────────────────
 
+    // Active item effects (populated by /use; pruned on read)
+    activeEffects: [{
+        type:      { type: String, required: true },
+        expiresAt: { type: Date,   default: null },
+        charges:   { type: Number, default: -1 }
+    }],
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });

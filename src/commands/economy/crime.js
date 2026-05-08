@@ -1,9 +1,10 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { hasEffect, consumeEffect } = require('../../services/effectsService');
 
-const COOLDOWN_MS   = 4 * 3_600_000; // 4 hours
-const SUCCESS_CHANCE = 0.40;
+const COOLDOWN_MS    = 4 * 3_600_000; // 4 hours
+const BASE_SUCCESS   = 0.40;
 
 const CRIMES = [
     { name: 'pickpocketing',       emoji: '🤏', minPayout: 80,   maxPayout: 200  },
@@ -47,9 +48,14 @@ module.exports = {
             return interaction.reply({ content: `You're still on the radar from last time. Lay low for **${hrs}h**.`, ephemeral: true });
         }
 
-        const crime   = CRIMES[Math.floor(Math.random() * CRIMES.length)];
-        const success = Math.random() < SUCCESS_CHANCE;
+        const crime = CRIMES[Math.floor(Math.random() * CRIMES.length)];
 
+        // Lucky Charm: +20% success rate on crime
+        let successChance = BASE_SUCCESS;
+        const luckyActive = hasEffect(user, 'lucky_charm');
+        if (luckyActive) successChance = Math.min(0.95, successChance + 0.20);
+
+        const success = Math.random() < successChance;
         user.lastCrime = new Date();
 
         try {
@@ -62,25 +68,44 @@ module.exports = {
                 embed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .setTitle(`${crime.emoji} Crime Pays — This Time`)
-                    .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.`)
+                    .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.${luckyActive ? '\n> 🍀 *Lucky Charm boosted your success chance!*' : ''}`)
                     .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
                     .setFooter({ text: 'Crimes can be committed every 4 hours' })
                     .setTimestamp();
             } else {
                 const fine = Math.floor(50 + Math.random() * 200);
                 const paid = Math.min(fine, user.balance);
-                user.balance = Math.max(0, user.balance - paid);
-                await user.save();
 
-                const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
-                embed = new EmbedBuilder()
-                    .setColor('#e74c3c')
-                    .setTitle(`${crime.emoji} Busted!`)
-                    .setDescription(`Your attempt at **${crime.name}** went sideways. ${flavorText}\nYou were fined **${currency}${paid.toLocaleString()}**.`)
-                    .addFields({ name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
-                               { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
-                    .setFooter({ text: 'Crimes can be committed every 4 hours' })
-                    .setTimestamp();
+                // Lifesaver: absorbs one failure — no fine paid
+                const lifesaverActive = hasEffect(user, 'lifesaver');
+                if (lifesaverActive) {
+                    consumeEffect(user, 'lifesaver');
+                    user.lastCrime = new Date();
+                    await user.save();
+
+                    const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
+                    embed = new EmbedBuilder()
+                        .setColor('#e67e22')
+                        .setTitle(`${crime.emoji} Saved by the Lifesaver!`)
+                        .setDescription(`Your attempt at **${crime.name}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver absorbed the fine — no coins lost! (consumed)*`)
+                        .addFields({ name: 'Fine Absorbed', value: `${currency}${paid.toLocaleString()}`, inline: true },
+                                   { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
+                        .setFooter({ text: 'Crimes can be committed every 4 hours' })
+                        .setTimestamp();
+                } else {
+                    user.balance = Math.max(0, user.balance - paid);
+                    await user.save();
+
+                    const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
+                    embed = new EmbedBuilder()
+                        .setColor('#e74c3c')
+                        .setTitle(`${crime.emoji} Busted!`)
+                        .setDescription(`Your attempt at **${crime.name}** went sideways. ${flavorText}\nYou were fined **${currency}${paid.toLocaleString()}**.`)
+                        .addFields({ name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
+                                   { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
+                        .setFooter({ text: 'Crimes can be committed every 4 hours' })
+                        .setTimestamp();
+                }
             }
 
             await interaction.reply({ embeds: [embed] });

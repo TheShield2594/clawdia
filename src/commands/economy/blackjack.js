@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { hasEffect } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -187,6 +188,8 @@ module.exports = {
             let freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             if (!freshUser) freshUser = user;
 
+            const luckyActive = hasEffect(freshUser, 'lucky_charm');
+
             if (dealerTotal > 21 || playerTotal > dealerTotal) {
                 freshUser.balance += bet * 2;
                 status = `✅ You win! +${currency}${bet.toLocaleString()}`;
@@ -194,6 +197,11 @@ module.exports = {
             } else if (playerTotal === dealerTotal) {
                 freshUser.balance += bet;
                 status = `🤝 Push — bet returned`;
+                color  = '#f39c12';
+            } else if (luckyActive && Math.random() < 0.20) {
+                // Lucky Charm: convert loss to push
+                freshUser.balance += bet;
+                status = `🍀 Lucky Charm! Push — bet returned (${currency}${bet.toLocaleString()})`;
                 color  = '#f39c12';
             } else {
                 status = `❌ Dealer wins. -${currency}${bet.toLocaleString()}`;
