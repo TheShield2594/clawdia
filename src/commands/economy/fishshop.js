@@ -14,6 +14,11 @@ const SHOP_ITEMS = [
 
 const SHOP_CHOICES = SHOP_ITEMS.map(i => ({ name: i.name, value: i.value }));
 
+// All consumables that can be activated via /fishshop use (repair kits use /fishrepair)
+const USE_CHOICES = Object.values(CONSUMABLES)
+    .filter(c => c.type !== 'repair')
+    .map(c => ({ name: `${c.emoji} ${c.name}`, value: c.id }));
+
 module.exports = {
     cooldown: 5,
 
@@ -44,13 +49,7 @@ module.exports = {
                     o.setName('item')
                         .setDescription('Which consumable to activate')
                         .setRequired(true)
-                        .addChoices(
-                            { name: '🐟 Chum Bait',         value: 'chum_bait' },
-                            { name: '🦐 Premium Chum',      value: 'premium_chum' },
-                            { name: '🍀 Angler\'s Luck',    value: 'anglers_luck' },
-                            { name: '📜 XP Scroll',         value: 'fish_xp_scroll' },
-                            { name: '⚡ Energy Drink',       value: 'energy_drink' }
-                        ))),
+                        .addChoices(...USE_CHOICES))),
 
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
