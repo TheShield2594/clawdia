@@ -19,6 +19,7 @@ const userSchema = new Schema({
     lastFish: { type: Date, default: null },
     lastMine: { type: Date, default: null },
     lastCrime: { type: Date, default: null },
+    wantedUntil: { type: Date, default: null },
     shiftsWorked: { type: Number, default: 0 },
 
     inventory: [{
