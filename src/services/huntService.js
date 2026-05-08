@@ -696,8 +696,8 @@ function executeHunt(user, zoneId) {
 
         if (weapon.currentDurability <= 0) result.weaponBroke = true;
 
-        // ── Death event (dangerous zones, 8% of failures) ───────────────
-        if (DANGEROUS_ZONE_IDS.has(zone.id) && Math.random() < HUNT_DEATH_RATE) {
+        // ── Death event (dangerous zones, 8% of failures, weapon still intact) ──
+        if (DANGEROUS_ZONE_IDS.has(zone.id) && !result.weaponBroke && Math.random() < HUNT_DEATH_RATE) {
             if (hasEffect(user, 'lifesaver')) {
                 consumeEffect(user, 'lifesaver');
                 result.deathEvent = { saved: true, weaponName: weapon.name };

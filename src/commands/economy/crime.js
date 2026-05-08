@@ -92,7 +92,7 @@ module.exports = {
                     consumeEffect(user, 'lifesaver');
                     const wouldHaveLost = isCriticalFailure
                         ? Math.floor(user.balance * (DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN)))
-                        : Math.floor(50 + Math.random() * 200);
+                        : Math.floor(Math.random() * 151) + 50;
                     user.lastCrime = new Date();
                     await user.save();
 
@@ -131,7 +131,7 @@ module.exports = {
                         .setFooter({ text: 'Purchase a Lifesaver from /shop to protect against death events' })
                         .setTimestamp();
                 } else {
-                    const fine = Math.floor(50 + Math.random() * 200);
+                    const fine = Math.floor(Math.random() * 151) + 50;
                     const paid = Math.min(fine, user.balance);
                     user.balance = Math.max(0, user.balance - paid);
                     user.lastCrime = new Date();
