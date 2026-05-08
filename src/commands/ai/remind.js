@@ -5,24 +5,24 @@ module.exports = {
     cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('remind')
-        .setDescription('Set a reminder')
+        .setDescription('Set a reminder — the bot will DM you after the specified time. Combine minutes, hours, and/or days.')
         .addStringOption(option =>
             option.setName('message')
-                .setDescription('What to remind you about')
+                .setDescription('What to remind you about. Max 500 characters.')
                 .setRequired(true))
         .addIntegerOption(option =>
             option.setName('minutes')
-                .setDescription('Minutes from now')
+                .setDescription('Minutes from now (min: 1). Combine with hours/days for longer durations.')
                 .setRequired(false)
                 .setMinValue(1))
         .addIntegerOption(option =>
             option.setName('hours')
-                .setDescription('Hours from now')
+                .setDescription('Hours from now (min: 1). Combine with minutes/days.')
                 .setRequired(false)
                 .setMinValue(1))
         .addIntegerOption(option =>
             option.setName('days')
-                .setDescription('Days from now')
+                .setDescription('Days from now (min: 1). Combine with hours/minutes.')
                 .setRequired(false)
                 .setMinValue(1)),
     async execute(interaction) {

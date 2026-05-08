@@ -29,10 +29,10 @@ module.exports = {
 
     data: new SlashCommandBuilder()
         .setName('hunt')
-        .setDescription('Head out on a hunt and see what you can catch')
+        .setDescription('Track and hunt animals in your zone. Uses 1 stamina. Cooldown: 30s. Equip a weapon with /huntinv for better results.')
         .addStringOption(o =>
             o.setName('zone')
-                .setDescription('Hunting zone to use (defaults to your active zone)')
+                .setDescription('Zone to hunt in (defaults to your active zone). Unlock more zones with /huntzone unlock.')
                 .setRequired(false)
                 .addChoices(...ZONE_CHOICES)),
 

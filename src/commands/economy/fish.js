@@ -28,10 +28,10 @@ module.exports = {
 
     data: new SlashCommandBuilder()
         .setName('fish')
-        .setDescription('Cast your line and see what you catch')
+        .setDescription('Cast your line and reel in fish at your current location. Uses 1 stamina. Cooldown: 25s. Equip a rod with /fishinv for better catches.')
         .addStringOption(o =>
             o.setName('location')
-                .setDescription('Fishing location to use (defaults to your active location)')
+                .setDescription('Location to fish at (defaults to your active location). Unlock new spots with /fishlocation unlock.')
                 .setRequired(false)
                 .addChoices(...LOCATION_CHOICES)),
 

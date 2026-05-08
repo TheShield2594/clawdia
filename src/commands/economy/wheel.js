@@ -262,10 +262,10 @@ async function performSpin(interaction, user, source, cost, buyCost, cooldownHou
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('wheel')
-        .setDescription('Spin the Wheel of Fortune for a chance at coins and prizes!')
+        .setDescription('Spin the Wheel of Fortune — free once every 24h. Win 50–2,500 coins or a free re-spin. Pay coins to skip the cooldown.')
         .addBooleanOption(opt =>
             opt.setName('buy')
-                .setDescription('Spend coins to buy an extra spin (skips cooldown).')
+                .setDescription('Set to True to pay the extra-spin cost (default: 200 coins) and spin again immediately.')
                 .setRequired(false)),
     cooldown: 5,
 

@@ -9,10 +9,10 @@ const MIN_ROB_BALANCE = 50;
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('rob')
-        .setDescription('Attempt to steal coins from another member')
+        .setDescription('Steal 10–30% of a member\'s wallet on success (45% success rate). Get caught and lose 10% of your own balance. Cooldown: 2h.')
         .addUserOption(o =>
             o.setName('target')
-                .setDescription('The member to rob')
+                .setDescription('The member to rob. Target must have at least 50 coins in their wallet.')
                 .setRequired(true)),
 
     async execute(interaction) {

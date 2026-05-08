@@ -3,10 +3,10 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('userinfo')
-        .setDescription('Get information about a user')
+        .setDescription('Display user info: account age, server join date, roles, and ID.')
         .addUserOption(option =>
             option.setName('user')
-                .setDescription('The user to get information about')
+                .setDescription('User to look up (defaults to yourself).')
                 .setRequired(false)),
     async execute(interaction) {
         const user = interaction.options.getUser('user') || interaction.user;

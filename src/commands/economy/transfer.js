@@ -12,7 +12,7 @@ module.exports = {
                 .setRequired(true))
         .addIntegerOption(option =>
             option.setName('amount')
-                .setDescription('Amount of coins to transfer')
+                .setDescription('Coins to send (min: 1). Must not exceed your wallet balance.')
                 .setRequired(true)
                 .setMinValue(1)),
     async execute(interaction) {

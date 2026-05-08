@@ -34,7 +34,7 @@ function quantity() {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('mine')
-        .setDescription('Head into the mines and dig for ore'),
+        .setDescription('Dig for ore in the mines and earn coins (10–1,200 per ore, chance of 2–3 pieces). Cooldown: 2h.'),
 
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });

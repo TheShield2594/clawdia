@@ -8,7 +8,7 @@ module.exports = {
         .setDescription('Use an item from your inventory')
         .addStringOption(o =>
             o.setName('item')
-                .setDescription('Name of the item to use')
+                .setDescription('Exact name of the item to use (see /inventory for your items).')
                 .setRequired(true)),
 
     async execute(interaction) {
