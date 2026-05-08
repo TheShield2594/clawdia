@@ -14,6 +14,7 @@ const userSchema = new Schema({
     lastDaily: { type: Date, default: null },
     lastWork: { type: Date, default: null },
     lastRob: { type: Date, default: null },
+    lastRobbedAt: { type: Date, default: null },
     lastWheelSpin: { type: Date, default: null },
     lastFish: { type: Date, default: null },
     lastMine: { type: Date, default: null },
