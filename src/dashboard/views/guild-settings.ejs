@@ -2208,12 +2208,13 @@
             var price = parseInt(document.getElementById('modal-item-price').value, 10);
             if (!name) { toast('Item name is required', 'error'); return; }
             if (!Number.isFinite(price) || price < 0) { toast('Enter a valid price', 'error'); return; }
+            var parsedStock = parseInt(document.getElementById('modal-item-stock').value, 10);
             var item = {
                 name: name,
                 description: document.getElementById('modal-item-desc').value.trim(),
                 price: price,
                 roleId: document.getElementById('modal-item-role').value || null,
-                stock: parseInt(document.getElementById('modal-item-stock').value, 10) || -1,
+                stock: Number.isNaN(parsedStock) ? -1 : parsedStock,
                 imageUrl: document.getElementById('modal-item-image').value.trim() || ''
             };
             if (editingItemIdx === -1) storeItems.push(item);

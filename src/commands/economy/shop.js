@@ -170,49 +170,63 @@ module.exports = {
             }
 
             const doPurchase = async (reply) => {
-                // Re-fetch to avoid race conditions on stock and balance
-                const [freshGuild, freshUser] = await Promise.all([
-                    Guild.findOne({ guildId: interaction.guild.id }),
-                    User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id })
-                ]);
+                const session = await Guild.startSession();
+                session.startTransaction();
+                try {
+                    const [freshGuild, freshUser] = await Promise.all([
+                        Guild.findOne({ guildId: interaction.guild.id }).session(session),
+                        User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }).session(session)
+                    ]);
 
-                const freshItem = freshGuild.shop.find(i => i.name.toLowerCase() === itemName);
-                if (!freshItem || freshItem.stock === 0) {
-                    return reply({ content: 'That item is no longer available.', embeds: [], components: [] });
+                    const freshItem = freshGuild.shop.find(i => i.name.toLowerCase() === itemName);
+                    if (!freshItem || freshItem.stock === 0) {
+                        await session.abortTransaction();
+                        session.endSession();
+                        return reply({ content: 'That item is no longer available.', embeds: [], components: [] });
+                    }
+                    if (freshUser.balance < freshItem.price) {
+                        await session.abortTransaction();
+                        session.endSession();
+                        return reply({
+                            content: `You need ${currency}${freshItem.price.toLocaleString()} but only have ${currency}${freshUser.balance.toLocaleString()}.`,
+                            embeds: [], components: []
+                        });
+                    }
+
+                    freshUser.balance -= freshItem.price;
+                    const invEntry = freshUser.inventory.find(e => e.itemId === freshItem.name);
+                    if (invEntry) invEntry.quantity += 1;
+                    else freshUser.inventory.push({ itemId: freshItem.name, quantity: 1 });
+
+                    if (freshItem.stock > 0) freshItem.stock -= 1;
+                    await Promise.all([freshUser.save({ session }), freshGuild.save({ session })]);
+
+                    await session.commitTransaction();
+                    session.endSession();
+
+                    if (freshItem.roleId) {
+                        await interaction.member.roles.add(freshItem.roleId).catch(console.error);
+                    }
+
+                    const successEmbed = new EmbedBuilder()
+                        .setColor('#00ff00')
+                        .setTitle('Purchase Successful')
+                        .setDescription(`You bought **${freshItem.name}** for ${currency}${freshItem.price.toLocaleString()}.`)
+                        .addFields({ name: 'New Balance', value: `${currency}${freshUser.balance.toLocaleString()}`, inline: true });
+
+                    if (freshItem.roleId) {
+                        successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
+                    }
+                    if (freshItem.imageUrl) {
+                        successEmbed.setThumbnail(freshItem.imageUrl);
+                    }
+
+                    return reply({ embeds: [successEmbed], components: [] });
+                } catch (err) {
+                    await session.abortTransaction().catch(() => {});
+                    session.endSession();
+                    throw err;
                 }
-                if (freshUser.balance < freshItem.price) {
-                    return reply({
-                        content: `You need ${currency}${freshItem.price.toLocaleString()} but only have ${currency}${freshUser.balance.toLocaleString()}.`,
-                        embeds: [], components: []
-                    });
-                }
-
-                freshUser.balance -= freshItem.price;
-                const invEntry = freshUser.inventory.find(e => e.itemId === freshItem.name);
-                if (invEntry) invEntry.quantity += 1;
-                else freshUser.inventory.push({ itemId: freshItem.name, quantity: 1 });
-
-                if (freshItem.stock > 0) freshItem.stock -= 1;
-                await Promise.all([freshUser.save(), freshGuild.save()]);
-
-                if (freshItem.roleId) {
-                    await interaction.member.roles.add(freshItem.roleId).catch(console.error);
-                }
-
-                const successEmbed = new EmbedBuilder()
-                    .setColor('#00ff00')
-                    .setTitle('Purchase Successful')
-                    .setDescription(`You bought **${freshItem.name}** for ${currency}${freshItem.price.toLocaleString()}.`)
-                    .addFields({ name: 'New Balance', value: `${currency}${freshUser.balance.toLocaleString()}`, inline: true });
-
-                if (freshItem.roleId) {
-                    successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
-                }
-                if (freshItem.imageUrl) {
-                    successEmbed.setThumbnail(freshItem.imageUrl);
-                }
-
-                return reply({ embeds: [successEmbed], components: [] });
             };
 
             if (item.price >= CONFIRM_THRESHOLD) {
@@ -247,7 +261,12 @@ module.exports = {
                         return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
                     }
                     await btn.deferUpdate();
-                    await doPurchase(opts => interaction.editReply(opts));
+                    try {
+                        await doPurchase(opts => interaction.editReply(opts));
+                    } catch (err) {
+                        console.error(err);
+                        interaction.editReply({ content: 'Something went wrong processing your purchase. Please try again.', embeds: [], components: [] }).catch(() => {});
+                    }
                 });
 
                 collector.on('end', (collected, reason) => {
@@ -260,7 +279,12 @@ module.exports = {
             }
 
             await interaction.deferReply();
-            await doPurchase(opts => interaction.editReply(opts));
+            try {
+                await doPurchase(opts => interaction.editReply(opts));
+            } catch (err) {
+                console.error(err);
+                interaction.editReply({ content: 'Something went wrong processing your purchase. Please try again.', embeds: [], components: [] }).catch(() => {});
+            }
             return;
         }
 
