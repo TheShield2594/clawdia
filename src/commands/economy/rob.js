@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const mongoose = require('mongoose');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 
@@ -10,6 +11,18 @@ const ROB_STEAL_MAX = 0.40;
 
 function hasItem(user, itemName) {
     return user.inventory?.some(i => i.itemId?.toLowerCase() === itemName.toLowerCase() && i.quantity > 0);
+}
+
+async function saveRobState(robber, victim) {
+    const session = await mongoose.startSession();
+    try {
+        await session.withTransaction(async () => {
+            await robber.save({ session });
+            await victim.save({ session });
+        });
+    } finally {
+        await session.endSession();
+    }
 }
 
 module.exports = {
@@ -70,10 +83,21 @@ module.exports = {
         try {
             let successChance = BASE_SUCCESS_CHANCE;
             if (hasItem(robber, 'knife')) successChance += 0.15;
-            if (hasItem(victim, 'shield')) successChance = 0;
+            const victimHasShield = hasItem(victim, 'shield');
             successChance = Math.max(0, Math.min(0.95, successChance));
-            const success = Math.random() < successChance;
             robber.lastRob = new Date();
+
+            if (victimHasShield) {
+                await robber.save();
+                const embed = new EmbedBuilder()
+                    .setColor('#3498db')
+                    .setTitle('🛡️ Robbery Blocked!')
+                    .setDescription(`**${target.username}** blocked your robbery attempt with a shield.`)
+                    .setTimestamp();
+                return interaction.reply({ embeds: [embed] });
+            }
+
+            const success = Math.random() < successChance;
 
             let embed;
             if (success) {
@@ -88,7 +112,7 @@ module.exports = {
                     victim.bank = Math.max(0, victim.bank - (stolen - fromWallet));
                 }
                 victim.lastRobbedAt = new Date();
-                await Promise.all([robber.save(), victim.save()]);
+                await saveRobState(robber, victim);
 
                 embed = new EmbedBuilder()
                     .setColor('#f39c12')
@@ -104,7 +128,7 @@ module.exports = {
                 const paid = Math.min(fine, robber.balance);
                 robber.balance = Math.max(0, robber.balance - paid);
                 victim.balance += paid;
-                await Promise.all([robber.save(), victim.save()]);
+                await saveRobState(robber, victim);
 
                 embed = new EmbedBuilder()
                     .setColor('#e74c3c')
