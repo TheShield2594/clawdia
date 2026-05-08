@@ -3,8 +3,12 @@ const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
 
-const COOLDOWN_MS    = 4 * 3_600_000; // 4 hours
-const BASE_SUCCESS   = 0.40;
+const COOLDOWN_MS      = 4 * 3_600_000; // 4 hours
+const WANTED_MS        = 1 * 3_600_000; // 1 hour wanted cooldown after death
+const BASE_SUCCESS     = 0.40;
+const DEATH_RATE       = 0.08;          // 8% of failures trigger critical death
+const DEATH_LOSS_MIN   = 0.15;
+const DEATH_LOSS_MAX   = 0.30;
 
 const CRIMES = [
     { name: 'pickpocketing',       emoji: '🤏', minPayout: 80,   maxPayout: 200  },
@@ -42,6 +46,12 @@ module.exports = {
             { upsert: true, new: true }
         );
 
+        if (user.wantedUntil && Date.now() < user.wantedUntil.getTime()) {
+            const remaining = user.wantedUntil.getTime() - Date.now();
+            const mins = Math.ceil(remaining / 60_000);
+            return interaction.reply({ content: `🚨 You're still **wanted by the police**! Lay low for **${mins} min** before attempting another crime.`, ephemeral: true });
+        }
+
         if (user.lastCrime && Date.now() - user.lastCrime.getTime() < COOLDOWN_MS) {
             const remaining = COOLDOWN_MS - (Date.now() - user.lastCrime.getTime());
             const hrs = Math.ceil(remaining / 3_600_000);
@@ -73,36 +83,68 @@ module.exports = {
                     .setFooter({ text: 'Crimes can be committed every 4 hours' })
                     .setTimestamp();
             } else {
-                const fine = Math.floor(50 + Math.random() * 200);
-                const paid = Math.min(fine, user.balance);
+                const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
+                const isCriticalFailure = Math.random() < DEATH_RATE;
 
-                // Lifesaver: absorbs one failure — no fine paid
+                // Lifesaver: absorbs any failure — no fine or death losses
                 const lifesaverActive = hasEffect(user, 'lifesaver');
                 if (lifesaverActive) {
                     consumeEffect(user, 'lifesaver');
+                    const wouldHaveLost = isCriticalFailure
+                        ? Math.floor(user.balance * (DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN)))
+                        : Math.floor(50 + Math.random() * 200);
                     user.lastCrime = new Date();
                     await user.save();
 
-                    const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
                         .setTitle(`${crime.emoji} Saved by the Lifesaver!`)
-                        .setDescription(`Your attempt at **${crime.name}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver absorbed the fine — no coins lost! (consumed)*`)
-                        .addFields({ name: 'Fine Absorbed', value: `${currency}${paid.toLocaleString()}`, inline: true },
-                                   { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
+                        .setDescription(`Your attempt at **${crime.name}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver activated and saved you! No coins lost! (consumed)*`)
+                        .addFields(
+                            { name: isCriticalFailure ? 'Death Loss Absorbed' : 'Fine Absorbed', value: `${currency}${Math.min(wouldHaveLost, user.balance).toLocaleString()}`, inline: true },
+                            { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
+                        )
                         .setFooter({ text: 'Crimes can be committed every 4 hours' })
                         .setTimestamp();
-                } else {
-                    user.balance = Math.max(0, user.balance - paid);
+                } else if (isCriticalFailure) {
+                    // Critical failure: lose 15–30% of wallet, enter "wanted" status
+                    const lossRate = DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
+                    const lost = Math.floor(user.balance * lossRate);
+                    user.balance = Math.max(0, user.balance - lost);
+                    user.wantedUntil = new Date(Date.now() + WANTED_MS);
+                    user.lastCrime = new Date();
                     await user.save();
 
-                    const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
+                    embed = new EmbedBuilder()
+                        .setColor('#8B0000')
+                        .setTitle(`💀 ${crime.emoji} Caught — You're Wanted!`)
+                        .setDescription(
+                            `Your attempt at **${crime.name}** ended catastrophically. ${flavorText}\n\n` +
+                            `**The police seized ${Math.round(lossRate * 100)}% of your wallet.**\n` +
+                            `> 🚨 You are now **wanted** — no crimes for 1 hour.`
+                        )
+                        .addFields(
+                            { name: '💸 Lost',           value: `${currency}${lost.toLocaleString()}`,          inline: true },
+                            { name: '💰 Remaining',      value: `${currency}${user.balance.toLocaleString()}`,  inline: true },
+                            { name: '⏳ Wanted For',     value: '1 hour',                                       inline: true }
+                        )
+                        .setFooter({ text: 'Purchase a Lifesaver from /shop to protect against death events' })
+                        .setTimestamp();
+                } else {
+                    const fine = Math.floor(50 + Math.random() * 200);
+                    const paid = Math.min(fine, user.balance);
+                    user.balance = Math.max(0, user.balance - paid);
+                    user.lastCrime = new Date();
+                    await user.save();
+
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')
                         .setTitle(`${crime.emoji} Busted!`)
                         .setDescription(`Your attempt at **${crime.name}** went sideways. ${flavorText}\nYou were fined **${currency}${paid.toLocaleString()}**.`)
-                        .addFields({ name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
-                                   { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
+                        .addFields(
+                            { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
+                            { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`, inline: true }
+                        )
                         .setFooter({ text: 'Crimes can be committed every 4 hours' })
                         .setTimestamp();
                 }

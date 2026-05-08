@@ -12,6 +12,11 @@ const {
     PRESTIGE_BONUSES,
     HUNT_QUEST_TEMPLATES
 } = require('../data/huntData');
+const { hasEffect, consumeEffect } = require('./effectsService');
+
+// Zones where a critical failure can destroy your weapon (death event)
+const DANGEROUS_ZONE_IDS = new Set(['desert_wastes', 'arctic_tundra', 'murky_swamp', 'legendary_peaks']);
+const HUNT_DEATH_RATE = 0.08;
 
 const DAILY_QUEST_COUNT = 3;
 
@@ -690,6 +695,19 @@ function executeHunt(user, zoneId) {
         result.failure    = { severity, message: severity.msg };
 
         if (weapon.currentDurability <= 0) result.weaponBroke = true;
+
+        // ── Death event (dangerous zones, 8% of failures) ───────────────
+        if (DANGEROUS_ZONE_IDS.has(zone.id) && Math.random() < HUNT_DEATH_RATE) {
+            if (hasEffect(user, 'lifesaver')) {
+                consumeEffect(user, 'lifesaver');
+                result.deathEvent = { saved: true, weaponName: weapon.name };
+            } else {
+                weapon.currentDurability = 0;
+                weapon.status = 'broken';
+                result.weaponBroke = true;
+                result.deathEvent = { saved: false, weaponName: weapon.name };
+            }
+        }
     }
 
     // ── Common post-hunt updates ────────────────────────────────────────

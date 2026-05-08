@@ -152,19 +152,36 @@ module.exports = {
             } else {
                 const fine = Math.floor(robber.balance * failFineRate);
                 const paid = Math.min(fine, robber.balance);
-                robber.balance = Math.max(0, robber.balance - paid);
-                victim.balance += paid;
-                await saveRobState(robber, victim);
 
-                embed = new EmbedBuilder()
-                    .setColor('#e74c3c')
-                    .setTitle('🚔 Caught Red-Handed!')
-                    .setDescription(`**${target.username}** caught you and you were fined **${currency}${paid.toLocaleString()}**, which went straight to them.`)
-                    .addFields(
-                        { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
-                        { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
-                    )
-                    .setTimestamp();
+                // Lifesaver: absorbs the failure fine — no coins lost
+                if (hasEffect(robber, 'lifesaver')) {
+                    consumeEffect(robber, 'lifesaver');
+                    await robber.save();
+
+                    embed = new EmbedBuilder()
+                        .setColor('#e67e22')
+                        .setTitle('🛟 Lifesaver Activated!')
+                        .setDescription(`**${target.username}** caught you in the act, but your **Lifesaver** protected you from the **${currency}${paid.toLocaleString()}** fine! (consumed)`)
+                        .addFields(
+                            { name: 'Fine Absorbed', value: `${currency}${paid.toLocaleString()}`,        inline: true },
+                            { name: 'Your Balance',  value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
+                        )
+                        .setTimestamp();
+                } else {
+                    robber.balance = Math.max(0, robber.balance - paid);
+                    victim.balance += paid;
+                    await saveRobState(robber, victim);
+
+                    embed = new EmbedBuilder()
+                        .setColor('#e74c3c')
+                        .setTitle('🚔 Caught Red-Handed!')
+                        .setDescription(`**${target.username}** caught you and you were fined **${currency}${paid.toLocaleString()}**, which went straight to them.`)
+                        .addFields(
+                            { name: 'Fine Paid',    value: `${currency}${paid.toLocaleString()}`,        inline: true },
+                            { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
+                        )
+                        .setTimestamp();
+                }
             }
 
             await interaction.reply({ embeds: [embed] });

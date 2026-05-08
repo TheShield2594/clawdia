@@ -238,12 +238,22 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         embed.addFields({ name: '🤕 Injured', value: `Extra cooldown: **${formatMs(failure.severity.injuryMs)}**`, inline: true });
     }
 
+    if (result.deathEvent) {
+        if (result.deathEvent.saved) {
+            embed.setColor('#e67e22');
+            embed.addFields({ name: '🛟 Lifesaver Activated!', value: `A severe injury would have destroyed your **${result.deathEvent.weaponName}**, but your Lifesaver absorbed it! (consumed)`, inline: false });
+        } else {
+            embed.setColor('#8B0000');
+            embed.addFields({ name: '💀 Severe Injury!', value: `The encounter was catastrophic — your **${result.deathEvent.weaponName}** was completely destroyed! Use \`/huntrepair\` to fix it.`, inline: false });
+        }
+    }
+
     if (levelUp) {
         const ld = getLevelData(levelUp.newLevel);
         embed.addFields({ name: '⬆️ Level Up!', value: `Hunter Level **${levelUp.oldLevel}** → **${levelUp.newLevel}** (${ld.title})`, inline: false });
     }
 
-    if (weapon.status === 'broken') {
+    if (weapon.status === 'broken' && !result.deathEvent) {
         embed.addFields({ name: '❌ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/huntrepair\` before hunting again.`, inline: false });
     }
 
