@@ -118,7 +118,11 @@ const guildSchema = new Schema({
         robFailFineRate: { type: Number, default: 0.2, min: 0, max: 1 },
         wheelEnabled: { type: Boolean, default: true },
         wheelCooldownHours: { type: Number, default: 24, min: 1, max: 168 },
-        wheelExtraSpinCost: { type: Number, default: 200, min: 1 }
+        wheelExtraSpinCost: { type: Number, default: 200, min: 1 },
+        duelEnabled: { type: Boolean, default: true },
+        duelMaxBet: { type: Number, default: 10000, min: 1 },
+        // max: 0.5 ensures winnerPayout >= amount so netGain is never negative
+        duelHouseCut: { type: Number, default: 0.05, min: 0, max: 0.5 }
     },
     
     music: {
