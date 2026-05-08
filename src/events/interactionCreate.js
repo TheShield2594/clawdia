@@ -155,8 +155,11 @@ module.exports = {
 
             if (now < expirationTime) {
                 const expiredTimestamp = Math.round(expirationTime / 1000);
+                const longCooldown = (expirationTime - now) > 12 * 60 * 60 * 1000;
+                const exactTime = longCooldown ? ` (<t:${expiredTimestamp}:F>)` : '';
+
                 return interaction.reply({
-                    content: `Please wait, you are on cooldown. You can use \`/${command.data.name}\` again <t:${expiredTimestamp}:R>.`,
+                    content: `Please wait, you are on cooldown. You can use \`/${command.data.name}\` again <t:${expiredTimestamp}:R>${exactTime}.`,
                     ephemeral: true
                 });
             }
