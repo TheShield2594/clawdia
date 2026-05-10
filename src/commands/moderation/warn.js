@@ -1,6 +1,8 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const Case = require('../../models/Case');
 const { logModeration } = require('../../utils/logger');
+const { applyEscalation, findStepForCount } = require('../../services/escalationService');
+const Guild = require('../../models/Guild');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -10,7 +12,8 @@ module.exports = {
             sub.setName('add')
                 .setDescription('Issue a warning to a member')
                 .addUserOption(o => o.setName('user').setDescription('The user to warn').setRequired(true))
-                .addStringOption(o => o.setName('reason').setDescription('Reason for the warning').setRequired(true)))
+                .addStringOption(o => o.setName('reason').setDescription('Reason for the warning').setRequired(true))
+                .addBooleanOption(o => o.setName('bypass_escalation').setDescription('Suppress auto-escalation for this warning (requires Manage Messages)').setRequired(false)))
         .addSubcommand(sub =>
             sub.setName('list')
                 .setDescription('List all warnings for a member')
@@ -27,17 +30,26 @@ module.exports = {
         if (sub === 'add') {
             const user   = interaction.options.getUser('user');
             const reason = interaction.options.getString('reason');
+            const bypassRequested = interaction.options.getBoolean('bypass_escalation') === true;
 
             if (user.bot) return interaction.reply({ content: 'You cannot warn bots.', ephemeral: true });
 
             try {
-                await logModeration(interaction.guild.id, 'warn', user, interaction.user, reason);
+                const triggeringCase = await logModeration(interaction.guild.id, 'warn', user, interaction.user, reason);
 
                 const warningCount = await Case.countDocuments({
                     guildId: interaction.guild.id,
                     targetUserId: user.id,
                     type: 'warn'
                 });
+
+                const canBypass = interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages);
+                const bypassEscalation = bypassRequested && canBypass;
+
+                const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+                const matchedStep = !bypassEscalation
+                    ? findStepForCount(guildSettings?.moderation?.escalation?.ladder, warningCount)
+                    : null;
 
                 const embed = new EmbedBuilder()
                     .setColor('#ffff00')
@@ -50,8 +62,46 @@ module.exports = {
                     )
                     .setTimestamp();
 
+                if (bypassRequested && !canBypass) {
+                    embed.addFields({ name: 'Escalation Bypass', value: 'Requested but ignored — requires Manage Messages.' });
+                } else if (bypassEscalation && matchedStep === null) {
+                    embed.addFields({ name: 'Escalation', value: 'Bypassed (no matching step at this count anyway).' });
+                } else if (bypassEscalation) {
+                    embed.addFields({ name: 'Escalation', value: `Bypassed — would have triggered ${matchedStep?.action?.toUpperCase()} at ${warningCount} warnings.` });
+                }
+
                 await interaction.reply({ embeds: [embed] });
                 await user.send(`You have been warned in **${interaction.guild.name}** for: ${reason}`).catch(() => {});
+
+                if (!bypassEscalation && guildSettings?.moderation?.escalation?.enabled) {
+                    const result = await applyEscalation({
+                        guild: interaction.guild,
+                        targetUser: user,
+                        warningCount,
+                        triggeringCase,
+                        client: interaction.client
+                    });
+                    if (result?.applied) {
+                        await interaction.followUp({
+                            embeds: [new EmbedBuilder()
+                                .setColor('#cc3300')
+                                .setTitle('Auto-Escalation Triggered')
+                                .setDescription(`Threshold **${result.step.threshold}** reached — applied **${result.step.action.toUpperCase()}**${result.step.durationMinutes ? ` for ${result.step.durationMinutes} minute(s)` : ''}.`)
+                                .addFields({ name: 'Target', value: `${user.tag}`, inline: true })
+                                .setTimestamp()]
+                        }).catch(() => {});
+                    } else if (result?.skipped) {
+                        await interaction.followUp({
+                            content: `Auto-escalation step **${result.step.threshold} → ${result.step.action.toUpperCase()}** skipped: ${result.reason}`,
+                            ephemeral: true
+                        }).catch(() => {});
+                    } else if (result?.error) {
+                        await interaction.followUp({
+                            content: `Auto-escalation step **${result.step.threshold} → ${result.step.action.toUpperCase()}** failed — see logs.`,
+                            ephemeral: true
+                        }).catch(() => {});
+                    }
+                }
             } catch (error) {
                 console.error('Warn error:', error);
                 if (!interaction.replied) {

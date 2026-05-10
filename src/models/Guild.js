@@ -84,7 +84,25 @@ const guildSchema = new Schema({
         behaviorScoreBanAt: { type: Number, default: 30, min: 0 },
         behaviorScoreDecayDays: { type: Number, default: 7, min: 1 },
         appealsEnabled: { type: Boolean, default: false },
-        appealChannelId: { type: String, default: null }
+        appealChannelId: { type: String, default: null },
+        escalation: {
+            enabled: { type: Boolean, default: true },
+            ladder: {
+                type: [{
+                    threshold:       { type: Number, required: true, min: 1 },
+                    action:          { type: String, enum: ['mute', 'kick', 'ban', 'tempban'], required: true },
+                    durationMinutes: { type: Number, default: null, min: 1 },
+                    dmUser:          { type: Boolean, default: true },
+                    reason:          { type: String, default: 'Automatic escalation: {count} warnings reached' }
+                }],
+                default: () => [
+                    { threshold: 3,  action: 'mute',    durationMinutes: 10,   dmUser: true, reason: 'Automatic escalation: {count} warnings reached' },
+                    { threshold: 5,  action: 'mute',    durationMinutes: 60,   dmUser: true, reason: 'Automatic escalation: {count} warnings reached' },
+                    { threshold: 7,  action: 'kick',    durationMinutes: null, dmUser: true, reason: 'Automatic escalation: {count} warnings reached' },
+                    { threshold: 10, action: 'ban',     durationMinutes: null, dmUser: true, reason: 'Automatic escalation: {count} warnings reached' }
+                ]
+            }
+        }
     },
     
     leveling: {
