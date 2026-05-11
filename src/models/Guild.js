@@ -493,6 +493,21 @@ const guildSchema = new Schema({
         autoRespond: { type: Boolean, default: true }
     },
 
+    achievements: {
+        enabled: { type: Boolean, default: false },
+        announcementChannelId: { type: String, default: null },
+        disabledAchievements: [{ type: String }],
+        customAchievements: [{
+            id:          { type: String, required: true },
+            name:        { type: String, required: true },
+            description: { type: String, default: '' },
+            emoji:       { type: String, default: '🏆' },
+            category:    { type: String, default: 'custom' },
+            xpReward:    { type: Number, default: 0 },
+            coinReward:  { type: Number, default: 0 }
+        }]
+    },
+
     analytics: {
         memberEvents: [{
             date: { type: String, required: true },

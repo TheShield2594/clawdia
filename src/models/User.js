@@ -302,6 +302,19 @@ const userSchema = new Schema({
         lastClimbedNotification:   { type: Date, default: null }
     },
 
+    // Achievement tracking
+    achievements: [{
+        id:       { type: String, required: true },
+        earnedAt: { type: Date, default: Date.now },
+        claimed:  { type: Boolean, default: false }
+    }],
+
+    // Lifetime stats used for achievement checks
+    lifetimeGambled: { type: Number, default: 0 },
+    successfulRobs:  { type: Number, default: 0 },
+    questsCompleted: { type: Number, default: 0 },
+    lastWarnedAt:    { type: Date, default: null },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });

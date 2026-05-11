@@ -124,6 +124,7 @@ module.exports = {
                 if (hasEffect(robber, 'robbery_bag')) stolen = Math.floor(stolen * 1.10);
 
                 robber.balance += stolen;
+                robber.successfulRobs = (robber.successfulRobs || 0) + 1;
 
                 if (padlockActive) {
                     victim.balance = Math.max(0, victim.balance - stolen);

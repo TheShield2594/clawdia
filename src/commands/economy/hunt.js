@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { ZONES, ZONE_LIST, TIER_COLORS, LIMITS, WEAPON_BY_TIER } = require('../../data/huntData');
+const { checkAndAward } = require('../../services/achievementService');
 const {
     ensureHuntData,
     applyStaminaRegen,
@@ -148,6 +149,8 @@ module.exports = {
         // ── Execute hunt ───────────────────────────────────────────────────
         const result = executeHunt(user, zoneId);
         updateHuntQuestProgress(user, result, zoneId);
+
+        await checkAndAward(user, guildSettings, interaction.client, interaction.member).catch(() => null);
 
         try {
             await user.save();

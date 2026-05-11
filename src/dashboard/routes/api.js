@@ -812,4 +812,40 @@ router.delete('/guild/:guildId/persona/:channelId', checkAuth, checkGuildAccess,
     }
 });
 
+// ── Achievements ────────────────────────────────────────────────────────────
+
+router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId } = req.params;
+    const { userId, achievementId } = req.body;
+
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
+        return res.status(400).json({ error: 'userId is required' });
+    }
+    if (!achievementId || typeof achievementId !== 'string' || !achievementId.trim()) {
+        return res.status(400).json({ error: 'achievementId is required' });
+    }
+
+    try {
+        const guildSettings = await Guild.findOne({ guildId });
+        if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
+
+        const User = require('../../models/User');
+        const { grantCustomAchievement } = require('../../services/achievementService');
+
+        let user = await User.findOne({ userId: userId.trim(), guildId });
+        if (!user) {
+            user = await User.create({ userId: userId.trim(), guildId });
+        }
+
+        const granted = await grantCustomAchievement(user, achievementId.trim());
+        user.markModified('achievements');
+        await user.save();
+
+        res.json({ success: true, granted });
+    } catch (error) {
+        console.error('Achievement grant error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 module.exports = router;

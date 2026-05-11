@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { LOCATIONS, LOCATION_LIST, TIER_COLORS, LIMITS, ROD_BY_TIER } = require('../../data/fishData');
+const { checkAndAward } = require('../../services/achievementService');
 const {
     ensureFishingData,
     applyStaminaRegen,
@@ -142,6 +143,8 @@ module.exports = {
 
         const result = executeCast(user, locationId);
         updateFishQuestProgress(user, result, locationId);
+
+        await checkAndAward(user, guildSettings, interaction.client, interaction.member).catch(() => null);
 
         try {
             await user.save();
