@@ -444,7 +444,7 @@ function activateConsumable(user, consumableId) {
         user.hunt.stamina = Math.min(huntMax, user.hunt.stamina + def.staminaRestore);
         user.markModified('hunt');
     } else if (def.type === 'repair') {
-        return { success: false, error: `Use repair kits with \`/fishrepair\`.` };
+        return { success: false, error: `Use repair kits with \`/fishshop repair\`.` };
     } else {
         return { success: false, error: 'That item cannot be activated this way.' };
     }

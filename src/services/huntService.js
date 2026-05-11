@@ -531,7 +531,7 @@ function activateConsumable(user, consumableId) {
         h.staminaTonicsToday += 1;
     } else if (def.type === 'repair') {
         // Repair kit used from huntshop use — handled in repair command
-        return { success: false, error: `Use repair kits with \`/huntrepair\`.` };
+        return { success: false, error: `Use repair kits with \`/huntshop repair\`.` };
     } else {
         return { success: false, error: 'That item cannot be activated this way.' };
     }

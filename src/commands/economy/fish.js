@@ -32,7 +32,7 @@ module.exports = {
         .setDescription('Cast your line and catch fish. 1 stamina per cast. Cooldown: 25s. Use /fishinv to equip a rod.')
         .addStringOption(o =>
             o.setName('location')
-                .setDescription('Location to fish at (defaults to your active location). Unlock new spots with /fishlocation unlock.')
+                .setDescription('Location to fish at (defaults to your active location). Unlock new spots with /fishshop unlock.')
                 .setRequired(false)
                 .addChoices(...LOCATION_CHOICES)),
 
@@ -70,7 +70,7 @@ module.exports = {
         }
         if (!f.unlockedLocations.includes(locationId)) {
             return interaction.reply({
-                content: `You haven't unlocked **${location.name}** yet. Use \`/fishlocation unlock ${locationId}\` to unlock it.`,
+                content: `You haven't unlocked **${location.name}** yet. Use \`/fishshop unlock\` to unlock it.`,
                 ephemeral: true
             });
         }
@@ -111,7 +111,7 @@ module.exports = {
         // ── Rod check ─────────────────────────────────────────────────────
         if (f.equippedRodIndex < 0 || !f.rods[f.equippedRodIndex]) {
             return interaction.reply({
-                content: `You don't have a rod equipped! Buy one with \`/fishbuyrod\` and equip it with \`/fishinv equip 1\`.`,
+                content: `You don't have a rod equipped! Buy one with \`/fishshop rod\` and equip it with \`/fishinv equip 1\`.`,
                 ephemeral: true
             });
         }
@@ -120,7 +120,7 @@ module.exports = {
 
         if (rod.status === 'broken' || rod.currentDurability <= 0) {
             return interaction.reply({
-                content: `Your **${rod.name}** is broken! Repair it with \`/fishrepair\` or buy a new one with \`/fishbuyrod\`.`,
+                content: `Your **${rod.name}** is broken! Repair it with \`/fishshop repair\` or buy a new one with \`/fishshop rod\`.`,
                 ephemeral: true
             });
         }
@@ -243,7 +243,7 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
         if (result.expiredBait) embed.addFields({ name: '🐟 Bait Expired', value: `Your ${result.expiredBait.replace(/_/g, ' ')} has worn off.`, inline: false });
 
         if (rod.status === 'broken') {
-            embed.addFields({ name: '❌ Rod Broke!', value: `Your **${rod.name}** has broken! Use \`/fishrepair\` before casting again.`, inline: false });
+            embed.addFields({ name: '❌ Rod Broke!', value: `Your **${rod.name}** has broken! Use \`/fishshop repair\` before casting again.`, inline: false });
         } else if (rod.currentDurability <= Math.floor(rod.maxDurability * 0.20)) {
             embed.addFields({ name: '⚠️ Low Durability', value: `Your rod is nearly worn out (${rod.currentDurability}/${rod.maxDurability}). Repair soon!`, inline: false });
         }
@@ -276,7 +276,7 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
     }
     if (levelUp) embed.addFields({ name: '⬆️ Level Up!', value: buildLevelUpLine(levelUp), inline: false });
     if (rod.status === 'broken') {
-        embed.addFields({ name: '❌ Rod Broke!', value: `Your **${rod.name}** has broken! Use \`/fishrepair\` before casting again.`, inline: false });
+        embed.addFields({ name: '❌ Rod Broke!', value: `Your **${rod.name}** has broken! Use \`/fishshop repair\` before casting again.`, inline: false });
     }
 
     embed.setFooter({ text: 'Tip: Use consumables from /fishshop to boost your success chance' });

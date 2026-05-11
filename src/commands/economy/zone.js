@@ -6,14 +6,12 @@ const Guild = require('../../models/Guild');
 const { ZONES, ZONE_LIST } = require('../../data/huntData');
 const { ensureHuntData } = require('../../services/huntService');
 
-const ZONE_CHOICES = ZONE_LIST.map(z => ({ name: z.name, value: z.id }));
-
 module.exports = {
     cooldown: 3,
 
     data: new SlashCommandBuilder()
         .setName('huntzone')
-        .setDescription('Manage your hunting zones')
+        .setDescription('View and switch your active hunting zone')
         .addSubcommand(sub =>
             sub.setName('list')
                 .setDescription('View all zones and their unlock status'))
@@ -24,15 +22,7 @@ module.exports = {
                     o.setName('zone')
                         .setDescription('Zone to switch to')
                         .setRequired(true)
-                        .addChoices(...ZONE_CHOICES)))
-        .addSubcommand(sub =>
-            sub.setName('unlock')
-                .setDescription('Pay to unlock a new hunting zone')
-                .addStringOption(o =>
-                    o.setName('zone')
-                        .setDescription('Zone to unlock')
-                        .setRequired(true)
-                        .addChoices(...ZONE_CHOICES))),
+                        .addChoices(...ZONE_LIST.map(z => ({ name: `${z.emoji} ${z.name}`, value: z.id }))))),
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
@@ -51,7 +41,6 @@ module.exports = {
         ensureHuntData(user);
         const h = user.hunt;
 
-        // ── LIST ───────────────────────────────────────────────────────────
         if (sub === 'list') {
             const lines = ZONE_LIST.map(zone => {
                 const unlocked = h.unlockedZones.includes(zone.id);
@@ -65,12 +54,8 @@ module.exports = {
                     ? (isActive ? '✅ **ACTIVE**' : '✅ Unlocked')
                     : `🔒 Level ${zone.unlockLevel}${zone.unlockCost > 0 ? ` · ${currency}${zone.unlockCost.toLocaleString()}` : ' · Free'}`;
 
-                const diffStr = zone.difficultyMod !== 0
-                    ? ` · ${Math.round(zone.difficultyMod * 100)}% success`
-                    : '';
-                const payStr = zone.payoutBonus > 0
-                    ? ` · +${Math.round(zone.payoutBonus * 100)}% payout`
-                    : '';
+                const diffStr = zone.difficultyMod !== 0 ? ` · ${Math.round(zone.difficultyMod * 100)}% success` : '';
+                const payStr  = zone.payoutBonus > 0 ? ` · +${Math.round(zone.payoutBonus * 100)}% payout` : '';
 
                 return `${zone.emoji} **${zone.name}** — ${statusLine}\n> ${zone.description}\n> Loot: ${tierStr}${diffStr}${payStr}`;
             });
@@ -79,12 +64,11 @@ module.exports = {
                 .setColor('#3498db')
                 .setTitle('🗺️ Hunting Zones')
                 .setDescription(lines.join('\n\n'))
-                .setFooter({ text: `Active zone: ${ZONES[h.activeZone]?.name ?? 'Unknown'} • Your level: ${h.level}` });
+                .setFooter({ text: `Unlock new zones with /huntshop unlock • Active zone: ${ZONES[h.activeZone]?.name ?? 'Unknown'} • Your level: ${h.level}` });
 
             return interaction.reply({ embeds: [embed] });
         }
 
-        // ── SET ────────────────────────────────────────────────────────────
         if (sub === 'set') {
             const zoneId = interaction.options.getString('zone');
             const zone   = ZONES[zoneId];
@@ -93,9 +77,8 @@ module.exports = {
                 return interaction.reply({ content: 'Unknown zone.', ephemeral: true });
             }
             if (!h.unlockedZones.includes(zoneId)) {
-                const costStr = zone.unlockCost > 0 ? ` for ${currency}${zone.unlockCost.toLocaleString()}` : '';
                 return interaction.reply({
-                    content: `**${zone.name}** is locked. Use \`/huntzone unlock ${zoneId}\`${costStr} to unlock it first.`,
+                    content: `**${zone.name}** is locked. Unlock it with \`/huntshop unlock\`.`,
                     ephemeral: true
                 });
             }
@@ -109,72 +92,24 @@ module.exports = {
                 return interaction.reply({ content: `You're already hunting in **${zone.name}**.`, ephemeral: true });
             }
 
-            const oldZone    = ZONES[h.activeZone];
-            h.activeZone     = zoneId;
+            const oldZone = ZONES[h.activeZone];
+            h.activeZone  = zoneId;
             user.markModified('hunt');
             await user.save();
 
-            const embed = new EmbedBuilder()
-                .setColor('#2ecc71')
-                .setTitle('🗺️ Zone Changed')
-                .setDescription(`Switched from **${oldZone?.emoji} ${oldZone?.name}** → **${zone.emoji} ${zone.name}**`)
-                .addFields(
-                    { name: 'Difficulty',   value: zone.difficultyMod < 0 ? `${Math.round(zone.difficultyMod * 100)}% success` : 'No penalty', inline: true },
-                    { name: 'Payout Bonus', value: zone.payoutBonus > 0 ? `+${Math.round(zone.payoutBonus * 100)}%` : 'Standard', inline: true }
-                )
-                .setFooter({ text: 'Your next /hunt will use this zone' });
-
-            return interaction.reply({ embeds: [embed] });
-        }
-
-        // ── UNLOCK ─────────────────────────────────────────────────────────
-        if (sub === 'unlock') {
-            const zoneId = interaction.options.getString('zone');
-            const zone   = ZONES[zoneId];
-
-            if (!zone) {
-                return interaction.reply({ content: 'Unknown zone.', ephemeral: true });
-            }
-            if (zone.defaultUnlocked || h.unlockedZones.includes(zoneId)) {
-                return interaction.reply({ content: `**${zone.name}** is already unlocked.`, ephemeral: true });
-            }
-            if (h.level < zone.unlockLevel) {
-                return interaction.reply({
-                    content: `You need Hunter Level **${zone.unlockLevel}** to unlock **${zone.name}**. You're Level ${h.level}.`,
-                    ephemeral: true
-                });
-            }
-            if (user.balance < zone.unlockCost) {
-                return interaction.reply({
-                    content: `Unlocking **${zone.name}** costs ${currency}${zone.unlockCost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`,
-                    ephemeral: true
-                });
-            }
-
-            user.balance       -= zone.unlockCost;
-            h.unlockedZones.push(zoneId);
-            user.markModified('hunt');
-            await user.save();
-
-            const tierStr = Object.entries(zone.tierWeights)
-                .filter(([, w]) => w > 0)
-                .map(([t, w]) => `${t}: ${w}%`)
-                .join(' · ');
-
-            const embed = new EmbedBuilder()
-                .setColor('#f39c12')
-                .setTitle(`${zone.emoji} Zone Unlocked: ${zone.name}!`)
-                .setDescription(zone.description)
-                .addFields(
-                    { name: 'Loot Table',   value: tierStr,                                            inline: false },
-                    { name: 'Difficulty',   value: zone.difficultyMod < 0 ? `${Math.round(zone.difficultyMod * 100)}% success` : 'No penalty', inline: true },
-                    { name: 'Payout Bonus', value: zone.payoutBonus > 0 ? `+${Math.round(zone.payoutBonus * 100)}%` : 'Standard', inline: true },
-                    { name: 'Unlock Cost',  value: `${currency}${zone.unlockCost.toLocaleString()}`,   inline: true },
-                    { name: 'New Balance',  value: `${currency}${user.balance.toLocaleString()}`,      inline: true }
-                )
-                .setFooter({ text: `Switch to it with /huntzone set ${zoneId}` });
-
-            return interaction.reply({ embeds: [embed] });
+            return interaction.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setColor('#2ecc71')
+                        .setTitle('🗺️ Zone Changed')
+                        .setDescription(`Switched from **${oldZone?.emoji} ${oldZone?.name}** → **${zone.emoji} ${zone.name}**`)
+                        .addFields(
+                            { name: 'Difficulty',   value: zone.difficultyMod < 0 ? `${Math.round(zone.difficultyMod * 100)}% success` : 'No penalty', inline: true },
+                            { name: 'Payout Bonus', value: zone.payoutBonus > 0 ? `+${Math.round(zone.payoutBonus * 100)}%` : 'Standard',              inline: true }
+                        )
+                        .setFooter({ text: 'Your next /hunt will use this zone' })
+                ]
+            });
         }
     }
 };
