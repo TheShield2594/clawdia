@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -34,14 +35,20 @@ module.exports = {
             }
 
             const dailyAmount = guildSettings?.economy.dailyAmount || 100;
-            user.balance += dailyAmount;
+            const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
+            const actualAmount = Math.round(dailyAmount * streakMult);
+            user.balance += actualAmount;
             user.lastDaily = new Date();
             await user.save();
+
+            const streakLine = streakMult > 1.0
+                ? `\n🔥 **${streakMult}x streak bonus** applied!`
+                : '';
 
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('Daily Reward Claimed!')
-                .setDescription(`You received **${dailyAmount}** coins!`)
+                .setDescription(`You received **${actualAmount.toLocaleString()}** coins!${streakLine}`)
                 .addFields(
                     { name: 'New Balance', value: `${user.balance.toLocaleString()} coins` }
                 )

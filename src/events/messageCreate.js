@@ -4,6 +4,8 @@ const Case = require('../models/Case');
 const { handleAIChat } = require('../services/aiService');
 const { logModeration } = require('../utils/logger');
 const { ensureQuests, onMessage, notifyQuestComplete } = require('../services/questService');
+const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
+const { hasEffect, consumeEffect } = require('../services/effectsService');
 
 const BASE_BAD_WORDS = [
     'nigger', 'nigga', 'faggot', 'fag', 'retard', 'chink', 'spic', 'kike',
@@ -119,12 +121,17 @@ async function handleStreakAndQuests(message, guildSettings) {
 
         // Streak logic
         const lastActive = user.streak?.lastActive;
+        let shieldActivated = false;
         if (lastActive) {
             const lastDay = lastActive.toISOString().slice(0, 10);
             if (lastDay !== todayUTC) {
                 const msAgo = now - lastActive;
                 if (msAgo < 172800000) { // within 48h = streak continues
                     user.streak.current = (user.streak.current || 0) + 1;
+                } else if (hasEffect(user, 'streak_shield')) {
+                    consumeEffect(user, 'streak_shield');
+                    user.streak.current = (user.streak.current || 0) + 1;
+                    shieldActivated = true;
                 } else {
                     user.streak.current = 1; // broken
                 }
@@ -132,7 +139,15 @@ async function handleStreakAndQuests(message, guildSettings) {
                 user.streak.lastActive = now;
             }
         } else {
-            user.streak = { current: 1, longest: 1, lastActive: now };
+            user.streak = { current: 1, longest: 1, lastActive: now, claimedMilestones: [] };
+        }
+
+        // Milestone rewards
+        const newMilestones = checkNewMilestones(user);
+        for (const milestone of newMilestones) {
+            user.balance += milestone.coins;
+            if (!user.streak.claimedMilestones) user.streak.claimedMilestones = [];
+            user.streak.claimedMilestones.push(milestone.days);
         }
 
         // Daily message counter for raider track
@@ -151,6 +166,21 @@ async function handleStreakAndQuests(message, guildSettings) {
         await user.save();
 
         await notifyQuestComplete(guildSettings, message.member, completedQuests, message.channel);
+
+        if (shieldActivated) {
+            await message.channel.send(
+                `🔥🛡️ <@${message.author.id}> Your **Streak Shield** protected your streak! (consumed)`
+            ).catch(() => {});
+        }
+
+        for (const milestone of newMilestones) {
+            const multiplier = getStreakMultiplier(user.streak.current);
+            await message.channel.send(
+                `🔥 <@${message.author.id}> **${milestone.days}-day streak milestone!** ` +
+                `You earned **${milestone.coins.toLocaleString()} coins** and the **${milestone.badge}** badge! ` +
+                `You're now earning **${multiplier}x** coins and XP.`
+            ).catch(() => {});
+        }
     } catch (err) {
         console.error('Streak/quest error:', err);
     }
@@ -185,6 +215,9 @@ async function handleLeveling(message, guildSettings) {
             }
         }
     }
+
+    // Streak multiplier
+    if (user) xpGain *= getStreakMultiplier(user.streak?.current ?? 0);
     xpGain = Math.floor(xpGain);
 
     if (user) {

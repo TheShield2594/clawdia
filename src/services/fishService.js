@@ -15,6 +15,7 @@ const {
     FAILURE_SEVERITIES,
     FISH_QUEST_TEMPLATES
 } = require('../data/fishData');
+const { getStreakMultiplier } = require('../utils/streakMultiplier');
 
 const DAILY_QUEST_COUNT = 3;
 
@@ -495,9 +496,10 @@ function executeCast(user, locationId) {
         const catchType = rollCatchType(location);
         result.catchType = catchType;
 
+        const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
         if (catchType === 'junk') {
             const junk         = weightedRoll(JUNK_ITEMS);
-            const payout       = randInt(junk.payoutMin, junk.payoutMax);
+            const payout       = Math.round(randInt(junk.payoutMin, junk.payoutMax) * streakMult);
             const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payout, location);
 
             applyDurabilityLoss(rod, 1);
@@ -509,6 +511,7 @@ function executeCast(user, locationId) {
 
             let xpGain = 2;
             if (f.activeXpScroll) xpGain = Math.round(xpGain * 1.5);
+            xpGain = Math.round(xpGain * streakMult);
             const lvResult = applyXp(user, xpGain);
 
             Object.assign(result, {
@@ -520,7 +523,7 @@ function executeCast(user, locationId) {
 
         } else if (catchType === 'treasure') {
             const treasure     = weightedRoll(TREASURE_ITEMS);
-            const payout       = randInt(treasure.payoutMin, treasure.payoutMax);
+            const payout       = Math.round(randInt(treasure.payoutMin, treasure.payoutMax) * streakMult);
             const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payout, location);
 
             applyDurabilityLoss(rod, 1);
@@ -533,6 +536,7 @@ function executeCast(user, locationId) {
 
             let xpGain = 15;
             if (f.activeXpScroll) xpGain = Math.round(xpGain * 1.5);
+            xpGain = Math.round(xpGain * streakMult);
             const lvResult = applyXp(user, xpGain);
 
             Object.assign(result, {
@@ -575,7 +579,7 @@ function executeCast(user, locationId) {
             const critChance     = calculateCritChance(user);
             const isCrit         = Math.random() < critChance;
             const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
-            const preModPayout   = Math.round(sizedPayout * critMultiplier);
+            const preModPayout   = Math.round(sizedPayout * critMultiplier * streakMult);
 
             const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, preModPayout, location);
 
@@ -592,6 +596,7 @@ function executeCast(user, locationId) {
             let xpGain = fish.xp;
             if (isCrit) xpGain = Math.round(xpGain * 1.5);
             if (f.activeXpScroll) xpGain = Math.round(xpGain * 1.5);
+            xpGain = Math.round(xpGain * streakMult);
 
             applyDurabilityLoss(rod, 1);
             result.durabilityLost = 1;

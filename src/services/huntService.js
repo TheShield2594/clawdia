@@ -13,6 +13,7 @@ const {
     HUNT_QUEST_TEMPLATES
 } = require('../data/huntData');
 const { hasEffect, consumeEffect } = require('./effectsService');
+const { getStreakMultiplier } = require('../utils/streakMultiplier');
 
 // Zones where a critical failure can destroy your weapon (death event)
 const DANGEROUS_ZONE_IDS = new Set(['desert_wastes', 'arctic_tundra', 'murky_swamp', 'legendary_peaks']);
@@ -628,7 +629,8 @@ function executeHunt(user, zoneId) {
         const isCrit         = Math.random() < critChance;
         const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
 
-        const payoutBeforeMods = Math.round(rawPayout * critMultiplier);
+        const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
+        const payoutBeforeMods = Math.round(rawPayout * critMultiplier * streakMult);
         const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payoutBeforeMods, zone);
 
         // Special drop
@@ -645,6 +647,7 @@ function executeHunt(user, zoneId) {
         let xpGain = animal.xp;
         if (isCrit) xpGain = Math.round(xpGain * 1.5);
         if (h.activeXpScroll) xpGain = Math.round(xpGain * 1.5);
+        xpGain = Math.round(xpGain * streakMult);
 
         // Durability (-1 on success)
         applyDurabilityLoss(weapon, 1);
