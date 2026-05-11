@@ -522,7 +522,9 @@ async function handleBibleVerseDetection(message, guildSettings) {
     if (!refs.length) return;
 
     const translation = guildSettings.bibleVerse?.translation || 'kjv';
-    const verseData = await lookupVerse(refs[0], translation);
+    // NIV is not available for on-demand lookup; fall back to KJV so auto-respond still works
+    const effectiveTranslation = translation === 'niv' ? 'kjv' : translation;
+    const verseData = await lookupVerse(refs[0], effectiveTranslation);
     if (!verseData?.text) return;
 
     await message.reply({ embeds: [createVerseEmbed(verseData)] }).catch(() => {});

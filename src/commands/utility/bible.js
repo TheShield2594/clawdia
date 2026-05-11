@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { lookupVerse, getDailyVerse, createVerseEmbed } = require('../../services/bibleService');
+const Guild = require('../../models/Guild');
 
 module.exports = {
     cooldown: 5,
@@ -66,7 +67,16 @@ module.exports = {
                 });
             }
 
-            const embed = createVerseEmbed(verseData, '📖 Daily Bible Verse');
+            const guildSettings = await Guild.findOne({ guildId: interaction.guildId });
+            const translation = guildSettings?.bibleVerse?.translation || 'kjv';
+
+            let displayVerse = verseData;
+            if (translation !== 'kjv' && translation !== 'niv' && verseData.reference) {
+                const translated = await lookupVerse(verseData.reference, translation);
+                if (translated?.text) displayVerse = translated;
+            }
+
+            const embed = createVerseEmbed(displayVerse, '📖 Daily Bible Verse');
             await interaction.editReply({ embeds: [embed] });
         }
     }

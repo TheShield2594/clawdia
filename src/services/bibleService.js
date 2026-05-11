@@ -68,9 +68,12 @@ async function getDailyVerse() {
 }
 
 function createVerseEmbed(verseData, title = '📖 Bible Verse') {
-    const text = (verseData.text || '').trim().replace(/\s+/g, ' ');
+    let text = (verseData.text || '').trim().replace(/\s+/g, ' ');
     const reference = verseData.reference || '';
     const translation = verseData.translation_name || verseData.translation_id?.toUpperCase() || 'KJV';
+
+    // Discord embed description limit is 4096 chars; *"…"* wrapping adds 4
+    if (text.length > 4090) text = text.slice(0, 4087) + '…';
 
     return new EmbedBuilder()
         .setColor(0xF5C518)
