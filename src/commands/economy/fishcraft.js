@@ -155,7 +155,8 @@ module.exports = {
             } else if (recipe.output.type === 'dual_stamina') {
                 const qty = recipe.output.qty ?? 1;
                 f.consumables[recipe.output.id] = (f.consumables[recipe.output.id] ?? 0) + qty;
-                outputDesc = `⚗️ **${qty}× Hunter's Brew** — use with \`/fishuse\` to restore stamina in both systems`;
+                const def = CONSUMABLES[recipe.output.id];
+                outputDesc = `${def?.emoji ?? '⚗️'} **${qty}× ${def?.name ?? recipe.output.id}** — use with \`/fishuse\` to restore stamina in both systems`;
             } else if (recipe.output.type === 'permanent') {
                 if (recipe.output.id === 'luckyHook') {
                     f.luckyHook = true;

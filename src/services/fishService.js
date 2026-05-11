@@ -16,6 +16,7 @@ const {
     FISH_QUEST_TEMPLATES
 } = require('../data/fishData');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
+const { ensureHuntData, getMaxStamina: getHuntMaxStamina } = require('./huntService');
 
 const DAILY_QUEST_COUNT = 3;
 
@@ -432,15 +433,15 @@ function activateConsumable(user, consumableId) {
             return { success: false, error: `You've already used ${LIMITS.ENERGY_DRINKS_PER_DAY} stamina items today.` };
         }
         const max = getMaxStamina(user);
-        if (f.stamina >= max && (user.hunt?.stamina ?? 0) >= 10) {
+        ensureHuntData(user);
+        const huntMax = getHuntMaxStamina(user);
+        if (f.stamina >= max && user.hunt.stamina >= huntMax) {
             return { success: false, error: `Both stamina bars are already full.` };
         }
         f.consumables[consumableId] -= 1;
         f.stamina = Math.min(max, f.stamina + def.staminaRestore);
         f.energyDrinksToday += 1;
-        // Also restore hunt stamina
-        if (!user.hunt) user.hunt = {};
-        user.hunt.stamina = Math.min(10, (user.hunt.stamina ?? 0) + def.staminaRestore);
+        user.hunt.stamina = Math.min(huntMax, user.hunt.stamina + def.staminaRestore);
         user.markModified('hunt');
     } else if (def.type === 'repair') {
         return { success: false, error: `Use repair kits with \`/fishrepair\`.` };

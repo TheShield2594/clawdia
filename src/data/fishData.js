@@ -662,7 +662,7 @@ const FISH_CRAFT_RECIPES = {
             { material: 'feather',      qty: 2, source: 'hunt' },
             { material: 'rare_scale',   qty: 1 }
         ],
-        output: { type: 'dual_stamina', qty: 2 },
+        output: { type: 'dual_stamina', id: 'hunters_brew', qty: 2 },
         unique: false
     }
 };
