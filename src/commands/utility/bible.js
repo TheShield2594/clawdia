@@ -22,7 +22,9 @@ module.exports = {
                             { name: 'American Standard Version (ASV)', value: 'asv' },
                             { name: 'World English Bible (WEB)', value: 'web' },
                             { name: "Young's Literal Translation (YLT)", value: 'ylt' },
-                            { name: 'Darby', value: 'darby' }
+                            { name: 'Darby', value: 'darby' },
+                            { name: 'Bible in Basic English (BBE)', value: 'bbe' },
+                            { name: 'World English Bible British Edition (WEBBE)', value: 'webbe' }
                         )
                 )
         )
