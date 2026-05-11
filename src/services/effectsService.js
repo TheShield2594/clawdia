@@ -8,6 +8,7 @@ const EFFECT_CONFIGS = {
     knife:              { label: 'Knife',              emoji: '🔪',  durationMs: null,            charges: -1 },
     robbery_bag:        { label: 'Robbery Bag',        emoji: '💼',  durationMs: null,            charges: -1 },
     finders_fee:        { label: "Finder's Fee",       emoji: '💸',  durationMs: null,            charges: -1 },
+    streak_shield:      { label: 'Streak Shield',      emoji: '🔥🛡️', durationMs: null,           charges: 1  },
 };
 
 // Maps item names (as stored in inventory) to effect type keys
@@ -21,6 +22,7 @@ const ITEM_TO_EFFECT = {
     'robbery bag':        'robbery_bag',
     "finder's fee":       'finders_fee',
     'finders fee':        'finders_fee',
+    'streak shield':      'streak_shield',
 };
 
 function resolveEffectType(itemName) {

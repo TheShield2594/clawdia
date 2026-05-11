@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 
 const COOLDOWN_MS = 2 * 3_600_000; // 2 hours
 
@@ -61,19 +62,22 @@ module.exports = {
         try {
             const ore = roll();
             const qty = quantity();
-            const earned = ore.payout * qty;
+            const baseEarned = ore.payout * qty;
+            const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
+            const earned = Math.round(baseEarned * streakMult);
 
             user.balance += earned;
             user.lastMine = new Date();
             await user.save();
 
+            const streakLabel = streakMult > 1.0 ? ` *(🔥 ${streakMult}x)*` : '';
             const embed = new EmbedBuilder()
                 .setColor(ore.payout >= 600 ? '#f39c12' : ore.payout >= 200 ? '#2ecc71' : '#7f8c8d')
                 .setTitle(`${ore.emoji} Mining Results`)
                 .setDescription(
                     qty > 1
-                        ? `You struck **${qty}x ${ore.name}** and earned **${currency}${earned.toLocaleString()}**!`
-                        : `You found **${ore.name}** and earned **${currency}${earned.toLocaleString()}**!`
+                        ? `You struck **${qty}x ${ore.name}** and earned **${currency}${earned.toLocaleString()}**!${streakLabel}`
+                        : `You found **${ore.name}** and earned **${currency}${earned.toLocaleString()}**!${streakLabel}`
                 )
                 .addFields(
                     { name: 'Ore', value: `${ore.emoji} ${ore.name} ×${qty}`, inline: true },

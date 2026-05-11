@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
+const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 
 const COOLDOWN_MS      = 4 * 3_600_000; // 4 hours
 const WANTED_MS        = 1 * 3_600_000; // 1 hour wanted cooldown after death
@@ -68,17 +69,20 @@ module.exports = {
         const success = Math.random() < successChance;
         user.lastCrime = new Date();
 
+        const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
         try {
             let embed;
             if (success) {
-                const earned = Math.floor(crime.minPayout + Math.random() * (crime.maxPayout - crime.minPayout));
+                const baseEarned = Math.floor(crime.minPayout + Math.random() * (crime.maxPayout - crime.minPayout));
+                const earned = Math.round(baseEarned * streakMult);
                 user.balance += earned;
                 await user.save();
 
+                const streakLine = streakMult > 1.0 ? `\n> 🔥 *${streakMult}x streak bonus applied!*` : '';
                 embed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .setTitle(`${crime.emoji} Crime Pays — This Time`)
-                    .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.${luckyActive ? '\n> 🍀 *Lucky Charm boosted your success chance!*' : ''}`)
+                    .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.${luckyActive ? '\n> 🍀 *Lucky Charm boosted your success chance!*' : ''}${streakLine}`)
                     .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
                     .setFooter({ text: 'Crimes can be committed every 4 hours' })
                     .setTimestamp();

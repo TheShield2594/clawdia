@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Guild = require('../models/Guild');
+const { getStreakMultiplier } = require('../utils/streakMultiplier');
 
 // difficulty → reward multiplier
 const DIFFICULTY_MULTIPLIERS = { easy: 1, medium: 1.75, hard: 3 };
@@ -149,12 +150,13 @@ async function incrementQuest(user, questId, amount = 1) {
 async function awardQuest(user, questDef, guildSettings) {
     const isDaily = DAILY_QUEST_POOL.some(d => d.questId === questDef.questId);
     const mult = DIFFICULTY_MULTIPLIERS[questDef.difficulty] ?? 1;
+    const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
 
     const baseXp    = isDaily ? (guildSettings?.quests?.dailyXpReward    ?? 50)  : (guildSettings?.quests?.weeklyXpReward    ?? 300);
     const baseCoins = isDaily ? (guildSettings?.quests?.dailyCoinReward   ?? 25)  : (guildSettings?.quests?.weeklyCoinReward  ?? 150);
 
-    const xp    = Math.round(baseXp    * mult);
-    const coins = Math.round(baseCoins * mult);
+    const xp    = Math.round(baseXp    * mult * streakMult);
+    const coins = Math.round(baseCoins * mult * streakMult);
 
     user.xp      += xp;
     user.balance += coins;

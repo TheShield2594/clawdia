@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
+const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -77,7 +78,9 @@ module.exports = {
             const basePay = Math.floor(Math.random() * (maxPay - minPay + 1)) + minPay;
 
             const performance = rollPerformance();
-            const earned = Math.max(1, Math.floor(basePay * performance.multiplier));
+            const basedEarned = Math.max(1, Math.floor(basePay * performance.multiplier));
+            const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
+            const earned = Math.round(basedEarned * streakMult);
 
             const jobLabel = job.emoji ? `${job.emoji} ${job.name}` : job.name;
             const scenario = WORK_SCENARIOS[Math.floor(Math.random() * WORK_SCENARIOS.length)]
@@ -91,12 +94,13 @@ module.exports = {
             const promotedTo = tierInfo.find(t => t.minShifts === user.shiftsWorked);
             const currency = guildSettings?.economy?.currency || '💰';
 
+            const streakLabel = streakMult > 1.0 ? ` *(🔥 ${streakMult}x streak)*` : '';
             const embed = new EmbedBuilder()
                 .setColor(performance.color)
                 .setTitle(`${performance.label} — Work Complete!`)
                 .setDescription(scenario)
                 .addFields(
-                    { name: 'Earned',       value: `${currency} **${earned.toLocaleString()}** coins`, inline: true },
+                    { name: 'Earned',       value: `${currency} **${earned.toLocaleString()}** coins${streakLabel}`, inline: true },
                     { name: 'Performance',  value: performance.label, inline: true },
                     { name: 'Career Tier',  value: `${userTier.name} · ${user.shiftsWorked.toLocaleString()} shifts`, inline: false },
                     {

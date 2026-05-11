@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
+const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -23,6 +24,12 @@ module.exports = {
             // Prune expired effects before displaying
             pruneEffects(user);
 
+            const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
+            const streakDays = user.streak?.current ?? 0;
+            const streakInfo = streakMult > 1.0
+                ? `🔥 ${streakDays}-day streak · **${streakMult}x** coins & XP`
+                : `❄️ ${streakDays}-day streak · 1.0x (7 days for bonus)`;
+
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle(`${targetUser.username}'s Balance`)
@@ -30,7 +37,8 @@ module.exports = {
                 .addFields(
                     { name: '💰 Wallet', value: `${user.balance.toLocaleString()} coins`, inline: true },
                     { name: '🏦 Bank',   value: `${user.bank.toLocaleString()} coins`,    inline: true },
-                    { name: '💎 Total',  value: `${(user.balance + user.bank).toLocaleString()} coins`, inline: true }
+                    { name: '💎 Total',  value: `${(user.balance + user.bank).toLocaleString()} coins`, inline: true },
+                    { name: '⚡ Streak Bonus', value: streakInfo, inline: false }
                 )
                 .setTimestamp();
 

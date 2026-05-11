@@ -40,7 +40,8 @@ const userSchema = new Schema({
     streak: {
         current: { type: Number, default: 0 },
         longest: { type: Number, default: 0 },
-        lastActive: { type: Date, default: null }
+        lastActive: { type: Date, default: null },
+        claimedMilestones: [{ type: Number }]
     },
 
     // Quest progress: each entry tracks one quest instance
