@@ -33,9 +33,10 @@ async function postDailyVerse(client, guildId, channelId, translation) {
         const verseData = await getDailyVerse();
         if (!verseData) return;
 
-        // Re-fetch in the guild's configured translation when it isn't the default KJV
+        // Re-fetch in the guild's configured translation when it isn't KJV or NIV.
+        // NIV is skipped because ourmanna.com already returns NIV text.
         let displayVerse = verseData;
-        if (translation && translation !== 'kjv' && verseData.reference) {
+        if (translation && translation !== 'kjv' && translation !== 'niv' && verseData.reference) {
             const translated = await lookupVerse(verseData.reference, translation);
             if (translated?.text) displayVerse = translated;
         }

@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { lookupVerse, getDailyVerse, createVerseEmbed } = require('../../services/bibleService');
+const Guild = require('../../models/Guild');
 
 module.exports = {
     cooldown: 5,
@@ -19,10 +20,13 @@ module.exports = {
                         .setDescription('Bible translation (default: KJV)')
                         .addChoices(
                             { name: 'King James Version (KJV)', value: 'kjv' },
+                            { name: 'New International Version (NIV)', value: 'niv' },
                             { name: 'American Standard Version (ASV)', value: 'asv' },
                             { name: 'World English Bible (WEB)', value: 'web' },
                             { name: "Young's Literal Translation (YLT)", value: 'ylt' },
-                            { name: 'Darby', value: 'darby' }
+                            { name: 'Darby', value: 'darby' },
+                            { name: 'Bible in Basic English (BBE)', value: 'bbe' },
+                            { name: 'World English Bible British Edition (WEBBE)', value: 'webbe' }
                         )
                 )
         )
@@ -38,6 +42,12 @@ module.exports = {
         if (sub === 'verse') {
             const reference = interaction.options.getString('reference');
             const translation = interaction.options.getString('translation') || 'kjv';
+
+            if (translation === 'niv') {
+                return interaction.editReply({
+                    content: `NIV is not available for on-demand verse lookup (it's a copyrighted translation). Use \`/bible daily\` to see today's verse in NIV, or choose a free translation like KJV, ASV, or WEB.`
+                });
+            }
 
             const verseData = await lookupVerse(reference, translation);
             if (!verseData?.text) {
@@ -57,7 +67,16 @@ module.exports = {
                 });
             }
 
-            const embed = createVerseEmbed(verseData, '📖 Daily Bible Verse');
+            const guildSettings = await Guild.findOne({ guildId: interaction.guildId });
+            const translation = guildSettings?.bibleVerse?.translation || 'kjv';
+
+            let displayVerse = verseData;
+            if (translation !== 'kjv' && translation !== 'niv' && verseData.reference) {
+                const translated = await lookupVerse(verseData.reference, translation);
+                if (translated?.text) displayVerse = translated;
+            }
+
+            const embed = createVerseEmbed(displayVerse, '📖 Daily Bible Verse');
             await interaction.editReply({ embeds: [embed] });
         }
     }

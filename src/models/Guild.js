@@ -486,8 +486,8 @@ const guildSchema = new Schema({
             type: String,
             default: 'kjv',
             enum: {
-                values: ['kjv', 'asv', 'web', 'ylt', 'darby'],
-                message: 'bibleVerse.translation must be one of: kjv, asv, web, ylt, darby'
+                values: ['kjv', 'niv', 'asv', 'web', 'ylt', 'darby', 'bbe', 'webbe'],
+                message: 'bibleVerse.translation must be one of: kjv, niv, asv, web, ylt, darby, bbe, webbe'
             }
         },
         autoRespond: { type: Boolean, default: true }
