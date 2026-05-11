@@ -390,6 +390,16 @@
                         <div><label class="field-label" for="economy-work-min">Work payout (min)</label><input type="text" id="economy-work-min" value="<%= settings.economy.workMin %>"></div>
                         <div><label class="field-label" for="economy-work-max">Work payout (max)</label><input type="text" id="economy-work-max" value="<%= settings.economy.workMax %>"></div>
                     </div>
+                    <div class="field">
+                        <label class="field-label" for="economy-announcement-channel">Announcements channel</label>
+                        <select id="economy-announcement-channel">
+                            <option value="">None (no announcements)</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.economy.announcementChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Channel where shop purchases and economy events are announced</small>
+                    </div>
 
                     <!-- Store -->
                     <div class="eco-section-head">
@@ -1769,6 +1779,7 @@
                     'economy.rollEnabled': document.getElementById('economy-roll-enabled').checked,
                     'economy.blackjackEnabled': document.getElementById('economy-blackjack-enabled').checked,
                     'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked,
+                    'economy.announcementChannelId': document.getElementById('economy-announcement-channel').value || null,
                     shop: storeItems,
                     jobs: jobsList,
                     jobTiers: jobTiersList

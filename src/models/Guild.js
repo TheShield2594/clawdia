@@ -158,7 +158,8 @@ const guildSchema = new Schema({
         duelMaxBet: { type: Number, default: 10000, min: 1 },
         // max: 0.5 ensures winnerPayout >= amount so netGain is never negative
         duelHouseCut: { type: Number, default: 0.05, min: 0, max: 0.5 },
-        betConfirmThreshold: { type: Number, default: 10000, min: 0 }
+        betConfirmThreshold: { type: Number, default: 10000, min: 0 },
+        announcementChannelId: { type: String, default: null }
     },
     
     music: {
