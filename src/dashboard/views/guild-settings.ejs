@@ -1591,7 +1591,7 @@
                             <option value="bbe" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'bbe') ? 'selected' : '' %>>Bible in Basic English (BBE)</option>
                             <option value="webbe" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'webbe') ? 'selected' : '' %>>World English Bible British Edition (WEBBE)</option>
                         </select>
-                        <small>Used for both the daily verse and auto-responses. No API key required.</small>
+                        <small>Used for scheduled daily verses and the <code>/bible daily</code> command. Auto-response lookups also use this translation, except NIV — NIV auto-responses fall back to KJV.</small>
                     </div>
 
                     <div class="actions-row">
