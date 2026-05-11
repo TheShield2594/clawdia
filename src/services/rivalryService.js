@@ -33,50 +33,55 @@ async function getLeaderboard(guildId) {
  */
 async function checkRivalry(client, guild, savedUser) {
     try {
-        const entries = await getLeaderboard(guild.id);
+        const cached = await getLeaderboard(guild.id);
 
-        // Find old rank in the cached list
-        const oldIdx = entries.findIndex(e => e.userId === savedUser.userId);
+        // Capture old rank from the unmodified snapshot
+        const oldIdx = cached.findIndex(e => e.userId === savedUser.userId);
         const oldRank = oldIdx === -1 ? null : oldIdx + 1;
 
-        // Update (or insert) this user's entry in the cache and re-sort
-        if (oldIdx !== -1) {
-            entries[oldIdx] = { userId: savedUser.userId, level: savedUser.level, xp: savedUser.xp };
-        } else {
-            entries.push({ userId: savedUser.userId, level: savedUser.level, xp: savedUser.xp });
+        // Build a new sorted array — never mutate the cached reference so
+        // concurrent calls always see a consistent snapshot
+        const updated = cached.map(e =>
+            e.userId === savedUser.userId
+                ? { userId: savedUser.userId, level: savedUser.level, xp: savedUser.xp }
+                : e
+        );
+        if (oldIdx === -1) {
+            updated.push({ userId: savedUser.userId, level: savedUser.level, xp: savedUser.xp });
         }
-        entries.sort((a, b) => b.level - a.level || b.xp - a.xp);
+        updated.sort((a, b) => b.level - a.level || b.xp - a.xp);
 
-        const newIdx = entries.findIndex(e => e.userId === savedUser.userId);
+        // Replace the cache entry atomically with the fully-built array
+        rankCache.set(guild.id, { entries: updated, updatedAt: Date.now() });
+
+        const newIdx = updated.findIndex(e => e.userId === savedUser.userId);
         const newRank = newIdx + 1;
 
-        // Only care about top 100
         if (newRank > MAX_RANK) return;
-
-        // User must have actually climbed
         if (!oldRank || newRank >= oldRank) return;
 
+        // Number of positions gained — used to derive the overtaken slice
+        const climbCount = oldRank - newRank;
         const now = Date.now();
 
-        // Fetch the climber's Discord user once for DM content
         const climberDiscord = await client.users.fetch(savedUser.userId).catch(() => null);
         const climberTag = climberDiscord?.tag || 'Someone';
 
-        // Notify each overtaken user (slice between newIdx+1 and oldIdx, exclusive)
-        const overtakenSlice = entries.slice(newIdx + 1, oldIdx);
+        // After sorting, overtaken users occupy the climbCount slots directly
+        // below the climber's new position
+        const overtakenSlice = updated.slice(newIdx + 1, newIdx + 1 + climbCount);
         for (const entry of overtakenSlice) {
-            const overtakenIdx = entries.findIndex(e => e.userId === entry.userId);
-            const overtakenRank = overtakenIdx + 1;
-
+            const overtakenRank = updated.findIndex(e => e.userId === entry.userId) + 1;
             if (overtakenRank - newRank > MAX_RANK_DIFF) continue;
 
-            // Fetch preferences + anti-spam timestamp with a targeted projection
             const overtakenDoc = await User.findOne(
                 { userId: entry.userId, guildId: guild.id },
                 { 'notifications.leaderboard.overtaken': 1, 'leaderboard.lastOvertakenNotification': 1 }
             ).lean();
             if (!overtakenDoc) continue;
-            if (overtakenDoc.notifications?.leaderboard?.overtaken === false) continue;
+
+            const overtakenAllowed = overtakenDoc.notifications?.leaderboard?.overtaken ?? true;
+            if (!overtakenAllowed) continue;
 
             const lastNotif = overtakenDoc.leaderboard?.lastOvertakenNotification;
             if (lastNotif && now - new Date(lastNotif).getTime() < NOTIFY_COOLDOWN) continue;
@@ -103,7 +108,9 @@ async function checkRivalry(client, guild, savedUser) {
             { userId: savedUser.userId, guildId: guild.id },
             { 'notifications.leaderboard.climbed': 1, 'leaderboard.lastClimbedNotification': 1 }
         ).lean();
-        if (!selfDoc?.notifications?.leaderboard?.climbed) return;
+
+        const climbedEnabled = selfDoc?.notifications?.leaderboard?.climbed ?? false;
+        if (!climbedEnabled) return;
 
         const lastClimb = selfDoc.leaderboard?.lastClimbedNotification;
         if (lastClimb && now - new Date(lastClimb).getTime() < NOTIFY_COOLDOWN) return;
