@@ -16,6 +16,7 @@ const {
     FISH_QUEST_TEMPLATES
 } = require('../data/fishData');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
+const { ensureHuntData, getMaxStamina: getHuntMaxStamina } = require('./huntService');
 
 const DAILY_QUEST_COUNT = 3;
 
@@ -420,6 +421,28 @@ function activateConsumable(user, consumableId) {
         f.consumables[consumableId] -= 1;
         f.stamina = Math.min(max, f.stamina + def.staminaRestore);
         f.energyDrinksToday += 1;
+    } else if (def.type === 'dual_stamina') {
+        applyStaminaRegen(user);
+        const now = Date.now();
+        const drinkWindowOk = f.lastDrinkDayReset && (now - f.lastDrinkDayReset.getTime() < LIMITS.DAILY_WINDOW_MS);
+        if (!drinkWindowOk) {
+            f.energyDrinksToday = 0;
+            f.lastDrinkDayReset = new Date(now);
+        }
+        if (f.energyDrinksToday >= LIMITS.ENERGY_DRINKS_PER_DAY) {
+            return { success: false, error: `You've already used ${LIMITS.ENERGY_DRINKS_PER_DAY} stamina items today.` };
+        }
+        const max = getMaxStamina(user);
+        ensureHuntData(user);
+        const huntMax = getHuntMaxStamina(user);
+        if (f.stamina >= max && user.hunt.stamina >= huntMax) {
+            return { success: false, error: `Both stamina bars are already full.` };
+        }
+        f.consumables[consumableId] -= 1;
+        f.stamina = Math.min(max, f.stamina + def.staminaRestore);
+        f.energyDrinksToday += 1;
+        user.hunt.stamina = Math.min(huntMax, user.hunt.stamina + def.staminaRestore);
+        user.markModified('hunt');
     } else if (def.type === 'repair') {
         return { success: false, error: `Use repair kits with \`/fishrepair\`.` };
     } else {

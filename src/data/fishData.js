@@ -139,6 +139,12 @@ const CONSUMABLES = {
         cost: 185, type: 'stamina', staminaRestore: 3,
         description: 'Restores 3 stamina (max 2 uses per day)',
         maxStack: 5
+    },
+    hunters_brew: {
+        id: 'hunters_brew', name: "Hunter's Brew", emoji: '⚗️',
+        type: 'dual_stamina', staminaRestore: 2,
+        description: 'Restores 2 stamina in both fishing AND hunting',
+        maxStack: 5
     }
 };
 
@@ -656,7 +662,7 @@ const FISH_CRAFT_RECIPES = {
             { material: 'feather',      qty: 2, source: 'hunt' },
             { material: 'rare_scale',   qty: 1 }
         ],
-        output: { type: 'dual_stamina', qty: 2 },
+        output: { type: 'dual_stamina', id: 'hunters_brew', qty: 2 },
         unique: false
     }
 };
