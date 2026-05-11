@@ -38,7 +38,7 @@ async function logModeration(guildId, action, target, moderator, reason, options
         }
 
         // Persist as a Case record
-        await createCase({
+        const newCase = await createCase({
             guildId,
             type: action,
             targetUserId: target.id,
@@ -47,8 +47,10 @@ async function logModeration(guildId, action, target, moderator, reason, options
             evidence: options.evidence || null,
             duration: options.duration || null
         });
+        return newCase;
     } catch (error) {
         console.error('Logger error:', error);
+        return null;
     }
 }
 
