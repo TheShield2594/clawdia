@@ -128,7 +128,7 @@ async function handleStreakAndQuests(message, guildSettings) {
                 const msAgo = now - lastActive;
                 if (msAgo < 172800000) { // within 48h = streak continues
                     user.streak.current = (user.streak.current || 0) + 1;
-                } else if (hasEffect(user, 'streak_shield')) {
+                } else if (msAgo <= 259200000 && hasEffect(user, 'streak_shield')) { // 48–72h: one missed day, shield applies
                     consumeEffect(user, 'streak_shield');
                     user.streak.current = (user.streak.current || 0) + 1;
                     shieldActivated = true;
@@ -216,8 +216,18 @@ async function handleLeveling(message, guildSettings) {
         }
     }
 
-    // Streak multiplier
-    if (user) xpGain *= getStreakMultiplier(user.streak?.current ?? 0);
+    // Streak multiplier — anticipate today's streak increment so the multiplier
+    // reflects the updated streak even though handleStreakAndQuests runs after this.
+    if (user) {
+        const lastActive = user.streak?.lastActive;
+        const todayUTC = new Date().toISOString().slice(0, 10);
+        let effectiveStreak = user.streak?.current ?? 0;
+        if (lastActive && lastActive.toISOString().slice(0, 10) !== todayUTC) {
+            const msAgo = Date.now() - lastActive.getTime();
+            effectiveStreak = msAgo < 172800000 ? effectiveStreak + 1 : 1;
+        }
+        xpGain *= getStreakMultiplier(effectiveStreak);
+    }
     xpGain = Math.floor(xpGain);
 
     if (user) {
