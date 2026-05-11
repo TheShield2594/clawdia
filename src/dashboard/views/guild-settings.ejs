@@ -60,10 +60,7 @@
                 <!-- Tools & Support -->
                 <div class="nav-section-header">Tools &amp; Support</div>
                 <button class="nav-item" data-tab="commandpolicies"><span class="nav-emoji">⚙️</span> Command Policies</button>
-                <button class="nav-item" data-tab="ai"><span class="nav-emoji">🧠</span> AI Chat</button>
-                <button class="nav-item" data-tab="knowledgebase"><span class="nav-emoji">📚</span> Knowledge Base</button>
-                <button class="nav-item" data-tab="aisummaries"><span class="nav-emoji">📝</span> AI Summaries</button>
-                <button class="nav-item" data-tab="aipersonas"><span class="nav-emoji">👤</span> AI Personas</button>
+                <button class="nav-item" data-tab="ai"><span class="nav-emoji">🧠</span> AI</button>
                 <button class="nav-item" data-tab="tempvoice"><span class="nav-emoji">🔊</span> Temp Voice</button>
                 <button class="nav-item" data-tab="tickets"><span class="nav-emoji">🎫</span> Tickets</button>
 
@@ -1340,192 +1337,197 @@
                 <!-- AI -->
                 <section id="ai" class="panel">
                     <div class="panel-head">
-                        <h2>AI Chat</h2>
-                        <p>Connect OpenAI, Gemini, Anthropic Claude, OpenRouter, or a self-hosted Ollama instance for chat in a designated channel.</p>
+                        <h2>AI</h2>
+                        <p>Configure AI chat, knowledge base, summaries, and per-channel personas for your server.</p>
                     </div>
-                    <label class="toggle">
-                        <span class="toggle-text"><strong>Enable AI chat</strong><span>Respond to messages in the AI channel</span></span>
-                        <span class="switch"><input type="checkbox" id="ai-enabled" <%= settings.ai.enabled ? 'checked' : '' %>><span class="slider"></span></span>
-                    </label>
-                    <div class="field">
-                        <label class="field-label" for="ai-provider">Provider</label>
-                        <select id="ai-provider" onchange="updateAiProviderUI()">
-                            <option value="openai" <%= settings.ai.provider === 'openai' || !settings.ai.provider ? 'selected' : '' %>>OpenAI</option>
-                            <option value="anthropic" <%= settings.ai.provider === 'anthropic' ? 'selected' : '' %>>Anthropic (Claude)</option>
-                            <option value="gemini" <%= settings.ai.provider === 'gemini' ? 'selected' : '' %>>Google Gemini</option>
-                            <option value="openrouter" <%= settings.ai.provider === 'openrouter' ? 'selected' : '' %>>OpenRouter</option>
-                            <option value="ollama" <%= settings.ai.provider === 'ollama' ? 'selected' : '' %>>Ollama (self-hosted)</option>
-                        </select>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="ai-model">Model</label>
-                        <input type="text" id="ai-model" value="<%= settings.ai.model || '' %>" placeholder="Leave empty for provider default">
-                        <small id="ai-model-hint">Default: gpt-4o-mini</small>
-                    </div>
-                    <div class="field ai-key-field" data-provider="openai">
-                        <label class="field-label" for="ai-openai-key">OpenAI API key</label>
-                        <input type="password" id="ai-openai-key" value="<%= settings.ai.openaiKey || '' %>" placeholder="sk-…">
-                        <small>Leave empty to use the bot's default key</small>
-                    </div>
-                    <div class="field ai-key-field" data-provider="anthropic">
-                        <label class="field-label" for="ai-anthropic-key">Anthropic API key</label>
-                        <input type="password" id="ai-anthropic-key" value="<%= settings.ai.anthropicKey || '' %>" placeholder="sk-ant-…">
-                        <small>Leave empty to use the bot's default key</small>
-                    </div>
-                    <div class="field ai-key-field" data-provider="gemini">
-                        <label class="field-label" for="ai-gemini-key">Gemini API key</label>
-                        <input type="password" id="ai-gemini-key" value="<%= settings.ai.geminiKey || '' %>" placeholder="AIza…">
-                        <small>Leave empty to use the bot's default key</small>
-                    </div>
-                    <div class="field ai-key-field" data-provider="openrouter">
-                        <label class="field-label" for="ai-openrouter-key">OpenRouter API key</label>
-                        <input type="password" id="ai-openrouter-key" value="<%= settings.ai.openrouterKey || '' %>" placeholder="sk-or-…">
-                        <small>Get a key at openrouter.ai. Use any model OpenRouter supports (e.g. <code>anthropic/claude-3.5-sonnet</code>).</small>
-                    </div>
-                    <div class="field ai-key-field" data-provider="ollama">
-                        <label class="field-label" for="ai-ollama-url">Ollama base URL</label>
-                        <input type="text" id="ai-ollama-url" value="<%= settings.ai.ollamaBaseUrl || 'http://localhost:11434' %>" placeholder="http://localhost:11434">
-                        <small>Point this at the host running <code>ollama serve</code>. Set the model field above to a tag you've pulled (e.g. <code>llama3.2</code>).</small>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="ai-channel">AI chat channel</label>
-                        <select id="ai-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.ai.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="ai-prompt">System prompt</label>
-                        <textarea id="ai-prompt" rows="3"><%= settings.ai.systemPrompt %></textarea>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="ai-temperature">Temperature (<span id="ai-temp-display"><%= settings.ai.temperature ?? 0.7 %></span>)</label>
-                        <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="<%= settings.ai.temperature ?? 0.7 %>" oninput="document.getElementById('ai-temp-display').textContent = this.value">
-                    </div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                        <div><label class="field-label" for="ai-max-tokens">Max output tokens</label><input type="number" id="ai-max-tokens" min="32" max="8192" value="<%= settings.ai.maxTokens ?? 1024 %>"></div>
-                        <div><label class="field-label" for="ai-max-history">Conversation history length</label><input type="number" id="ai-max-history" min="0" max="100" value="<%= settings.ai.maxHistory ?? 20 %>"><small>0 disables history</small></div>
-                    </div>
-                    <label class="toggle">
-                        <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates</span></span>
-                        <span class="switch"><input type="checkbox" id="ai-streaming" <%= settings.ai.streaming !== false ? 'checked' : '' %>><span class="slider"></span></span>
-                    </label>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                        <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables</small></div>
-                        <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
-                    </div>
-                    <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('ai')">Save changes</button>
-                    </div>
-                </section>
 
-                <section id="knowledgebase" class="panel">
-                    <div class="panel-head">
-                        <h2>Knowledge Base</h2>
-                        <p>Add context entries that the AI references when answering in this server. Changes take effect immediately — no commands needed.</p>
+                    <!-- Inner AI tabs -->
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab active" data-ai-tab="ai-chat">🧠 Chat</button>
+                        <button class="ai-inner-tab" data-ai-tab="ai-knowledgebase">📚 Knowledge Base</button>
+                        <button class="ai-inner-tab" data-ai-tab="ai-summaries">📝 Summaries</button>
+                        <button class="ai-inner-tab" data-ai-tab="ai-personas">👤 Personas</button>
                     </div>
-                    <div id="kb-list" style="margin-bottom:1.5rem;">
-                        <div class="empty-state" style="padding:2rem 1.5rem;">
-                            <p>Loading entries…</p>
-                        </div>
-                    </div>
-                    <div class="panel-head" style="margin-top:1rem"><h3>Add entry</h3></div>
-                    <div class="field">
-                        <label class="field-label" for="kb-title">Title</label>
-                        <input type="text" id="kb-title" placeholder="e.g. Server Rules">
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="kb-content">Content</label>
-                        <textarea id="kb-content" rows="5" placeholder="The information the AI should know…"></textarea>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="kb-tags">Tags <small style="font-weight:normal;opacity:.7;">(comma-separated, optional)</small></label>
-                        <input type="text" id="kb-tags" placeholder="rules, faq, moderation">
-                    </div>
-                    <div class="actions-row">
-                        <button class="btn btn-primary" onclick="addKbEntry()">Add entry</button>
-                    </div>
-                </section>
 
-                <!-- AI Summaries -->
-                <section id="aisummaries" class="panel">
-                    <div class="panel-head">
-                        <h2>AI Summaries</h2>
-                        <p>Schedule automatic AI-generated summaries of channel activity. The bot fetches recent messages and posts a digest to a target channel at the specified UTC time each day.</p>
-                    </div>
-                    <div id="summary-jobs-list" style="margin-bottom:1.5rem;">
-                        <div class="empty-state" style="padding:2rem 1.5rem;">
-                            <p>Loading summary jobs…</p>
+                    <!-- Chat -->
+                    <div id="ai-chat" class="ai-inner-panel active">
+                        <p class="ai-inner-desc">Connect OpenAI, Gemini, Anthropic Claude, OpenRouter, or a self-hosted Ollama instance for chat in a designated channel.</p>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable AI chat</strong><span>Respond to messages in the AI channel</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-enabled" <%= settings.ai.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field">
+                            <label class="field-label" for="ai-provider">Provider</label>
+                            <select id="ai-provider" onchange="updateAiProviderUI()">
+                                <option value="openai" <%= settings.ai.provider === 'openai' || !settings.ai.provider ? 'selected' : '' %>>OpenAI</option>
+                                <option value="anthropic" <%= settings.ai.provider === 'anthropic' ? 'selected' : '' %>>Anthropic (Claude)</option>
+                                <option value="gemini" <%= settings.ai.provider === 'gemini' ? 'selected' : '' %>>Google Gemini</option>
+                                <option value="openrouter" <%= settings.ai.provider === 'openrouter' ? 'selected' : '' %>>OpenRouter</option>
+                                <option value="ollama" <%= settings.ai.provider === 'ollama' ? 'selected' : '' %>>Ollama (self-hosted)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="ai-model">Model</label>
+                            <input type="text" id="ai-model" value="<%= settings.ai.model || '' %>" placeholder="Leave empty for provider default">
+                            <small id="ai-model-hint">Default: gpt-4o-mini</small>
+                        </div>
+                        <div class="field ai-key-field" data-provider="openai">
+                            <label class="field-label" for="ai-openai-key">OpenAI API key</label>
+                            <input type="password" id="ai-openai-key" value="<%= settings.ai.openaiKey || '' %>" placeholder="sk-…">
+                            <small>Leave empty to use the bot's default key</small>
+                        </div>
+                        <div class="field ai-key-field" data-provider="anthropic">
+                            <label class="field-label" for="ai-anthropic-key">Anthropic API key</label>
+                            <input type="password" id="ai-anthropic-key" value="<%= settings.ai.anthropicKey || '' %>" placeholder="sk-ant-…">
+                            <small>Leave empty to use the bot's default key</small>
+                        </div>
+                        <div class="field ai-key-field" data-provider="gemini">
+                            <label class="field-label" for="ai-gemini-key">Gemini API key</label>
+                            <input type="password" id="ai-gemini-key" value="<%= settings.ai.geminiKey || '' %>" placeholder="AIza…">
+                            <small>Leave empty to use the bot's default key</small>
+                        </div>
+                        <div class="field ai-key-field" data-provider="openrouter">
+                            <label class="field-label" for="ai-openrouter-key">OpenRouter API key</label>
+                            <input type="password" id="ai-openrouter-key" value="<%= settings.ai.openrouterKey || '' %>" placeholder="sk-or-…">
+                            <small>Get a key at openrouter.ai. Use any model OpenRouter supports (e.g. <code>anthropic/claude-3.5-sonnet</code>).</small>
+                        </div>
+                        <div class="field ai-key-field" data-provider="ollama">
+                            <label class="field-label" for="ai-ollama-url">Ollama base URL</label>
+                            <input type="text" id="ai-ollama-url" value="<%= settings.ai.ollamaBaseUrl || 'http://localhost:11434' %>" placeholder="http://localhost:11434">
+                            <small>Point this at the host running <code>ollama serve</code>. Set the model field above to a tag you've pulled (e.g. <code>llama3.2</code>).</small>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="ai-channel">AI chat channel</label>
+                            <select id="ai-channel">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>" <%= settings.ai.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="ai-prompt">System prompt</label>
+                            <textarea id="ai-prompt" rows="3"><%= settings.ai.systemPrompt %></textarea>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="ai-temperature">Temperature (<span id="ai-temp-display"><%= settings.ai.temperature ?? 0.7 %></span>)</label>
+                            <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="<%= settings.ai.temperature ?? 0.7 %>" oninput="document.getElementById('ai-temp-display').textContent = this.value">
+                        </div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div><label class="field-label" for="ai-max-tokens">Max output tokens</label><input type="number" id="ai-max-tokens" min="32" max="8192" value="<%= settings.ai.maxTokens ?? 1024 %>"></div>
+                            <div><label class="field-label" for="ai-max-history">Conversation history length</label><input type="number" id="ai-max-history" min="0" max="100" value="<%= settings.ai.maxHistory ?? 20 %>"><small>0 disables history</small></div>
+                        </div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-streaming" <%= settings.ai.streaming !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables</small></div>
+                            <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('ai')">Save changes</button>
                         </div>
                     </div>
-                    <div class="panel-head" style="margin-top:1rem"><h3>Add summary job</h3></div>
-                    <div class="field">
-                        <label class="field-label" for="summary-source">Source channel (channel to summarize)</label>
-                        <select id="summary-source">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>">#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="summary-target">Target channel (where the summary is posted)</label>
-                        <select id="summary-target">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>">#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
-                    </div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                        <div>
-                            <label class="field-label" for="summary-hour">UTC hour (0–23)</label>
-                            <input type="number" id="summary-hour" min="0" max="23" value="9">
-                        </div>
-                        <div>
-                            <label class="field-label" for="summary-minute">UTC minute (0–59)</label>
-                            <input type="number" id="summary-minute" min="0" max="59" value="0">
-                        </div>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="summary-label">Label <small style="font-weight:normal;opacity:.7;">(optional)</small></label>
-                        <input type="text" id="summary-label" placeholder="e.g. Daily Summary of #general">
-                        <small>Defaults to "Daily Summary of #channel" if left empty.</small>
-                    </div>
-                    <div class="actions-row">
-                        <button class="btn btn-primary" onclick="addSummaryJob()">Add summary job</button>
-                    </div>
-                </section>
 
-                <!-- AI Personas -->
-                <section id="aipersonas" class="panel">
-                    <div class="panel-head">
-                        <h2>AI Personas</h2>
-                        <p>Assign a custom AI persona to specific channels. When the bot is active in a channel with a persona, it uses that persona's system prompt instead of the server-wide default.</p>
+                    <!-- Knowledge Base -->
+                    <div id="ai-knowledgebase" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Add context entries that the AI references when answering in this server. Changes take effect immediately — no commands needed.</p>
+                        <div id="kb-list" style="margin-bottom:1.5rem;">
+                            <div class="empty-state" style="padding:2rem 1.5rem;">
+                                <p>Loading entries…</p>
+                            </div>
+                        </div>
+                        <div class="panel-head" style="margin-top:1rem"><h3>Add entry</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="kb-title">Title</label>
+                            <input type="text" id="kb-title" placeholder="e.g. Server Rules">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="kb-content">Content</label>
+                            <textarea id="kb-content" rows="5" placeholder="The information the AI should know…"></textarea>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="kb-tags">Tags <small style="font-weight:normal;opacity:.7;">(comma-separated, optional)</small></label>
+                            <input type="text" id="kb-tags" placeholder="rules, faq, moderation">
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="addKbEntry()">Add entry</button>
+                        </div>
                     </div>
-                    <div id="personas-list" style="margin-bottom:1.5rem;"></div>
-                    <div class="panel-head" style="margin-top:1rem"><h3>Add / update persona</h3></div>
-                    <div class="field">
-                        <label class="field-label" for="persona-channel">Channel</label>
-                        <select id="persona-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>">#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+
+                    <!-- Summaries -->
+                    <div id="ai-summaries" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Schedule automatic AI-generated summaries of channel activity. The bot fetches recent messages and posts a digest to a target channel at the specified UTC time each day.</p>
+                        <div id="summary-jobs-list" style="margin-bottom:1.5rem;">
+                            <div class="empty-state" style="padding:2rem 1.5rem;">
+                                <p>Loading summary jobs…</p>
+                            </div>
+                        </div>
+                        <div class="panel-head" style="margin-top:1rem"><h3>Add summary job</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="summary-source">Source channel (channel to summarize)</label>
+                            <select id="summary-source">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="summary-target">Target channel (where the summary is posted)</label>
+                            <select id="summary-target">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div>
+                                <label class="field-label" for="summary-hour">UTC hour (0–23)</label>
+                                <input type="number" id="summary-hour" min="0" max="23" value="9">
+                            </div>
+                            <div>
+                                <label class="field-label" for="summary-minute">UTC minute (0–59)</label>
+                                <input type="number" id="summary-minute" min="0" max="59" value="0">
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="summary-label">Label <small style="font-weight:normal;opacity:.7;">(optional)</small></label>
+                            <input type="text" id="summary-label" placeholder="e.g. Daily Summary of #general">
+                            <small>Defaults to "Daily Summary of #channel" if left empty.</small>
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="addSummaryJob()">Add summary job</button>
+                        </div>
                     </div>
-                    <div class="field">
-                        <label class="field-label" for="persona-name">Persona name</label>
-                        <input type="text" id="persona-name" placeholder="e.g. Support Bot">
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="persona-prompt">System prompt</label>
-                        <textarea id="persona-prompt" rows="4" placeholder="You are a helpful support assistant…"></textarea>
-                    </div>
-                    <div class="actions-row">
-                        <button class="btn btn-primary" onclick="addPersona()">Save persona</button>
+
+                    <!-- Personas -->
+                    <div id="ai-personas" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Assign a custom AI persona to specific channels. When the bot is active in a channel with a persona, it uses that persona's system prompt instead of the server-wide default.</p>
+                        <div id="personas-list" style="margin-bottom:1.5rem;"></div>
+                        <div class="panel-head" style="margin-top:1rem"><h3>Add / update persona</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="persona-channel">Channel</label>
+                            <select id="persona-channel">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="persona-name">Persona name</label>
+                            <input type="text" id="persona-name" placeholder="e.g. Support Bot">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="persona-prompt">System prompt</label>
+                            <textarea id="persona-prompt" rows="4" placeholder="You are a helpful support assistant…"></textarea>
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="addPersona()">Save persona</button>
+                        </div>
                     </div>
                 </section>
 
@@ -1614,15 +1616,37 @@
                 item.classList.add('active');
                 document.getElementById(tab).classList.add('active');
                 if (tab === 'analytics') loadAnalytics();
-                if (tab === 'knowledgebase') loadKnowledgeBase();
-                if (tab === 'aisummaries') loadSummaryJobs();
-                if (tab === 'aipersonas') renderPersonas();
                 if (history.replaceState) history.replaceState(null, '', '#' + tab);
             });
         });
+
+        // AI inner tab navigation
+        function switchAiInnerTab(tabId) {
+            document.querySelectorAll('.ai-inner-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.ai-inner-panel').forEach(p => p.classList.remove('active'));
+            const btn = document.querySelector(`.ai-inner-tab[data-ai-tab="${tabId}"]`);
+            const panel = document.getElementById(tabId);
+            if (btn) btn.classList.add('active');
+            if (panel) panel.classList.add('active');
+            if (tabId === 'ai-knowledgebase') loadKnowledgeBase();
+            if (tabId === 'ai-summaries') loadSummaryJobs();
+            if (tabId === 'ai-personas') renderPersonas();
+        }
+        document.querySelectorAll('.ai-inner-tab').forEach(tab => {
+            tab.addEventListener('click', () => switchAiInnerTab(tab.dataset.aiTab));
+        });
+
         if (location.hash) {
-            const target = document.querySelector(`.nav-item[data-tab="${location.hash.slice(1)}"]`);
-            if (target) target.click();
+            const hash = location.hash.slice(1);
+            const aiInnerMap = { knowledgebase: 'ai-knowledgebase', aisummaries: 'ai-summaries', aipersonas: 'ai-personas' };
+            if (aiInnerMap[hash]) {
+                const aiNav = document.querySelector('.nav-item[data-tab="ai"]');
+                if (aiNav) aiNav.click();
+                switchAiInnerTab(aiInnerMap[hash]);
+            } else {
+                const target = document.querySelector(`.nav-item[data-tab="${hash}"]`);
+                if (target) target.click();
+            }
         }
 
         // Toast helper
