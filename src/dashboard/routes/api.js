@@ -829,6 +829,13 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
         const guildSettings = await Guild.findOne({ guildId });
         if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
 
+        const trimmedId = achievementId.trim();
+        const validAchievement = (guildSettings.achievements?.customAchievements || [])
+            .find(a => a.id === trimmedId);
+        if (!validAchievement) {
+            return res.status(404).json({ error: 'Achievement not found in this server\'s custom achievements' });
+        }
+
         const User = require('../../models/User');
         const { grantCustomAchievement } = require('../../services/achievementService');
 
@@ -837,7 +844,7 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
             user = await User.create({ userId: userId.trim(), guildId });
         }
 
-        const granted = await grantCustomAchievement(user, achievementId.trim());
+        const granted = await grantCustomAchievement(user, trimmedId);
         user.markModified('achievements');
         await user.save();
 

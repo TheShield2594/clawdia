@@ -2478,9 +2478,9 @@
         });
 
         // ── Achievements ───────────────────────────────────────────────────────────
-        var _BUILTIN_ACHS = <%- JSON.stringify(builtinAchievements || []) %>;
-        var _disabledAchievements = <%- JSON.stringify(settings.achievements?.disabledAchievements || []) %>;
-        var _customAchievements   = <%- JSON.stringify(settings.achievements?.customAchievements || []) %>;
+        var _BUILTIN_ACHS = <%- JSON.stringify(builtinAchievements || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        var _disabledAchievements = <%- JSON.stringify(settings.achievements?.disabledAchievements || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        var _customAchievements   = <%- JSON.stringify(settings.achievements?.customAchievements || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
         var _editingAchIdx = -1;
 
         var ACH_CAT_LABELS = { economy:'Economy', leveling:'Leveling', hunt:'Hunt', fishing:'Fishing', community:'Community', moderation:'Moderation', custom:'Custom' };

@@ -12,7 +12,7 @@ const { ACHIEVEMENTS } = require('../data/achievements');
  * @param {object} member         - GuildMember for the user (optional, used for DMs / name display)
  * @returns {Array} newly earned achievement definitions (built-in + custom)
  */
-async function checkAndAward(user, guildSettings, client, member) {
+async function checkAndAward(user, guildSettings) {
     if (!guildSettings?.achievements?.enabled) return [];
 
     const disabled = new Set(guildSettings.achievements?.disabledAchievements || []);
@@ -40,11 +40,7 @@ async function checkAndAward(user, guildSettings, client, member) {
         newlyEarned.push(def);
     }
 
-    // ── Announce ──────────────────────────────────────────────────────────
-    if (newlyEarned.length && client) {
-        await announceAchievements(client, guildSettings, user, member, newlyEarned).catch(() => null);
-    }
-
+    // Announcement is deferred — callers must call announceAchievements after user.save()
     return newlyEarned;
 }
 

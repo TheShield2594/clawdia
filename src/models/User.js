@@ -325,6 +325,12 @@ userSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 
 userSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
+
+    const ids = (this.achievements || []).map(a => a.id);
+    if (new Set(ids).size !== ids.length) {
+        return next(new Error('User achievements contains duplicate id values'));
+    }
+
     next();
 });
 

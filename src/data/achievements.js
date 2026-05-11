@@ -241,13 +241,12 @@ const ACHIEVEMENTS = [
         xpReward: 150,
         coinReward: 500,
         check: (user) => {
-            if (user.warnings > 0 && !user.lastWarnedAt) return false;
-            if (!user.lastWarnedAt) return true;
+            if (!user.lastWarnedAt) return false;
             const daysSince = (Date.now() - new Date(user.lastWarnedAt).getTime()) / 864e5;
             return daysSince >= 30;
         },
         progress: (user) => {
-            if (!user.lastWarnedAt) return [30, 30];
+            if (!user.lastWarnedAt) return [0, 30];
             const daysSince = Math.min(Math.floor((Date.now() - new Date(user.lastWarnedAt).getTime()) / 864e5), 30);
             return [daysSince, 30];
         }

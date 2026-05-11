@@ -39,11 +39,15 @@ module.exports = {
                 const triggeringCase = await logModeration(interaction.guild.id, 'warn', user, interaction.user, reason);
 
                 // Track last warning date for Clean Record achievement
-                await User.findOneAndUpdate(
-                    { userId: user.id, guildId: interaction.guild.id },
-                    { $set: { lastWarnedAt: new Date() } },
-                    { upsert: true }
-                ).catch(() => null);
+                try {
+                    await User.findOneAndUpdate(
+                        { userId: user.id, guildId: interaction.guild.id },
+                        { $set: { lastWarnedAt: new Date() } },
+                        { upsert: true }
+                    );
+                } catch (updateErr) {
+                    console.error(`[warn] Failed to set lastWarnedAt for user ${user.id} in guild ${interaction.guild.id}:`, updateErr);
+                }
 
                 const warningCount = await Case.countDocuments({
                     guildId: interaction.guild.id,

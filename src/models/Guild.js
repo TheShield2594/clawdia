@@ -503,8 +503,8 @@ const guildSchema = new Schema({
             description: { type: String, default: '' },
             emoji:       { type: String, default: '🏆' },
             category:    { type: String, default: 'custom' },
-            xpReward:    { type: Number, default: 0 },
-            coinReward:  { type: Number, default: 0 }
+            xpReward:    { type: Number, default: 0, min: 0 },
+            coinReward:  { type: Number, default: 0, min: 0 }
         }]
     },
 
