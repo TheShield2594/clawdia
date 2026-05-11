@@ -6,6 +6,7 @@ const { logModeration } = require('../utils/logger');
 const { ensureQuests, onMessage, notifyQuestComplete } = require('../services/questService');
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
 const { hasEffect, consumeEffect } = require('../services/effectsService');
+const { checkRivalry } = require('../services/rivalryService');
 
 const BASE_BAD_WORDS = [
     'nigger', 'nigga', 'faggot', 'fag', 'retard', 'chink', 'spic', 'kike',
@@ -262,6 +263,7 @@ async function handleLeveling(message, guildSettings) {
         }
 
         await user.save();
+        checkRivalry(message.client, message.guild, user).catch(() => {});
     } else {
         await User.create({
             userId: message.author.id,

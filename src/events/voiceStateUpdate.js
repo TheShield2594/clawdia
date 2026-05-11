@@ -1,6 +1,7 @@
 const { handleVoiceStateUpdate } = require('../services/tempVoiceService');
 const Guild = require('../models/Guild');
 const User = require('../models/User');
+const { checkRivalry } = require('../services/rivalryService');
 
 // userId -> joinTimestamp (ms)
 const voiceJoinTimes = new Map();
@@ -9,11 +10,11 @@ module.exports = {
     name: 'voiceStateUpdate',
     async execute(oldState, newState, client) {
         await handleVoiceStateUpdate(oldState, newState, client);
-        await handleVoiceXp(oldState, newState);
+        await handleVoiceXp(oldState, newState, client);
     }
 };
 
-async function handleVoiceXp(oldState, newState) {
+async function handleVoiceXp(oldState, newState, client) {
     const member = newState.member || oldState.member;
     if (!member || member.user.bot) return;
 
@@ -77,6 +78,7 @@ async function handleVoiceXp(oldState, newState) {
         }
 
         await user.save();
+        if (guild) checkRivalry(client, guild, user).catch(() => {});
     } catch (err) {
         console.error('Voice XP error:', err);
     }

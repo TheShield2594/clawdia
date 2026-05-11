@@ -288,6 +288,20 @@ const userSchema = new Schema({
         charges:   { type: Number, default: -1 }
     }],
 
+    // Per-user notification preferences
+    notifications: {
+        leaderboard: {
+            overtaken: { type: Boolean, default: true },  // DM when someone passes you
+            climbed:   { type: Boolean, default: false }  // DM when you hit a major rank threshold
+        }
+    },
+
+    // Leaderboard rivalry anti-spam timestamps
+    leaderboard: {
+        lastOvertakenNotification: { type: Date, default: null },
+        lastClimbedNotification:   { type: Date, default: null }
+    },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });
