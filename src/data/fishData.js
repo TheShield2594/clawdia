@@ -139,6 +139,12 @@ const CONSUMABLES = {
         cost: 185, type: 'stamina', staminaRestore: 3,
         description: 'Restores 3 stamina (max 2 uses per day)',
         maxStack: 5
+    },
+    hunters_brew: {
+        id: 'hunters_brew', name: "Hunter's Brew", emoji: '⚗️',
+        type: 'dual_stamina', staminaRestore: 2,
+        description: 'Restores 2 stamina in both fishing AND hunting',
+        maxStack: 5
     }
 };
 

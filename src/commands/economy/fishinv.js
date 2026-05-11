@@ -192,7 +192,7 @@ async function showMaterials(interaction, user) {
         embed.addFields({ name: 'Hunt Materials (cross-system)', value: huntMatLines.join('\n'), inline: false });
     }
 
-    embed.setFooter({ text: 'Materials are used in crafting recipes. /fishcraft (coming soon)' });
+    embed.setFooter({ text: 'Materials are used in crafting recipes. Use /fishcraft list to see what you can make.' });
     embed.setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
