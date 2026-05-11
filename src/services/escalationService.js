@@ -6,6 +6,13 @@ const { createCase } = require('./caseService');
 
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 
+const ACTION_PAST_TENSE = {
+    mute:    'muted',
+    kick:    'kicked',
+    ban:     'banned',
+    tempban: 'temporarily banned'
+};
+
 function findStepForCount(ladder, count) {
     if (!Array.isArray(ladder) || ladder.length === 0) return null;
     return ladder.find(step => step.threshold === count) || null;
@@ -43,8 +50,10 @@ async function applyEscalation({ guild, targetUser, warningCount, triggeringCase
     let durationMs = step.durationMinutes ? step.durationMinutes * 60 * 1000 : null;
 
     if (step.dmUser) {
+        const actionPast = ACTION_PAST_TENSE[step.action] || step.action;
+        const durationSuffix = durationMs ? ` for ${step.durationMinutes} minute(s)` : '';
         await targetUser.send(
-            `You have been auto-${step.action}${durationMs ? `ed for ${step.durationMinutes} minute(s)` : (step.action.endsWith('e') ? 'd' : 'ed')} in **${guild.name}**: ${reason}`
+            `You have been auto-${actionPast}${durationSuffix} in **${guild.name}**: ${reason}`
         ).catch(() => {});
     }
 
@@ -61,6 +70,7 @@ async function applyEscalation({ guild, targetUser, warningCount, triggeringCase
             }
             await member.kick(reason);
         } else if (step.action === 'ban') {
+            // member may be null if the user already left — Discord allows ban-by-ID.
             if (member && !member.bannable) {
                 return { skipped: true, reason: 'Member not bannable.', step };
             }
@@ -121,7 +131,7 @@ async function applyEscalation({ guild, targetUser, warningCount, triggeringCase
     return { applied: true, step, actionTaken, autoCase: newCase };
 }
 
-async function countActiveWarnings(guildId, userId) {
+async function countWarnings(guildId, userId) {
     return Case.countDocuments({ guildId, targetUserId: userId, type: 'warn' });
 }
 
@@ -129,6 +139,6 @@ module.exports = {
     applyEscalation,
     simulate,
     findStepForCount,
-    countActiveWarnings,
+    countWarnings,
     formatReason
 };
