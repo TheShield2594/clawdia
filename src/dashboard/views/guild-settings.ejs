@@ -1583,6 +1583,7 @@
                         <label class="field-label" for="bv-translation">Default translation</label>
                         <select id="bv-translation">
                             <option value="kjv" <%= (!settings.bibleVerse || settings.bibleVerse.translation === 'kjv') ? 'selected' : '' %>>King James Version (KJV)</option>
+                            <option value="niv" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'niv') ? 'selected' : '' %>>New International Version (NIV)</option>
                             <option value="asv" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'asv') ? 'selected' : '' %>>American Standard Version (ASV)</option>
                             <option value="web" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'web') ? 'selected' : '' %>>World English Bible (WEB)</option>
                             <option value="ylt" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'ylt') ? 'selected' : '' %>>Young's Literal Translation (YLT)</option>

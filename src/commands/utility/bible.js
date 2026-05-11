@@ -19,6 +19,7 @@ module.exports = {
                         .setDescription('Bible translation (default: KJV)')
                         .addChoices(
                             { name: 'King James Version (KJV)', value: 'kjv' },
+                            { name: 'New International Version (NIV)', value: 'niv' },
                             { name: 'American Standard Version (ASV)', value: 'asv' },
                             { name: 'World English Bible (WEB)', value: 'web' },
                             { name: "Young's Literal Translation (YLT)", value: 'ylt' },
@@ -40,6 +41,12 @@ module.exports = {
         if (sub === 'verse') {
             const reference = interaction.options.getString('reference');
             const translation = interaction.options.getString('translation') || 'kjv';
+
+            if (translation === 'niv') {
+                return interaction.editReply({
+                    content: `NIV is not available for on-demand verse lookup (it's a copyrighted translation). Use \`/bible daily\` to see today's verse in NIV, or choose a free translation like KJV, ASV, or WEB.`
+                });
+            }
 
             const verseData = await lookupVerse(reference, translation);
             if (!verseData?.text) {
