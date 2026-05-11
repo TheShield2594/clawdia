@@ -3,6 +3,7 @@ const Case = require('../../models/Case');
 const { logModeration } = require('../../utils/logger');
 const { applyEscalation, findStepForCount } = require('../../services/escalationService');
 const Guild = require('../../models/Guild');
+const User = require('../../models/User');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -36,6 +37,17 @@ module.exports = {
 
             try {
                 const triggeringCase = await logModeration(interaction.guild.id, 'warn', user, interaction.user, reason);
+
+                // Track last warning date for Clean Record achievement
+                try {
+                    await User.findOneAndUpdate(
+                        { userId: user.id, guildId: interaction.guild.id },
+                        { $set: { lastWarnedAt: new Date() } },
+                        { upsert: true }
+                    );
+                } catch (updateErr) {
+                    console.error(`[warn] Failed to set lastWarnedAt for user ${user.id} in guild ${interaction.guild.id}:`, updateErr);
+                }
 
                 const warningCount = await Case.countDocuments({
                     guildId: interaction.guild.id,

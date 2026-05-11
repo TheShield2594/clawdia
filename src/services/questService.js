@@ -160,6 +160,7 @@ async function awardQuest(user, questDef, guildSettings) {
 
     user.xp      += xp;
     user.balance += coins;
+    user.questsCompleted = (user.questsCompleted || 0) + 1;
     await awardSeasonXp(user, xp, guildSettings);
     return { xp, coins, def: questDef };
 }

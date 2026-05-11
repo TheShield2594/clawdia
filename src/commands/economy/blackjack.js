@@ -119,6 +119,7 @@ module.exports = {
 
         // Deduct bet upfront
         user.balance -= bet;
+        user.lifetimeGambled = (user.lifetimeGambled || 0) + bet;
         await user.save();
 
         const deck       = buildDeck();

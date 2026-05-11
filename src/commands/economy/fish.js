@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { LOCATIONS, LOCATION_LIST, TIER_COLORS, LIMITS, ROD_BY_TIER } = require('../../data/fishData');
+const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const {
     ensureFishingData,
     applyStaminaRegen,
@@ -143,8 +144,13 @@ module.exports = {
         const result = executeCast(user, locationId);
         updateFishQuestProgress(user, result, locationId);
 
+        const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
+
         try {
             await user.save();
+            if (fishAchievements.length) {
+                announceAchievements(interaction.client, guildSettings, user, interaction.member, fishAchievements).catch(() => null);
+            }
         } catch (err) {
             if (err.name === 'VersionError') {
                 return interaction.editReply({ content: 'A simultaneous request conflicted. Please try `/fish` again.' });

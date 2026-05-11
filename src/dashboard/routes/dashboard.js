@@ -3,6 +3,7 @@ const router = express.Router();
 const Guild = require('../../models/Guild');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
+const { ACHIEVEMENTS } = require('../../data/achievements');
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -96,6 +97,12 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
             .filter(r => r.name !== '@everyone')
             .map(r => ({ id: r.id, name: r.name }));
 
+        const builtinAchievements = ACHIEVEMENTS.map(a => ({
+            id: a.id, name: a.name, description: a.description,
+            emoji: a.emoji, category: a.category,
+            xpReward: a.xpReward, coinReward: a.coinReward
+        }));
+
         res.render('guild-settings', {
             user: req.user,
             guild: guild,
@@ -105,7 +112,8 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
             categories: categories,
             roles: roles,
             defaultJobs: DEFAULT_JOBS,
-            defaultTiers: DEFAULT_TIERS
+            defaultTiers: DEFAULT_TIERS,
+            builtinAchievements
         });
     } catch (error) {
         console.error('Dashboard error:', error);

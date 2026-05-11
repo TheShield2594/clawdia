@@ -7,6 +7,7 @@ const { ensureQuests, onMessage, notifyQuestComplete } = require('../services/qu
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
 const { hasEffect, consumeEffect } = require('../services/effectsService');
 const { checkRivalry } = require('../services/rivalryService');
+const { checkAndAward, announceAchievements } = require('../services/achievementService');
 
 const BASE_BAD_WORDS = [
     'nigger', 'nigga', 'faggot', 'fag', 'retard', 'chink', 'spic', 'kike',
@@ -164,7 +165,13 @@ async function handleStreakAndQuests(message, guildSettings) {
         await ensureQuests(user, guildSettings);
         const completedQuests = await onMessage(user, guildSettings);
 
+        const newlyEarned = await checkAndAward(user, guildSettings).catch(() => []);
+
         await user.save();
+
+        if (newlyEarned.length) {
+            announceAchievements(message.client, guildSettings, user, message.member, newlyEarned).catch(() => null);
+        }
 
         await notifyQuestComplete(guildSettings, message.member, completedQuests, message.channel);
 

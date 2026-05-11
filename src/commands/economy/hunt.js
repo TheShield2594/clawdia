@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { ZONES, ZONE_LIST, TIER_COLORS, LIMITS, WEAPON_BY_TIER } = require('../../data/huntData');
+const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const {
     ensureHuntData,
     applyStaminaRegen,
@@ -149,8 +150,13 @@ module.exports = {
         const result = executeHunt(user, zoneId);
         updateHuntQuestProgress(user, result, zoneId);
 
+        const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
+
         try {
             await user.save();
+            if (huntAchievements.length) {
+                announceAchievements(interaction.client, guildSettings, user, interaction.member, huntAchievements).catch(() => null);
+            }
         } catch (err) {
             if (err.name === 'VersionError') {
                 return interaction.editReply({ content: 'A simultaneous request conflicted with your hunt. Please try `/hunt` again.' });

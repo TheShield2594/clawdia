@@ -158,7 +158,8 @@ const guildSchema = new Schema({
         duelMaxBet: { type: Number, default: 10000, min: 1 },
         // max: 0.5 ensures winnerPayout >= amount so netGain is never negative
         duelHouseCut: { type: Number, default: 0.05, min: 0, max: 0.5 },
-        betConfirmThreshold: { type: Number, default: 10000, min: 0 }
+        betConfirmThreshold: { type: Number, default: 10000, min: 0 },
+        announcementChannelId: { type: String, default: null }
     },
     
     music: {
@@ -490,6 +491,21 @@ const guildSchema = new Schema({
             }
         },
         autoRespond: { type: Boolean, default: true }
+    },
+
+    achievements: {
+        enabled: { type: Boolean, default: false },
+        announcementChannelId: { type: String, default: null },
+        disabledAchievements: [{ type: String }],
+        customAchievements: [{
+            id:          { type: String, required: true },
+            name:        { type: String, required: true },
+            description: { type: String, default: '' },
+            emoji:       { type: String, default: '🏆' },
+            category:    { type: String, default: 'custom' },
+            xpReward:    { type: Number, default: 0, min: 0 },
+            coinReward:  { type: Number, default: 0, min: 0 }
+        }]
     },
 
     analytics: {
