@@ -15,7 +15,6 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('event')
         .setDescription('Manage limited-time events')
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .addSubcommand(sub =>
             sub.setName('start')
                 .setDescription('Start a limited-time event')

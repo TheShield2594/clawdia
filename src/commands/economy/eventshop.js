@@ -6,7 +6,6 @@ const {
     hasActiveEvent,
     getEventCurrencyId,
     getEventCurrencyBalance,
-    spendEventCurrency,
 } = require('../../services/seasonalEventService');
 const { addEffect, resolveEffectType } = require('../../services/effectsService');
 
@@ -122,38 +121,60 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
         return interaction.editReply({ content: `🛒 No item matching **"${itemQuery}"** found in the event shop.` });
     }
 
-    if (shopItem.stock !== -1 && shopItem.stock < qty) {
-        return interaction.editReply({
-            content: `🛒 **${shopItem.name}** only has **${shopItem.stock}** left in stock.`
-        });
-    }
-
     const totalCost = shopItem.cost * qty;
 
-    let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-    if (!user) {
-        user = new User({ userId: interaction.user.id, guildId: interaction.guild.id });
-    }
-
-    const balance = getEventCurrencyBalance(user, currencyId);
-    if (balance < totalCost) {
+    // Fast pre-check on balance (stale read; the atomic step below is authoritative)
+    const userPre = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+    const preBalance = getEventCurrencyBalance(userPre, currencyId);
+    if (preBalance < totalCost) {
         return interaction.editReply({
-            content: `❌ You need **${totalCost} ${currency.name}** ${currency.emoji} but only have **${balance}**.`
+            content: `❌ You need **${totalCost} ${currency.name}** ${currency.emoji} but only have **${preBalance}**.`
         });
     }
 
-    // Deduct currency
-    const success = spendEventCurrency(user, currencyId, totalCost);
-    if (!success) {
-        return interaction.editReply({ content: '❌ Failed to deduct event currency. Please try again.' });
+    // Step 1: Atomically decrement stock only if stock >= qty (eliminates check-then-act race)
+    const stockLimited = shopItem.stock !== -1;
+    if (stockLimited) {
+        const stockResult = await Guild.findOneAndUpdate(
+            {
+                guildId: interaction.guild.id,
+                'activeEvent.eventShop.itemId': shopItem.itemId,
+                'activeEvent.eventShop.stock': { $gte: qty }
+            },
+            { $inc: { 'activeEvent.eventShop.$.stock': -qty } }
+        );
+        if (!stockResult) {
+            return interaction.editReply({ content: `🛒 **${shopItem.name}** is out of stock.` });
+        }
     }
 
-    // Grant item or effect
+    // Step 2: Atomically deduct currency; revert stock if this fails
+    const charged = await User.findOneAndUpdate(
+        {
+            userId: interaction.user.id,
+            guildId: interaction.guild.id,
+            'eventCurrency.currencyId': currencyId,
+            'eventCurrency.amount': { $gte: totalCost }
+        },
+        { $inc: { 'eventCurrency.$.amount': -totalCost } },
+        { new: true }
+    );
+
+    if (!charged) {
+        if (stockLimited) {
+            await Guild.findOneAndUpdate(
+                { guildId: interaction.guild.id, 'activeEvent.eventShop.itemId': shopItem.itemId },
+                { $inc: { 'activeEvent.eventShop.$.stock': qty } }
+            ).catch(() => {});
+        }
+        return interaction.editReply({ content: `❌ Insufficient event currency. Please try again.` });
+    }
+
+    // Step 3: Grant item or effect (currency already secured above)
+    const user = charged;
     if (EFFECT_ITEMS.has(shopItem.itemId)) {
         const effectType = resolveEffectType(shopItem.name) ?? shopItem.itemId;
-        for (let i = 0; i < qty; i++) {
-            addEffect(user, effectType);
-        }
+        for (let i = 0; i < qty; i++) addEffect(user, effectType);
     } else {
         if (!user.inventory) user.inventory = [];
         const slot = user.inventory.find(i => i.itemId === shopItem.itemId);
@@ -164,15 +185,9 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
         }
     }
 
-    // Reduce stock
-    if (shopItem.stock !== -1) {
-        await Guild.findOneAndUpdate(
-            { guildId: interaction.guild.id, 'activeEvent.eventShop.itemId': shopItem.itemId },
-            { $inc: { 'activeEvent.eventShop.$.stock': -qty } }
-        );
-    }
-
-    await user.save();
+    await user.save().catch(err =>
+        console.error('[eventshop] item grant save failed:', err.message)
+    );
 
     const newBalance = getEventCurrencyBalance(user, currencyId);
 

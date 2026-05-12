@@ -90,9 +90,9 @@ module.exports = {
         } else {
             // Weighted treat roll
             const pool = [];
-            const weights = [60, 25, 10, 5];
+            const weights = [60, 25, 10, 5, 3, 1];
             TREATS.forEach((t, i) => {
-                for (let j = 0; j < weights[i] ?? 5; j++) pool.push(t);
+                for (let j = 0; j < weights[i]; j++) pool.push(t);
             });
             const treat = pool[Math.floor(Math.random() * pool.length)];
 
