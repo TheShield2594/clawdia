@@ -232,8 +232,13 @@ async function handleBuyWeapon(interaction, user, currency) {
             return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
         }
 
-        await btn.deferUpdate();
-        await completePurchase(btn, user, weaponData, autoEquip, currency);
+        try {
+            await btn.deferUpdate();
+            await completePurchase(btn, user, weaponData, autoEquip, currency);
+        } catch (err) {
+            console.error('[huntshop weapon] purchase error:', err);
+            interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
+        }
     });
 
     collector.on('end', (_, reason) => {
@@ -244,15 +249,6 @@ async function handleBuyWeapon(interaction, user, currency) {
 }
 
 async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, currency) {
-    const h = user.hunt;
-
-    if (user.balance < weaponData.cost) {
-        const reply = { content: `Insufficient funds. You need ${currency}${weaponData.cost.toLocaleString()} but only have ${currency}${user.balance.toLocaleString()}.`, embeds: [], components: [] };
-        return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
-    }
-
-    user.balance -= weaponData.cost;
-
     const newWeapon = {
         name:              weaponData.name,
         tier:              weaponData.tier,
@@ -266,15 +262,27 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
         acquiredAt:        new Date()
     };
 
-    h.weapons.push(newWeapon);
+    const updated = await User.findOneAndUpdate(
+        { userId: user.userId, guildId: user.guildId, balance: { $gte: weaponData.cost } },
+        { $inc: { balance: -weaponData.cost }, $push: { 'hunt.weapons': newWeapon } },
+        { new: true }
+    );
+
+    if (!updated) {
+        const reply = { content: `Insufficient funds. You need ${currency}${weaponData.cost.toLocaleString()} but only have ${currency}${user.balance.toLocaleString()}.`, embeds: [], components: [] };
+        return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
+    }
+
+    const h = updated.hunt;
     const newIndex = h.weapons.length - 1;
 
     if (autoEquip && (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex] || h.weapons[h.equippedWeaponIndex].status === 'broken')) {
         h.equippedWeaponIndex = newIndex;
+        await User.updateOne(
+            { userId: user.userId, guildId: user.guildId },
+            { $set: { 'hunt.equippedWeaponIndex': newIndex } }
+        );
     }
-
-    user.markModified('hunt');
-    await user.save();
 
     const equipped = h.equippedWeaponIndex === newIndex;
     const embed = new EmbedBuilder()
@@ -289,7 +297,7 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
             { name: 'Weapon #',     value: `#${newIndex + 1} in inventory`,                                                                                           inline: true },
             { name: 'Status',       value: equipped ? '✅ Equipped' : `Use \`/huntinv equip ${newIndex + 1}\``,                                                       inline: true }
         )
-        .addFields({ name: 'New Balance', value: `${currency}${user.balance.toLocaleString()}` })
+        .addFields({ name: 'New Balance', value: `${currency}${updated.balance.toLocaleString()}` })
         .setFooter({ text: equipped ? 'Ready to hunt! Use /hunt' : `Equip with /huntinv equip ${newIndex + 1}` });
 
     const reply = { embeds: [embed], components: [] };
