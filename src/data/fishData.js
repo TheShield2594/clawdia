@@ -546,7 +546,7 @@ const TIER_LABELS = {
 // ─── ANTI-EXPLOIT CONSTANTS ───────────────────────────────────────────────────
 
 const LIMITS = {
-    CAST_COOLDOWN_MS:        25_000,        // 25 seconds between casts
+    CAST_COOLDOWN_MS:        45_000,        // 45 seconds between casts
     INJURY_PENALTY_MS:       10 * 60_000,   // +10 min on fell-in event
     STAMINA_REGEN_MS:        6  * 60_000,   // 1 stamina per 6 minutes
     MAX_STAMINA_BASE:        10,

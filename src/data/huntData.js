@@ -488,7 +488,7 @@ const TIER_COLORS = {
 // ─── ANTI-EXPLOIT CONSTANTS ───────────────────────────────────────────────────
 
 const LIMITS = {
-    HUNT_COOLDOWN_MS:        30_000,        // 30 seconds between hunts
+    HUNT_COOLDOWN_MS:        45_000,        // 45 seconds between hunts
     INJURY_PENALTY_MS:       15 * 60_000,   // +15 min on injury
     STAMINA_REGEN_MS:        6 * 60_000,    // 1 stamina per 6 minutes
     MAX_STAMINA_BASE:        10,

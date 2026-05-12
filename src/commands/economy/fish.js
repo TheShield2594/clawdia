@@ -29,7 +29,7 @@ module.exports = {
 
     data: new SlashCommandBuilder()
         .setName('fish')
-        .setDescription('Cast your line and catch fish. 1 stamina per cast. Cooldown: 25s. Use /fishinv to equip a rod.')
+        .setDescription('Cast your line and catch fish. 1 stamina per cast. Cooldown: 45s. Use /fishinv to equip a rod.')
         .addStringOption(o =>
             o.setName('location')
                 .setDescription('Location to fish at (defaults to your active location). Unlock new spots with /fishshop unlock.')
@@ -316,7 +316,7 @@ function buildLevelUpLine(levelUp) {
 
 function buildFooter(user) {
     const f = user.fishing;
-    const parts = [`Cooldown: 25s`];
+    const parts = [`Cooldown: 45s`];
     if (f.activeBait)  parts.push(`Bait (${f.activeBaitCastsLeft} casts left)`);
     if (f.activeLuck)  parts.push(`Luck (queued)`);
     if (f.activeXpScroll) parts.push(`XP Scroll (queued)`);
