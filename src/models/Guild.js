@@ -391,6 +391,27 @@ const guildSchema = new Schema({
         weeklyCoinReward: { type: Number, default: 150 }
     },
 
+    activeEvent: {
+        type:           { type: String, enum: ['winter_wonderland', 'spooky_season', 'summer_festival', 'valentines_day', 'custom', null], default: null },
+        name:           { type: String, default: null },
+        emoji:          { type: String, default: null },
+        color:          { type: String, default: null },
+        startedAt:      { type: Date, default: null },
+        endsAt:         { type: Date, default: null },
+        coinMultiplier: { type: Number, default: 1.0, min: 1.0, max: 5.0 },
+        xpMultiplier:   { type: Number, default: 1.0, min: 1.0, max: 5.0 },
+        startedBy:      { type: String, default: null },
+        announcementChannelId: { type: String, default: null },
+        eventShop: [{
+            itemId:      { type: String, required: true },
+            name:        { type: String, required: true },
+            description: { type: String, default: '' },
+            emoji:       { type: String, default: '' },
+            cost:        { type: Number, required: true, min: 0 },
+            stock:       { type: Number, default: -1 }
+        }]
+    },
+
     season: {
         enabled: { type: Boolean, default: false },
         seasonId: { type: String, default: null },

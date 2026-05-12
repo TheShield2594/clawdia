@@ -5,6 +5,7 @@ const { checkReminders } = require('../services/reminderService');
 const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
 const { checkBirthdays } = require('../services/birthdayService');
+const { checkSeasonalEvents } = require('../services/seasonalEventService');
 const { runJob } = require('../utils/jobRunner');
 
 module.exports = {
@@ -46,6 +47,11 @@ module.exports = {
 
         cron.schedule('0 * * * *', () =>
             runJob('birthdayService', 'checkBirthdays', () => checkBirthdays(client))
+        );
+
+        // Check seasonal event auto-start/auto-end once per hour
+        cron.schedule('0 * * * *', () =>
+            runJob('seasonalEventService', 'checkSeasonalEvents', () => checkSeasonalEvents(client))
         );
 
         console.log('[READY] Background services started');

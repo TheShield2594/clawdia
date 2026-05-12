@@ -13,6 +13,8 @@ const userSchema = new Schema({
     bank: { type: Number, default: 0 },
     lastDaily: { type: Date, default: null },
     lastWork: { type: Date, default: null },
+    lastSnowball: { type: Date, default: null },
+    lastTrickOrTreat: { type: Date, default: null },
     lastRob: { type: Date, default: null },
     lastRobbedAt: { type: Date, default: null },
     lastDuel: { type: Date, default: null },
@@ -286,6 +288,12 @@ const userSchema = new Schema({
         type:      { type: String, required: true },
         expiresAt: { type: Date,   default: null },
         charges:   { type: Number, default: -1 }
+    }],
+
+    // Event currency balances (e.g. snowflakes, candy, shells, hearts)
+    eventCurrency: [{
+        currencyId: { type: String, required: true },
+        amount:     { type: Number, default: 0, min: 0 }
     }],
 
     // Per-user notification preferences
