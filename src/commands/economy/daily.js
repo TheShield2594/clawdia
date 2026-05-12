@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
+const { getCoinMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -34,21 +35,25 @@ module.exports = {
                 });
             }
 
-            const dailyAmount = guildSettings?.economy.dailyAmount || 100;
-            const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
-            const actualAmount = Math.round(dailyAmount * streakMult);
+            const dailyAmount  = guildSettings?.economy?.dailyAmount ?? 100;
+            const streakMult   = getStreakMultiplier(user.streak?.current ?? 0);
+            const coinMult     = getCoinMultiplier(user);
+            const serverMult   = getServerCoinMultiplier(guildSettings);
+            const actualAmount = Math.round(dailyAmount * streakMult * coinMult * serverMult);
             user.balance += actualAmount;
             user.lastDaily = new Date();
             await user.save();
 
-            const streakLine = streakMult > 1.0
-                ? `\n🔥 **${streakMult}x streak bonus** applied!`
-                : '';
+            const bonusLines = [];
+            if (streakMult > 1.0) bonusLines.push(`🔥 **${streakMult}x streak bonus** applied!`);
+            if (coinMult > 1.0)   bonusLines.push(`💰🚀 **${coinMult}x Coin Booster** active!`);
+            if (serverMult > 1.0) bonusLines.push(`🌐 **${serverMult}x Server Boost** active!`);
+            const bonusLine = bonusLines.length ? `\n${bonusLines.join('\n')}` : '';
 
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('Daily Reward Claimed!')
-                .setDescription(`You received **${actualAmount.toLocaleString()}** coins!${streakLine}`)
+                .setDescription(`You received **${actualAmount.toLocaleString()}** coins!${bonusLine}`)
                 .addFields(
                     { name: 'New Balance', value: `${user.balance.toLocaleString()} coins` }
                 )

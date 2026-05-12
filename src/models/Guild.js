@@ -136,6 +136,13 @@ const guildSchema = new Schema({
         voiceXpRate: { type: Number, default: 1.0 }
     },
     
+    serverBoost: {
+        type:        { type: String, enum: ['coin', 'xp', null], default: null },
+        multiplier:  { type: Number, default: 1.5, min: 1.0, max: 10.0 },
+        expiresAt:   { type: Date,   default: null },
+        activatedBy: { type: String, default: null }
+    },
+
     economy: {
         enabled: { type: Boolean, default: true },
         currency: { type: String, default: '💰' },

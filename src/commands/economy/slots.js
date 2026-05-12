@@ -7,7 +7,8 @@ const {
 } = require('discord.js');
 const User = require('../../models/User');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect } = require('../../services/effectsService');
+const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
+const Guild = require('../../models/Guild');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
 
@@ -107,6 +108,7 @@ function resultEmbed(reels, result, bet, balance, interaction) {
         mult3:   { color: '#00FFFF', title: '🎰 ⚡ Triple Boost! ⚡',     line: '⚡⚡⚡ **TRIPLE MULTIPLIER BONUS!**\n*Electrifying win!*' },
         three:   { color: '#00FF00', title: `🎰 🏆 Three ${symbol?.name ?? ''}s!`, line: `${symbol?.emoji.repeat(3)} **THREE OF A KIND!**\n*${symbol?.name} power!*` },
         two:     { color: '#FFAA00', title: '🎰 Two of a Kind',           line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — partial win!` },
+        push:    { color: '#f39c12', title: '🎰 🎯 Lucky Push!',          line: '🎯 **Lucky Streak** saved you — bet returned!' },
         lose:    { color: '#FF4444', title: '🎰 No Match',                line: '💨 *No matching symbols — better luck next time!*' },
     };
     const { color, title, line } = cfg[outcome] ?? cfg.lose;
@@ -176,23 +178,44 @@ module.exports = {
 async function playSlots(interaction, bet) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     try {
-        const userDoc = await User.findOneAndUpdate(
-            userFilter,
-            { $setOnInsert: { ...userFilter, balance: 0 } },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-        const luckyActive = hasEffect(userDoc, 'lucky_charm');
+        const [userDoc, guildSettings] = await Promise.all([
+            User.findOneAndUpdate(
+                userFilter,
+                { $setOnInsert: { ...userFilter, balance: 0 } },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            ),
+            Guild.findOne({ guildId: interaction.guild.id }),
+        ]);
+        const luckyActive      = hasEffect(userDoc, 'lucky_charm');
+        const luckyStreakBonus = getLuckyStreakBonus(userDoc);
+        const coinMult         = getCoinMultiplier(userDoc);
+        const serverMult       = getServerCoinMultiplier(guildSettings);
+        const totalCoinMult    = coinMult * serverMult;
 
         let reels  = [spinReel(), spinReel(), spinReel()];
         let result = evaluate(reels, bet);
+        let charmTriggered        = false;
+        let luckyStreakTriggered   = false;
+
         // Lucky Charm: on loss, 20% chance to re-spin
-        let charmTriggered = false;
         if (result.outcome === 'lose' && luckyActive && Math.random() < 0.20) {
             reels  = [spinReel(), spinReel(), spinReel()];
             result = evaluate(reels, bet);
             charmTriggered = true;
         }
-        const net    = result.payout - bet;
+        // Lucky Streak: on remaining loss, 25% chance to convert to a push (bet returned)
+        if (result.outcome === 'lose' && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+            result = { ...result, outcome: 'push', payout: bet };
+            luckyStreakTriggered = true;
+        }
+
+        // Apply coin booster to payout (net profit portion only)
+        let adjustedPayout = result.payout;
+        if (result.payout > 0 && totalCoinMult > 1.0) {
+            // Scale net profit by multiplier, keep original bet return whole
+            adjustedPayout = bet + Math.round((result.payout - bet) * totalCoinMult);
+        }
+        const net = adjustedPayout - bet;
 
         const user = await User.findOneAndUpdate(
             { ...userFilter, balance: { $gte: bet } },
@@ -225,10 +248,15 @@ async function playSlots(interaction, bet) {
             new ButtonBuilder().setCustomId(paytableId).setLabel('📊 Paytable').setStyle(ButtonStyle.Secondary),
         );
 
-        const finalEmbed = resultEmbed(reels, result, bet, user.balance, interaction);
+        const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, user.balance, interaction);
         if (charmTriggered) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + '\n> 🍀 *Lucky Charm gave you a second chance!*');
+        }
+        // luckyStreakTriggered outcome already communicates via the 'push' embed title/line
+        if (totalCoinMult > 1.0 && adjustedPayout > bet) {
+            const desc = finalEmbed.data.description ?? '';
+            finalEmbed.setDescription(desc + `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied to winnings!*`);
         }
         await interaction.editReply({
             embeds: [finalEmbed],
