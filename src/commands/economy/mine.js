@@ -84,7 +84,7 @@ module.exports = {
                     { name: 'Earned', value: `${currency}${earned.toLocaleString()}`, inline: true },
                     { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                 )
-                .setFooter({ text: 'The mines reopen in 2 hours' })
+                .setFooter({ text: 'Cooldown: 2h' })
                 .setTimestamp();
 
             await interaction.editReply({ embeds: [embed] });

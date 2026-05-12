@@ -103,7 +103,7 @@ module.exports = {
                     `**${trick.name}**\n${trick.description}\n\n` +
                     `💸 You lost **${loss.toLocaleString()} coins**.`
                 )
-                .setFooter({ text: 'Cooldown: 1 hour • Better luck next time!' })
+                .setFooter({ text: 'Cooldown: 1h • Better luck next time!' })
                 .setTimestamp();
         } else {
             // Weighted treat roll
@@ -146,7 +146,7 @@ module.exports = {
                     `🎃 A **Candy Bag** was added to your inventory!`
                 )
                 .addFields({ name: 'Rarity', value: `\`${treat.rarity.toUpperCase()}\``, inline: true })
-                .setFooter({ text: 'Cooldown: 1 hour • Use /eventshop to spend your Candy' })
+                .setFooter({ text: 'Cooldown: 1h • Use /eventshop to spend your Candy' })
                 .setTimestamp();
         }
 

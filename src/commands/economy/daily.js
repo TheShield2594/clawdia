@@ -60,6 +60,7 @@ module.exports = {
                 .addFields(
                     { name: 'New Balance', value: `${user.balance.toLocaleString()} coins` }
                 )
+                .setFooter({ text: 'Cooldown: 24h' })
                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed] });

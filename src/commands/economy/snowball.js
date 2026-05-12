@@ -122,7 +122,7 @@ module.exports = {
             .setColor(hit ? '#a8d8f0' : '#888888')
             .setTitle(hit ? '❄️ Snowball Hit!' : '❄️ Snowball Miss!')
             .setDescription(description)
-            .setFooter({ text: 'Cooldown: 5 minutes • Use /eventshop to restock snowballs' })
+            .setFooter({ text: 'Cooldown: 5m • Use /eventshop to restock snowballs' })
             .setTimestamp();
 
         return interaction.editReply({ embeds: [embed] });
