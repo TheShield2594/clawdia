@@ -7,7 +7,8 @@ const {
 } = require('discord.js');
 const User = require('../../models/User');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect } = require('../../services/effectsService');
+const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
+const Guild = require('../../models/Guild');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
 
@@ -169,11 +170,12 @@ module.exports = {
         const wallet = user?.balance ?? 0;
         if (!await confirmBet(interaction, bet, wallet, 'Slots')) return;
         await interaction.deferReply();
-        await playSlots(interaction, bet);
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        await playSlots(interaction, bet, guildSettings);
     },
 };
 
-async function playSlots(interaction, bet) {
+async function playSlots(interaction, bet, guildSettings) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     try {
         const userDoc = await User.findOneAndUpdate(
@@ -181,18 +183,37 @@ async function playSlots(interaction, bet) {
             { $setOnInsert: { ...userFilter, balance: 0 } },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
-        const luckyActive = hasEffect(userDoc, 'lucky_charm');
+        const luckyActive      = hasEffect(userDoc, 'lucky_charm');
+        const luckyStreakBonus = getLuckyStreakBonus(userDoc);
+        const coinMult         = getCoinMultiplier(userDoc);
+        const serverMult       = getServerCoinMultiplier(guildSettings);
+        const totalCoinMult    = coinMult * serverMult;
 
         let reels  = [spinReel(), spinReel(), spinReel()];
         let result = evaluate(reels, bet);
+        let charmTriggered        = false;
+        let luckyStreakTriggered   = false;
+
         // Lucky Charm: on loss, 20% chance to re-spin
-        let charmTriggered = false;
         if (result.outcome === 'lose' && luckyActive && Math.random() < 0.20) {
             reels  = [spinReel(), spinReel(), spinReel()];
             result = evaluate(reels, bet);
             charmTriggered = true;
         }
-        const net    = result.payout - bet;
+        // Lucky Streak: on remaining loss, 25% chance to re-spin
+        if (result.outcome === 'lose' && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+            reels  = [spinReel(), spinReel(), spinReel()];
+            result = evaluate(reels, bet);
+            luckyStreakTriggered = true;
+        }
+
+        // Apply coin booster to payout (net profit portion only)
+        let adjustedPayout = result.payout;
+        if (result.payout > 0 && totalCoinMult > 1.0) {
+            // Scale net profit by multiplier, keep original bet return whole
+            adjustedPayout = bet + Math.round((result.payout - bet) * totalCoinMult);
+        }
+        const net = adjustedPayout - bet;
 
         const user = await User.findOneAndUpdate(
             { ...userFilter, balance: { $gte: bet } },
@@ -225,10 +246,18 @@ async function playSlots(interaction, bet) {
             new ButtonBuilder().setCustomId(paytableId).setLabel('📊 Paytable').setStyle(ButtonStyle.Secondary),
         );
 
-        const finalEmbed = resultEmbed(reels, result, bet, user.balance, interaction);
+        const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, user.balance, interaction);
         if (charmTriggered) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + '\n> 🍀 *Lucky Charm gave you a second chance!*');
+        }
+        if (luckyStreakTriggered) {
+            const desc = finalEmbed.data.description ?? '';
+            finalEmbed.setDescription(desc + '\n> 🎯 *Lucky Streak gave you a second chance!*');
+        }
+        if (totalCoinMult > 1.0 && result.payout > 0) {
+            const desc = finalEmbed.data.description ?? '';
+            finalEmbed.setDescription(desc + `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied to winnings!*`);
         }
         await interaction.editReply({
             embeds: [finalEmbed],
@@ -248,7 +277,7 @@ async function playSlots(interaction, bet) {
             }
             collector.stop('replay');
             await i.deferUpdate();
-            await playSlots(interaction, bet);
+            await playSlots(interaction, bet, guildSettings);
         });
 
         collector.on('end', (_, reason) => {

@@ -5,7 +5,7 @@ const { handleAIChat } = require('../services/aiService');
 const { logModeration } = require('../utils/logger');
 const { ensureQuests, onMessage, notifyQuestComplete } = require('../services/questService');
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
-const { hasEffect, consumeEffect } = require('../services/effectsService');
+const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = require('../services/effectsService');
 const { checkRivalry } = require('../services/rivalryService');
 const { checkAndAward, announceAchievements } = require('../services/achievementService');
 
@@ -235,7 +235,9 @@ async function handleLeveling(message, guildSettings) {
             effectiveStreak = msAgo < 172800000 ? effectiveStreak + 1 : 1;
         }
         xpGain *= getStreakMultiplier(effectiveStreak);
+        xpGain *= getXpMultiplier(user);
     }
+    xpGain *= getServerXpMultiplier(guildSettings);
     xpGain = Math.floor(xpGain);
 
     if (user) {

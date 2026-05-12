@@ -4,6 +4,7 @@ const Guild = require('../../models/Guild');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
+const { getCoinMultiplier, getSalaryMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -79,8 +80,11 @@ module.exports = {
 
             const performance = rollPerformance();
             const basedEarned = Math.max(1, Math.floor(basePay * performance.multiplier));
-            const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
-            const earned = Math.round(basedEarned * streakMult);
+            const streakMult  = getStreakMultiplier(user.streak?.current ?? 0);
+            const salaryMult  = getSalaryMultiplier(user);
+            const coinMult    = getCoinMultiplier(user);
+            const serverMult  = getServerCoinMultiplier(guildSettings);
+            const earned = Math.round(basedEarned * streakMult * salaryMult * coinMult * serverMult);
 
             const jobLabel = job.emoji ? `${job.emoji} ${job.name}` : job.name;
             const scenario = WORK_SCENARIOS[Math.floor(Math.random() * WORK_SCENARIOS.length)]
@@ -94,13 +98,19 @@ module.exports = {
             const promotedTo = tierInfo.find(t => t.minShifts === user.shiftsWorked);
             const currency = guildSettings?.economy?.currency || '💰';
 
-            const streakLabel = streakMult > 1.0 ? ` *(🔥 ${streakMult}x streak)*` : '';
+            const bonusLabels = [];
+            if (streakMult > 1.0)  bonusLabels.push(`🔥 ${streakMult}x streak`);
+            if (salaryMult > 1.0)  bonusLabels.push(`📈 ${salaryMult}x salary raise`);
+            if (coinMult > 1.0)    bonusLabels.push(`💰🚀 ${coinMult}x coin booster`);
+            if (serverMult > 1.0)  bonusLabels.push(`🌐 ${serverMult}x server boost`);
+            const bonusStr = bonusLabels.length ? ` *(${bonusLabels.join(', ')})*` : '';
+
             const embed = new EmbedBuilder()
                 .setColor(performance.color)
                 .setTitle(`${performance.label} — Work Complete!`)
                 .setDescription(scenario)
                 .addFields(
-                    { name: 'Earned',       value: `${currency} **${earned.toLocaleString()}** coins${streakLabel}`, inline: true },
+                    { name: 'Earned',       value: `${currency} **${earned.toLocaleString()}** coins${bonusStr}`, inline: true },
                     { name: 'Performance',  value: performance.label, inline: true },
                     { name: 'Career Tier',  value: `${userTier.name} · ${user.shiftsWorked.toLocaleString()} shifts`, inline: false },
                     {

@@ -8,7 +8,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect } = require('../../services/effectsService');
+const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -135,10 +135,13 @@ module.exports = {
                 const embed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, '🤝 Push — both got blackjack', '#f39c12', false);
                 return interaction.reply({ embeds: [embed], components: [buildButtons(gameId, true)] });
             }
-            const payout = Math.floor(bet * 1.5);
+            const bjCoinMult   = getCoinMultiplier(user);
+            const bjServerMult = getServerCoinMultiplier(guildSettings);
+            const payout = Math.round(Math.floor(bet * 1.5) * bjCoinMult * bjServerMult);
             user.balance += bet + payout;
             await user.save();
-            const embed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, `🎉 Blackjack! +${currency}${payout.toLocaleString()}`, '#2ecc71', false);
+            const boostNote = (bjCoinMult * bjServerMult) > 1.0 ? ` *(🚀 ${(bjCoinMult * bjServerMult).toFixed(1)}x)*` : '';
+            const embed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, `🎉 Blackjack! +${currency}${payout.toLocaleString()}${boostNote}`, '#2ecc71', false);
             return interaction.reply({ embeds: [embed], components: [buildButtons(gameId, true)] });
         }
 
@@ -192,20 +195,32 @@ module.exports = {
             let freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             if (!freshUser) freshUser = user;
 
-            const luckyActive = hasEffect(freshUser, 'lucky_charm');
+            const luckyActive      = hasEffect(freshUser, 'lucky_charm');
+            const luckyStreakBonus = getLuckyStreakBonus(freshUser);
+            const coinMult         = getCoinMultiplier(freshUser);
+            const serverMult       = getServerCoinMultiplier(guildSettings);
+            const totalCoinMult    = coinMult * serverMult;
 
             if (dealerTotal > 21 || playerTotal > dealerTotal) {
-                freshUser.balance += bet * 2;
-                status = `✅ You win! +${currency}${bet.toLocaleString()}`;
+                // Win: return original bet + net profit scaled by booster
+                const netProfit = Math.round(bet * totalCoinMult);
+                freshUser.balance += bet + netProfit;
+                const boostNote = totalCoinMult > 1.0 ? ` *(🚀 ${totalCoinMult.toFixed(1)}x)*` : '';
+                status = `✅ You win! +${currency}${netProfit.toLocaleString()}${boostNote}`;
                 color  = '#2ecc71';
             } else if (playerTotal === dealerTotal) {
                 freshUser.balance += bet;
                 status = `🤝 Push — bet returned`;
                 color  = '#f39c12';
             } else if (luckyActive && Math.random() < 0.20) {
-                // Lucky Charm: convert loss to push
+                // Lucky Charm: convert 20% of losses to push
                 freshUser.balance += bet;
                 status = `🍀 Lucky Charm! Push — bet returned (${currency}${bet.toLocaleString()})`;
+                color  = '#f39c12';
+            } else if (luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+                // Lucky Streak: convert 25% of remaining losses to push
+                freshUser.balance += bet;
+                status = `🎯 Lucky Streak! Push — bet returned (${currency}${bet.toLocaleString()})`;
                 color  = '#f39c12';
             } else {
                 status = `❌ Dealer wins. -${currency}${bet.toLocaleString()}`;

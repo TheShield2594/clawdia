@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
-const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
+const Guild = require('../../models/Guild');
+const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 
 module.exports = {
@@ -15,8 +16,12 @@ module.exports = {
         const targetUser = interaction.options.getUser('user') || interaction.user;
 
         try {
-            let user = await User.findOne({ userId: targetUser.id, guildId: interaction.guild.id });
+            const [user_raw, guildSettings] = await Promise.all([
+                User.findOne({ userId: targetUser.id, guildId: interaction.guild.id }),
+                Guild.findOne({ guildId: interaction.guild.id })
+            ]);
 
+            let user = user_raw;
             if (!user) {
                 user = await User.create({ userId: targetUser.id, guildId: interaction.guild.id });
             }
@@ -42,17 +47,40 @@ module.exports = {
                 )
                 .setTimestamp();
 
-            // Show active protective effects as indicators
-            if (user.activeEffects?.length) {
-                const indicators = user.activeEffects.map(e => {
-                    const cfg = EFFECT_CONFIGS[e.type];
-                    if (!cfg) return null;
-                    const duration = e.expiresAt ? timeRemaining(e.expiresAt) : (e.charges === 1 ? '1 use left' : 'permanent');
-                    return `${cfg.emoji} **${cfg.label}** — ${duration}`;
-                }).filter(Boolean);
+            // Show server boost banner if active
+            const serverCoinMult = getServerCoinMultiplier(guildSettings);
+            const serverXpMult   = getServerXpMultiplier(guildSettings);
+            const sb = guildSettings?.serverBoost;
+            if ((serverCoinMult > 1.0 || serverXpMult > 1.0) && sb?.expiresAt) {
+                const boostType  = sb.type === 'coin' ? `💰 ${serverCoinMult}x Coins` : `⭐ ${serverXpMult}x XP`;
+                const remaining  = timeRemaining(sb.expiresAt);
+                embed.addFields({
+                    name:   '🌐 Server Boost Active!',
+                    value:  `${boostType} — **${remaining}** remaining`,
+                    inline: false
+                });
+            }
 
-                if (indicators.length) {
-                    embed.addFields({ name: '🔮 Active Effects', value: indicators.join('\n'), inline: false });
+            // Show active effects as indicators
+            if (user.activeEffects?.length) {
+                const BOOSTER_TYPES = new Set(['coin_booster_2x', 'xp_booster_2x', 'lucky_streak', 'salary_raise']);
+                const boosters   = [];
+                const protectors = [];
+
+                for (const e of user.activeEffects) {
+                    const cfg = EFFECT_CONFIGS[e.type];
+                    if (!cfg) continue;
+                    const duration = e.expiresAt ? timeRemaining(e.expiresAt) : (e.charges === 1 ? '1 use left' : 'permanent');
+                    const line = `${cfg.emoji} **${cfg.label}** — ${duration}`;
+                    if (BOOSTER_TYPES.has(e.type)) boosters.push(line);
+                    else protectors.push(line);
+                }
+
+                if (boosters.length) {
+                    embed.addFields({ name: '🚀 Active Boosters', value: boosters.join('\n'), inline: false });
+                }
+                if (protectors.length) {
+                    embed.addFields({ name: '🔮 Active Effects', value: protectors.join('\n'), inline: false });
                 }
             }
 
