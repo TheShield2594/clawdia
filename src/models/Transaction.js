@@ -12,7 +12,7 @@ const transactionSchema = new Schema({
     bank:      { type: Number, default: null  }, // bank balance AFTER the transaction (null if unchanged)
     relatedUserId: { type: String, default: null }, // e.g. recipient on transfer, opponent on duel
     note:      { type: String, default: null  }, // human-readable detail
-    createdAt: { type: Date,   default: Date.now, index: true }
+    createdAt: { type: Date,   default: Date.now }
 });
 
 transactionSchema.index({ userId: 1, guildId: 1 });

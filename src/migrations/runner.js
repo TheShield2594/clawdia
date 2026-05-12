@@ -5,11 +5,20 @@ const MigrationRecord = require('../models/MigrationRecord');
 const MIGRATION_TIMEOUT_MS = 30_000; // 30 s — a migration that hangs blocks startup
 
 function withTimeout(promise, ms, label) {
+    let timerId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timerId = setTimeout(
+            () => reject(new Error(`[MIGRATIONS] Timed out after ${ms}ms: ${label}`)),
+            ms
+        ).unref();
+    });
+    // Clear the timer whichever promise wins so the callback never fires unnecessarily.
     return Promise.race([
-        promise,
-        new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`[MIGRATIONS] Timed out after ${ms}ms: ${label}`)), ms).unref()
-        )
+        promise.then(
+            v => { clearTimeout(timerId); return v; },
+            e => { clearTimeout(timerId); return Promise.reject(e); }
+        ),
+        timeoutPromise
     ]);
 }
 

@@ -70,7 +70,11 @@ function start(client) {
         throw new Error('[DASHBOARD] SESSION_SECRET is not set. Add a strong random value to your .env file.');
     }
 
+    // Trust the first hop from a reverse proxy (nginx, Caddy, etc.) so that
+    // req.protocol reflects the original HTTPS scheme and the secure: true
+    // cookie flag works correctly when deployed behind a proxy.
     const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction) app.set('trust proxy', 1);
     app.use(session({
         secret: process.env.SESSION_SECRET,
         resave: false,

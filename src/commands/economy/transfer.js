@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const mongoose = require('mongoose');
 const User = require('../../models/User');
 const { logTransaction } = require('../../utils/logTransaction');
 
@@ -28,18 +29,23 @@ module.exports = {
             return interaction.reply({ content: 'You cannot transfer coins to yourself!', ephemeral: true });
         }
 
+        // Use a MongoDB session transaction so both the sender debit and receiver
+        // credit are committed atomically. If anything fails after the debit,
+        // abortTransaction() rolls it back and no coins are lost.
+        // On standalone MongoDB (no replica set), startTransaction() throws before
+        // any documents are modified, so no compensation is needed in that case.
+        const session = await mongoose.startSession();
         try {
-            // Atomically deduct from sender — only succeeds if they have enough balance.
-            // Using findOneAndUpdate avoids a read-modify-write race condition where two
-            // concurrent transfers could both pass the balance check and overdraft the wallet.
+            session.startTransaction();
+
             const sender = await User.findOneAndUpdate(
                 { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: amount } },
                 { $inc: { balance: -amount } },
-                { new: true }
+                { new: true, session }
             );
 
             if (!sender) {
-                // Either the user doesn't exist yet or they lack sufficient balance.
+                await session.abortTransaction();
                 const existing = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
                 const currentBal = existing ? existing.balance : 0;
                 return interaction.reply({
@@ -52,8 +58,10 @@ module.exports = {
             const receiver = await User.findOneAndUpdate(
                 { userId: recipient.id, guildId: interaction.guild.id },
                 { $inc: { balance: amount } },
-                { upsert: true, new: true }
+                { upsert: true, new: true, session }
             );
+
+            await session.commitTransaction();
 
             logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'transfer_send', amount: -amount, balance: sender.balance, relatedUserId: recipient.id });
             logTransaction({ userId: recipient.id, guildId: interaction.guild.id, type: 'transfer_receive', amount, balance: receiver.balance, relatedUserId: interaction.user.id });
@@ -69,8 +77,13 @@ module.exports = {
 
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
+            if (session.inTransaction()) {
+                await session.abortTransaction().catch(() => {});
+            }
             console.error('Transfer error:', error);
-            await interaction.reply({ content: 'Failed to transfer coins.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to transfer coins.', ephemeral: true }).catch(() => {});
+        } finally {
+            session.endSession().catch(() => {});
         }
     }
 };
