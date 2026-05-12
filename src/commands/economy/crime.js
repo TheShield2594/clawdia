@@ -56,7 +56,7 @@ module.exports = {
         if (user.lastCrime && Date.now() - user.lastCrime.getTime() < COOLDOWN_MS) {
             const remaining = COOLDOWN_MS - (Date.now() - user.lastCrime.getTime());
             const mins = Math.ceil(remaining / 60_000);
-            const display = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+            const display = mins >= 60 ? (mins % 60 === 0 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 60)}h ${mins % 60}m`) : `${mins}m`;
             return interaction.reply({ content: `You're still on the radar from last time. Lay low for **${display}**.`, ephemeral: true });
         }
 
