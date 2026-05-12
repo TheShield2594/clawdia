@@ -2,6 +2,26 @@ const fs = require('fs');
 const path = require('path');
 const MigrationRecord = require('../models/MigrationRecord');
 
+const MIGRATION_TIMEOUT_MS = 30_000; // 30 s — a migration that hangs blocks startup
+
+function withTimeout(promise, ms, label) {
+    let timerId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timerId = setTimeout(
+            () => reject(new Error(`[MIGRATIONS] Timed out after ${ms}ms: ${label}`)),
+            ms
+        ).unref();
+    });
+    // Clear the timer whichever promise wins so the callback never fires unnecessarily.
+    return Promise.race([
+        promise.then(
+            v => { clearTimeout(timerId); return v; },
+            e => { clearTimeout(timerId); return Promise.reject(e); }
+        ),
+        timeoutPromise
+    ]);
+}
+
 /**
  * Discovers and applies any pending migrations in this directory.
  * Migrations are .js files (excluding runner.js itself) sorted by filename.
@@ -41,7 +61,7 @@ async function runMigrations() {
         console.log(`[MIGRATIONS] Applying: ${name}`);
         const start = Date.now();
         try {
-            await up();
+            await withTimeout(up(), MIGRATION_TIMEOUT_MS, name);
             const durationMs = Date.now() - start;
             await MigrationRecord.create({ name, durationMs });
             console.log(`[MIGRATIONS] Applied ${name} in ${durationMs}ms`);

@@ -39,7 +39,20 @@ function setupPassport() {
         callbackURL,
         scope: ['identify', 'guilds']
     }, (accessToken, refreshToken, profile, done) => {
-        process.nextTick(() => done(null, profile));
+        if (!profile || !profile.id || !profile.username) {
+            return done(new Error('Invalid Discord profile returned from OAuth'));
+        }
+        // Store only what the dashboard needs — never persist raw OAuth tokens or full profile
+        const safeProfile = {
+            id: profile.id,
+            username: profile.username,
+            discriminator: profile.discriminator || '0',
+            avatar: profile.avatar || null,
+            guilds: Array.isArray(profile.guilds)
+                ? profile.guilds.map(g => ({ id: g.id, name: g.name, icon: g.icon, permissions: g.permissions }))
+                : []
+        };
+        process.nextTick(() => done(null, safeProfile));
     }));
 }
 
@@ -57,11 +70,21 @@ function start(client) {
         throw new Error('[DASHBOARD] SESSION_SECRET is not set. Add a strong random value to your .env file.');
     }
 
+    // Trust the first hop from a reverse proxy (nginx, Caddy, etc.) so that
+    // req.protocol reflects the original HTTPS scheme and the secure: true
+    // cookie flag works correctly when deployed behind a proxy.
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction) app.set('trust proxy', 1);
     app.use(session({
         secret: process.env.SESSION_SECRET,
         resave: false,
         saveUninitialized: false,
-        cookie: { maxAge: 86400000 }
+        cookie: {
+            maxAge: 86400000,
+            httpOnly: true,
+            secure: isProduction,
+            sameSite: 'lax'
+        }
     }));
 
     app.use(passport.initialize());

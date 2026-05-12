@@ -1,5 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const mongoose = require('mongoose');
 const User = require('../../models/User');
+const { logTransaction } = require('../../utils/logTransaction');
 
 module.exports = {
     cooldown: 5,
@@ -27,32 +29,47 @@ module.exports = {
             return interaction.reply({ content: 'You cannot transfer coins to yourself!', ephemeral: true });
         }
 
+        // Use a MongoDB session transaction so both the sender debit and receiver
+        // credit are committed atomically. If anything fails after the debit,
+        // abortTransaction() rolls it back and no coins are lost.
+        // On standalone MongoDB (no replica set), startTransaction() throws before
+        // any documents are modified, so no compensation is needed in that case.
+        const session = await mongoose.startSession();
         try {
-            let sender = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            let receiverUser = await User.findOne({ userId: recipient.id, guildId: interaction.guild.id });
+            session.startTransaction();
+
+            const sender = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: amount } },
+                { $inc: { balance: -amount } },
+                { new: true, session }
+            );
 
             if (!sender) {
-                sender = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
+                await session.abortTransaction();
+                const existing = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+                const currentBal = existing ? existing.balance : 0;
+                return interaction.reply({
+                    content: `You don't have enough coins! Your balance: ${currentBal.toLocaleString()} coins`,
+                    ephemeral: true
+                });
             }
 
-            if (!receiverUser) {
-                receiverUser = await User.create({ userId: recipient.id, guildId: interaction.guild.id });
-            }
+            // Credit receiver; upsert in case they have no record yet.
+            const receiver = await User.findOneAndUpdate(
+                { userId: recipient.id, guildId: interaction.guild.id },
+                { $inc: { balance: amount } },
+                { upsert: true, new: true, session }
+            );
 
-            if (sender.balance < amount) {
-                return interaction.reply({ content: `You don't have enough coins! Your balance: ${sender.balance}`, ephemeral: true });
-            }
+            await session.commitTransaction();
 
-            sender.balance -= amount;
-            receiverUser.balance += amount;
-
-            await sender.save();
-            await receiverUser.save();
+            logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'transfer_send', amount: -amount, balance: sender.balance, relatedUserId: recipient.id });
+            logTransaction({ userId: recipient.id, guildId: interaction.guild.id, type: 'transfer_receive', amount, balance: receiver.balance, relatedUserId: interaction.user.id });
 
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('Transfer Successful')
-                .setDescription(`You transferred **${amount}** coins to ${recipient}`)
+                .setDescription(`You transferred **${amount.toLocaleString()}** coins to ${recipient}`)
                 .addFields(
                     { name: 'Your New Balance', value: `${sender.balance.toLocaleString()} coins` }
                 )
@@ -60,8 +77,13 @@ module.exports = {
 
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
+            if (session.inTransaction()) {
+                await session.abortTransaction().catch(() => {});
+            }
             console.error('Transfer error:', error);
-            await interaction.reply({ content: 'Failed to transfer coins.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to transfer coins.', ephemeral: true }).catch(() => {});
+        } finally {
+            session.endSession().catch(() => {});
         }
     }
 };

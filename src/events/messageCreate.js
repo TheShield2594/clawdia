@@ -8,18 +8,7 @@ const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMult
 const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = require('../services/effectsService');
 const { checkRivalry } = require('../services/rivalryService');
 const { checkAndAward, announceAchievements } = require('../services/achievementService');
-
-const BASE_BAD_WORDS = [
-    'nigger', 'nigga', 'faggot', 'fag', 'retard', 'chink', 'spic', 'kike',
-    'cunt', 'whore', 'slut', 'bitch', 'bastard', 'asshole', 'dick', 'cock',
-    'pussy', 'fuck', 'shit', 'piss', 'crap', 'damn', 'hell', 'ass',
-    'motherfucker', 'motherfucking', 'fucker', 'fucking', 'bullshit',
-    'twat', 'wanker', 'prick', 'arsehole', 'bollocks', 'shithead',
-    'jackass', 'dumbass', 'smartass', 'dipshit', 'douchebag',
-    'tranny', 'dyke', 'wetback', 'beaner', 'cracker', 'gook', 'towelhead',
-    'raghead', 'sandnigger', 'zipperhead', 'nig', 'coon', 'jigaboo',
-    'spook', 'porch monkey', 'jungle bunny', 'tar baby'
-];
+const BASE_BAD_WORDS = require('../data/profanityList');
 
 // Leet-speak normalization map
 const LEET_MAP = {

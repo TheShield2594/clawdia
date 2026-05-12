@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
+const { logTransaction } = require('../../utils/logTransaction');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -43,6 +44,8 @@ module.exports = {
             user.balance += actualAmount;
             user.lastDaily = new Date();
             await user.save();
+
+            logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'daily', amount: actualAmount, balance: user.balance, note: `streak ${user.streak?.current ?? 0}x, mult ${(streakMult * coinMult * serverMult).toFixed(2)}` });
 
             const bonusLines = [];
             if (streakMult > 1.0) bonusLines.push(`🔥 **${streakMult}x streak bonus** applied!`);

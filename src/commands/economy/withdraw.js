@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { logTransaction } = require('../../utils/logTransaction');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -44,6 +45,8 @@ module.exports = {
             console.error('[withdraw] save error:', err);
             return interaction.reply({ content: 'Failed to save your withdrawal. Please try again.', ephemeral: true });
         }
+
+        logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'withdraw', amount, balance: userData.balance, bank: userData.bank, note: `Withdrew ${amount} from bank` });
 
         const embed = new EmbedBuilder()
             .setColor('#00ff00')
