@@ -43,6 +43,12 @@ module.exports = {
             const sb = guildSettings?.serverBoost;
             const hasServerBoost = (serverCoinMult > 1.0 || serverXpMult > 1.0) && sb?.expiresAt;
 
+            const hasExclusions = (guildSettings?.leveling?.noXpChannelIds?.length > 0) ||
+                                  (guildSettings?.leveling?.noXpRoleIds?.length > 0);
+            const xpHint = hasExclusions
+                ? '💡 Some channels or roles may not earn XP. Use /xpinfo to see details.'
+                : null;
+
             if (activeBoosters.length || hasServerBoost) {
                 const lines = [];
                 if (hasServerBoost) {
@@ -57,7 +63,13 @@ module.exports = {
                 const boosterEmbed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .addFields({ name: '🚀 Active Boosters', value: lines.join('\n'), inline: false });
+                if (xpHint) boosterEmbed.setFooter({ text: xpHint });
                 await interaction.reply({ files: [attachment], embeds: [boosterEmbed] });
+            } else if (xpHint) {
+                const hintEmbed = new EmbedBuilder()
+                    .setColor('#95a5a6')
+                    .setFooter({ text: xpHint });
+                await interaction.reply({ files: [attachment], embeds: [hintEmbed] });
             } else {
                 await interaction.reply({ files: [attachment] });
             }
