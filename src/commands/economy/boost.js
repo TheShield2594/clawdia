@@ -84,8 +84,8 @@ module.exports = {
                 // Announce in configured channel if different from this channel
                 if (announcementChannelId && announcementChannelId !== interaction.channel.id) {
                     const announceChannel = interaction.guild.channels.cache.get(announcementChannelId);
-                    if (announceChannel) {
-                        await announceChannel.send({ embeds: [embed] }).catch(() => {});
+                    if (announceChannel?.isTextBased()) {
+                        await announceChannel.send({ embeds: [embed] }).catch(console.error);
                     }
                 }
                 return;
@@ -138,7 +138,12 @@ module.exports = {
 
         } catch (error) {
             console.error('Boost error:', error);
-            await interaction.reply({ content: 'Failed to manage server boost.', ephemeral: true });
+            const errMsg = { content: 'Failed to manage server boost.', ephemeral: true };
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp(errMsg);
+            } else {
+                await interaction.reply(errMsg);
+            }
         }
     }
 };

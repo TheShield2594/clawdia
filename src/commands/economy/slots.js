@@ -108,6 +108,7 @@ function resultEmbed(reels, result, bet, balance, interaction) {
         mult3:   { color: '#00FFFF', title: '🎰 ⚡ Triple Boost! ⚡',     line: '⚡⚡⚡ **TRIPLE MULTIPLIER BONUS!**\n*Electrifying win!*' },
         three:   { color: '#00FF00', title: `🎰 🏆 Three ${symbol?.name ?? ''}s!`, line: `${symbol?.emoji.repeat(3)} **THREE OF A KIND!**\n*${symbol?.name} power!*` },
         two:     { color: '#FFAA00', title: '🎰 Two of a Kind',           line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — partial win!` },
+        push:    { color: '#f39c12', title: '🎰 🎯 Lucky Push!',          line: '🎯 **Lucky Streak** saved you — bet returned!' },
         lose:    { color: '#FF4444', title: '🎰 No Match',                line: '💨 *No matching symbols — better luck next time!*' },
     };
     const { color, title, line } = cfg[outcome] ?? cfg.lose;
@@ -170,19 +171,21 @@ module.exports = {
         const wallet = user?.balance ?? 0;
         if (!await confirmBet(interaction, bet, wallet, 'Slots')) return;
         await interaction.deferReply();
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-        await playSlots(interaction, bet, guildSettings);
+        await playSlots(interaction, bet);
     },
 };
 
-async function playSlots(interaction, bet, guildSettings) {
+async function playSlots(interaction, bet) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     try {
-        const userDoc = await User.findOneAndUpdate(
-            userFilter,
-            { $setOnInsert: { ...userFilter, balance: 0 } },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
+        const [userDoc, guildSettings] = await Promise.all([
+            User.findOneAndUpdate(
+                userFilter,
+                { $setOnInsert: { ...userFilter, balance: 0 } },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            ),
+            Guild.findOne({ guildId: interaction.guild.id }),
+        ]);
         const luckyActive      = hasEffect(userDoc, 'lucky_charm');
         const luckyStreakBonus = getLuckyStreakBonus(userDoc);
         const coinMult         = getCoinMultiplier(userDoc);
@@ -200,10 +203,9 @@ async function playSlots(interaction, bet, guildSettings) {
             result = evaluate(reels, bet);
             charmTriggered = true;
         }
-        // Lucky Streak: on remaining loss, 25% chance to re-spin
+        // Lucky Streak: on remaining loss, 25% chance to convert to a push (bet returned)
         if (result.outcome === 'lose' && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
-            reels  = [spinReel(), spinReel(), spinReel()];
-            result = evaluate(reels, bet);
+            result = { ...result, outcome: 'push', payout: bet };
             luckyStreakTriggered = true;
         }
 
@@ -251,11 +253,8 @@ async function playSlots(interaction, bet, guildSettings) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + '\n> 🍀 *Lucky Charm gave you a second chance!*');
         }
-        if (luckyStreakTriggered) {
-            const desc = finalEmbed.data.description ?? '';
-            finalEmbed.setDescription(desc + '\n> 🎯 *Lucky Streak gave you a second chance!*');
-        }
-        if (totalCoinMult > 1.0 && result.payout > 0) {
+        // luckyStreakTriggered outcome already communicates via the 'push' embed title/line
+        if (totalCoinMult > 1.0 && adjustedPayout > bet) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied to winnings!*`);
         }
@@ -277,7 +276,7 @@ async function playSlots(interaction, bet, guildSettings) {
             }
             collector.stop('replay');
             await i.deferUpdate();
-            await playSlots(interaction, bet, guildSettings);
+            await playSlots(interaction, bet);
         });
 
         collector.on('end', (_, reason) => {

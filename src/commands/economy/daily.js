@@ -35,7 +35,7 @@ module.exports = {
                 });
             }
 
-            const dailyAmount  = guildSettings?.economy.dailyAmount || 100;
+            const dailyAmount  = guildSettings?.economy?.dailyAmount ?? 100;
             const streakMult   = getStreakMultiplier(user.streak?.current ?? 0);
             const coinMult     = getCoinMultiplier(user);
             const serverMult   = getServerCoinMultiplier(guildSettings);

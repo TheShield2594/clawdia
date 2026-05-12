@@ -192,13 +192,16 @@ module.exports = {
             const dealerTotal = handTotal(dealerHand);
 
             let color, status;
-            let freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            if (!freshUser) freshUser = user;
+            const [freshUser_raw, freshGuild] = await Promise.all([
+                User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
+                Guild.findOne({ guildId: interaction.guild.id }),
+            ]);
+            const freshUser = freshUser_raw ?? user;
 
             const luckyActive      = hasEffect(freshUser, 'lucky_charm');
             const luckyStreakBonus = getLuckyStreakBonus(freshUser);
             const coinMult         = getCoinMultiplier(freshUser);
-            const serverMult       = getServerCoinMultiplier(guildSettings);
+            const serverMult       = getServerCoinMultiplier(freshGuild);
             const totalCoinMult    = coinMult * serverMult;
 
             if (dealerTotal > 21 || playerTotal > dealerTotal) {
