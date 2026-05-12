@@ -145,7 +145,7 @@ module.exports = {
                 if (specialEvent.item) {
                     if (!Array.isArray(user.inventory)) user.inventory = [];
                     const existing = user.inventory.find(i => i.itemId === specialEvent.item.itemId);
-                    if (existing) existing.quantity += 1;
+                    if (existing) existing.quantity = (Number(existing.quantity) || 0) + 1;
                     else user.inventory.push({ itemId: specialEvent.item.itemId, quantity: 1 });
                 }
             }
