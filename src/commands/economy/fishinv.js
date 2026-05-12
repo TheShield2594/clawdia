@@ -66,7 +66,7 @@ async function showRods(interaction, user) {
     const f = user.fishing;
 
     if (!f.rods.length) {
-        return interaction.reply({ content: `You don't own any rods yet. Buy one with \`/fishbuyrod\`.`, ephemeral: true });
+        return interaction.reply({ content: `You don't own any rods yet. Buy one with \`/fishshop rod\`.`, ephemeral: true });
     }
 
     const { ROD_BY_TIER } = require('../../data/fishData');
@@ -82,7 +82,7 @@ async function showRods(interaction, user) {
         .setColor('#3498db')
         .setTitle(`🎣 ${interaction.user.username}'s Rods`)
         .setDescription(lines.join('\n\n'))
-        .setFooter({ text: 'Use /fishinv equip <number> to equip a rod • /fishrepair to repair' })
+        .setFooter({ text: 'Use /fishinv equip <number> to equip a rod • /fishshop repair to repair' })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -101,7 +101,7 @@ async function equipRod(interaction, user) {
 
     const rod = f.rods[index];
     if (rod.status === 'broken') {
-        return interaction.reply({ content: `Your **${rod.name}** is broken and cannot be equipped. Repair it first with \`/fishrepair\`.`, ephemeral: true });
+        return interaction.reply({ content: `Your **${rod.name}** is broken and cannot be equipped. Repair it first with \`/fishshop repair\`.`, ephemeral: true });
     }
 
     f.equippedRodIndex = index;

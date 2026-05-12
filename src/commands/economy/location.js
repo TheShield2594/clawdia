@@ -3,20 +3,15 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
-const { LOCATIONS, LOCATION_LIST, TIER_COLORS } = require('../../data/fishData');
+const { LOCATIONS, LOCATION_LIST } = require('../../data/fishData');
 const { ensureFishingData } = require('../../services/fishService');
-
-const LOCATION_CHOICES = LOCATION_LIST.filter(l => !l.defaultUnlocked).map(l => ({
-    name: `${l.emoji} ${l.name}`,
-    value: l.id
-}));
 
 module.exports = {
     cooldown: 5,
 
     data: new SlashCommandBuilder()
         .setName('fishlocation')
-        .setDescription('Manage your fishing locations')
+        .setDescription('View and switch your active fishing location')
         .addSubcommand(sub =>
             sub.setName('list')
                 .setDescription('View all fishing locations and their requirements'))
@@ -27,15 +22,7 @@ module.exports = {
                     o.setName('location')
                         .setDescription('Location to fish at')
                         .setRequired(true)
-                        .addChoices(...LOCATION_LIST.map(l => ({ name: `${l.emoji} ${l.name}`, value: l.id })))))
-        .addSubcommand(sub =>
-            sub.setName('unlock')
-                .setDescription('Unlock a new fishing location')
-                .addStringOption(o =>
-                    o.setName('location')
-                        .setDescription('Location to unlock')
-                        .setRequired(true)
-                        .addChoices(...LOCATION_CHOICES))),
+                        .addChoices(...LOCATION_LIST.map(l => ({ name: `${l.emoji} ${l.name}`, value: l.id }))))),
 
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -53,9 +40,8 @@ module.exports = {
         ensureFishingData(user);
 
         switch (sub) {
-            case 'list':   return showList(interaction, user, currency);
-            case 'set':    return setLocation(interaction, user);
-            case 'unlock': return unlockLocation(interaction, user, currency);
+            case 'list': return showList(interaction, user, currency);
+            case 'set':  return setLocation(interaction, user, currency);
         }
     }
 };
@@ -83,7 +69,7 @@ async function showList(interaction, user, currency) {
         .setColor('#3498db')
         .setTitle('🗺️ Fishing Locations')
         .setDescription(locationLines.join('\n\n'))
-        .setFooter({ text: 'Use /fishlocation unlock <location> to unlock • /fishlocation set <location> to switch' })
+        .setFooter({ text: 'Unlock new locations with /fishshop unlock • Switch with /fishlocation set' })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -91,7 +77,7 @@ async function showList(interaction, user, currency) {
 
 // ─── SET LOCATION ─────────────────────────────────────────────────────────────
 
-async function setLocation(interaction, user) {
+async function setLocation(interaction, user, currency) {
     const f          = user.fishing;
     const locationId = interaction.options.getString('location');
     const location   = LOCATIONS[locationId];
@@ -101,7 +87,7 @@ async function setLocation(interaction, user) {
     }
     if (!f.unlockedLocations.includes(locationId)) {
         return interaction.reply({
-            content: `**${location.name}** is locked. Use \`/fishlocation unlock ${locationId}\` to unlock it first.`,
+            content: `**${location.name}** is locked. Unlock it with \`/fishshop unlock\`.`,
             ephemeral: true
         });
     }
@@ -122,67 +108,16 @@ async function setLocation(interaction, user) {
         return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
     }
 
-    const embed = new EmbedBuilder()
-        .setColor('#2ecc71')
-        .setTitle(`📍 Location Changed`)
-        .setDescription(`You are now fishing at **${location.emoji} ${location.name}**.`)
-        .addFields({ name: 'About', value: location.description, inline: false })
-        .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
-}
-
-// ─── UNLOCK LOCATION ──────────────────────────────────────────────────────────
-
-async function unlockLocation(interaction, user, currency) {
-    const f          = user.fishing;
-    const locationId = interaction.options.getString('location');
-    const location   = LOCATIONS[locationId];
-
-    if (!location) {
-        return interaction.reply({ content: 'Unknown location.', ephemeral: true });
-    }
-    if (f.unlockedLocations.includes(locationId)) {
-        return interaction.reply({ content: `**${location.name}** is already unlocked.`, ephemeral: true });
-    }
-    if (f.level < location.unlockLevel) {
-        return interaction.reply({
-            content: `You need Fisher Level **${location.unlockLevel}** to unlock **${location.name}**. You are Level **${f.level}**.`,
-            ephemeral: true
-        });
-    }
-    if (user.balance < location.unlockCost) {
-        return interaction.reply({
-            content: `Unlocking **${location.name}** costs **${currency}${location.unlockCost.toLocaleString()}**. You have **${currency}${user.balance.toLocaleString()}**.`,
-            ephemeral: true
-        });
-    }
-
-    user.balance -= location.unlockCost;
-    f.unlockedLocations.push(locationId);
-    f.activeLocation = locationId;
-    user.markModified('fishing');
-
-    try {
-        await user.save();
-    } catch (err) {
-        console.error('[location unlock] save error:', err);
-        return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
-    }
-
-    const embed = new EmbedBuilder()
-        .setColor('#f39c12')
-        .setTitle(`🗺️ ${location.emoji} ${location.name} Unlocked!`)
-        .setDescription(location.description)
-        .addFields(
-            { name: 'Cost Paid', value: location.unlockCost > 0 ? `${currency}${location.unlockCost.toLocaleString()}` : 'Free', inline: true },
-            { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`, inline: true },
-            { name: 'Status',    value: 'Now your active location!', inline: true }
-        )
-        .setFooter({ text: 'Use /fish to start catching from this location' })
-        .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({
+        embeds: [
+            new EmbedBuilder()
+                .setColor('#2ecc71')
+                .setTitle(`📍 Location Changed`)
+                .setDescription(`You are now fishing at **${location.emoji} ${location.name}**.`)
+                .addFields({ name: 'About', value: location.description, inline: false })
+                .setTimestamp()
+        ]
+    });
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
