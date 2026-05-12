@@ -4,8 +4,8 @@ const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 
-const COOLDOWN_MS      = 4 * 3_600_000; // 4 hours
-const WANTED_MS        = 1 * 3_600_000; // 1 hour wanted cooldown after death
+const COOLDOWN_MS      = 2.5 * 3_600_000; // 2.5 hours
+const WANTED_MS        = 0.5 * 3_600_000; // 30 min wanted cooldown after death
 const BASE_SUCCESS     = 0.40;
 const DEATH_RATE       = 0.08;          // 8% of failures trigger critical death
 const DEATH_LOSS_MIN   = 0.15;
@@ -31,7 +31,7 @@ const FINES = [
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('crime')
-        .setDescription('Attempt a crime for 80–1,500 coins (40% success). Caught? You pay a fine instead. Cooldown: 4h.'),
+        .setDescription('Attempt a crime for 80–1,500 coins (40% success). Caught? You pay a fine instead. Cooldown: 2.5h.'),
 
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -55,8 +55,9 @@ module.exports = {
 
         if (user.lastCrime && Date.now() - user.lastCrime.getTime() < COOLDOWN_MS) {
             const remaining = COOLDOWN_MS - (Date.now() - user.lastCrime.getTime());
-            const hrs = Math.ceil(remaining / 3_600_000);
-            return interaction.reply({ content: `You're still on the radar from last time. Lay low for **${hrs}h**.`, ephemeral: true });
+            const mins = Math.ceil(remaining / 60_000);
+            const display = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+            return interaction.reply({ content: `You're still on the radar from last time. Lay low for **${display}**.`, ephemeral: true });
         }
 
         const crime = CRIMES[Math.floor(Math.random() * CRIMES.length)];
@@ -84,7 +85,7 @@ module.exports = {
                     .setTitle(`${crime.emoji} Crime Pays — This Time`)
                     .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.${luckyActive ? '\n> 🍀 *Lucky Charm boosted your success chance!*' : ''}${streakLine}`)
                     .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
-                    .setFooter({ text: 'Cooldown: 4h' })
+                    .setFooter({ text: 'Cooldown: 2.5h' })
                     .setTimestamp();
             } else {
                 const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
@@ -108,7 +109,7 @@ module.exports = {
                             { name: isCriticalFailure ? 'Death Loss Absorbed' : 'Fine Absorbed', value: `${currency}${Math.min(wouldHaveLost, user.balance).toLocaleString()}`, inline: true },
                             { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                         )
-                        .setFooter({ text: 'Cooldown: 4h' })
+                        .setFooter({ text: 'Cooldown: 2.5h' })
                         .setTimestamp();
                 } else if (isCriticalFailure) {
                     // Critical failure: lose 15–30% of wallet, enter "wanted" status
@@ -125,14 +126,14 @@ module.exports = {
                         .setDescription(
                             `Your attempt at **${crime.name}** ended catastrophically. ${flavorText}\n\n` +
                             `**The police seized ${Math.round(lossRate * 100)}% of your wallet.**\n` +
-                            `> 🚨 You are now **wanted** — no crimes for 1 hour.`
+                            `> 🚨 You are now **wanted** — no crimes for 30 minutes.`
                         )
                         .addFields(
                             { name: '💸 Lost',           value: `${currency}${lost.toLocaleString()}`,          inline: true },
                             { name: '💰 Remaining',      value: `${currency}${user.balance.toLocaleString()}`,  inline: true },
-                            { name: '⏳ Wanted For',     value: '1 hour',                                       inline: true }
+                            { name: '⏳ Wanted For',     value: '30 minutes',                                   inline: true }
                         )
-                        .setFooter({ text: 'Cooldown: 4h • Purchase a Lifesaver from /shop to protect against death events' })
+                        .setFooter({ text: 'Cooldown: 2.5h • Purchase a Lifesaver from /shop to protect against death events' })
                         .setTimestamp();
                 } else {
                     const fine = Math.floor(Math.random() * 151) + 50;
@@ -149,7 +150,7 @@ module.exports = {
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
                             { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                         )
-                        .setFooter({ text: 'Cooldown: 4h' })
+                        .setFooter({ text: 'Cooldown: 2.5h' })
                         .setTimestamp();
                 }
             }
