@@ -668,16 +668,24 @@ async function handleUnlock(interaction, user, currency) {
         });
     }
 
-    user.balance -= location.unlockCost;
-    f.unlockedLocations.push(locationId);
-    f.activeLocation = locationId;
-    user.markModified('fishing');
+    const updated = await User.findOneAndUpdate(
+        {
+            userId:   interaction.user.id,
+            guildId:  interaction.guild.id,
+            balance:  { $gte: location.unlockCost },
+            'fishing.level': { $gte: location.unlockLevel },
+            'fishing.unlockedLocations': { $ne: locationId }
+        },
+        {
+            $inc:      { balance: -location.unlockCost },
+            $addToSet: { 'fishing.unlockedLocations': locationId },
+            $set:      { 'fishing.activeLocation': locationId }
+        },
+        { new: true }
+    );
 
-    try {
-        await user.save();
-    } catch (err) {
-        console.error('[fishshop unlock] save error:', err);
-        return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
+    if (!updated) {
+        return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', ephemeral: true });
     }
 
     return interaction.reply({
@@ -688,7 +696,7 @@ async function handleUnlock(interaction, user, currency) {
                 .setDescription(location.description)
                 .addFields(
                     { name: 'Cost Paid', value: location.unlockCost > 0 ? `${currency}${location.unlockCost.toLocaleString()}` : 'Free', inline: true },
-                    { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`,                                            inline: true },
+                    { name: 'Balance',   value: `${currency}${updated.balance.toLocaleString()}`,                                          inline: true },
                     { name: 'Status',    value: 'Now your active location!',                                                              inline: true }
                 )
                 .setFooter({ text: 'Use /fish to start catching from this location • Switch anytime with /fishlocation set' })

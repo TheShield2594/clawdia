@@ -10,7 +10,7 @@ const {
 } = require('../../data/huntData');
 const {
     ensureHuntData, activateConsumable, getMaxStamina,
-    applyRepair, weaponStatusEmoji, durabilityBar
+    applyRepair, weaponStatusEmoji, durabilityBar, updateWeaponStatus
 } = require('../../services/huntService');
 
 const ALL_ITEMS       = [...Object.values(CONSUMABLES), ...AMMO_PACKS];
@@ -481,7 +481,7 @@ async function handleRepair(interaction, user, currency) {
 
         const before = weapon.currentDurability;
         weapon.currentDurability = Math.min(weapon.maxDurability, weapon.currentDurability + kitDef.durabilityRestore);
-        if (weapon.status === 'broken') weapon.status = 'good';
+        updateWeaponStatus(weapon);
         h.consumables[kitId] -= 1;
         user.markModified('hunt');
         await user.save();
