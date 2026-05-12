@@ -126,12 +126,12 @@ module.exports = {
                         .setDescription(
                             `Your attempt at **${crime.name}** ended catastrophically. ${flavorText}\n\n` +
                             `**The police seized ${Math.round(lossRate * 100)}% of your wallet.**\n` +
-                            `> 🚨 You are now **wanted** — no crimes for 30 minutes.`
+                            `> 🚨 You are now **wanted** for 30 minutes — the crime cooldown (2.5h) still applies after.`
                         )
                         .addFields(
                             { name: '💸 Lost',           value: `${currency}${lost.toLocaleString()}`,          inline: true },
                             { name: '💰 Remaining',      value: `${currency}${user.balance.toLocaleString()}`,  inline: true },
-                            { name: '⏳ Wanted For',     value: '30 minutes',                                   inline: true }
+                            { name: '⏳ Wanted For',     value: '30 min (+ 2.5h cooldown)',                     inline: true }
                         )
                         .setFooter({ text: 'Cooldown: 2.5h • Purchase a Lifesaver from /shop to protect against death events' })
                         .setTimestamp();
