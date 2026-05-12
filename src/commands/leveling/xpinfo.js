@@ -31,6 +31,7 @@ module.exports = {
         .setDMPermission(false),
     async execute(interaction) {
         if (!interaction.inGuild()) return;
+        await interaction.deferReply({ ephemeral: true });
         try {
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             const leveling = guildSettings?.leveling ?? {};
@@ -62,10 +63,10 @@ module.exports = {
                 )
                 .setFooter({ text: statusLine });
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.editReply({ embeds: [embed] });
         } catch (error) {
             console.error('XP info error:', error);
-            await interaction.reply({ content: 'Failed to fetch XP settings.', ephemeral: true });
+            await interaction.editReply({ content: 'Failed to fetch XP settings.' });
         }
     }
 };
