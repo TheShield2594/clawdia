@@ -237,7 +237,7 @@ async function handleBuyWeapon(interaction, user, currency) {
             await completePurchase(btn, user, weaponData, autoEquip, currency);
         } catch (err) {
             console.error('[huntshop weapon] purchase error:', err);
-            interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
+            btn.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
         }
     });
 
@@ -277,11 +277,17 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
     const newIndex = h.weapons.length - 1;
 
     if (autoEquip && (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex] || h.weapons[h.equippedWeaponIndex].status === 'broken')) {
+        const oldIndex = h.equippedWeaponIndex;
         h.equippedWeaponIndex = newIndex;
-        await User.updateOne(
-            { userId: user.userId, guildId: user.guildId },
-            { $set: { 'hunt.equippedWeaponIndex': newIndex } }
-        );
+        try {
+            await User.updateOne(
+                { userId: user.userId, guildId: user.guildId },
+                { $set: { 'hunt.equippedWeaponIndex': newIndex } }
+            );
+        } catch (err) {
+            console.error('[huntshop weapon] equip update error:', err);
+            h.equippedWeaponIndex = oldIndex;
+        }
     }
 
     const equipped = h.equippedWeaponIndex === newIndex;
