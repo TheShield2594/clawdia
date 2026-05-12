@@ -83,7 +83,7 @@ function start(client) {
             maxAge: 86400000,
             httpOnly: true,
             secure: isProduction,
-            sameSite: isProduction ? 'strict' : 'lax'
+            sameSite: 'lax'
         }
     }));
 
