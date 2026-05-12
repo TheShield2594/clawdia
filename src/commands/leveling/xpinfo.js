@@ -2,13 +2,35 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const Guild = require('../../models/Guild');
 
 const XP_COOLDOWN_SECONDS = 60;
+const FIELD_LIMIT = 1024;
+
+function truncateMentionList(ids, format) {
+    const items = [];
+    let length = 0;
+    for (let i = 0; i < ids.length; i++) {
+        const mention = format(ids[i]);
+        const separator = items.length > 0 ? ', ' : '';
+        const added = separator.length + mention.length;
+        const remaining = ids.length - i;
+        const suffix = `, … and ${remaining} more`;
+        if (length + added + (remaining > 1 ? suffix.length : 0) > FIELD_LIMIT) {
+            items.push(`… and ${remaining} more`);
+            break;
+        }
+        items.push(mention);
+        length += added;
+    }
+    return items.length > 0 ? items.join(', ') : 'None';
+}
 
 module.exports = {
     cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('xpinfo')
-        .setDescription('See which channels and roles are excluded from XP gain in this server.'),
+        .setDescription('See which channels and roles are excluded from XP gain in this server.')
+        .setDMPermission(false),
     async execute(interaction) {
+        if (!interaction.inGuild()) return;
         try {
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             const leveling = guildSettings?.leveling ?? {};
@@ -18,13 +40,8 @@ module.exports = {
             const excludedChannelIds = leveling.noXpChannelIds ?? [];
             const excludedRoleIds = leveling.noXpRoleIds ?? [];
 
-            const channelMentions = excludedChannelIds
-                .map(id => `<#${id}>`)
-                .join(', ') || 'None';
-
-            const roleMentions = excludedRoleIds
-                .map(id => `<@&${id}>`)
-                .join(', ') || 'None';
+            const channelMentions = truncateMentionList(excludedChannelIds, id => `<#${id}>`);
+            const roleMentions = truncateMentionList(excludedRoleIds, id => `<@&${id}>`);
 
             const xpRateLabel = xpRate === 1.0 ? `${xpRate}x (default)` : `${xpRate}x`;
 
