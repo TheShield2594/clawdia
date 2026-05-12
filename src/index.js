@@ -6,6 +6,16 @@ require('dotenv').config();
 
 const health = require('./health');
 
+// Validate required environment variables before doing anything else.
+// Fail loudly at startup rather than silently misbehaving at runtime.
+const REQUIRED_ENV = ['DISCORD_TOKEN', 'CLIENT_ID', 'MONGODB_URI', 'SESSION_SECRET', 'CLIENT_SECRET'];
+const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missingEnv.length) {
+    console.error(`[STARTUP] Missing required environment variables: ${missingEnv.join(', ')}`);
+    console.error('[STARTUP] Copy .env.example to .env and fill in all required values.');
+    process.exit(1);
+}
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,

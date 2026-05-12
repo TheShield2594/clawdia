@@ -66,6 +66,7 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
         }
         await assertHostPublic(current.hostname);
 
+        const FEED_MAX_BYTES = 5 * 1024 * 1024; // 5 MB — enough for any real RSS feed
         const result = await new Promise((resolve, reject) => {
             const mod = current.protocol === 'https:' ? https : http;
             const port = current.port ? Number(current.port) : (current.protocol === 'https:' ? 443 : 80);
@@ -80,7 +81,15 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
                         return resolve({ redirect: loc });
                     }
                     const chunks = [];
-                    res.on('data', c => chunks.push(c));
+                    let totalBytes = 0;
+                    res.on('data', c => {
+                        totalBytes += c.length;
+                        if (totalBytes > FEED_MAX_BYTES) {
+                            res.destroy();
+                            return reject(new Error('Feed response exceeds maximum allowed size (5 MB).'));
+                        }
+                        chunks.push(c);
+                    });
                     res.on('end', () => resolve({ body: Buffer.concat(chunks).toString('utf8') }));
                     res.on('error', reject);
                 }
@@ -113,6 +122,11 @@ function parseChannelIdFromJumpUrl(url) {
     return parts.length >= 2 ? parts[parts.length - 2] : null;
 }
 
+// Discord snowflake IDs are 17–20 digit strings.
+function isValidDiscordId(id) {
+    return typeof id === 'string' && /^\d{17,20}$/.test(id);
+}
+
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
     res.status(401).json({ error: 'Unauthorized' });
@@ -133,12 +147,19 @@ function checkGuildAccess(req, res, next) {
 
 // In-memory rate limiter for write operations: 60 requests per minute per user
 const writeRateLimits = new Map();
+const WRITE_RL_WINDOW_MS = 60 * 1000;
+const WRITE_RL_MAX_ENTRIES = 50_000; // evict oldest entry when map exceeds this size
 setInterval(() => {
-    const cutoff = Date.now() - 60 * 1000;
+    const cutoff = Date.now() - WRITE_RL_WINDOW_MS;
     for (const [userId, timestamps] of writeRateLimits) {
         if (timestamps.every(t => t < cutoff)) writeRateLimits.delete(userId);
     }
-}, 5 * 60 * 1000);
+    // Safety valve: if the map is still over the limit, drop the oldest half
+    if (writeRateLimits.size > WRITE_RL_MAX_ENTRIES) {
+        const keys = [...writeRateLimits.keys()];
+        for (let i = 0; i < Math.floor(keys.length / 2); i++) writeRateLimits.delete(keys[i]);
+    }
+}, 5 * 60 * 1000).unref();
 
 function checkWriteRateLimit(req, res, next) {
     const userId = req.user?.id;
@@ -159,13 +180,39 @@ function checkWriteRateLimit(req, res, next) {
     next();
 }
 
+// Top-level Guild schema keys that the dashboard is allowed to update.
+// This whitelist prevents prototype pollution (__proto__, constructor, etc.)
+// and limits surface area to only fields the dashboard UI actually manages.
+const ALLOWED_SETTING_PARENTS = new Set([
+    'moderation', 'leveling', 'welcome', 'economy', 'ai', 'rssFeeds',
+    'dailyNews', 'dailyNewsProfiles', 'bibleVerse', 'suggestions', 'starboard',
+    'tempVoice', 'autoRoles', 'reactionRoles', 'levelRoles', 'progressionTracks',
+    'analytics', 'logging', 'tickets', 'giveaways', 'antiNuke', 'raids',
+    'escalation', 'notifications'
+]);
+
+function isAllowedSettingKey(key) {
+    if (typeof key !== 'string') return false;
+    const top = key.split('.')[0];
+    return ALLOWED_SETTING_PARENTS.has(top);
+}
+
 router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
 
+    if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+        return res.status(400).json({ error: 'Request body must be a plain object' });
+    }
+
+    const rejectedKeys = Object.keys(updates).filter(k => !isAllowedSettingKey(k));
+    if (rejectedKeys.length) {
+        return res.status(400).json({ error: `Disallowed setting key(s): ${rejectedKeys.join(', ')}` });
+    }
+
     try {
         const guildSettings = await Guild.findOne({ guildId });
-        
+
         if (!guildSettings) {
             return res.status(404).json({ error: 'Guild not found' });
         }
@@ -381,6 +428,7 @@ router.post('/guild/:guildId/autorole', checkAuth, checkGuildAccess, checkWriteR
     const { roleId } = req.body;
 
     if (!roleId) return res.status(400).json({ error: 'roleId required' });
+    if (!isValidDiscordId(roleId)) return res.status(400).json({ error: 'roleId must be a valid Discord snowflake' });
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
@@ -426,6 +474,9 @@ router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, c
         if (!m || typeof m.emoji !== 'string' || !m.emoji.trim() ||
             typeof m.roleId !== 'string' || !m.roleId.trim()) {
             return res.status(400).json({ error: 'Each mapping must have a non-empty emoji and roleId' });
+        }
+        if (!isValidDiscordId(m.roleId.trim())) {
+            return res.status(400).json({ error: `Invalid roleId: ${m.roleId} — must be a valid Discord snowflake` });
         }
     }
 
@@ -545,10 +596,24 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRa
     const { guildId } = req.params;
     const { url, channelId } = req.body;
 
+    if (!url || typeof url !== 'string') return res.status(400).json({ error: 'url is required' });
+    if (!channelId || !isValidDiscordId(channelId)) return res.status(400).json({ error: 'channelId must be a valid Discord snowflake' });
+
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(url);
+    } catch {
+        return res.status(400).json({ error: 'url must be a valid URL' });
+    }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).json({ error: 'url must use http or https' });
+    }
+
     try {
         const guildSettings = await Guild.findOne({ guildId });
-        
-        guildSettings.rssFeeds.push({ url, channelId });
+        if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
+
+        guildSettings.rssFeeds.push({ url: url.trim(), channelId });
         await guildSettings.save();
 
         res.json({ success: true });

@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
+const { logTransaction } = require('../../utils/logTransaction');
 
 module.exports = {
     cooldown: 5,
@@ -28,31 +29,39 @@ module.exports = {
         }
 
         try {
-            let sender = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            let receiverUser = await User.findOne({ userId: recipient.id, guildId: interaction.guild.id });
+            // Atomically deduct from sender — only succeeds if they have enough balance.
+            // Using findOneAndUpdate avoids a read-modify-write race condition where two
+            // concurrent transfers could both pass the balance check and overdraft the wallet.
+            const sender = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: amount } },
+                { $inc: { balance: -amount } },
+                { new: true }
+            );
 
             if (!sender) {
-                sender = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
+                // Either the user doesn't exist yet or they lack sufficient balance.
+                const existing = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+                const currentBal = existing ? existing.balance : 0;
+                return interaction.reply({
+                    content: `You don't have enough coins! Your balance: ${currentBal.toLocaleString()} coins`,
+                    ephemeral: true
+                });
             }
 
-            if (!receiverUser) {
-                receiverUser = await User.create({ userId: recipient.id, guildId: interaction.guild.id });
-            }
+            // Credit receiver; upsert in case they have no record yet.
+            const receiver = await User.findOneAndUpdate(
+                { userId: recipient.id, guildId: interaction.guild.id },
+                { $inc: { balance: amount } },
+                { upsert: true, new: true }
+            );
 
-            if (sender.balance < amount) {
-                return interaction.reply({ content: `You don't have enough coins! Your balance: ${sender.balance}`, ephemeral: true });
-            }
-
-            sender.balance -= amount;
-            receiverUser.balance += amount;
-
-            await sender.save();
-            await receiverUser.save();
+            logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'transfer_send', amount: -amount, balance: sender.balance, relatedUserId: recipient.id });
+            logTransaction({ userId: recipient.id, guildId: interaction.guild.id, type: 'transfer_receive', amount, balance: receiver.balance, relatedUserId: interaction.user.id });
 
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('Transfer Successful')
-                .setDescription(`You transferred **${amount}** coins to ${recipient}`)
+                .setDescription(`You transferred **${amount.toLocaleString()}** coins to ${recipient}`)
                 .addFields(
                     { name: 'Your New Balance', value: `${sender.balance.toLocaleString()} coins` }
                 )
