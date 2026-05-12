@@ -132,14 +132,15 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
         });
     }
 
-    // Step 1: Atomically decrement stock only if stock >= qty (eliminates check-then-act race)
+    // Step 1: Atomically decrement stock only if stock >= qty (eliminates check-then-act race).
+    // $elemMatch ensures both conditions apply to the same array element so the positional
+    // operator $ always targets the correct shop entry.
     const stockLimited = shopItem.stock !== -1;
     if (stockLimited) {
         const stockResult = await Guild.findOneAndUpdate(
             {
                 guildId: interaction.guild.id,
-                'activeEvent.eventShop.itemId': shopItem.itemId,
-                'activeEvent.eventShop.stock': { $gte: qty }
+                'activeEvent.eventShop': { $elemMatch: { itemId: shopItem.itemId, stock: { $gte: qty } } }
             },
             { $inc: { 'activeEvent.eventShop.$.stock': -qty } }
         );
@@ -185,9 +186,24 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
         }
     }
 
-    await user.save().catch(err =>
-        console.error('[eventshop] item grant save failed:', err.message)
-    );
+    try {
+        await user.save();
+    } catch (err) {
+        console.error('[eventshop] item grant save failed:', err.message);
+        // Revert currency deduction
+        await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': currencyId },
+            { $inc: { 'eventCurrency.$.amount': totalCost } }
+        ).catch(() => {});
+        // Revert stock decrement
+        if (stockLimited) {
+            await Guild.findOneAndUpdate(
+                { guildId: interaction.guild.id, 'activeEvent.eventShop': { $elemMatch: { itemId: shopItem.itemId } } },
+                { $inc: { 'activeEvent.eventShop.$.stock': qty } }
+            ).catch(() => {});
+        }
+        return interaction.editReply({ content: '❌ Purchase failed due to a server error. Please try again.' });
+    }
 
     const newBalance = getEventCurrencyBalance(user, currencyId);
 

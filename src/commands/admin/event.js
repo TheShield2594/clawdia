@@ -64,7 +64,7 @@ module.exports = {
         }
 
         // start and end require ManageGuild
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
             return interaction.reply({ content: 'You need **Manage Server** permission to manage events.', ephemeral: true });
         }
 
@@ -147,7 +147,7 @@ async function handleStart(interaction) {
         description: s.description ?? '',
         emoji:       s.emoji ?? '',
         cost:        s.cost,
-        stock:       -1
+        stock:       s.stock ?? -1
     })) ?? [];
 
     const newEvent = {

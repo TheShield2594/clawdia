@@ -44,14 +44,10 @@ module.exports = {
             });
         }
 
-        let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        if (!user) {
-            user = new User({ userId: interaction.user.id, guildId: interaction.guild.id });
-        }
-
-        // Cooldown check
-        if (user.lastTrickOrTreat) {
-            const elapsed = Date.now() - new Date(user.lastTrickOrTreat).getTime();
+        // Fast pre-check for a user-friendly remaining-time message
+        const existingUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        if (existingUser?.lastTrickOrTreat) {
+            const elapsed = Date.now() - new Date(existingUser.lastTrickOrTreat).getTime();
             if (elapsed < COOLDOWN_MS) {
                 const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 60_000);
                 return interaction.editReply({
@@ -60,7 +56,29 @@ module.exports = {
             }
         }
 
-        user.lastTrickOrTreat = new Date();
+        // Atomic cooldown claim — guards against concurrent duplicate submissions
+        let user;
+        const cooldownThreshold = new Date(Date.now() - COOLDOWN_MS);
+        if (existingUser) {
+            const claimed = await User.findOneAndUpdate(
+                {
+                    userId: interaction.user.id,
+                    guildId: interaction.guild.id,
+                    $or: [
+                        { lastTrickOrTreat: null },
+                        { lastTrickOrTreat: { $lt: cooldownThreshold } }
+                    ]
+                },
+                { $set: { lastTrickOrTreat: new Date() } },
+                { new: true }
+            );
+            if (!claimed) {
+                return interaction.editReply({ content: '🎃 You already went trick-or-treating! Try again later.' });
+            }
+            user = claimed;
+        } else {
+            user = new User({ userId: interaction.user.id, guildId: interaction.guild.id, lastTrickOrTreat: new Date() });
+        }
 
         const isTrick = Math.random() < TRICK_CHANCE;
         let embed;
