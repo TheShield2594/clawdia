@@ -5,7 +5,7 @@ const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const {
     CONSUMABLES, AMMO_PACKS,
-    WEAPON_TIERS, WEAPON_BY_TIER, WEAPON_UPGRADES,
+    WEAPON_TIERS, WEAPON_BY_TIER, WEAPON_BY_SLUG, WEAPON_UPGRADES,
     ZONES, ZONE_LIST
 } = require('../../data/huntData');
 const {
@@ -13,6 +13,7 @@ const {
     applyRepair, weaponStatusEmoji, durabilityBar, updateWeaponStatus
 } = require('../../services/huntService');
 
+const WEAPON_CHOICES  = WEAPON_TIERS.map(w => ({ name: `${w.emoji} ${w.name} — ${w.cost.toLocaleString()} coins`, value: w.slug }));
 const ALL_ITEMS       = [...Object.values(CONSUMABLES), ...AMMO_PACKS];
 const ITEM_CHOICES    = ALL_ITEMS.map(i => ({ name: `${i.emoji ?? ''} ${i.name} — ${i.cost} coins`.trim(), value: i.id }));
 const ACTIVATABLE     = ['basic_bait', 'premium_bait', 'luck_charm', 'hunters_focus', 'xp_scroll', 'stamina_tonic'];
@@ -31,12 +32,11 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('weapon')
                 .setDescription('Buy a new hunting weapon')
-                .addIntegerOption(o =>
-                    o.setName('tier')
-                        .setDescription('Weapon tier (1–5)')
+                .addStringOption(o =>
+                    o.setName('type')
+                        .setDescription('Which weapon to buy')
                         .setRequired(true)
-                        .setMinValue(1)
-                        .setMaxValue(5))
+                        .addChoices(...WEAPON_CHOICES))
                 .addBooleanOption(o =>
                     o.setName('equip')
                         .setDescription('Auto-equip after purchase (default: true)')
@@ -182,74 +182,73 @@ async function showList(interaction, user, currency) {
 // ─── BUY WEAPON ──────────────────────────────────────────────────────────────
 
 async function handleBuyWeapon(interaction, user, currency) {
-    const tier       = interaction.options.getInteger('tier');
+    const slug       = interaction.options.getString('type');
     const autoEquip  = interaction.options.getBoolean('equip') ?? true;
-    const weaponData = WEAPON_BY_TIER[tier];
+    const weaponData = WEAPON_BY_SLUG[slug];
 
     if (!weaponData) {
-        return interaction.reply({ content: 'Invalid weapon tier.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown weapon type.', ephemeral: true });
     }
     if (user.balance < weaponData.cost) {
         return interaction.reply({
-            content: `You need ${currency}${weaponData.cost.toLocaleString()} but only have ${currency}${user.balance.toLocaleString()}.`,
+            content: `You need **${currency}${weaponData.cost.toLocaleString()}** to buy the **${weaponData.name}**. You have **${currency}${user.balance.toLocaleString()}**.`,
             ephemeral: true
         });
     }
 
-    if (weaponData.cost >= 5000) {
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('buygun_confirm').setLabel('Confirm Purchase').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('buygun_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-        );
+    const ammoValue = weaponData.requiresAmmo
+        ? `${weaponData.ammoType.replace(/_/g, ' ')} (${currency}${weaponData.ammoCost}/hunt)`
+        : 'None required';
 
-        const confirmEmbed = new EmbedBuilder()
-            .setColor('#f39c12')
-            .setTitle('Confirm Purchase')
-            .setDescription(`Buy **${weaponData.emoji} ${weaponData.name}** for **${currency}${weaponData.cost.toLocaleString()}**?`)
-            .addFields(
-                { name: 'Your Balance',   value: `${currency}${user.balance.toLocaleString()}`,                 inline: true },
-                { name: 'After Purchase', value: `${currency}${(user.balance - weaponData.cost).toLocaleString()}`, inline: true }
-            )
-            .setFooter({ text: 'This expires in 30 seconds' });
+    const confirmEmbed = new EmbedBuilder()
+        .setColor('#f39c12')
+        .setTitle(`${weaponData.emoji} Purchase ${weaponData.name}?`)
+        .setDescription(weaponData.description)
+        .addFields(
+            { name: 'Cost',         value: `${currency}${weaponData.cost.toLocaleString()}`,                         inline: true },
+            { name: 'Durability',   value: `${weaponData.baseDurability}`,                                            inline: true },
+            { name: 'Success Rate', value: `${Math.round(weaponData.successRate * 100)}%`,                            inline: true },
+            { name: 'Rarity Boost', value: weaponData.rarityBoost > 0 ? `+${Math.round(weaponData.rarityBoost * 100)}%` : 'None', inline: true },
+            { name: 'Ammo',         value: ammoValue,                                                                 inline: true },
+            { name: 'Your Balance', value: `${currency}${user.balance.toLocaleString()}`,                             inline: true }
+        )
+        .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
-        const msg = await interaction.reply({ embeds: [confirmEmbed], components: [row], fetchReply: true });
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('buygun_confirm').setLabel('Buy').setStyle(ButtonStyle.Success).setEmoji('✅'),
+        new ButtonBuilder().setCustomId('buygun_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+    );
 
-        const collector = msg.createMessageComponentCollector({
-            componentType: ComponentType.Button,
-            filter: i => i.user.id === interaction.user.id,
-            time: 30_000,
-            max: 1
-        });
+    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+    const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
-        collector.on('collect', async btnInteraction => {
-            if (btnInteraction.customId === 'buygun_cancel') {
-                return btnInteraction.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
-            }
-            await btnInteraction.deferUpdate();
-            await completePurchase(btnInteraction, user, weaponData, autoEquip, currency);
-        });
+    collector.on('collect', async btn => {
+        if (btn.user.id !== interaction.user.id) {
+            return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+        }
+        collector.stop();
 
-        collector.on('end', async (collected, reason) => {
-            if (reason === 'time' && collected.size === 0) {
-                await interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
-            }
-        });
-    } else {
-        await interaction.deferReply();
-        await completePurchase(interaction, user, weaponData, autoEquip, currency);
-    }
+        if (btn.customId === 'buygun_cancel') {
+            return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
+        }
+
+        try {
+            await btn.deferUpdate();
+            await completePurchase(btn, user, weaponData, autoEquip, currency);
+        } catch (err) {
+            console.error('[huntshop weapon] purchase error:', err);
+            btn.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
+        }
+    });
+
+    collector.on('end', (_, reason) => {
+        if (reason === 'time') {
+            interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
+        }
+    });
 }
 
 async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, currency) {
-    const h = user.hunt;
-
-    if (user.balance < weaponData.cost) {
-        const reply = { content: `Insufficient funds. You need ${currency}${weaponData.cost.toLocaleString()} but only have ${currency}${user.balance.toLocaleString()}.`, embeds: [], components: [] };
-        return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
-    }
-
-    user.balance -= weaponData.cost;
-
     const newWeapon = {
         name:              weaponData.name,
         tier:              weaponData.tier,
@@ -263,15 +262,33 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
         acquiredAt:        new Date()
     };
 
-    h.weapons.push(newWeapon);
+    const updated = await User.findOneAndUpdate(
+        { userId: user.userId, guildId: user.guildId, balance: { $gte: weaponData.cost } },
+        { $inc: { balance: -weaponData.cost }, $push: { 'hunt.weapons': newWeapon } },
+        { new: true }
+    );
+
+    if (!updated) {
+        const reply = { content: `Insufficient funds. You need ${currency}${weaponData.cost.toLocaleString()} but only have ${currency}${user.balance.toLocaleString()}.`, embeds: [], components: [] };
+        return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
+    }
+
+    const h = updated.hunt;
     const newIndex = h.weapons.length - 1;
 
     if (autoEquip && (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex] || h.weapons[h.equippedWeaponIndex].status === 'broken')) {
+        const oldIndex = h.equippedWeaponIndex;
         h.equippedWeaponIndex = newIndex;
+        try {
+            await User.updateOne(
+                { userId: user.userId, guildId: user.guildId },
+                { $set: { 'hunt.equippedWeaponIndex': newIndex } }
+            );
+        } catch (err) {
+            console.error('[huntshop weapon] equip update error:', err);
+            h.equippedWeaponIndex = oldIndex;
+        }
     }
-
-    user.markModified('hunt');
-    await user.save();
 
     const equipped = h.equippedWeaponIndex === newIndex;
     const embed = new EmbedBuilder()
@@ -286,7 +303,7 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
             { name: 'Weapon #',     value: `#${newIndex + 1} in inventory`,                                                                                           inline: true },
             { name: 'Status',       value: equipped ? '✅ Equipped' : `Use \`/huntinv equip ${newIndex + 1}\``,                                                       inline: true }
         )
-        .addFields({ name: 'New Balance', value: `${currency}${user.balance.toLocaleString()}` })
+        .addFields({ name: 'New Balance', value: `${currency}${updated.balance.toLocaleString()}` })
         .setFooter({ text: equipped ? 'Ready to hunt! Use /hunt' : `Equip with /huntinv equip ${newIndex + 1}` });
 
     const reply = { embeds: [embed], components: [] };
