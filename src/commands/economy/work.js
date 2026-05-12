@@ -37,8 +37,8 @@ const LUCKY_FIND_ITEMS = [
 
 // Mutually exclusive special events, checked in priority order (rarest first)
 // Returns null or { type, embedField: { name, value } } plus optional coinDelta / item
-function rollSpecialEvent(earned, basePay) {
-    const roll = Math.random();
+function rollSpecialEvent(earned, basePay, randomFn = Math.random) {
+    const roll = randomFn();
     if (roll < 0.01) {
         return {
             type: 'promotion',
@@ -47,7 +47,7 @@ function rollSpecialEvent(earned, basePay) {
         };
     }
     if (roll < 0.04) {
-        const item = LUCKY_FIND_ITEMS[Math.floor(Math.random() * LUCKY_FIND_ITEMS.length)];
+        const item = LUCKY_FIND_ITEMS[Math.floor(randomFn() * LUCKY_FIND_ITEMS.length)];
         return {
             type: 'lucky_find',
             coinDelta: 0,
@@ -56,7 +56,7 @@ function rollSpecialEvent(earned, basePay) {
         };
     }
     if (roll < 0.14) {
-        const bonus = Math.round(basePay * (0.25 + Math.random() * 0.25));
+        const bonus = Math.round(basePay * (0.25 + randomFn() * 0.25));
         return {
             type: 'bonus',
             coinDelta: bonus,
@@ -64,7 +64,7 @@ function rollSpecialEvent(earned, basePay) {
         };
     }
     if (roll < 0.19) {
-        const penalty = Math.round(basePay * (0.10 + Math.random() * 0.10));
+        const penalty = Math.round(basePay * (0.10 + randomFn() * 0.10));
         return {
             type: 'bad_day',
             coinDelta: -penalty,
@@ -143,6 +143,7 @@ module.exports = {
             if (specialEvent) {
                 finalEarned = Math.max(0, earned + specialEvent.coinDelta);
                 if (specialEvent.item) {
+                    if (!Array.isArray(user.inventory)) user.inventory = [];
                     const existing = user.inventory.find(i => i.itemId === specialEvent.item.itemId);
                     if (existing) existing.quantity += 1;
                     else user.inventory.push({ itemId: specialEvent.item.itemId, quantity: 1 });
