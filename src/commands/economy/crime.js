@@ -84,7 +84,7 @@ module.exports = {
                     .setTitle(`${crime.emoji} Crime Pays — This Time`)
                     .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.${luckyActive ? '\n> 🍀 *Lucky Charm boosted your success chance!*' : ''}${streakLine}`)
                     .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
-                    .setFooter({ text: 'Crimes can be committed every 4 hours' })
+                    .setFooter({ text: 'Cooldown: 4h' })
                     .setTimestamp();
             } else {
                 const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
@@ -108,7 +108,7 @@ module.exports = {
                             { name: isCriticalFailure ? 'Death Loss Absorbed' : 'Fine Absorbed', value: `${currency}${Math.min(wouldHaveLost, user.balance).toLocaleString()}`, inline: true },
                             { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                         )
-                        .setFooter({ text: 'Crimes can be committed every 4 hours' })
+                        .setFooter({ text: 'Cooldown: 4h' })
                         .setTimestamp();
                 } else if (isCriticalFailure) {
                     // Critical failure: lose 15–30% of wallet, enter "wanted" status
@@ -132,7 +132,7 @@ module.exports = {
                             { name: '💰 Remaining',      value: `${currency}${user.balance.toLocaleString()}`,  inline: true },
                             { name: '⏳ Wanted For',     value: '1 hour',                                       inline: true }
                         )
-                        .setFooter({ text: 'Purchase a Lifesaver from /shop to protect against death events' })
+                        .setFooter({ text: 'Cooldown: 4h • Purchase a Lifesaver from /shop to protect against death events' })
                         .setTimestamp();
                 } else {
                     const fine = Math.floor(Math.random() * 151) + 50;
@@ -149,7 +149,7 @@ module.exports = {
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
                             { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                         )
-                        .setFooter({ text: 'Crimes can be committed every 4 hours' })
+                        .setFooter({ text: 'Cooldown: 4h' })
                         .setTimestamp();
                 }
             }

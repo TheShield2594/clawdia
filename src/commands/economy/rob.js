@@ -89,6 +89,7 @@ module.exports = {
                         .setColor('#9b59b6')
                         .setTitle('🧥 Target Invisible!')
                         .setDescription(`**${target.username}** is wearing an Invisibility Cloak. You can't find them! (${timeRemaining(cloak?.expiresAt)} remaining)`)
+                        .setFooter({ text: 'Cooldown: 1h' })
                         .setTimestamp()]
                 });
             }
@@ -102,6 +103,7 @@ module.exports = {
                         .setColor('#3498db')
                         .setTitle('🛡️ Robbery Blocked!')
                         .setDescription(`**${target.username}** blocked your robbery attempt with a Shield. (${timeRemaining(shield?.expiresAt)} remaining)`)
+                        .setFooter({ text: 'Cooldown: 1h' })
                         .setTimestamp()]
                 });
             }
@@ -145,6 +147,7 @@ module.exports = {
                         { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true },
                         { name: 'Their Balance', value: `${currency}${victim.balance.toLocaleString()}`, inline: true }
                     )
+                    .setFooter({ text: 'Cooldown: 1h' })
                     .setTimestamp();
 
                 if (padlockActive) {
@@ -167,6 +170,7 @@ module.exports = {
                             { name: 'Fine Absorbed', value: `${currency}${paid.toLocaleString()}`,        inline: true },
                             { name: 'Your Balance',  value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
                         )
+                        .setFooter({ text: 'Cooldown: 1h' })
                         .setTimestamp();
                 } else {
                     robber.balance = Math.max(0, robber.balance - paid);
@@ -181,6 +185,7 @@ module.exports = {
                             { name: 'Fine Paid',    value: `${currency}${paid.toLocaleString()}`,        inline: true },
                             { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
                         )
+                        .setFooter({ text: 'Cooldown: 1h' })
                         .setTimestamp();
                 }
             }

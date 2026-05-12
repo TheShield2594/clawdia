@@ -182,6 +182,7 @@ module.exports = {
                     },
                     { name: 'Balance', value: `${currency} ${user.balance.toLocaleString()}`, inline: false }
                 )
+                .setFooter({ text: 'Cooldown: 1h' })
                 .setTimestamp();
 
             if (specialEvent) {
