@@ -37,7 +37,10 @@ module.exports = {
             const url = interaction.options.getString('url');
             const channel = interaction.options.getChannel('channel');
 
-            if (!['https://www.youtube.com', 'https://youtu.be', 'https://youtube.com'].some(p => url.startsWith(p))) {
+            let parsedUrl;
+            try { parsedUrl = new URL(url); } catch { parsedUrl = null; }
+            const YOUTUBE_HOSTNAMES = new Set(['www.youtube.com', 'youtube.com', 'youtu.be', 'm.youtube.com']);
+            if (!parsedUrl || !YOUTUBE_HOSTNAMES.has(parsedUrl.hostname)) {
                 return interaction.reply({ content: 'Only YouTube URLs are supported.', ephemeral: true });
             }
 
@@ -46,14 +49,19 @@ module.exports = {
             // Stop any existing livestream before reconfiguring
             stopLivestream(interaction.guild.id);
 
-            await Guild.findOneAndUpdate(
+            const saved = await Guild.findOneAndUpdate(
                 { guildId: interaction.guild.id },
                 {
                     'music.livestream.enabled': true,
                     'music.livestream.url': url,
                     'music.livestream.channelId': channel.id
-                }
+                },
+                { upsert: true, new: true }
             );
+
+            if (!saved) {
+                return interaction.editReply('Failed to save livestream settings. Please try again.');
+            }
 
             await startLivestream(client, interaction.guild.id);
 

@@ -105,6 +105,11 @@ async function _connect(client, guildId, guild, channel, url) {
 
     } catch (err) {
         console.error(`[LIVESTREAM] Failed to start for guild ${guildId}:`, err);
+        const state = activeLivestreams.get(guildId);
+        if (state) {
+            try { state.player.stop(true); } catch {}
+            try { state.connection.destroy(); } catch {}
+        }
         activeLivestreams.delete(guildId);
     }
 }

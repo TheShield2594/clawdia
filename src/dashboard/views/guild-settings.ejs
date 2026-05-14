@@ -1981,11 +1981,11 @@
                 const lsUrl = document.getElementById('music-ls-url').value.trim();
                 const lsChannelId = document.getElementById('music-ls-channel').value || null;
                 if (lsEnabled && !lsUrl) {
-                    showToast('Please enter a YouTube URL for the livestream.', 'error');
+                    toast('Please enter a YouTube URL for the livestream.', 'error');
                     return;
                 }
                 if (lsEnabled && !lsChannelId) {
-                    showToast('Please select a channel for the livestream.', 'error');
+                    toast('Please select a channel for the livestream.', 'error');
                     return;
                 }
                 data = {
