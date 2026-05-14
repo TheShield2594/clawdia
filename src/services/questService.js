@@ -76,6 +76,16 @@ function getWeeklyExpiry() {
     return d;
 }
 
+// Unbiased in-place Fisher-Yates (Durstenfeld) shuffle — returns a new array
+function shuffle(arr) {
+    const out = [...arr];
+    for (let i = out.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+}
+
 // Weighted random selection: higher-level users are more likely to get harder quests.
 function pickWeighted(pool, count, userLevel) {
     const lvl = userLevel || 1;
@@ -87,7 +97,7 @@ function pickWeighted(pool, count, userLevel) {
         else                                weight = lvl < 10 ? 1 : lvl < 30 ? 2 : 4; // hard
         for (let i = 0; i < weight; i++) entries.push(q);
     }
-    const shuffled = [...entries].sort(() => Math.random() - 0.5);
+    const shuffled = shuffle(entries);
     const seen = new Set();
     const result = [];
     for (const q of shuffled) {
@@ -99,7 +109,7 @@ function pickWeighted(pool, count, userLevel) {
     }
     // Fallback: pad with remaining quests if pool was too small after weighting
     if (result.length < count) {
-        const remaining = pool.filter(q => !seen.has(q.questId)).sort(() => Math.random() - 0.5);
+        const remaining = shuffle(pool.filter(q => !seen.has(q.questId)));
         result.push(...remaining.slice(0, count - result.length));
     }
     return result;

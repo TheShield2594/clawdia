@@ -12,15 +12,14 @@ module.exports = {
     cooldown: 5,
     async execute(interaction) {
         try {
-            let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-
-            if (!user) {
-                user = await User.create({
-                    userId: interaction.user.id,
-                    guildId: interaction.guild.id
-                });
-            }
+            const [user, guildSettings] = await Promise.all([
+                User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+                    { upsert: true, new: true }
+                ),
+                Guild.findOne({ guildId: interaction.guild.id })
+            ]);
 
             const now = Date.now();
             const dailyCooldown = 86400000;

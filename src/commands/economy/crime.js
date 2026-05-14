@@ -34,18 +34,20 @@ module.exports = {
         .setDescription('Attempt a crime for 80–1,500 coins (40% success). Caught? You pay a fine instead. Cooldown: 2.5h.'),
 
     async execute(interaction) {
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const [guildSettings, user] = await Promise.all([
+            Guild.findOne({ guildId: interaction.guild.id }),
+            User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+                { upsert: true, new: true }
+            )
+        ]);
+
         if (guildSettings?.economy?.enabled === false) {
             return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
         }
 
         const currency = guildSettings?.economy?.currency || '💰';
-
-        let user = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            {},
-            { upsert: true, new: true }
-        );
 
         if (user.wantedUntil && Date.now() < user.wantedUntil.getTime()) {
             const remaining = user.wantedUntil.getTime() - Date.now();
