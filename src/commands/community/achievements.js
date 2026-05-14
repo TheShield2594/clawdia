@@ -58,6 +58,7 @@ module.exports = {
                 }));
 
                 const allDefs = [...ACHIEVEMENTS, ...customAchievements].filter(d => !disabled.has(d.id));
+                const visibleDefs = allDefs.filter(d => !d.secret || earnedMap.has(d.id));
 
                 // Group by category
                 const byCategory = {};
@@ -77,7 +78,7 @@ module.exports = {
                     .setColor(0xF1C40F)
                     .setTitle(`🏅 ${target.username}'s Achievements`)
                     .setDescription(
-                        `**${earned.length}/${allDefs.length}** achievements earned` +
+                        `**${earned.length}/${visibleDefs.length}** achievements earned` +
                         (unclaimed.length ? `\n> ⚠️ ${unclaimed.length} unclaimed reward(s) — use \`/achievements claim\`` : '')
                     )
                     .setThumbnail(target.displayAvatarURL());
@@ -92,6 +93,11 @@ module.exports = {
                         if (entry) {
                             const claimFlag = (!entry.claimed && (def.xpReward || def.coinReward)) ? ' ⚠️' : '';
                             return `${def.emoji} ~~**${def.name}**~~${claimFlag} ✅`;
+                        }
+
+                        // Secret achievements: hide everything until earned
+                        if (def.secret) {
+                            return `🔒 **???** — *Secret Achievement*`;
                         }
 
                         let progressStr = '';

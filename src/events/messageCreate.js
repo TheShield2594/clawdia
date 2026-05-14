@@ -3,7 +3,7 @@ const Guild = require('../models/Guild');
 const Case = require('../models/Case');
 const { handleAIChat } = require('../services/aiService');
 const { logModeration } = require('../utils/logger');
-const { ensureQuests, onMessage, notifyQuestComplete } = require('../services/questService');
+const { ensureQuests, onMessage, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset } = require('../services/questService');
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
 const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = require('../services/effectsService');
 const { checkRivalry } = require('../services/rivalryService');
@@ -151,8 +151,8 @@ async function handleStreakAndQuests(message, guildSettings) {
         user.dailyMessages = (user.dailyMessages || 0) + 1;
 
         // Quest progress
-        await ensureQuests(user, guildSettings);
-        const completedQuests = await onMessage(user, guildSettings);
+        const { assignedNewDaily } = await ensureQuests(user, guildSettings);
+        const { completed: completedQuests, nearComplete: nearCompleteQuests } = await onMessage(user, guildSettings);
 
         const newlyEarned = await checkAndAward(user, guildSettings).catch(() => []);
 
@@ -163,6 +163,10 @@ async function handleStreakAndQuests(message, guildSettings) {
         }
 
         await notifyQuestComplete(guildSettings, message.member, completedQuests, message.channel);
+        await notifyQuestNearComplete(guildSettings, message.member, nearCompleteQuests, message.channel);
+        if (assignedNewDaily) {
+            await notifyDailyQuestReset(guildSettings, message.member, user, message.channel);
+        }
 
         if (shieldActivated) {
             await message.channel.send(

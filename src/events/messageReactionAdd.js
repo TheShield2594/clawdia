@@ -1,7 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 const User = require('../models/User');
-const { ensureQuests, onReaction, notifyQuestComplete } = require('../services/questService');
+const { ensureQuests, onReaction, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 
 module.exports = {
     name: 'messageReactionAdd',
@@ -36,11 +36,12 @@ async function handleReactionQuests(reaction, discordUser, guild, guildSettings)
     );
     if (!userDoc) return;
     await ensureQuests(userDoc, guildSettings);
-    const completed = await onReaction(userDoc, guildSettings);
+    const { completed, nearComplete } = await onReaction(userDoc, guildSettings);
     await userDoc.save();
     const member = await guild.members.fetch(discordUser.id).catch(() => null);
     if (member) {
         await notifyQuestComplete(guildSettings, member, completed, reaction.message.channel);
+        await notifyQuestNearComplete(guildSettings, member, nearComplete, reaction.message.channel);
     }
 }
 
