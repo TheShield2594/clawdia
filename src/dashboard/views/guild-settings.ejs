@@ -578,6 +578,44 @@
                         <label class="field-label" for="music-queue-size">Max queue size</label>
                         <input type="number" id="music-queue-size" value="<%= settings.music.maxQueueSize || 100 %>" min="1" max="500">
                     </div>
+
+                    <div class="eco-section-head" style="margin-top:1.75rem">
+                        <span class="toggle-text"><strong>24/7 Livestream</strong><span>Stream a YouTube video or livestream into a Stage or Voice channel around the clock. Resumes automatically after restarts and when the music queue ends.</span></span>
+                    </div>
+
+                    <label class="toggle" style="margin-top:1rem">
+                        <span class="toggle-text"><strong>Enable livestream</strong><span>Bot will join the selected channel and stream the URL continuously</span></span>
+                        <span class="switch"><input type="checkbox" id="music-ls-enabled" <%= settings.music?.livestream?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="field" style="margin-top:1rem">
+                        <label class="field-label" for="music-ls-url">YouTube URL</label>
+                        <input type="url" id="music-ls-url" placeholder="https://www.youtube.com/watch?v=..." value="<%= settings.music?.livestream?.url || '' %>">
+                        <small>Paste a YouTube video link (e.g. a 24/7 lo-fi stream or a long playlist video)</small>
+                    </div>
+
+                    <div class="field">
+                        <label class="field-label" for="music-ls-channel">Stage / Voice channel</label>
+                        <select id="music-ls-channel">
+                            <option value="">Select a channel</option>
+                            <% if (stageChannels && stageChannels.length) { %>
+                                <optgroup label="Stage Channels">
+                                <% stageChannels.forEach(ch => { %>
+                                    <option value="<%= ch.id %>" <%= settings.music?.livestream?.channelId === ch.id ? 'selected' : '' %>>🎭 <%= ch.name %></option>
+                                <% }); %>
+                                </optgroup>
+                            <% } %>
+                            <% if (voiceChannels && voiceChannels.length) { %>
+                                <optgroup label="Voice Channels">
+                                <% voiceChannels.forEach(ch => { %>
+                                    <option value="<%= ch.id %>" <%= settings.music?.livestream?.channelId === ch.id ? 'selected' : '' %>>🔊 <%= ch.name %></option>
+                                <% }); %>
+                                </optgroup>
+                            <% } %>
+                        </select>
+                        <small>The bot will join this channel to play the stream</small>
+                    </div>
+
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('music')">Save changes</button>
                     </div>
@@ -1939,10 +1977,24 @@
                 };
             } else if (section === 'music') {
                 const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
+                const lsEnabled = document.getElementById('music-ls-enabled').checked;
+                const lsUrl = document.getElementById('music-ls-url').value.trim();
+                const lsChannelId = document.getElementById('music-ls-channel').value || null;
+                if (lsEnabled && !lsUrl) {
+                    toast('Please enter a YouTube URL for the livestream.', 'error');
+                    return;
+                }
+                if (lsEnabled && !lsChannelId) {
+                    toast('Please select a channel for the livestream.', 'error');
+                    return;
+                }
                 data = {
                     'music.djRoleId': document.getElementById('music-dj-role').value || null,
                     'music.defaultVolume': safeInt('music-volume', 50),
-                    'music.maxQueueSize': safeInt('music-queue-size', 100)
+                    'music.maxQueueSize': safeInt('music-queue-size', 100),
+                    'music.livestream.enabled': lsEnabled,
+                    'music.livestream.url': lsUrl || null,
+                    'music.livestream.channelId': lsChannelId
                 };
             } else if (section === 'tickets') {
                 const ticketsEnabled = document.getElementById('tickets-enabled').checked;

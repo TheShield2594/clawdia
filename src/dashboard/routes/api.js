@@ -9,6 +9,7 @@ const SummaryJob = require('../../models/SummaryJob');
 const MAX_SUMMARY_JOBS_PER_GUILD = 10;
 const { rescheduleDailyNews } = require('../../services/rssService');
 const { rescheduleBibleVerse } = require('../../services/dailyBibleService');
+const { startLivestream, stopLivestream } = require('../../services/livestreamService');
 const Parser = require('rss-parser');
 const dns = require('dns');
 const net = require('net');
@@ -188,7 +189,7 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'dailyNews', 'dailyNewsProfiles', 'bibleVerse', 'suggestions', 'starboard',
     'tempVoice', 'autoRoles', 'reactionRoles', 'levelRoles', 'progressionTracks',
     'analytics', 'logging', 'tickets', 'giveaways', 'antiNuke', 'raids',
-    'escalation', 'notifications'
+    'escalation', 'notifications', 'music'
 ]);
 
 function isAllowedSettingKey(key) {
@@ -218,17 +219,7 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
         }
 
         Object.keys(updates).forEach(key => {
-            if (key.includes('.')) {
-                const parts = key.split('.');
-                const parent = parts[0];
-                const child = parts.slice(1).join('.');
-                if (guildSettings[parent] == null) {
-                    guildSettings[parent] = {};
-                }
-                guildSettings[parent][child] = updates[key];
-            } else {
-                guildSettings[key] = updates[key];
-            }
+            guildSettings.set(key, updates[key]);
         });
 
         await guildSettings.save();
@@ -242,7 +233,15 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
         if (shouldRescheduleBible) {
             rescheduleBibleVerse(req.client, guildId);
         }
-        
+
+        const livestreamChanged = Object.keys(updates).some(key => key.startsWith('music.livestream'));
+        if (livestreamChanged) {
+            stopLivestream(guildId);
+            if (guildSettings.music?.livestream?.enabled) {
+                startLivestream(req.client, guildId);
+            }
+        }
+
         res.json({ success: true, settings: guildSettings });
     } catch (error) {
         console.error('API error:', error);
