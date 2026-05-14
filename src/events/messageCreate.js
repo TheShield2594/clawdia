@@ -10,6 +10,12 @@ const { checkRivalry } = require('../services/rivalryService');
 const { checkAndAward, announceAchievements } = require('../services/achievementService');
 const BASE_BAD_WORDS = require('../data/profanityList');
 
+// Pre-compile base word regexes once at module load — avoids per-message regex construction
+const BASE_BAD_WORD_REGEXES = BASE_BAD_WORDS.map(word => {
+    const escaped = word.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`, 'i');
+});
+
 // Leet-speak normalization map
 const LEET_MAP = {
     '4': 'a', '@': 'a', '3': 'e', '€': 'e', '1': 'i', '!': 'i',
@@ -78,8 +84,9 @@ module.exports = {
                 }
             }
 
+            let sharedUser = null;
             if (guildSettings?.leveling.enabled) {
-                await handleLeveling(message, guildSettings);
+                sharedUser = await handleLeveling(message, guildSettings);
             }
 
             if (guildSettings?.moderation.enabled) {
@@ -94,7 +101,8 @@ module.exports = {
             }
 
             // Streak + quests (only for non-blocked messages)
-            await handleStreakAndQuests(message, guildSettings);
+            // Reuse user fetched by handleLeveling when available — avoids a second DB round-trip
+            await handleStreakAndQuests(message, guildSettings, sharedUser);
 
         } catch (error) {
             console.error('Error in messageCreate:', error);
@@ -102,9 +110,9 @@ module.exports = {
     }
 };
 
-async function handleStreakAndQuests(message, guildSettings) {
+async function handleStreakAndQuests(message, guildSettings, existingUser = null) {
     try {
-        let user = await User.findOne({ userId: message.author.id, guildId: message.guild.id });
+        let user = existingUser ?? await User.findOne({ userId: message.author.id, guildId: message.guild.id });
         if (!user) return;
 
         const now = new Date();
@@ -188,14 +196,15 @@ async function handleStreakAndQuests(message, guildSettings) {
 }
 
 async function handleLeveling(message, guildSettings) {
-    if (!guildSettings?.leveling?.rewardsEnabled) return;
-    if (guildSettings.leveling?.noXpChannelIds?.includes(message.channel.id)) return;
-    if (message.member?.roles?.cache?.some(role => guildSettings.leveling?.noXpRoleIds?.includes(role.id))) return;
+    if (!guildSettings?.leveling?.rewardsEnabled) return null;
+    if (guildSettings.leveling?.noXpChannelIds?.includes(message.channel.id)) return null;
+    if (message.member?.roles?.cache?.some(role => guildSettings.leveling?.noXpRoleIds?.includes(role.id))) return null;
 
     let user = await User.findOne({ userId: message.author.id, guildId: message.guild.id });
 
     const now = Date.now();
-    if (user && user.lastXpGain && now - user.lastXpGain.getTime() < 60000) return;
+    // Return the user even when XP is on cooldown so handleStreakAndQuests can reuse it
+    if (user && user.lastXpGain && now - user.lastXpGain.getTime() < 60000) return user;
 
     let xpGain = Math.floor(Math.random() * 15 + 10) * guildSettings.leveling.xpRate;
 
@@ -266,14 +275,16 @@ async function handleLeveling(message, guildSettings) {
 
         await user.save();
         checkRivalry(message.client, message.guild, user).catch(() => {});
+        return user;
     } else {
-        await User.create({
+        const newUser = await User.create({
             userId: message.author.id,
             guildId: message.guild.id,
             xp: xpGain,
             messages: 1,
             lastXpGain: new Date()
         });
+        return newUser;
     }
 }
 
@@ -397,12 +408,12 @@ async function handleAutoModeration(message, guildSettings) {
     }
 
     if (mod.profanityFilter && !isModerator) {
-        const badWords = [...BASE_BAD_WORDS, ...(mod.customBadWords || [])];
         const normalized = normalizeToxic(message.content);
-        const hasBadWord = badWords.some((word) => {
+        const customRegexes = (mod.customBadWords || []).map(word => {
             const escaped = word.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            return new RegExp(`\\b${escaped}\\b`, 'i').test(normalized);
+            return new RegExp(`\\b${escaped}\\b`, 'i');
         });
+        const hasBadWord = [...BASE_BAD_WORD_REGEXES, ...customRegexes].some(re => re.test(normalized));
 
         if (hasBadWord) {
             await message.delete().catch(console.error);

@@ -41,9 +41,9 @@ module.exports = {
 
         const currency = guildSettings?.economy?.currency || '💰';
 
-        let user = await User.findOneAndUpdate(
+        const user = await User.findOneAndUpdate(
             { userId: interaction.user.id, guildId: interaction.guild.id },
-            {},
+            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
             { upsert: true, new: true }
         );
 
