@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const play = require('play-dl');
 const { checkDjPermission } = require('../../utils/musicPermissions');
+const { maybeResumeLivestream } = require('../../services/livestreamService');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -104,6 +105,7 @@ async function playSong(queue, client, guild) {
             queue.connection.destroy();
         }
         client.musicQueues.delete(guild.id);
+        maybeResumeLivestream(client, guild.id);
         return;
     }
 

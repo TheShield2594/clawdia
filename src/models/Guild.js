@@ -172,7 +172,12 @@ const guildSchema = new Schema({
     music: {
         djRoleId: { type: String, default: null },
         defaultVolume: { type: Number, default: 50 },
-        maxQueueSize: { type: Number, default: 100 }
+        maxQueueSize: { type: Number, default: 100 },
+        livestream: {
+            enabled: { type: Boolean, default: false },
+            url: { type: String, default: null },
+            channelId: { type: String, default: null }
+        }
     },
     
     rssFeeds: [{

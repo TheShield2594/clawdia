@@ -89,6 +89,10 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
             .filter(c => c.type === 2)
             .map(c => ({ id: c.id, name: c.name }));
 
+        const stageChannels = guild.channels.cache
+            .filter(c => c.type === 13)
+            .map(c => ({ id: c.id, name: c.name }));
+
         const categories = guild.channels.cache
             .filter(c => c.type === 4)
             .map(c => ({ id: c.id, name: c.name }));
@@ -109,6 +113,7 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
             settings: guildSettings,
             channels: channels,
             voiceChannels: voiceChannels,
+            stageChannels: stageChannels,
             categories: categories,
             roles: roles,
             defaultJobs: DEFAULT_JOBS,

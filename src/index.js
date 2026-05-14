@@ -146,6 +146,9 @@ async function startBot() {
 
         const { startRaidMonitor } = require('./services/raidService');
         startRaidMonitor(client);
+
+        const { resumeAllLivestreams } = require('./services/livestreamService');
+        resumeAllLivestreams(client);
     });
 
     client.login(process.env.DISCORD_TOKEN);
