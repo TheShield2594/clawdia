@@ -277,14 +277,14 @@ async function handleLeveling(message, guildSettings) {
         checkRivalry(message.client, message.guild, user).catch(() => {});
         return user;
     } else {
-        await User.create({
+        const newUser = await User.create({
             userId: message.author.id,
             guildId: message.guild.id,
             xp: xpGain,
             messages: 1,
             lastXpGain: new Date()
         });
-        return null; // new user; handleStreakAndQuests will skip (first message, no streak yet)
+        return newUser;
     }
 }
 
