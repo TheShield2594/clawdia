@@ -76,21 +76,47 @@ function getWeeklyExpiry() {
     return d;
 }
 
-function pickRandom(pool, count) {
-    const shuffled = [...pool].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, Math.min(count, shuffled.length));
+// Weighted random selection: higher-level users are more likely to get harder quests.
+function pickWeighted(pool, count, userLevel) {
+    const lvl = userLevel || 1;
+    const entries = [];
+    for (const q of pool) {
+        let weight;
+        if (q.difficulty === 'easy')        weight = lvl < 10 ? 4 : lvl < 30 ? 2 : 1;
+        else if (q.difficulty === 'medium') weight = lvl < 5  ? 1 : lvl < 20 ? 2 : 3;
+        else                                weight = lvl < 10 ? 1 : lvl < 30 ? 2 : 4; // hard
+        for (let i = 0; i < weight; i++) entries.push(q);
+    }
+    const shuffled = [...entries].sort(() => Math.random() - 0.5);
+    const seen = new Set();
+    const result = [];
+    for (const q of shuffled) {
+        if (!seen.has(q.questId)) {
+            seen.add(q.questId);
+            result.push(q);
+            if (result.length >= count) break;
+        }
+    }
+    // Fallback: pad with remaining quests if pool was too small after weighting
+    if (result.length < count) {
+        const remaining = pool.filter(q => !seen.has(q.questId)).sort(() => Math.random() - 0.5);
+        result.push(...remaining.slice(0, count - result.length));
+    }
+    return result;
 }
 
 // Assign a fresh daily/weekly quest set for a user, keeping any still-active ones.
 // Does NOT call user.save() — callers must persist.
+// Returns { assignedNewDaily: boolean } so callers can send a reset notification.
 async function ensureQuests(user, guildSettings) {
-    if (!guildSettings?.quests?.enabled) return;
+    if (!guildSettings?.quests?.enabled) return { assignedNewDaily: false };
 
     const now = new Date();
     user.quests = (user.quests || []).filter(q => q.expiresAt > now);
 
     const dailyCount  = guildSettings.quests.questsPerDay  ?? 3;
     const weeklyCount = guildSettings.quests.questsPerWeek ?? 2;
+    const userLevel   = user.level || 1;
 
     const activeIds = new Set(user.quests.map(q => q.questId));
 
@@ -107,21 +133,27 @@ async function ensureQuests(user, guildSettings) {
     const dailyNeeded  = dailyCount  - activeDailyIds.length;
     const weeklyNeeded = weeklyCount - activeWeeklyIds.length;
 
+    let assignedNewDaily = false;
+
     if (dailyNeeded > 0) {
         const available = DAILY_QUEST_POOL.filter(q => !activeIds.has(q.questId));
-        const picked = pickRandom(available, dailyNeeded);
+        const picked = pickWeighted(available, dailyNeeded, userLevel);
         for (const def of picked) {
             user.quests.push({ questId: def.questId, progress: 0, completedAt: null, expiresAt: dailyExpiry });
+            activeIds.add(def.questId);
         }
+        if (picked.length > 0) assignedNewDaily = true;
     }
 
     if (weeklyNeeded > 0) {
         const available = WEEKLY_QUEST_POOL.filter(q => !activeIds.has(q.questId));
-        const picked = pickRandom(available, weeklyNeeded);
+        const picked = pickWeighted(available, weeklyNeeded, userLevel);
         for (const def of picked) {
             user.quests.push({ questId: def.questId, progress: 0, completedAt: null, expiresAt: weeklyExpiry });
         }
     }
+
+    return { assignedNewDaily };
 }
 
 function getDefById(questId) {
@@ -130,20 +162,31 @@ function getDefById(questId) {
         || null;
 }
 
-// Increment progress on an active quest; returns the def if just completed
+// Increment progress on an active quest.
+// Returns { completed: def|null, nearComplete: def|null }.
+// nearComplete fires once when progress first crosses 80% without completing.
 async function incrementQuest(user, questId, amount = 1) {
     const entry = user.quests?.find(q => q.questId === questId && !q.completedAt && q.expiresAt > new Date());
-    if (!entry) return null;
+    if (!entry) return { completed: null, nearComplete: null };
 
     const def = getDefById(questId);
-    if (!def) return null;
+    if (!def) return { completed: null, nearComplete: null };
 
-    entry.progress = Math.min((entry.progress || 0) + amount, def.target);
+    const prevProgress = entry.progress || 0;
+    entry.progress = Math.min(prevProgress + amount, def.target);
+
     if (entry.progress >= def.target) {
         entry.completedAt = new Date();
-        return def;
+        return { completed: def, nearComplete: null };
     }
-    return null;
+
+    // Fire near-complete exactly once: when crossing the 80% threshold
+    const threshold = Math.ceil(def.target * 0.8);
+    if (entry.progress >= threshold && prevProgress < threshold) {
+        return { completed: null, nearComplete: def };
+    }
+
+    return { completed: null, nearComplete: null };
 }
 
 // Award XP + coins scaled by difficulty; returns { xp, coins, def }
@@ -180,70 +223,76 @@ async function awardSeasonXp(user, xp, guildSettings) {
 // ── Event hooks ──────────────────────────────────────────────────────────────
 
 async function onMessage(user, guildSettings) {
-    if (!guildSettings?.quests?.enabled) return [];
-    const completed = [];
+    if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
+    const completed = [], nearComplete = [];
     for (const questId of ['daily_messages_5', 'daily_messages_10', 'daily_messages_25', 'daily_messages_50',
                            'weekly_messages_50', 'weekly_messages_150', 'weekly_messages_300']) {
-        const def = await incrementQuest(user, questId);
-        if (def) completed.push(await awardQuest(user, def, guildSettings));
+        const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
+        if (def)     completed.push(await awardQuest(user, def, guildSettings));
+        if (nearDef) nearComplete.push(nearDef);
     }
-    return completed;
+    return { completed, nearComplete };
 }
 
 async function onReaction(user, guildSettings) {
-    if (!guildSettings?.quests?.enabled) return [];
-    const completed = [];
+    if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
+    const completed = [], nearComplete = [];
     for (const questId of ['daily_reactions_3', 'daily_reactions_5', 'daily_reactions_10', 'daily_reactions_20']) {
-        const def = await incrementQuest(user, questId);
-        if (def) completed.push(await awardQuest(user, def, guildSettings));
+        const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
+        if (def)     completed.push(await awardQuest(user, def, guildSettings));
+        if (nearDef) nearComplete.push(nearDef);
     }
-    return completed;
+    return { completed, nearComplete };
 }
 
 async function onCommandUse(user, guildSettings) {
-    if (!guildSettings?.quests?.enabled) return [];
-    const completed = [];
+    if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
+    const completed = [], nearComplete = [];
     for (const questId of ['daily_commands_2', 'daily_commands_5', 'daily_commands_10',
                            'weekly_commands_10', 'weekly_commands_25']) {
-        const def = await incrementQuest(user, questId);
-        if (def) completed.push(await awardQuest(user, def, guildSettings));
+        const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
+        if (def)     completed.push(await awardQuest(user, def, guildSettings));
+        if (nearDef) nearComplete.push(nearDef);
     }
-    return completed;
+    return { completed, nearComplete };
 }
 
 async function onEconomyEarn(user, guildSettings, amount) {
-    if (!guildSettings?.quests?.enabled) return [];
-    const completed = [];
+    if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
+    const completed = [], nearComplete = [];
     for (const questId of ['daily_economy_earn_50', 'daily_economy_earn_200',
                            'weekly_economy_500', 'weekly_economy_1500']) {
-        const def = await incrementQuest(user, questId, amount);
-        if (def) completed.push(await awardQuest(user, def, guildSettings));
+        const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId, amount);
+        if (def)     completed.push(await awardQuest(user, def, guildSettings));
+        if (nearDef) nearComplete.push(nearDef);
     }
-    return completed;
+    return { completed, nearComplete };
 }
 
 async function onHunt(user, guildSettings) {
-    if (!guildSettings?.quests?.enabled) return [];
-    const completed = [];
+    if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
+    const completed = [], nearComplete = [];
     for (const questId of ['daily_hunt_1', 'daily_hunt_5', 'weekly_hunt_10', 'weekly_hunt_25']) {
-        const def = await incrementQuest(user, questId);
-        if (def) completed.push(await awardQuest(user, def, guildSettings));
+        const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
+        if (def)     completed.push(await awardQuest(user, def, guildSettings));
+        if (nearDef) nearComplete.push(nearDef);
     }
-    return completed;
+    return { completed, nearComplete };
 }
 
 async function onFish(user, guildSettings) {
-    if (!guildSettings?.quests?.enabled) return [];
-    const completed = [];
+    if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
+    const completed = [], nearComplete = [];
     for (const questId of ['daily_fish_1', 'daily_fish_5', 'weekly_fish_10', 'weekly_fish_25']) {
-        const def = await incrementQuest(user, questId);
-        if (def) completed.push(await awardQuest(user, def, guildSettings));
+        const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
+        if (def)     completed.push(await awardQuest(user, def, guildSettings));
+        if (nearDef) nearComplete.push(nearDef);
     }
-    return completed;
+    return { completed, nearComplete };
 }
 
 async function onStreakUpdate(user, guildSettings) {
-    if (!guildSettings?.quests?.enabled) return [];
+    if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
     const streak    = user.streak?.current || 0;
     const completed = [];
     for (const questId of ['weekly_streak_3', 'weekly_streak_5']) {
@@ -258,7 +307,47 @@ async function onStreakUpdate(user, guildSettings) {
             }
         }
     }
-    return completed;
+    return { completed, nearComplete: [] };
+}
+
+// Notify the user that a quest is almost done (crossed 80% progress this event)
+async function notifyQuestNearComplete(guildSettings, member, quests, fallbackChannel) {
+    if (!quests?.length) return;
+
+    const settings = guildSettings?.quests ?? guildSettings;
+    const notifChannelId = settings?.notificationChannelId;
+    const channel = notifChannelId
+        ? (member.guild.channels.cache.get(notifChannelId) ?? fallbackChannel)
+        : fallbackChannel;
+    if (!channel) return;
+
+    const { EmbedBuilder } = require('discord.js');
+    for (const def of quests) {
+        if (!def) continue;
+        const catEmoji  = CATEGORY_EMOJIS[def.category] ?? '🗺️';
+        const diffColor = DIFFICULTY_COLORS[def.difficulty] ?? '🟢';
+        const embed = new EmbedBuilder()
+            .setColor(0xFEE75C)
+            .setAuthor({ name: `${member.displayName} is almost there!`, iconURL: member.displayAvatarURL({ dynamic: true }) })
+            .setDescription(`${catEmoji} **${def.name}** ${diffColor}\n${def.description}\n\n> Almost done — keep going!`)
+            .setTimestamp();
+        await channel.send({ embeds: [embed] }).catch(() => {});
+    }
+}
+
+// Notify the user that their daily quests have refreshed
+async function notifyDailyQuestReset(guildSettings, member, user, fallbackChannel) {
+    const settings = guildSettings?.quests ?? guildSettings;
+    const notifChannelId = settings?.notificationChannelId;
+    const channel = notifChannelId
+        ? (member.guild.channels.cache.get(notifChannelId) ?? fallbackChannel)
+        : fallbackChannel;
+    if (!channel) return;
+
+    const dailyCount = guildSettings?.quests?.questsPerDay ?? 3;
+    await channel.send(
+        `🗺️ <@${user.userId}> Your **${dailyCount} daily quest${dailyCount !== 1 ? 's' : ''}** have refreshed! Use \`/quests\` to see them.`
+    ).catch(() => {});
 }
 
 // Send quest completion notification to the configured channel (or fallback channel)
@@ -312,6 +401,6 @@ module.exports = {
     ensureQuests, getQuestDefs, getDailyPool, getWeeklyPool,
     getCategoryEmojis, getDifficultyColors,
     onMessage, onReaction, onCommandUse, onEconomyEarn, onHunt, onFish, onStreakUpdate,
-    awardSeasonXp, notifyQuestComplete,
+    awardSeasonXp, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset,
     startQuestService,
 };
