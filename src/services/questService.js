@@ -123,12 +123,14 @@ async function ensureQuests(user, guildSettings) {
     const dailyExpiry  = getDailyExpiry();
     const weeklyExpiry = getWeeklyExpiry();
 
-    // Mutually exclusive by type: daily expires before the weekly cutoff, weekly at or after.
-    // Using getTime() avoids the Saturday edge case where dailyExpiry === weeklyExpiry.
+    // Classify by exact expiry match. On Saturday dailyExpiryMs === weeklyExpiryMs, so
+    // using exact equality for both means quests are counted toward both limits and no
+    // extras are assigned — safer than the old t < weeklyExpiryMs / t >= weeklyExpiryMs
+    // approach which left activeDailyIds empty on the boundary day.
     const dailyExpiryMs  = dailyExpiry.getTime();
     const weeklyExpiryMs = weeklyExpiry.getTime();
-    const activeDailyIds  = user.quests.filter(q => { const t = q.expiresAt.getTime(); return t === dailyExpiryMs && t < weeklyExpiryMs; }).map(q => q.questId);
-    const activeWeeklyIds = user.quests.filter(q => q.expiresAt.getTime() >= weeklyExpiryMs).map(q => q.questId);
+    const activeDailyIds  = user.quests.filter(q => q.expiresAt.getTime() === dailyExpiryMs).map(q => q.questId);
+    const activeWeeklyIds = user.quests.filter(q => q.expiresAt.getTime() === weeklyExpiryMs).map(q => q.questId);
 
     const dailyNeeded  = dailyCount  - activeDailyIds.length;
     const weeklyNeeded = weeklyCount - activeWeeklyIds.length;
@@ -293,21 +295,28 @@ async function onFish(user, guildSettings) {
 
 async function onStreakUpdate(user, guildSettings) {
     if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
-    const streak    = user.streak?.current || 0;
-    const completed = [];
+    const streak       = user.streak?.current || 0;
+    const completed    = [];
+    const nearComplete = [];
     for (const questId of ['weekly_streak_3', 'weekly_streak_5']) {
         const def = getDefById(questId);
         if (!def) continue;
+        const entry = user.quests?.find(q => q.questId === questId && !q.completedAt && q.expiresAt > new Date());
+        if (!entry) continue;
         if (streak >= def.target) {
-            const entry = user.quests?.find(q => q.questId === questId && !q.completedAt && q.expiresAt > new Date());
-            if (entry && entry.progress < def.target) {
+            if (entry.progress < def.target) {
                 entry.progress    = def.target;
                 entry.completedAt = new Date();
                 completed.push(await awardQuest(user, def, guildSettings));
             }
+        } else {
+            const threshold = Math.ceil(def.target * 0.8);
+            if (streak >= threshold && entry.progress < def.target) {
+                nearComplete.push(def);
+            }
         }
     }
-    return { completed, nearComplete: [] };
+    return { completed, nearComplete };
 }
 
 // Notify the user that a quest is almost done (crossed 80% progress this event)
