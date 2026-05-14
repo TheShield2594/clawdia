@@ -5,6 +5,10 @@ const Case = require('../../models/Case');
 const User = require('../../models/User');
 const KnowledgeBase = require('../../models/KnowledgeBase');
 const SummaryJob = require('../../models/SummaryJob');
+const Automation = require('../../models/Automation');
+const AutomationLog = require('../../models/AutomationLog');
+const composioService = require('../../services/composioService');
+const { refreshScheduledAutomation } = require('../../services/automationEngine');
 
 const MAX_SUMMARY_JOBS_PER_GUILD = 10;
 const { rescheduleDailyNews } = require('../../services/rssService');
@@ -916,6 +920,189 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
     } catch (error) {
         console.error('Achievement grant error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ====================================================================
+// Integrations — server owner only
+// ====================================================================
+
+function ownerOnly(req, res, next) {
+    if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
+    const { guildId } = req.params;
+    const userGuild = req.user?.guilds?.find(g => g.id === guildId);
+    if (!userGuild?.owner) return res.status(403).json({ error: 'Only the server owner can manage integrations' });
+    next();
+}
+
+// Save the guild's Composio API key
+router.post('/integrations/:guildId/key', ownerOnly, async (req, res) => {
+    try {
+        const { guildId } = req.params;
+        const { composioApiKey } = req.body;
+        if (!composioApiKey || typeof composioApiKey !== 'string') {
+            return res.status(400).json({ error: 'composioApiKey is required' });
+        }
+        await Guild.findOneAndUpdate({ guildId }, { 'integrations.composioApiKey': composioApiKey.trim() });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Initiate OAuth connection for an app
+router.post('/integrations/:guildId/connect', ownerOnly, async (req, res) => {
+    try {
+        const { guildId } = req.params;
+        const { appName } = req.body;
+        if (!appName) return res.status(400).json({ error: 'appName is required' });
+
+        const guild = await Guild.findOne({ guildId });
+        const apiKey = guild?.integrations?.composioApiKey;
+        if (!apiKey) return res.status(400).json({ error: 'Composio API key not configured' });
+
+        const dashUrl = process.env.DASHBOARD_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3000}`;
+        const redirectUri = `${dashUrl}/dashboard/guild/${guildId}/settings#integrations`;
+
+        const result = await composioService.initiateConnection(guildId, apiKey, appName, redirectUri);
+
+        // Mark app as connected in guild record once OAuth is initiated
+        await Guild.findOneAndUpdate({ guildId }, { $addToSet: { 'integrations.connectedApps': appName } });
+
+        res.json({ redirectUrl: result.redirectUrl || result.connectionUrl || null, connectionId: result.id || result.connectionId });
+    } catch (err) {
+        console.error('[Integrations] Connect error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Disconnect an app
+router.delete('/integrations/:guildId/disconnect/:appName', ownerOnly, async (req, res) => {
+    try {
+        const { guildId, appName } = req.params;
+        const guild = await Guild.findOne({ guildId });
+        const apiKey = guild?.integrations?.composioApiKey;
+
+        if (apiKey) {
+            try {
+                const connections = await composioService.getConnections(guildId, apiKey);
+                const conn = connections.find(c => c.appName?.toLowerCase() === appName.toLowerCase());
+                if (conn) await composioService.deleteConnection(conn.id, apiKey);
+            } catch {}
+        }
+
+        await Guild.findOneAndUpdate({ guildId }, { $pull: { 'integrations.connectedApps': appName } });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Agent channels — add/update
+router.post('/integrations/:guildId/channels', ownerOnly, async (req, res) => {
+    try {
+        const { guildId } = req.params;
+        const { channelId, focus, enabledApps } = req.body;
+        if (!channelId) return res.status(400).json({ error: 'channelId is required' });
+
+        const guild = await Guild.findOne({ guildId });
+        if (!guild) return res.status(404).json({ error: 'Guild not found' });
+
+        const existing = guild.integrations?.agentChannels?.find(c => c.channelId === channelId);
+        if (existing) {
+            existing.focus = focus || '';
+            existing.enabledApps = enabledApps || [];
+        } else {
+            if (!guild.integrations) guild.integrations = {};
+            if (!guild.integrations.agentChannels) guild.integrations.agentChannels = [];
+            guild.integrations.agentChannels.push({ channelId, focus: focus || '', enabledApps: enabledApps || [] });
+        }
+        guild.markModified('integrations');
+        await guild.save();
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Agent channels — remove
+router.delete('/integrations/:guildId/channels/:channelId', ownerOnly, async (req, res) => {
+    try {
+        const { guildId, channelId } = req.params;
+        await Guild.findOneAndUpdate({ guildId }, {
+            $pull: { 'integrations.agentChannels': { channelId } }
+        });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ====================================================================
+// Automations — server owner only
+// ====================================================================
+
+router.get('/automations/:guildId', ownerOnly, async (req, res) => {
+    try {
+        const automations = await Automation.find({ guildId: req.params.guildId }).sort({ createdAt: -1 });
+        res.json(automations);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/automations/:guildId', ownerOnly, async (req, res) => {
+    try {
+        const { guildId } = req.params;
+        const { name, trigger, action } = req.body;
+        if (!name || !trigger?.type || !action?.appName || !action?.actionName) {
+            return res.status(400).json({ error: 'name, trigger.type, action.appName, and action.actionName are required' });
+        }
+        const automation = await Automation.create({
+            guildId,
+            createdBy: req.user.id,
+            name: name.trim().slice(0, 100),
+            trigger,
+            action
+        });
+        refreshScheduledAutomation(automation);
+        res.json(automation);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.patch('/automations/:guildId/:id/toggle', ownerOnly, async (req, res) => {
+    try {
+        const automation = await Automation.findOne({ _id: req.params.id, guildId: req.params.guildId });
+        if (!automation) return res.status(404).json({ error: 'Not found' });
+        automation.enabled = !automation.enabled;
+        await automation.save();
+        refreshScheduledAutomation(automation);
+        res.json({ enabled: automation.enabled });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.delete('/automations/:guildId/:id', ownerOnly, async (req, res) => {
+    try {
+        const automation = await Automation.findOneAndDelete({ _id: req.params.id, guildId: req.params.guildId });
+        if (!automation) return res.status(404).json({ error: 'Not found' });
+        refreshScheduledAutomation({ ...automation.toObject(), enabled: false });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.get('/automations/:guildId/logs', ownerOnly, async (req, res) => {
+    try {
+        const logs = await AutomationLog.find({ guildId: req.params.guildId })
+            .sort({ executedAt: -1 }).limit(50);
+        res.json(logs);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 

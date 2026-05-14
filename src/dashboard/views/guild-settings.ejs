@@ -68,6 +68,10 @@
                 <div class="nav-section-header">Feeds &amp; Automation</div>
                 <button class="nav-item" data-tab="bibleverses"><span class="nav-emoji">📖</span> Bible Verses</button>
                 <button class="nav-item" data-tab="rss"><span class="nav-emoji">📰</span> RSS Feeds</button>
+                <% if (guild.owner) { %>
+                <button class="nav-item" data-tab="agentchannels"><span class="nav-emoji">🤖</span> Agent Channels</button>
+                <button class="nav-item" data-tab="automations"><span class="nav-emoji">⚡</span> Automations</button>
+                <% } %>
 
                 <!-- Insights -->
                 <div class="nav-section-header">Insights</div>
@@ -1643,6 +1647,158 @@
                         <button class="btn btn-primary" onclick="saveSettings('bibleverses')">Save changes</button>
                     </div>
                 </section>
+
+                <!-- ====================== Agent Channels (owner only) ====================== -->
+                <% if (guild.owner) { %>
+                <section id="agentchannels" class="panel">
+                    <h2 class="panel-title">🤖 Agent Channels</h2>
+                    <p class="panel-desc">Designate channels where the bot acts as a full AI agent. The server owner can type naturally in these channels — the bot will use your connected apps to take real actions (check email, create GitHub issues, add calendar events, etc.).</p>
+
+                    <div class="form-group">
+                        <label>Composio API Key</label>
+                        <input type="password" id="composioApiKey" placeholder="Paste your Composio API key" value="<%= settings.integrations && settings.integrations.composioApiKey ? '••••••••' : '' %>">
+                        <small>Get your key from <strong>composio.dev</strong> → Settings → API Keys. Stored securely per server.</small>
+                        <button class="btn btn-secondary" style="margin-top:.5rem" onclick="saveComposioKey()">Save API Key</button>
+                    </div>
+
+                    <hr style="margin:1.5rem 0;border-color:var(--border)">
+
+                    <h3 style="margin-bottom:1rem;font-size:1rem">Connected Apps</h3>
+                    <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem">Connect apps to make them available as agent tools. Click an app to start the OAuth flow.</p>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.75rem;margin-bottom:1.5rem" id="appGrid">
+                        <% const connectedApps = (settings.integrations && settings.integrations.connectedApps) || []; %>
+                        <% const availableApps = [
+                            { id:'github', name:'GitHub', icon:'🐙' },
+                            { id:'gmail', name:'Gmail', icon:'📧' },
+                            { id:'googlecalendar', name:'Google Calendar', icon:'📅' },
+                            { id:'googlesheets', name:'Google Sheets', icon:'📊' },
+                            { id:'googledrive', name:'Google Drive', icon:'📁' },
+                            { id:'notion', name:'Notion', icon:'📝' },
+                            { id:'slack', name:'Slack', icon:'💬' },
+                            { id:'trello', name:'Trello', icon:'📋' },
+                            { id:'jira', name:'Jira', icon:'🔧' },
+                            { id:'linear', name:'Linear', icon:'⚡' },
+                            { id:'airtable', name:'Airtable', icon:'🗃️' },
+                            { id:'discord', name:'Discord Webhook', icon:'🔔' }
+                        ]; %>
+                        <% for (const app of availableApps) { %>
+                        <% const connected = connectedApps.includes(app.id); %>
+                        <div class="card" style="padding:.75rem;display:flex;flex-direction:column;gap:.5rem;align-items:flex-start">
+                            <div style="font-size:1.4rem"><%= app.icon %></div>
+                            <div style="font-weight:600;font-size:.9rem"><%= app.name %></div>
+                            <% if (connected) { %>
+                            <span style="font-size:.75rem;color:#4ade80;font-weight:600">● Connected</span>
+                            <button class="btn btn-sm" style="background:var(--card-alt)" onclick="disconnectApp('<%= app.id %>')">Disconnect</button>
+                            <% } else { %>
+                            <span style="font-size:.75rem;color:var(--muted)">○ Not connected</span>
+                            <button class="btn btn-sm btn-primary" onclick="connectApp('<%= app.id %>')">Connect</button>
+                            <% } %>
+                        </div>
+                        <% } %>
+                    </div>
+
+                    <hr style="margin:1.5rem 0;border-color:var(--border)">
+
+                    <h3 style="margin-bottom:1rem;font-size:1rem">Agent Channels</h3>
+                    <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem">Each channel can have a different focus. Only the server owner's messages are handled as agent requests.</p>
+
+                    <div id="agentChannelsList" style="display:flex;flex-direction:column;gap:.75rem;margin-bottom:1rem">
+                        <% const agentChannels = (settings.integrations && settings.integrations.agentChannels) || []; %>
+                        <% for (const ac of agentChannels) { %>
+                        <% const ch = channels.find(c => c.id === ac.channelId); %>
+                        <div class="card" style="padding:.75rem;display:flex;justify-content:space-between;align-items:center;gap:1rem">
+                            <div>
+                                <div style="font-weight:600">#<%= ch ? ch.name : ac.channelId %></div>
+                                <div style="font-size:.8rem;color:var(--muted)"><%= ac.focus || 'No focus set' %> · Apps: <%= (ac.enabledApps||[]).join(', ') || 'all connected' %></div>
+                            </div>
+                            <button class="btn btn-sm" style="background:var(--card-alt)" onclick="removeAgentChannel('<%= ac.channelId %>')">Remove</button>
+                        </div>
+                        <% } %>
+                        <% if (!agentChannels.length) { %>
+                        <p style="font-size:.85rem;color:var(--muted)">No agent channels configured yet.</p>
+                        <% } %>
+                    </div>
+
+                    <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr auto;gap:.5rem;align-items:end">
+                        <div>
+                            <label>Channel</label>
+                            <select id="newAgentChannelId">
+                                <% for (const ch of channels.filter(c => c.type === 0)) { %>
+                                <option value="<%= ch.id %>">#<%= ch.name %></option>
+                                <% } %>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Focus (optional)</label>
+                            <input type="text" id="newAgentFocus" placeholder="e.g. Email management">
+                        </div>
+                        <button class="btn btn-primary" onclick="addAgentChannel()">Add Channel</button>
+                    </div>
+                </section>
+
+                <!-- ====================== Automations (owner only) ====================== -->
+                <section id="automations" class="panel">
+                    <h2 class="panel-title">⚡ Automations</h2>
+                    <p class="panel-desc">Set-and-forget workflows that trigger on Discord events and execute actions in your connected apps. No AI needed at runtime — automations run instantly when the trigger fires.</p>
+
+                    <div id="automationsList" style="display:flex;flex-direction:column;gap:.75rem;margin-bottom:1.5rem">
+                        <p style="font-size:.85rem;color:var(--muted)">Loading automations…</p>
+                    </div>
+
+                    <details style="margin-bottom:1rem">
+                        <summary style="cursor:pointer;font-weight:600;font-size:.95rem;padding:.5rem 0">+ Create new automation</summary>
+                        <div style="padding:1rem 0;display:flex;flex-direction:column;gap:.75rem">
+                            <div class="form-group">
+                                <label>Name</label>
+                                <input type="text" id="autoName" placeholder="e.g. Log joins to Google Sheets">
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+                                <div class="form-group">
+                                    <label>Trigger</label>
+                                    <select id="autoTriggerType">
+                                        <option value="member_join">Member Joins</option>
+                                        <option value="member_leave">Member Leaves</option>
+                                        <option value="message_keyword">Keyword in Message</option>
+                                        <option value="role_assigned">Role Assigned</option>
+                                        <option value="moderation_action">Moderation Action</option>
+                                        <option value="level_up">User Levels Up</option>
+                                        <option value="scheduled">Scheduled (cron)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Trigger config (JSON, optional)</label>
+                                    <input type="text" id="autoTriggerConfig" placeholder='{"keyword":"help"}'>
+                                </div>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+                                <div class="form-group">
+                                    <label>App</label>
+                                    <select id="autoActionApp">
+                                        <option value="github">GitHub</option>
+                                        <option value="googlesheets">Google Sheets</option>
+                                        <option value="notion">Notion</option>
+                                        <option value="slack">Slack</option>
+                                        <option value="trello">Trello</option>
+                                        <option value="discord">Discord Webhook</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Action name (Composio action ID)</label>
+                                    <input type="text" id="autoActionName" placeholder="e.g. GITHUB_CREATE_AN_ISSUE">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Action input (JSON, use {user.name} {guild.name} etc.)</label>
+                                <textarea id="autoActionInput" rows="3" placeholder='{"owner":"myorg","repo":"myrepo","title":"New member: {user.name}"}'></textarea>
+                            </div>
+                            <button class="btn btn-primary" onclick="createAutomation()">Create Automation</button>
+                        </div>
+                    </details>
+
+                    <h3 style="font-size:.9rem;color:var(--muted);margin-bottom:.5rem">Available variables: <code>{user.name} {user.id} {guild.name} {timestamp} {message.content} {role.name} {action.type} {level}</code></h3>
+                </section>
+                <% } %>
+
             </div>
         </div>
     </main>
@@ -3148,6 +3304,143 @@
                 addParagraph('Failed to load analytics.');
             }
         }
+
+        // ============================================================
+        // Integrations & Agent channels
+        // ============================================================
+        const GUILD_ID = '<%= guild.id %>';
+
+        async function saveComposioKey() {
+            const key = document.getElementById('composioApiKey')?.value?.trim();
+            if (!key || key === '••••••••') return showToast('Enter your Composio API key first', 'error');
+            const res = await fetch(`/api/integrations/${GUILD_ID}/key`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ composioApiKey: key })
+            });
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('composioApiKey').value = '••••••••';
+                showToast('API key saved');
+            } else {
+                showToast(data.error || 'Failed to save key', 'error');
+            }
+        }
+
+        async function connectApp(appName) {
+            const res = await fetch(`/api/integrations/${GUILD_ID}/connect`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ appName })
+            });
+            const data = await res.json();
+            if (data.error) return showToast(data.error, 'error');
+            if (data.redirectUrl) {
+                window.open(data.redirectUrl, '_blank');
+                showToast(`Opening ${appName} OAuth — complete the flow in the new tab, then reload this page`);
+            } else {
+                showToast(`${appName} connection initiated`);
+            }
+        }
+
+        async function disconnectApp(appName) {
+            if (!confirm(`Disconnect ${appName}? Any automations or agent channels using it will stop working.`)) return;
+            const res = await fetch(`/api/integrations/${GUILD_ID}/disconnect/${appName}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) { showToast(`${appName} disconnected`); setTimeout(() => location.reload(), 800); }
+            else showToast(data.error || 'Failed to disconnect', 'error');
+        }
+
+        async function addAgentChannel() {
+            const channelId = document.getElementById('newAgentChannelId')?.value;
+            const focus = document.getElementById('newAgentFocus')?.value?.trim();
+            if (!channelId) return showToast('Select a channel', 'error');
+            const res = await fetch(`/api/integrations/${GUILD_ID}/channels`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channelId, focus, enabledApps: [] })
+            });
+            const data = await res.json();
+            if (data.success) { showToast('Agent channel added'); setTimeout(() => location.reload(), 800); }
+            else showToast(data.error || 'Failed to add channel', 'error');
+        }
+
+        async function removeAgentChannel(channelId) {
+            const res = await fetch(`/api/integrations/${GUILD_ID}/channels/${channelId}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) { showToast('Channel removed'); setTimeout(() => location.reload(), 800); }
+            else showToast(data.error || 'Failed to remove', 'error');
+        }
+
+        // ============================================================
+        // Automations
+        // ============================================================
+        async function loadAutomations() {
+            const list = document.getElementById('automationsList');
+            if (!list) return;
+            try {
+                const res = await fetch(`/api/automations/${GUILD_ID}/logs`);
+                // logs endpoint — actually load automations first
+            } catch {}
+            try {
+                const res = await fetch(`/api/automations/${GUILD_ID}`);
+                const automations = await res.json();
+                if (!automations.length) {
+                    list.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">No automations yet. Create one below.</p>';
+                    return;
+                }
+                list.innerHTML = automations.map(a => `
+                    <div class="card" style="padding:.75rem;display:flex;justify-content:space-between;align-items:center;gap:1rem">
+                        <div>
+                            <div style="font-weight:600">${a.name}</div>
+                            <div style="font-size:.8rem;color:var(--muted)">${a.trigger?.type} → ${a.action?.appName}/${a.action?.actionName?.split('_').slice(-2).join(' ').toLowerCase()} · runs: ${a.runCount}</div>
+                        </div>
+                        <div style="display:flex;gap:.5rem">
+                            <button class="btn btn-sm" style="background:${a.enabled ? '#4ade8033' : 'var(--card-alt)'};color:${a.enabled ? '#4ade80' : 'var(--muted)'}" onclick="toggleAutomation('${a._id}')">${a.enabled ? 'Enabled' : 'Disabled'}</button>
+                            <button class="btn btn-sm" style="background:var(--card-alt)" onclick="deleteAutomation('${a._id}')">Delete</button>
+                        </div>
+                    </div>`).join('');
+            } catch (err) {
+                list.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Could not load automations.</p>';
+            }
+        }
+
+        async function createAutomation() {
+            const name = document.getElementById('autoName')?.value?.trim();
+            const triggerType = document.getElementById('autoTriggerType')?.value;
+            const triggerConfigRaw = document.getElementById('autoTriggerConfig')?.value?.trim();
+            const appName = document.getElementById('autoActionApp')?.value;
+            const actionName = document.getElementById('autoActionName')?.value?.trim();
+            const actionInputRaw = document.getElementById('autoActionInput')?.value?.trim();
+            if (!name || !triggerType || !actionName) return showToast('Name, trigger, and action name are required', 'error');
+            let triggerConfig = {}, actionInput = {};
+            try { if (triggerConfigRaw) triggerConfig = JSON.parse(triggerConfigRaw); } catch { return showToast('Trigger config must be valid JSON', 'error'); }
+            try { if (actionInputRaw) actionInput = JSON.parse(actionInputRaw); } catch { return showToast('Action input must be valid JSON', 'error'); }
+            const res = await fetch(`/api/automations/${GUILD_ID}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, trigger: { type: triggerType, config: triggerConfig }, action: { appName, actionName, input: actionInput } })
+            });
+            const data = await res.json();
+            if (data._id) { showToast('Automation created'); loadAutomations(); }
+            else showToast(data.error || 'Failed to create', 'error');
+        }
+
+        async function toggleAutomation(id) {
+            const res = await fetch(`/api/automations/${GUILD_ID}/${id}/toggle`, { method: 'PATCH' });
+            const data = await res.json();
+            if (data.enabled !== undefined) { showToast(`Automation ${data.enabled ? 'enabled' : 'disabled'}`); loadAutomations(); }
+            else showToast(data.error || 'Failed', 'error');
+        }
+
+        async function deleteAutomation(id) {
+            if (!confirm('Delete this automation?')) return;
+            const res = await fetch(`/api/automations/${GUILD_ID}/${id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) { showToast('Deleted'); loadAutomations(); }
+            else showToast(data.error || 'Failed to delete', 'error');
+        }
+
+        // Load automations when that tab is opened
+        document.querySelectorAll('.nav-item[data-tab="automations"]').forEach(btn => {
+            btn.addEventListener('click', loadAutomations);
+        });
     </script>
 </body>
 </html>

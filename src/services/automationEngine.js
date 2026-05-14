@@ -1,5 +1,6 @@
 const Automation = require('../models/Automation');
 const AutomationLog = require('../models/AutomationLog');
+const Guild = require('../models/Guild');
 const { executeAction } = require('./composioService');
 const cron = require('node-cron');
 
@@ -42,6 +43,12 @@ async function fire(guildId, triggerType, ctx) {
         return;
     }
 
+    let apiKey = null;
+    try {
+        const guild = await Guild.findOne({ guildId }).lean();
+        apiKey = guild?.integrations?.composioApiKey || null;
+    } catch {}
+
     for (const automation of automations) {
         // Extra trigger-specific filtering
         if (!matchesTriggerConfig(automation.trigger, ctx)) continue;
@@ -51,7 +58,7 @@ async function fire(guildId, triggerType, ctx) {
         let error = null;
 
         try {
-            await executeAction(guildId, automation.action.actionName, resolvedInput);
+            await executeAction(guildId, apiKey, automation.action.actionName, resolvedInput);
             success = true;
         } catch (err) {
             error = err.message;

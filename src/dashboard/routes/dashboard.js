@@ -109,7 +109,7 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
 
         res.render('guild-settings', {
             user: req.user,
-            guild: guild,
+            guild: { id: guild.id, name: guild.name, icon: guild.icon, ownerId: guild.ownerId, owner: req.user.id === guild.ownerId },
             settings: guildSettings,
             channels: channels,
             voiceChannels: voiceChannels,

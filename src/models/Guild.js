@@ -557,6 +557,16 @@ const guildSchema = new Schema({
         }]
     },
     
+    integrations: {
+        composioApiKey: { type: String, default: null },
+        agentChannels: [{
+            channelId: { type: String, required: true },
+            focus:     { type: String, default: '' },
+            enabledApps: [{ type: String }]
+        }],
+        connectedApps: [{ type: String }]
+    },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });
