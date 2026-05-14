@@ -169,10 +169,7 @@ async function sendDailyNewsForProfile(client, guild, profile) {
         uniqueItems.push(item);
     }
 
-    if (uniqueItems.length === 0) {
-        await channel.send(`No news articles found in the last 24 hours for **${profile.title}**.`);
-        return;
-    }
+    if (uniqueItems.length === 0) return;
 
     uniqueItems.sort((a, b) => b.date - a.date);
 
