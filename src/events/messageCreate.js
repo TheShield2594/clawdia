@@ -623,12 +623,12 @@ const REMINDER_REGEXES = [
     // "remind me to/about X in an/a hour/minute/day"
     { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+in\s+an?\s+(minute|min|hour|hr|day)\.?\s*$/i,
       parse: (m) => ({ amount: 1, unit: m[2].toLowerCase(), text: m[1] }) },
+    // "remind me to/about X tomorrow at 9am" — must come before generic "at" rule
+    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+tomorrow\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\.?\s*$/i,
+      parse: (m) => ({ tomorrow: true, hour: +m[2], min: +(m[3] || 0), ampm: m[4], text: m[1] }) },
     // "remind me to/about X at 3pm"
     { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\.?\s*$/i,
       parse: (m) => ({ hour: +m[2], min: +(m[3] || 0), ampm: m[4], text: m[1] }) },
-    // "remind me to/about X tomorrow at 9am"
-    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+tomorrow\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\.?\s*$/i,
-      parse: (m) => ({ tomorrow: true, hour: +m[2], min: +(m[3] || 0), ampm: m[4], text: m[1] }) },
     // "remind me to/about X next week/month"
     { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+next\s+(week|month)\.?\s*$/i,
       parse: (m) => ({ amount: m[2] === 'week' ? 7 : 30, unit: 'day', text: m[1] }) },
@@ -718,8 +718,6 @@ async function handleNLReminder(message, contentOverride) {
         const pending = await Reminder.countDocuments({ userId: message.author.id, completed: false }).catch(() => NL_REMINDER_MAX_PENDING);
         if (pending >= NL_REMINDER_MAX_PENDING) return false;
 
-        nlReminderLastUsed.set(message.author.id, Date.now());
-
         try {
             await Reminder.create({
                 userId:    message.author.id,
@@ -728,6 +726,8 @@ async function handleNLReminder(message, contentOverride) {
                 message:   reminderText,
                 remindAt
             });
+
+            nlReminderLastUsed.set(message.author.id, Date.now());
 
             const unixTs = Math.floor(remindAt.getTime() / 1000);
             await message.reply({ content: `✅ Got it! I'll remind you <t:${unixTs}:R> about: **${reminderText}**`, allowedMentions: { parse: [] } }).catch(() => {});
