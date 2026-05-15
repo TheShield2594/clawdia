@@ -593,19 +593,53 @@ async function handleAgentChannel(message, guildSettings, agentChannel) {
 // Natural language reminder detection (available to everyone)
 // ------------------------------------------------------------------
 
-// Regex patterns ordered from most specific to least
+// Regex patterns ordered from most specific to least.
+// Each pattern can be time-first ("remind me in 2h to X") or task-first ("remind me to X in 2h").
 const REMINDER_REGEXES = [
-    // "remind me in 2 hours to do X" / "remind me in 30 minutes about X"
-    { re: /remind me in (\d+)\s*(minute|min|hour|hr|day)s?\s+(?:to|about)\s+(.+)/i,      parse: (m) => ({ amount: +m[1], unit: m[2].toLowerCase(), text: m[3] }) },
-    // "remind me tomorrow at 9am to X"
-    { re: /remind me tomorrow at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(?:to|about)\s+(.+)/i, parse: (m) => ({ tomorrow: true, hour: +m[1], min: +(m[2] || 0), ampm: m[3], text: m[4] }) },
-    // "remind me at 3pm to X"
-    { re: /remind me at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(?:to|about)\s+(.+)/i,      parse: (m) => ({ hour: +m[1], min: +(m[2] || 0), ampm: m[3], text: m[4] }) },
-    // "set a reminder for 10 minutes to X"
-    { re: /set (?:a )?reminder (?:for )?(\d+)\s*(minute|min|hour|hr|day)s?\s+(?:to|about)\s+(.+)/i, parse: (m) => ({ amount: +m[1], unit: m[2].toLowerCase(), text: m[3] }) },
-    // "remind me tomorrow to/about X" or "remind me to/about X tomorrow" (no specific time — 9am next day)
-    { re: /remind(?:\s+me)?\s+tomorrow\s+(?:to|about)\s+(.+)/i,                          parse: (m) => ({ tomorrow: true, hour: 9, min: 0, ampm: 'am', text: m[1] }) },
-    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+tomorrow\b/i,                       parse: (m) => ({ tomorrow: true, hour: 9, min: 0, ampm: 'am', text: m[1] }) },
+    // --- Time-first patterns ---
+    // "remind me in 2 hours to/about X"
+    { re: /remind(?:\s+me)?\s+in\s+(\d+)\s*(minute|min|hour|hr|day)s?\s+(?:to|about)\s+(.+)/i,
+      parse: (m) => ({ amount: +m[1], unit: m[2].toLowerCase(), text: m[3] }) },
+    // "remind me in an/a hour/minute/day to/about X"
+    { re: /remind(?:\s+me)?\s+in\s+an?\s+(minute|min|hour|hr|day)\s+(?:to|about)\s+(.+)/i,
+      parse: (m) => ({ amount: 1, unit: m[1].toLowerCase(), text: m[2] }) },
+    // "remind me tomorrow at 9am to/about X"
+    { re: /remind(?:\s+me)?\s+tomorrow\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(?:to|about)\s+(.+)/i,
+      parse: (m) => ({ tomorrow: true, hour: +m[1], min: +(m[2] || 0), ampm: m[3], text: m[4] }) },
+    // "remind me at 3pm to/about X"
+    { re: /remind(?:\s+me)?\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(?:to|about)\s+(.+)/i,
+      parse: (m) => ({ hour: +m[1], min: +(m[2] || 0), ampm: m[3], text: m[4] }) },
+    // "remind me next week/month to/about X"
+    { re: /remind(?:\s+me)?\s+next\s+(week|month)\s+(?:to|about)\s+(.+)/i,
+      parse: (m) => ({ amount: m[1] === 'week' ? 7 : 30, unit: 'day', text: m[2] }) },
+    // "remind me tomorrow to/about X" (no specific time — 9am next day)
+    { re: /remind(?:\s+me)?\s+tomorrow\s+(?:to|about)\s+(.+)/i,
+      parse: (m) => ({ tomorrow: true, hour: 9, min: 0, ampm: 'am', text: m[1] }) },
+
+    // --- Task-first patterns ("remind me to X [time]") ---
+    // "remind me to/about X in 2 hours"
+    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+in\s+(\d+)\s*(minute|min|hour|hr|day)s?\.?\s*$/i,
+      parse: (m) => ({ amount: +m[2], unit: m[3].toLowerCase(), text: m[1] }) },
+    // "remind me to/about X in an/a hour/minute/day"
+    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+in\s+an?\s+(minute|min|hour|hr|day)\.?\s*$/i,
+      parse: (m) => ({ amount: 1, unit: m[2].toLowerCase(), text: m[1] }) },
+    // "remind me to/about X at 3pm"
+    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\.?\s*$/i,
+      parse: (m) => ({ hour: +m[2], min: +(m[3] || 0), ampm: m[4], text: m[1] }) },
+    // "remind me to/about X tomorrow at 9am"
+    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+tomorrow\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\.?\s*$/i,
+      parse: (m) => ({ tomorrow: true, hour: +m[2], min: +(m[3] || 0), ampm: m[4], text: m[1] }) },
+    // "remind me to/about X next week/month"
+    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+next\s+(week|month)\.?\s*$/i,
+      parse: (m) => ({ amount: m[2] === 'week' ? 7 : 30, unit: 'day', text: m[1] }) },
+    // "remind me to/about X tomorrow" (no specific time — 9am next day)
+    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+tomorrow\.?\s*$/i,
+      parse: (m) => ({ tomorrow: true, hour: 9, min: 0, ampm: 'am', text: m[1] }) },
+
+    // --- Legacy / alias patterns ---
+    // "set a reminder for 10 minutes to/about X"
+    { re: /set\s+(?:a\s+)?reminder\s+(?:for\s+)?(\d+)\s*(minute|min|hour|hr|day)s?\s+(?:to|about)\s+(.+)/i,
+      parse: (m) => ({ amount: +m[1], unit: m[2].toLowerCase(), text: m[3] }) },
 ];
 
 function parseRelativeMs(amount, unit) {
