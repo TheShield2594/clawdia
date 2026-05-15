@@ -1,6 +1,6 @@
-# UltraBot
+# Clawdia
 
-A feature-rich, self-hosted Discord bot with extensive moderation tools, welcome systems, leveling, economy, RSS feeds, 24/7 music streaming, AI chat integration, and a full-featured web dashboard.
+A chill, self-hosted Discord bot with serious teeth. Clawdia brings moderation, music, AI chat, leveling, economy, RSS feeds, and a full-featured web dashboard to your community — without any cloud lock-in.
 
 ## Features
 
@@ -19,7 +19,7 @@ A feature-rich, self-hosted Discord bot with extensive moderation tools, welcome
 
 ## Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - MongoDB (local or cloud)
 - Discord Application with Bot & OAuth2 scopes enabled
 - (Optional) OpenAI API Key, Google Gemini API Key, or local Ollama instance
@@ -104,7 +104,7 @@ npm start
 - `/ping` - Bot latency
 
 ### AI
-- `/ai` - Ask AI a question
+- `@Clawdia` - Mention the bot to start an AI conversation
 - `/remind` - Set a reminder
 
 ### Admin
@@ -130,12 +130,10 @@ npm start
 1. **OpenAI (GPT-3.5/GPT-4)**
    - Get your API key from https://platform.openai.com/
    - Add to `.env` as `OPENAI_API_KEY` or configure per-server in dashboard
-   - Models: GPT-3.5 Turbo (default)
 
 2. **Google Gemini**
    - Get your API key from https://makersuite.google.com/app/apikey
    - Add to `.env` as `GEMINI_API_KEY` or configure per-server in dashboard
-   - Models: Gemini Pro
 
 3. **Local (Ollama)**
    - Point `OLLAMA_BASE_URL` to your local instance
@@ -151,11 +149,11 @@ npm start
 5. Customize the system prompt
 6. Enable AI Chat
 
-Users can now chat with AI in the designated channel or use `/ai` command anywhere.
+Members can chat with Clawdia in the designated channel or mention her anywhere.
 
 ## Insights Layer
 
-UltraBot includes an **Insights** view in the dashboard focused on decisions instead of raw event logs.
+Clawdia includes an **Insights** view in the dashboard focused on decisions instead of raw event logs.
 
 ### Key Metrics
 
@@ -164,14 +162,6 @@ UltraBot includes an **Insights** view in the dashboard focused on decisions ins
 - **Toxic Channel Detection**: Rank channels by moderation events, warning density, and repeat offenders
 - **Moderator SLA Trends**: Measure median response time from incident to first mod action
 - **Newcomer Conversion (7/30 days)**: Track how many new members become active contributors
-
-### Why it matters
-
-Server owners can use these metrics to:
-- Schedule events during true peak hours
-- Spot channels that need policy updates or more moderators
-- Improve onboarding flows and newcomer retention
-- Track whether moderation performance is improving over time
 
 ## Daily News Digest
 
@@ -187,11 +177,8 @@ The Daily News feature compiles multiple RSS feeds into a single daily post.
 6. Configure title and max items per feed
 7. Save settings
 
-The bot will automatically post a compiled digest at your specified time.
-
 ### Manual Trigger
 
-Admin users can manually trigger the digest with:
 ```
 /dailynews
 ```

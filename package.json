@@ -1,7 +1,7 @@
 {
-  "name": "ultrabot",
+  "name": "clawdia",
   "version": "1.0.0",
-  "description": "Feature-rich self-hosted Discord bot with admin dashboard",
+  "description": "Clawdia — a chill, self-hosted Discord bot with a full-featured admin dashboard",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

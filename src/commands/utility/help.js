@@ -148,7 +148,7 @@ const CATEGORIES = [
         preview: 'AI chat & reminders',
         commands: [
             { name: 'remind',   description: 'Set a reminder — bot will DM you after the specified time' },
-            { name: '@Ultrabot', description: 'Mention or ping the bot to start an AI conversation', mention: true },
+            { name: '@Clawdia', description: 'Mention or ping the bot to start an AI conversation', mention: true },
         ],
     },
     {
@@ -182,7 +182,7 @@ function buildLandingEmbed() {
     );
     return new EmbedBuilder()
         .setColor(COLOR)
-        .setTitle('🤖 Ultrabot Help')
+        .setTitle('🐾 Clawdia Help')
         .setDescription(
             'Select a category below to see available commands.\n\n' +
             '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +

@@ -399,7 +399,7 @@ function openRouterArgs(base) {
         baseURL: 'https://openrouter.ai/api/v1',
         defaultHeaders: {
             'HTTP-Referer': process.env.OPENROUTER_REFERER || 'https://github.com/theshield2594/ultrabot',
-            'X-Title': 'Ultrabot'
+            'X-Title': 'Clawdia'
         }
     };
 }

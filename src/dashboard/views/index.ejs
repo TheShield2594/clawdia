@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UltraBot — The all-in-one Discord bot</title>
-    <meta name="description" content="UltraBot is the modern, all-in-one Discord bot for moderation, music, AI, leveling, economy and more.">
+    <title>Clawdia — Your server's favorite Discord bot</title>
+    <meta name="description" content="Clawdia is a chill, self-hosted Discord bot for modern communities. Moderation, music, AI chat, leveling, economy and more.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
     <header class="topbar">
         <a href="/" class="brand" style="text-decoration:none;color:inherit;">
             <span class="brand-mark"></span>
-            <span>UltraBot</span>
+            <span>Clawdia</span>
         </a>
         <div class="topbar-right">
             <% if (user) { %>
@@ -29,16 +29,16 @@
 
     <main>
         <section class="hero">
-            <div class="eyebrow"><span class="dot"></span> Online &amp; ready · Updated for 2026</div>
-            <h1>Run a smarter server with <span class="grad">UltraBot</span></h1>
-            <p class="lead">A modern, self-hosted Discord bot built for serious communities. Moderation, music, AI chat, leveling, economy, and live news — configured from a beautiful dashboard.</p>
+            <div class="eyebrow"><span class="dot"></span> Open source · Self-hosted · Built for 2026</div>
+            <h1>Meet <span class="grad">Clawdia</span>, your server's new favorite bot</h1>
+            <p class="lead">A chill, self-hosted Discord bot packed with everything your community needs. Moderation, music, AI chat, leveling, economy — all configured from a clean dashboard.</p>
             <div class="hero-actions">
                 <% if (user) { %>
                     <a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
                 <% } else { %>
                     <a href="/auth/login" class="btn btn-primary">Get Started</a>
                 <% } %>
-                <a href="https://github.com/theshield2594/ultrabot" class="btn btn-ghost" target="_blank" rel="noopener">View Source</a>
+                <a href="https://github.com/theshield2594/ultrabot" class="btn btn-ghost" target="_blank" rel="noopener">View on GitHub</a>
             </div>
 
             <div class="stats">
@@ -52,7 +52,7 @@
         <section class="section">
             <div class="section-head">
                 <h2>Everything your community needs</h2>
-                <p>One bot. Every essential module. Configured in clicks, not config files.</p>
+                <p>One bot. Every essential module. No config files required.</p>
             </div>
             <div class="features">
                 <div class="feature">
@@ -100,8 +100,8 @@
 
         <section class="section" style="padding-top:2rem;">
             <div class="section-head">
-                <h2>Ready to power up your server?</h2>
-                <p>Sign in with Discord and configure UltraBot in under two minutes.</p>
+                <h2>Ready to bring Clawdia in?</h2>
+                <p>Sign in with Discord and have Clawdia running in your server in under two minutes.</p>
             </div>
             <div class="hero-actions">
                 <% if (user) { %>
@@ -114,11 +114,10 @@
     </main>
 
     <footer class="footer">
-        © <%= new Date().getFullYear() %> UltraBot · Built for modern Discord communities
+        © <%= new Date().getFullYear() %> Clawdia · Built for Discord communities
     </footer>
 
     <script>
-        // Subtle pointer-tracked glow on feature cards
         document.querySelectorAll('.feature').forEach(card => {
             card.addEventListener('mousemove', (e) => {
                 const rect = card.getBoundingClientRect();
