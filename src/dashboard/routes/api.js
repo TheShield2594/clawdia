@@ -931,8 +931,8 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
 function ownerOnly(req, res, next) {
     if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
     const { guildId } = req.params;
-    const userGuild = req.user?.guilds?.find(g => g.id === guildId);
-    if (!userGuild?.owner) return res.status(403).json({ error: 'Only the server owner can manage integrations' });
+    const guild = req.client?.guilds?.cache?.get(guildId);
+    if (!guild || guild.ownerId !== req.user?.id) return res.status(403).json({ error: 'Only the server owner can manage integrations' });
     next();
 }
 
