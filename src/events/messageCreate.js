@@ -80,7 +80,14 @@ module.exports = {
                             const blocked = await handleAutoModeration(message, guildSettings);
                             if (blocked) return;
                         }
-                        await handleAIChat(message, effectiveSettings);
+                        // Strip bot mention tokens so NL reminder detection works on the real content
+                        const strippedContent = message.content
+                            .replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '')
+                            .trim();
+                        const reminderHandled = await handleNLReminder(message, strippedContent);
+                        if (!reminderHandled) {
+                            await handleAIChat(message, effectiveSettings);
+                        }
                         return;
                     }
                 }
@@ -596,6 +603,9 @@ const REMINDER_REGEXES = [
     { re: /remind me at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(?:to|about)\s+(.+)/i,      parse: (m) => ({ hour: +m[1], min: +(m[2] || 0), ampm: m[3], text: m[4] }) },
     // "set a reminder for 10 minutes to X"
     { re: /set (?:a )?reminder (?:for )?(\d+)\s*(minute|min|hour|hr|day)s?\s+(?:to|about)\s+(.+)/i, parse: (m) => ({ amount: +m[1], unit: m[2].toLowerCase(), text: m[3] }) },
+    // "remind me tomorrow to/about X" or "remind me to/about X tomorrow" (no specific time — 9am next day)
+    { re: /remind(?:\s+me)?\s+tomorrow\s+(?:to|about)\s+(.+)/i,                          parse: (m) => ({ tomorrow: true, hour: 9, min: 0, ampm: 'am', text: m[1] }) },
+    { re: /remind(?:\s+me)?\s+(?:to|about)\s+(.+?)\s+tomorrow\b/i,                       parse: (m) => ({ tomorrow: true, hour: 9, min: 0, ampm: 'am', text: m[1] }) },
 ];
 
 function parseRelativeMs(amount, unit) {
@@ -643,10 +653,10 @@ function sanitizeReminderText(text) {
         .slice(0, NL_REMINDER_MAX_TEXT);
 }
 
-async function handleNLReminder(message) {
-    const content = message.content.trim();
-    if (content.length < 10) return;
-    if (!/remind/i.test(content)) return;
+async function handleNLReminder(message, contentOverride) {
+    const content = (contentOverride ?? message.content).trim();
+    if (content.length < 5) return false;
+    if (!/remind/i.test(content)) return false;
 
     for (const { re, parse } of REMINDER_REGEXES) {
         const m = content.match(re);
@@ -668,11 +678,11 @@ async function handleNLReminder(message) {
 
         // Per-user cooldown
         const lastUsed = nlReminderLastUsed.get(message.author.id) || 0;
-        if (Date.now() - lastUsed < NL_REMINDER_COOLDOWN_MS) return;
+        if (Date.now() - lastUsed < NL_REMINDER_COOLDOWN_MS) return false;
 
         // Cap pending reminders per user
         const pending = await Reminder.countDocuments({ userId: message.author.id, completed: false }).catch(() => NL_REMINDER_MAX_PENDING);
-        if (pending >= NL_REMINDER_MAX_PENDING) return;
+        if (pending >= NL_REMINDER_MAX_PENDING) return false;
 
         nlReminderLastUsed.set(message.author.id, Date.now());
 
@@ -689,8 +699,10 @@ async function handleNLReminder(message) {
             await message.reply({ content: `✅ Got it! I'll remind you <t:${unixTs}:R> about: **${reminderText}**`, allowedMentions: { parse: [] } }).catch(() => {});
         } catch (err) {
             console.error('[NLReminder] Failed to create reminder:', err.message);
+            return false;
         }
-        return;
+        return true;
     }
+    return false;
 }
 
