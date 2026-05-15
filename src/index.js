@@ -149,6 +149,9 @@ async function startBot() {
 
         const { resumeAllLivestreams } = require('./services/livestreamService');
         resumeAllLivestreams(client);
+
+        const { init: initAutomationEngine } = require('./services/automationEngine');
+        initAutomationEngine(client);
     });
 
     client.login(process.env.DISCORD_TOKEN);

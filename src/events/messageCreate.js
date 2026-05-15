@@ -1,7 +1,9 @@
 const User = require('../models/User');
 const Guild = require('../models/Guild');
 const Case = require('../models/Case');
+const Reminder = require('../models/Reminder');
 const { handleAIChat } = require('../services/aiService');
+const { runAgent } = require('../services/agentService');
 const { logModeration } = require('../utils/logger');
 const { ensureQuests, onMessage, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset } = require('../services/questService');
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
@@ -84,6 +86,15 @@ module.exports = {
                 }
             }
 
+            // Agent channel — only the server owner's messages are handled; others fall through normally
+            const agentChannel = guildSettings?.integrations?.agentChannels?.find(
+                ch => ch.channelId === message.channel.id
+            );
+            if (agentChannel && message.guild.ownerId === message.author.id) {
+                await handleAgentChannel(message, guildSettings, agentChannel);
+                return;
+            }
+
             let sharedUser = null;
             if (guildSettings?.leveling.enabled) {
                 sharedUser = await handleLeveling(message, guildSettings);
@@ -99,6 +110,9 @@ module.exports = {
             if (guildSettings?.bibleVerse?.autoRespond) {
                 await handleBibleVerseDetection(message, guildSettings);
             }
+
+            // Natural language reminders — available to everyone, any channel
+            await handleNLReminder(message);
 
             // Streak + quests (only for non-blocked messages)
             // Reuse user fetched by handleLeveling when available — avoids a second DB round-trip
@@ -534,5 +548,149 @@ async function handleBibleVerseDetection(message, guildSettings) {
     if (!verseData?.text) return;
 
     await message.reply({ embeds: [createVerseEmbed(verseData)] }).catch(() => {});
+}
+
+// ------------------------------------------------------------------
+// Agent channel handler
+// ------------------------------------------------------------------
+// Strip leading bot mention tokens so they don't waste agent context
+function cleanAgentMessage(content, botId) {
+    return content
+        .replace(new RegExp(`^\\s*<@!?${botId}>\\s*:?\\s*`, ''), '')
+        .trim();
+}
+
+async function handleAgentChannel(message, guildSettings, agentChannel) {
+    await message.channel.sendTyping().catch(() => {});
+
+    const userMessage = cleanAgentMessage(message.content, message.client.user.id);
+
+    try {
+        const reply = await runAgent({
+            guildId: message.guild.id,
+            guildSettings,
+            userMessage,
+            channelFocus: agentChannel.focus || '',
+            enabledApps: agentChannel.enabledApps || [],
+            userName: message.member?.displayName || message.author.username
+        });
+        await message.reply({ content: reply, allowedMentions: { parse: [] } })
+            .catch(() => message.channel.send({ content: reply, allowedMentions: { parse: [] } }));
+    } catch (err) {
+        console.error('[AgentChannel] Error:', err.message);
+        await message.reply({ content: '⚠️ Something went wrong running the agent. Check your API keys and try again.', allowedMentions: { parse: [] } }).catch(() => {});
+    }
+}
+
+// ------------------------------------------------------------------
+// Natural language reminder detection (available to everyone)
+// ------------------------------------------------------------------
+
+// Regex patterns ordered from most specific to least
+const REMINDER_REGEXES = [
+    // "remind me in 2 hours to do X" / "remind me in 30 minutes about X"
+    { re: /remind me in (\d+)\s*(minute|min|hour|hr|day)s?\s+(?:to|about)\s+(.+)/i,      parse: (m) => ({ amount: +m[1], unit: m[2].toLowerCase(), text: m[3] }) },
+    // "remind me tomorrow at 9am to X"
+    { re: /remind me tomorrow at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(?:to|about)\s+(.+)/i, parse: (m) => ({ tomorrow: true, hour: +m[1], min: +(m[2] || 0), ampm: m[3], text: m[4] }) },
+    // "remind me at 3pm to X"
+    { re: /remind me at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(?:to|about)\s+(.+)/i,      parse: (m) => ({ hour: +m[1], min: +(m[2] || 0), ampm: m[3], text: m[4] }) },
+    // "set a reminder for 10 minutes to X"
+    { re: /set (?:a )?reminder (?:for )?(\d+)\s*(minute|min|hour|hr|day)s?\s+(?:to|about)\s+(.+)/i, parse: (m) => ({ amount: +m[1], unit: m[2].toLowerCase(), text: m[3] }) },
+];
+
+function parseRelativeMs(amount, unit) {
+    const u = unit.toLowerCase();
+    if (u.startsWith('min')) return amount * 60_000;
+    if (u.startsWith('hr') || u.startsWith('hour')) return amount * 3_600_000;
+    if (u.startsWith('day')) return amount * 86_400_000;
+    return null;
+}
+
+function resolveAbsoluteTime(hour, min, ampm, tomorrow) {
+    const now = new Date();
+
+    function makeTarget(h) {
+        const t = new Date(now);
+        t.setHours(h, min || 0, 0, 0);
+        if (tomorrow) t.setDate(t.getDate() + 1);
+        else if (t <= now) t.setDate(t.getDate() + 1);
+        return t;
+    }
+
+    if (ampm) {
+        let h = hour;
+        if (ampm.toLowerCase() === 'pm' && h < 12) h += 12;
+        if (ampm.toLowerCase() === 'am' && h === 12) h = 0;
+        return makeTarget(h);
+    }
+
+    // No am/pm — pick the soonest future occurrence (try both AM and PM candidates)
+    const candidates = [hour % 24, (hour % 12) + 12].map(makeTarget);
+    return candidates.reduce((best, t) => (t < best ? t : best));
+}
+
+const NL_REMINDER_MAX_TEXT = 200;
+const NL_REMINDER_MAX_PENDING = 10;
+const NL_REMINDER_COOLDOWN_MS = 30_000; // 30 seconds between NL-created reminders per user
+const nlReminderLastUsed = new Map(); // userId → timestamp
+
+function sanitizeReminderText(text) {
+    return text
+        // Strip @everyone, @here, and role/user mention tokens
+        .replace(/@(everyone|here)/gi, '')
+        .replace(/<@[!&]?\d+>/g, '')
+        .trim()
+        .slice(0, NL_REMINDER_MAX_TEXT);
+}
+
+async function handleNLReminder(message) {
+    const content = message.content.trim();
+    if (content.length < 10) return;
+    if (!/remind/i.test(content)) return;
+
+    for (const { re, parse } of REMINDER_REGEXES) {
+        const m = content.match(re);
+        if (!m) continue;
+
+        const parsed = parse(m);
+        let remindAt;
+
+        if (parsed.amount != null) {
+            const ms = parseRelativeMs(parsed.amount, parsed.unit);
+            if (!ms) continue;
+            remindAt = new Date(Date.now() + ms);
+        } else {
+            remindAt = resolveAbsoluteTime(parsed.hour, parsed.min, parsed.ampm, parsed.tomorrow);
+        }
+
+        const reminderText = sanitizeReminderText(parsed.text);
+        if (!reminderText) continue;
+
+        // Per-user cooldown
+        const lastUsed = nlReminderLastUsed.get(message.author.id) || 0;
+        if (Date.now() - lastUsed < NL_REMINDER_COOLDOWN_MS) return;
+
+        // Cap pending reminders per user
+        const pending = await Reminder.countDocuments({ userId: message.author.id, completed: false }).catch(() => NL_REMINDER_MAX_PENDING);
+        if (pending >= NL_REMINDER_MAX_PENDING) return;
+
+        nlReminderLastUsed.set(message.author.id, Date.now());
+
+        try {
+            await Reminder.create({
+                userId:    message.author.id,
+                guildId:   message.guild?.id || null,
+                channelId: message.channel.id,
+                message:   reminderText,
+                remindAt
+            });
+
+            const unixTs = Math.floor(remindAt.getTime() / 1000);
+            await message.reply({ content: `✅ Got it! I'll remind you <t:${unixTs}:R> about: **${reminderText}**`, allowedMentions: { parse: [] } }).catch(() => {});
+        } catch (err) {
+            console.error('[NLReminder] Failed to create reminder:', err.message);
+        }
+        return;
+    }
 }
 
