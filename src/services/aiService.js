@@ -177,15 +177,23 @@ function buildKnowledgeContext(entries) {
 
 // ---------- AI Actions ----------
 
-const ACTIONS_SYSTEM_ADDENDUM = `
+function buildActionsAddendum() {
+    const now = new Date();
+    const timeStr = now.toUTCString();
+    return `
 You may optionally take one in-channel action by appending an ACTION block on its own line at the very end of your response. Only do so when the user explicitly asks for it or it is clearly useful.
+
+Current UTC time: ${timeStr}
 
 Available actions:
 - Create a poll:    ACTION:{"type":"create_poll","question":"...","options":["a","b",...]}
 - Set a reminder:   ACTION:{"type":"create_reminder","text":"...","delayMinutes":30}
 - Suggest mod action (mods only): ACTION:{"type":"suggest_mod_action","suggestion":"..."}
 
+For reminders: always use the ACTION block to actually set the reminder — never just describe it. Compute delayMinutes using the current UTC time above. If the user says "tomorrow" with no time, use 9am their next day (roughly 18–24 hours). If timing is genuinely ambiguous, ask one clarifying question before setting it.
+
 Never fabricate an action. The ACTION block must be the final line of your response with no text after it.`;
+}
 
 // Extracts and removes a trailing ACTION block from AI response text.
 function extractAction(text) {
@@ -499,7 +507,7 @@ async function handleAIChat(message, aiSettings) {
         systemPrompt += buildKnowledgeContext(kbEntries);
     }
     if (aiSettings.actionsEnabled) {
-        systemPrompt += ACTIONS_SYSTEM_ADDENDUM;
+        systemPrompt += buildActionsAddendum();
     }
 
     try {
