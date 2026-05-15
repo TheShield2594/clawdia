@@ -23,7 +23,7 @@ module.exports = {
         }
 
         client.user.setPresence({
-            activities: [{ name: '/help | UltraBot', type: 0 }],
+            activities: [{ name: '/help | Clawdia', type: 0 }],
             status: 'online'
         });
 

@@ -78,7 +78,7 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
             const port = current.port ? Number(current.port) : (current.protocol === 'https:' ? 443 : 80);
             const req = mod.request(
                 { hostname: current.hostname, port, path: current.pathname + current.search, method: 'GET',
-                  headers: { 'User-Agent': 'UltraBot-FeedValidator/1.0', Accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
+                  headers: { 'User-Agent': 'Clawdia-FeedValidator/1.0', Accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
                   timeout: 8000 },
                 (res) => {
                     if ([301, 302, 303, 307, 308].includes(res.statusCode)) {

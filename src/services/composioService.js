@@ -103,7 +103,7 @@ async function executeAction(guildId, apiKey, actionName, input) {
         if (!DISCORD_WEBHOOK_HOSTS.has(parsed.hostname)) throw new Error('webhook_url must be a Discord webhook URL');
 
         const webhookClient = axios.create({ timeout: 8000 });
-        const res = await webhookClient.post(webhook_url, { content, username: username || 'UltraBot' });
+        const res = await webhookClient.post(webhook_url, { content, username: username || 'Clawdia' });
         if (res.status < 200 || res.status >= 300) throw new Error(`Webhook returned status ${res.status}`);
         return { success: true };
     }
