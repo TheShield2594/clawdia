@@ -23,4 +23,7 @@ const automationSchema = new Schema({
     lastRunAt: { type: Date, default: null }
 }, { timestamps: true });
 
+// Compound index matches the hot query in fire(): { guildId, enabled, trigger.type }
+automationSchema.index({ guildId: 1, enabled: 1, 'trigger.type': 1 });
+
 module.exports = model('Automation', automationSchema);

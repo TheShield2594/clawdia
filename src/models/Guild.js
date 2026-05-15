@@ -1,5 +1,16 @@
 const { Schema, model } = require('mongoose');
 
+function distinctAgentChannelIds(channels) {
+    if (!Array.isArray(channels)) return true;
+    const seen = new Set();
+    for (const ch of channels) {
+        if (!ch || !ch.channelId) continue;
+        if (seen.has(ch.channelId)) return false;
+        seen.add(ch.channelId);
+    }
+    return true;
+}
+
 function distinctProfileIds(profiles) {
     if (!Array.isArray(profiles)) return true;
 
@@ -559,11 +570,14 @@ const guildSchema = new Schema({
     
     integrations: {
         composioApiKey: { type: String, default: null },
-        agentChannels: [{
-            channelId: { type: String, required: true },
-            focus:     { type: String, default: '' },
-            enabledApps: [{ type: String }]
-        }],
+        agentChannels: {
+            type: [{
+                channelId: { type: String, required: true },
+                focus:     { type: String, default: '' },
+                enabledApps: [{ type: String }]
+            }],
+            validate: { validator: distinctAgentChannelIds, message: 'Each agent channel must be unique' }
+        },
         connectedApps: [{ type: String }]
     },
 

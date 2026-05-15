@@ -86,11 +86,11 @@ module.exports = {
                 }
             }
 
-            // Agent channel — server owner designates channels where the bot acts as a full AI agent
+            // Agent channel — only the server owner's messages are handled; others fall through normally
             const agentChannel = guildSettings?.integrations?.agentChannels?.find(
                 ch => ch.channelId === message.channel.id
             );
-            if (agentChannel) {
+            if (agentChannel && message.guild.ownerId === message.author.id) {
                 await handleAgentChannel(message, guildSettings, agentChannel);
                 return;
             }
@@ -553,25 +553,32 @@ async function handleBibleVerseDetection(message, guildSettings) {
 // ------------------------------------------------------------------
 // Agent channel handler
 // ------------------------------------------------------------------
-async function handleAgentChannel(message, guildSettings, agentChannel) {
-    // Only the server owner can use agent channels
-    if (message.guild.ownerId !== message.author.id) return;
+// Strip leading bot mention tokens so they don't waste agent context
+function cleanAgentMessage(content, botId) {
+    return content
+        .replace(new RegExp(`^\\s*<@!?${botId}>\\s*:?\\s*`, ''), '')
+        .trim();
+}
 
+async function handleAgentChannel(message, guildSettings, agentChannel) {
     await message.channel.sendTyping().catch(() => {});
+
+    const userMessage = cleanAgentMessage(message.content, message.client.user.id);
 
     try {
         const reply = await runAgent({
             guildId: message.guild.id,
             guildSettings,
-            userMessage: message.content,
+            userMessage,
             channelFocus: agentChannel.focus || '',
             enabledApps: agentChannel.enabledApps || [],
             userName: message.member?.displayName || message.author.username
         });
-        await message.reply(reply).catch(() => message.channel.send(reply));
+        await message.reply({ content: reply, allowedMentions: { parse: [] } })
+            .catch(() => message.channel.send({ content: reply, allowedMentions: { parse: [] } }));
     } catch (err) {
         console.error('[AgentChannel] Error:', err.message);
-        await message.reply('⚠️ Something went wrong running the agent. Check your API keys and try again.').catch(() => {});
+        await message.reply({ content: '⚠️ Something went wrong running the agent. Check your API keys and try again.', allowedMentions: { parse: [] } }).catch(() => {});
     }
 }
 
@@ -600,24 +607,45 @@ function parseRelativeMs(amount, unit) {
 }
 
 function resolveAbsoluteTime(hour, min, ampm, tomorrow) {
-    let h = hour;
+    const now = new Date();
+
+    function makeTarget(h) {
+        const t = new Date(now);
+        t.setHours(h, min || 0, 0, 0);
+        if (tomorrow) t.setDate(t.getDate() + 1);
+        else if (t <= now) t.setDate(t.getDate() + 1);
+        return t;
+    }
+
     if (ampm) {
+        let h = hour;
         if (ampm.toLowerCase() === 'pm' && h < 12) h += 12;
         if (ampm.toLowerCase() === 'am' && h === 12) h = 0;
+        return makeTarget(h);
     }
-    const now = new Date();
-    const target = new Date(now);
-    target.setHours(h, min || 0, 0, 0);
-    if (tomorrow) target.setDate(target.getDate() + 1);
-    else if (target <= now) target.setDate(target.getDate() + 1); // already passed today
-    return target;
+
+    // No am/pm — pick the soonest future occurrence (try both AM and PM candidates)
+    const candidates = [hour % 24, (hour % 12) + 12].map(makeTarget);
+    return candidates.reduce((best, t) => (t < best ? t : best));
+}
+
+const NL_REMINDER_MAX_TEXT = 200;
+const NL_REMINDER_MAX_PENDING = 10;
+const NL_REMINDER_COOLDOWN_MS = 30_000; // 30 seconds between NL-created reminders per user
+const nlReminderLastUsed = new Map(); // userId → timestamp
+
+function sanitizeReminderText(text) {
+    return text
+        // Strip @everyone, @here, and role/user mention tokens
+        .replace(/@(everyone|here)/gi, '')
+        .replace(/<@[!&]?\d+>/g, '')
+        .trim()
+        .slice(0, NL_REMINDER_MAX_TEXT);
 }
 
 async function handleNLReminder(message) {
     const content = message.content.trim();
     if (content.length < 10) return;
-
-    // Quick bailout — must contain "remind" or "reminder"
     if (!/remind/i.test(content)) return;
 
     for (const { re, parse } of REMINDER_REGEXES) {
@@ -635,8 +663,18 @@ async function handleNLReminder(message) {
             remindAt = resolveAbsoluteTime(parsed.hour, parsed.min, parsed.ampm, parsed.tomorrow);
         }
 
-        const reminderText = parsed.text.trim();
+        const reminderText = sanitizeReminderText(parsed.text);
         if (!reminderText) continue;
+
+        // Per-user cooldown
+        const lastUsed = nlReminderLastUsed.get(message.author.id) || 0;
+        if (Date.now() - lastUsed < NL_REMINDER_COOLDOWN_MS) return;
+
+        // Cap pending reminders per user
+        const pending = await Reminder.countDocuments({ userId: message.author.id, completed: false }).catch(() => NL_REMINDER_MAX_PENDING);
+        if (pending >= NL_REMINDER_MAX_PENDING) return;
+
+        nlReminderLastUsed.set(message.author.id, Date.now());
 
         try {
             await Reminder.create({
@@ -648,11 +686,11 @@ async function handleNLReminder(message) {
             });
 
             const unixTs = Math.floor(remindAt.getTime() / 1000);
-            await message.reply(`✅ Got it! I'll remind you <t:${unixTs}:R> about: **${reminderText}**`).catch(() => {});
+            await message.reply({ content: `✅ Got it! I'll remind you <t:${unixTs}:R> about: **${reminderText}**`, allowedMentions: { parse: [] } }).catch(() => {});
         } catch (err) {
             console.error('[NLReminder] Failed to create reminder:', err.message);
         }
-        return; // only create one reminder per message
+        return;
     }
 }
 

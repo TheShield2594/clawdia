@@ -107,10 +107,17 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
             xpReward: a.xpReward, coinReward: a.coinReward
         }));
 
+        // Redact the composioApiKey before sending to the template — the template only
+        // needs to know whether a key is configured (truthy), not the key itself.
+        const safeSettings = guildSettings.toObject();
+        if (safeSettings.integrations?.composioApiKey) {
+            safeSettings.integrations.composioApiKey = true;
+        }
+
         res.render('guild-settings', {
             user: req.user,
             guild: { id: guild.id, name: guild.name, icon: guild.icon, ownerId: guild.ownerId, owner: req.user.id === guild.ownerId },
-            settings: guildSettings,
+            settings: safeSettings,
             channels: channels,
             voiceChannels: voiceChannels,
             stageChannels: stageChannels,

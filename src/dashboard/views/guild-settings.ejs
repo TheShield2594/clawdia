@@ -1723,7 +1723,7 @@
                         <div>
                             <label>Channel</label>
                             <select id="newAgentChannelId">
-                                <% for (const ch of channels.filter(c => c.type === 0)) { %>
+                                <% for (const ch of channels) { %>
                                 <option value="<%= ch.id %>">#<%= ch.name %></option>
                                 <% } %>
                             </select>
@@ -3312,7 +3312,7 @@
 
         async function saveComposioKey() {
             const key = document.getElementById('composioApiKey')?.value?.trim();
-            if (!key || key === '••••••••') return showToast('Enter your Composio API key first', 'error');
+            if (!key || key === '••••••••') return toast('Enter your Composio API key first', 'error');
             const res = await fetch(`/api/integrations/${GUILD_ID}/key`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ composioApiKey: key })
@@ -3320,9 +3320,9 @@
             const data = await res.json();
             if (data.success) {
                 document.getElementById('composioApiKey').value = '••••••••';
-                showToast('API key saved');
+                toast('API key saved');
             } else {
-                showToast(data.error || 'Failed to save key', 'error');
+                toast(data.error || 'Failed to save key', 'error');
             }
         }
 
@@ -3332,12 +3332,12 @@
                 body: JSON.stringify({ appName })
             });
             const data = await res.json();
-            if (data.error) return showToast(data.error, 'error');
+            if (data.error) return toast(data.error, 'error');
             if (data.redirectUrl) {
                 window.open(data.redirectUrl, '_blank');
-                showToast(`Opening ${appName} OAuth — complete the flow in the new tab, then reload this page`);
+                toast(`Opening ${appName} OAuth — complete the flow in the new tab, then reload this page`);
             } else {
-                showToast(`${appName} connection initiated`);
+                toast(`${appName} connection initiated`);
             }
         }
 
@@ -3345,28 +3345,28 @@
             if (!confirm(`Disconnect ${appName}? Any automations or agent channels using it will stop working.`)) return;
             const res = await fetch(`/api/integrations/${GUILD_ID}/disconnect/${appName}`, { method: 'DELETE' });
             const data = await res.json();
-            if (data.success) { showToast(`${appName} disconnected`); setTimeout(() => location.reload(), 800); }
-            else showToast(data.error || 'Failed to disconnect', 'error');
+            if (data.success) { toast(`${appName} disconnected`); setTimeout(() => location.reload(), 800); }
+            else toast(data.error || 'Failed to disconnect', 'error');
         }
 
         async function addAgentChannel() {
             const channelId = document.getElementById('newAgentChannelId')?.value;
             const focus = document.getElementById('newAgentFocus')?.value?.trim();
-            if (!channelId) return showToast('Select a channel', 'error');
+            if (!channelId) return toast('Select a channel', 'error');
             const res = await fetch(`/api/integrations/${GUILD_ID}/channels`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ channelId, focus, enabledApps: [] })
             });
             const data = await res.json();
-            if (data.success) { showToast('Agent channel added'); setTimeout(() => location.reload(), 800); }
-            else showToast(data.error || 'Failed to add channel', 'error');
+            if (data.success) { toast('Agent channel added'); setTimeout(() => location.reload(), 800); }
+            else toast(data.error || 'Failed to add channel', 'error');
         }
 
         async function removeAgentChannel(channelId) {
             const res = await fetch(`/api/integrations/${GUILD_ID}/channels/${channelId}`, { method: 'DELETE' });
             const data = await res.json();
-            if (data.success) { showToast('Channel removed'); setTimeout(() => location.reload(), 800); }
-            else showToast(data.error || 'Failed to remove', 'error');
+            if (data.success) { toast('Channel removed'); setTimeout(() => location.reload(), 800); }
+            else toast(data.error || 'Failed to remove', 'error');
         }
 
         // ============================================================
@@ -3409,32 +3409,32 @@
             const appName = document.getElementById('autoActionApp')?.value;
             const actionName = document.getElementById('autoActionName')?.value?.trim();
             const actionInputRaw = document.getElementById('autoActionInput')?.value?.trim();
-            if (!name || !triggerType || !actionName) return showToast('Name, trigger, and action name are required', 'error');
+            if (!name || !triggerType || !actionName) return toast('Name, trigger, and action name are required', 'error');
             let triggerConfig = {}, actionInput = {};
-            try { if (triggerConfigRaw) triggerConfig = JSON.parse(triggerConfigRaw); } catch { return showToast('Trigger config must be valid JSON', 'error'); }
-            try { if (actionInputRaw) actionInput = JSON.parse(actionInputRaw); } catch { return showToast('Action input must be valid JSON', 'error'); }
+            try { if (triggerConfigRaw) triggerConfig = JSON.parse(triggerConfigRaw); } catch { return toast('Trigger config must be valid JSON', 'error'); }
+            try { if (actionInputRaw) actionInput = JSON.parse(actionInputRaw); } catch { return toast('Action input must be valid JSON', 'error'); }
             const res = await fetch(`/api/automations/${GUILD_ID}`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, trigger: { type: triggerType, config: triggerConfig }, action: { appName, actionName, input: actionInput } })
             });
             const data = await res.json();
-            if (data._id) { showToast('Automation created'); loadAutomations(); }
-            else showToast(data.error || 'Failed to create', 'error');
+            if (data._id) { toast('Automation created'); loadAutomations(); }
+            else toast(data.error || 'Failed to create', 'error');
         }
 
         async function toggleAutomation(id) {
             const res = await fetch(`/api/automations/${GUILD_ID}/${id}/toggle`, { method: 'PATCH' });
             const data = await res.json();
-            if (data.enabled !== undefined) { showToast(`Automation ${data.enabled ? 'enabled' : 'disabled'}`); loadAutomations(); }
-            else showToast(data.error || 'Failed', 'error');
+            if (data.enabled !== undefined) { toast(`Automation ${data.enabled ? 'enabled' : 'disabled'}`); loadAutomations(); }
+            else toast(data.error || 'Failed', 'error');
         }
 
         async function deleteAutomation(id) {
             if (!confirm('Delete this automation?')) return;
             const res = await fetch(`/api/automations/${GUILD_ID}/${id}`, { method: 'DELETE' });
             const data = await res.json();
-            if (data.success) { showToast('Deleted'); loadAutomations(); }
-            else showToast(data.error || 'Failed to delete', 'error');
+            if (data.success) { toast('Deleted'); loadAutomations(); }
+            else toast(data.error || 'Failed to delete', 'error');
         }
 
         // Load automations when that tab is opened

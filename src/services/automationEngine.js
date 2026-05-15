@@ -7,6 +7,10 @@ const cron = require('node-cron');
 // Scheduled automation cron handles, keyed by automationId string
 const cronHandles = new Map();
 
+// In-memory set of guildIds that have at least one active message_keyword automation.
+// Prevents a DB round-trip on every non-bot message when no keyword automations exist.
+const keywordGuilds = new Set();
+
 // ------------------------------------------------------------------
 // Variable substitution
 // ------------------------------------------------------------------
@@ -22,12 +26,22 @@ function substitute(value, ctx) {
 }
 
 function substituteInput(input, ctx) {
-    if (!input || typeof input !== 'object') return input;
+    if (input == null || typeof input !== 'object') return input;
+    if (Array.isArray(input)) return input.map(item => substituteInput(item, ctx));
     const result = {};
     for (const [k, v] of Object.entries(input)) {
-        result[k] = typeof v === 'object' ? substituteInput(v, ctx) : substitute(v, ctx);
+        result[k] = (v != null && typeof v === 'object' && !Array.isArray(v))
+            ? substituteInput(v, ctx)
+            : substitute(v, ctx);
     }
     return result;
+}
+
+// Strip fields that may contain PII before persisting the log context
+function sanitizeCtx(ctx) {
+    const safe = { ...ctx };
+    if (safe.message) safe.message = { channelId: safe.message.channelId };
+    return safe;
 }
 
 // ------------------------------------------------------------------
@@ -43,14 +57,15 @@ async function fire(guildId, triggerType, ctx) {
         return;
     }
 
+    if (!automations.length) return;
+
     let apiKey = null;
     try {
-        const guild = await Guild.findOne({ guildId }).lean();
+        const guild = await Guild.findOne({ guildId }, { 'integrations.composioApiKey': 1 }).lean();
         apiKey = guild?.integrations?.composioApiKey || null;
     } catch {}
 
     for (const automation of automations) {
-        // Extra trigger-specific filtering
         if (!matchesTriggerConfig(automation.trigger, ctx)) continue;
 
         const resolvedInput = substituteInput(automation.action.input, ctx);
@@ -76,7 +91,7 @@ async function fire(guildId, triggerType, ctx) {
             triggerType,
             success,
             error,
-            contextData: ctx,
+            contextData: sanitizeCtx(ctx),
             executedAt: new Date()
         }).catch(() => null);
     }
@@ -119,9 +134,14 @@ async function loadScheduledAutomations() {
         for (const automation of scheduled) {
             scheduleAutomation(automation);
         }
-        console.log(`[AutomationEngine] Loaded ${scheduled.length} scheduled automation(s)`);
+
+        // Populate keyword guild cache
+        const keywordDocs = await Automation.distinct('guildId', { enabled: true, 'trigger.type': 'message_keyword' });
+        for (const guildId of keywordDocs) keywordGuilds.add(guildId);
+
+        console.log(`[AutomationEngine] Loaded ${scheduled.length} scheduled automation(s), ${keywordGuilds.size} guild(s) with keyword triggers`);
     } catch (err) {
-        console.error('[AutomationEngine] Failed to load scheduled automations:', err.message);
+        console.error('[AutomationEngine] Failed to load automations:', err.message);
     }
 }
 
@@ -129,16 +149,16 @@ function scheduleAutomation(automation) {
     const cronExpr = automation.trigger.config?.cron;
     if (!cronExpr || !cron.validate(cronExpr)) return;
 
-    // Cancel any existing handle
     unscheduleAutomation(automation._id.toString());
 
+    const tz = automation.trigger.config?.timezone;
     const handle = cron.schedule(cronExpr, async () => {
         const ctx = {
             guild: { id: automation.guildId },
             timestamp: new Date().toISOString()
         };
         await fire(automation.guildId, 'scheduled', ctx);
-    });
+    }, tz ? { timezone: tz } : undefined);
 
     cronHandles.set(automation._id.toString(), handle);
 }
@@ -151,7 +171,6 @@ function unscheduleAutomation(automationId) {
     }
 }
 
-// Called from automation dashboard/API when an automation is created/updated/deleted
 function refreshScheduledAutomation(automation) {
     if (automation.trigger?.type !== 'scheduled') return;
     if (automation.enabled) {
@@ -178,6 +197,9 @@ function init(client) {
 
     client.on('messageCreate', async (message) => {
         if (message.author.bot || !message.guild) return;
+        // Skip DB call entirely when no automations use keyword triggers for this guild
+        if (!keywordGuilds.has(message.guild.id)) return;
+
         const ctx = {
             user:    { id: message.author.id, name: message.author.username, tag: message.author.tag },
             guild:   { id: message.guild.id, name: message.guild.name },
@@ -190,7 +212,9 @@ function init(client) {
     client.on('guildMemberUpdate', async (oldMember, newMember) => {
         if (!newMember.guild) return;
         const addedRoles = newMember.roles.cache.filter(r => !oldMember.roles.cache.has(r.id));
-        for (const [, role] of addedRoles) {
+        for (const role of addedRoles.values()) {
+            // Skip the synthetic @everyone role (its id matches the guild id)
+            if (role.id === newMember.guild.id) continue;
             const ctx = {
                 user:  { id: newMember.user.id, name: newMember.user.username, tag: newMember.user.tag },
                 role:  { id: role.id, name: role.name },
@@ -206,11 +230,10 @@ function init(client) {
     console.log('[AutomationEngine] Initialized');
 }
 
-// Called from moderation commands to fire moderation_action triggers
 async function fireModerationAction(guildId, targetUser, moderator, actionType, reason) {
     const ctx = {
         user:   { id: targetUser.id, name: targetUser.username, tag: targetUser.tag },
-        mod:    { id: moderator.id,   name: moderator.username },
+        mod:    { id: moderator.id,  name: moderator.username },
         action: { type: actionType, reason: reason || '' },
         guild:  { id: guildId },
         timestamp: new Date().toISOString()
@@ -218,7 +241,6 @@ async function fireModerationAction(guildId, targetUser, moderator, actionType, 
     await fire(guildId, 'moderation_action', ctx);
 }
 
-// Called from leveling event handler when a user levels up
 async function fireLevelUp(guildId, user, level) {
     const ctx = {
         user:  { id: user.id, name: user.username, tag: user.tag },

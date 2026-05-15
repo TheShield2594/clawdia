@@ -12,5 +12,7 @@ const automationLogSchema = new Schema({
 }, { timestamps: false });
 
 automationLogSchema.index({ guildId: 1, executedAt: -1 });
+// Retain logs for 30 days, then let MongoDB remove them automatically
+automationLogSchema.index({ executedAt: 1 }, { expireAfterSeconds: 30 * 24 * 3600 });
 
 module.exports = model('AutomationLog', automationLogSchema);

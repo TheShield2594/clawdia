@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { Types: MongooseTypes } = require('mongoose');
 const Guild = require('../../models/Guild');
 const Case = require('../../models/Case');
 const User = require('../../models/User');
@@ -946,7 +947,8 @@ router.post('/integrations/:guildId/key', ownerOnly, async (req, res) => {
         await Guild.findOneAndUpdate({ guildId }, { 'integrations.composioApiKey': composioApiKey.trim() });
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[Integrations] Save key error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -962,21 +964,35 @@ router.post('/integrations/:guildId/connect', ownerOnly, async (req, res) => {
         if (!apiKey) return res.status(400).json({ error: 'Composio API key not configured' });
 
         const dashUrl = process.env.DASHBOARD_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3000}`;
-        const redirectUri = `${dashUrl}/dashboard/guild/${guildId}/settings#integrations`;
+        // No fragment (#...) in redirectUri — OAuth providers reject fragments
+        const redirectUri = `${dashUrl}/dashboard/guild/${guildId}/settings`;
 
         const result = await composioService.initiateConnection(guildId, apiKey, appName, redirectUri);
-
-        // Mark app as connected in guild record once OAuth is initiated
-        await Guild.findOneAndUpdate({ guildId }, { $addToSet: { 'integrations.connectedApps': appName } });
+        // connectedApps is updated only after the user completes the OAuth flow and reloads;
+        // marking it here before completion would create a false-connected state.
 
         res.json({ redirectUrl: result.redirectUrl || result.connectionUrl || null, connectionId: result.id || result.connectionId });
     } catch (err) {
-        console.error('[Integrations] Connect error:', err.message);
-        res.status(500).json({ error: err.message });
+        console.error('[Integrations] Connect error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-// Disconnect an app
+// Mark an app as connected (called client-side after the OAuth callback completes)
+router.post('/integrations/:guildId/connected', ownerOnly, async (req, res) => {
+    try {
+        const { guildId } = req.params;
+        const { appName } = req.body;
+        if (!appName) return res.status(400).json({ error: 'appName is required' });
+        await Guild.findOneAndUpdate({ guildId }, { $addToSet: { 'integrations.connectedApps': appName } });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[Integrations] Mark connected error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Disconnect an app — only removes local record if the Composio delete succeeds
 router.delete('/integrations/:guildId/disconnect/:appName', ownerOnly, async (req, res) => {
     try {
         const { guildId, appName } = req.params;
@@ -984,17 +1000,18 @@ router.delete('/integrations/:guildId/disconnect/:appName', ownerOnly, async (re
         const apiKey = guild?.integrations?.composioApiKey;
 
         if (apiKey) {
-            try {
-                const connections = await composioService.getConnections(guildId, apiKey);
-                const conn = connections.find(c => c.appName?.toLowerCase() === appName.toLowerCase());
-                if (conn) await composioService.deleteConnection(conn.id, apiKey);
-            } catch {}
+            const connections = await composioService.getConnections(guildId, apiKey);
+            const conn = connections.find(c => c.appName?.toLowerCase() === appName.toLowerCase());
+            if (conn) {
+                await composioService.deleteConnection(conn.id, apiKey);
+            }
         }
 
         await Guild.findOneAndUpdate({ guildId }, { $pull: { 'integrations.connectedApps': appName } });
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[Integrations] Disconnect error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -1021,7 +1038,8 @@ router.post('/integrations/:guildId/channels', ownerOnly, async (req, res) => {
         await guild.save();
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[Integrations] Add channel error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -1034,7 +1052,8 @@ router.delete('/integrations/:guildId/channels/:channelId', ownerOnly, async (re
         });
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[Integrations] Remove channel error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -1047,7 +1066,8 @@ router.get('/automations/:guildId', ownerOnly, async (req, res) => {
         const automations = await Automation.find({ guildId: req.params.guildId }).sort({ createdAt: -1 });
         res.json(automations);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[Automations] List error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -1068,11 +1088,15 @@ router.post('/automations/:guildId', ownerOnly, async (req, res) => {
         refreshScheduledAutomation(automation);
         res.json(automation);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[Automations] Create error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 router.patch('/automations/:guildId/:id/toggle', ownerOnly, async (req, res) => {
+    if (!MongooseTypes.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid id' });
+    }
     try {
         const automation = await Automation.findOne({ _id: req.params.id, guildId: req.params.guildId });
         if (!automation) return res.status(404).json({ error: 'Not found' });
@@ -1081,18 +1105,23 @@ router.patch('/automations/:guildId/:id/toggle', ownerOnly, async (req, res) => 
         refreshScheduledAutomation(automation);
         res.json({ enabled: automation.enabled });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[Automations] Toggle error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 router.delete('/automations/:guildId/:id', ownerOnly, async (req, res) => {
+    if (!MongooseTypes.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid id' });
+    }
     try {
         const automation = await Automation.findOneAndDelete({ _id: req.params.id, guildId: req.params.guildId });
         if (!automation) return res.status(404).json({ error: 'Not found' });
         refreshScheduledAutomation({ ...automation.toObject(), enabled: false });
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[Automations] Delete error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -1102,7 +1131,8 @@ router.get('/automations/:guildId/logs', ownerOnly, async (req, res) => {
             .sort({ executedAt: -1 }).limit(50);
         res.json(logs);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('[Automations] Logs error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
