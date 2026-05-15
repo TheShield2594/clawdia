@@ -931,8 +931,17 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
 function ownerOnly(req, res, next) {
     if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
     const { guildId } = req.params;
+    const userId = req.user?.id;
     const guild = req.client?.guilds?.cache?.get(guildId);
-    if (!guild || guild.ownerId !== req.user?.id) return res.status(403).json({ error: 'Only the server owner can manage integrations' });
+    if (guild) {
+        // Preferred path: authoritative owner check via bot client cache.
+        if (guild.ownerId !== userId) return res.status(403).json({ error: 'Only the server owner can manage integrations' });
+        return next();
+    }
+    // Fallback: bot not in cache — rely on Discord OAuth guild list.
+    const oauthGuild = req.user?.guilds?.find(g => g.id === guildId);
+    if (!oauthGuild) return res.status(404).json({ error: 'Guild not found or bot not in guild' });
+    if (!oauthGuild.owner) return res.status(403).json({ error: 'Only the server owner can manage integrations' });
     next();
 }
 
