@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const COMPOSIO_BASE = process.env.COMPOSIO_BASE || 'https://backend.composio.dev/api/v1';
+const COMPOSIO_BASE = process.env.COMPOSIO_BASE || 'https://backend.composio.dev/api/v3';
 
 // Allowed hostnames for the native Discord webhook action (SSRF guard)
 const DISCORD_WEBHOOK_HOSTS = new Set(['discord.com', 'discordapp.com', 'ptb.discord.com', 'canary.discord.com']);
@@ -40,23 +40,47 @@ function makeClient(apiKey) {
     });
 }
 
-function entityId(guildId) {
+function userId(guildId) {
     return `guild-${guildId}`;
 }
 
-// Fetch action definitions from Composio and format as OpenAI-compatible tools
+// Look up the auth config id for a toolkit by slug. Returns null if the user
+// has not created one in their Composio dashboard for this app yet.
+async function findAuthConfigId(apiKey, appName) {
+    const slug = String(appName).toLowerCase();
+    const { data } = await makeClient(apiKey).get('/auth_configs', {
+        params: { toolkit_slugs: slug, limit: 100 }
+    });
+    const items = data.items || [];
+    const match = items.find(c => (c.toolkit?.slug || '').toLowerCase() === slug);
+    return match?.id || null;
+}
+
+// Fetch tool definitions from Composio v3 and format as OpenAI-compatible tools.
+// Note: /v3/tools' `toolkit_slug` filter is single-valued, so we call once per
+// toolkit and follow next_cursor to collect every tool the user has access to.
 async function getTools(guildId, apiKey, appNames) {
     if (!apiKey || !appNames?.length) return [];
+    const client = makeClient(apiKey);
+    const slugs = [...new Set(appNames.map(a => a.toLowerCase()))];
+    const items = [];
     try {
-        const { data } = await makeClient(apiKey).get('/actions', {
-            params: { appNames: appNames.join(','), limit: 20 }
-        });
-        return (data.items || []).map(action => ({
+        for (const slug of slugs) {
+            let cursor;
+            do {
+                const params = { toolkit_slug: slug, limit: 1000 };
+                if (cursor) params.cursor = cursor;
+                const { data } = await client.get('/tools', { params });
+                if (Array.isArray(data.items)) items.push(...data.items);
+                cursor = data.next_cursor || null;
+            } while (cursor);
+        }
+        return items.map(tool => ({
             type: 'function',
             function: {
-                name: action.name,
-                description: action.description || action.display_name || action.name,
-                parameters: action.parameters || { type: 'object', properties: {} }
+                name: tool.slug,
+                description: tool.description || tool.name || tool.slug,
+                parameters: tool.input_parameters || { type: 'object', properties: {} }
             }
         }));
     } catch (err) {
@@ -66,29 +90,44 @@ async function getTools(guildId, apiKey, appNames) {
 }
 
 async function initiateConnection(guildId, apiKey, appName, redirectUri) {
-    const { data } = await makeClient(apiKey).post('/connectedAccounts', {
-        appName,
-        entityId: entityId(guildId),
-        redirectUri
+    const authConfigId = await findAuthConfigId(apiKey, appName);
+    if (!authConfigId) {
+        const err = new Error(`No auth config exists for "${appName}" in your Composio project. Create one at https://app.composio.dev/ → Auth Configs, then try again.`);
+        err.userFacing = true;
+        err.status = 400;
+        throw err;
+    }
+    const { data } = await makeClient(apiKey).post('/connected_accounts/link', {
+        auth_config_id: authConfigId,
+        user_id: userId(guildId),
+        callback_url: redirectUri
     });
-    return data;
+    return {
+        redirectUrl: data.redirect_url || null,
+        connectionId: data.id || data.connection_id || null
+    };
 }
 
+// Returns connections normalized with an `appName` (toolkit slug) field so
+// callers can match by app name without knowing the v3 response shape.
 async function getConnections(guildId, apiKey) {
     if (!apiKey) return [];
-    const { data } = await makeClient(apiKey).get('/connectedAccounts', {
-        params: { entityId: entityId(guildId) }
+    const { data } = await makeClient(apiKey).get('/connected_accounts', {
+        params: { user_ids: userId(guildId), limit: 100 }
     });
-    return data.items || [];
+    return (data.items || []).map(c => ({
+        ...c,
+        appName: c.toolkit?.slug || c.appName || null
+    }));
 }
 
 async function getConnectionStatus(connectionId, apiKey) {
-    const { data } = await makeClient(apiKey).get(`/connectedAccounts/${connectionId}`);
+    const { data } = await makeClient(apiKey).get(`/connected_accounts/${connectionId}`);
     return data;
 }
 
 async function deleteConnection(connectionId, apiKey) {
-    await makeClient(apiKey).delete(`/connectedAccounts/${connectionId}`);
+    await makeClient(apiKey).delete(`/connected_accounts/${connectionId}`);
 }
 
 async function executeAction(guildId, apiKey, actionName, input) {
@@ -108,9 +147,9 @@ async function executeAction(guildId, apiKey, actionName, input) {
         return { success: true };
     }
 
-    const { data } = await makeClient(apiKey).post(`/actions/${actionName}/execute`, {
-        entityId: entityId(guildId),
-        input
+    const { data } = await makeClient(apiKey).post(`/tools/execute/${actionName}`, {
+        user_id: userId(guildId),
+        arguments: input
     });
     return data;
 }
