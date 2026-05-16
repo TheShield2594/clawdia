@@ -120,7 +120,7 @@ async function playSong(queue, client, guild) {
         });
     }
 
-    const stream = await play.stream(song.url);
+    const stream = await play.stream(song.url, { discordPlayerCompatibility: true });
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
 
     queue.player.play(resource);
