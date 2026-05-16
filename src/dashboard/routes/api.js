@@ -980,10 +980,12 @@ router.post('/integrations/:guildId/connect', ownerOnly, async (req, res) => {
         // connectedApps is updated only after the user completes the OAuth flow and reloads;
         // marking it here before completion would create a false-connected state.
 
-        res.json({ redirectUrl: result.redirectUrl || result.connectionUrl || null, connectionId: result.id || result.connectionId });
+        res.json({ redirectUrl: result.redirectUrl, connectionId: result.connectionId });
     } catch (err) {
-        console.error('[Integrations] Connect error:', err);
-        res.status(500).json({ error: 'Internal server error' });
+        console.error('[Integrations] Connect error:', err.response?.data || err.message);
+        if (err.userFacing) return res.status(err.status || 400).json({ error: err.message });
+        const upstream = err.response?.data?.error || err.response?.data?.message;
+        res.status(500).json({ error: upstream ? `Composio: ${upstream}` : 'Internal server error' });
     }
 });
 
