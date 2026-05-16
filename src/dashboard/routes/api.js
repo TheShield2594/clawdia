@@ -189,12 +189,20 @@ function checkWriteRateLimit(req, res, next) {
 // Top-level Guild schema keys that the dashboard is allowed to update.
 // This whitelist prevents prototype pollution (__proto__, constructor, etc.)
 // and limits surface area to only fields the dashboard UI actually manages.
+// Keep in sync with the field names the saveSettings() function in
+// guild-settings.ejs actually sends — anything missing causes a 400.
 const ALLOWED_SETTING_PARENTS = new Set([
-    'moderation', 'leveling', 'welcome', 'economy', 'ai', 'rssFeeds',
-    'dailyNews', 'dailyNewsProfiles', 'bibleVerse', 'suggestions', 'starboard',
-    'tempVoice', 'autoRoles', 'reactionRoles', 'levelRoles', 'progressionTracks',
-    'analytics', 'logging', 'tickets', 'giveaways', 'antiNuke', 'raids',
-    'escalation', 'notifications', 'music', 'quests'
+    'welcome', 'farewell', 'birthdays',
+    'moderation', 'leveling', 'levelRoles',
+    'economy', 'shop', 'jobs', 'jobTiers',
+    'achievements', 'music', 'tickets',
+    'raidDetection', 'antiNuke', 'caseSettings',
+    'starboard', 'eventLog', 'quests',
+    'season', 'progressionTracks', 'commandPolicies',
+    'suggestions', 'ai', 'tempVoice', 'bibleVerse',
+    'dailyNews', 'dailyNewsProfiles', 'rssFeeds',
+    'autoRoles', 'reactionRoles', 'analytics',
+    'giveaways', 'notifications'
 ]);
 
 function isAllowedSettingKey(key) {
@@ -961,6 +969,27 @@ router.post('/integrations/:guildId/key', ownerOnly, async (req, res) => {
     }
 });
 
+// Pull a human-readable message out of a Composio (axios) error response.
+// v3 responses arrive in several shapes — `{error: "msg"}`, `{error: {message}}`,
+// `{message}`, `{detail}`, `{errors: [...]}` — so try each before giving up.
+function extractComposioError(err) {
+    const data = err?.response?.data;
+    if (!data) return null;
+    if (typeof data === 'string') return data;
+    if (typeof data.error === 'string') return data.error;
+    if (data.error && typeof data.error === 'object') {
+        return data.error.message || data.error.detail || JSON.stringify(data.error);
+    }
+    if (typeof data.message === 'string') return data.message;
+    if (typeof data.detail === 'string') return data.detail;
+    if (Array.isArray(data.errors) && data.errors.length) {
+        const first = data.errors[0];
+        if (typeof first === 'string') return first;
+        if (first && typeof first === 'object') return first.message || JSON.stringify(first);
+    }
+    return null;
+}
+
 // Initiate OAuth connection for an app
 router.post('/integrations/:guildId/connect', ownerOnly, async (req, res) => {
     try {
@@ -982,10 +1011,25 @@ router.post('/integrations/:guildId/connect', ownerOnly, async (req, res) => {
 
         res.json({ redirectUrl: result.redirectUrl, connectionId: result.connectionId });
     } catch (err) {
-        console.error('[Integrations] Connect error:', err.response?.data || err.message);
+        const status = err.response?.status;
+        console.error('[Integrations] Connect error:', {
+            appName: req.body?.appName,
+            status,
+            data: err.response?.data,
+            message: err.message
+        });
         if (err.userFacing) return res.status(err.status || 400).json({ error: err.message });
-        const upstream = err.response?.data?.error || err.response?.data?.message;
-        res.status(500).json({ error: upstream ? `Composio: ${upstream}` : 'Internal server error' });
+
+        const upstream = extractComposioError(err);
+        if (upstream) {
+            // Surface 4xx upstream errors as 400s so the dashboard shows the real reason.
+            const httpStatus = status && status >= 400 && status < 500 ? 400 : 502;
+            return res.status(httpStatus).json({ error: `Composio: ${upstream}` });
+        }
+        if (status) {
+            return res.status(502).json({ error: `Composio returned HTTP ${status}. Check your API key and that an auth config for "${req.body?.appName}" exists.` });
+        }
+        res.status(500).json({ error: err.message || 'Internal server error' });
     }
 });
 
