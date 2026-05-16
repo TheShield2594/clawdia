@@ -63,7 +63,16 @@ module.exports = {
                 return interaction.editReply('Failed to save livestream settings. Please try again.');
             }
 
-            await startLivestream(client, interaction.guild.id);
+            const result = await startLivestream(client, interaction.guild.id);
+
+            if (!result?.ok) {
+                // Roll back the enabled flag so /livestream status reflects reality.
+                await Guild.findOneAndUpdate(
+                    { guildId: interaction.guild.id },
+                    { 'music.livestream.enabled': false }
+                );
+                return interaction.editReply(`❌ Failed to start livestream: ${result?.reason || 'Unknown error.'}`);
+            }
 
             const embed = new EmbedBuilder()
                 .setColor('#ff0000')

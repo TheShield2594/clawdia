@@ -14,24 +14,32 @@ const activeLivestreams = new Map();
 
 async function startLivestream(client, guildId) {
     const guildSettings = await Guild.findOne({ guildId });
-    if (!guildSettings?.music?.livestream?.enabled) return;
+    if (!guildSettings?.music?.livestream?.enabled) {
+        return { ok: false, reason: 'Livestream is not enabled for this guild.' };
+    }
 
     const { url, channelId } = guildSettings.music.livestream;
-    if (!url || !channelId) return;
+    if (!url || !channelId) {
+        return { ok: false, reason: 'Livestream URL or channel is missing.' };
+    }
 
     const guild = client.guilds.cache.get(guildId);
-    if (!guild) return;
+    if (!guild) return { ok: false, reason: 'Guild not found in cache.' };
 
     const channel = guild.channels.cache.get(channelId);
-    if (!channel) return;
+    if (!channel) return { ok: false, reason: 'Configured channel no longer exists.' };
 
     // Don't start if a regular music queue is active in this guild
-    if (client.musicQueues.has(guildId)) return;
+    if (client.musicQueues.has(guildId)) {
+        return { ok: false, reason: 'A music queue is already active. Stop it first.' };
+    }
 
     // Don't double-start
-    if (activeLivestreams.has(guildId)) return;
+    if (activeLivestreams.has(guildId)) {
+        return { ok: true, alreadyRunning: true };
+    }
 
-    await _connect(client, guildId, guild, channel, url);
+    return await _connect(client, guildId, guild, channel, url);
 }
 
 async function _connect(client, guildId, guild, channel, url) {
@@ -49,13 +57,24 @@ async function _connect(client, guildId, guild, channel, url) {
         const state = { connection, player, retryTimeout: null, stopped: false };
         activeLivestreams.set(guildId, state);
 
-        // Stage channels: request speaker status
+        // Wait for the voice connection to be ready before attempting to stream.
+        // Without this, audio resources can be created against a half-open
+        // connection and silently fail.
+        try {
+            await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+        } catch (err) {
+            activeLivestreams.delete(guildId);
+            try { connection.destroy(); } catch {}
+            console.error(`[LIVESTREAM] Voice connection never reached Ready for guild ${guildId}:`, err);
+            return { ok: false, reason: 'Could not establish a voice connection within 20s. Check the bot has Connect/Speak permissions on that channel.' };
+        }
+
+        // Stage channels: request speaker status so the bot can actually be heard.
         if (channel.type === 13) {
             try {
-                await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
                 await guild.members.me.voice.setSuppressed(false);
-            } catch {
-                // Non-fatal — the bot may still play even if suppressed on some servers
+            } catch (err) {
+                console.warn(`[LIVESTREAM] Could not un-suppress in stage for guild ${guildId}:`, err?.message || err);
             }
         }
 
@@ -103,6 +122,7 @@ async function _connect(client, guildId, guild, channel, url) {
             if (!state.stopped) activeLivestreams.delete(guildId);
         });
 
+        return { ok: true };
     } catch (err) {
         console.error(`[LIVESTREAM] Failed to start for guild ${guildId}:`, err);
         const state = activeLivestreams.get(guildId);
@@ -111,12 +131,15 @@ async function _connect(client, guildId, guild, channel, url) {
             try { state.connection.destroy(); } catch {}
         }
         activeLivestreams.delete(guildId);
+        return { ok: false, reason: err?.message || 'Unknown error while starting livestream.' };
     }
 }
 
 async function _playStream(state, url) {
-    const stream = await play.stream(url);
-    const resource = createAudioResource(stream.stream, { inputType: stream.type });
+    // discordPlayerCompatibility is required for YouTube *live* streams (HLS).
+    // It is harmless for regular videos.
+    const stream = await play.stream(url, { discordPlayerCompatibility: true });
+    const resource = createAudioResource(stream.stream, { inputType: stream.type, inlineVolume: false });
     state.player.play(resource);
 }
 
