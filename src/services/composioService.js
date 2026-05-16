@@ -56,14 +56,26 @@ async function findAuthConfigId(apiKey, appName) {
     return match?.id || null;
 }
 
-// Fetch tool definitions from Composio v3 and format as OpenAI-compatible tools
+// Fetch tool definitions from Composio v3 and format as OpenAI-compatible tools.
+// Note: /v3/tools' `toolkit_slug` filter is single-valued, so we call once per
+// toolkit and follow next_cursor to collect every tool the user has access to.
 async function getTools(guildId, apiKey, appNames) {
     if (!apiKey || !appNames?.length) return [];
+    const client = makeClient(apiKey);
+    const slugs = [...new Set(appNames.map(a => a.toLowerCase()))];
+    const items = [];
     try {
-        const { data } = await makeClient(apiKey).get('/tools', {
-            params: { toolkit_slugs: appNames.map(a => a.toLowerCase()).join(','), limit: 20 }
-        });
-        return (data.items || []).map(tool => ({
+        for (const slug of slugs) {
+            let cursor;
+            do {
+                const params = { toolkit_slug: slug, limit: 1000 };
+                if (cursor) params.cursor = cursor;
+                const { data } = await client.get('/tools', { params });
+                if (Array.isArray(data.items)) items.push(...data.items);
+                cursor = data.next_cursor || null;
+            } while (cursor);
+        }
+        return items.map(tool => ({
             type: 'function',
             function: {
                 name: tool.slug,
