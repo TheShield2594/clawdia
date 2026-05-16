@@ -194,7 +194,7 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'dailyNews', 'dailyNewsProfiles', 'bibleVerse', 'suggestions', 'starboard',
     'tempVoice', 'autoRoles', 'reactionRoles', 'levelRoles', 'progressionTracks',
     'analytics', 'logging', 'tickets', 'giveaways', 'antiNuke', 'raids',
-    'escalation', 'notifications', 'music'
+    'escalation', 'notifications', 'music', 'quests'
 ]);
 
 function isAllowedSettingKey(key) {
