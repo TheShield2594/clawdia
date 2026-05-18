@@ -2,129 +2,465 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Clawdia — Your server's favorite Discord bot</title>
-    <meta name="description" content="Clawdia is a chill, self-hosted Discord bot for modern communities. Moderation, music, AI chat, leveling, economy and more.">
+    <meta name="viewport" content="width=1480">
+    <title>Clawdia — A chill Discord bot with serious teeth</title>
+    <meta name="description" content="Moderation, music, leveling, economy, AI chat and analytics — in one self-hosted Discord bot. Own your data.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-    <div class="mesh-bg"><div class="grid"></div><div class="blob-3"></div></div>
+<body style="background:var(--cream-50);">
 
-    <header class="topbar">
-        <a href="/" class="brand" style="text-decoration:none;color:inherit;">
-            <span class="brand-mark"></span>
-            <span>Clawdia</span>
-        </a>
-        <div class="topbar-right">
-            <% if (user) { %>
-                <a href="/dashboard" class="btn btn-primary">Open Dashboard →</a>
-            <% } else { %>
-                <a href="/auth/login" class="btn btn-primary">Login with Discord</a>
-            <% } %>
+<div class="cw-home">
+
+    <!-- NAV -->
+    <nav class="cw-nav">
+        <div class="cw-nav-inner">
+            <div class="cw-brand">
+                <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+                    <ellipse cx="16" cy="22" rx="8.5" ry="6" fill="#14110d"/>
+                    <ellipse cx="7" cy="12.5" rx="2.6" ry="3.8" fill="#14110d" transform="rotate(-18 7 12.5)"/>
+                    <ellipse cx="12.5" cy="9" rx="2.6" ry="4" fill="#14110d" transform="rotate(-6 12.5 9)"/>
+                    <ellipse cx="19.5" cy="9" rx="2.6" ry="4" fill="#14110d" transform="rotate(6 19.5 9)"/>
+                    <ellipse cx="25" cy="12.5" rx="2.6" ry="3.8" fill="#14110d" transform="rotate(18 25 12.5)"/>
+                    <path d="M14 20.5c0.6-1.6 3.4-1.6 4 0" stroke="#d97742" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+                </svg>
+                <span class="cw-wordmark">Clawdia</span>
+            </div>
+            <div class="cw-nav-links">
+                <a>Features</a>
+                <a>Modules</a>
+                <a>Insights</a>
+                <a>Self-host</a>
+                <a href="https://github.com/theshield2594/ultrabot" target="_blank" rel="noopener">Docs</a>
+            </div>
+            <div class="cw-nav-cta">
+                <% if (user) { %>
+                    <a href="/dashboard" class="cw-link-quiet">Dashboard</a>
+                    <a href="/dashboard" class="cw-btn cw-btn-dark">Open Dashboard <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                <% } else { %>
+                    <a href="/auth/login" class="cw-link-quiet">Sign in</a>
+                    <a href="/auth/login" class="cw-btn cw-btn-dark">Add to Discord <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                <% } %>
+            </div>
         </div>
+    </nav>
+
+    <!-- HERO -->
+    <header class="cw-hero">
+        <div class="cw-hero-eyebrow">
+            <span class="cw-dot"></span>
+            v4.2 · Insights layer is live
+        </div>
+        <h1 class="font-display cw-hero-title">
+            A <em>chill</em> Discord bot<br>
+            with <span class="cw-underline-claw">serious teeth.</span>
+        </h1>
+        <p class="cw-hero-sub">
+            Moderation, music, leveling, economy, AI chat and decision-grade analytics — in one self-hosted bot. Own your data. Skip the cloud lock-in. Up and purring in five minutes.
+        </p>
+        <div class="cw-hero-cta">
+            <% if (user) { %>
+                <a href="/dashboard" class="cw-btn cw-btn-claw">Open Dashboard <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            <% } else { %>
+                <a href="/auth/login" class="cw-btn cw-btn-claw">Add to Discord <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            <% } %>
+            <a href="https://github.com/theshield2594/ultrabot" target="_blank" rel="noopener" class="cw-btn cw-btn-ghost">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+                View on GitHub
+            </a>
+        </div>
+        <div class="cw-hero-stats">
+            <div><b>14,200</b><span>servers</span></div>
+            <i></i>
+            <div><b>2.1M</b><span>commands / day</span></div>
+            <i></i>
+            <div><b>99.98%</b><span>uptime · 90d</span></div>
+            <i></i>
+            <div><b>MIT</b><span>open source</span></div>
+        </div>
+
+        <!-- Decorative claw mark -->
+        <svg class="cw-hero-art" viewBox="0 0 460 460" fill="none">
+            <ellipse cx="230" cy="320" rx="135" ry="95" fill="#14110d" opacity="0.06"/>
+            <ellipse cx="90" cy="170" rx="42" ry="62" fill="#14110d" opacity="0.06" transform="rotate(-18 90 170)"/>
+            <ellipse cx="180" cy="115" rx="42" ry="65" fill="#14110d" opacity="0.06" transform="rotate(-6 180 115)"/>
+            <ellipse cx="280" cy="115" rx="42" ry="65" fill="#14110d" opacity="0.06" transform="rotate(6 280 115)"/>
+            <ellipse cx="370" cy="170" rx="42" ry="62" fill="#14110d" opacity="0.06" transform="rotate(18 370 170)"/>
+            <g stroke="#d97742" stroke-width="3" stroke-linecap="round" opacity="0.7">
+                <path d="M170 280 Q 180 320 200 360"/>
+                <path d="M220 280 Q 230 322 250 365"/>
+                <path d="M270 280 Q 282 322 300 365"/>
+            </g>
+        </svg>
     </header>
 
-    <main>
-        <section class="hero">
-            <div class="eyebrow"><span class="dot"></span> Open source · Self-hosted · Built for 2026</div>
-            <h1>Meet <span class="grad">Clawdia</span>, your server's new favorite bot</h1>
-            <p class="lead">A chill, self-hosted Discord bot packed with everything your community needs. Moderation, music, AI chat, leveling, economy — all configured from a clean dashboard.</p>
-            <div class="hero-actions">
-                <% if (user) { %>
-                    <a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>
-                <% } else { %>
-                    <a href="/auth/login" class="btn btn-primary">Get Started</a>
-                <% } %>
-                <a href="https://github.com/theshield2594/ultrabot" class="btn btn-ghost" target="_blank" rel="noopener">View on GitHub</a>
+    <!-- MODULE STRIP -->
+    <div class="cw-strip">
+        <div class="cw-strip-inner">
+            <span class="cw-strip-label">12 modules</span>
+            <div class="cw-strip-items">
+                <span>· Moderation</span>
+                <span>· Welcome</span>
+                <span>· Leveling</span>
+                <span>· Economy</span>
+                <span>· Music</span>
+                <span>· RSS Feeds</span>
+                <span>· Daily News</span>
+                <span>· AI Chat</span>
+                <span>· Reminders</span>
+                <span>· Auto-roles</span>
+                <span>· Custom commands</span>
+                <span>· Insights</span>
             </div>
+        </div>
+    </div>
 
-            <div class="stats">
-                <div class="stat"><div class="stat-num">8+</div><div class="stat-label">Modules</div></div>
-                <div class="stat"><div class="stat-num">24/7</div><div class="stat-label">Uptime</div></div>
-                <div class="stat"><div class="stat-num">2</div><div class="stat-label">AI Providers</div></div>
-                <div class="stat"><div class="stat-num">∞</div><div class="stat-label">Servers</div></div>
+    <!-- FEATURES -->
+    <section class="cw-section">
+        <div class="cw-section-header">
+            <div>
+                <div class="cw-eyebrow">// Everything bundled</div>
+                <h2 class="cw-section-title">One bot. Every module<br>you'd otherwise stitch together.</h2>
             </div>
-        </section>
+            <p class="cw-section-blurb">Clawdia replaces Carl-bot, MEE6, Dyno, Groovy and a half-dozen analytics scripts. Toggle modules per server.</p>
+        </div>
+        <div class="cw-feature-grid">
+            <!-- Moderation -->
+            <div class="cw-feature">
+                <div class="cw-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6l8-3z"/></svg>
+                </div>
+                <h3>Moderation</h3>
+                <p>Ban, kick, warn, mute, timeout. Auto-flag spam, invites, links. Every action logged with reason and timestamp.</p>
+                <span class="cw-feature-tag">core</span>
+            </div>
+            <!-- AI Chat — dark -->
+            <div class="cw-feature dark">
+                <div class="cw-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z"/></svg>
+                </div>
+                <h3>AI Chat</h3>
+                <p>Bring your own model — OpenAI, Gemini or self-hosted Ollama. Per-server prompts and dedicated channels.</p>
+                <span class="cw-feature-tag">smart</span>
+            </div>
+            <!-- Welcome -->
+            <div class="cw-feature">
+                <div class="cw-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/><path d="M3 11c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/></svg>
+                </div>
+                <h3>Welcome</h3>
+                <p>Custom welcome cards with avatar, server name and member count. Variables for personalization.</p>
+                <span class="cw-feature-tag">core</span>
+            </div>
+            <!-- Leveling -->
+            <div class="cw-feature">
+                <div class="cw-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8v4a4 4 0 0 1-8 0V4z"/><path d="M5 6H3v2a3 3 0 0 0 3 3M19 6h2v2a3 3 0 0 1-3 3"/><path d="M9 14h6l1 6H8z"/></svg>
+                </div>
+                <h3>Leveling</h3>
+                <p>XP per message, configurable rate. Leaderboards, rank cards, and level-up announcements.</p>
+                <span class="cw-feature-tag">fun</span>
+            </div>
+            <!-- Economy -->
+            <div class="cw-feature">
+                <div class="cw-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M10 9h3a2 2 0 0 1 0 4h-3v-4zM10 13v3"/></svg>
+                </div>
+                <h3>Economy</h3>
+                <p>Currency, daily rewards, work, transfers, jobs, wheel of fortune, blackjack and crash.</p>
+                <span class="cw-feature-tag">fun</span>
+            </div>
+            <!-- Music -->
+            <div class="cw-feature">
+                <div class="cw-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+                </div>
+                <h3>Music</h3>
+                <p>24/7 streaming with queue management, DJ roles, volume limits and queue caps.</p>
+                <span class="cw-feature-tag">core</span>
+            </div>
+            <!-- RSS -->
+            <div class="cw-feature">
+                <div class="cw-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/><circle cx="5" cy="19" r="1.4" fill="currentColor"/></svg>
+                </div>
+                <h3>RSS &amp; Digest</h3>
+                <p>Watch feeds individually or compile multiple sources into one daily post at a scheduled hour.</p>
+                <span class="cw-feature-tag">core</span>
+            </div>
+            <!-- Insights — dark -->
+            <div class="cw-feature dark">
+                <div class="cw-feature-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+                </div>
+                <h3>Insights</h3>
+                <p>Retention cohorts, active hours heatmap, toxic channel detection, mod SLA, newcomer conversion.</p>
+                <span class="cw-feature-tag new">★ new</span>
+            </div>
+        </div>
+    </section>
 
-        <section class="section">
-            <div class="section-head">
-                <h2>Everything your community needs</h2>
-                <p>One bot. Every essential module. No config files required.</p>
+    <!-- INSIGHTS SHOWPIECE -->
+    <section class="cw-show">
+        <div class="cw-show-inner">
+            <div>
+                <div class="cw-eyebrow">// Insights, v4.2</div>
+                <h2>Decisions, not<br>event logs <em>·</em></h2>
+                <p>Most Discord analytics dump raw events at you. Clawdia surfaces the five questions server owners actually ask — and answers them.</p>
+                <ul>
+                    <li><em>→</em> What hours should our events run?</li>
+                    <li><em>→</em> Which channels need more mod coverage?</li>
+                    <li><em>→</em> Which week's joiners stuck around?</li>
+                    <li><em>→</em> How fast is our team responding to flags?</li>
+                    <li><em>→</em> Are newcomers converting to contributors?</li>
+                </ul>
             </div>
-            <div class="features">
-                <div class="feature">
-                    <div class="icon">🛡️</div>
-                    <h3>Smart Moderation</h3>
-                    <p>Auto-mod, spam &amp; invite filters, link controls, and a full audit log channel.</p>
+            <div class="cw-show-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+                    <div>
+                        <div style="font-family:'Instrument Serif',serif; font-size:22px; color:var(--cream-50);">Active hours</div>
+                        <div style="font-size:12px; color:var(--ink-400); font-family:'JetBrains Mono',monospace; margin-top:2px;">UTC · last 28 days</div>
+                    </div>
+                    <div style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--ink-850);font-size:12px;color:var(--ink-200);border:1px solid var(--ink-800);font-family:'JetBrains Mono',monospace;">peak · Sat 21:00</div>
                 </div>
-                <div class="feature">
-                    <div class="icon">🎵</div>
-                    <h3>High-Fidelity Music</h3>
-                    <p>Smooth 24/7 streaming with queue management, DJ roles, and per-server volume.</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">🧠</div>
-                    <h3>AI Chat</h3>
-                    <p>Bring your own key — OpenAI or Google Gemini — with custom system prompts.</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">📈</div>
-                    <h3>Leveling &amp; XP</h3>
-                    <p>Reward active members with tunable XP rates and customizable level-up messages.</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">💎</div>
-                    <h3>Economy</h3>
-                    <p>Daily rewards, work payouts, currency symbols — tweak everything from the dashboard.</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">📰</div>
-                    <h3>RSS &amp; Daily Digest</h3>
-                    <p>Pipe any feed into a channel or aggregate them into a clean daily news digest.</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">👋</div>
-                    <h3>Welcome Cards</h3>
-                    <p>Greet new members with rich, branded welcome messages and image cards.</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">⚙️</div>
-                    <h3>Self-Hosted</h3>
-                    <p>You own the data. Drop it on Docker, Portainer, or bare metal in minutes.</p>
+                <div class="cw-heatmap" id="insights-heatmap"></div>
+                <div class="cw-show-stats">
+                    <div class="cw-show-stat">
+                        <div class="v">D7 · 62%</div>
+                        <div class="l">retention</div>
+                        <div class="delta">↑ 4.2 pts</div>
+                    </div>
+                    <div class="cw-show-stat">
+                        <div class="v">12m</div>
+                        <div class="l">mod SLA</div>
+                        <div class="delta">↑ 38% faster</div>
+                    </div>
+                    <div class="cw-show-stat">
+                        <div class="v">#general</div>
+                        <div class="l">hottest channel</div>
+                        <div class="delta bad">↓ 23% toxic</div>
+                    </div>
                 </div>
             </div>
-        </section>
+        </div>
+    </section>
 
-        <section class="section" style="padding-top:2rem;">
-            <div class="section-head">
-                <h2>Ready to bring Clawdia in?</h2>
-                <p>Sign in with Discord and have Clawdia running in your server in under two minutes.</p>
+    <!-- COMPARE -->
+    <section class="cw-section" style="padding-top:90px; padding-bottom:80px;">
+        <div class="cw-section-header">
+            <div>
+                <div class="cw-eyebrow">// vs. the alternatives</div>
+                <h2 class="cw-section-title">Things other bots<br>charge $9/mo for.</h2>
             </div>
-            <div class="hero-actions">
-                <% if (user) { %>
-                    <a href="/dashboard" class="btn btn-primary">Open Dashboard</a>
-                <% } else { %>
-                    <a href="/auth/login" class="btn btn-primary">Login with Discord</a>
-                <% } %>
-            </div>
-        </section>
-    </main>
+        </div>
+        <div class="cw-compare">
+            <div>Feature</div>
+            <div class="hi">Clawdia</div>
+            <div>MEE6 Pro</div>
+            <div>Carl-bot Premium</div>
 
-    <footer class="footer">
-        © <%= new Date().getFullYear() %> Clawdia · Built for Discord communities
+            <div>Self-hosted, your data</div>
+            <div class="hi"><span class="cw-compare-yes">● included</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+
+            <div>AI chat (OpenAI / Gemini / Ollama)</div>
+            <div class="hi"><span class="cw-compare-yes">● included</span></div>
+            <div><span class="cw-compare-warn">◐ limited</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+
+            <div>Insights &amp; retention cohorts</div>
+            <div class="hi"><span class="cw-compare-yes">● included</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+
+            <div>Music · 24/7 · no audio cap</div>
+            <div class="hi"><span class="cw-compare-yes">● included</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+            <div><span class="cw-compare-warn">◐ limited</span></div>
+
+            <div>Daily news digest from multi-feed</div>
+            <div class="hi"><span class="cw-compare-yes">● included</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+
+            <div>Custom welcome cards</div>
+            <div class="hi"><span class="cw-compare-yes">● included</span></div>
+            <div><span class="cw-compare-yes">● included</span></div>
+            <div><span class="cw-compare-yes">● included</span></div>
+
+            <div>Source code · MIT</div>
+            <div class="hi"><span class="cw-compare-yes">● included</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+            <div><span class="cw-compare-no">— not available</span></div>
+
+            <div>Monthly cost</div>
+            <div class="hi"><b>free</b></div>
+            <div><b>$11.95</b></div>
+            <div><b>$5</b></div>
+        </div>
+    </section>
+
+    <!-- SELF-HOST -->
+    <section class="cw-host">
+        <div class="cw-host-inner">
+            <div>
+                <div class="cw-eyebrow">// Self-host</div>
+                <h2>Up and purring in <em>five minutes.</em></h2>
+                <p>One Docker compose file. Bring your own MongoDB. Optionally point at Ollama for completely offline AI. No vendor account required.</p>
+                <div class="cw-host-features">
+                    <div class="cw-host-feature">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97742" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                        <div><b>Docker / Portainer</b>One-click stack import</div>
+                    </div>
+                    <div class="cw-host-feature">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97742" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                        <div><b>Node 18+</b>Or run bare-metal</div>
+                    </div>
+                    <div class="cw-host-feature">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97742" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                        <div><b>MongoDB</b>Self-hosted or Atlas</div>
+                    </div>
+                    <div class="cw-host-feature">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97742" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                        <div><b>Ollama-ready</b>Local AI, zero API cost</div>
+                    </div>
+                </div>
+                <div class="cw-host-cta">
+                    <a href="https://github.com/theshield2594/ultrabot" target="_blank" rel="noopener" class="cw-btn cw-btn-dark">Read setup guide <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                    <a href="https://github.com/theshield2594/ultrabot" target="_blank" rel="noopener" class="cw-btn cw-btn-ghost">⌥ View on GitHub</a>
+                </div>
+            </div>
+            <div class="cw-terminal">
+                <div class="cw-terminal-bar">
+                    <span class="cw-terminal-dot" style="background:#ff5f57;"></span>
+                    <span class="cw-terminal-dot" style="background:#febc2e;"></span>
+                    <span class="cw-terminal-dot" style="background:#28c840;"></span>
+                    <span>~/clawdia · zsh</span>
+                </div>
+                <pre><span class="pr">$</span> git clone git@github.com:clawdia/bot.git
+<span class="pr">$</span> cd bot &amp;&amp; cp .env.example .env
+<span class="cm"># add DISCORD_TOKEN, MONGODB_URI, etc.</span>
+<span class="pr">$</span> docker compose up -d
+
+<span class="ok">✓</span> mongo               <span class="cm">started in 1.2s</span>
+<span class="ok">✓</span> clawdia-bot         <span class="cm">connected as Clawdia#7841</span>
+<span class="ok">✓</span> clawdia-dashboard   <span class="cm">listening on :3000</span>
+
+<span class="key">→</span> Dashboard ready at <span class="pr">http://localhost:3000</span>
+<span class="key">→</span> Invite Clawdia: <span class="pr">discord.gg/oauth/...</span></pre>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cw-cta">
+        <h2 class="font-display">Stop running <em>five bots.</em><br>Start running <em>one.</em></h2>
+        <p>Free forever. Open source. Add Clawdia to your server in under a minute, or clone the repo and self-host.</p>
+        <div class="cw-cta-btns">
+            <% if (user) { %>
+                <a href="/dashboard" class="cw-btn cw-btn-dark">Open Dashboard <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            <% } else { %>
+                <a href="/auth/login" class="cw-btn cw-btn-dark">Add to Discord <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+            <% } %>
+            <a href="https://github.com/theshield2594/ultrabot" target="_blank" rel="noopener" class="cw-btn cw-btn-cream">⌥ Self-host on Docker</a>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="cw-footer">
+        <div class="cw-footer-inner">
+            <div>
+                <div class="cw-brand">
+                    <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
+                        <ellipse cx="16" cy="22" rx="8.5" ry="6" fill="#ece4d2"/>
+                        <ellipse cx="7" cy="12.5" rx="2.6" ry="3.8" fill="#ece4d2" transform="rotate(-18 7 12.5)"/>
+                        <ellipse cx="12.5" cy="9" rx="2.6" ry="4" fill="#ece4d2" transform="rotate(-6 12.5 9)"/>
+                        <ellipse cx="19.5" cy="9" rx="2.6" ry="4" fill="#ece4d2" transform="rotate(6 19.5 9)"/>
+                        <ellipse cx="25" cy="12.5" rx="2.6" ry="3.8" fill="#ece4d2" transform="rotate(18 25 12.5)"/>
+                        <path d="M14 20.5c0.6-1.6 3.4-1.6 4 0" stroke="#e89163" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+                    </svg>
+                    <span class="cw-wordmark">Clawdia</span>
+                </div>
+                <p class="cw-footer-tag">A chill, self-hosted Discord bot with serious teeth. Built by the community, for the community.</p>
+            </div>
+            <div>
+                <h4>Product</h4>
+                <ul>
+                    <li><a>Features</a></li>
+                    <li><a>Modules</a></li>
+                    <li><a>Insights</a></li>
+                    <li><a>Changelog</a></li>
+                </ul>
+            </div>
+            <div>
+                <h4>Resources</h4>
+                <ul>
+                    <li><a href="https://github.com/theshield2594/ultrabot" target="_blank" rel="noopener">Setup guide</a></li>
+                    <li><a>API reference</a></li>
+                    <li><a>Commands</a></li>
+                    <li><a>Discord</a></li>
+                </ul>
+            </div>
+            <div>
+                <h4>Community</h4>
+                <ul>
+                    <li><a href="https://github.com/theshield2594/ultrabot" target="_blank" rel="noopener">GitHub</a></li>
+                    <li><a>Contributing</a></li>
+                    <li><a>Roadmap</a></li>
+                    <li><a>Sponsor</a></li>
+                </ul>
+            </div>
+            <div>
+                <h4>Legal</h4>
+                <ul>
+                    <li><a>License · MIT</a></li>
+                    <li><a>Privacy</a></li>
+                    <li><a>Terms</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="cw-footer-bottom">
+            <span>© <%= new Date().getFullYear() %> Clawdia · Built with claws ✦ MIT licensed</span>
+            <span>v4.2.0 · last deploy 14 minutes ago</span>
+        </div>
     </footer>
 
-    <script>
-        document.querySelectorAll('.feature').forEach(card => {
-            card.addEventListener('mousemove', (e) => {
-                const rect = card.getBoundingClientRect();
-                card.style.setProperty('--mx', `${e.clientX - rect.left}px`);
-                card.style.setProperty('--my', `${e.clientY - rect.top}px`);
-            });
-        });
-    </script>
+</div><!-- .cw-home -->
+
+<script>
+(function() {
+    var heatmap = document.getElementById('insights-heatmap');
+    if (!heatmap) return;
+    var days = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
+    var intensity = function(d, h) {
+        var base = 0;
+        if (h >= 16 && h <= 23) base = 0.5 + 0.4 * Math.sin((h - 16) / 7 * Math.PI);
+        else if (h >= 11 && h <= 15) base = 0.3;
+        else if (h >= 0 && h < 6) base = 0.05;
+        if (d >= 5) base += 0.18;
+        if (d === 5 && h === 21) base = 1;
+        return Math.max(0, Math.min(1, base));
+    };
+    var colorFor = function(v) {
+        if (v < 0.1) return '#2a241e';
+        var a = (0.15 + v * 0.85).toFixed(2);
+        return 'rgba(217,119,66,' + a + ')';
+    };
+    var html = '<div></div>';
+    [0, 3, 6, 9, 12, 15, 18, 21].forEach(function(h) {
+        html += '<div class="h" style="grid-column:span 3">' + String(h).padStart(2, '0') + '</div>';
+    });
+    days.forEach(function(d, di) {
+        html += '<div class="lbl">' + d + '</div>';
+        for (var h = 0; h < 24; h++) {
+            var v = intensity(di, h);
+            html += '<div class="cell" style="background:' + colorFor(v) + '"></div>';
+        }
+    });
+    heatmap.innerHTML = html;
+})();
+</script>
 </body>
 </html>
