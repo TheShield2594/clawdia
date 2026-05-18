@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=1480">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Clawdia — A chill Discord bot with serious teeth</title>
     <meta name="description" content="Moderation, music, leveling, economy, AI chat and analytics — in one self-hosted Discord bot. Own your data.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -28,10 +28,10 @@
                 <span class="cw-wordmark">Clawdia</span>
             </div>
             <div class="cw-nav-links">
-                <a>Features</a>
-                <a>Modules</a>
-                <a>Insights</a>
-                <a>Self-host</a>
+                <a href="#features">Features</a>
+                <a href="#features">Modules</a>
+                <a href="#insights">Insights</a>
+                <a href="#self-host">Self-host</a>
                 <a href="https://github.com/theshield2594/ultrabot" target="_blank" rel="noopener">Docs</a>
             </div>
             <div class="cw-nav-cta">
@@ -117,7 +117,7 @@
     </div>
 
     <!-- FEATURES -->
-    <section class="cw-section">
+    <section id="features" class="cw-section">
         <div class="cw-section-header">
             <div>
                 <div class="cw-eyebrow">// Everything bundled</div>
@@ -202,7 +202,7 @@
     </section>
 
     <!-- INSIGHTS SHOWPIECE -->
-    <section class="cw-show">
+    <section id="insights" class="cw-show">
         <div class="cw-show-inner">
             <div>
                 <div class="cw-eyebrow">// Insights, v4.2</div>
@@ -303,7 +303,7 @@
     </section>
 
     <!-- SELF-HOST -->
-    <section class="cw-host">
+    <section id="self-host" class="cw-host">
         <div class="cw-host-inner">
             <div>
                 <div class="cw-eyebrow">// Self-host</div>
@@ -339,8 +339,8 @@
                     <span class="cw-terminal-dot" style="background:#28c840;"></span>
                     <span>~/clawdia · zsh</span>
                 </div>
-                <pre><span class="pr">$</span> git clone git@github.com:clawdia/bot.git
-<span class="pr">$</span> cd bot &amp;&amp; cp .env.example .env
+                <pre><span class="pr">$</span> git clone git@github.com:theshield2594/ultrabot.git
+<span class="pr">$</span> cd ultrabot &amp;&amp; cp .env.example .env
 <span class="cm"># add DISCORD_TOKEN, MONGODB_URI, etc.</span>
 <span class="pr">$</span> docker compose up -d
 
@@ -423,7 +423,7 @@
         </div>
         <div class="cw-footer-bottom">
             <span>© <%= new Date().getFullYear() %> Clawdia · Built with claws ✦ MIT licensed</span>
-            <span>v4.2.0 · last deploy 14 minutes ago</span>
+            <span>v4.2.0</span>
         </div>
     </footer>
 
