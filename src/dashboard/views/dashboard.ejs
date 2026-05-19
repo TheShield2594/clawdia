@@ -2,90 +2,100 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard — Clawdia</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body style="background:var(--ink-950);">
+<body style="background:var(--cream-50);">
 
-<div class="cw-dash-page">
+<div class="cw-home">
 
-    <!-- NAV -->
-    <nav class="cw-dash-nav">
-        <div class="cw-dash-brand">
-            <a href="/" style="display:flex;align-items:center;gap:10px;text-decoration:none;">
-                <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
-                    <ellipse cx="16" cy="22" rx="8.5" ry="6" fill="#ece4d2"/>
-                    <ellipse cx="7" cy="12.5" rx="2.6" ry="3.8" fill="#ece4d2" transform="rotate(-18 7 12.5)"/>
-                    <ellipse cx="12.5" cy="9" rx="2.6" ry="4" fill="#ece4d2" transform="rotate(-6 12.5 9)"/>
-                    <ellipse cx="19.5" cy="9" rx="2.6" ry="4" fill="#ece4d2" transform="rotate(6 19.5 9)"/>
-                    <ellipse cx="25" cy="12.5" rx="2.6" ry="3.8" fill="#ece4d2" transform="rotate(18 25 12.5)"/>
-                    <path d="M14 20.5c0.6-1.6 3.4-1.6 4 0" stroke="#e89163" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-                </svg>
-                <span class="cw-dash-wordmark">Clawdia</span>
-            </a>
-        </div>
-        <div class="cw-dash-user">
-            <% if (user.avatar) { %>
-                <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" alt="" class="cw-dash-avatar">
-            <% } else { %>
-                <div class="cw-dash-avatar-fallback"><%= user.username.charAt(0).toUpperCase() %></div>
-            <% } %>
-            <span class="cw-dash-username"><%= user.username %></span>
-            <a href="/auth/logout" class="cw-dash-nav-btn">Logout</a>
+    <!-- NAV (same cream nav as home page) -->
+    <nav class="cw-nav">
+        <div class="cw-nav-inner">
+            <div class="cw-brand">
+                <a href="/" style="display:flex;align-items:center;gap:10px;text-decoration:none;">
+                    <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+                        <ellipse cx="16" cy="22" rx="8.5" ry="6" fill="#14110d"/>
+                        <ellipse cx="7" cy="12.5" rx="2.6" ry="3.8" fill="#14110d" transform="rotate(-18 7 12.5)"/>
+                        <ellipse cx="12.5" cy="9" rx="2.6" ry="4" fill="#14110d" transform="rotate(-6 12.5 9)"/>
+                        <ellipse cx="19.5" cy="9" rx="2.6" ry="4" fill="#14110d" transform="rotate(6 19.5 9)"/>
+                        <ellipse cx="25" cy="12.5" rx="2.6" ry="3.8" fill="#14110d" transform="rotate(18 25 12.5)"/>
+                        <path d="M14 20.5c0.6-1.6 3.4-1.6 4 0" stroke="#d97742" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+                    </svg>
+                    <span class="cw-wordmark">Clawdia</span>
+                </a>
+            </div>
+            <div class="cw-nav-cta">
+                <% if (user.avatar) { %>
+                    <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" alt="" class="cw-dash-avatar" style="border-radius:10px;">
+                <% } else { %>
+                    <div class="cw-dash-avatar-fallback" style="background:var(--ink-700);color:var(--cream-100);"><%= user.username.charAt(0).toUpperCase() %></div>
+                <% } %>
+                <span style="font-size:14px;color:var(--ink-700);font-weight:500;"><%= user.username %></span>
+                <a href="/auth/logout" class="cw-btn cw-btn-dark" style="padding:9px 16px;font-size:13.5px;">Logout</a>
+            </div>
         </div>
     </nav>
 
-    <!-- MAIN -->
-    <main class="cw-dash-main">
+    <!-- HEADER -->
+    <header class="cw-dash-lp-header">
+        <div class="cw-eyebrow">Your Dashboard</div>
+        <h1 class="font-display cw-dash-lp-title">Good to see you, <em><%= user.username %>.</em></h1>
+        <p class="cw-dash-lp-sub">Pick a server to configure Clawdia. You'll see every server where you have <strong style="color:var(--ink-950);">Manage Server</strong> permission.</p>
+    </header>
 
-        <div class="cw-dash-header">
-            <h1 class="cw-dash-greeting">Good to see you, <em><%= user.username %>.</em></h1>
-            <p class="cw-dash-subhead">Pick a server to configure Clawdia. You'll see every server where you have <strong style="color:var(--cream-50)">Manage Server</strong> permission.</p>
-        </div>
+    <!-- SERVER LIST -->
+    <section class="cw-dash-lp-section">
 
         <% if (guilds.length === 0) { %>
 
-            <div class="cw-dash-empty">
+            <div class="cw-dash-lp-empty">
+                <div class="cw-dash-lp-empty-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 15s1.5-2 4-2 4 2 4 2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                </div>
                 <h3>No manageable servers found</h3>
-                <p>You need <strong>Manage Server</strong> permission (or to be the owner) on at least one server. If you just got the role, log out and back in to refresh your Discord session.</p>
-                <div style="display:flex;gap:12px;justify-content:center;margin-top:24px;">
-                    <a href="/auth/logout" class="cw-btn cw-btn-dark" style="padding:10px 18px;font-size:14px;">Refresh login</a>
-                    <a href="/" class="cw-dash-nav-btn">← Back home</a>
+                <p>You need <strong>Manage Server</strong> permission (or be the owner) on at least one server. If you just got the role, log out and back in to refresh your Discord session.</p>
+                <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+                    <a href="/auth/logout" class="cw-btn cw-btn-dark">Refresh login</a>
+                    <a href="/" class="cw-btn cw-btn-ghost">← Back home</a>
                 </div>
             </div>
 
         <% } else { %>
 
-            <div class="cw-dash-section-label">// Your servers — <%= guilds.length %> found</div>
-            <div class="cw-server-grid">
+            <div class="cw-dash-lp-count">
+                <span class="font-mono">// <%= guilds.length %> server<%= guilds.length === 1 ? '' : 's' %> found</span>
+            </div>
+
+            <div class="cw-dash-lp-grid">
                 <% guilds.forEach(function(guild) { %>
-                    <div class="cw-server-card">
+                    <div class="cw-dash-lp-card">
                         <% if (guild.icon) { %>
-                            <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png" alt="<%= guild.name %>" class="cw-server-icon">
+                            <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png" alt="<%= guild.name %>" class="cw-dash-lp-icon">
                         <% } else { %>
-                            <div class="cw-server-icon-fallback" style="background:linear-gradient(135deg, #d97742, #7e5570);">
+                            <div class="cw-dash-lp-icon-fallback">
                                 <%= guild.name.charAt(0).toUpperCase() %>
                             </div>
                         <% } %>
-                        <div class="cw-server-info">
-                            <div class="cw-server-name"><%= guild.name %></div>
-                            <div class="cw-server-meta">
+                        <div class="cw-dash-lp-info">
+                            <div class="cw-dash-lp-name"><%= guild.name %></div>
+                            <div class="cw-dash-lp-meta font-mono">
                                 <% if (guild.botPresent) { %>
-                                    <span style="color:var(--good);">● bot active</span>
+                                    <span class="cw-dash-lp-status active">● bot active</span>
                                 <% } else { %>
-                                    <span style="color:var(--ink-500);">○ bot not added</span>
+                                    <span class="cw-dash-lp-status inactive">○ not added</span>
                                 <% } %>
                             </div>
                         </div>
                         <% if (guild.botPresent) { %>
-                            <a href="/dashboard/guild/<%= guild.id %>" class="cw-server-action manage">Manage</a>
+                            <a href="/dashboard/guild/<%= guild.id %>" class="cw-btn cw-btn-dark cw-dash-lp-action">Manage <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
                         <% } else if (guild.inviteUrl) { %>
-                            <a href="<%= guild.inviteUrl %>" target="_blank" rel="noopener" class="cw-server-action invite-btn">Invite bot</a>
+                            <a href="<%= guild.inviteUrl %>" target="_blank" rel="noopener" class="cw-btn cw-btn-ghost cw-dash-lp-action">Invite bot</a>
                         <% } else { %>
-                            <span class="cw-server-action invite-btn" style="opacity:.5;cursor:not-allowed;">Not configured</span>
+                            <span class="cw-btn cw-btn-ghost cw-dash-lp-action" style="opacity:.45;cursor:not-allowed;">Not configured</span>
                         <% } %>
                     </div>
                 <% }); %>
@@ -93,14 +103,15 @@
 
         <% } %>
 
-    </main>
+    </section>
 
-    <footer class="cw-dash-footer">
+    <!-- FOOTER -->
+    <footer style="border-top:1px solid rgba(20,17,13,.08);padding:28px 48px;max-width:1320px;margin:60px auto 0;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--ink-400);font-family:'JetBrains Mono',monospace;">
         <span>© <%= new Date().getFullYear() %> Clawdia · MIT licensed</span>
         <span>v4.2.0</span>
     </footer>
 
-</div><!-- .cw-dash-page -->
+</div><!-- .cw-home -->
 
 </body>
 </html>
