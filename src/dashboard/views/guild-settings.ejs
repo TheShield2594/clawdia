@@ -240,62 +240,62 @@
                         <span class="dash-pill"><span style="width:6px;height:6px;border-radius:50%;background:var(--good);display:inline-block;"></span> live</span>
                     </div>
                     <div class="dash-module-list">
-                        <a class="dash-module <%= (settings.welcome && settings.welcome.enabled) ? 'on' : '' %>" data-tab-link="welcome">
+                        <button type="button" class="dash-module <%= (settings.welcome && settings.welcome.enabled) ? 'on' : '' %>" data-tab-link="welcome">
                             <div class="dash-module-icon">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/><path d="M3 11c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 16c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/><path d="M3 11c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/></svg>
                             </div>
                             <div class="dash-module-body"><h4>Welcome</h4><p>Cards &amp; farewell</p></div>
                             <div class="dash-module-toggle"></div>
-                        </a>
-                        <a class="dash-module <%= (settings.moderation && settings.moderation.enabled) ? 'on' : '' %>" data-tab-link="moderation">
+                        </button>
+                        <button type="button" class="dash-module <%= (settings.moderation && settings.moderation.enabled) ? 'on' : '' %>" data-tab-link="moderation">
                             <div class="dash-module-icon">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6l8-3z"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6l8-3z"/></svg>
                             </div>
                             <div class="dash-module-body"><h4>Moderation</h4><p>Auto-mod, mute, logging</p></div>
                             <div class="dash-module-toggle"></div>
-                        </a>
-                        <a class="dash-module <%= (settings.leveling && settings.leveling.enabled) ? 'on' : '' %>" data-tab-link="leveling">
+                        </button>
+                        <button type="button" class="dash-module <%= (settings.leveling && settings.leveling.enabled) ? 'on' : '' %>" data-tab-link="leveling">
                             <div class="dash-module-icon">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8v4a4 4 0 0 1-8 0V4z"/><path d="M5 6H3v2a3 3 0 0 0 3 3M19 6h2v2a3 3 0 0 1-3 3"/><path d="M9 14h6l1 6H8z"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8v4a4 4 0 0 1-8 0V4z"/><path d="M5 6H3v2a3 3 0 0 0 3 3M19 6h2v2a3 3 0 0 1-3 3"/><path d="M9 14h6l1 6H8z"/></svg>
                             </div>
                             <div class="dash-module-body"><h4>Leveling</h4><p>XP &amp; rank cards</p></div>
                             <div class="dash-module-toggle"></div>
-                        </a>
-                        <a class="dash-module <%= (settings.economy && settings.economy.enabled) ? 'on' : '' %>" data-tab-link="economy">
+                        </button>
+                        <button type="button" class="dash-module <%= (settings.economy && settings.economy.enabled) ? 'on' : '' %>" data-tab-link="economy">
                             <div class="dash-module-icon">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M10 9h3a2 2 0 0 1 0 4h-3v-4zM10 13v3"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M10 9h3a2 2 0 0 1 0 4h-3v-4zM10 13v3"/></svg>
                             </div>
                             <div class="dash-module-body"><h4>Economy</h4><p>Currency · 🪙 Crowns</p></div>
                             <div class="dash-module-toggle"></div>
-                        </a>
-                        <a class="dash-module <%= (settings.music && settings.music.enabled) ? 'on' : '' %>" data-tab-link="music">
+                        </button>
+                        <button type="button" class="dash-module <%= (settings.music && settings.music.enabled) ? 'on' : '' %>" data-tab-link="music">
                             <div class="dash-module-icon">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
                             </div>
                             <div class="dash-module-body"><h4>Music</h4><p>24/7 playback</p></div>
                             <div class="dash-module-toggle"></div>
-                        </a>
-                        <a class="dash-module <%= (settings.ai && settings.ai.enabled) ? 'on' : '' %>" data-tab-link="ai">
+                        </button>
+                        <button type="button" class="dash-module <%= (settings.ai && settings.ai.enabled) ? 'on' : '' %>" data-tab-link="ai">
                             <div class="dash-module-icon">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4z"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4z"/></svg>
                             </div>
                             <div class="dash-module-body"><h4>AI Chat</h4><p>Conversational AI</p></div>
                             <div class="dash-module-toggle"></div>
-                        </a>
-                        <a class="dash-module <%= (settings.dailyNewsProfiles && settings.dailyNewsProfiles.length > 0) ? 'on' : '' %>" data-tab-link="rss">
+                        </button>
+                        <button type="button" class="dash-module <%= (settings.dailyNewsProfiles && settings.dailyNewsProfiles.length > 0) ? 'on' : '' %>" data-tab-link="rss">
                             <div class="dash-module-icon">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/><circle cx="5" cy="19" r="1.4" fill="currentColor"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4a16 16 0 0 1 16 16"/><path d="M4 11a9 9 0 0 1 9 9"/><circle cx="5" cy="19" r="1.4" fill="currentColor"/></svg>
                             </div>
                             <div class="dash-module-body"><h4>Daily Digest</h4><p>RSS &amp; news feeds</p></div>
                             <div class="dash-module-toggle"></div>
-                        </a>
-                        <a class="dash-module" data-tab-link="analytics">
+                        </button>
+                        <button type="button" class="dash-module" data-tab-link="analytics">
                             <div class="dash-module-icon">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
                             </div>
                             <div class="dash-module-body"><h4>Analytics</h4><p>Insights &amp; event log</p></div>
                             <div class="dash-module-toggle"></div>
-                        </a>
+                        </button>
                     </div>
                 </div>
 
@@ -1687,23 +1687,23 @@
                         </div>
                         <div class="field ai-key-field" data-provider="openai">
                             <label class="field-label" for="ai-openai-key">OpenAI API key</label>
-                            <input type="password" id="ai-openai-key" value="<%= settings.ai.openaiKey || '' %>" placeholder="sk-…">
-                            <small>Leave empty to use the bot's default key</small>
+                            <input type="password" id="ai-openai-key" value="" placeholder="<%= settings.ai.openaiKey ? '••••••••••••' : 'sk-…' %>">
+                            <small><% if (settings.ai.openaiKey) { %>Key configured — enter a new value to replace it<% } else { %>Leave empty to use the bot's default key<% } %></small>
                         </div>
                         <div class="field ai-key-field" data-provider="anthropic">
                             <label class="field-label" for="ai-anthropic-key">Anthropic API key</label>
-                            <input type="password" id="ai-anthropic-key" value="<%= settings.ai.anthropicKey || '' %>" placeholder="sk-ant-…">
-                            <small>Leave empty to use the bot's default key</small>
+                            <input type="password" id="ai-anthropic-key" value="" placeholder="<%= settings.ai.anthropicKey ? '••••••••••••' : 'sk-ant-…' %>">
+                            <small><% if (settings.ai.anthropicKey) { %>Key configured — enter a new value to replace it<% } else { %>Leave empty to use the bot's default key<% } %></small>
                         </div>
                         <div class="field ai-key-field" data-provider="gemini">
                             <label class="field-label" for="ai-gemini-key">Gemini API key</label>
-                            <input type="password" id="ai-gemini-key" value="<%= settings.ai.geminiKey || '' %>" placeholder="AIza…">
-                            <small>Leave empty to use the bot's default key</small>
+                            <input type="password" id="ai-gemini-key" value="" placeholder="<%= settings.ai.geminiKey ? '••••••••••••' : 'AIza…' %>">
+                            <small><% if (settings.ai.geminiKey) { %>Key configured — enter a new value to replace it<% } else { %>Leave empty to use the bot's default key<% } %></small>
                         </div>
                         <div class="field ai-key-field" data-provider="openrouter">
                             <label class="field-label" for="ai-openrouter-key">OpenRouter API key</label>
-                            <input type="password" id="ai-openrouter-key" value="<%= settings.ai.openrouterKey || '' %>" placeholder="sk-or-…">
-                            <small>Get a key at openrouter.ai. Use any model OpenRouter supports (e.g. <code>anthropic/claude-3.5-sonnet</code>).</small>
+                            <input type="password" id="ai-openrouter-key" value="" placeholder="<%= settings.ai.openrouterKey ? '••••••••••••' : 'sk-or-…' %>">
+                            <small><% if (settings.ai.openrouterKey) { %>Key configured — enter a new value to replace it<% } else { %>Get a key at openrouter.ai. Use any model OpenRouter supports (e.g. <code>anthropic/claude-3.5-sonnet</code>).<% } %></small>
                         </div>
                         <div class="field ai-key-field" data-provider="ollama">
                             <label class="field-label" for="ai-ollama-url">Ollama base URL</label>
@@ -2078,13 +2078,25 @@
         const navItems = document.querySelectorAll('.nav-item');
         const panels = document.querySelectorAll('.panel');
         const topbarSection = document.getElementById('topbar-section');
+
+        // Keyboard + ARIA accessibility for nav items
+        navItems.forEach(item => {
+            item.setAttribute('role', 'button');
+            item.setAttribute('tabindex', '0');
+            item.setAttribute('aria-pressed', item.classList.contains('active') ? 'true' : 'false');
+            item.addEventListener('keydown', e => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); item.click(); }
+            });
+        });
+
         navItems.forEach(item => {
             item.addEventListener('click', () => {
                 const tab = item.dataset.tab;
                 if (!tab) return;
-                navItems.forEach(n => n.classList.remove('active'));
+                navItems.forEach(n => { n.classList.remove('active'); n.setAttribute('aria-pressed', 'false'); });
                 panels.forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
                 item.classList.add('active');
+                item.setAttribute('aria-pressed', 'true');
                 const panel = document.getElementById(tab);
                 if (panel) { panel.classList.add('active'); panel.style.display = 'block'; }
                 if (topbarSection) topbarSection.textContent = item.querySelector('span:last-child')?.textContent || tab;
@@ -2569,10 +2581,10 @@
                     'ai.enabled': document.getElementById('ai-enabled').checked,
                     'ai.provider': document.getElementById('ai-provider').value,
                     'ai.model': document.getElementById('ai-model').value.trim(),
-                    'ai.openaiKey': document.getElementById('ai-openai-key').value,
-                    'ai.anthropicKey': document.getElementById('ai-anthropic-key').value,
-                    'ai.geminiKey': document.getElementById('ai-gemini-key').value,
-                    'ai.openrouterKey': document.getElementById('ai-openrouter-key').value,
+                    ...(document.getElementById('ai-openai-key').value ? {'ai.openaiKey': document.getElementById('ai-openai-key').value} : {}),
+                    ...(document.getElementById('ai-anthropic-key').value ? {'ai.anthropicKey': document.getElementById('ai-anthropic-key').value} : {}),
+                    ...(document.getElementById('ai-gemini-key').value ? {'ai.geminiKey': document.getElementById('ai-gemini-key').value} : {}),
+                    ...(document.getElementById('ai-openrouter-key').value ? {'ai.openrouterKey': document.getElementById('ai-openrouter-key').value} : {}),
                     'ai.ollamaBaseUrl': document.getElementById('ai-ollama-url').value.trim(),
                     'ai.channelId': document.getElementById('ai-channel').value,
                     'ai.systemPrompt': document.getElementById('ai-prompt').value,
@@ -3658,10 +3670,6 @@
         async function loadAutomations() {
             const list = document.getElementById('automationsList');
             if (!list) return;
-            try {
-                const res = await fetch(`/api/automations/${GUILD_ID}/logs`);
-                // logs endpoint — actually load automations first
-            } catch {}
             try {
                 const res = await fetch(`/api/automations/${GUILD_ID}`);
                 const automations = await res.json();

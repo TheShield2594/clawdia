@@ -1091,11 +1091,15 @@ textarea { resize: vertical; min-height: 80px; }
 .cw-dash-lp-empty h3 { font-family: 'Instrument Serif', serif; font-size: 30px; color: var(--ink-950); margin: 0 0 10px; }
 .cw-dash-lp-empty p { font-size: 15px; color: var(--ink-600); max-width: 380px; margin: 0 auto 28px; line-height: 1.6; }
 
+/* Dashboard server-picker footer */
+.cw-dash-lp-footer { border-top: 1px solid rgba(20,17,13,.08); padding: 28px 48px; max-width: 1320px; margin: 60px auto 0; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--ink-400); font-family: 'JetBrains Mono', monospace; }
+
 /* Responsive */
 @media (max-width: 768px) {
     .cw-dash-lp-header { padding: 48px 24px 32px; }
     .cw-dash-lp-section { padding: 0 24px 60px; }
     .cw-dash-lp-grid { grid-template-columns: 1fr; }
+    .cw-dash-lp-footer { padding: 24px; flex-direction: column; gap: 8px; text-align: center; }
 }
 
 /* ================================================================
@@ -1157,7 +1161,7 @@ textarea { resize: vertical; min-height: 80px; }
 
 /* Modules grid */
 .dash-module-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.dash-module { background: var(--ink-850); border: 1px solid var(--ink-800); border-radius: 14px; padding: 16px; display: flex; gap: 12px; align-items: flex-start; cursor: pointer; transition: border-color .15s, background .15s; text-decoration: none; color: inherit; }
+.dash-module { background: var(--ink-850); border: 1px solid var(--ink-800); border-radius: 14px; padding: 16px; display: flex; gap: 12px; align-items: flex-start; cursor: pointer; transition: border-color .15s, background .15s; text-decoration: none; color: inherit; font: inherit; -webkit-appearance: none; appearance: none; width: 100%; text-align: left; }
 .dash-module:hover { border-color: var(--ink-600); background: var(--ink-800); }
 .dash-module-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--ink-800); color: var(--cream-100); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 18px; }
 .dash-module-body { flex: 1; min-width: 0; }
@@ -1202,6 +1206,9 @@ textarea { resize: vertical; min-height: 80px; }
 .dash-bot-text { flex: 1; font-size: 14px; line-height: 1.55; color: rgba(255,255,255,.92); }
 .dash-bot-btn { background: rgba(0,0,0,.25); color: #fff; border: 1px solid rgba(255,255,255,.2); padding: 8px 14px; border-radius: 10px; font-size: 13px; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; transition: background .15s; }
 .dash-bot-btn:hover { background: rgba(0,0,0,.4); }
+
+/* Nav item keyboard focus */
+.dash-nav li:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; border-radius: 10px; }
 
 /* Quick-action bar at top of settings panels */
 .dash-panel-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--ink-800); }

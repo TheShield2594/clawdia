@@ -17,7 +17,7 @@
         <div class="cw-nav-inner">
             <div class="cw-brand">
                 <a href="/" style="display:flex;align-items:center;gap:10px;text-decoration:none;">
-                    <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+                    <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
                         <ellipse cx="16" cy="22" rx="8.5" ry="6" fill="#14110d"/>
                         <ellipse cx="7" cy="12.5" rx="2.6" ry="3.8" fill="#14110d" transform="rotate(-18 7 12.5)"/>
                         <ellipse cx="12.5" cy="9" rx="2.6" ry="4" fill="#14110d" transform="rotate(-6 12.5 9)"/>
@@ -30,7 +30,7 @@
             </div>
             <div class="cw-nav-cta">
                 <% if (user.avatar) { %>
-                    <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" alt="" class="cw-dash-avatar" style="border-radius:10px;">
+                    <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" alt="<%= user.username %>'s avatar" class="cw-dash-avatar" style="border-radius:10px;">
                 <% } else { %>
                     <div class="cw-dash-avatar-fallback" style="background:var(--ink-700);color:var(--cream-100);"><%= user.username.charAt(0).toUpperCase() %></div>
                 <% } %>
@@ -54,7 +54,7 @@
 
             <div class="cw-dash-lp-empty">
                 <div class="cw-dash-lp-empty-icon">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 15s1.5-2 4-2 4 2 4 2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 15s1.5-2 4-2 4 2 4 2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
                 </div>
                 <h3>No manageable servers found</h3>
                 <p>You need <strong>Manage Server</strong> permission (or be the owner) on at least one server. If you just got the role, log out and back in to refresh your Discord session.</p>
@@ -74,7 +74,7 @@
                 <% guilds.forEach(function(guild) { %>
                     <div class="cw-dash-lp-card">
                         <% if (guild.icon) { %>
-                            <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png" alt="<%= guild.name %>" class="cw-dash-lp-icon">
+                            <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png" alt="Icon for <%= guild.name %> server" class="cw-dash-lp-icon">
                         <% } else { %>
                             <div class="cw-dash-lp-icon-fallback">
                                 <%= guild.name.charAt(0).toUpperCase() %>
@@ -91,7 +91,7 @@
                             </div>
                         </div>
                         <% if (guild.botPresent) { %>
-                            <a href="/dashboard/guild/<%= guild.id %>" class="cw-btn cw-btn-dark cw-dash-lp-action">Manage <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+                            <a href="/dashboard/guild/<%= guild.id %>" class="cw-btn cw-btn-dark cw-dash-lp-action">Manage <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
                         <% } else if (guild.inviteUrl) { %>
                             <a href="<%= guild.inviteUrl %>" target="_blank" rel="noopener" class="cw-btn cw-btn-ghost cw-dash-lp-action">Invite bot</a>
                         <% } else { %>
@@ -106,7 +106,7 @@
     </section>
 
     <!-- FOOTER -->
-    <footer style="border-top:1px solid rgba(20,17,13,.08);padding:28px 48px;max-width:1320px;margin:60px auto 0;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--ink-400);font-family:'JetBrains Mono',monospace;">
+    <footer class="cw-dash-lp-footer">
         <span>© <%= new Date().getFullYear() %> Clawdia · MIT licensed</span>
         <span>v4.2.0</span>
     </footer>
