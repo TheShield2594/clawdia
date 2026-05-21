@@ -19,8 +19,13 @@ const TEMPLATES = [
     { name: 'UNO Draw 25 Cards',      value: '217743513' },
 ];
 
-// key -> { url, expires }
 const cache = new Map();
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of cache) {
+        if (entry.expires <= now) cache.delete(key);
+    }
+}, 10 * 60_000).unref();
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -43,19 +48,16 @@ module.exports = {
                 .setMaxLength(200)),
 
     async execute(interaction) {
-        const { limited, wait } = checkImageRateLimit(interaction.user.id);
-        if (limited) {
-            return interaction.reply({
-                content: `⏱️ You're using image commands too fast! Please wait **${wait}s** before trying again.`,
-                ephemeral: true,
-            });
+        const rl = checkImageRateLimit(interaction.user.id);
+        if (rl.limited) {
+            return interaction.reply({ content: rl.message, ephemeral: true });
         }
 
         const templateId = interaction.options.getString('template');
         const topText    = interaction.options.getString('top_text');
         const bottomText = interaction.options.getString('bottom_text') || '';
 
-        const cacheKey = `${templateId}:${topText}:${bottomText}`;
+        const cacheKey = JSON.stringify([templateId, topText, bottomText]);
         const cached   = cache.get(cacheKey);
         if (cached && cached.expires > Date.now()) {
             return interaction.reply({ embeds: [buildEmbed(interaction, cached.url, templateId)] });
@@ -70,9 +72,9 @@ module.exports = {
             });
         }
 
-        await interaction.deferReply();
-
         try {
+            await interaction.deferReply();
+
             const params = new URLSearchParams({ template_id: templateId, username, password, text0: topText, text1: bottomText });
             const { data } = await axios.post('https://api.imgflip.com/caption_image', params.toString(), {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -87,7 +89,12 @@ module.exports = {
             cache.set(cacheKey, { url, expires: Date.now() + 5 * 60_000 });
             await interaction.editReply({ embeds: [buildEmbed(interaction, url, templateId)] });
         } catch {
-            await interaction.editReply('❌ Failed to generate meme. Please try again later.');
+            const msg = '❌ Failed to generate meme. Please try again later.';
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply(msg);
+            } else {
+                await interaction.reply({ content: msg, ephemeral: true });
+            }
         }
     },
 };
@@ -100,7 +107,7 @@ function buildEmbed(interaction, url, templateId) {
         .setImage(url)
         .setFooter({
             text: `Requested by ${interaction.user.username} • Powered by Imgflip`,
-            iconURL: interaction.user.displayAvatarURL({ dynamic: true }),
+            iconURL: interaction.user.displayAvatarURL(),
         })
         .setTimestamp();
 }

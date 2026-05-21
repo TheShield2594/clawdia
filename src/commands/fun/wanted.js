@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
+const { applySepia } = require('../../utils/canvasFilters');
 
 const W           = 400;
 const H           = 530;
@@ -18,18 +19,15 @@ module.exports = {
                 .setRequired(false)),
 
     async execute(interaction) {
-        const { limited, wait } = checkImageRateLimit(interaction.user.id);
-        if (limited) {
-            return interaction.reply({
-                content: `⏱️ You're using image commands too fast! Please wait **${wait}s** before trying again.`,
-                ephemeral: true,
-            });
+        const rl = checkImageRateLimit(interaction.user.id);
+        if (rl.limited) {
+            return interaction.reply({ content: rl.message, ephemeral: true });
         }
 
         const target = interaction.options.getUser('user') || interaction.user;
-        await interaction.deferReply();
 
         try {
+            await interaction.deferReply();
             const avatar = await loadImage(target.displayAvatarURL({ extension: 'png', size: 256 }));
 
             const canvas = createCanvas(W, H);
@@ -76,15 +74,8 @@ module.exports = {
 
             ctx.drawImage(avatar, AVATAR_X, AVATAR_Y, AVATAR_SIZE, AVATAR_SIZE);
 
-            // Sepia tint on avatar
-            const imgData    = ctx.getImageData(AVATAR_X, AVATAR_Y, AVATAR_SIZE, AVATAR_SIZE);
-            const { data }   = imgData;
-            for (let i = 0; i < data.length; i += 4) {
-                const g      = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-                data[i]      = Math.min(255, g * 1.2 + 40);
-                data[i + 1]  = Math.min(255, g       + 20);
-                data[i + 2]  = Math.min(255, g * 0.8);
-            }
+            const imgData = ctx.getImageData(AVATAR_X, AVATAR_Y, AVATAR_SIZE, AVATAR_SIZE);
+            applySepia(imgData);
             ctx.putImageData(imgData, AVATAR_X, AVATAR_Y);
 
             // Username (truncate if needed)
@@ -110,7 +101,12 @@ module.exports = {
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'wanted.png' });
             await interaction.editReply({ files: [attachment] });
         } catch {
-            await interaction.editReply('❌ Could not generate the wanted poster. Please try again.');
+            const msg = '❌ Could not generate the wanted poster. Please try again.';
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply(msg);
+            } else {
+                await interaction.reply({ content: msg, ephemeral: true });
+            }
         }
     },
 };
