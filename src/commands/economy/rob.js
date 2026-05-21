@@ -51,10 +51,6 @@ module.exports = {
         if (target.bot) {
             return interaction.reply({ content: "You can't rob a bot.", ephemeral: true });
         }
-        const targetMember = await interaction.guild.members.fetch(target.id).catch(() => null);
-        if (targetMember?.permissions.has('Administrator')) {
-            return interaction.reply({ content: "You can't rob server admins.", ephemeral: true });
-        }
 
         const [robber, victim] = await Promise.all([
             User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
