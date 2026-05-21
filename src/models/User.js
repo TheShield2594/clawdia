@@ -283,6 +283,104 @@ const userSchema = new Schema({
     },
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ── Mining System ────────────────────────────────────────────────────────
+    mining: {
+        stamina:             { type: Number, default: 10 },
+        staminaLastRegen:    { type: Date,   default: null },
+        energyTonicsToday:   { type: Number, default: 0 },
+        lastTonicDayReset:   { type: Date,   default: null },
+
+        xp:       { type: Number, default: 0 },
+        level:    { type: Number, default: 1 },
+        prestige: { type: Number, default: 0 },
+
+        lastMine:     { type: Date, default: null },
+        injuryUntil:  { type: Date, default: null },
+
+        activeDepth:    { type: String, default: 'surface_quarry' },
+        unlockedDepths: [{ type: String }],
+
+        equippedPickaxeIndex: { type: Number, default: -1 },
+
+        pickaxes: [{
+            name:              { type: String },
+            tier:              { type: Number },
+            slug:              { type: String },
+            currentDurability: { type: Number },
+            maxDurability:     { type: Number },
+            baseDurability:    { type: Number },
+            repairCount:       { type: Number, default: 0 },
+            upgrade:           { type: String, default: null },
+            status:            { type: String, default: 'good' },
+            acquiredAt:        { type: Date,   default: Date.now }
+        }],
+
+        charges: {
+            iron_blast:        { type: Number, default: 0 },
+            steel_blast:       { type: Number, default: 0 },
+            explosive_charge:  { type: Number, default: 0 },
+            void_charge:       { type: Number, default: 0 }
+        },
+
+        consumables: {
+            ore_magnet:        { type: Number, default: 0 },
+            premium_magnet:    { type: Number, default: 0 },
+            miners_lamp:       { type: Number, default: 0 },
+            miners_instinct:   { type: Number, default: 0 },
+            repair_kit_small:  { type: Number, default: 0 },
+            repair_kit_large:  { type: Number, default: 0 },
+            energy_tonic:      { type: Number, default: 0 },
+            xp_scroll:         { type: Number, default: 0 }
+        },
+
+        activeMagnet:          { type: String,  default: null },
+        activeMagnetMinesLeft: { type: Number,  default: 0 },
+        activeLamp:            { type: String,  default: null },
+        activeLampMinesLeft:   { type: Number,  default: 0 },
+        activeInstinct:        { type: Boolean, default: false },
+        activeXpScroll:        { type: Boolean, default: false },
+
+        materials: {
+            rock_fragment:  { type: Number, default: 0 },
+            coal_dust:      { type: Number, default: 0 },
+            copper_flake:   { type: Number, default: 0 },
+            iron_filing:    { type: Number, default: 0 },
+            silver_dust:    { type: Number, default: 0 },
+            lead_slug:      { type: Number, default: 0 },
+            quartz_shard:   { type: Number, default: 0 },
+            gold_nugget:    { type: Number, default: 0 },
+            raw_sapphire:   { type: Number, default: 0 },
+            amethyst_chip:  { type: Number, default: 0 },
+            topaz_shard:    { type: Number, default: 0 },
+            raw_emerald:    { type: Number, default: 0 },
+            raw_ruby:       { type: Number, default: 0 },
+            obsidian_chip:  { type: Number, default: 0 },
+            platinum_dust:  { type: Number, default: 0 },
+            raw_diamond:    { type: Number, default: 0 },
+            crystal_sliver: { type: Number, default: 0 },
+            mythril_dust:   { type: Number, default: 0 },
+            zenith_essence: { type: Number, default: 0 },
+            primordial_ash: { type: Number, default: 0 },
+            stardust:       { type: Number, default: 0 },
+            void_essence:   { type: Number, default: 0 }
+        },
+
+        sharpPick: { type: Boolean, default: false },
+
+        totalMines:       { type: Number, default: 0 },
+        successfulMines:  { type: Number, default: 0 },
+        totalEarned:      { type: Number, default: 0 },
+        legendaryFinds:   { type: Number, default: 0 },
+        eventFinds:       { type: Number, default: 0 },
+        bestPayout:       { type: Number, default: 0 },
+        consecutiveFails: { type: Number, default: 0 },
+
+        dailyCoins:       { type: Number, default: 0 },
+        dailyMines:       { type: Number, default: 0 },
+        dailyWindowStart: { type: Date,   default: null }
+    },
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Active item effects (populated by /use; pruned on read)
     activeEffects: [{
         type:      { type: String, required: true },
