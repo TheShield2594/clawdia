@@ -24,7 +24,7 @@ const {
 const DEPTH_CHOICES = DEPTH_LIST.map(d => ({ name: d.name, value: d.id }));
 
 module.exports = {
-    cooldown: 5,
+    cooldown: 30,
 
     data: new SlashCommandBuilder()
         .setName('mine')

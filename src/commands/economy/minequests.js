@@ -103,6 +103,10 @@ module.exports = {
 
         // ── CLAIM ──────────────────────────────────────────────────────────
         if (sub === 'claim') {
+            if (user.isModified()) {
+                await user.save().catch(e => console.error('[minequests] pre-claim save error:', e));
+            }
+
             const questId  = interaction.options.getString('quest');
             const template = MINE_QUEST_TEMPLATES.find(t => t.id === questId);
 

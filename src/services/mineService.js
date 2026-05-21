@@ -554,9 +554,11 @@ function executeMine(user, depthId) {
 
         let xpGain = severity.xp;
         if (m.activeXpScroll && xpGain > 0) xpGain = Math.round(xpGain * 1.5);
-        if (xpGain > 0) applyXp(user, xpGain);
+        let lvResult = null;
+        if (xpGain > 0) lvResult = applyXp(user, xpGain);
 
         result.xpEarned = xpGain;
+        result.levelUp  = lvResult?.leveledUp ? lvResult : null;
         result.failure  = { severity, message: severity.msg };
 
         if (pickaxe.currentDurability <= 0) result.pickaxeBroke = true;

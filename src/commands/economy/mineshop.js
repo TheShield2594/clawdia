@@ -323,14 +323,13 @@ module.exports = {
             }
 
             const pickaxe = m.pickaxes[m.equippedPickaxeIndex];
-            const currency_ = currency;
 
             if (method === 'shop') {
                 const repairResult = applyRepair(pickaxe, null);
                 if (repairResult.error) return interaction.reply({ content: repairResult.error, ephemeral: true });
 
                 if (user.balance < repairResult.cost) {
-                    return interaction.reply({ content: `Repair costs ${currency_}${repairResult.cost.toLocaleString()} but you only have ${currency_}${user.balance.toLocaleString()}.`, ephemeral: true });
+                    return interaction.reply({ content: `Repair costs ${currency}${repairResult.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, ephemeral: true });
                 }
 
                 user.balance -= repairResult.cost;
@@ -344,8 +343,8 @@ module.exports = {
                     .addFields(
                         { name: 'Durability',  value: `${pickaxe.currentDurability}/${pickaxe.maxDurability}`, inline: true },
                         { name: 'Status',      value: `${pickaxeStatusEmoji(pickaxe.status)} ${pickaxe.status}`, inline: true },
-                        { name: 'Cost',        value: `${currency_}${repairResult.cost.toLocaleString()}`, inline: true },
-                        { name: 'Balance',     value: `${currency_}${user.balance.toLocaleString()}`, inline: true }
+                        { name: 'Cost',        value: `${currency}${repairResult.cost.toLocaleString()}`, inline: true },
+                        { name: 'Balance',     value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                     );
 
                 if (repairResult.condemned) {

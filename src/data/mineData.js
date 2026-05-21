@@ -456,7 +456,7 @@ const LIMITS = {
     MAX_CRIT_CHANCE:         0.25,
     ENERGY_TONICS_PER_DAY:   2,
     PITY_CONSECUTIVE_FAILS:  4,
-    PITY_BONUS_PER_STACK:    0.15
+    PITY_BONUS_PER_STACK:    0.015
 };
 
 // ─── PRESTIGE BONUSES ────────────────────────────────────────────────────────
