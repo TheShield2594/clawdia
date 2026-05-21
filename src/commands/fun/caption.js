@@ -75,12 +75,17 @@ module.exports = {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'caption.png' });
             await interaction.editReply({ files: [attachment] });
-        } catch {
+        } catch (err) {
+            console.error('caption: image load or render failed', err);
             const msg = '❌ Could not load that image. Make sure the URL points to a valid image.';
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply(msg);
-            } else {
-                await interaction.reply({ content: msg, ephemeral: true });
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply(msg);
+                } else {
+                    await interaction.reply({ content: msg, ephemeral: true });
+                }
+            } catch (replyErr) {
+                console.error('caption: failed to send error reply', replyErr);
             }
         }
     },

@@ -99,12 +99,17 @@ module.exports = {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'achievement.png' });
             await interaction.editReply({ files: [attachment] });
-        } catch {
+        } catch (err) {
+            console.error('achievement: render failed', err);
             const msg = '❌ Could not generate the achievement. Please try again.';
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply(msg);
-            } else {
-                await interaction.reply({ content: msg, ephemeral: true });
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply(msg);
+                } else {
+                    await interaction.reply({ content: msg, ephemeral: true });
+                }
+            } catch (replyErr) {
+                console.error('achievement: failed to send error reply', replyErr);
             }
         }
     },

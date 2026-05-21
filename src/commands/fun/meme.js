@@ -82,18 +82,24 @@ module.exports = {
             });
 
             if (!data.success) {
+                console.error('meme: Imgflip API returned failure', { templateId, error_message: data.error_message });
                 return interaction.editReply(`❌ Imgflip API error: ${data.error_message || 'Unknown error'}`);
             }
 
             const url = data.data.url;
             cache.set(cacheKey, { url, expires: Date.now() + 5 * 60_000 });
             await interaction.editReply({ embeds: [buildEmbed(interaction, url, templateId)] });
-        } catch {
+        } catch (err) {
+            console.error('meme: request or reply failed', err);
             const msg = '❌ Failed to generate meme. Please try again later.';
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply(msg);
-            } else {
-                await interaction.reply({ content: msg, ephemeral: true });
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply(msg);
+                } else {
+                    await interaction.reply({ content: msg, ephemeral: true });
+                }
+            } catch (replyErr) {
+                console.error('meme: failed to send error reply', replyErr);
             }
         }
     },
