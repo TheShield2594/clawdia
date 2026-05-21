@@ -21,8 +21,8 @@ function drawIcon(ctx, x, y, size) {
 
     // Guard — lighter blue horizontal bar
     ctx.fillStyle = '#8aeef2';
-    [[1,8],[2,8],[3,8],[4,8],[5,8]].forEach(([gx, gy]) =>
-        ctx.fillRect(x + gx * s, y + gy * s, s, s));
+    const guard = [[1,8],[2,8],[3,8],[4,8],[5,8]];
+    for (const [gx, gy] of guard) ctx.fillRect(x + gx * s, y + gy * s, s, s);
 
     // Handle — brown
     ctx.fillStyle = '#8b5e3c';
@@ -41,18 +41,15 @@ module.exports = {
                 .setMaxLength(50)),
 
     async execute(interaction) {
-        const { limited, wait } = checkImageRateLimit(interaction.user.id);
-        if (limited) {
-            return interaction.reply({
-                content: `⏱️ You're using image commands too fast! Please wait **${wait}s** before trying again.`,
-                ephemeral: true,
-            });
+        const rl = checkImageRateLimit(interaction.user.id);
+        if (rl.limited) {
+            return interaction.reply({ content: rl.message, ephemeral: true });
         }
 
         const text = interaction.options.getString('text');
-        await interaction.deferReply();
 
         try {
+            await interaction.deferReply();
             const canvas = createCanvas(W, H);
             const ctx    = canvas.getContext('2d');
 
@@ -90,14 +87,30 @@ module.exports = {
             ctx.fillStyle = '#ffdf00';
             ctx.fillText('Achievement Unlocked!', textX, 20);
 
-            ctx.font      = 'bold 21px Arial, sans-serif';
+            const maxTextWidth = W - textX - PAD;
+            let fontSize = 21;
+            ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+            while (ctx.measureText(text).width > maxTextWidth && fontSize > 10) {
+                fontSize--;
+                ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+            }
             ctx.fillStyle = '#ffffff';
             ctx.fillText(text, textX, 46);
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'achievement.png' });
             await interaction.editReply({ files: [attachment] });
-        } catch {
-            await interaction.editReply('❌ Could not generate the achievement. Please try again.');
+        } catch (err) {
+            console.error('achievement: render failed', err);
+            const msg = '❌ Could not generate the achievement. Please try again.';
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply(msg);
+                } else {
+                    await interaction.reply({ content: msg, ephemeral: true });
+                }
+            } catch (replyErr) {
+                console.error('achievement: failed to send error reply', replyErr);
+            }
         }
     },
 };

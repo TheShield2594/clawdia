@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
+const { applyGrayscale } = require('../../utils/canvasFilters');
 
 const SIZE = 512;
 
@@ -14,18 +15,15 @@ module.exports = {
                 .setRequired(false)),
 
     async execute(interaction) {
-        const { limited, wait } = checkImageRateLimit(interaction.user.id);
-        if (limited) {
-            return interaction.reply({
-                content: `⏱️ You're using image commands too fast! Please wait **${wait}s** before trying again.`,
-                ephemeral: true,
-            });
+        const rl = checkImageRateLimit(interaction.user.id);
+        if (rl.limited) {
+            return interaction.reply({ content: rl.message, ephemeral: true });
         }
 
         const target = interaction.options.getUser('user') || interaction.user;
-        await interaction.deferReply();
 
         try {
+            await interaction.deferReply();
             const avatar = await loadImage(target.displayAvatarURL({ extension: 'png', size: SIZE }));
 
             const canvas = createCanvas(SIZE, SIZE);
@@ -33,15 +31,8 @@ module.exports = {
 
             ctx.drawImage(avatar, 0, 0, SIZE, SIZE);
 
-            // Grayscale
-            const img    = ctx.getImageData(0, 0, SIZE, SIZE);
-            const { data } = img;
-            for (let i = 0; i < data.length; i += 4) {
-                const g  = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-                data[i]     = g;
-                data[i + 1] = g;
-                data[i + 2] = g;
-            }
+            const img = ctx.getImageData(0, 0, SIZE, SIZE);
+            applyGrayscale(img);
             ctx.putImageData(img, 0, 0);
 
             // Dark red vignette
@@ -70,7 +61,12 @@ module.exports = {
                 files: [attachment],
             });
         } catch {
-            await interaction.editReply('❌ Could not generate the wasted image. Please try again.');
+            const msg = '❌ Could not generate the wasted image. Please try again.';
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply(msg);
+            } else {
+                await interaction.reply({ content: msg, ephemeral: true });
+            }
         }
     },
 };
