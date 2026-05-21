@@ -58,7 +58,7 @@ router.get('/', checkAuth, (req, res) => {
     res.render('dashboard', { user: req.user, guilds });
 });
 
-router.get('/guild/:guildId', checkAuth, async (req, res) => {
+async function renderGuildSettings(req, res) {
     const { guildId } = req.params;
     const userGuilds = getManageableGuilds(req);
 
@@ -125,12 +125,19 @@ router.get('/guild/:guildId', checkAuth, async (req, res) => {
             roles: roles,
             defaultJobs: DEFAULT_JOBS,
             defaultTiers: DEFAULT_TIERS,
-            builtinAchievements
+            builtinAchievements,
+            oauthStatus: req.query.status || null,
+            oauthApp: req.query.connected_account_id ? 'integration' : null
         });
     } catch (error) {
         console.error('Dashboard error:', error);
         res.status(500).send('Internal server error');
     }
-});
+}
+
+router.get('/guild/:guildId', checkAuth, renderGuildSettings);
+
+// OAuth callback from Composio lands on this URL after an integration is connected
+router.get('/guild/:guildId/settings', checkAuth, renderGuildSettings);
 
 module.exports = router;

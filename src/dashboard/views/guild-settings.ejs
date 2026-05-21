@@ -3742,6 +3742,20 @@
         document.querySelectorAll('.nav-item[data-tab="automations"]').forEach(btn => {
             btn.addEventListener('click', loadAutomations);
         });
+
+        // Show a toast when returning from an OAuth integration flow
+        (function () {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('status') === 'success') {
+                toast('Integration connected successfully!', 'success');
+                // Scroll to the integrations tab and activate it
+                const intTab = document.querySelector('.nav-item[data-tab="integrations"]');
+                if (intTab) intTab.click();
+                // Clean up the URL without triggering a reload
+                const clean = window.location.pathname;
+                history.replaceState(null, '', clean);
+            }
+        })();
     </script>
 </body>
 </html>
