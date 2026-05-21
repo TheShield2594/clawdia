@@ -3749,7 +3749,7 @@
             if (params.get('status') === 'success') {
                 toast('Integration connected successfully!', 'success');
                 // Scroll to the integrations tab and activate it
-                const intTab = document.querySelector('.nav-item[data-tab="integrations"]');
+                const intTab = document.querySelector('.nav-item[data-tab="agentchannels"]');
                 if (intTab) intTab.click();
                 // Clean up the URL without triggering a reload
                 const clean = window.location.pathname;
