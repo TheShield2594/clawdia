@@ -1,5 +1,4 @@
 const {
-    SlashCommandBuilder,
     EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
@@ -89,9 +88,9 @@ function buildButtons(gameId, disabled = false) {
 }
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('blackjack')
-        .setDescription('Play blackjack against the dealer')
+    name: 'blackjack',
+    description: 'Play blackjack against the dealer',
+    configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
                 .setDescription(`Amount to bet (${MIN_BET}–${MAX_BET})`)

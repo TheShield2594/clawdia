@@ -1,5 +1,4 @@
 const {
-    SlashCommandBuilder,
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
@@ -125,16 +124,16 @@ function buildReplayRow(replayId) {
 }
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('doubleornothing')
-        .setDescription('Bet on a coin flip — keep doubling your pot or walk away.')
+    name: 'doubleornothing',
+    description: 'Bet on a coin flip — keep doubling your pot or walk away.',
+    cooldown: 5,
+    configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
                 .setDescription(`Coins to wager (${MIN_BET.toLocaleString()}–${MAX_BET.toLocaleString()})`)
                 .setMinValue(MIN_BET)
                 .setMaxValue(MAX_BET)
                 .setRequired(true)),
-    cooldown: 5,
 
     async execute(interaction) {
         const bet = interaction.options.getInteger('bet');
