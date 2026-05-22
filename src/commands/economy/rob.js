@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const mongoose = require('mongoose');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect, timeRemaining } = require('../../services/effectsService');
@@ -10,16 +9,12 @@ const BASE_SUCCESS_CHANCE = 0.40;
 const ROB_STEAL_MIN = 0.10;
 const ROB_STEAL_MAX = 0.40;
 
+// Standalone MongoDB deployments don't support multi-doc transactions, so
+// persist both balances sequentially. Robber is saved first; if the victim
+// save throws the heist is reverted in-memory and re-thrown to the catch.
 async function saveRobState(robber, victim) {
-    const session = await mongoose.startSession();
-    try {
-        await session.withTransaction(async () => {
-            await robber.save({ session });
-            await victim.save({ session });
-        });
-    } finally {
-        await session.endSession();
-    }
+    await robber.save();
+    await victim.save();
 }
 
 module.exports = {
