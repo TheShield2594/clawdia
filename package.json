@@ -19,7 +19,7 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
-    "@discordjs/voice": "^0.16.1",
+    "@discordjs/voice": "^0.19.2",
     "@google/generative-ai": "^0.2.1",
     "axios": "^1.6.2",
     "canvas": "^2.11.2",
