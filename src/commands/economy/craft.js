@@ -60,7 +60,7 @@ module.exports = {
                 .setColor('#1abc9c')
                 .setTitle('🔨 Crafting Recipes')
                 .setDescription(lines.join('\n\n'))
-                .setFooter({ text: '✅ = you can craft now  •  Use /craft make <recipe> to craft  •  /huntinv materials to check stock' });
+                .setFooter({ text: '✅ = you can craft now  •  Use /craft make <recipe> to craft  •  /hunt inv materials to check stock' });
 
             return interaction.reply({ embeds: [embed] });
         }
@@ -144,7 +144,7 @@ module.exports = {
                 .setTitle(`${recipe.emoji} Crafted: ${recipe.name}`)
                 .setDescription(`You crafted ${outputDesc}!`)
                 .addFields({ name: 'Materials Consumed', value: usedLines, inline: false })
-                .setFooter({ text: 'Use /huntinv materials to check your remaining stock' })
+                .setFooter({ text: 'Use /hunt inv materials to check your remaining stock' })
                 .setTimestamp();
 
             return interaction.reply({ embeds: [embed] });

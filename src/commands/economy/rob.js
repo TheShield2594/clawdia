@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const mongoose = require('mongoose');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect, timeRemaining } = require('../../services/effectsService');
@@ -10,15 +9,30 @@ const BASE_SUCCESS_CHANCE = 0.40;
 const ROB_STEAL_MIN = 0.10;
 const ROB_STEAL_MAX = 0.40;
 
-async function saveRobState(robber, victim) {
-    const session = await mongoose.startSession();
+// Standalone MongoDB deployments don't support multi-doc transactions, so
+// persist both balances sequentially. If the victim save fails after the
+// robber has already been persisted, restore the robber's prior balance from
+// the snapshot before re-throwing, so partial heists don't leave the robber
+// with stolen coins the victim never lost.
+async function saveRobState(robber, victim, robberSnapshot) {
+    await robber.save();
     try {
-        await session.withTransaction(async () => {
-            await robber.save({ session });
-            await victim.save({ session });
-        });
-    } finally {
-        await session.endSession();
+        await victim.save();
+    } catch (victimErr) {
+        try {
+            await User.updateOne(
+                { userId: robber.userId, guildId: robber.guildId },
+                { $set: {
+                    balance:         robberSnapshot.balance,
+                    bank:            robberSnapshot.bank,
+                    lastRob:         robberSnapshot.lastRob,
+                    successfulRobs:  robberSnapshot.successfulRobs,
+                } }
+            );
+        } catch (rollbackErr) {
+            console.error('[rob] rollback failed; balances may be inconsistent:', rollbackErr);
+        }
+        throw victimErr;
     }
 }
 
@@ -74,6 +88,12 @@ module.exports = {
         }
 
         try {
+            const robberSnapshot = {
+                balance:        robber.balance,
+                bank:           robber.bank,
+                lastRob:        robber.lastRob ?? null,
+                successfulRobs: robber.successfulRobs ?? 0,
+            };
             robber.lastRob = new Date();
 
             // ── Invisibility Cloak: victim cannot be targeted ─────────────────
@@ -132,7 +152,7 @@ module.exports = {
                     victim.bank = Math.max(0, victim.bank - (stolen - fromWallet));
                 }
                 victim.lastRobbedAt = new Date();
-                await saveRobState(robber, victim);
+                await saveRobState(robber, victim, robberSnapshot);
 
                 const bagNote = hasEffect(robber, 'robbery_bag') ? '\n> 💼 *Robbery Bag boosted your haul by 10%!*' : '';
                 embed = new EmbedBuilder()
@@ -171,7 +191,7 @@ module.exports = {
                 } else {
                     robber.balance = Math.max(0, robber.balance - paid);
                     victim.balance += paid;
-                    await saveRobState(robber, victim);
+                    await saveRobState(robber, victim, robberSnapshot);
 
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')

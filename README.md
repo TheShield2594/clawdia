@@ -19,7 +19,7 @@ A chill, self-hosted Discord bot with serious teeth. Clawdia brings moderation, 
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 22.12+
 - MongoDB (local or cloud)
 - Discord Application with Bot & OAuth2 scopes enabled
 - (Optional) OpenAI API Key, Google Gemini API Key, or local Ollama instance
@@ -108,8 +108,10 @@ npm start
 - `/remind` - Set a reminder
 
 ### Admin
-- `/settings` - Get dashboard link
-- `/dailynews` - Manually trigger daily news digest (Admin only)
+- `/raidmode` - Configure raid detection and case management
+- `/event` - Manage seasonal events
+
+Configuration that previously lived behind slash commands (settings link, level roles, starboard, escalation ladder, daily news scheduling and manual trigger) is now in the web dashboard.
 
 ## Tech Stack
 
@@ -179,9 +181,7 @@ The Daily News feature compiles multiple RSS feeds into a single daily post.
 
 ### Manual Trigger
 
-```
-/dailynews
-```
+Use the **Send digest now** button in the dashboard's Daily News panel.
 
 ## Troubleshooting
 

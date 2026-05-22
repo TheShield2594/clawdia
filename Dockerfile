@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
 # Install dependencies for canvas and voice
 RUN apk add --no-cache \
@@ -21,6 +21,10 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 COPY . .
+
+# Drop to the unprivileged `node` user shipped with the base image.
+RUN chown -R node:node /app
+USER node
 
 EXPOSE 3000
 

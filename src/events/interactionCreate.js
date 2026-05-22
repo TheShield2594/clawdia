@@ -87,12 +87,37 @@ function getPolicyDecision(interaction, guildSettings) {
     return { allowed: true };
 }
 
+// Node's setTimeout treats delays > 2^31-1 ms as 1 ms, which would wipe the
+// cooldown timestamp almost immediately and let the next call slip past the
+// gate. Clamp cooldown seconds so seconds * 1000 stays within timer bounds.
+const MAX_TIMER_MS = 2_147_483_647;
+const MAX_COOLDOWN_SECONDS = Math.floor(MAX_TIMER_MS / 1000);
+
+function coerceCooldown(value, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return fallback;
+    return Math.floor(Math.min(n, MAX_COOLDOWN_SECONDS));
+}
+
 function getCooldownSeconds(command, interaction, guildSettings) {
-    const defaultCooldownDuration = command.cooldown ?? 3;
+    const rawBase = typeof command.cooldownAmount === 'function'
+        ? command.cooldownAmount(interaction)
+        : (command.cooldown ?? 3);
+    const baseCooldown = coerceCooldown(rawBase, 3);
     const overrides = guildSettings?.commandPolicies?.cooldownOverrides || [];
-    const matches = overrides.filter(entry => entry.command === command.data.name && interaction.member?.roles?.cache?.has(entry.roleId));
-    if (!matches.length) return defaultCooldownDuration;
-    return Math.min(...matches.map(match => match.cooldownSeconds));
+    const matches = overrides.filter(entry =>
+        entry.command === command.data.name &&
+        Number.isFinite(Number(entry.cooldownSeconds)) &&
+        Number(entry.cooldownSeconds) >= 0 &&
+        interaction.member?.roles?.cache?.has(entry.roleId));
+    if (!matches.length) return baseCooldown;
+    return coerceCooldown(Math.min(...matches.map(match => Number(match.cooldownSeconds))), baseCooldown);
+}
+
+function getCooldownKey(command, interaction) {
+    return typeof command.cooldownKey === 'function'
+        ? command.cooldownKey(interaction)
+        : command.data.name;
 }
 
 module.exports = {
@@ -142,13 +167,14 @@ module.exports = {
         }
 
         const { cooldowns } = client;
+        const cooldownBucket = getCooldownKey(command, interaction);
 
-        if (!cooldowns.has(command.data.name)) {
-            cooldowns.set(command.data.name, new Map());
+        if (!cooldowns.has(cooldownBucket)) {
+            cooldowns.set(cooldownBucket, new Map());
         }
 
         const now = Date.now();
-        const timestamps = cooldowns.get(command.data.name);
+        const timestamps = cooldowns.get(cooldownBucket);
         const cooldownAmount = getCooldownSeconds(command, interaction, guildSettings) * 1000;
 
         if (timestamps.has(interaction.user.id)) {
@@ -166,8 +192,10 @@ module.exports = {
             }
         }
 
-        timestamps.set(interaction.user.id, now);
-        setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
+        if (cooldownAmount > 0) {
+            timestamps.set(interaction.user.id, now);
+            setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
+        }
 
         try {
             await command.execute(interaction, client);

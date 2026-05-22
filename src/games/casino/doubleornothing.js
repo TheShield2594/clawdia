@@ -1,5 +1,4 @@
 const {
-    SlashCommandBuilder,
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
@@ -125,27 +124,29 @@ function buildReplayRow(replayId) {
 }
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('doubleornothing')
-        .setDescription('Bet on a coin flip — keep doubling your pot or walk away.')
+    name: 'doubleornothing',
+    description: 'Bet on a coin flip — keep doubling your pot or walk away.',
+    cooldown: 5,
+    configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
                 .setDescription(`Coins to wager (${MIN_BET.toLocaleString()}–${MAX_BET.toLocaleString()})`)
                 .setMinValue(MIN_BET)
                 .setMaxValue(MAX_BET)
                 .setRequired(true)),
-    cooldown: 5,
 
     async execute(interaction) {
         const bet = interaction.options.getInteger('bet');
-        const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        const [user, guildSettings] = await Promise.all([
+            User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
+            Guild.findOne({ guildId: interaction.guild.id })
+        ]);
         const wallet = user?.balance ?? 0;
         if (!await confirmBet(interaction, bet, wallet, 'Double or Nothing', guildSettings)) return;
         await interaction.deferReply();
         const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
         try {
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
                 return interaction.editReply({ content: 'Economy games are disabled in this server.' });
             }

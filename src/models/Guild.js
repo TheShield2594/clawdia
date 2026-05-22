@@ -293,6 +293,8 @@ const guildSchema = new Schema({
         imageUrl: { type: String, default: '' }
     }],
 
+    shopDefaultsSeeded: { type: Boolean, default: false },
+
     jobTiers: [{
         tier:      { type: Number, required: true, min: 1, max: 4 },
         name:      { type: String, required: true },

@@ -1,5 +1,4 @@
 const {
-    SlashCommandBuilder,
     EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
@@ -138,16 +137,16 @@ function resultEmbed(path, positions, bucket, multiplier, bet, payout, newBalanc
 }
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('plinko')
-        .setDescription('Drop a ball through pegs into multiplier buckets!')
+    name: 'plinko',
+    description: 'Drop a ball through pegs into multiplier buckets!',
+    cooldown: 5,
+    configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
                 .setDescription(`Coins to bet (${MIN_BET.toLocaleString()}–${MAX_BET.toLocaleString()})`)
                 .setMinValue(MIN_BET)
                 .setMaxValue(MAX_BET)
                 .setRequired(true)),
-    cooldown: 5,
 
     async execute(interaction) {
         if (!interaction.guild) {

@@ -1,5 +1,4 @@
 const {
-    SlashCommandBuilder,
     EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
@@ -155,16 +154,16 @@ function paytableEmbed() {
 }
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('slots')
-        .setDescription('Spin the slot machine and try your luck!')
+    name: 'slots',
+    description: 'Spin the slot machine and try your luck!',
+    cooldown: 5,
+    configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
                 .setDescription('Amount of coins to bet (10–5,000)')
                 .setMinValue(10)
                 .setMaxValue(5000)
                 .setRequired(true)),
-    cooldown: 5,
     async execute(interaction) {
         const bet = interaction.options.getInteger('bet');
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });

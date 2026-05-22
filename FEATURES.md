@@ -95,10 +95,7 @@ https://www.reddit.com/r/worldnews/.rss
 
 ### Manual Trigger
 
-Administrators can test or trigger an immediate digest:
-```
-/dailynews
-```
+Administrators can send an immediate digest using the **Send digest now** button in the dashboard's Daily News panel.
 
 ## 🎵 Music System
 
@@ -184,9 +181,9 @@ Set a moderation log channel to track:
 /balance             - Check balance
 /daily               - Daily reward (24h cooldown)
 /work                - Work for coins (1h cooldown)
-/transfer <user> <amount> - Send coins
-/wheel               - Spin the Wheel of Fortune (free spin per cooldown, or buy extra spins)
-/roulette            - Bet on Red/Black, Odd/Even, Low/High, dozens, columns, or a straight number
+/bank transfer <user> <amount> - Send coins
+/casino wheel        - Spin the Wheel of Fortune (free spin per cooldown, or buy extra spins)
+/casino roulette     - Bet on Red/Black, Odd/Even, Low/High, dozens, columns, or a straight number
 ```
 
 **Wheel of Fortune:**
@@ -370,8 +367,8 @@ Prevent spam with built-in cooldowns:
 | `/ai` | 10 seconds |
 | `/daily` | 24 hours |
 | `/work` | 1 hour |
-| `/wheel` | 24 hours (configurable; bypass with paid spin) |
-| `/roulette` | 5 seconds |
+| `/casino wheel` | 24 hours (configurable; bypass with paid spin) |
+| `/casino` (other games) | 5–10 seconds |
 | `/play` | 3 seconds |
 | Most others | 3 seconds |
 
