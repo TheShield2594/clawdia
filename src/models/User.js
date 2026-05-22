@@ -179,7 +179,7 @@ const userSchema = new Schema({
         // Permanent account upgrades
         luckyPaw: { type: Boolean, default: false },
 
-        // Trophy collection (displayed on /huntprofile; awarded on legendary/event kills)
+        // Trophy collection (displayed on /hunt profile; awarded on legendary/event kills)
         trophies: [{ type: String }],
 
         // Hunt statistics
