@@ -87,10 +87,16 @@ function getPolicyDecision(interaction, guildSettings) {
     return { allowed: true };
 }
 
+// Node's setTimeout treats delays > 2^31-1 ms as 1 ms, which would wipe the
+// cooldown timestamp almost immediately and let the next call slip past the
+// gate. Clamp cooldown seconds so seconds * 1000 stays within timer bounds.
+const MAX_TIMER_MS = 2_147_483_647;
+const MAX_COOLDOWN_SECONDS = Math.floor(MAX_TIMER_MS / 1000);
+
 function coerceCooldown(value, fallback) {
     const n = Number(value);
     if (!Number.isFinite(n) || n < 0) return fallback;
-    return Math.floor(n);
+    return Math.floor(Math.min(n, MAX_COOLDOWN_SECONDS));
 }
 
 function getCooldownSeconds(command, interaction, guildSettings) {
