@@ -64,19 +64,6 @@ const CATEGORIES = [
         ],
     },
     {
-        id: 'music',
-        emoji: '🎵',
-        label: 'Music',
-        preview: 'play, skip, queue',
-        commands: [
-            { name: 'play',       description: 'Play a song in your voice channel (requires DJ role)' },
-            { name: 'skip',       description: 'Skip the current song' },
-            { name: 'stop',       description: 'Stop the music and clear the queue' },
-            { name: 'queue',      description: 'View the music queue' },
-            { name: 'nowplaying', description: 'Show the currently playing song' },
-        ],
-    },
-    {
         id: 'leveling',
         emoji: '⭐',
         label: 'Leveling',

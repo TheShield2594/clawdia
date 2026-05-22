@@ -14,7 +14,6 @@ const { refreshScheduledAutomation } = require('../../services/automationEngine'
 const MAX_SUMMARY_JOBS_PER_GUILD = 10;
 const { rescheduleDailyNews, sendDailyNews } = require('../../services/rssService');
 const { rescheduleBibleVerse } = require('../../services/dailyBibleService');
-const { startLivestream, stopLivestream } = require('../../services/livestreamService');
 const Parser = require('rss-parser');
 const dns = require('dns');
 const net = require('net');
@@ -195,7 +194,7 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'welcome', 'farewell', 'birthdays',
     'moderation', 'leveling', 'levelRoles',
     'economy', 'shop', 'jobs', 'jobTiers',
-    'achievements', 'music', 'tickets',
+    'achievements', 'tickets',
     'raidDetection', 'antiNuke', 'caseSettings',
     'starboard', 'eventLog', 'quests',
     'season', 'progressionTracks', 'commandPolicies',
@@ -245,14 +244,6 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
         const shouldRescheduleBible = Object.keys(updates).some(key => key.startsWith('bibleVerse.'));
         if (shouldRescheduleBible) {
             rescheduleBibleVerse(req.client, guildId);
-        }
-
-        const livestreamChanged = Object.keys(updates).some(key => key.startsWith('music.livestream'));
-        if (livestreamChanged) {
-            stopLivestream(guildId);
-            if (guildSettings.music?.livestream?.enabled) {
-                startLivestream(req.client, guildId);
-            }
         }
 
         res.json({ success: true, settings: guildSettings });
