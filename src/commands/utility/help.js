@@ -84,7 +84,6 @@ const CATEGORIES = [
         commands: [
             { name: 'rank',        description: 'View your rank card showing level, XP, and position' },
             { name: 'leaderboard', description: 'View the top 10 members on the server leaderboard' },
-            { name: 'levelrole',   description: 'Manage roles awarded when members reach a level' },
             { name: 'setlevel',    description: 'Directly assign a level to a member (admin)' },
         ],
     },
@@ -113,7 +112,6 @@ const CATEGORIES = [
             { name: 'giveaway',   description: 'Manage giveaways' },
             { name: 'birthday',   description: 'Manage birthdays' },
             { name: 'bible',      description: 'Look up a Bible verse or get the daily verse' },
-            { name: 'starboard',  description: 'Configure the starboard' },
             { name: 'suggest',    description: 'Submit a suggestion to the server' },
             { name: 'role',       description: 'Self-assign or remove a role from reaction role panels' },
             { name: 'vc',         description: 'Manage your temporary voice channel' },
@@ -145,11 +143,10 @@ const CATEGORIES = [
         id: 'admin',
         emoji: '⚙️',
         label: 'Admin',
-        preview: 'settings, raid mode, news',
+        preview: 'raid mode, events',
         commands: [
-            { name: 'settings',  description: 'Get the dashboard link to configure the bot' },
             { name: 'raidmode',  description: 'Configure raid detection and case management settings' },
-            { name: 'dailynews', description: 'Manually trigger the daily news digest' },
+            { name: 'event',     description: 'Manage seasonal events (admin)' },
         ],
     },
 ];

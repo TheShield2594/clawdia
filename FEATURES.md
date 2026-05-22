@@ -95,10 +95,7 @@ https://www.reddit.com/r/worldnews/.rss
 
 ### Manual Trigger
 
-Administrators can test or trigger an immediate digest:
-```
-/dailynews
-```
+Administrators can send an immediate digest using the **Send digest now** button in the dashboard's Daily News panel.
 
 ## 🎵 Music System
 

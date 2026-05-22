@@ -12,7 +12,7 @@ const composioService = require('../../services/composioService');
 const { refreshScheduledAutomation } = require('../../services/automationEngine');
 
 const MAX_SUMMARY_JOBS_PER_GUILD = 10;
-const { rescheduleDailyNews } = require('../../services/rssService');
+const { rescheduleDailyNews, sendDailyNews } = require('../../services/rssService');
 const { rescheduleBibleVerse } = require('../../services/dailyBibleService');
 const { startLivestream, stopLivestream } = require('../../services/livestreamService');
 const Parser = require('rss-parser');
@@ -632,6 +632,17 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRa
     } catch (error) {
         console.error('RSS add error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.post('/guild/:guildId/dailynews/trigger', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId } = req.params;
+    try {
+        await sendDailyNews(req.client, guildId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Daily news manual trigger error:', error);
+        res.status(500).json({ error: 'Failed to send daily news. Check that the digest is configured.' });
     }
 });
 
