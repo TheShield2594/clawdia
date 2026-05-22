@@ -87,14 +87,25 @@ function getPolicyDecision(interaction, guildSettings) {
     return { allowed: true };
 }
 
+function coerceCooldown(value, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return fallback;
+    return Math.floor(n);
+}
+
 function getCooldownSeconds(command, interaction, guildSettings) {
-    const baseCooldown = typeof command.cooldownAmount === 'function'
+    const rawBase = typeof command.cooldownAmount === 'function'
         ? command.cooldownAmount(interaction)
         : (command.cooldown ?? 3);
+    const baseCooldown = coerceCooldown(rawBase, 3);
     const overrides = guildSettings?.commandPolicies?.cooldownOverrides || [];
-    const matches = overrides.filter(entry => entry.command === command.data.name && interaction.member?.roles?.cache?.has(entry.roleId));
+    const matches = overrides.filter(entry =>
+        entry.command === command.data.name &&
+        Number.isFinite(Number(entry.cooldownSeconds)) &&
+        Number(entry.cooldownSeconds) >= 0 &&
+        interaction.member?.roles?.cache?.has(entry.roleId));
     if (!matches.length) return baseCooldown;
-    return Math.min(...matches.map(match => match.cooldownSeconds));
+    return coerceCooldown(Math.min(...matches.map(match => Number(match.cooldownSeconds))), baseCooldown);
 }
 
 function getCooldownKey(command, interaction) {

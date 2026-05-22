@@ -22,6 +22,10 @@ RUN npm ci --only=production
 
 COPY . .
 
+# Drop to the unprivileged `node` user shipped with the base image.
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 3000
 
 CMD ["npm", "start"]
