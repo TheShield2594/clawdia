@@ -561,6 +561,17 @@
                         <div><label class="field-label" for="mod-ban-threshold">Ban at (warnings)</label><input type="number" id="mod-ban-threshold" value="<%= settings.moderation.banThreshold || 0 %>" min="0" max="50"><small>0 = disabled</small></div>
                     </div>
 
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Auto-Escalation Ladder</h3><p>Per-step actions triggered when a user reaches a warning threshold. Duration is required for mute/tempban.</p></div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable auto-escalation</strong><span>Apply the ladder below as warnings accumulate</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-escalation-enabled" <%= settings.moderation.escalation?.enabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div id="mod-escalation-ladder"></div>
+                    <div class="actions-row" style="margin-top:.5rem;">
+                        <button type="button" class="btn btn-sm" onclick="addEscalationStep()">+ Add step</button>
+                        <button type="button" class="btn btn-sm" onclick="resetEscalationLadder()">Reset to defaults</button>
+                    </div>
+
                     <div class="panel-head" style="margin-top:1.5rem"><h3>Behavior Score Escalation</h3><p>Separate score system that decays over time. Each automod violation adds to the score.</p></div>
                     <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.75rem;">
                         <div><label class="field-label" for="mod-score-mute">Mute at score</label><input type="number" id="mod-score-mute" value="<%= settings.moderation.behaviorScoreMuteAt ?? 10 %>" min="0"><small>0 = disabled</small></div>
@@ -1535,6 +1546,7 @@
                         </div>
                         <div class="actions-row">
                             <button class="btn btn-primary" onclick="saveSettings('dailynews')">Save changes</button>
+                            <button class="btn" type="button" onclick="triggerDailyNewsNow()">Send digest now</button>
                         </div>
                     </div>
                 </section>
@@ -2072,6 +2084,13 @@
     <script>
         const DAILY_NEWS_INITIAL_PROFILES = <%- JSON.stringify(settings.dailyNewsProfiles || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
         const DAILY_NEWS_CHANNELS = <%- JSON.stringify(channels || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        const ESCALATION_DEFAULTS = [
+            { threshold: 3,  action: 'mute', durationMinutes: 10,   dmUser: true, reason: 'Automatic escalation: {count} warnings reached' },
+            { threshold: 5,  action: 'mute', durationMinutes: 60,   dmUser: true, reason: 'Automatic escalation: {count} warnings reached' },
+            { threshold: 7,  action: 'kick', durationMinutes: null, dmUser: true, reason: 'Automatic escalation: {count} warnings reached' },
+            { threshold: 10, action: 'ban',  durationMinutes: null, dmUser: true, reason: 'Automatic escalation: {count} warnings reached' }
+        ];
+        let ESCALATION_LADDER = <%- JSON.stringify(settings.moderation?.escalation?.ladder || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
 
         // Sidebar tab navigation
         const navItems = document.querySelectorAll('.nav-item');
@@ -2198,6 +2217,107 @@
         }
         if (document.getElementById('ai-provider')) updateAiProviderUI();
         renderDailyNewsProfiles();
+        renderEscalationLadder();
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
+        function renderEscalationLadder() {
+            const host = document.getElementById('mod-escalation-ladder');
+            if (!host) return;
+            if (!ESCALATION_LADDER.length) {
+                host.innerHTML = '<p style="opacity:.7;font-size:.85rem;margin:.5rem 0;">No ladder steps configured. Click <strong>Add step</strong> to create one, or <strong>Reset to defaults</strong> for the recommended ladder.</p>';
+                return;
+            }
+            const sorted = ESCALATION_LADDER.slice().sort((a, b) => (a.threshold || 0) - (b.threshold || 0));
+            host.innerHTML = sorted.map((step, idx) => {
+                const needsDuration = step.action === 'mute' || step.action === 'tempban';
+                return `
+                <div class="field" style="display:grid;grid-template-columns:90px 130px 110px 60px 1fr auto;gap:.5rem;align-items:end;margin-bottom:.4rem;border:1px solid var(--border,#2a2a2a);border-radius:6px;padding:.5rem;">
+                    <div><label class="field-label" style="font-size:.75rem;">Warnings</label><input type="number" min="1" value="${step.threshold || 1}" data-esc-idx="${idx}" data-esc-key="threshold"></div>
+                    <div><label class="field-label" style="font-size:.75rem;">Action</label>
+                        <select data-esc-idx="${idx}" data-esc-key="action">
+                            <option value="mute" ${step.action === 'mute' ? 'selected' : ''}>Mute</option>
+                            <option value="tempban" ${step.action === 'tempban' ? 'selected' : ''}>Tempban</option>
+                            <option value="kick" ${step.action === 'kick' ? 'selected' : ''}>Kick</option>
+                            <option value="ban" ${step.action === 'ban' ? 'selected' : ''}>Ban</option>
+                        </select>
+                    </div>
+                    <div><label class="field-label" style="font-size:.75rem;">Duration (min)</label><input type="number" min="1" max="40320" value="${step.durationMinutes ?? ''}" ${needsDuration ? '' : 'disabled'} data-esc-idx="${idx}" data-esc-key="durationMinutes"></div>
+                    <div><label class="field-label" style="font-size:.75rem;">DM</label><input type="checkbox" ${step.dmUser !== false ? 'checked' : ''} data-esc-idx="${idx}" data-esc-key="dmUser"></div>
+                    <div><label class="field-label" style="font-size:.75rem;">Reason (supports {count})</label><input type="text" value="${escapeHtml(step.reason || '')}" data-esc-idx="${idx}" data-esc-key="reason"></div>
+                    <div><button type="button" class="btn btn-sm" onclick="removeEscalationStep(${idx})">✕</button></div>
+                </div>`;
+            }).join('');
+
+            host.querySelectorAll('[data-esc-idx]').forEach(el => {
+                el.addEventListener('change', updateEscalationFromDom);
+                el.addEventListener('input', updateEscalationFromDom);
+            });
+            ESCALATION_LADDER = sorted;
+        }
+
+        function updateEscalationFromDom(e) {
+            const idx = parseInt(e.target.getAttribute('data-esc-idx'), 10);
+            const key = e.target.getAttribute('data-esc-key');
+            if (Number.isNaN(idx) || !ESCALATION_LADDER[idx]) return;
+            const step = ESCALATION_LADDER[idx];
+            if (key === 'threshold') step.threshold = parseInt(e.target.value, 10) || 1;
+            else if (key === 'durationMinutes') step.durationMinutes = e.target.value === '' ? null : (parseInt(e.target.value, 10) || null);
+            else if (key === 'dmUser') step.dmUser = e.target.checked;
+            else if (key === 'reason') step.reason = e.target.value;
+            else if (key === 'action') {
+                step.action = e.target.value;
+                if (step.action !== 'mute' && step.action !== 'tempban') step.durationMinutes = null;
+                renderEscalationLadder();
+            }
+        }
+
+        function addEscalationStep() {
+            const maxThreshold = ESCALATION_LADDER.reduce((m, s) => Math.max(m, s.threshold || 0), 0);
+            ESCALATION_LADDER.push({
+                threshold: maxThreshold + 1,
+                action: 'mute',
+                durationMinutes: 10,
+                dmUser: true,
+                reason: 'Automatic escalation: {count} warnings reached'
+            });
+            renderEscalationLadder();
+        }
+
+        function removeEscalationStep(idx) {
+            ESCALATION_LADDER.splice(idx, 1);
+            renderEscalationLadder();
+        }
+
+        function resetEscalationLadder() {
+            if (!confirm('Replace the current ladder with the default 4-step ladder?')) return;
+            ESCALATION_LADDER = JSON.parse(JSON.stringify(ESCALATION_DEFAULTS));
+            renderEscalationLadder();
+        }
+
+        function serializeEscalationLadder() {
+            const seen = new Set();
+            const cleaned = [];
+            for (const step of ESCALATION_LADDER) {
+                const threshold = parseInt(step.threshold, 10);
+                if (!threshold || threshold < 1 || seen.has(threshold)) continue;
+                seen.add(threshold);
+                cleaned.push({
+                    threshold,
+                    action: step.action || 'mute',
+                    durationMinutes: (step.action === 'mute' || step.action === 'tempban')
+                        ? (parseInt(step.durationMinutes, 10) || null)
+                        : null,
+                    dmUser: step.dmUser !== false,
+                    reason: step.reason || 'Automatic escalation: {count} warnings reached'
+                });
+            }
+            return cleaned.sort((a, b) => a.threshold - b.threshold);
+        }
 
         function dailyNewsChannelOptions(selected = '') {
             return ['<option value="">Select a channel</option>']
@@ -2383,7 +2503,9 @@
                     'moderation.behaviorScoreBanAt': parseInt(document.getElementById('mod-score-ban').value, 10) || 0,
                     'moderation.behaviorScoreDecayDays': parseInt(document.getElementById('mod-score-decay').value, 10) || 7,
                     'moderation.appealsEnabled': document.getElementById('mod-appeals-enabled').checked,
-                    'moderation.appealChannelId': document.getElementById('mod-appeal-channel').value || null
+                    'moderation.appealChannelId': document.getElementById('mod-appeal-channel').value || null,
+                    'moderation.escalation.enabled': document.getElementById('mod-escalation-enabled').checked,
+                    'moderation.escalation.ladder': serializeEscalationLadder()
                 };
             } else if (section === 'leveling') {
                 const noXpRoleIds = document.getElementById('level-no-xp-roles').value.split('\n').map(v => v.trim()).filter(Boolean);
@@ -2659,6 +2781,22 @@
             } catch (error) {
                 console.error(error);
                 toast('An error occurred', 'error');
+            }
+        }
+
+        async function triggerDailyNewsNow() {
+            const guildId = '<%= guild.id %>';
+            if (!confirm('Send the daily digest right now to the configured channel?')) return;
+            try {
+                const response = await fetch(`/api/guild/${guildId}/dailynews/trigger`, { method: 'POST' });
+                if (response.ok) toast('Digest sent ✓', 'success');
+                else {
+                    const err = await response.json().catch(() => ({}));
+                    toast(err.error || 'Failed to send digest', 'error');
+                }
+            } catch (error) {
+                console.error(error);
+                toast('An error occurred sending the digest', 'error');
             }
         }
 
