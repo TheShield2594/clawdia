@@ -4,6 +4,7 @@ const Guild = require('../../models/Guild');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { ACHIEVEMENTS } = require('../../data/achievements');
+const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
 const composioService = require('../../services/composioService');
 
 function checkAuth(req, res, next) {
@@ -80,6 +81,10 @@ async function renderGuildSettings(req, res) {
                 guildId: guild.id,
                 name: guild.name
             });
+        }
+
+        if (ensureDefaultShopItems(guildSettings)) {
+            await guildSettings.save();
         }
 
         const channels = guild.channels.cache
