@@ -719,9 +719,9 @@ async function executePrestige(interaction) {
             .setStyle(ButtonStyle.Secondary)
     );
 
-    await interaction.reply({ embeds: [confirmEmbed], components: [row] });
+    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], fetchReply: true });
 
-    const collector = interaction.channel.createMessageComponentCollector({
+    const collector = reply.createMessageComponentCollector({
         filter: i => i.user.id === interaction.user.id &&
                      ['prestige_confirm', 'prestige_cancel'].includes(i.customId),
         time:   30_000,
@@ -1316,7 +1316,7 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
     const h = updated.hunt;
     const newIndex = h.weapons.length - 1;
 
-    if (autoEquip && (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex] || h.weapons[h.equippedWeaponIndex].status === 'broken')) {
+    if (autoEquip) {
         const oldIndex = h.equippedWeaponIndex;
         h.equippedWeaponIndex = newIndex;
         try {

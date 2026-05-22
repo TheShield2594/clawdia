@@ -22,7 +22,8 @@ const DEFAULT_SHOP_ITEMS = [
 function ensureDefaultShopItems(guildSettings) {
     if (!guildSettings || guildSettings.shopDefaultsSeeded) return false;
 
-    const existingNames = new Set((guildSettings.shop || []).map(i => i.name.toLowerCase()));
+    if (!Array.isArray(guildSettings.shop)) guildSettings.shop = [];
+    const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
     let added = false;
     for (const item of DEFAULT_SHOP_ITEMS) {
         if (existingNames.has(item.name.toLowerCase())) continue;

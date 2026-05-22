@@ -2305,13 +2305,18 @@
             for (const step of ESCALATION_LADDER) {
                 const threshold = parseInt(step.threshold, 10);
                 if (!threshold || threshold < 1 || seen.has(threshold)) continue;
+                const action = step.action || 'mute';
+                let durationMinutes = null;
+                if (action === 'mute' || action === 'tempban') {
+                    const duration = parseInt(step.durationMinutes, 10);
+                    if (!duration || duration < 1) continue;
+                    durationMinutes = duration;
+                }
                 seen.add(threshold);
                 cleaned.push({
                     threshold,
-                    action: step.action || 'mute',
-                    durationMinutes: (step.action === 'mute' || step.action === 'tempban')
-                        ? (parseInt(step.durationMinutes, 10) || null)
-                        : null,
+                    action,
+                    durationMinutes,
                     dmUser: step.dmUser !== false,
                     reason: step.reason || 'Automatic escalation: {count} warnings reached'
                 });

@@ -88,11 +88,19 @@ function getPolicyDecision(interaction, guildSettings) {
 }
 
 function getCooldownSeconds(command, interaction, guildSettings) {
-    const defaultCooldownDuration = command.cooldown ?? 3;
+    const baseCooldown = typeof command.cooldownAmount === 'function'
+        ? command.cooldownAmount(interaction)
+        : (command.cooldown ?? 3);
     const overrides = guildSettings?.commandPolicies?.cooldownOverrides || [];
     const matches = overrides.filter(entry => entry.command === command.data.name && interaction.member?.roles?.cache?.has(entry.roleId));
-    if (!matches.length) return defaultCooldownDuration;
+    if (!matches.length) return baseCooldown;
     return Math.min(...matches.map(match => match.cooldownSeconds));
+}
+
+function getCooldownKey(command, interaction) {
+    return typeof command.cooldownKey === 'function'
+        ? command.cooldownKey(interaction)
+        : command.data.name;
 }
 
 module.exports = {
@@ -142,13 +150,14 @@ module.exports = {
         }
 
         const { cooldowns } = client;
+        const cooldownBucket = getCooldownKey(command, interaction);
 
-        if (!cooldowns.has(command.data.name)) {
-            cooldowns.set(command.data.name, new Map());
+        if (!cooldowns.has(cooldownBucket)) {
+            cooldowns.set(cooldownBucket, new Map());
         }
 
         const now = Date.now();
-        const timestamps = cooldowns.get(command.data.name);
+        const timestamps = cooldowns.get(cooldownBucket);
         const cooldownAmount = getCooldownSeconds(command, interaction, guildSettings) * 1000;
 
         if (timestamps.has(interaction.user.id)) {
@@ -166,8 +175,10 @@ module.exports = {
             }
         }
 
-        timestamps.set(interaction.user.id, now);
-        setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
+        if (cooldownAmount > 0) {
+            timestamps.set(interaction.user.id, now);
+            setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
+        }
 
         try {
             await command.execute(interaction, client);

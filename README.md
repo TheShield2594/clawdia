@@ -19,7 +19,7 @@ A chill, self-hosted Discord bot with serious teeth. Clawdia brings moderation, 
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 22.12+
 - MongoDB (local or cloud)
 - Discord Application with Bot & OAuth2 scopes enabled
 - (Optional) OpenAI API Key, Google Gemini API Key, or local Ollama instance

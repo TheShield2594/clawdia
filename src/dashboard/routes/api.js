@@ -635,14 +635,21 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRa
     }
 });
 
+const dailyNewsInFlight = new Set();
 router.post('/guild/:guildId/dailynews/trigger', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
+    if (dailyNewsInFlight.has(guildId)) {
+        return res.status(409).json({ error: 'A digest is already being sent for this guild. Please wait for it to finish.' });
+    }
+    dailyNewsInFlight.add(guildId);
     try {
         await sendDailyNews(req.client, guildId);
         res.json({ success: true });
     } catch (error) {
         console.error('Daily news manual trigger error:', error);
         res.status(500).json({ error: 'Failed to send daily news. Check that the digest is configured.' });
+    } finally {
+        dailyNewsInFlight.delete(guildId);
     }
 });
 
