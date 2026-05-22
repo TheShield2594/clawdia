@@ -180,17 +180,6 @@ const guildSchema = new Schema({
         announcementChannelId: { type: String, default: null }
     },
     
-    music: {
-        djRoleId: { type: String, default: null },
-        defaultVolume: { type: Number, default: 50 },
-        maxQueueSize: { type: Number, default: 100 },
-        livestream: {
-            enabled: { type: Boolean, default: false },
-            url: { type: String, default: null },
-            channelId: { type: String, default: null }
-        }
-    },
-    
     rssFeeds: [{
         url: { type: String, required: true },
         channelId: { type: String, required: true },
