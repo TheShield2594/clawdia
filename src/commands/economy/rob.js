@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect, timeRemaining } = require('../../services/effectsService');
+const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 
 const ROBBER_COOLDOWN_MS = 1 * 3_600_000; // 1 hour
 const VICTIM_IMMUNITY_MS = 30 * 60_000;   // 30 minutes
@@ -152,7 +153,11 @@ module.exports = {
                     victim.bank = Math.max(0, victim.bank - (stolen - fromWallet));
                 }
                 victim.lastRobbedAt = new Date();
+                const robAchievements = await checkAndAward(robber, guildSettings).catch(() => []);
                 await saveRobState(robber, victim, robberSnapshot);
+                if (robAchievements.length) {
+                    announceAchievements(interaction.client, guildSettings, robber, interaction.member, robAchievements).catch(() => null);
+                }
 
                 const bagNote = hasEffect(robber, 'robbery_bag') ? '\n> 💼 *Robbery Bag boosted your haul by 10%!*' : '';
                 embed = new EmbedBuilder()
