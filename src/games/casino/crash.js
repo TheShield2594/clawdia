@@ -1,5 +1,4 @@
 const {
-    SlashCommandBuilder,
     EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
@@ -157,16 +156,16 @@ function buildResultRow(replayId) {
 }
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('crash')
-        .setDescription('Bet on a rising multiplier — cash out before it crashes!')
+    name: 'crash',
+    description: 'Bet on a rising multiplier — cash out before it crashes!',
+    cooldown: 10,
+    configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
                 .setDescription(`Coins to bet (${MIN_BET.toLocaleString()}–${MAX_BET.toLocaleString()})`)
                 .setMinValue(MIN_BET)
                 .setMaxValue(MAX_BET)
                 .setRequired(true)),
-    cooldown: 10,
 
     async execute(interaction) {
         const bet = interaction.options.getInteger('bet');

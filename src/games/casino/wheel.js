@@ -1,5 +1,4 @@
 const {
-    SlashCommandBuilder,
     EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
@@ -265,14 +264,14 @@ async function performSpin(interaction, user, source, cost, buyCost, cooldownHou
 }
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('wheel')
-        .setDescription('Spin the Wheel of Fortune — free every 24h (server default). Win 50–2,500 coins or re-spin.')
+    name: 'wheel',
+    description: 'Spin the Wheel of Fortune — free every 24h (server default). Win 50–2,500 coins or re-spin.',
+    cooldown: 5,
+    configure: sub => sub
         .addBooleanOption(opt =>
             opt.setName('buy')
                 .setDescription('Pay the server extra-spin cost (default: 200 coins) to skip the cooldown and spin now.')
                 .setRequired(false)),
-    cooldown: 5,
 
     async execute(interaction) {
         await interaction.deferReply();
