@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
 # Install dependencies for canvas and voice
 RUN apk add --no-cache \

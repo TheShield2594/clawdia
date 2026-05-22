@@ -152,14 +152,16 @@ module.exports = {
 
     async execute(interaction) {
         const bet = interaction.options.getInteger('bet');
-        const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        const [user, guildSettings] = await Promise.all([
+            User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
+            Guild.findOne({ guildId: interaction.guild.id })
+        ]);
         const wallet = user?.balance ?? 0;
         if (!await confirmBet(interaction, bet, wallet, 'Higher or Lower', guildSettings)) return;
         // Acknowledge immediately so Discord doesn't reject the interaction
-        // while Guild.findOne / User.findOneAndUpdate run.
+        // while User.findOneAndUpdate runs.
         await interaction.deferReply();
         try {
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
                 return interaction.editReply({ content: 'Economy games are disabled in this server.' });
             }

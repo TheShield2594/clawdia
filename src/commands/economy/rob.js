@@ -10,11 +10,30 @@ const ROB_STEAL_MIN = 0.10;
 const ROB_STEAL_MAX = 0.40;
 
 // Standalone MongoDB deployments don't support multi-doc transactions, so
-// persist both balances sequentially. Robber is saved first; if the victim
-// save throws the heist is reverted in-memory and re-thrown to the catch.
-async function saveRobState(robber, victim) {
+// persist both balances sequentially. If the victim save fails after the
+// robber has already been persisted, restore the robber's prior balance from
+// the snapshot before re-throwing, so partial heists don't leave the robber
+// with stolen coins the victim never lost.
+async function saveRobState(robber, victim, robberSnapshot) {
     await robber.save();
-    await victim.save();
+    try {
+        await victim.save();
+    } catch (victimErr) {
+        try {
+            await User.updateOne(
+                { userId: robber.userId, guildId: robber.guildId },
+                { $set: {
+                    balance:         robberSnapshot.balance,
+                    bank:            robberSnapshot.bank,
+                    lastRob:         robberSnapshot.lastRob,
+                    successfulRobs:  robberSnapshot.successfulRobs,
+                } }
+            );
+        } catch (rollbackErr) {
+            console.error('[rob] rollback failed; balances may be inconsistent:', rollbackErr);
+        }
+        throw victimErr;
+    }
 }
 
 module.exports = {
@@ -69,6 +88,12 @@ module.exports = {
         }
 
         try {
+            const robberSnapshot = {
+                balance:        robber.balance,
+                bank:           robber.bank,
+                lastRob:        robber.lastRob ?? null,
+                successfulRobs: robber.successfulRobs ?? 0,
+            };
             robber.lastRob = new Date();
 
             // ── Invisibility Cloak: victim cannot be targeted ─────────────────
@@ -127,7 +152,7 @@ module.exports = {
                     victim.bank = Math.max(0, victim.bank - (stolen - fromWallet));
                 }
                 victim.lastRobbedAt = new Date();
-                await saveRobState(robber, victim);
+                await saveRobState(robber, victim, robberSnapshot);
 
                 const bagNote = hasEffect(robber, 'robbery_bag') ? '\n> 💼 *Robbery Bag boosted your haul by 10%!*' : '';
                 embed = new EmbedBuilder()
@@ -166,7 +191,7 @@ module.exports = {
                 } else {
                     robber.balance = Math.max(0, robber.balance - paid);
                     victim.balance += paid;
-                    await saveRobState(robber, victim);
+                    await saveRobState(robber, victim, robberSnapshot);
 
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')

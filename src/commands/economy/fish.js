@@ -1306,7 +1306,8 @@ async function handleBuyUpgrade(interaction, user, currency) {
         return interaction.reply({ content: 'Unknown upgrade.', ephemeral: true });
     }
 
-    const rod     = f.rods[f.equippedRodIndex];
+    const targetRodIndex = f.equippedRodIndex;
+    const rod     = f.rods[targetRodIndex];
     const rodData = ROD_BY_TIER[rod.tier];
     const cost    = Math.round(rodData.cost * upgradeDef.costMultiplier);
 
@@ -1358,9 +1359,12 @@ async function handleBuyUpgrade(interaction, user, currency) {
             return btn.update({ content: 'Insufficient funds.', embeds: [], components: [] });
         }
 
-        const freshRod = freshUser.fishing.rods[freshUser.fishing.equippedRodIndex];
-        if (!freshRod || freshRod.upgrade) {
-            return btn.update({ content: 'Rod already has an upgrade or is no longer equipped.', embeds: [], components: [] });
+        const freshRod = freshUser.fishing.rods[targetRodIndex];
+        if (!freshRod) {
+            return btn.update({ content: 'That rod is no longer in your inventory.', embeds: [], components: [] });
+        }
+        if (freshRod.upgrade) {
+            return btn.update({ content: `**${freshRod.name}** already has an upgrade installed.`, embeds: [], components: [] });
         }
 
         freshUser.balance -= cost;
@@ -1821,7 +1825,7 @@ async function handleCraft(interaction, sub) {
             const qty = recipe.output.qty ?? 1;
             f.consumables[recipe.output.id] = (f.consumables[recipe.output.id] ?? 0) + qty;
             const def = CONSUMABLES[recipe.output.id];
-            outputDesc = `${def?.emoji ?? '⚗️'} **${qty}× ${def?.name ?? recipe.output.id}** — use with \`/fishuse\` to restore stamina in both systems`;
+            outputDesc = `${def?.emoji ?? '⚗️'} **${qty}× ${def?.name ?? recipe.output.id}** — use with \`/use\` to restore stamina in both systems`;
         } else if (recipe.output.type === 'permanent') {
             if (recipe.output.id === 'luckyHook') {
                 f.luckyHook = true;

@@ -74,8 +74,7 @@ module.exports = {
                             o.setName('slot')
                                 .setDescription('Pickaxe slot number (use /mine inv view to see slots)')
                                 .setRequired(true)
-                                .setMinValue(1)
-                                .setMaxValue(10))))
+                                .setMinValue(1))))
         .addSubcommandGroup(group =>
             group.setName('quests')
                 .setDescription('View and claim your daily mine quests')

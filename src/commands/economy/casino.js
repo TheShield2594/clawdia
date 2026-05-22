@@ -24,8 +24,13 @@ for (const game of games) {
 }
 
 module.exports = {
-    cooldown: Math.max(0, ...games.map(g => g.cooldown ?? 0)),
     data: builder,
+    cooldownKey: interaction => `casino:${interaction.options.getSubcommand()}`,
+    cooldownAmount: interaction => {
+        const sub = interaction.options.getSubcommand();
+        const game = games.find(g => g.name === sub);
+        return game?.cooldown ?? 3;
+    },
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
         const game = games.find(g => g.name === sub);
