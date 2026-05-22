@@ -34,7 +34,6 @@ const client = new Client({
 
 client.commands = new Collection();
 client.cooldowns = new Collection();
-client.musicQueues = new Map();
 
 async function loadCommands() {
     const foldersPath = path.join(__dirname, 'commands');
@@ -146,9 +145,6 @@ async function startBot() {
 
         const { startRaidMonitor } = require('./services/raidService');
         startRaidMonitor(client);
-
-        const { resumeAllLivestreams } = require('./services/livestreamService');
-        resumeAllLivestreams(client);
 
         const { init: initAutomationEngine } = require('./services/automationEngine');
         initAutomationEngine(client);
