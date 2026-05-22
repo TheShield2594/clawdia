@@ -1,5 +1,4 @@
 const {
-    SlashCommandBuilder,
     EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
@@ -190,9 +189,10 @@ function resultEmbed({ pick, winner, player, banker, natural, bet, profit, balan
 }
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('baccarat')
-        .setDescription('Bet on Player, Banker, or Tie in a hand of Baccarat')
+    name: 'baccarat',
+    description: 'Bet on Player, Banker, or Tie in a hand of Baccarat',
+    cooldown: 5,
+    configure: sub => sub
         .addStringOption(opt =>
             opt.setName('side')
                 .setDescription('Which outcome to bet on')
@@ -208,7 +208,6 @@ module.exports = {
                 .setMinValue(MIN_BET)
                 .setMaxValue(MAX_BET)
                 .setRequired(true)),
-    cooldown: 5,
 
     async execute(interaction) {
         const pick = interaction.options.getString('side');

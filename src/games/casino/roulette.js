@@ -1,5 +1,4 @@
 const {
-    SlashCommandBuilder,
     EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
@@ -131,9 +130,10 @@ function resultEmbed({ result, won, betKey, target, bet, profit, balance, intera
 }
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('roulette')
-        .setDescription('Bet on Red/Black, Odd/Even, dozens, columns, or a specific number.')
+    name: 'roulette',
+    description: 'Bet on Red/Black, Odd/Even, dozens, columns, or a specific number.',
+    cooldown: 5,
+    configure: sub => sub
         .addStringOption(opt =>
             opt.setName('bet')
                 .setDescription('What to bet on')
@@ -165,7 +165,6 @@ module.exports = {
                 .setMinValue(0)
                 .setMaxValue(36)
                 .setRequired(false)),
-    cooldown: 5,
 
     async execute(interaction) {
         if (!interaction.guild) {

@@ -10,6 +10,7 @@ const {
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const { chunkArray, paginate } = require('../../utils/paginator');
+const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
 
 const PAGE_SIZE = 5;
 const CONFIRM_THRESHOLD = 500;
@@ -78,6 +79,10 @@ module.exports = {
             { $setOnInsert: { name: interaction.guild.name } },
             { upsert: true, new: true }
         );
+
+        if (ensureDefaultShopItems(guildSettings)) {
+            await guildSettings.save();
+        }
 
         const currency = guildSettings.economy.currency;
 

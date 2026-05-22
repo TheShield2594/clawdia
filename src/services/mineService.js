@@ -435,7 +435,7 @@ function activateConsumable(user, consumableId) {
         m.stamina = Math.min(max, m.stamina + def.staminaRestore);
         m.energyTonicsToday += 1;
     } else if (def.type === 'repair') {
-        return { success: false, error: `Use repair kits with \`/mineshop repair\`.` };
+        return { success: false, error: `Use repair kits with \`/mine shop repair\`.` };
     } else {
         return { success: false, error: 'That item cannot be activated this way.' };
     }
