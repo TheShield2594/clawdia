@@ -161,24 +161,29 @@ module.exports = {
                         { $inc: { 'shop.$.stock': -1 } }
                     );
                     if (!stockResult) {
-                        await User.findOneAndUpdate(
-                            { userId: interaction.user.id, guildId: interaction.guild.id },
-                            { $inc: { balance: freshItem.price } }
-                        );
-                        return reply({ content: 'That item just sold out. Your coins have been refunded.', embeds: [], components: [] });
+                        try {
+                            await User.findOneAndUpdate(
+                                { userId: interaction.user.id, guildId: interaction.guild.id },
+                                { $inc: { balance: freshItem.price } }
+                            );
+                            return reply({ content: 'That item just sold out. Your coins have been refunded.', embeds: [], components: [] });
+                        } catch (refundErr) {
+                            console.error('[shop] refund failed after sell-out:', refundErr);
+                            return reply({ content: 'That item just sold out and the automatic refund failed — please contact support.', embeds: [], components: [] });
+                        }
                     }
                 }
 
-                // Update inventory (increment existing entry or push new one)
-                const hasItem = chargedUser.inventory.some(e => e.itemId === freshItem.name);
-                if (hasItem) {
+                // Update inventory atomically: increment if entry exists, otherwise push
+                const incResult = await User.updateOne(
+                    { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': freshItem.name },
+                    { $inc: { 'inventory.$.quantity': 1 } }
+                );
+                if (incResult.modifiedCount === 0) {
+                    // No existing entry — push a new one; $ne guard makes this a no-op if a
+                    // concurrent request already inserted the entry between these two operations
                     await User.updateOne(
-                        { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': freshItem.name },
-                        { $inc: { 'inventory.$.quantity': 1 } }
-                    );
-                } else {
-                    await User.updateOne(
-                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': { $ne: freshItem.name } },
                         { $push: { inventory: { itemId: freshItem.name, quantity: 1 } } }
                     );
                 }
