@@ -84,7 +84,8 @@ module.exports = {
             return interaction.reply({ content: `${target.username} is under rob immunity for **${mins} min**.`, ephemeral: true });
         }
 
-        if (!victim || victim.balance < minRobWallet) {
+        const victimTotalWealth = (victim?.balance ?? 0) + (victim?.bank ?? 0);
+        if (!victim || victimTotalWealth < minRobWallet) {
             return interaction.reply({ content: `${target.username} doesn't have enough ${currency} to be worth robbing (minimum ${currency}${minRobWallet}).`, ephemeral: true });
         }
 
