@@ -1,7 +1,7 @@
 // Configuration for every usable item effect
 const EFFECT_CONFIGS = {
     shield:             { label: 'Shield',            emoji: '🛡️',   durationMs: 12 * 3_600_000, charges: -1 },
-    padlock:            { label: 'Padlock',            emoji: '🔒',   durationMs: null,            charges: -1 },
+    padlock:            { label: 'Padlock',            emoji: '🔒',   durationMs: null,            charges: 1  },
     lucky_charm:        { label: 'Lucky Charm',        emoji: '🍀',   durationMs: 2  * 3_600_000, charges: -1 },
     lifesaver:          { label: 'Lifesaver',          emoji: '🛟',   durationMs: null,            charges: 1  },
     invisibility_cloak: { label: 'Invisibility Cloak', emoji: '🧥',   durationMs: 6  * 3_600_000, charges: -1 },
