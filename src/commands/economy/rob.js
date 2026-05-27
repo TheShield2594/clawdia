@@ -153,6 +153,7 @@ module.exports = {
                     victim.bank = Math.max(0, victim.bank - (stolen - fromWallet));
                 }
                 victim.lastRobbedAt = new Date();
+                if (padlockActive) consumeEffect(victim, 'padlock');
                 const robAchievements = await checkAndAward(robber, guildSettings).catch(() => []);
                 await saveRobState(robber, victim, robberSnapshot);
                 if (robAchievements.length) {
@@ -172,7 +173,7 @@ module.exports = {
                     .setTimestamp();
 
                 if (padlockActive) {
-                    embed.addFields({ name: '🔒 Padlock Active', value: `${target.username}'s bank was protected!`, inline: false });
+                    embed.addFields({ name: '🔒 Padlock Broken!', value: `${target.username}'s bank was protected, but their padlock is now gone!`, inline: false });
                 }
             } else {
                 const fine = Math.floor(robber.balance * failFineRate);
