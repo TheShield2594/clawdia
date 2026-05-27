@@ -182,7 +182,8 @@ module.exports = {
                 // Lifesaver: absorbs the failure fine — no coins lost
                 if (hasEffect(robber, 'lifesaver')) {
                     consumeEffect(robber, 'lifesaver');
-                    await robber.save();
+                    victim.lastRobbedAt = new Date();
+                    await Promise.all([robber.save(), victim.save().catch(console.error)]);
 
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
@@ -197,6 +198,7 @@ module.exports = {
                 } else {
                     robber.balance = Math.max(0, robber.balance - paid);
                     victim.balance += paid;
+                    victim.lastRobbedAt = new Date();
                     await saveRobState(robber, victim, robberSnapshot);
 
                     embed = new EmbedBuilder()
