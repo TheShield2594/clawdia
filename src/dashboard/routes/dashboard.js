@@ -5,7 +5,6 @@ const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { ACHIEVEMENTS } = require('../../data/achievements');
 const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
-const composioService = require('../../services/composioService');
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -113,37 +112,7 @@ async function renderGuildSettings(req, res) {
             xpReward: a.xpReward, coinReward: a.coinReward
         }));
 
-        // Reconcile the local connectedApps cache against Composio's live state so the
-        // dashboard reflects what's actually connected without the client needing to
-        // POST after the OAuth flow completes.
-        const apiKey = guildSettings.integrations?.composioApiKey;
-        if (apiKey) {
-            try {
-                const connections = await composioService.getConnections(guildId, apiKey);
-                const liveApps = [...new Set(connections
-                    .filter(c => !c.status || String(c.status).toUpperCase() === 'ACTIVE')
-                    .map(c => c.appName)
-                    .filter(Boolean)
-                    .map(s => String(s).toLowerCase()))];
-
-                const cached = (guildSettings.integrations.connectedApps || []).map(s => String(s).toLowerCase());
-                const sameSet = liveApps.length === cached.length && liveApps.every(a => cached.includes(a));
-                if (!sameSet) {
-                    guildSettings.integrations.connectedApps = liveApps;
-                    guildSettings.markModified('integrations');
-                    await guildSettings.save();
-                }
-            } catch (err) {
-                console.error('[Dashboard] Composio connection sync failed:', err.message);
-            }
-        }
-
-        // Redact the composioApiKey before sending to the template — the template only
-        // needs to know whether a key is configured (truthy), not the key itself.
         const safeSettings = guildSettings.toObject();
-        if (safeSettings.integrations?.composioApiKey) {
-            safeSettings.integrations.composioApiKey = true;
-        }
 
         res.render('guild-settings', {
             user: req.user,
@@ -156,9 +125,7 @@ async function renderGuildSettings(req, res) {
             roles: roles,
             defaultJobs: DEFAULT_JOBS,
             defaultTiers: DEFAULT_TIERS,
-            builtinAchievements,
-            oauthStatus: req.query.status || null,
-            oauthApp: req.query.connected_account_id ? 'integration' : null
+            builtinAchievements
         });
     } catch (error) {
         console.error('Dashboard error:', error);
@@ -167,8 +134,5 @@ async function renderGuildSettings(req, res) {
 }
 
 router.get('/guild/:guildId', checkAuth, renderGuildSettings);
-
-// OAuth callback from Composio lands on this URL after an integration is connected
-router.get('/guild/:guildId/settings', checkAuth, renderGuildSettings);
 
 module.exports = router;
