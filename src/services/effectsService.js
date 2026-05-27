@@ -1,13 +1,12 @@
 // Configuration for every usable item effect
 const EFFECT_CONFIGS = {
     shield:             { label: 'Shield',            emoji: '🛡️',   durationMs: 12 * 3_600_000, charges: -1 },
-    padlock:            { label: 'Padlock',            emoji: '🔒',   durationMs: null,            charges: -1 },
+    padlock:            { label: 'Padlock',            emoji: '🔒',   durationMs: null,            charges: 1  },
     lucky_charm:        { label: 'Lucky Charm',        emoji: '🍀',   durationMs: 2  * 3_600_000, charges: -1 },
     lifesaver:          { label: 'Lifesaver',          emoji: '🛟',   durationMs: null,            charges: 1  },
     invisibility_cloak: { label: 'Invisibility Cloak', emoji: '🧥',   durationMs: 6  * 3_600_000, charges: -1 },
-    knife:              { label: 'Knife',              emoji: '🔪',   durationMs: null,            charges: -1 },
-    robbery_bag:        { label: 'Robbery Bag',        emoji: '💼',   durationMs: null,            charges: -1 },
-    finders_fee:        { label: "Finder's Fee",       emoji: '💸',   durationMs: null,            charges: -1 },
+    knife:              { label: 'Knife',              emoji: '🔪',   durationMs: 1  * 3_600_000, charges: -1 },
+    robbery_bag:        { label: 'Robbery Bag',        emoji: '💼',   durationMs: 1  * 3_600_000, charges: -1 },
     streak_shield:      { label: 'Streak Shield',      emoji: '🔥🛡️', durationMs: null,            charges: 1  },
 
     // ── Booster effects ───────────────────────────────────────────────────────
@@ -26,8 +25,6 @@ const ITEM_TO_EFFECT = {
     'invisibility cloak': 'invisibility_cloak',
     'knife':              'knife',
     'robbery bag':        'robbery_bag',
-    "finder's fee":       'finders_fee',
-    'finders fee':        'finders_fee',
     'streak shield':      'streak_shield',
     '2x coin booster':    'coin_booster_2x',
     'coin booster':       'coin_booster_2x',
