@@ -3,7 +3,6 @@ const Guild = require('../models/Guild');
 const Case = require('../models/Case');
 const Reminder = require('../models/Reminder');
 const { handleAIChat } = require('../services/aiService');
-const { runAgent } = require('../services/agentService');
 const { logModeration } = require('../utils/logger');
 const { ensureQuests, onMessage, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset } = require('../services/questService');
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
@@ -91,15 +90,6 @@ module.exports = {
                         return;
                     }
                 }
-            }
-
-            // Agent channel — only the server owner's messages are handled; others fall through normally
-            const agentChannel = guildSettings?.integrations?.agentChannels?.find(
-                ch => ch.channelId === message.channel.id
-            );
-            if (agentChannel && message.guild.ownerId === message.author.id) {
-                await handleAgentChannel(message, guildSettings, agentChannel);
-                return;
             }
 
             let sharedUser = null;
@@ -557,37 +547,6 @@ async function handleBibleVerseDetection(message, guildSettings) {
     await message.reply({ embeds: [createVerseEmbed(verseData)] }).catch(() => {});
 }
 
-// ------------------------------------------------------------------
-// Agent channel handler
-// ------------------------------------------------------------------
-// Strip leading bot mention tokens so they don't waste agent context
-function cleanAgentMessage(content, botId) {
-    return content
-        .replace(new RegExp(`^\\s*<@!?${botId}>\\s*:?\\s*`, ''), '')
-        .trim();
-}
-
-async function handleAgentChannel(message, guildSettings, agentChannel) {
-    await message.channel.sendTyping().catch(() => {});
-
-    const userMessage = cleanAgentMessage(message.content, message.client.user.id);
-
-    try {
-        const reply = await runAgent({
-            guildId: message.guild.id,
-            guildSettings,
-            userMessage,
-            channelFocus: agentChannel.focus || '',
-            enabledApps: agentChannel.enabledApps || [],
-            userName: message.member?.displayName || message.author.username
-        });
-        await message.reply({ content: reply, allowedMentions: { parse: [] } })
-            .catch(() => message.channel.send({ content: reply, allowedMentions: { parse: [] } }));
-    } catch (err) {
-        console.error('[AgentChannel] Error:', err.message);
-        await message.reply({ content: '⚠️ Something went wrong running the agent. Check your API keys and try again.', allowedMentions: { parse: [] } }).catch(() => {});
-    }
-}
 
 // ------------------------------------------------------------------
 // Natural language reminder detection (available to everyone)

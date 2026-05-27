@@ -145,9 +145,6 @@ async function startBot() {
 
         const { startRaidMonitor } = require('./services/raidService');
         startRaidMonitor(client);
-
-        const { init: initAutomationEngine } = require('./services/automationEngine');
-        initAutomationEngine(client);
     });
 
     client.login(process.env.DISCORD_TOKEN);
