@@ -184,7 +184,7 @@ module.exports = {
                 if (hasEffect(robber, 'lifesaver')) {
                     consumeEffect(robber, 'lifesaver');
                     victim.lastRobbedAt = new Date();
-                    await Promise.all([robber.save(), victim.save().catch(console.error)]);
+                    await Promise.all([robber.save(), victim.save()]);
 
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
