@@ -127,63 +127,85 @@ module.exports = {
             }
 
             const doPurchase = async (reply) => {
-                const session = await Guild.startSession();
-                session.startTransaction();
-                try {
-                    const [freshGuild, freshUser] = await Promise.all([
-                        Guild.findOne({ guildId: interaction.guild.id }).session(session),
-                        User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }).session(session)
-                    ]);
+                // Re-fetch to catch any changes since the pre-check (stock sold out, balance changed)
+                const [freshGuild, freshUser] = await Promise.all([
+                    Guild.findOne({ guildId: interaction.guild.id }),
+                    User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id })
+                ]);
 
-                    const freshItem = freshGuild.shop.find(i => i.name.toLowerCase() === itemName);
-                    if (!freshItem || freshItem.stock === 0) {
-                        await session.abortTransaction();
-                        session.endSession();
-                        return reply({ content: 'That item is no longer available.', embeds: [], components: [] });
-                    }
-                    if (freshUser.balance < freshItem.price) {
-                        await session.abortTransaction();
-                        session.endSession();
-                        return reply({
-                            content: `You need ${currency}${freshItem.price.toLocaleString()} but only have ${currency}${freshUser.balance.toLocaleString()}.`,
-                            embeds: [], components: []
-                        });
-                    }
-
-                    freshUser.balance -= freshItem.price;
-                    const invEntry = freshUser.inventory.find(e => e.itemId === freshItem.name);
-                    if (invEntry) invEntry.quantity += 1;
-                    else freshUser.inventory.push({ itemId: freshItem.name, quantity: 1 });
-
-                    if (freshItem.stock > 0) freshItem.stock -= 1;
-                    await Promise.all([freshUser.save({ session }), freshGuild.save({ session })]);
-
-                    await session.commitTransaction();
-                    session.endSession();
-
-                    if (freshItem.roleId) {
-                        await interaction.member.roles.add(freshItem.roleId).catch(console.error);
-                    }
-
-                    const successEmbed = new EmbedBuilder()
-                        .setColor('#00ff00')
-                        .setTitle('Purchase Successful')
-                        .setDescription(`You bought **${freshItem.name}** for ${currency}${freshItem.price.toLocaleString()}.`)
-                        .addFields({ name: 'New Balance', value: `${currency}${freshUser.balance.toLocaleString()}`, inline: true });
-
-                    if (freshItem.roleId) {
-                        successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
-                    }
-                    if (freshItem.imageUrl) {
-                        successEmbed.setThumbnail(freshItem.imageUrl);
-                    }
-
-                    return reply({ embeds: [successEmbed], components: [] });
-                } catch (err) {
-                    await session.abortTransaction().catch(() => {});
-                    session.endSession();
-                    throw err;
+                const freshItem = freshGuild?.shop.find(i => i.name.toLowerCase() === itemName);
+                if (!freshItem || freshItem.stock === 0) {
+                    return reply({ content: 'That item is no longer available.', embeds: [], components: [] });
                 }
+                if (!freshUser || freshUser.balance < freshItem.price) {
+                    return reply({
+                        content: `You need ${currency}${freshItem.price.toLocaleString()} but only have ${currency}${(freshUser?.balance ?? 0).toLocaleString()}.`,
+                        embeds: [], components: []
+                    });
+                }
+
+                // Atomically deduct balance — prevents double-spend if balance changed between checks
+                const chargedUser = await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: freshItem.price } },
+                    { $inc: { balance: -freshItem.price } },
+                    { new: true }
+                );
+                if (!chargedUser) {
+                    return reply({ content: `You no longer have enough ${currency} for this purchase.`, embeds: [], components: [] });
+                }
+
+                // Atomically decrement stock if limited; refund on sell-out race
+                if (freshItem.stock > 0) {
+                    const stockResult = await Guild.findOneAndUpdate(
+                        { guildId: interaction.guild.id, 'shop._id': freshItem._id, 'shop.stock': { $gt: 0 } },
+                        { $inc: { 'shop.$.stock': -1 } }
+                    );
+                    if (!stockResult) {
+                        try {
+                            await User.findOneAndUpdate(
+                                { userId: interaction.user.id, guildId: interaction.guild.id },
+                                { $inc: { balance: freshItem.price } }
+                            );
+                            return reply({ content: 'That item just sold out. Your coins have been refunded.', embeds: [], components: [] });
+                        } catch (refundErr) {
+                            console.error('[shop] refund failed after sell-out:', refundErr);
+                            return reply({ content: 'That item just sold out and the automatic refund failed — please contact support.', embeds: [], components: [] });
+                        }
+                    }
+                }
+
+                // Update inventory atomically: increment if entry exists, otherwise push
+                const incResult = await User.updateOne(
+                    { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': freshItem.name },
+                    { $inc: { 'inventory.$.quantity': 1 } }
+                );
+                if (incResult.modifiedCount === 0) {
+                    // No existing entry — push a new one; $ne guard makes this a no-op if a
+                    // concurrent request already inserted the entry between these two operations
+                    await User.updateOne(
+                        { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': { $ne: freshItem.name } },
+                        { $push: { inventory: { itemId: freshItem.name, quantity: 1 } } }
+                    );
+                }
+
+                if (freshItem.roleId) {
+                    await interaction.member.roles.add(freshItem.roleId).catch(console.error);
+                }
+
+                const successEmbed = new EmbedBuilder()
+                    .setColor('#00ff00')
+                    .setTitle('Purchase Successful')
+                    .setDescription(`You bought **${freshItem.name}** for ${currency}${freshItem.price.toLocaleString()}.`)
+                    .addFields({ name: 'New Balance', value: `${currency}${chargedUser.balance.toLocaleString()}`, inline: true });
+
+                if (freshItem.roleId) {
+                    successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
+                }
+                if (freshItem.imageUrl) {
+                    successEmbed.setThumbnail(freshItem.imageUrl);
+                }
+
+                return reply({ embeds: [successEmbed], components: [] });
             };
 
             if (item.price >= CONFIRM_THRESHOLD) {

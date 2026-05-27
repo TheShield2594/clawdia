@@ -84,7 +84,8 @@ module.exports = {
             return interaction.reply({ content: `${target.username} is under rob immunity for **${mins} min**.`, ephemeral: true });
         }
 
-        if (!victim || victim.balance < minRobWallet) {
+        const victimTotalWealth = (victim?.balance ?? 0) + (victim?.bank ?? 0);
+        if (!victim || victimTotalWealth < minRobWallet) {
             return interaction.reply({ content: `${target.username} doesn't have enough ${currency} to be worth robbing (minimum ${currency}${minRobWallet}).`, ephemeral: true });
         }
 
@@ -153,6 +154,7 @@ module.exports = {
                     victim.bank = Math.max(0, victim.bank - (stolen - fromWallet));
                 }
                 victim.lastRobbedAt = new Date();
+                if (padlockActive) consumeEffect(victim, 'padlock');
                 const robAchievements = await checkAndAward(robber, guildSettings).catch(() => []);
                 await saveRobState(robber, victim, robberSnapshot);
                 if (robAchievements.length) {
@@ -172,7 +174,7 @@ module.exports = {
                     .setTimestamp();
 
                 if (padlockActive) {
-                    embed.addFields({ name: '🔒 Padlock Active', value: `${target.username}'s bank was protected!`, inline: false });
+                    embed.addFields({ name: '🔒 Padlock Broken!', value: `${target.username}'s bank was protected, but their padlock is now gone!`, inline: false });
                 }
             } else {
                 const fine = Math.floor(robber.balance * failFineRate);
@@ -181,7 +183,8 @@ module.exports = {
                 // Lifesaver: absorbs the failure fine — no coins lost
                 if (hasEffect(robber, 'lifesaver')) {
                     consumeEffect(robber, 'lifesaver');
-                    await robber.save();
+                    victim.lastRobbedAt = new Date();
+                    await Promise.all([robber.save(), victim.save()]);
 
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
@@ -196,6 +199,7 @@ module.exports = {
                 } else {
                     robber.balance = Math.max(0, robber.balance - paid);
                     victim.balance += paid;
+                    victim.lastRobbedAt = new Date();
                     await saveRobState(robber, victim, robberSnapshot);
 
                     embed = new EmbedBuilder()
