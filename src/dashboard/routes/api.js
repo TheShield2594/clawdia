@@ -205,6 +205,28 @@ function isAllowedSettingKey(key) {
     return ALLOWED_SETTING_PARENTS.has(top);
 }
 
+// Field-level validation for welcome settings before they reach Mongoose (fix #12).
+// Returns an error string, or null if valid.
+function validateWelcomeUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        if (!key.startsWith('welcome.') && key !== 'welcome') continue;
+        const field = key.split('.')[1];
+        if (field === 'message' || field === 'dmMessage') {
+            if (typeof value !== 'string') return `welcome.${field} must be a string`;
+            if (value.length > 4000) return `welcome.${field} exceeds 4000 characters`;
+        }
+        if (field === 'enabled' || field === 'cardEnabled' || field === 'dmEnabled') {
+            if (typeof value !== 'boolean') return `welcome.${field} must be a boolean`;
+        }
+        if (field === 'channelId' && value !== null && value !== '') {
+            if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {
+                return 'welcome.channelId must be a valid Discord snowflake or null';
+            }
+        }
+    }
+    return null;
+}
+
 router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
@@ -217,6 +239,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
     if (rejectedKeys.length) {
         return res.status(400).json({ error: `Disallowed setting key(s): ${rejectedKeys.join(', ')}` });
     }
+
+    const welcomeError = validateWelcomeUpdate(updates);
+    if (welcomeError) return res.status(400).json({ error: welcomeError });
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
@@ -243,6 +268,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
         res.json({ success: true, settings: guildSettings });
     } catch (error) {
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({ error: error.message });
+        }
         console.error('API error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
