@@ -189,7 +189,7 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'welcome', 'farewell', 'birthdays',
     'moderation', 'leveling', 'levelRoles',
     'economy', 'shop', 'jobs', 'jobTiers',
-    'achievements', 'tickets',
+    'achievements',
     'raidDetection', 'antiNuke', 'caseSettings',
     'starboard', 'eventLog', 'quests',
     'season', 'progressionTracks', 'commandPolicies',

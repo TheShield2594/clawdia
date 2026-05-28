@@ -42,7 +42,7 @@ const CATEGORIES = [
         id: 'moderation',
         emoji: '🛡️',
         label: 'Moderation',
-        preview: 'ban, kick, warn, cases, tickets',
+        preview: 'ban, kick, warn, cases, appeals',
         commands: [
             { name: 'ban',       description: 'Ban a member from the server' },
             { name: 'kick',      description: 'Kick a member from the server' },
@@ -59,7 +59,6 @@ const CATEGORIES = [
             { name: 'cases',     description: 'List moderation cases for a user' },
             { name: 'closecase', description: 'Close a moderation case' },
             { name: 'note',      description: 'Add a note to a case or assign/label it' },
-            { name: 'ticket',    description: 'Ticket system for support requests' },
             { name: 'appeal',    description: 'Appeal a moderation case against you' },
         ],
     },
