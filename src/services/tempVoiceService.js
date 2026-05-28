@@ -13,11 +13,20 @@ async function handleVoiceStateUpdate(oldState, newState, client) {
     // Member joined the lobby → create their channel
     if (newState.channelId === lobbyChannelId && newState.member) {
         const member = newState.member;
+
+        const botMember = guild.members.me;
+        if (!botMember) return;
+        const targetParent = categoryId ? guild.channels.cache.get(categoryId) : null;
+        if (!botMember.permissionsIn(targetParent ?? guild).has(PermissionFlagsBits.ManageChannels)) {
+            console.warn(`[TEMPVOICE] Bot lacks ManageChannels in guild ${guild.id}`);
+            return;
+        }
+
         const nameTemplate = channelName || "{username}'s VC";
         const resolvedName = nameTemplate
             .replace(/{username}/gi, member.user.username)
             .replace(/{displayname}/gi, member.displayName)
-            .replace(/{tag}/gi, member.user.tag ?? member.user.username);
+            .replace(/{tag}/gi, member.user.globalName ?? member.user.username);
 
         const channel = await guild.channels.create({
             name: resolvedName,
@@ -34,8 +43,10 @@ async function handleVoiceStateUpdate(oldState, newState, client) {
 
         await member.voice.setChannel(channel).catch(console.error);
 
-        guildSettings.tempVoice.activeChannels.push(channel.id);
-        await guildSettings.save();
+        await Guild.updateOne(
+            { guildId: guild.id },
+            { $addToSet: { 'tempVoice.activeChannels': channel.id } }
+        );
     }
 
     // Member left a temp channel → delete if empty
@@ -45,10 +56,10 @@ async function handleVoiceStateUpdate(oldState, newState, client) {
         const leftChannel = guild.channels.cache.get(oldState.channelId);
         if (leftChannel && leftChannel.members.size === 0) {
             await leftChannel.delete().catch(console.error);
-            guildSettings.tempVoice.activeChannels = guildSettings.tempVoice.activeChannels.filter(
-                id => id !== oldState.channelId
+            await Guild.updateOne(
+                { guildId: guild.id },
+                { $pull: { 'tempVoice.activeChannels': oldState.channelId } }
             );
-            await guildSettings.save();
         }
     }
 }
@@ -62,22 +73,22 @@ async function checkTempVoice(client) {
             const guild = client.guilds.cache.get(guildSettings.guildId);
             if (!guild) continue;
 
-            let dirty = false;
             const toKeep = [];
 
             for (const channelId of guildSettings.tempVoice.activeChannels) {
                 const channel = guild.channels.cache.get(channelId);
                 if (!channel || channel.members.size === 0) {
                     if (channel) await channel.delete().catch(() => {});
-                    dirty = true;
                 } else {
                     toKeep.push(channelId);
                 }
             }
 
-            if (dirty) {
-                guildSettings.tempVoice.activeChannels = toKeep;
-                await guildSettings.save();
+            if (toKeep.length !== guildSettings.tempVoice.activeChannels.length) {
+                await Guild.updateOne(
+                    { guildId: guildSettings.guildId },
+                    { $set: { 'tempVoice.activeChannels': toKeep } }
+                );
             }
         }
     } catch (err) {
