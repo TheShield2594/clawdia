@@ -48,10 +48,10 @@ const guildSchema = new Schema({
     welcome: {
         enabled: { type: Boolean, default: false },
         channelId: { type: String, default: null },
-        message: { type: String, default: 'Welcome {user} to {server}!' },
+        message: { type: String, default: 'Welcome {user} to {server}!', maxlength: 4000 },
         cardEnabled: { type: Boolean, default: true },
         dmEnabled: { type: Boolean, default: false },
-        dmMessage: { type: String, default: 'Welcome to {server}! We\'re glad to have you here.' }
+        dmMessage: { type: String, default: 'Welcome to {server}! We\'re glad to have you here.', maxlength: 4000 }
     },
     
     farewell: {
