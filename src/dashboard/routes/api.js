@@ -227,6 +227,26 @@ function validateWelcomeUpdate(updates) {
     return null;
 }
 
+function validateFarewellUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        if (!key.startsWith('farewell.') && key !== 'farewell') continue;
+        const field = key.split('.')[1];
+        if (field === 'message') {
+            if (typeof value !== 'string') return 'farewell.message must be a string';
+            if (value.length > 4000) return 'farewell.message exceeds 4000 characters';
+        }
+        if (field === 'enabled') {
+            if (typeof value !== 'boolean') return 'farewell.enabled must be a boolean';
+        }
+        if (field === 'channelId' && value !== null && value !== '') {
+            if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {
+                return 'farewell.channelId must be a valid Discord snowflake or null';
+            }
+        }
+    }
+    return null;
+}
+
 router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
@@ -242,6 +262,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
     const welcomeError = validateWelcomeUpdate(updates);
     if (welcomeError) return res.status(400).json({ error: welcomeError });
+
+    const farewellError = validateFarewellUpdate(updates);
+    if (farewellError) return res.status(400).json({ error: farewellError });
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
