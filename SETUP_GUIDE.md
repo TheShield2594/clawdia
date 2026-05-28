@@ -6,6 +6,11 @@
 3. [Daily News Configuration](#daily-news-configuration)
 4. [Dashboard Setup](#dashboard-setup)
 5. [Portainer Deployment](#portainer-deployment)
+6. [Database Management](#database-management)
+7. [Troubleshooting](#troubleshooting)
+8. [Best Practices](#best-practices)
+9. [Getting Help](#getting-help)
+10. [Next Steps](#next-steps)
 
 ## Discord Bot Setup
 
@@ -155,6 +160,11 @@ GEMINI_API_KEY=AIza_your_gemini_key_here
 
 # Music (Optional)
 YOUTUBE_COOKIE=your_youtube_cookie_if_needed
+
+# Meme Generation (Optional — required for /meme command)
+# Free account at https://imgflip.com/api
+IMGFLIP_USERNAME=your_imgflip_username
+IMGFLIP_PASSWORD=your_imgflip_password
 
 # Environment
 NODE_ENV=production
