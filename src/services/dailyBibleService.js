@@ -1,4 +1,5 @@
 const cron = require('node-cron');
+const { PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 const { getDailyVerse, lookupVerse, createVerseEmbed } = require('./bibleService');
 
@@ -44,6 +45,15 @@ async function postDailyVerse(client, guildId, channelId, translation) {
         let channel = client.channels.cache.get(channelId);
         if (!channel) channel = await client.channels.fetch(channelId).catch(() => null);
         if (!channel || typeof channel.send !== 'function') return;
+
+        const guild = channel.guild;
+        if (guild) {
+            const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+            if (botMember && !channel.permissionsFor(botMember).has(PermissionFlagsBits.SendMessages)) {
+                console.warn(`[BibleService] Missing SendMessages permission in channel ${channelId} for guild ${guildId}`);
+                return;
+            }
+        }
 
         const embed = createVerseEmbed(displayVerse, '📖 Daily Bible Verse');
         await channel.send({ embeds: [embed] });
