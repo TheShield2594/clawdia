@@ -32,7 +32,7 @@ function applyVariables(template, member) {
     return template
         .replace(/{user}/g, `<@${member.id}>`)
         .replace(/{username}/g, member.user.displayName ?? member.user.username)
-        .replace(/{tag}/g, member.user.tag)
+        .replace(/{tag}/g, member.user.username)
         .replace(/{server}/g, member.guild.name)
         .replace(/{memberCount}/g, member.guild.memberCount);
 }
