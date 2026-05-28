@@ -1,4 +1,4 @@
-# UltraBot Feature Reference
+# Clawdia Feature Reference
 
 ## 🤖 AI Chat Integration
 
@@ -9,6 +9,9 @@
 | **Google Gemini** | ✅ 60 req/min | ⚡ Fast | General chat, testing |
 | **OpenAI GPT-3.5** | ❌ Paid | ⚡ Fast | Complex tasks, coding |
 | **OpenAI GPT-4** | ❌ Paid | 🐌 Slower | Advanced reasoning |
+| **Anthropic Claude** | ❌ Paid | ⚡ Fast | Nuanced reasoning, long context |
+| **OpenRouter** | ❌ Paid | ⚡ Fast | Access to many models via one API |
+| **Ollama (self-hosted)** | ✅ Free | Varies | Privacy-first, local inference |
 
 ### Configuration Options
 
@@ -16,6 +19,9 @@
 ```env
 OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=AIza...
+ANTHROPIC_API_KEY=sk-ant-...
+OPENROUTER_API_KEY=...
+OLLAMA_BASE_URL=http://localhost:11434
 ```
 
 **Per-Server Configuration** (Dashboard):
@@ -28,13 +34,8 @@ GEMINI_API_KEY=AIza...
 
 **Dedicated Channel:**
 - Set an AI chat channel in dashboard
-- Users chat naturally, bot responds to every message
+- Users chat naturally, bot responds to every message and @-mentions/replies anywhere
 - Bot shows typing indicator while processing
-
-**Command Usage:**
-```
-/ai prompt:What is the capital of France?
-```
 
 **Customization:**
 ```
@@ -97,32 +98,6 @@ https://www.reddit.com/r/worldnews/.rss
 
 Administrators can send an immediate digest using the **Send digest now** button in the dashboard's Daily News panel.
 
-## 🎵 Music System
-
-### Features
-
-- 24/7 music streaming
-- YouTube support
-- Queue management
-- Volume control
-- Persistent voice connection
-
-### Commands
-
-```
-/play <song/url>     - Play or queue a song
-/skip                - Skip current song
-/stop                - Stop music and clear queue
-/queue               - View queue
-/nowplaying          - Current song info
-```
-
-### Dashboard Settings
-
-- **DJ Role**: Restrict music controls to specific role
-- **Default Volume**: Set initial volume (0-100)
-- **Max Queue Size**: Limit queue length
-
 ## ⚖️ Moderation System
 
 ### Commands
@@ -131,11 +106,12 @@ Administrators can send an immediate digest using the **Send digest now** button
 |---------|-------------|---------------------|
 | `/ban` | Ban a user | Ban Members |
 | `/kick` | Kick a user | Kick Members |
-| `/warn` | Warn a user | Moderate Members |
+| `/warn add` | Warn a user | Moderate Members |
+| `/warn list` | View warnings for a user | Moderate Members |
+| `/warn remove` | Remove a warning | Moderate Members |
 | `/mute` | Timeout user | Moderate Members |
 | `/unmute` | Remove timeout | Moderate Members |
 | `/clear` | Delete messages | Manage Messages |
-| `/warnings` | View warnings | Moderate Members |
 
 ### Auto-Moderation
 
@@ -145,6 +121,10 @@ Enable in dashboard for automatic enforcement:
 - **Invite Filter**: Discord invite links
 - **Link Filter**: HTTP/HTTPS links
 - **Profanity Filter**: Custom word list
+- **Caps Filter**: Excessive capitalization
+- **Emoji Filter**: Emoji flooding
+- **Mention Filter**: Mass mentions
+- **Zalgo Filter**: Corrupted/zalgo text
 
 ### Logging
 
@@ -159,7 +139,7 @@ Set a moderation log channel to track:
 ### Leveling
 
 **How it works:**
-- Users gain 10-25 XP per message
+- Users gain 10-24 XP per message
 - XP cooldown: 60 seconds
 - Level formula: `Level * 100 + 100` XP needed
 
@@ -280,18 +260,14 @@ Automatically assign roles to new members:
 
 ### Reminders
 
-Set personal reminders:
+Set personal reminders using separate time options:
 ```
-/remind time:1h message:Check the oven
-/remind time:tomorrow message:Meeting at 9am
-/remind time:2d message:Submit report
+/remind minutes:30 message:Check the oven
+/remind hours:2 message:Meeting at 9am
+/remind days:2 message:Submit report
 ```
 
-Time formats:
-- `1h`, `2h` - Hours
-- `30m`, `45m` - Minutes
-- `1d`, `2d` - Days
-- `tomorrow`, `today` - Relative days
+The slash command accepts `minutes`, `hours`, and `days` as individual integer options (combine as needed).
 
 ## 📱 Dashboard Features
 
@@ -300,14 +276,25 @@ Access at `http://your-domain:3000`
 ### Sections
 
 1. **Overview** - Server stats, quick settings
-2. **Welcome** - Welcome/farewell configuration
-3. **Moderation** - Auto-mod and logging
-4. **Leveling** - XP system settings
-5. **Economy** - Currency configuration
-6. **Music** - Player settings
-7. **RSS Feeds** - Individual feed management
-8. **Daily News** - Digest configuration
-9. **AI Chat** - Provider and prompt settings
+2. **Welcome / Farewell** - Welcome/farewell message configuration
+3. **Moderation** - Auto-mod, case settings, and logging
+4. **Raid Detection / Anti-Nuke** - Server protection settings
+5. **Leveling** - XP system settings
+6. **Economy** - Currency configuration
+7. **Achievements / Quests** - Milestone and quest tracking
+8. **Season Pass / Progression Tracks** - Season and progression rewards
+9. **Starboard** - Highlight popular messages
+10. **Suggestions** - Community suggestion tracking
+11. **Reaction Roles** - Self-assignable roles via reactions
+12. **Temp Voice** - Temporary voice channel management
+13. **Birthdays** - Birthday announcements
+14. **Bible Verses** - Daily scripture posts
+15. **RSS Feeds** - Individual feed management
+16. **Daily News** - Digest configuration
+17. **AI Chat** - Provider and prompt settings
+18. **Analytics** - Insights and engagement metrics
+19. **Event Log** - Audit log for server events
+20. **Command Policies** - Per-command permission overrides
 
 ### Multi-Server Support
 
@@ -364,7 +351,6 @@ Prevent spam with built-in cooldowns:
 
 | Command | Cooldown |
 |---------|----------|
-| `/ai` | 10 seconds |
 | `/daily` | 24 hours |
 | `/work` | 1 hour |
 | `/casino wheel` | 24 hours (configurable; bypass with paid spin) |
