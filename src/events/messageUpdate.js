@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 
 module.exports = {
@@ -13,10 +13,12 @@ module.exports = {
         const logChannel = newMessage.guild.channels.cache.get(guildSettings.eventLog.channelId);
         if (!logChannel) return;
 
+        if (!logChannel.permissionsFor(newMessage.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) return;
+
         const embed = new EmbedBuilder()
             .setColor('#FFA500')
             .setTitle('Message Edited')
-            .setAuthor({ name: newMessage.author.tag, iconURL: newMessage.author.displayAvatarURL({ dynamic: true }) })
+            .setAuthor({ name: newMessage.author.globalName ?? newMessage.author.username, iconURL: newMessage.author.displayAvatarURL() })
             .addFields(
                 { name: 'Before', value: (oldMessage.content || '*empty*').substring(0, 1024) },
                 { name: 'After', value: (newMessage.content || '*empty*').substring(0, 1024) },

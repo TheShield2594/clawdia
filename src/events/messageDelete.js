@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 
 module.exports = {
@@ -12,10 +12,12 @@ module.exports = {
         const logChannel = message.guild.channels.cache.get(guildSettings.eventLog.channelId);
         if (!logChannel) return;
 
+        if (!logChannel.permissionsFor(message.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) return;
+
         const embed = new EmbedBuilder()
             .setColor('#ff0000')
             .setTitle('Message Deleted')
-            .setAuthor({ name: message.author?.tag ?? 'Unknown', iconURL: message.author?.displayAvatarURL({ dynamic: true }) })
+            .setAuthor({ name: message.author?.globalName ?? message.author?.username ?? 'Unknown', iconURL: message.author?.displayAvatarURL() })
             .addFields(
                 { name: 'Content', value: (message.content || '*no text content*').substring(0, 1024) },
                 { name: 'Channel', value: `<#${message.channel.id}>`, inline: true }
