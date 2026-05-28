@@ -1,4 +1,4 @@
-const { EmbedBuilder, AuditLogEvent } = require('discord.js');
+const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 const { trackAction } = require('../services/antiNukeService');
 
@@ -23,6 +23,8 @@ module.exports = {
 
         const logChannel = channel.guild.channels.cache.get(guildSettings.eventLog.channelId);
         if (!logChannel) return;
+
+        if (!logChannel.permissionsFor(channel.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) return;
 
         const embed = new EmbedBuilder()
             .setColor('#ff0000')

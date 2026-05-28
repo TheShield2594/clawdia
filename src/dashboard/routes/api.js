@@ -293,6 +293,26 @@ function validateBirthdaysUpdate(updates) {
     return null;
 }
 
+function validateEventLogUpdate(updates) {
+    const EVENT_LOG_BOOLEAN_FIELDS = new Set([
+        'enabled', 'logMessageEdit', 'logMessageDelete',
+        'logMemberJoin', 'logMemberLeave', 'logRoleChanges', 'logChannelChanges',
+    ]);
+    for (const [key, value] of Object.entries(updates)) {
+        if (!key.startsWith('eventLog.') && key !== 'eventLog') continue;
+        const field = key.split('.')[1];
+        if (EVENT_LOG_BOOLEAN_FIELDS.has(field)) {
+            if (typeof value !== 'boolean') return `eventLog.${field} must be a boolean`;
+        }
+        if (field === 'channelId' && value !== null && value !== '') {
+            if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {
+                return 'eventLog.channelId must be a valid Discord snowflake or null';
+            }
+        }
+    }
+    return null;
+}
+
 const VALID_BIBLE_TRANSLATIONS = new Set(['kjv', 'niv', 'asv', 'web', 'ylt', 'darby', 'bbe', 'webbe']);
 
 function validateBibleVerseUpdate(updates) {
@@ -357,6 +377,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
     const bibleVerseError = validateBibleVerseUpdate(updates);
     if (bibleVerseError) return res.status(400).json({ error: bibleVerseError });
+
+    const eventLogError = validateEventLogUpdate(updates);
+    if (eventLogError) return res.status(400).json({ error: eventLogError });
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
@@ -1073,3 +1096,4 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
 
 module.exports = router;
 module.exports.computeRetention = computeRetention;
+module.exports.validateEventLogUpdate = validateEventLogUpdate;
