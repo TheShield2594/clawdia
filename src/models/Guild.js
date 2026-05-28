@@ -57,7 +57,7 @@ const guildSchema = new Schema({
     farewell: {
         enabled: { type: Boolean, default: false },
         channelId: { type: String, default: null },
-        message: { type: String, default: 'Goodbye {user}!' }
+        message: { type: String, default: 'Goodbye {user}!', maxlength: 4000 }
     },
 
     birthdays: {
