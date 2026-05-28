@@ -138,6 +138,10 @@ async function startBot() {
         const { startTempBanService } = require('./services/tempBanService');
         startTempBanService(client);
 
+        const { checkTempVoice } = require('./services/tempVoiceService');
+        checkTempVoice(client);
+        setInterval(() => checkTempVoice(client), 5 * 60_000);
+
         const { startRaidMonitor } = require('./services/raidService');
         startRaidMonitor(client);
     });
