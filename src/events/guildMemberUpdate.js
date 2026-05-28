@@ -1,4 +1,4 @@
-const { EmbedBuilder, AuditLogEvent } = require('discord.js');
+const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 
 module.exports = {
@@ -9,6 +9,8 @@ module.exports = {
 
         const logChannel = newMember.guild.channels.cache.get(guildSettings.eventLog.channelId);
         if (!logChannel) return;
+
+        if (!logChannel.permissionsFor(newMember.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) return;
 
         const oldRoles = oldMember.roles.cache;
         const newRoles = newMember.roles.cache;
@@ -21,7 +23,7 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setColor('#5865F2')
             .setTitle('Member Roles Updated')
-            .setAuthor({ name: newMember.user.tag, iconURL: newMember.user.displayAvatarURL({ dynamic: true }) })
+            .setAuthor({ name: newMember.user.globalName ?? newMember.user.username, iconURL: newMember.user.displayAvatarURL() })
             .setTimestamp();
 
         if (added.size) embed.addFields({ name: 'Roles Added', value: added.map(r => r.toString()).join(', ') });
