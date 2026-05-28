@@ -392,10 +392,12 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
         const memberEvents = guildSettings?.analytics?.memberEvents || [];
         const commandUsage = guildSettings?.analytics?.commandUsage || [];
 
+        const joins7 = memberEvents.slice(-7).reduce((a, d) => a + (d.joins || 0), 0);
+        const leaves7 = memberEvents.slice(-7).reduce((a, d) => a + (d.leaves || 0), 0);
         const joins30 = memberEvents.slice(-30).reduce((a, d) => a + (d.joins || 0), 0);
         const leaves30 = memberEvents.slice(-30).reduce((a, d) => a + (d.leaves || 0), 0);
-        const retained7 = Math.max(0, joins30 - leaves30) / Math.max(joins30, 1);
-        const retained30 = Math.max(0, joins30 - Math.round(leaves30 * 1.2)) / Math.max(joins30, 1);
+        const retained7 = joins7 ? Math.max(0, joins7 - leaves7) / joins7 : 0;
+        const retained30 = joins30 ? Math.max(0, joins30 - leaves30) / joins30 : 0;
 
         const commandSummary = {};
         const failedByReason = {};
