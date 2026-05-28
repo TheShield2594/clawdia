@@ -287,15 +287,6 @@ const guildSchema = new Schema({
         maxPay: { type: Number, default: 150, min: 0 }
     }],
 
-    tickets: {
-        enabled: { type: Boolean, default: false },
-        categoryId: { type: String, default: null },
-        logChannelId: { type: String, default: null },
-        supportRoleId: { type: String, default: null },
-        openMessage: { type: String, default: 'A support agent will be with you shortly.' },
-        count: { type: Number, default: 0 }
-    },
-
     raidDetection: {
         enabled: { type: Boolean, default: false },
         threshold: { type: Number, default: 10, min: 1 },

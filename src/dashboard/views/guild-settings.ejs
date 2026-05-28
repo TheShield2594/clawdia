@@ -108,7 +108,6 @@
                 <span>AI Chat</span>
             </li>
             <li class="nav-item" data-tab="tempvoice"><span class="nav-emoji">🔊</span><span>Temp Voice</span></li>
-            <li class="nav-item" data-tab="tickets"><span class="nav-emoji">🎫</span><span>Tickets</span></li>
         </ul>
 
         <!-- Feeds & Automation -->
@@ -907,56 +906,6 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- Tickets -->
-                <section id="tickets" class="panel">
-                    <div class="panel-head">
-                        <h2>Ticket System</h2>
-                        <p>Let members open private support channels via <code>/ticket open</code>.</p>
-                    </div>
-                    <label class="toggle">
-                        <span class="toggle-text"><strong>Enable ticket system</strong></span>
-                        <span class="switch"><input type="checkbox" id="tickets-enabled" <%= settings.tickets?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
-                    </label>
-                    <div class="field">
-                        <label class="field-label" for="tickets-category">Ticket category</label>
-                        <select id="tickets-category">
-                            <option value="">Select a category</option>
-                            <% (categories || []).forEach(cat => { %>
-                                <option value="<%= cat.id %>" <%= settings.tickets?.categoryId === cat.id ? 'selected' : '' %>><%= cat.name %></option>
-                            <% }); %>
-                        </select>
-                        <small>New ticket channels are created inside this category.</small>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="tickets-support-role">Support role</label>
-                        <select id="tickets-support-role">
-                            <option value="">Select a role</option>
-                            <% roles.forEach(role => { %>
-                                <option value="<%= role.id %>" <%= settings.tickets?.supportRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
-                            <% }); %>
-                        </select>
-                        <small>This role can see and manage all ticket channels.</small>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="tickets-log-channel">Ticket log channel</label>
-                        <select id="tickets-log-channel">
-                            <option value="">None</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.tickets?.logChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
-                        <small>Closed ticket summaries and transcripts are posted here.</small>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="tickets-open-message">Opening message</label>
-                        <textarea id="tickets-open-message" rows="3"><%= settings.tickets?.openMessage || 'A support agent will be with you shortly.' %></textarea>
-                        <small>Shown inside the ticket channel when it's created.</small>
-                    </div>
-                    <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('tickets')">Save changes</button>
-                    </div>
-                </section>
 
                 <!-- Raid Detection -->
                 <section id="raiddetection" class="panel">
@@ -2320,21 +2269,6 @@
                     'achievements.announcementChannelId': document.getElementById('ach-announce-channel').value || null,
                     'achievements.disabledAchievements': _disabledAchievements,
                     'achievements.customAchievements': _customAchievements
-                };
-            } else if (section === 'tickets') {
-                const ticketsEnabled = document.getElementById('tickets-enabled').checked;
-                const ticketsCategoryId = document.getElementById('tickets-category').value || null;
-                const ticketsSupportRoleId = document.getElementById('tickets-support-role').value || null;
-                if (ticketsEnabled && (!ticketsCategoryId || !ticketsSupportRoleId)) {
-                    toast('A category and support role are required to enable tickets.', 'error');
-                    return;
-                }
-                data = {
-                    'tickets.enabled': ticketsEnabled,
-                    'tickets.categoryId': ticketsCategoryId,
-                    'tickets.supportRoleId': ticketsSupportRoleId,
-                    'tickets.logChannelId': document.getElementById('tickets-log-channel').value || null,
-                    'tickets.openMessage': document.getElementById('tickets-open-message').value
                 };
             } else if (section === 'raiddetection') {
                 data = {
