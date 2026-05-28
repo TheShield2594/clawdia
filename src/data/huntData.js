@@ -364,7 +364,7 @@ const ANIMALS = {
         id: 'wild_hog', name: 'Wild Hog', emoji: '🐗', tier: 'uncommon',
         payoutMin: 62, payoutMax: 115, xp: 25,
         specialDrop: { itemId: 'hog_tusk', name: 'Hog Tusk', chance: 0.07 },
-        zones: ['murky_swamp', 'beginner_forest'],
+        zones: ['murky_swamp'],
         flavor: 'A mud-caked wild hog bursts from the reeds with a furious squeal.'
     },
 
