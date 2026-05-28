@@ -92,12 +92,14 @@ async function handleMemberJoin(member, client) {
         )
         .setTimestamp();
 
+    // Set in-memory state before the first await so concurrent joins can't
+    // both pass the raidModeActive.has() guard and double-trigger the alert.
+    raidModeActive.add(guildId);
+    raidModeActivatedBy.set(guildId, 'auto');
+
     if (alertChannel) {
         await alertChannel.send({ embeds: [embed] }).catch(console.error);
     }
-
-    raidModeActive.add(guildId);
-    raidModeActivatedBy.set(guildId, 'auto');
 
     await Guild.updateOne({ guildId }, {
         $set: {
