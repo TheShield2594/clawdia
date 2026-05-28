@@ -65,7 +65,7 @@ const guildSchema = new Schema({
         channelId: { type: String, default: null },
         wishingHourUtc: { type: Number, default: 9, min: 0, max: 23 },
         roleId: { type: String, default: null },
-        message: { type: String, default: "It's the birthday of {user} ({age}) ! 🎂" }
+        message: { type: String, default: "It's the birthday of {user} ({age}) ! 🎂", maxlength: 2000 }
     },
     
     moderation: {

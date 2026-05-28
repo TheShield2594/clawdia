@@ -247,6 +247,36 @@ function validateFarewellUpdate(updates) {
     return null;
 }
 
+function validateBirthdaysUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        if (!key.startsWith('birthdays.') && key !== 'birthdays') continue;
+        const field = key.split('.')[1];
+        if (field === 'message') {
+            if (typeof value !== 'string') return 'birthdays.message must be a string';
+            if (value.length > 2000) return 'birthdays.message exceeds 2000 characters';
+        }
+        if (field === 'enabled') {
+            if (typeof value !== 'boolean') return 'birthdays.enabled must be a boolean';
+        }
+        if (field === 'channelId' && value !== null && value !== '') {
+            if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {
+                return 'birthdays.channelId must be a valid Discord snowflake or null';
+            }
+        }
+        if (field === 'roleId' && value !== null && value !== '') {
+            if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {
+                return 'birthdays.roleId must be a valid Discord snowflake or null';
+            }
+        }
+        if (field === 'wishingHourUtc') {
+            if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 23) {
+                return 'birthdays.wishingHourUtc must be an integer between 0 and 23';
+            }
+        }
+    }
+    return null;
+}
+
 router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
@@ -265,6 +295,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
     const farewellError = validateFarewellUpdate(updates);
     if (farewellError) return res.status(400).json({ error: farewellError });
+
+    const birthdaysError = validateBirthdaysUpdate(updates);
+    if (birthdaysError) return res.status(400).json({ error: birthdaysError });
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
