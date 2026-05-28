@@ -12,8 +12,10 @@ async function trackMemberEvent(guildSettings, dateKey, field) {
     );
     if (!result.matchedCount) {
         // No entry for today yet; add one and trim array to 120 days.
+        // The $ne guard prevents a duplicate insert when concurrent joins both
+        // miss the first update and race to this branch.
         await guildSettings.constructor.updateOne(
-            { guildId: guildSettings.guildId },
+            { guildId: guildSettings.guildId, 'analytics.memberEvents.date': { $ne: dateKey } },
             {
                 $push: {
                     'analytics.memberEvents': {
@@ -103,13 +105,17 @@ module.exports = {
             }
 
             if (guildSettings.autoRoles.length > 0) {
-                // Apply all auto-roles in parallel rather than sequentially (fix #7)
-                await Promise.allSettled(
+                const results = await Promise.allSettled(
                     guildSettings.autoRoles
-                        .map(autoRole => member.guild.roles.cache.get(autoRole.roleId))
-                        .filter(Boolean)
-                        .map(role => member.roles.add(role))
+                        .map(autoRole => ({ roleId: autoRole.roleId, role: member.guild.roles.cache.get(autoRole.roleId) }))
+                        .filter(({ role }) => role)
+                        .map(({ roleId, role }) => member.roles.add(role).catch(err => { throw Object.assign(err, { roleId }); }))
                 );
+                for (const r of results) {
+                    if (r.status === 'rejected') {
+                        console.error(`Failed to add auto-role ${r.reason?.roleId} to ${member.id}:`, r.reason);
+                    }
+                }
             }
 
             if (guildSettings.eventLog?.enabled && guildSettings.eventLog.logMemberJoin) {
