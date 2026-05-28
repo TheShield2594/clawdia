@@ -1,5 +1,10 @@
+const { PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 const User = require('../models/User');
+
+function isLeapYear(year) {
+    return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
 
 function calculateAge(year, now) {
     if (!year) return null;
@@ -19,6 +24,13 @@ async function checkBirthdays(client) {
         'birthdays.wishingHourUtc': hour
     });
 
+    // On Feb 28 of a non-leap year, also celebrate Feb 29 birthdays.
+    const includeFeb29 = month === 2 && day === 28 && !isLeapYear(now.getUTCFullYear());
+
+    const birthdayFilter = includeFeb29
+        ? { $or: [{ 'birthday.month': 2, 'birthday.day': 28 }, { 'birthday.month': 2, 'birthday.day': 29 }] }
+        : { 'birthday.month': month, 'birthday.day': day };
+
     for (const settings of guilds) {
         const guild = client.guilds.cache.get(settings.guildId);
         if (!guild) continue;
@@ -26,10 +38,11 @@ async function checkBirthdays(client) {
         const channel = guild.channels.cache.get(settings.birthdays.channelId);
         if (!channel || !channel.isTextBased()) continue;
 
+        if (!channel.permissionsFor(guild.members.me).has(PermissionFlagsBits.SendMessages)) continue;
+
         const users = await User.find({
             guildId: settings.guildId,
-            'birthday.month': month,
-            'birthday.day': day,
+            ...birthdayFilter,
             $or: [
                 { 'birthday.lastCelebratedYear': { $ne: now.getUTCFullYear() } },
                 { 'birthday.lastCelebratedYear': { $exists: false } }
