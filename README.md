@@ -8,7 +8,6 @@ A chill, self-hosted Discord bot with serious teeth. Clawdia brings moderation, 
 - **Welcome/Farewell**: Customizable messages with image cards
 - **Leveling System**: XP and level tracking with leaderboards
 - **Economy**: Balance, daily rewards, work command, and transfers
-- **Music Player**: 24/7 music streaming with queue management
 - **RSS Feeds**: Automatic RSS feed monitoring and posting
 - **Daily News Digest**: Compile multiple RSS feeds into a daily summary
 - **AI Chat**: OpenAI GPT, Google Gemini, or optional local Ollama integration
@@ -61,40 +60,68 @@ npm start
 - `SESSION_SECRET` - Random string for session encryption
 - `OPENAI_API_KEY` - (Optional) OpenAI API key for AI features
 - `GEMINI_API_KEY` - (Optional) Google Gemini API key for AI features
+- `ANTHROPIC_API_KEY` - (Optional) Anthropic Claude API key for AI features
 - `OLLAMA_BASE_URL` - (Optional) Local Ollama endpoint (e.g., `http://localhost:11434`)
+- `IMGFLIP_USERNAME` / `IMGFLIP_PASSWORD` - (Optional) Imgflip credentials for `/meme` command
 
 ## Commands
 
 ### Moderation
 - `/ban` - Ban a user
 - `/kick` - Kick a user
+- `/softban` - Ban and immediately unban (clears messages)
+- `/massban` - Ban multiple users at once
 - `/warn` - Warn a user
 - `/mute` - Timeout a user
 - `/unmute` - Remove timeout
 - `/clear` - Delete messages
-- `/warnings` - View user warnings
+- `/slowmode` - Set channel slowmode
+- `/lockdown` - Lock a channel
+- `/case` / `/cases` / `/closecase` - Case management
+- `/appeal` - Submit a ban appeal
+- `/note` - Add a moderator note to a user
 
 ### Economy
 - `/balance` - Check balance
+- `/bank` - Manage your bank account
 - `/daily` - Claim daily reward
 - `/work` - Work for coins
-- `/transfer` - Transfer coins
+- `/crime` - Attempt a crime for coins
+- `/rob` - Rob another user
+- `/duel` - Challenge another user
+- `/shop` / `/buy` / `/inventory` / `/use` - Item economy
+- `/craft` - Craft items
+- `/jobs` - View and take jobs
+- `/casino` - Casino games
+- `/fish` / `/hunt` / `/mine` - Gathering activities
+- `/quiz` - Answer trivia for rewards
+- `/boost` - Activate economy boosts
+- `/eventshop` - Seasonal event shop
 
 ### Leveling
 - `/rank` - View rank card
 - `/leaderboard` - View server leaderboard
+- `/xpinfo` - View XP settings
+- `/setlevel` - Set a user's level (admin)
 
-### Music
-- `/play` - Play music
-- `/skip` - Skip current song
-- `/stop` - Stop music
-- `/queue` - View queue
-- `/nowplaying` - Current song info
+### Community
+- `/remind` - Set a reminder
+- `/streak` - View your activity streak
+- `/quests` - View active quests
+- `/achievements` - View achievements
+- `/season` - View current season info
+- `/notifications` - Manage your notifications
+- `/track` - Track events or milestones
 
 ### Fun
 - `/8ball` - Ask the magic 8-ball
 - `/roll` - Roll a dice
 - `/coinflip` - Flip a coin
+- `/meme` - Generate a meme (requires Imgflip credentials)
+- `/caption` - Add a caption to an image
+- `/wanted` / `/wasted` - Image filter commands
+- `/achievement` - Generate a fake achievement card
+- `/snowball` / `/trickortreat` - Seasonal fun commands
 
 ### Utility
 - `/avatar` - Get user avatar
@@ -102,10 +129,17 @@ npm start
 - `/serverinfo` - Server information
 - `/help` - Command list
 - `/ping` - Bot latency
+- `/poll` - Create a poll
+- `/giveaway` - Manage giveaways
+- `/birthday` - Set or view birthdays
+- `/profile` - View your profile card
+- `/role` - Self-assignable roles
+- `/suggest` - Submit a suggestion
+- `/vc` - Voice channel utilities
+- `/bible` - Bible verse lookup
 
 ### AI
 - `@Clawdia` - Mention the bot to start an AI conversation
-- `/remind` - Set a reminder
 
 ### Admin
 - `/raidmode` - Configure raid detection and case management
@@ -120,8 +154,7 @@ Configuration that previously lived behind slash commands (settings link, level 
 - MongoDB with Mongoose
 - Express.js
 - Passport (Discord OAuth2)
-- OpenAI API / Google Gemini API / Ollama (optional)
-- play-dl (Music streaming)
+- OpenAI API / Google Gemini API / Anthropic Claude API / Ollama (optional)
 - RSS Parser
 - Canvas (Image generation)
 
@@ -137,7 +170,11 @@ Configuration that previously lived behind slash commands (settings link, level 
    - Get your API key from https://makersuite.google.com/app/apikey
    - Add to `.env` as `GEMINI_API_KEY` or configure per-server in dashboard
 
-3. **Local (Ollama)**
+3. **Anthropic (Claude)**
+   - Get your API key from https://console.anthropic.com/
+   - Add to `.env` as `ANTHROPIC_API_KEY` or configure per-server in dashboard
+
+4. **Local (Ollama)**
    - Point `OLLAMA_BASE_URL` to your local instance
    - Configure `OLLAMA_MODEL` in dashboard (e.g., `llama3.2`, `mistral`)
    - Ideal for private, zero-cost inference
