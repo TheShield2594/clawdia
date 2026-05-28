@@ -109,6 +109,22 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
     throw new Error('Too many redirects.');
 }
 
+// Filters memberEvents by calendar date rather than array position so sparse
+// histories (days with no events) don't skew the 7/30-day windows.
+function computeRetention(memberEvents, nowMs = Date.now()) {
+    const cutoff7  = new Date(nowMs - 7  * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const cutoff30 = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const events7  = memberEvents.filter(e => e.date >= cutoff7);
+    const events30 = memberEvents.filter(e => e.date >= cutoff30);
+    const joins7   = events7.reduce((a, d) => a + (d.joins  || 0), 0);
+    const leaves7  = events7.reduce((a, d) => a + (d.leaves || 0), 0);
+    const joins30  = events30.reduce((a, d) => a + (d.joins  || 0), 0);
+    const leaves30 = events30.reduce((a, d) => a + (d.leaves || 0), 0);
+    const retained7  = joins7  ? Math.max(0, joins7  - leaves7)  / joins7  : 0;
+    const retained30 = joins30 ? Math.max(0, joins30 - leaves30) / joins30 : 0;
+    return { joins7, leaves7, joins30, leaves30, retained7, retained30 };
+}
+
 function median(nums) {
     if (!nums.length) return null;
     const sorted = [...nums].sort((a, b) => a - b);
@@ -392,12 +408,7 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
         const memberEvents = guildSettings?.analytics?.memberEvents || [];
         const commandUsage = guildSettings?.analytics?.commandUsage || [];
 
-        const joins7 = memberEvents.slice(-7).reduce((a, d) => a + (d.joins || 0), 0);
-        const leaves7 = memberEvents.slice(-7).reduce((a, d) => a + (d.leaves || 0), 0);
-        const joins30 = memberEvents.slice(-30).reduce((a, d) => a + (d.joins || 0), 0);
-        const leaves30 = memberEvents.slice(-30).reduce((a, d) => a + (d.leaves || 0), 0);
-        const retained7 = joins7 ? Math.max(0, joins7 - leaves7) / joins7 : 0;
-        const retained30 = joins30 ? Math.max(0, joins30 - leaves30) / joins30 : 0;
+        const { joins7, leaves7, joins30, leaves30, retained7, retained30 } = computeRetention(memberEvents);
 
         const commandSummary = {};
         const failedByReason = {};
@@ -463,12 +474,7 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
         const commandUsage = guildSettings?.analytics?.commandUsage || [];
 
         // Retention: 7/30 day net-retention proxy from join/leave tracking.
-        const joins7 = memberEvents.slice(-7).reduce((a, d) => a + (d.joins || 0), 0);
-        const leaves7 = memberEvents.slice(-7).reduce((a, d) => a + (d.leaves || 0), 0);
-        const joins30 = memberEvents.slice(-30).reduce((a, d) => a + (d.joins || 0), 0);
-        const leaves30 = memberEvents.slice(-30).reduce((a, d) => a + (d.leaves || 0), 0);
-        const retained7 = joins7 ? Math.max(0, joins7 - leaves7) / joins7 : 0;
-        const retained30 = joins30 ? Math.max(0, joins30 - leaves30) / joins30 : 0;
+        const { joins7, leaves7, joins30, leaves30, retained7, retained30 } = computeRetention(memberEvents);
 
         // Active hours: command-driven activity histogram (UTC).
         const hourMap = Array.from({ length: 24 }, (_, hour) => ({ hourUtc: hour, count: 0 }));
@@ -1066,3 +1072,4 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
 });
 
 module.exports = router;
+module.exports.computeRetention = computeRetention;

@@ -45,6 +45,25 @@ jest.mock('../src/services/questService', () => ({
 }));
 jest.mock('../src/commands/utility/poll', () => ({ handlePollVote: jest.fn() }));
 
+// Minimal stubs so api.js (and its transitive requires) can be loaded without
+// a real DB or external services.
+jest.mock('../src/models/Case', () => ({ find: jest.fn() }));
+jest.mock('../src/models/KnowledgeBase', () => ({}));
+jest.mock('../src/models/SummaryJob', () => ({}));
+jest.mock('../src/services/rssService', () => ({ rescheduleDailyNews: jest.fn(), sendDailyNews: jest.fn() }));
+jest.mock('../src/services/dailyBibleService', () => ({ rescheduleBibleVerse: jest.fn() }));
+jest.mock('rss-parser', () => jest.fn().mockImplementation(() => ({})));
+jest.mock('express', () => {
+    const fn = jest.fn(() => ({
+        use: jest.fn(), get: jest.fn(), post: jest.fn(), delete: jest.fn(), put: jest.fn(),
+    }));
+    fn.Router = () => ({
+        use: jest.fn(), get: jest.fn(), post: jest.fn(), delete: jest.fn(), put: jest.fn(),
+    });
+    return fn;
+});
+
+const { computeRetention } = require('../src/dashboard/routes/api');
 const Guild = require('../src/models/Guild');
 const guildMemberAdd = require('../src/events/guildMemberAdd');
 const guildMemberRemove = require('../src/events/guildMemberRemove');
@@ -313,55 +332,71 @@ describe('applyVariables {tag} template (guildMemberAdd)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Retention calculation — /stats endpoint math
+// Retention calculation — production computeRetention helper
 // ---------------------------------------------------------------------------
 
-describe('Retention calculation math (stats endpoint)', () => {
-    // These tests validate the corrected formulas directly.
-    // retained7 must use 7-day data; retained30 must use plain joins-leaves / joins.
+// Build a date string N days before a fixed reference epoch so fixtures are
+// deterministic regardless of when the tests run.
+function daysAgo(n, nowMs) {
+    return new Date(nowMs - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
-    function computeRetained(memberEvents) {
-        const joins7 = memberEvents.slice(-7).reduce((a, d) => a + (d.joins || 0), 0);
-        const leaves7 = memberEvents.slice(-7).reduce((a, d) => a + (d.leaves || 0), 0);
-        const joins30 = memberEvents.slice(-30).reduce((a, d) => a + (d.joins || 0), 0);
-        const leaves30 = memberEvents.slice(-30).reduce((a, d) => a + (d.leaves || 0), 0);
-        const retained7 = joins7 ? Math.max(0, joins7 - leaves7) / joins7 : 0;
-        const retained30 = joins30 ? Math.max(0, joins30 - leaves30) / joins30 : 0;
-        return { joins7, leaves7, joins30, leaves30, retained7, retained30 };
-    }
+describe('computeRetention (production helper)', () => {
+    // Pin the clock so date arithmetic is stable across runs.
+    const NOW = new Date('2026-01-30T12:00:00Z').getTime();
 
-    it('retained7 uses 7-day window, not 30-day', () => {
-        // 7 entries, each with 10 joins 5 leaves; entries 8–30 have 100 joins each
-        const events = [];
-        for (let i = 0; i < 23; i++) events.push({ joins: 100, leaves: 0 }); // older than 7 days
-        for (let i = 0; i < 7; i++) events.push({ joins: 10, leaves: 5 });  // last 7 days
-        const { retained7, joins7 } = computeRetained(events);
-        expect(joins7).toBe(70); // 7 * 10
-        // retained7 = (70 - 35) / 70 ≈ 50%
+    it('counts only events within the last 7 calendar days for retained7', () => {
+        const events = [
+            { date: daysAgo(35, NOW), joins: 100, leaves: 0 }, // outside both windows
+            { date: daysAgo(20, NOW), joins: 100, leaves: 0 }, // inside 30-day, outside 7-day
+            { date: daysAgo(5,  NOW), joins: 10,  leaves: 5  }, // inside 7-day
+            { date: daysAgo(2,  NOW), joins: 10,  leaves: 5  }, // inside 7-day
+        ];
+        const { joins7, leaves7, retained7 } = computeRetention(events, NOW);
+        expect(joins7).toBe(20);
+        expect(leaves7).toBe(10);
+        // retained7 = (20 - 10) / 20 = 0.5
         expect(retained7).toBeCloseTo(0.5);
     });
 
-    it('retained30 does not inflate leaves', () => {
-        const events = Array.from({ length: 30 }, () => ({ joins: 100, leaves: 20 }));
-        const { retained30 } = computeRetained(events);
-        // (3000 - 600) / 3000 = 0.8
+    it('excludes events older than 30 days from retained30', () => {
+        const events = [
+            { date: daysAgo(35, NOW), joins: 999, leaves: 999 }, // must be excluded
+            { date: daysAgo(25, NOW), joins: 100, leaves: 20  },
+            { date: daysAgo(3,  NOW), joins: 100, leaves: 20  },
+        ];
+        const { joins30, leaves30, retained30 } = computeRetention(events, NOW);
+        expect(joins30).toBe(200);
+        expect(leaves30).toBe(40);
+        // retained30 = (200 - 40) / 200 = 0.8
         expect(retained30).toBeCloseTo(0.8);
     });
 
-    it('retained7 returns 0 when no 7-day joins', () => {
-        const events = [{ joins: 0, leaves: 5 }];
-        const { retained7 } = computeRetained(events);
-        expect(retained7).toBe(0);
+    it('sparse history: gaps between events do not shift the window', () => {
+        // Only one event 6 days ago; no events on days 1-5.
+        // slice(-7) on a 1-entry array would include it regardless of date;
+        // date-filtering must also include it (6 days ago < 7-day cutoff).
+        const events = [
+            { date: daysAgo(60, NOW), joins: 50, leaves: 0 },
+            { date: daysAgo(6,  NOW), joins: 10, leaves: 4 },
+        ];
+        const { joins7, retained7 } = computeRetention(events, NOW);
+        expect(joins7).toBe(10);
+        expect(retained7).toBeCloseTo(0.6);
     });
 
-    it('retained30 returns 0 when no 30-day joins', () => {
-        const { retained30 } = computeRetained([]);
-        expect(retained30).toBe(0);
+    it('returns 0 for retained7 when there are no 7-day joins', () => {
+        const events = [{ date: daysAgo(2, NOW), joins: 0, leaves: 5 }];
+        expect(computeRetention(events, NOW).retained7).toBe(0);
     });
 
-    it('retained values are clamped to 0 minimum (no negative retention)', () => {
-        const events = Array.from({ length: 30 }, () => ({ joins: 10, leaves: 50 }));
-        const { retained7, retained30 } = computeRetained(events);
+    it('returns 0 for retained30 when there are no 30-day events', () => {
+        expect(computeRetention([], NOW).retained30).toBe(0);
+    });
+
+    it('clamps retention to 0 when leaves exceed joins (no negative retention)', () => {
+        const events = [{ date: daysAgo(1, NOW), joins: 10, leaves: 50 }];
+        const { retained7, retained30 } = computeRetention(events, NOW);
         expect(retained7).toBeGreaterThanOrEqual(0);
         expect(retained30).toBeGreaterThanOrEqual(0);
     });
