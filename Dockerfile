@@ -13,7 +13,8 @@ RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    ffmpeg
+    ffmpeg \
+    ttf-dejavu
 
 WORKDIR /app
 

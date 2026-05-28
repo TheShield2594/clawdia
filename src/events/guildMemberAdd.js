@@ -1,19 +1,19 @@
 const Guild = require('../models/Guild');
-const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { EmbedBuilder, AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const { createWelcomeCard } = require('../utils/cardGenerator');
 const { handleMemberJoin: raidCheck } = require('../services/raidService');
 const { enforceJoinGate } = require('../services/antiNukeService');
+
 async function trackMemberEvent(guildSettings, dateKey, field) {
+    // Try to atomically increment today's existing entry (fix #8 — simpler, no spurious $push).
     const result = await guildSettings.constructor.updateOne(
         { guildId: guildSettings.guildId, 'analytics.memberEvents.date': dateKey },
-        {
-            $inc: { [`analytics.memberEvents.$.${field}`]: 1 },
-            $push: { 'analytics.memberEvents': { $each: [], $slice: -120 } }
-        }
+        { $inc: { [`analytics.memberEvents.$.${field}`]: 1 } }
     );
     if (!result.matchedCount) {
+        // No entry for today yet; add one and trim array to 120 days.
         await guildSettings.constructor.updateOne(
-            { guildId: guildSettings.guildId, 'analytics.memberEvents.date': { $ne: dateKey } },
+            { guildId: guildSettings.guildId },
             {
                 $push: {
                     'analytics.memberEvents': {
@@ -37,6 +37,8 @@ function applyVariables(template, member) {
 
 module.exports = {
     name: 'guildMemberAdd',
+    // Exported for unit testing only
+    _applyVariables: applyVariables,
     async execute(member, client) {
         try {
             // Join gate runs first; if it removes the member, skip the rest.
@@ -59,28 +61,38 @@ module.exports = {
             if (guildSettings.welcome.enabled) {
                 const channel = member.guild.channels.cache.get(guildSettings.welcome.channelId);
                 if (channel) {
-                    const message = applyVariables(guildSettings.welcome.message, member);
+                    // Check that the bot actually has permission to post before trying (fix #10)
+                    const perms = channel.permissionsFor(member.guild.members.me);
+                    const canSend = perms?.has(PermissionFlagsBits.SendMessages);
+                    const canAttach = perms?.has(PermissionFlagsBits.AttachFiles);
 
-                    if (guildSettings.welcome.cardEnabled) {
-                        const card = await createWelcomeCard(member);
-                        const attachment = new AttachmentBuilder(card, { name: 'welcome.png' });
-
-                        const embed = new EmbedBuilder()
-                            .setColor('#5865F2')
-                            .setDescription(message)
-                            .setImage('attachment://welcome.png')
-                            .setTimestamp();
-
-                        await channel.send({ embeds: [embed], files: [attachment] });
+                    if (!canSend) {
+                        console.error(`Missing SendMessages permission for welcome channel ${channel.id} in guild ${member.guild.id}`);
                     } else {
-                        const embed = new EmbedBuilder()
-                            .setColor('#5865F2')
-                            .setTitle('Welcome!')
-                            .setDescription(message)
-                            .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-                            .setTimestamp();
+                        const message = applyVariables(guildSettings.welcome.message, member);
 
-                        await channel.send({ embeds: [embed] });
+                        if (guildSettings.welcome.cardEnabled && canAttach) {
+                            const card = await createWelcomeCard(member);
+                            const attachment = new AttachmentBuilder(card, { name: 'welcome.png' });
+
+                            const embed = new EmbedBuilder()
+                                .setColor('#5865F2')
+                                .setDescription(message)
+                                .setImage('attachment://welcome.png')
+                                .setTimestamp();
+
+                            await channel.send({ embeds: [embed], files: [attachment] });
+                        } else {
+                            const embed = new EmbedBuilder()
+                                .setColor('#5865F2')
+                                .setTitle('Welcome!')
+                                .setDescription(message)
+                                // Remove deprecated { dynamic: true } option (fix #4)
+                                .setThumbnail(member.user.displayAvatarURL())
+                                .setTimestamp();
+
+                            await channel.send({ embeds: [embed] });
+                        }
                     }
                 }
             }
@@ -91,12 +103,13 @@ module.exports = {
             }
 
             if (guildSettings.autoRoles.length > 0) {
-                for (const autoRole of guildSettings.autoRoles) {
-                    const role = member.guild.roles.cache.get(autoRole.roleId);
-                    if (role) {
-                        await member.roles.add(role).catch(console.error);
-                    }
-                }
+                // Apply all auto-roles in parallel rather than sequentially (fix #7)
+                await Promise.allSettled(
+                    guildSettings.autoRoles
+                        .map(autoRole => member.guild.roles.cache.get(autoRole.roleId))
+                        .filter(Boolean)
+                        .map(role => member.roles.add(role))
+                );
             }
 
             if (guildSettings.eventLog?.enabled && guildSettings.eventLog.logMemberJoin) {
@@ -105,7 +118,8 @@ module.exports = {
                     const logEmbed = new EmbedBuilder()
                         .setColor('#5865F2')
                         .setTitle('Member Joined')
-                        .setAuthor({ name: member.user.tag, iconURL: member.user.displayAvatarURL({ dynamic: true }) })
+                        // Use username instead of deprecated .tag (fix #5); drop deprecated dynamic option (fix #4)
+                        .setAuthor({ name: member.user.username, iconURL: member.user.displayAvatarURL() })
                         .addFields(
                             { name: 'Account Created', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: true },
                             { name: 'Member Count', value: member.guild.memberCount.toString(), inline: true }
