@@ -277,6 +277,46 @@ function validateBirthdaysUpdate(updates) {
     return null;
 }
 
+const VALID_BIBLE_TRANSLATIONS = new Set(['kjv', 'niv', 'asv', 'web', 'ylt', 'darby', 'bbe', 'webbe']);
+
+function validateBibleVerseUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        if (!key.startsWith('bibleVerse.') && key !== 'bibleVerse') continue;
+        const field = key.split('.')[1];
+        if (field === 'enabled' || field === 'autoRespond') {
+            if (typeof value !== 'boolean') return `bibleVerse.${field} must be a boolean`;
+        }
+        if (field === 'channelId' && value !== null && value !== '') {
+            if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {
+                return 'bibleVerse.channelId must be a valid Discord snowflake or null';
+            }
+        }
+        if (field === 'time' && value !== null && value !== '') {
+            if (typeof value !== 'string' || !/^\d{1,2}:\d{2}$/.test(value)) {
+                return 'bibleVerse.time must be in HH:MM format (e.g. 08:00)';
+            }
+            const [h, m] = value.split(':').map(Number);
+            if (h < 0 || h > 23 || m < 0 || m > 59) {
+                return 'bibleVerse.time must be a valid 24-hour time (00:00–23:59)';
+            }
+        }
+        if (field === 'timezone' && value !== null && value !== '') {
+            if (typeof value !== 'string') return 'bibleVerse.timezone must be a string';
+            try {
+                Intl.DateTimeFormat(undefined, { timeZone: value });
+            } catch {
+                return `bibleVerse.timezone "${value}" is not a valid IANA timezone`;
+            }
+        }
+        if (field === 'translation') {
+            if (!VALID_BIBLE_TRANSLATIONS.has(value)) {
+                return `bibleVerse.translation must be one of: ${[...VALID_BIBLE_TRANSLATIONS].join(', ')}`;
+            }
+        }
+    }
+    return null;
+}
+
 router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
@@ -298,6 +338,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
     const birthdaysError = validateBirthdaysUpdate(updates);
     if (birthdaysError) return res.status(400).json({ error: birthdaysError });
+
+    const bibleVerseError = validateBibleVerseUpdate(updates);
+    if (bibleVerseError) return res.status(400).json({ error: bibleVerseError });
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
