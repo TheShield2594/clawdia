@@ -1,6 +1,5 @@
 const Guild = require('../models/Guild');
 const User = require('../models/User');
-const { closeTicket } = require('../commands/moderation/ticket');
 const { handlePollVote } = require('../commands/utility/poll');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 async function logCommandMetric(interaction, success, reason = null) {
@@ -124,11 +123,6 @@ module.exports = {
     name: 'interactionCreate',
     async execute(interaction, client) {
         if (interaction.isButton()) {
-            if (interaction.customId === 'ticket_close') {
-                const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-                await closeTicket(interaction, guildSettings);
-            }
-
             if (interaction.customId === 'giveaway_enter') {
                 const msg = interaction.message;
                 if (!msg.giveawayEntrants) msg.giveawayEntrants = [];
