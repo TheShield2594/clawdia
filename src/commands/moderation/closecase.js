@@ -30,7 +30,7 @@ module.exports = {
             .setTitle(`Case #${caseId} Closed`)
             .addFields(
                 { name: 'Target', value: `<@${modCase.targetUserId}>`, inline: true },
-                { name: 'Closed By', value: interaction.user.tag, inline: true },
+                { name: 'Closed By', value: interaction.user.globalName ?? interaction.user.username, inline: true },
                 { name: 'Resolution', value: resolution }
             )
             .setTimestamp();

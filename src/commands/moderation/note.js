@@ -42,7 +42,7 @@ module.exports = {
             .addFields({ name: 'Note', value: text });
 
         if (label) embed.addFields({ name: 'Label Added', value: label, inline: true });
-        if (assignee) embed.addFields({ name: 'Assigned To', value: assignee.tag, inline: true });
+        if (assignee) embed.addFields({ name: 'Assigned To', value: assignee.globalName ?? assignee.username, inline: true });
 
         await interaction.reply({ embeds: [embed], ephemeral: true });
     }
