@@ -87,35 +87,42 @@ module.exports = {
             guildSettings.tickets.count += 1;
             await guildSettings.save();
 
-            const channel = await interaction.guild.channels.create({
-                name: `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
-                type: ChannelType.GuildText,
-                parent: category.id,
-                permissionOverwrites: [
-                    { id: interaction.guild.id, deny: ['ViewChannel'] },
-                    { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
-                    { id: guildSettings.tickets.supportRoleId, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageMessages'] },
-                    { id: interaction.client.user.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageChannels'] }
-                ]
-            });
+            try {
+                const channel = await interaction.guild.channels.create({
+                    name: `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+                    type: ChannelType.GuildText,
+                    parent: category.id,
+                    permissionOverwrites: [
+                        { id: interaction.guild.id, deny: ['ViewChannel'] },
+                        { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
+                        { id: guildSettings.tickets.supportRoleId, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageMessages'] },
+                        { id: interaction.client.user.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageChannels'] }
+                    ]
+                });
 
-            const embed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setTitle(`Ticket #${guildSettings.tickets.count}`)
-                .setDescription(guildSettings.tickets.openMessage)
-                .addFields({ name: 'Opened by', value: interaction.user.toString() })
-                .setTimestamp();
+                const embed = new EmbedBuilder()
+                    .setColor('#5865F2')
+                    .setTitle(`Ticket #${guildSettings.tickets.count}`)
+                    .setDescription(guildSettings.tickets.openMessage)
+                    .addFields({ name: 'Opened by', value: interaction.user.toString() })
+                    .setTimestamp();
 
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('ticket_close')
-                    .setLabel('Close Ticket')
-                    .setStyle(ButtonStyle.Danger)
-                    .setEmoji('🔒')
-            );
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('ticket_close')
+                        .setLabel('Close Ticket')
+                        .setStyle(ButtonStyle.Danger)
+                        .setEmoji('🔒')
+                );
 
-            await channel.send({ content: `${interaction.user} <@&${guildSettings.tickets.supportRoleId}>`, embeds: [embed], components: [row] });
-            await interaction.editReply({ content: `Your ticket has been opened: ${channel}` });
+                await channel.send({ content: `${interaction.user} <@&${guildSettings.tickets.supportRoleId}>`, embeds: [embed], components: [row] });
+                await interaction.editReply({ content: `Your ticket has been opened: ${channel}` });
+            } catch (err) {
+                console.error('Ticket open error:', err);
+                guildSettings.tickets.count -= 1;
+                await guildSettings.save().catch(() => {});
+                await interaction.editReply({ content: 'Failed to open a ticket. Please try again.' }).catch(() => {});
+            }
 
         } else if (sub === 'close') {
             await closeTicket(interaction, guildSettings);

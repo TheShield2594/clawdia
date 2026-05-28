@@ -167,7 +167,7 @@ This file tracks the production readiness status of each feature/function in Cla
 |---|-------|-----|-------|
 | 4 | `user.tag` deprecated throughout — in the new Discord username system `.tag` always returns `username#0000` for non-legacy accounts | Replaced all `user.tag` / `interaction.user.tag` / `ban.user.tag` / `msg.author.tag` / `targetUser.tag` / `botUser.tag` with `globalName ?? username` | `appeal.js`, `ban.js`, `cases.js`, `closecase.js`, `escalationService.js`, `kick.js`, `logger.js`, `massban.js`, `mute.js`, `note.js`, `slowmode.js`, `softban.js`, `ticket.js`, `unban.js`, `unmute.js`, `warn.js` |
 | 5 | `displayAvatarURL({ dynamic: true })` deprecated in discord.js v14 | Removed the `{ dynamic: true }` option; the method returns animated URLs by default | `cases.js` |
-| 6 | `c.createdAt / 1000` in cases list — implicit Date→number coercion; relies on JavaScript auto-coercion rather than explicit `.getTime()` | Changed to `c.createdAt.getTime() / 1000` | `cases.js` |
+| 6 | `c.createdAt / 1000` in the case list embed (`cases.js`) — implicit Date→number coercion instead of explicit `.getTime()` | Changed to `c.createdAt.getTime() / 1000` | `cases.js` |
 | 7 | `massban.js` fallback user object used `{ id, tag }` — mismatched logger's `globalName ?? username` lookup after fix #4 | Changed to `{ id, globalName: null, username: userId }` | `massban.js` |
 | 8 | `warn.js` used flat `if` chains for subcommand dispatch — all three branches evaluated on every call | Changed to `if / else if / else if` | `warn.js` |
 
