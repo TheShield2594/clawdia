@@ -35,6 +35,8 @@ module.exports = {
 
             if (user.bot) return interaction.reply({ content: 'You cannot warn bots.', ephemeral: true });
 
+            await interaction.deferReply();
+
             try {
                 const triggeringCase = await logModeration(interaction.guild.id, 'warn', user, interaction.user, reason);
 
@@ -66,11 +68,11 @@ module.exports = {
                 const embed = new EmbedBuilder()
                     .setColor('#ffff00')
                     .setTitle('User Warned')
-                    .setDescription(`**${user.tag}** has been warned.`)
+                    .setDescription(`**${user.globalName ?? user.username}** has been warned.`)
                     .addFields(
                         { name: 'Reason', value: reason },
                         { name: 'Total Warnings', value: warningCount.toString() },
-                        { name: 'Moderator', value: interaction.user.tag }
+                        { name: 'Moderator', value: interaction.user.globalName ?? interaction.user.username }
                     )
                     .setTimestamp();
 
@@ -82,7 +84,7 @@ module.exports = {
                     embed.addFields({ name: 'Escalation', value: `Bypassed — would have triggered ${matchedStep?.action?.toUpperCase()} at ${warningCount} warnings.` });
                 }
 
-                await interaction.reply({ embeds: [embed] });
+                await interaction.editReply({ embeds: [embed] });
                 await user.send(`You have been warned in **${interaction.guild.name}** for: ${reason}`).catch(() => {});
 
                 if (!bypassEscalation && guildSettings?.moderation?.escalation?.enabled) {
@@ -99,7 +101,7 @@ module.exports = {
                                 .setColor('#cc3300')
                                 .setTitle('Auto-Escalation Triggered')
                                 .setDescription(`Threshold **${result.step.threshold}** reached — applied **${result.step.action.toUpperCase()}**${result.step.durationMinutes ? ` for ${result.step.durationMinutes} minute(s)` : ''}.`)
-                                .addFields({ name: 'Target', value: `${user.tag}`, inline: true })
+                                .addFields({ name: 'Target', value: `${user.globalName ?? user.username}`, inline: true })
                                 .setTimestamp()]
                         }).catch(() => {});
                     } else if (result?.skipped) {
@@ -117,12 +119,10 @@ module.exports = {
             } catch (error) {
                 console.error('Warn error:', error);
                 if (!interaction.replied) {
-                    await interaction.reply({ content: 'Failed to warn the user.', ephemeral: true });
+                    await interaction.editReply({ content: 'Failed to warn the user.' });
                 }
             }
-        }
-
-        if (sub === 'list') {
+        } else if (sub === 'list') {
             const user = interaction.options.getUser('user');
 
             try {
@@ -133,7 +133,7 @@ module.exports = {
                 }).sort({ createdAt: -1 }).limit(20);
 
                 if (!warnings.length) {
-                    return interaction.reply({ content: `${user.tag} has no warnings.`, ephemeral: true });
+                    return interaction.reply({ content: `${user.globalName ?? user.username} has no warnings.`, ephemeral: true });
                 }
 
                 const lines = warnings.map(w => {
@@ -143,7 +143,7 @@ module.exports = {
 
                 const embed = new EmbedBuilder()
                     .setColor('#ffff00')
-                    .setTitle(`Warnings for ${user.tag}`)
+                    .setTitle(`Warnings for ${user.globalName ?? user.username}`)
                     .setDescription(lines.join('\n'))
                     .setFooter({ text: `${warnings.length} warning(s) shown · use /warn remove <case_id> to clear one` })
                     .setTimestamp();
@@ -155,9 +155,7 @@ module.exports = {
                     await interaction.reply({ content: 'Failed to fetch warnings.', ephemeral: true });
                 }
             }
-        }
-
-        if (sub === 'remove') {
+        } else if (sub === 'remove') {
             const caseId = interaction.options.getInteger('case_id');
 
             try {
@@ -179,7 +177,7 @@ module.exports = {
                     .setDescription(`Case **#${caseId}** has been deleted.`)
                     .addFields(
                         { name: 'Original Reason', value: warnCase.reason },
-                        { name: 'Removed by', value: interaction.user.tag }
+                        { name: 'Removed by', value: interaction.user.globalName ?? interaction.user.username }
                     )
                     .setTimestamp();
 

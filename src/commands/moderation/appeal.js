@@ -16,19 +16,21 @@ module.exports = {
         const caseId = interaction.options.getInteger('case_id');
         const reason = interaction.options.getString('reason');
 
+        await interaction.deferReply({ ephemeral: true });
+
         const modCase = await getCase(interaction.guild.id, caseId);
 
         if (!modCase) {
-            return interaction.reply({ content: `Case #${caseId} not found.`, ephemeral: true });
+            return interaction.editReply({ content: `Case #${caseId} not found.` });
         }
         if (modCase.targetUserId !== interaction.user.id) {
-            return interaction.reply({ content: 'You can only appeal cases that are against you.', ephemeral: true });
+            return interaction.editReply({ content: 'You can only appeal cases that are against you.' });
         }
         if (modCase.status === 'appealed') {
-            return interaction.reply({ content: 'This case is already under appeal.', ephemeral: true });
+            return interaction.editReply({ content: 'This case is already under appeal.' });
         }
         if (['appeal_approved', 'appeal_denied', 'closed'].includes(modCase.status)) {
-            return interaction.reply({ content: 'This case cannot be appealed.', ephemeral: true });
+            return interaction.editReply({ content: 'This case cannot be appealed.' });
         }
 
         // Mark as appealed and add appeal note
@@ -46,9 +48,8 @@ module.exports = {
             }
         );
 
-        await interaction.reply({
+        await interaction.editReply({
             content: 'Your appeal has been submitted. Moderators have been notified.',
-            ephemeral: true
         });
 
         // Post to appeal channel / mod log
@@ -71,7 +72,7 @@ module.exports = {
             .setColor('#5865F2')
             .setTitle(`Appeal Filed — Case #${caseId}`)
             .addFields(
-                { name: 'User', value: `${interaction.user.tag} (<@${interaction.user.id}>)`, inline: true },
+                { name: 'User', value: `${interaction.user.globalName ?? interaction.user.username} (<@${interaction.user.id}>)`, inline: true },
                 { name: 'Original Action', value: modCase.type.toUpperCase(), inline: true },
                 { name: 'Original Reason', value: modCase.reason },
                 { name: 'Appeal Reason', value: reason }

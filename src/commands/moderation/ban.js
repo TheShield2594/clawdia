@@ -91,10 +91,10 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#ff0000')
                 .setTitle(durationMs ? 'User Temporarily Banned' : 'User Banned')
-                .setDescription(`**${user.tag}** has been banned from the server.`)
+                .setDescription(`**${user.globalName ?? user.username}** has been banned from the server.`)
                 .addFields(
                     { name: 'Reason', value: reason },
-                    { name: 'Moderator', value: interaction.user.tag }
+                    { name: 'Moderator', value: interaction.user.globalName ?? interaction.user.username }
                 )
                 .setTimestamp();
 

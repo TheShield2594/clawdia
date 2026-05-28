@@ -82,6 +82,8 @@ module.exports = {
                 return interaction.reply({ content: `You already have an open ticket: ${existing}`, ephemeral: true });
             }
 
+            await interaction.deferReply({ ephemeral: true });
+
             guildSettings.tickets.count += 1;
             await guildSettings.save();
 
@@ -113,7 +115,7 @@ module.exports = {
             );
 
             await channel.send({ content: `${interaction.user} <@&${guildSettings.tickets.supportRoleId}>`, embeds: [embed], components: [row] });
-            await interaction.reply({ content: `Your ticket has been opened: ${channel}`, ephemeral: true });
+            await interaction.editReply({ content: `Your ticket has been opened: ${channel}` });
 
         } else if (sub === 'close') {
             await closeTicket(interaction, guildSettings);
@@ -157,12 +159,12 @@ async function closeTicket(interaction, guildSettings) {
         const logChannel = interaction.guild.channels.cache.get(guildSettings.tickets.logChannelId);
         if (logChannel) {
             const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-            let transcript = `Ticket Transcript: #${channel.name}\nClosed by: ${interaction.user.tag}\nDate: ${new Date().toUTCString()}\n${'─'.repeat(60)}\n`;
+            let transcript = `Ticket Transcript: #${channel.name}\nClosed by: ${interaction.user.globalName ?? interaction.user.username}\nDate: ${new Date().toUTCString()}\n${'─'.repeat(60)}\n`;
             if (messages) {
                 const sorted = [...messages.values()].reverse();
                 for (const msg of sorted) {
                     const time = msg.createdAt.toUTCString();
-                    transcript += `[${time}] ${msg.author.tag}: ${msg.content || ''}`;
+                    transcript += `[${time}] ${msg.author.globalName ?? msg.author.username}: ${msg.content || ''}`;
                     if (msg.attachments.size) transcript += ` [${msg.attachments.map(a => a.url).join(', ')}]`;
                     transcript += '\n';
                 }

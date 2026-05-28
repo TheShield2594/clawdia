@@ -87,8 +87,6 @@ This file tracks the production readiness status of each feature/function in Cla
 
 ---
 
----
-
 ## Birthday Function
 
 **Status: PRODUCTION READY** ✓
@@ -118,6 +116,60 @@ This file tracks the production readiness status of each feature/function in Cla
 | # | Issue | Fix | Files |
 |---|-------|-----|-------|
 | 5 | No tests | Added Jest; 7 passing tests covering age substitution, permission guard, leap day handling, and `lastCelebratedYear` tracking | `tests/birthday.test.js` |
+
+---
+
+## Moderation Function
+
+**Status: PRODUCTION READY** ✓
+
+**Files reviewed/fixed:**
+- `src/commands/moderation/appeal.js`
+- `src/commands/moderation/ban.js`
+- `src/commands/moderation/case.js`
+- `src/commands/moderation/cases.js`
+- `src/commands/moderation/clear.js`
+- `src/commands/moderation/closecase.js`
+- `src/commands/moderation/kick.js`
+- `src/commands/moderation/lockdown.js`
+- `src/commands/moderation/massban.js`
+- `src/commands/moderation/mute.js`
+- `src/commands/moderation/note.js`
+- `src/commands/moderation/slowmode.js`
+- `src/commands/moderation/softban.js`
+- `src/commands/moderation/ticket.js`
+- `src/commands/moderation/unban.js`
+- `src/commands/moderation/unmute.js`
+- `src/commands/moderation/warn.js`
+- `src/services/caseService.js`
+- `src/services/escalationService.js`
+- `src/services/tempBanService.js`
+- `src/utils/logger.js`
+- `src/events/messageCreate.js` (AutoMod)
+- `src/models/Case.js`
+- `src/models/TempBan.js`
+
+---
+
+### Issues Found & Fixed
+
+#### Critical (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 1 | `warn add` subcommand had 5+ sequential DB/API operations before `interaction.reply` — routinely exceeded Discord's 3-second response deadline, causing "This interaction failed" errors | Added `interaction.deferReply()` immediately after the bot-check guard; changed reply to `editReply`; fixed the catch path to use `editReply` when already deferred | `warn.js` |
+| 2 | `appeal.js` had 2 DB operations before any reply — at-risk of 3-second timeout | Added `interaction.deferReply({ ephemeral: true })` before first DB call; changed all subsequent `reply` calls to `editReply` | `appeal.js` |
+| 3 | `ticket open` subcommand had a DB save + channel creation (2+ slow operations) before reply | Added `interaction.deferReply({ ephemeral: true })` before the slow section; changed final `reply` to `editReply` | `ticket.js` |
+
+#### Warnings (all resolved)
+
+| # | Issue | Fix | Files |
+|---|-------|-----|-------|
+| 4 | `user.tag` deprecated throughout — in the new Discord username system `.tag` always returns `username#0000` for non-legacy accounts | Replaced all `user.tag` / `interaction.user.tag` / `ban.user.tag` / `msg.author.tag` / `targetUser.tag` / `botUser.tag` with `globalName ?? username` | `appeal.js`, `ban.js`, `cases.js`, `closecase.js`, `escalationService.js`, `kick.js`, `logger.js`, `massban.js`, `mute.js`, `note.js`, `slowmode.js`, `softban.js`, `ticket.js`, `unban.js`, `unmute.js`, `warn.js` |
+| 5 | `displayAvatarURL({ dynamic: true })` deprecated in discord.js v14 | Removed the `{ dynamic: true }` option; the method returns animated URLs by default | `cases.js` |
+| 6 | `c.createdAt / 1000` in cases list — implicit Date→number coercion; relies on JavaScript auto-coercion rather than explicit `.getTime()` | Changed to `c.createdAt.getTime() / 1000` | `cases.js` |
+| 7 | `massban.js` fallback user object used `{ id, tag }` — mismatched logger's `globalName ?? username` lookup after fix #4 | Changed to `{ id, globalName: null, username: userId }` | `massban.js` |
+| 8 | `warn.js` used flat `if` chains for subcommand dispatch — all three branches evaluated on every call | Changed to `if / else if / else if` | `warn.js` |
 
 ---
 

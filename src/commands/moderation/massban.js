@@ -53,7 +53,7 @@ module.exports = {
                 });
                 succeeded.push(userId);
 
-                const fetchedUser = await interaction.client.users.fetch(userId).catch(() => ({ id: userId, tag: userId }));
+                const fetchedUser = await interaction.client.users.fetch(userId).catch(() => ({ id: userId, globalName: null, username: userId }));
                 await logModeration(interaction.guild.id, 'ban', fetchedUser, interaction.user, `[MassBan] ${reason}`);
             } catch {
                 failed.push(userId);

@@ -21,10 +21,10 @@ async function logModeration(guildId, action, target, moderator, reason, options
 
                 const embed = new EmbedBuilder()
                     .setColor(colors[action] || '#999999')
-                    .setTitle(`${action.toUpperCase()} | ${target.tag}`)
+                    .setTitle(`${action.toUpperCase()} | ${target.globalName ?? target.username}`)
                     .addFields(
-                        { name: 'User', value: `${target.tag} (${target.id})`, inline: true },
-                        { name: 'Moderator', value: `${moderator.tag}`, inline: true },
+                        { name: 'User', value: `${target.globalName ?? target.username} (${target.id})`, inline: true },
+                        { name: 'Moderator', value: `${moderator.globalName ?? moderator.username}`, inline: true },
                         { name: 'Reason', value: reason }
                     )
                     .setTimestamp();

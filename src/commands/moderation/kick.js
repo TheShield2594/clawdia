@@ -37,10 +37,10 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#ff9900')
                 .setTitle('User Kicked')
-                .setDescription(`**${user.tag}** has been kicked from the server.`)
+                .setDescription(`**${user.globalName ?? user.username}** has been kicked from the server.`)
                 .addFields(
                     { name: 'Reason', value: reason },
-                    { name: 'Moderator', value: interaction.user.tag }
+                    { name: 'Moderator', value: interaction.user.globalName ?? interaction.user.username }
                 )
                 .setTimestamp();
 
