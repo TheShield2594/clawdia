@@ -106,11 +106,11 @@ async function applyEscalation({ guild, targetUser, warningCount, triggeringCase
 
     const embed = new EmbedBuilder()
         .setColor('#cc3300')
-        .setTitle(`AutoMod | ${step.action.toUpperCase()} | ${targetUser.tag}`)
+        .setTitle(`AutoMod | ${step.action.toUpperCase()} | ${targetUser.globalName ?? targetUser.username}`)
         .setDescription(`Triggered by warning threshold **${step.threshold}** (user reached **${warningCount}** active warnings).`)
         .addFields(
-            { name: 'User', value: `${targetUser.tag} (${targetUser.id})`, inline: true },
-            { name: 'Moderator', value: `${botUser.tag} (AutoMod)`, inline: true },
+            { name: 'User', value: `${targetUser.globalName ?? targetUser.username} (${targetUser.id})`, inline: true },
+            { name: 'Moderator', value: `${botUser.globalName ?? botUser.username} (AutoMod)`, inline: true },
             { name: 'Action', value: step.action.toUpperCase(), inline: true },
             { name: 'Reason', value: reason }
         )

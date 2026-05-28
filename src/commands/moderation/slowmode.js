@@ -25,7 +25,7 @@ module.exports = {
         }
 
         try {
-            await channel.setRateLimitPerUser(seconds, `Set by ${interaction.user.tag}`);
+            await channel.setRateLimitPerUser(seconds, `Set by ${interaction.user.globalName ?? interaction.user.username}`);
 
             const embed = new EmbedBuilder()
                 .setColor(seconds === 0 ? '#00ff00' : '#ff9900')
@@ -35,7 +35,7 @@ module.exports = {
                         ? `Slowmode has been removed from ${channel}.`
                         : `${channel} now has a **${seconds}s** slowmode.`
                 )
-                .addFields({ name: 'Set by', value: interaction.user.tag, inline: true })
+                .addFields({ name: 'Set by', value: interaction.user.globalName ?? interaction.user.username, inline: true })
                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed] });

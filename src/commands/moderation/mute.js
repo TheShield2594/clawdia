@@ -40,11 +40,11 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#ff6600')
                 .setTitle('User Muted')
-                .setDescription(`**${user.tag}** has been muted.`)
+                .setDescription(`**${user.globalName ?? user.username}** has been muted.`)
                 .addFields(
                     { name: 'Duration', value: `${duration} minutes` },
                     { name: 'Reason', value: reason },
-                    { name: 'Moderator', value: interaction.user.tag }
+                    { name: 'Moderator', value: interaction.user.globalName ?? interaction.user.username }
                 )
                 .setTimestamp();
 
