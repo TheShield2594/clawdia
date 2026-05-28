@@ -66,6 +66,8 @@ module.exports = {
         const sub = interaction.options.getSubcommand();
 
         if (sub === 'raid') {
+            await interaction.deferReply();
+
             const enabled = interaction.options.getBoolean('enabled');
             const threshold = interaction.options.getInteger('threshold');
             const window = interaction.options.getInteger('window');
@@ -103,18 +105,19 @@ module.exports = {
                 )
                 .setTimestamp();
 
-            return interaction.reply({ embeds: [embed] });
+            return interaction.editReply({ embeds: [embed] });
         }
 
         if (sub === 'toggle') {
+            await interaction.deferReply();
+
             const status = interaction.options.getString('status');
             const active = status === 'on';
 
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             if (!guildSettings?.raidDetection?.enabled) {
-                return interaction.reply({
-                    content: 'Raid detection is not enabled. Use `/raidmode raid enabled:true` first.',
-                    ephemeral: true
+                return interaction.editReply({
+                    content: 'Raid detection is not enabled. Use `/raidmode raid enabled:true` first.'
                 });
             }
 
@@ -131,15 +134,17 @@ module.exports = {
                 .addFields({ name: 'Triggered By', value: 'Manual (moderator override)', inline: true })
                 .setTimestamp();
 
-            return interaction.reply({ embeds: [embed] });
+            return interaction.editReply({ embeds: [embed] });
         }
 
         if (sub === 'status') {
+            await interaction.deferReply();
+
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             const rd = guildSettings?.raidDetection;
 
             if (!rd?.enabled) {
-                return interaction.reply({
+                return interaction.editReply({
                     embeds: [new EmbedBuilder()
                         .setColor('#888888')
                         .setTitle('Raid Detection: Disabled')
@@ -160,7 +165,7 @@ module.exports = {
                     { name: 'Raid Mode Active', value: isActive ? '🔴 YES' : '🟢 No', inline: true },
                     { name: 'Triggered By', value: isActive ? (activatedBy === 'manual' ? 'Manual' : 'Automatic') : 'N/A', inline: true },
                     { name: 'Threshold', value: `${rd.threshold} joins / ${rd.windowSeconds}s`, inline: true },
-                    { name: 'Action', value: rd.action.toUpperCase(), inline: true },
+                    { name: 'Action', value: (rd.action ?? 'alert').toUpperCase(), inline: true },
                     { name: 'Min Account Age', value: `${rd.minAccountAgeDays} days`, inline: true },
                     { name: 'Auto-Disable', value: rd.autoDisable ? 'Yes' : 'No', inline: true },
                     { name: 'Calm Window', value: `${rd.calmWindowSeconds}s`, inline: true },
@@ -172,7 +177,7 @@ module.exports = {
             }
 
             embed.setTimestamp();
-            return interaction.reply({ embeds: [embed] });
+            return interaction.editReply({ embeds: [embed] });
         }
 
         if (sub === 'cases') {
