@@ -19,13 +19,19 @@ function truncateText(ctx, text, maxWidth) {
 }
 
 // Wraps loadImage with a hard timeout so a slow/unreachable CDN can't stall the
-// whole event handler indefinitely (fix #6).
+// whole event handler indefinitely (fix #6). The timer is always cleared so no
+// handle leaks after the race settles either way.
 function loadImageWithTimeout(url, ms = 5000) {
+    let timer;
+    const image = loadImage(url).then(
+        img => { clearTimeout(timer); return img; },
+        err => { clearTimeout(timer); return Promise.reject(err); }
+    );
     return Promise.race([
-        loadImage(url),
-        new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Avatar load timed out')), ms)
-        )
+        image,
+        new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Avatar load timed out')), ms);
+        })
     ]);
 }
 

@@ -218,7 +218,7 @@ function validateWelcomeUpdate(updates) {
         if (field === 'enabled' || field === 'cardEnabled' || field === 'dmEnabled') {
             if (typeof value !== 'boolean') return `welcome.${field} must be a boolean`;
         }
-        if (field === 'channelId' && value !== null) {
+        if (field === 'channelId' && value !== null && value !== '') {
             if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {
                 return 'welcome.channelId must be a valid Discord snowflake or null';
             }
