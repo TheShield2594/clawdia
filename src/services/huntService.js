@@ -604,7 +604,17 @@ function executeHunt(user, zoneId) {
         };
     }
 
-    const successChance = calculateSuccessChance(user, weapon, zone);
+    // Roll the animal upfront so traits can influence the success check
+    const tier   = rollTier(user, zone);
+    const animal = rollAnimal(tier, zoneId ?? h.activeZone);
+    const traits = animal.traits ?? [];
+
+    // Base success chance + trait adjustments
+    let successChance = calculateSuccessChance(user, weapon, zone);
+    if (traits.includes('elusive'))  successChance -= 0.10;
+    if (traits.includes('spectral') && h.activeCharm === 'luck_charm') successChance -= 0.015;
+    successChance = Math.min(0.95, Math.max(0.10, successChance));
+
     const success = Math.random() < successChance;
 
     // Track which consumables were active BEFORE ticking
@@ -613,24 +623,36 @@ function executeHunt(user, zoneId) {
 
     const result = {
         success,
+        animal,
+        tier,
+        traits,
         xpEarned: 0,
         durabilityLost: 0,
-        weaponBroke: false
+        weaponBroke: false,
+        traitEffects: []
     };
 
     if (success) {
-        // ── Resolve animal ──────────────────────────────────────────────
-        const tier   = rollTier(user, zone);
-        const animal = rollAnimal(tier, zoneId ?? h.activeZone);
         const rawPayout = randInt(animal.payoutMin, animal.payoutMax);
 
-        // Crit
+        // Crit — armored trait negates crits
         const critChance     = calculateCritChance(user);
-        const isCrit         = Math.random() < critChance;
+        const isCrit         = traits.includes('armored') ? false : Math.random() < critChance;
         const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
 
+        if (traits.includes('armored')) {
+            result.traitEffects.push({ trait: 'armored', msg: 'Its thick hide absorbed your critical strike.' });
+        }
+
         const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
-        const payoutBeforeMods = Math.round(rawPayout * critMultiplier * streakMult);
+        let payoutBeforeMods = Math.round(rawPayout * critMultiplier * streakMult);
+
+        // Trait: enraged — +25% payout
+        if (traits.includes('enraged')) {
+            payoutBeforeMods = Math.round(payoutBeforeMods * 1.25);
+            result.traitEffects.push({ trait: 'enraged', msg: 'Its fury drove the prize higher (+25% payout).' });
+        }
+
         const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payoutBeforeMods, zone);
 
         // Special drop
@@ -649,9 +671,26 @@ function executeHunt(user, zoneId) {
         if (h.activeXpScroll) xpGain = Math.round(xpGain * 1.5);
         xpGain = Math.round(xpGain * streakMult);
 
-        // Durability (-1 on success)
-        applyDurabilityLoss(weapon, 1);
-        result.durabilityLost = 1;
+        // Durability loss on success (base 1 + giant trait)
+        let durLoss = 1;
+        if (traits.includes('giant')) {
+            durLoss += 1;
+            result.traitEffects.push({ trait: 'giant', msg: 'The sheer mass of the beast wore your weapon harder.' });
+        }
+        applyDurabilityLoss(weapon, durLoss);
+        result.durabilityLost = durLoss;
+
+        // Trait: venomous — costs an extra stamina
+        if (traits.includes('venomous') && h.stamina > 0) {
+            h.stamina = Math.max(0, h.stamina - 1);
+            result.traitEffects.push({ trait: 'venomous', msg: 'Its venom sapped your strength (-1 extra stamina).' });
+        }
+
+        // Trait: aggressive — 30% chance to injure even on success
+        if (traits.includes('aggressive') && Math.random() < 0.30) {
+            h.injuryUntil = new Date(Date.now() + LIMITS.INJURY_PENALTY_MS);
+            result.traitEffects.push({ trait: 'aggressive', msg: 'It lashed out while falling, injuring you (+15 min cooldown).' });
+        }
 
         // Apply payout
         user.balance         += adjustedPayout;
@@ -669,7 +708,7 @@ function executeHunt(user, zoneId) {
         const lvResult = applyXp(user, xpGain);
 
         Object.assign(result, {
-            animal, tier, rawPayout, finalPayout: adjustedPayout,
+            rawPayout, finalPayout: adjustedPayout,
             isCrit, critMultiplier: parseFloat(critMultiplier.toFixed(2)),
             specialDrop, xpEarned: xpGain,
             levelUp: lvResult.leveledUp ? lvResult : null,
@@ -681,8 +720,15 @@ function executeHunt(user, zoneId) {
     } else {
         // ── Failure path ────────────────────────────────────────────────
         const severity = rollFailureSeverity();
-        applyDurabilityLoss(weapon, severity.durLoss);
-        result.durabilityLost = severity.durLoss;
+
+        // Trait: pack_hunter — extra durability damage on failure
+        let failDurLoss = severity.durLoss;
+        if (traits.includes('pack_hunter')) {
+            failDurLoss += 3;
+            result.traitEffects.push({ trait: 'pack_hunter', msg: 'The pack descended on you, battering your weapon.' });
+        }
+        applyDurabilityLoss(weapon, failDurLoss);
+        result.durabilityLost = failDurLoss;
 
         if (severity.injuryMs > 0) {
             h.injuryUntil = new Date(Date.now() + severity.injuryMs);
