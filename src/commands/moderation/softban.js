@@ -57,11 +57,11 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setColor('#ff9900')
             .setTitle('User Softbanned')
-            .setDescription(`**${user.tag}** has been softbanned — their last ${deleteDays} day(s) of messages were removed and they may rejoin.`)
+            .setDescription(`**${user.globalName ?? user.username}** has been softbanned — their last ${deleteDays} day(s) of messages were removed and they may rejoin.`)
             .addFields(
                 { name: 'Reason', value: reason },
                 { name: 'Messages Deleted', value: `${deleteDays} day(s)` },
-                { name: 'Moderator', value: interaction.user.tag }
+                { name: 'Moderator', value: interaction.user.globalName ?? interaction.user.username }
             )
             .setTimestamp();
 

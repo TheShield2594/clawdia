@@ -23,7 +23,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('User Unmuted')
-                .setDescription(`**${user.tag}** has been unmuted.`)
+                .setDescription(`**${user.globalName ?? user.username}** has been unmuted.`)
                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed] });

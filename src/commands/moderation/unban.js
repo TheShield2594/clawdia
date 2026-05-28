@@ -35,10 +35,10 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('User Unbanned')
-                .setDescription(`**${ban.user.tag}** has been unbanned.`)
+                .setDescription(`**${ban.user.globalName ?? ban.user.username}** has been unbanned.`)
                 .addFields(
                     { name: 'Reason', value: reason },
-                    { name: 'Moderator', value: interaction.user.tag }
+                    { name: 'Moderator', value: interaction.user.globalName ?? interaction.user.username }
                 )
                 .setTimestamp();
 
