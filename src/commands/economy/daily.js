@@ -8,6 +8,48 @@ const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/econo
 const { generateDailyChallenge } = require('../../utils/dailyChallenge');
 const { DROP_TABLE, RARE_DROP_TABLE, DROP_MILESTONES, DROP_BASE_CHANCE, weightedRandom } = require('../../data/dailyDropTable');
 
+function getStreakColor(streak) {
+    if (streak >= 100) return '#9b59b6';
+    if (streak >= 30)  return '#FFD700';
+    if (streak >= 7)   return '#ff6b00';
+    return '#f39c12';
+}
+
+function getStreakTitle(streak, isMilestone) {
+    if (isMilestone) return `🔥 ${streak}-Day Milestone!`;
+    if (streak >= 7)  return `🔥 Day ${streak} — Daily Streak`;
+    return '☀️ Daily Reward';
+}
+
+function getStreakDescription(streak, isMilestone) {
+    if (isMilestone) {
+        if (streak === 100) return "One hundred days. You've made this a habit.\nThat's not luck — that's dedication.";
+        if (streak === 30)  return "You've shown up 30 days in a row.\nThat kind of commitment pays off.";
+        if (streak === 7)   return "A full week without missing a day.\nYou're just getting started.";
+    }
+    if (streak >= 100) return "Still going. Every day counts.";
+    if (streak >= 30)  return "You've been showing up consistently.\nKeep the momentum going.";
+    if (streak >= 7)   return "The streak is real. Don't break it.";
+    return "Good to see you today.";
+}
+
+function buildRewardBlock(amount, streak, streakMult, balance, bonusLines, droppedItem, isMilestone, streakCurrent) {
+    const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
+    const lines = [div];
+    lines.push(`💰 Today's Reward: **${amount.toLocaleString()} coins**`);
+    if (streak >= 7 && streakMult > 1.0) lines.push(`🔥 Streak Bonus: **${streakMult}x**  (day ${streak})`);
+    if (bonusLines.length) lines.push(...bonusLines);
+    lines.push(div);
+    lines.push(`Balance: **${balance.toLocaleString()} coins**`);
+    if (droppedItem) {
+        const dropLabel = isMilestone ? `🎁 Milestone Drop! (${streakCurrent}-day streak)` : '🎁 Surprise Drop!';
+        lines.push('');
+        lines.push(`${dropLabel}`);
+        lines.push(`You found a ${droppedItem.emoji} **${droppedItem.name}** in today's reward!`);
+    }
+    return lines.join('\n');
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('daily')
@@ -33,7 +75,13 @@ module.exports = {
                 const minutes = Math.floor((timeLeft % 3600000) / 60000);
 
                 return interaction.reply({
-                    content: `You've already claimed your daily reward! Come back in ${hours}h ${minutes}m.`,
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor('#888888')
+                            .setTitle('⏳ Already Claimed')
+                            .setDescription(`You've already claimed your daily reward!\nCome back in **${hours}h ${minutes}m**.`)
+                            .setTimestamp()
+                    ],
                     ephemeral: true
                 });
             }
@@ -155,7 +203,16 @@ module.exports = {
             );
 
             if (!updated) {
-                const errorMsg = { content: "You've already claimed your daily reward! Try again later.", ephemeral: true };
+                const errorMsg = {
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor('#888888')
+                            .setTitle('⏳ Already Claimed')
+                            .setDescription("You've already claimed your daily reward! Try again later.")
+                            .setTimestamp()
+                    ],
+                    ephemeral: true
+                };
                 return usedFollowUp ? interaction.followUp(errorMsg) : interaction.reply(errorMsg);
             }
 
@@ -201,42 +258,57 @@ module.exports = {
             // ─────────────────────────────────────────────────────────────────────
 
             const bonusLines = [];
-            if (streakMult > 1.0) bonusLines.push(`🔥 **${streakMult}x streak bonus** applied!`);
             if (coinMult > 1.0)   bonusLines.push(`💰🚀 **${coinMult}x Coin Booster** active!`);
             if (serverMult > 1.0) bonusLines.push(`🌐 **${serverMult}x Server Boost** active!`);
             if (capActive)        bonusLines.push(`⚠️ Combined multiplier capped at **${MAX_COMBINED_MULTIPLIER}x**.`);
-            const bonusLine = bonusLines.length ? `\n${bonusLines.join('\n')}` : '';
 
-            const embed = new EmbedBuilder()
-                .setColor('#00ff00')
-                .setTitle('Daily Reward Claimed!')
-                .setDescription(`You received **${actualAmount.toLocaleString()}** coins!${bonusLine}`)
-                .addFields(
-                    { name: 'New Balance', value: `${updated.balance.toLocaleString()} coins` }
+            const streakColor = getStreakColor(streakCurrent);
+            const rewardEmbed = new EmbedBuilder()
+                .setColor(streakColor)
+                .setTitle(getStreakTitle(streakCurrent, isMilestone))
+                .setDescription(
+                    getStreakDescription(streakCurrent, isMilestone) + '\n\n' +
+                    buildRewardBlock(actualAmount, streakCurrent, streakMult, updated.balance, bonusLines, droppedItem, isMilestone, streakCurrent)
                 )
                 .setFooter({ text: 'Cooldown: 24h' })
                 .setTimestamp();
 
-            if (droppedItem) {
-                const dropLabel = isMilestone ? `🎁 Milestone Drop! (${streakCurrent}-day streak)` : '🎁 Surprise Drop!';
-                embed.addFields({
-                    name: dropLabel,
-                    value: `You found a ${droppedItem.emoji} **${droppedItem.name}** in today's reward!`
-                });
-            }
-
             const freezeCount = user.streak?.freezes ?? 0;
             if (freezeCount > 0) {
-                embed.addFields({ name: '❄️ Streak Freezes', value: `${freezeCount} banked`, inline: true });
+                rewardEmbed.addFields({ name: '❄️ Streak Freezes', value: `${freezeCount} banked`, inline: true });
             }
 
             const challenge = generateDailyChallenge();
-            embed.addFields({ name: '🎯 Bonus Challenge', value: `${challenge.description}\n*Answer correctly for a **+50% bonus** on your daily reward!*` });
+            const challengeEmbed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setTitle('⚡ Quick Challenge — Earn +50%')
+                .setDescription(`> ${challenge.description}\n\nYou have **${Math.round(challenge.timeLimit / 1000)} seconds**.`);
 
-            const sendOpts = { embeds: [embed], components: [challenge.row], fetchReply: true };
+            const sendOpts = { embeds: [rewardEmbed, challengeEmbed], components: [challenge.row], fetchReply: true };
             const reply = usedFollowUp
                 ? await interaction.followUp(sendOpts)
                 : await interaction.reply(sendOpts);
+
+            // ── Milestone public announcement ─────────────────────────────────────
+            if (isMilestone) {
+                const announcementChannelId = guildSettings?.economy?.announcementChannelId;
+                const channel = announcementChannelId
+                    ? interaction.guild.channels.cache.get(announcementChannelId)
+                    : null;
+
+                if (channel?.isTextBased()) {
+                    const milestoneAnnounce = new EmbedBuilder()
+                        .setColor(streakColor)
+                        .setTitle(`🔥 ${streakCurrent}-Day Streak Milestone!`)
+                        .setDescription(
+                            `${interaction.user} just hit a **${streakCurrent}-day streak**!\n` +
+                            (droppedItem ? `They found a ${droppedItem.emoji} **${droppedItem.name}** from their milestone drop!` : '')
+                        )
+                        .setTimestamp();
+                    channel.send({ embeds: [milestoneAnnounce] }).catch(() => {});
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────────
 
             let activateTimer = null;
             if (challenge.type === 'react_fast' && challenge.activeRow) {
@@ -267,27 +339,32 @@ module.exports = {
                         balance: bonusUpdated?.balance ?? updated.balance + bonusAmount,
                         note: `daily challenge bonus (${challenge.type})`,
                     });
-                    embed.setColor('#ffd700');
-                    embed.spliceFields(0, embed.data.fields.length,
-                        { name: 'New Balance', value: `${(bonusUpdated?.balance ?? updated.balance + bonusAmount).toLocaleString()} coins` },
-                        { name: '🎯 Bonus Challenge', value: `✅ Correct! You earned an extra **+${bonusAmount.toLocaleString()}** coins!` },
+
+                    const finalBalance = bonusUpdated?.balance ?? updated.balance + bonusAmount;
+                    rewardEmbed.setDescription(
+                        getStreakDescription(streakCurrent, isMilestone) + '\n\n' +
+                        buildRewardBlock(actualAmount, streakCurrent, streakMult, finalBalance, bonusLines, droppedItem, isMilestone, streakCurrent)
                     );
-                    await response.update({ embeds: [embed], components: [] });
+                    const winChallengeEmbed = new EmbedBuilder()
+                        .setColor('#ffd700')
+                        .setTitle('⚡ Quick Challenge — Earned!')
+                        .setDescription(`✅ Correct! You earned an extra **+${bonusAmount.toLocaleString()} coins**!`);
+                    await response.update({ embeds: [rewardEmbed, winChallengeEmbed], components: [] });
                 } else {
-                    embed.spliceFields(0, embed.data.fields.length,
-                        { name: 'New Balance', value: `${updated.balance.toLocaleString()} coins` },
-                        { name: '🎯 Bonus Challenge', value: '❌ Wrong answer! No bonus this time — your daily reward is still yours.' },
-                    );
-                    await response.update({ embeds: [embed], components: [] });
+                    const loseChallengeEmbed = new EmbedBuilder()
+                        .setColor('#5865F2')
+                        .setTitle('⚡ Quick Challenge')
+                        .setDescription('❌ Wrong answer! No bonus this time — your daily reward is still yours.');
+                    await response.update({ embeds: [rewardEmbed, loseChallengeEmbed], components: [] });
                 }
             } catch (err) {
                 if (activateTimer) clearTimeout(activateTimer);
                 if (err.name === 'InteractionCollectorError') {
-                    embed.spliceFields(0, embed.data.fields.length,
-                        { name: 'New Balance', value: `${updated.balance.toLocaleString()} coins` },
-                        { name: '🎯 Bonus Challenge', value: '⏱️ Time\'s up! No bonus this time — your daily reward is still yours.' },
-                    );
-                    await reply.edit({ embeds: [embed], components: [] }).catch(() => {});
+                    const timeoutChallengeEmbed = new EmbedBuilder()
+                        .setColor('#5865F2')
+                        .setTitle('⚡ Quick Challenge')
+                        .setDescription("⏱️ Time's up! No bonus this time — your daily reward is still yours.");
+                    await reply.edit({ embeds: [rewardEmbed, timeoutChallengeEmbed], components: [] }).catch(() => {});
                 } else {
                     console.error('Daily challenge error:', err);
                     await reply.edit({ components: [] }).catch(() => {});
