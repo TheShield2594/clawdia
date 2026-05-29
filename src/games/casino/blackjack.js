@@ -8,6 +8,7 @@ const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
+const { randomFrom, BJ_WIN_LINES, BJ_LOSE_LINES, BJ_BUST_LINES, BJ_PUSH_LINES } = require('../../utils/copyLines');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -382,7 +383,7 @@ module.exports = {
                     collector.stop('bust');
                     const bustUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
                     const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, activeBet,
-                        '🃏 Blackjack — Bust', 'Went over. The house collects.',
+                        '🃏 Blackjack — Bust', randomFrom(BJ_BUST_LINES),
                         '#e74c3c', bustUser?.balance ?? 0);
                     return interaction.editReply({ embeds: [embed], components: buildButtons(gameId, true) });
                 }
@@ -463,7 +464,7 @@ module.exports = {
                     collector.stop('bust');
                     const bustUser2 = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
                     const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, activeBet,
-                        '🃏 Blackjack — Bust', 'Went over. The house collects.',
+                        '🃏 Blackjack — Bust', randomFrom(BJ_BUST_LINES),
                         '#e74c3c', bustUser2?.balance ?? 0);
                     return interaction.editReply({ embeds: [embed], components: buildButtons(gameId, true) });
                 }
@@ -583,18 +584,18 @@ module.exports = {
                     const netProfit = Math.round(activeBet * totalCoinMult);
                     totalCredit = activeBet + netProfit;
                     title       = '🃏 Blackjack — You Win';
-                    description = `The dealer broke. You didn't.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 Payout: ${currency}${(activeBet + netProfit).toLocaleString()}  (+${currency}${netProfit.toLocaleString()} net)${boostNote}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    description = `${randomFrom(BJ_WIN_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 Payout: ${currency}${(activeBet + netProfit).toLocaleString()}  (+${currency}${netProfit.toLocaleString()} net)${boostNote}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#2ecc71';
                 } else if (playerTotal > dealerTotal) {
                     const netProfit = Math.round(activeBet * totalCoinMult);
                     totalCredit = activeBet + netProfit;
                     title       = '🃏 Blackjack — You Win';
-                    description = `You had the better hand.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 Payout: ${currency}${(activeBet + netProfit).toLocaleString()}  (+${currency}${netProfit.toLocaleString()} net)${boostNote}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    description = `${randomFrom(BJ_WIN_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 Payout: ${currency}${(activeBet + netProfit).toLocaleString()}  (+${currency}${netProfit.toLocaleString()} net)${boostNote}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#2ecc71';
                 } else if (playerTotal === dealerTotal) {
                     totalCredit = activeBet;
                     title       = '🃏 Blackjack — Push';
-                    description = `Same total. Bet returned.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    description = `${randomFrom(BJ_PUSH_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#f39c12';
                 } else if (luckyActive && Math.random() < 0.20) {
                     totalCredit = activeBet;
@@ -608,7 +609,7 @@ module.exports = {
                     color       = '#f39c12';
                 } else {
                     title       = '🃏 Blackjack — Dealer Wins';
-                    description = `Dealer had it.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💸 Lost: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    description = `${randomFrom(BJ_LOSE_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💸 Lost: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#e74c3c';
                 }
             }

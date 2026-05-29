@@ -4,6 +4,7 @@ const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect, timeRemaining } = require('../../services/effectsService');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { getTotalBonus } = require('../../services/petService');
+const { randomFrom, ROB_WIN_LINES, ROB_FAIL_LINES } = require('../../utils/copyLines');
 
 const ROBBER_COOLDOWN_MS = 1 * 3_600_000; // 1 hour
 const VICTIM_IMMUNITY_MS = 30 * 60_000;   // 30 minutes
@@ -167,7 +168,7 @@ module.exports = {
                 embed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .setTitle('🦹 Successful Heist!')
-                    .setDescription(`You slipped past **${target.username}** and stole **${currency}${stolen.toLocaleString()}**!${bagNote}`)
+                    .setDescription(`${randomFrom(ROB_WIN_LINES)} You took **${currency}${stolen.toLocaleString()}** from **${target.username}**.${bagNote}`)
                     .addFields(
                         { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true },
                         { name: 'Their Balance', value: `${currency}${victim.balance.toLocaleString()}`, inline: true }
@@ -207,7 +208,7 @@ module.exports = {
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')
                         .setTitle('🚔 Caught Red-Handed!')
-                        .setDescription(`**${target.username}** caught you and you were fined **${currency}${paid.toLocaleString()}**, which went straight to them.`)
+                        .setDescription(`${randomFrom(ROB_FAIL_LINES)} **${target.username}** had you fined **${currency}${paid.toLocaleString()}**, which went straight to them.`)
                         .addFields(
                             { name: 'Fine Paid',    value: `${currency}${paid.toLocaleString()}`,        inline: true },
                             { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
