@@ -13,6 +13,8 @@ const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72
 const MIN_BET = 10;
 const MAX_BET = 5000;
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 const SUITS  = ['♠', '♥', '♦', '♣'];
 const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
@@ -96,23 +98,83 @@ function buildEmbed(interaction, playerHand, dealerHand, bet, currency, status, 
 
 function buildButtons(gameId, disabled = false, opts = {}) {
     const {
-        canDouble = false, doubleCost = 0,
-        canSplit = false,  splitCost  = 0,
-        canInsurance = false, insuranceCost = 0,
+        canDouble = false,
+        canSplit = false,
+        canInsurance = false,
     } = opts;
 
     const buttons = [
-        new ButtonBuilder().setCustomId(`bj_hit_${gameId}`).setLabel('Hit').setStyle(ButtonStyle.Primary).setDisabled(disabled),
-        new ButtonBuilder().setCustomId(`bj_stand_${gameId}`).setLabel('Stand').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+        new ButtonBuilder().setCustomId(`bj_hit_${gameId}`).setLabel('🎯 Hit').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+        new ButtonBuilder().setCustomId(`bj_stand_${gameId}`).setLabel('✋ Stand').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
     ];
 
     if (!disabled) {
-        if (canDouble)    buttons.push(new ButtonBuilder().setCustomId(`bj_double_${gameId}`).setLabel(`Double Down (${doubleCost.toLocaleString()})`).setStyle(ButtonStyle.Success));
-        if (canSplit)     buttons.push(new ButtonBuilder().setCustomId(`bj_split_${gameId}`).setLabel(`Split (${splitCost.toLocaleString()})`).setStyle(ButtonStyle.Success));
-        if (canInsurance) buttons.push(new ButtonBuilder().setCustomId(`bj_insurance_${gameId}`).setLabel(`Insurance (${insuranceCost.toLocaleString()})`).setStyle(ButtonStyle.Danger));
+        if (canDouble)    buttons.push(new ButtonBuilder().setCustomId(`bj_double_${gameId}`).setLabel('⚡ Double Down').setStyle(ButtonStyle.Success));
+        if (canSplit)     buttons.push(new ButtonBuilder().setCustomId(`bj_split_${gameId}`).setLabel('🃏 Split').setStyle(ButtonStyle.Success));
+        if (canInsurance) buttons.push(new ButtonBuilder().setCustomId(`bj_insurance_${gameId}`).setLabel('🛡️ Insurance').setStyle(ButtonStyle.Danger));
     }
 
     return new ActionRowBuilder().addComponents(buttons);
+}
+
+function buildDealerRevealEmbed(interaction, dealerHand, playerHand, splitHands, currency, bet) {
+    const dealerStr = displayHand(dealerHand);
+    const dealerVal = handTotal(dealerHand);
+
+    const embed = new EmbedBuilder()
+        .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
+        .setThumbnail(THUMB)
+        .setColor('#5865F2')
+        .setTitle('🃏 Blackjack — Dealer\'s Turn')
+        .setDescription('Dealer flips the hole card…')
+        .addFields({ name: `Dealer (${dealerVal})`, value: dealerStr, inline: false })
+        .setFooter({ text: 'Blackjack pays 3:2 · Dealer stands on 17' })
+        .setTimestamp();
+
+    if (splitHands) {
+        embed.addFields(
+            { name: `Hand 1 (${handTotal(splitHands[0])})`, value: displayHand(splitHands[0]), inline: true },
+            { name: `Hand 2 (${handTotal(splitHands[1])})`, value: displayHand(splitHands[1]), inline: true },
+        );
+    } else if (playerHand) {
+        embed.addFields({ name: `Your Hand (${handTotal(playerHand)})`, value: displayHand(playerHand), inline: false });
+    }
+
+    return embed;
+}
+
+function buildFinalEmbed(interaction, dealerHand, playerHand, splitHands, currency, bet, statusLine, description, color, balanceAfter) {
+    const dealerStr  = displayHand(dealerHand);
+    const dealerVal  = handTotal(dealerHand);
+    const dealerLabel = dealerVal > 21 ? `Bust (${dealerVal})` : `${dealerVal}`;
+
+    const embed = new EmbedBuilder()
+        .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
+        .setThumbnail(THUMB)
+        .setColor(color)
+        .setTitle(statusLine)
+        .setDescription(description ? `> ${description}` : null)
+        .setFooter({ text: 'Blackjack pays 3:2 · Dealer stands on 17' })
+        .setTimestamp();
+
+    if (splitHands) {
+        embed.addFields(
+            { name: `Dealer (${dealerLabel})`, value: dealerStr, inline: false },
+            { name: `Hand 1 (${handTotal(splitHands[0])})`, value: displayHand(splitHands[0]), inline: true },
+            { name: `Hand 2 (${handTotal(splitHands[1])})`, value: displayHand(splitHands[1]), inline: true },
+        );
+    } else if (playerHand) {
+        embed.addFields(
+            { name: `Dealer (${dealerLabel})`, value: dealerStr, inline: true },
+            { name: `Your Hand (${handTotal(playerHand)})`, value: displayHand(playerHand), inline: true },
+        );
+    }
+
+    if (balanceAfter !== null) {
+        embed.addFields({ name: 'Balance', value: `${currency}${balanceAfter.toLocaleString()}`, inline: false });
+    }
+
+    return embed;
 }
 
 module.exports = {
@@ -158,7 +220,8 @@ module.exports = {
             if (handTotal(dealerHand) === 21) {
                 user.balance += bet;
                 await user.save();
-                const embed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, '🤝 Push — both got blackjack', '#f39c12', false);
+                const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, bet,
+                    '🃏 Blackjack — Push', 'Both got blackjack. Bet returned.', '#f39c12', user.balance);
                 return interaction.reply({ embeds: [embed], components: [buildButtons(gameId, true)] });
             }
             const bjCoinMult   = getCoinMultiplier(user);
@@ -167,7 +230,19 @@ module.exports = {
             user.balance += bet + payout;
             await user.save();
             const boostNote = (bjCoinMult * bjServerMult) > 1.0 ? ` *(🚀 ${(bjCoinMult * bjServerMult).toFixed(1)}x)*` : '';
-            const embed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, `🎉 Blackjack! +${currency}${payout.toLocaleString()}${boostNote}`, '#2ecc71', false);
+            const embed = new EmbedBuilder()
+                .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
+                .setThumbnail(THUMB)
+                .setColor('#FFD700')
+                .setTitle('🃏 Blackjack — Natural 21')
+                .setDescription(`> Perfect hand. Pays 3:2.`)
+                .addFields(
+                    { name: 'Your Hand', value: `${displayHand(playerHand)} ━━ Blackjack`, inline: false },
+                    { name: `💰 Payout`, value: `${currency}${(bet + payout).toLocaleString()}  (+${currency}${payout.toLocaleString()} net)${boostNote}`, inline: false },
+                    { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: false },
+                )
+                .setFooter({ text: 'Blackjack pays 3:2 · Dealer stands on 17' })
+                .setTimestamp();
             return interaction.reply({ embeds: [embed], components: [buildButtons(gameId, true)] });
         }
 
@@ -181,7 +256,7 @@ module.exports = {
                 new ButtonBuilder().setCustomId(`bj_stand_${gameId}`).setLabel('Stand').setStyle(ButtonStyle.Secondary).setDisabled(true),
                 ...(insuranceCost > 0 ? [new ButtonBuilder()
                     .setCustomId(`bj_insurance_${gameId}`)
-                    .setLabel(`Insurance (${insuranceCost.toLocaleString()})`)
+                    .setLabel('🛡️ Insurance')
                     .setStyle(ButtonStyle.Danger)] : []),
             );
             await interaction.reply({
@@ -244,9 +319,9 @@ module.exports = {
         function currentOpts() {
             if (splitActive) return {};
             return {
-                canDouble: doubleAvailable, doubleCost: bet,
-                canSplit: splitAvailable,   splitCost: bet,
-                canInsurance: insuranceAvailable, insuranceCost,
+                canDouble: doubleAvailable,
+                canSplit: splitAvailable,
+                canInsurance: insuranceAvailable,
             };
         }
 
@@ -301,7 +376,10 @@ module.exports = {
                 const total = handTotal(playerHand);
                 if (total > 21) {
                     collector.stop('bust');
-                    const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, `💥 Bust! -${currency}${activeBet.toLocaleString()}`, '#e74c3c', false);
+                    const bustUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+                    const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, activeBet,
+                        '🃏 Blackjack — Bust', 'Went over. The house collects.',
+                        '#e74c3c', bustUser?.balance ?? 0);
                     return interaction.editReply({ embeds: [embed], components: [buildButtons(gameId, true)] });
                 }
                 const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, `📊 Doubled to ${currency}${activeBet.toLocaleString()} — dealer reveals...`, '#5865F2', true);
@@ -379,7 +457,10 @@ module.exports = {
 
                 if (total > 21) {
                     collector.stop('bust');
-                    const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, `💥 Bust! -${currency}${activeBet.toLocaleString()}`, '#e74c3c', false);
+                    const bustUser2 = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+                    const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, activeBet,
+                        '🃏 Blackjack — Bust', 'Went over. The house collects.',
+                        '#e74c3c', bustUser2?.balance ?? 0);
                     return interaction.editReply({ embeds: [embed], components: [buildButtons(gameId, true)] });
                 }
 
@@ -422,12 +503,25 @@ module.exports = {
                         { userId: interaction.user.id, guildId: interaction.guild.id },
                         { $inc: { balance: insuranceBet * 3 } },
                     );
-                    const bustStatus = `💥 Bust! -${currency}${activeBet.toLocaleString()}\n🛡️ Insurance paid! +${currency}${(insuranceBet * 2).toLocaleString()}`;
-                    const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, bustStatus, '#e74c3c', false);
+                    const insUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+                    const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, activeBet,
+                        '🃏 Blackjack — Bust',
+                        `Went over. The house collects.\n🛡️ Insurance paid! +${currency}${(insuranceBet * 2).toLocaleString()}`,
+                        '#e74c3c', insUser?.balance ?? 0);
                     await interaction.editReply({ embeds: [embed], components: [buildButtons(gameId, true)] }).catch(() => {});
                 }
                 return;
             }
+
+            // Staged dealer reveal
+            const revealEmbed = buildDealerRevealEmbed(
+                interaction, dealerHand,
+                splitActive ? null : playerHand,
+                splitActive ? splitHands : null,
+                currency, activeBet,
+            );
+            await interaction.editReply({ embeds: [revealEmbed], components: [] }).catch(() => {});
+            await delay(600);
 
             while (handTotal(dealerHand) < 17) dealerHand.push(deck.pop());
             const dealerTotal = handTotal(dealerHand);
@@ -445,7 +539,7 @@ module.exports = {
             const totalCoinMult    = coinMult * serverMult;
 
             let totalCredit = 0;
-            let color, status;
+            let color, title, description;
 
             if (splitActive) {
                 const handResults = [];
@@ -474,32 +568,44 @@ module.exports = {
                     }
                 }
                 const net = totalCredit - (splitBets[0] + splitBets[1]);
-                color  = net > 0 ? '#2ecc71' : net === 0 ? '#f39c12' : '#e74c3c';
-                status = handResults.join('\n');
+                color       = net > 0 ? '#2ecc71' : net === 0 ? '#f39c12' : '#e74c3c';
+                title       = net > 0 ? '🃏 Blackjack — Split Win' : net === 0 ? '🃏 Blackjack — Split Push' : '🃏 Blackjack — Split Loss';
+                description = handResults.join('\n');
             } else {
                 const playerTotal = handTotal(playerHand);
+                const boostNote   = totalCoinMult > 1.0 ? ` *(🚀 ${totalCoinMult.toFixed(1)}x)*` : '';
 
-                if (dealerTotal > 21 || playerTotal > dealerTotal) {
+                if (dealerTotal > 21) {
                     const netProfit = Math.round(activeBet * totalCoinMult);
                     totalCredit = activeBet + netProfit;
-                    const boostNote = totalCoinMult > 1.0 ? ` *(🚀 ${totalCoinMult.toFixed(1)}x)*` : '';
-                    status = `✅ You win! +${currency}${netProfit.toLocaleString()}${boostNote}`;
-                    color  = '#2ecc71';
+                    title       = '🃏 Blackjack — You Win';
+                    description = `The dealer broke. You didn't.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 Payout: ${currency}${(activeBet + netProfit).toLocaleString()}  (+${currency}${netProfit.toLocaleString()} net)${boostNote}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    color       = '#2ecc71';
+                } else if (playerTotal > dealerTotal) {
+                    const netProfit = Math.round(activeBet * totalCoinMult);
+                    totalCredit = activeBet + netProfit;
+                    title       = '🃏 Blackjack — You Win';
+                    description = `You had the better hand.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 Payout: ${currency}${(activeBet + netProfit).toLocaleString()}  (+${currency}${netProfit.toLocaleString()} net)${boostNote}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    color       = '#2ecc71';
                 } else if (playerTotal === dealerTotal) {
                     totalCredit = activeBet;
-                    status = `🤝 Push — bet returned`;
-                    color  = '#f39c12';
+                    title       = '🃏 Blackjack — Push';
+                    description = `Same total. Bet returned.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    color       = '#f39c12';
                 } else if (luckyActive && Math.random() < 0.20) {
                     totalCredit = activeBet;
-                    status = `🍀 Lucky Charm! Push — bet returned (${currency}${activeBet.toLocaleString()})`;
-                    color  = '#f39c12';
+                    title       = '🃏 Blackjack — Lucky Push';
+                    description = `🍀 Lucky Charm saved you. Bet returned.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    color       = '#f39c12';
                 } else if (luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
                     totalCredit = activeBet;
-                    status = `🎯 Lucky Streak! Push — bet returned (${currency}${activeBet.toLocaleString()})`;
-                    color  = '#f39c12';
+                    title       = '🃏 Blackjack — Lucky Push';
+                    description = `🎯 Lucky Streak saved you. Bet returned.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    color       = '#f39c12';
                 } else {
-                    status = `❌ Dealer wins. -${currency}${activeBet.toLocaleString()}`;
-                    color  = '#e74c3c';
+                    title       = '🃏 Blackjack — Dealer Wins';
+                    description = `Dealer had it.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💸 Lost: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                    color       = '#e74c3c';
                 }
             }
 
@@ -507,10 +613,10 @@ module.exports = {
             if (insuranceBet > 0) {
                 const dealerNaturalBJ = handTotal(dealerHand.slice(0, 2)) === 21;
                 if (dealerNaturalBJ) {
-                    totalCredit += insuranceBet * 3; // return bet + 2:1 payout
-                    status += `\n🛡️ Insurance paid! +${currency}${(insuranceBet * 2).toLocaleString()}`;
+                    totalCredit += insuranceBet * 3;
+                    description += `\n🛡️ Insurance paid! +${currency}${(insuranceBet * 2).toLocaleString()}`;
                 } else {
-                    status += `\n🛡️ Insurance lost (-${currency}${insuranceBet.toLocaleString()})`;
+                    description += `\n🛡️ Insurance lost (-${currency}${insuranceBet.toLocaleString()})`;
                 }
             }
 
@@ -519,12 +625,16 @@ module.exports = {
                 { $inc: { balance: totalCredit } },
             );
 
+            const finalUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+
             if (splitActive) {
                 const splitState = { splitHands, splitBets, currentSplitHand: -1, splitHandDone: [true, true] };
-                const embed = buildEmbed(interaction, null, dealerHand, bet, currency, status, color, false, splitState);
+                const embed = buildEmbed(interaction, null, dealerHand, bet, currency, description, color, false, splitState);
+                embed.setTitle(title);
                 await interaction.editReply({ embeds: [embed], components: [buildButtons(gameId, true)] }).catch(() => {});
             } else {
-                const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, status, color, false);
+                const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, activeBet,
+                    title, description, color, finalUser?.balance ?? 0);
                 await interaction.editReply({ embeds: [embed], components: [buildButtons(gameId, true)] }).catch(() => {});
             }
         });
