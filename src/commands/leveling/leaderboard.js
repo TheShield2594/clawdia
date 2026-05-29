@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
+const Guild = require('../../models/Guild');
 
 module.exports = {
     cooldown: 10,
@@ -15,7 +16,8 @@ module.exports = {
                     { name: 'Economy',         value: 'economy' },
                     { name: 'Streaks',         value: 'streaks' },
                     { name: 'Streaks (Longest All-Time)', value: 'streaks_longest' },
-                    { name: 'Duels (Most Wins)',          value: 'duels'           }
+                    { name: 'Duels (Most Wins)',          value: 'duels'           },
+                    { name: 'Achievements',               value: 'achievements'    }
                 )),
     async execute(interaction) {
         const type = interaction.options.getString('type') || 'levels';
@@ -43,6 +45,16 @@ module.exports = {
                 }).sort({ duelWins: -1 }).limit(10);
                 title = '⚔️ Duel Leaderboard';
                 descriptionHeader = 'Top 10 Duelists by Win Count';
+            } else if (type === 'achievements') {
+                const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+                if (!guildSettings?.achievements?.enabled) {
+                    return interaction.reply({ content: 'Achievements are not enabled on this server.', ephemeral: true });
+                }
+                users = await User.find({ guildId: interaction.guild.id, achievementsCount: { $gt: 0 } })
+                    .sort({ achievementsCount: -1 })
+                    .limit(10);
+                title = '🏅 Achievement Leaderboard';
+                descriptionHeader = 'Top 10 by Total Achievements Earned';
             } else {
                 const sortField = type === 'levels' ? { level: -1, xp: -1 } : { balance: -1, bank: -1 };
                 users = await User.find({ guildId: interaction.guild.id }).sort(sortField).limit(10);
@@ -102,6 +114,9 @@ module.exports = {
                 } else if (type === 'streaks_longest') {
                     const days = user.streak?.longest ?? 0;
                     description += `${medal} ${discordUser.tag} — 🔥 ${days} day${days !== 1 ? 's' : ''}\n`;
+                } else if (type === 'achievements') {
+                    const count = user.achievementsCount ?? 0;
+                    description += `${medal} ${discordUser.tag} — 🏅 ${count} achievement${count !== 1 ? 's' : ''}\n`;
                 } else {
                     const wins   = user.duelWins   ?? 0;
                     const losses = user.duelLosses ?? 0;

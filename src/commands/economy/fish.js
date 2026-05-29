@@ -364,7 +364,72 @@ async function handleCast(interaction) {
 
     await interaction.deferReply();
 
-    const result = executeCast(user, locationId);
+    // ── Reaction Window Mechanic ───────────────────────────────────────────────
+    // Show "lure in water" embed, then after a random delay enable a "Reel In!" button.
+    // reaction < 2s = 1.2x payout bonus | 2–4s = 1.0x normal | timeout = 0 (no payout)
+    const reelId = `fish_reel_${interaction.id}_${Date.now()}`;
+    const delay  = ms => new Promise(r => setTimeout(r, ms));
+
+    const luringEmbed = new EmbedBuilder()
+        .setColor('#4169E1')
+        .setTitle('🎣 Cast!')
+        .setDescription('*Your lure hits the water with a satisfying plop…*\n\n🎣 **Lure in water… waiting…**')
+        .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) });
+
+    await interaction.editReply({ embeds: [luringEmbed], components: [] });
+
+    // Random wait before fish bites (3–8 seconds)
+    const waitMs = 3000 + Math.floor(Math.random() * 5001);
+    await delay(waitMs);
+
+    const bitingEmbed = new EmbedBuilder()
+        .setColor('#FF6600')
+        .setTitle('🐟 Something\'s Biting!')
+        .setDescription('⚡ **REEL IT IN!** ⚡\n\n*React fast for a bonus — you have 4 seconds!*')
+        .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) });
+
+    const reelRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(reelId).setLabel('🎣 Reel In!').setStyle(ButtonStyle.Success)
+    );
+
+    await interaction.editReply({ embeds: [bitingEmbed], components: [reelRow] });
+    const biteTime = Date.now();
+
+    // Wait for reaction (4s window)
+    const reelMsg   = await interaction.fetchReply();
+    const reactionMs = await new Promise(resolve => {
+        const col = reelMsg.createMessageComponentCollector({
+            filter: i => i.user.id === interaction.user.id && i.customId === reelId,
+            time: 4_000,
+            max: 1,
+        });
+        col.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - biteTime); });
+        col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+    });
+
+    let reactionFactor;
+    if (reactionMs === null) {
+        reactionFactor = 0; // missed
+    } else if (reactionMs < 2000) {
+        reactionFactor = 1.2; // fast reel bonus
+    } else {
+        reactionFactor = 1.0; // normal
+    }
+
+    // If missed, show brief missed message before showing full result
+    if (reactionFactor === 0) {
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setColor('#888888')
+                .setTitle('🐟 The Fish Got Away!')
+                .setDescription('*You were too slow — the fish slipped free.*\n\nStamina spent, no reward.')
+                .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) })],
+            components: [],
+        });
+        await delay(1200);
+    }
+
+    const result = executeCast(user, locationId, { reactionFactor });
     updateFishQuestProgress(user, result, locationId);
 
     const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
@@ -383,6 +448,16 @@ async function handleCast(interaction) {
     }
 
     const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
+
+    // Annotate embed with reaction window result
+    if (result.reactionFactor !== undefined) {
+        const desc = embed.data.description ?? '';
+        if (result.reactionFactor === 0) {
+            embed.setDescription(desc + '\n> ⏰ *Reaction too slow — fish escaped (no payout)*');
+        } else if (result.reactionFactor > 1.0) {
+            embed.setDescription(desc + `\n> ⚡ *Quick reel! ${((result.reactionFactor - 1) * 100).toFixed(0)}% payout bonus applied*`);
+        }
+    }
 
     // Boss encounter — present choices if triggered
     if (result.bossEncounter) {
