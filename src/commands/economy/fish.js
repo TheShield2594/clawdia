@@ -556,18 +556,18 @@ async function handleCast(interaction) {
 
     await interaction.editReply({ embeds: [embed] });
 
-    if (result.success && result.tier === 'legendary') {
-        const announceChannelId = guildSettings?.leveling?.announceChannel;
+    if (result.success && result.tier === 'legendary' && guildSettings?.economy?.announceRareDrops !== false) {
+        const announceChannelId = guildSettings?.economy?.announcementChannelId;
         const announceChannel = announceChannelId
             ? interaction.guild.channels.cache.get(announceChannelId) ?? interaction.channel
             : interaction.channel;
         const displayName = interaction.member?.displayName || interaction.user.username;
         const announcementEmbed = new EmbedBuilder()
-            .setColor(TIER_COLORS.legendary)
+            .setColor('#ff9800')
             .setTitle('✨ Legendary Catch! ✨')
             .setDescription(
-                `**${displayName}** just pulled a ${result.fish.emoji} **${result.fish.name}** [⭐⭐⭐⭐⭐]\n` +
-                `while fishing in **${location.emoji} ${location.name}**.\n\n` +
+                `<@${interaction.user.id}> just pulled a ${result.fish.emoji} **${result.fish.name}** [⭐⭐⭐⭐⭐]\n` +
+                `while fishing in the **${location.name}**.\n\n` +
                 `That's incredibly rare.`
             )
             .setTimestamp();
