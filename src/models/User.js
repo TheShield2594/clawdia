@@ -48,7 +48,10 @@ const userSchema = new Schema({
         current: { type: Number, default: 0 },
         longest: { type: Number, default: 0 },
         lastActive: { type: Date, default: null },
-        claimedMilestones: [{ type: Number }]
+        claimedMilestones: [{ type: Number }],
+        freezes: { type: Number, default: 0, min: 0, max: 2 },
+        pendingRestore: { type: Number, default: 0 },  // broken streak count awaiting freeze decision
+        claimedDropMilestones: [{ type: Number }]       // streak days where guaranteed drop was given
     },
 
     // Quest progress: each entry tracks one quest instance
@@ -433,6 +436,8 @@ const userSchema = new Schema({
 userSchema.set('optimisticConcurrency', true);
 
 userSchema.index({ userId: 1, guildId: 1 }, { unique: true });
+userSchema.index({ guildId: 1, 'streak.current': -1 });
+userSchema.index({ guildId: 1, 'streak.longest': -1 });
 
 userSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
