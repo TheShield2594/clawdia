@@ -548,6 +548,28 @@ const guildSchema = new Schema({
         }]
     },
 
+    // Server vs server war
+    activeWar: {
+        opponentGuildId:   { type: String, default: null },
+        opponentGuildName: { type: String, default: null },
+        initiatorGuildId:  { type: String, default: null },
+        status:            { type: String, enum: ['pending', 'active', 'ended', null], default: null },
+        myScore:           { type: Number, default: 0 },
+        opponentScore:     { type: Number, default: 0 },
+        startedAt:         { type: Date, default: null },
+        endsAt:            { type: Date, default: null },
+        announcementChannelId: { type: String, default: null },
+        inviteCode:        { type: String, default: null }
+    },
+
+    // 90-day economy season (separate from battle pass season)
+    currentSeason: {
+        id:        { type: String, default: null },
+        name:      { type: String, default: null },
+        startedAt: { type: Date, default: null },
+        endsAt:    { type: Date, default: null }
+    },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });
