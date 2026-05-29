@@ -26,6 +26,7 @@ const {
     getMaxStamina,
     calculateSuccessChance,
     executeCast,
+    resolveBossEncounter,
     assignDailyFishQuests,
     updateFishQuestProgress,
     formatMs,
@@ -38,6 +39,8 @@ const {
     updateRodStatus,
     applyXp
 } = require('../../services/fishService');
+const { getCurrentWeather } = require('../../services/weatherService');
+const { FISH_TRAITS, TIME_OF_DAY_BONUSES, getTimeOfDay } = require('../../data/fishData');
 const { ensureHuntData } = require('../../services/huntService');
 
 const LOCATION_CHOICES = LOCATION_LIST.map(l => ({ name: l.name, value: l.id }));
@@ -380,6 +383,72 @@ async function handleCast(interaction) {
     }
 
     const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
+
+    // Boss encounter — present choices if triggered
+    if (result.bossEncounter) {
+        const bossRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('boss_fight').setLabel('⚔️ Fight').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('boss_loosen').setLabel('〰️ Loosen Line').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('boss_cut').setLabel('✂️ Cut Line').setStyle(ButtonStyle.Secondary)
+        );
+        const bossEmbed = new EmbedBuilder()
+            .setColor('#e74c3c')
+            .setTitle('⚠️ Something enormous bites your line...')
+            .setDescription(
+                `A **${result.bossEncounter.fish.emoji} ${result.bossEncounter.fish.name}** latches on with terrifying force!\n\n` +
+                `**What do you do?**\n` +
+                `⚔️ **Fight** — high risk, big reward. Your rod will take damage.\n` +
+                `〰️ **Loosen Line** — safer fight, partial payout.\n` +
+                `✂️ **Cut Line** — safe retreat, no reward.`
+            )
+            .setFooter({ text: 'You have 30 seconds to decide!' });
+
+        await interaction.editReply({ embeds: [embed, bossEmbed], components: [bossRow] });
+
+        const bossReply = await interaction.fetchReply();
+        const bossCollector = bossReply.createMessageComponentCollector({
+            filter: i => i.user.id === interaction.user.id && ['boss_fight', 'boss_loosen', 'boss_cut'].includes(i.customId),
+            time: 30_000, max: 1
+        });
+
+        bossCollector.on('collect', async btn => {
+            const choiceMap = { boss_fight: 'fight', boss_loosen: 'loosen', boss_cut: 'cut' };
+            const choice    = choiceMap[btn.customId];
+
+            const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+            ensureFishingData(freshUser);
+            const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choice);
+
+            if (bossResult.bonusPayout > 0) {
+                freshUser.balance         += bossResult.bonusPayout;
+                freshUser.fishing.totalEarned += bossResult.bonusPayout;
+                freshUser.fishing.dailyCoins  += bossResult.bonusPayout;
+            }
+            freshUser.markModified('fishing');
+            await freshUser.save().catch(e => console.error('[fish boss] save error:', e));
+
+            const freshCurrency = currency;
+            const bossResultEmbed = new EmbedBuilder()
+                .setColor(bossResult.outcome === 'win' ? '#2ecc71' : bossResult.outcome === 'loss' ? '#e74c3c' : '#95a5a6')
+                .setTitle(bossResult.outcome === 'win' ? '🎉 Boss Defeated!' : bossResult.outcome === 'loss' ? '💥 Got Away!' : bossResult.outcome === 'loosen' ? '〰️ Partial Victory' : '✂️ Line Cut')
+                .setDescription(bossResult.message)
+                .addFields(
+                    { name: 'Bonus Payout',   value: bossResult.bonusPayout > 0 ? `${freshCurrency}${bossResult.bonusPayout.toLocaleString()}` : 'None', inline: true },
+                    { name: 'Rod Damage',     value: `-${bossResult.durabilityLost} durability`, inline: true }
+                )
+                .setTimestamp();
+
+            await btn.update({ embeds: [embed, bossResultEmbed], components: [] });
+        });
+
+        bossCollector.on('end', (collected, reason) => {
+            if (reason === 'time' && collected.size === 0) {
+                interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+            }
+        });
+        return;
+    }
+
     await interaction.editReply({ embeds: [embed] });
 }
 
@@ -438,7 +507,8 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
         const { fish, tier, isCrit, critMultiplier, sizeLabel, specialDrop } = result;
         const color      = isCrit ? '#FFD700' : TIER_COLORS[tier];
         const tierLabel  = tier.charAt(0).toUpperCase() + tier.slice(1);
-        const sizeStr    = sizeLabel ? ` [${sizeLabel}]` : '';
+        const weightStr  = result.weightLbs > 0 ? ` (${result.weightLbs} lbs)` : '';
+        const sizeStr    = sizeLabel ? ` [${sizeLabel}${weightStr}]` : '';
         const payDisplay = cappedByHard
             ? `~~${currency}${finalPayout}~~ (daily cap)`
             : `**${currency}${finalPayout.toLocaleString()}**`;
@@ -457,6 +527,22 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
             );
 
         if (isCrit) embed.addFields({ name: 'Crit Multiplier', value: `×${critMultiplier}`, inline: true });
+
+        // Fish traits display
+        if (result.traitEffects?.length) {
+            const traitLines = result.traitEffects.map(t => {
+                const def = FISH_TRAITS[t];
+                return def ? `• **${t}** — ${def.description}` : `• ${t}`;
+            });
+            embed.addFields({ name: '🧬 Traits', value: traitLines.join('\n'), inline: false });
+        }
+        if (result.venomousDrain) embed.addFields({ name: '☠️ Venomous!', value: 'The fish stung you — extra stamina drained!', inline: true });
+
+        // Personal best
+        if (result.isPersonalBest && result.weightLbs > 0) {
+            embed.addFields({ name: '🏆 New Personal Best!', value: `${fish.name} — ${result.weightLbs} lbs!`, inline: false });
+        }
+
         if (specialDrop) embed.addFields({ name: '🎁 Material Drop!', value: `You found **${specialDrop.name}**!`, inline: false });
         if (levelUp) embed.addFields({ name: '⬆️ Level Up!', value: buildLevelUpLine(levelUp), inline: false });
         if (result.expiredBait) embed.addFields({ name: '🐟 Bait Expired', value: `Your ${result.expiredBait.replace(/_/g, ' ')} has worn off.`, inline: false });
@@ -474,6 +560,24 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
         embed.setFooter({ text: buildFooter(user) });
         embed.setTimestamp();
         return embed;
+    }
+
+    // ── Trait escape ──────────────────────────────────────────────────────
+    if (result.traitEscape) {
+        const { fish } = result.traitEscape;
+        const escEmbed = new EmbedBuilder()
+            .setColor('#e67e22')
+            .setTitle(`😤 ${fish.emoji} ${fish.name} Escaped!`)
+            .setDescription(`*${result.failure?.message ?? 'The fish slipped free.'}*`)
+            .addFields(
+                { name: 'Location', value: `${location.emoji} ${location.name}`, inline: true },
+                { name: 'Trait',    value: `🧬 ${result.traitEscape.trait}`,      inline: true },
+                { name: 'Rod',      value: buildRodLine(rod),                     inline: true },
+                { name: 'Stamina',  value: buildStaminaLine(user),                inline: true }
+            )
+            .setFooter({ text: buildFooter(user) })
+            .setTimestamp();
+        return escEmbed;
     }
 
     // ── Failure embed ──────────────────────────────────────────────────────
@@ -539,6 +643,13 @@ function buildFooter(user) {
     if (f.activeBait)  parts.push(`Bait (${f.activeBaitCastsLeft} casts left)`);
     if (f.activeLuck)  parts.push(`Luck (queued)`);
     if (f.activeXpScroll) parts.push(`XP Scroll (queued)`);
+
+    const weather = getCurrentWeather();
+    const tod     = getTimeOfDay();
+    const todData = TIME_OF_DAY_BONUSES[tod];
+    parts.push(`${weather.emoji} ${weather.name}`);
+    if (todData) parts.push(todData.description);
+
     return parts.join(' • ');
 }
 
