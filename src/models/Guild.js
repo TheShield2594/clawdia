@@ -264,6 +264,7 @@ const guildSchema = new Schema({
 
     shop: [{
         name: { type: String, required: true },
+        itemId: { type: String, default: null },
         description: { type: String, default: '' },
         price: { type: Number, required: true },
         roleId: { type: String, default: null },

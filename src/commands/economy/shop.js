@@ -174,17 +174,20 @@ module.exports = {
                     }
                 }
 
+                // Use the item's canonical itemId if set, otherwise fall back to its name
+                const inventoryId = freshItem.itemId || freshItem.name;
+
                 // Update inventory atomically: increment if entry exists, otherwise push
                 const incResult = await User.updateOne(
-                    { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': freshItem.name },
+                    { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': inventoryId },
                     { $inc: { 'inventory.$.quantity': 1 } }
                 );
                 if (incResult.modifiedCount === 0) {
                     // No existing entry — push a new one; $ne guard makes this a no-op if a
                     // concurrent request already inserted the entry between these two operations
                     await User.updateOne(
-                        { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': { $ne: freshItem.name } },
-                        { $push: { inventory: { itemId: freshItem.name, quantity: 1 } } }
+                        { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': { $ne: inventoryId } },
+                        { $push: { inventory: { itemId: inventoryId, quantity: 1 } } }
                     );
                 }
 

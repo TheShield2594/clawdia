@@ -3,6 +3,7 @@ const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
+const { clampMultiplier } = require('../../config/economy');
 
 const COOLDOWN_MS      = 2.5 * 3_600_000; // 2.5 hours
 const WANTED_MS        = 0.5 * 3_600_000; // 30 min wanted cooldown after death
@@ -70,7 +71,7 @@ module.exports = {
         const success = Math.random() < successChance;
         user.lastCrime = new Date();
 
-        const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
+        const streakMult = clampMultiplier(getStreakMultiplier(user.streak?.current ?? 0));
         try {
             let embed;
             if (success) {
