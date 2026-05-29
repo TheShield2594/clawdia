@@ -174,6 +174,61 @@ module.exports = {
         const dealerShowsAce  = dealerHand[0].value === 'A';
         const insuranceCost   = Math.floor(bet / 2);
 
+        // Dealer peek: if dealer shows Ace and has natural blackjack, resolve before player acts
+        if (dealerShowsAce && handTotal(dealerHand) === 21) {
+            const peekRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`bj_hit_${gameId}`).setLabel('Hit').setStyle(ButtonStyle.Primary).setDisabled(true),
+                new ButtonBuilder().setCustomId(`bj_stand_${gameId}`).setLabel('Stand').setStyle(ButtonStyle.Secondary).setDisabled(true),
+                ...(insuranceCost > 0 ? [new ButtonBuilder()
+                    .setCustomId(`bj_insurance_${gameId}`)
+                    .setLabel(`Insurance (${insuranceCost.toLocaleString()})`)
+                    .setStyle(ButtonStyle.Danger)] : []),
+            );
+            await interaction.reply({
+                embeds: [buildEmbed(interaction, playerHand, dealerHand, bet, currency,
+                    insuranceCost > 0
+                        ? `🛡️ Insurance? (${currency}${insuranceCost.toLocaleString()}) — Dealer may have Blackjack`
+                        : `⏳ Dealer revealing...`,
+                    '#f39c12', true)],
+                components: [peekRow],
+            });
+
+            let peekInsuranceBet = 0;
+            if (insuranceCost > 0) {
+                const peekMsg = await interaction.fetchReply();
+                try {
+                    const insI = await peekMsg.awaitMessageComponent({
+                        filter: i2 => i2.user.id === interaction.user.id && i2.customId === `bj_insurance_${gameId}`,
+                        time: 15_000,
+                    });
+                    await insI.deferUpdate();
+                    const peekUpdated = await User.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: insuranceCost } },
+                        { $inc: { balance: -insuranceCost, lifetimeGambled: insuranceCost } },
+                        { new: true },
+                    );
+                    if (peekUpdated) peekInsuranceBet = insuranceCost;
+                } catch {
+                    // No insurance taken within timeout
+                }
+            }
+
+            let peekStatus = `❌ Dealer Blackjack! -${currency}${bet.toLocaleString()}`;
+            let peekCredit = 0;
+            if (peekInsuranceBet > 0) {
+                peekCredit = peekInsuranceBet * 3;
+                peekStatus += `\n🛡️ Insurance paid! +${currency}${(peekInsuranceBet * 2).toLocaleString()}`;
+            }
+            if (peekCredit > 0) {
+                await User.updateOne(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    { $inc: { balance: peekCredit } },
+                );
+            }
+            const peekEmbed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, peekStatus, '#e74c3c', false);
+            return interaction.editReply({ embeds: [peekEmbed], components: [buildButtons(gameId, true)] });
+        }
+
         // Mutable game state
         let insuranceBet      = 0;
         let activeBet         = bet;
@@ -361,7 +416,18 @@ module.exports = {
         });
 
         collector.on('end', async (_, reason) => {
-            if (reason === 'bust') return;
+            if (reason === 'bust') {
+                if (insuranceBet > 0 && handTotal(dealerHand.slice(0, 2)) === 21) {
+                    await User.updateOne(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { $inc: { balance: insuranceBet * 3 } },
+                    );
+                    const bustStatus = `💥 Bust! -${currency}${activeBet.toLocaleString()}\n🛡️ Insurance paid! +${currency}${(insuranceBet * 2).toLocaleString()}`;
+                    const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, bustStatus, '#e74c3c', false);
+                    await interaction.editReply({ embeds: [embed], components: [buildButtons(gameId, true)] }).catch(() => {});
+                }
+                return;
+            }
 
             while (handTotal(dealerHand) < 17) dealerHand.push(deck.pop());
             const dealerTotal = handTotal(dealerHand);
@@ -448,8 +514,10 @@ module.exports = {
                 }
             }
 
-            freshUser.balance += totalCredit;
-            await freshUser.save();
+            await User.updateOne(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: totalCredit } },
+            );
 
             if (splitActive) {
                 const splitState = { splitHands, splitBets, currentSplitHand: -1, splitHandDone: [true, true] };
