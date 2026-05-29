@@ -13,7 +13,8 @@ const {
     ZONES, ZONE_LIST, TIER_COLORS, LIMITS, WEAPON_BY_TIER,
     CONSUMABLES, AMMO_PACKS,
     WEAPON_TIERS, WEAPON_BY_SLUG, WEAPON_UPGRADES,
-    HUNTER_LEVELS, PRESTIGE_BONUSES, HUNT_QUEST_TEMPLATES
+    HUNTER_LEVELS, PRESTIGE_BONUSES, HUNT_QUEST_TEMPLATES,
+    ANIMAL_TRAITS
 } = require('../../data/huntData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const {
@@ -385,7 +386,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     const h = user.hunt;
 
     if (result.success) {
-        const { animal, tier, finalPayout, isCrit, critMultiplier, specialDrop, xpEarned, levelUp, cappedByHard } = result;
+        const { animal, tier, traits, finalPayout, isCrit, critMultiplier, specialDrop, xpEarned, levelUp, cappedByHard, traitEffects } = result;
         const color = isCrit ? '#FFD700' : TIER_COLORS[tier];
 
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
@@ -406,6 +407,19 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
 
         if (isCrit) {
             embed.addFields({ name: 'Crit Multiplier', value: `×${critMultiplier}`, inline: true });
+        }
+
+        if (traits && traits.length > 0) {
+            const traitLine = traits.map(t => {
+                const def = ANIMAL_TRAITS[t];
+                return def ? `${def.emoji} **${def.name}**` : t;
+            }).join('  ');
+            embed.addFields({ name: '🧬 Traits', value: traitLine, inline: false });
+        }
+
+        if (traitEffects && traitEffects.length > 0) {
+            const effectLines = traitEffects.map(e => `• ${e.msg}`).join('\n');
+            embed.addFields({ name: '⚡ Trait Effects', value: effectLines, inline: false });
         }
 
         if (specialDrop) {
@@ -434,11 +448,11 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         return embed;
     }
 
-    const { failure, xpEarned, levelUp } = result;
+    const { failure, xpEarned, levelUp, animal: failAnimal, traits: failTraits, traitEffects: failTraitEffects } = result;
     const embed = new EmbedBuilder()
         .setColor('#e74c3c')
         .setTitle(buildFailureTitle(failure.severity.id))
-        .setDescription(`*${failure.message}*`)
+        .setDescription(failAnimal ? `*Encountered: ${failAnimal.emoji} **${failAnimal.name}***\n${failure.message}` : `*${failure.message}*`)
         .addFields(
             { name: 'Zone',    value: `${zone.emoji} ${zone.name}`,  inline: true },
             { name: 'Reward',  value: 'Nothing',                      inline: true },
@@ -446,6 +460,19 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             { name: 'Weapon',  value: `${weapon.name} ${weaponStatusEmoji(weapon.status)}\n${durabilityBar(weapon.currentDurability, weapon.maxDurability)} ${weapon.currentDurability}/${weapon.maxDurability}`, inline: true },
             { name: 'Stamina', value: buildStaminaLine(user), inline: true }
         );
+
+    if (failTraits && failTraits.length > 0) {
+        const traitLine = failTraits.map(t => {
+            const def = ANIMAL_TRAITS[t];
+            return def ? `${def.emoji} **${def.name}**` : t;
+        }).join('  ');
+        embed.addFields({ name: '🧬 Traits', value: traitLine, inline: false });
+    }
+
+    if (failTraitEffects && failTraitEffects.length > 0) {
+        const effectLines = failTraitEffects.map(e => `• ${e.msg}`).join('\n');
+        embed.addFields({ name: '⚡ Trait Effects', value: effectLines, inline: false });
+    }
 
     if (failure.severity.injuryMs > 0) {
         embed.addFields({ name: '🤕 Injured', value: `Extra cooldown: **${formatMs(failure.severity.injuryMs)}**`, inline: true });

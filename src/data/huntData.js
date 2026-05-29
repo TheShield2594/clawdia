@@ -192,8 +192,46 @@ const ZONES = {
 
 const ZONE_LIST = Object.values(ZONES);
 
+// ─── ANIMAL TRAITS ───────────────────────────────────────────────────────────
+
+const ANIMAL_TRAITS = {
+    aggressive: {
+        id: 'aggressive', name: 'Aggressive', emoji: '⚔️',
+        description: 'Can injure the hunter even on a successful hunt (30% chance, +15 min cooldown)'
+    },
+    elusive: {
+        id: 'elusive', name: 'Elusive', emoji: '💨',
+        description: 'Harder to hit — reduces effective success chance by 10%'
+    },
+    armored: {
+        id: 'armored', name: 'Armored', emoji: '🛡️',
+        description: 'Thick hide absorbs impacts — critical hits are negated'
+    },
+    pack_hunter: {
+        id: 'pack_hunter', name: 'Pack Hunter', emoji: '🐾',
+        description: 'Draws its pack — failures deal +3 extra durability damage'
+    },
+    giant: {
+        id: 'giant', name: 'Giant', emoji: '💪',
+        description: 'Enormous size causes extra weapon wear (+1 durability loss per hunt)'
+    },
+    venomous: {
+        id: 'venomous', name: 'Venomous', emoji: '☠️',
+        description: 'Bite or sting costs an extra stamina on hunt'
+    },
+    spectral: {
+        id: 'spectral', name: 'Spectral', emoji: '👻',
+        description: 'Otherworldly nature — luck charms lose half their effectiveness'
+    },
+    enraged: {
+        id: 'enraged', name: 'Enraged', emoji: '🔥',
+        description: 'Permanent fury grants +25% payout on a successful hunt'
+    }
+};
+
 // ─── ANIMALS ─────────────────────────────────────────────────────────────────
 // zones: ['all'] means available in every zone; otherwise specific zone ids.
+// traits: array of trait IDs from ANIMAL_TRAITS (optional).
 
 const ANIMALS = {
     // ── COMMON ──────────────────────────────────────────────────────────────
@@ -201,84 +239,84 @@ const ANIMALS = {
         id: 'rabbit', name: 'Rabbit', emoji: '🐇', tier: 'common',
         payoutMin: 12, payoutMax: 28, xp: 10,
         specialDrop: { itemId: 'rabbits_foot', name: "Rabbit's Foot", chance: 0.04 },
-        zones: ['all'],
+        zones: ['all'], traits: [],
         flavor: 'A swift cottontail darts through the brush.'
     },
     squirrel: {
         id: 'squirrel', name: 'Squirrel', emoji: '🐿️', tier: 'common',
         payoutMin: 8, payoutMax: 20, xp: 10,
         specialDrop: { itemId: 'acorn_cache', name: 'Acorn Cache', chance: 0.03 },
-        zones: ['beginner_forest', 'murky_swamp'],
+        zones: ['beginner_forest', 'murky_swamp'], traits: [],
         flavor: 'A chattering squirrel scurries up the nearest tree.'
     },
     dove: {
         id: 'dove', name: 'Dove', emoji: '🕊️', tier: 'common',
         payoutMin: 14, payoutMax: 25, xp: 10,
         specialDrop: { itemId: 'feather', name: 'Feather', chance: 0.05 },
-        zones: ['beginner_forest', 'desert_wastes'],
+        zones: ['beginner_forest', 'desert_wastes'], traits: [],
         flavor: 'A white dove takes flight in the open sky.'
     },
     quail: {
         id: 'quail', name: 'Quail', emoji: '🐦', tier: 'common',
         payoutMin: 16, payoutMax: 32, xp: 10,
         specialDrop: null,
-        zones: ['beginner_forest', 'desert_wastes'],
+        zones: ['beginner_forest', 'desert_wastes'], traits: [],
         flavor: 'A small quail bursts from the tall grass.'
     },
     duck: {
         id: 'duck', name: 'Duck', emoji: '🦆', tier: 'common',
         payoutMin: 22, payoutMax: 42, xp: 10,
         specialDrop: { itemId: 'down_feather', name: 'Down Feather', chance: 0.06 },
-        zones: ['murky_swamp', 'beginner_forest'],
+        zones: ['murky_swamp', 'beginner_forest'], traits: [],
         flavor: 'A mallard lifts off from the still water.'
     },
     pheasant: {
         id: 'pheasant', name: 'Pheasant', emoji: '🦚', tier: 'common',
         payoutMin: 26, payoutMax: 50, xp: 10,
         specialDrop: null,
-        zones: ['beginner_forest'],
+        zones: ['beginner_forest'], traits: [],
         flavor: 'A pheasant erupts from the underbrush in a flash of color.'
     },
     raccoon: {
         id: 'raccoon', name: 'Raccoon', emoji: '🦝', tier: 'common',
         payoutMin: 18, payoutMax: 38, xp: 10,
         specialDrop: { itemId: 'bandit_mask', name: 'Bandit Mask', chance: 0.01 },
-        zones: ['beginner_forest', 'murky_swamp'],
+        zones: ['beginner_forest', 'murky_swamp'], traits: ['aggressive'],
         flavor: 'A masked bandit rummages through the campsite.'
     },
     chipmunk: {
         id: 'chipmunk', name: 'Chipmunk', emoji: '🐿️', tier: 'common',
         payoutMin: 8, payoutMax: 18, xp: 10,
         specialDrop: { itemId: 'striped_pelt', name: 'Striped Pelt', chance: 0.03 },
-        zones: ['beginner_forest'],
+        zones: ['beginner_forest'], traits: [],
         flavor: 'A tiny chipmunk freezes mid-sprint, cheeks stuffed with acorns.'
     },
     crow: {
         id: 'crow', name: 'Crow', emoji: '🐦', tier: 'common',
         payoutMin: 12, payoutMax: 24, xp: 10,
         specialDrop: { itemId: 'crow_feather', name: 'Crow Feather', chance: 0.04 },
-        zones: ['all'],
+        zones: ['all'], traits: [],
         flavor: 'A glossy crow caws loudly from a dead branch.'
     },
     frog: {
         id: 'frog', name: 'Frog', emoji: '🐸', tier: 'common',
         payoutMin: 10, payoutMax: 20, xp: 10,
         specialDrop: { itemId: 'slick_skin', name: 'Slick Skin', chance: 0.04 },
-        zones: ['murky_swamp', 'beginner_forest'],
+        zones: ['murky_swamp', 'beginner_forest'], traits: [],
         flavor: 'A green frog leaps from a lily pad with a resonant splash.'
     },
     opossum: {
         id: 'opossum', name: 'Opossum', emoji: '🐀', tier: 'common',
         payoutMin: 14, payoutMax: 28, xp: 10,
         specialDrop: { itemId: 'opossum_pelt', name: 'Opossum Pelt', chance: 0.03 },
-        zones: ['beginner_forest', 'murky_swamp'],
+        zones: ['beginner_forest', 'murky_swamp'], traits: ['elusive'],
         flavor: "A hissing opossum plays dead until you're almost on top of it."
     },
     woodpecker: {
         id: 'woodpecker', name: 'Woodpecker', emoji: '🐦', tier: 'common',
         payoutMin: 15, payoutMax: 30, xp: 10,
         specialDrop: { itemId: 'hardwood_chip', name: 'Hardwood Chip', chance: 0.05 },
-        zones: ['beginner_forest'],
+        zones: ['beginner_forest'], traits: [],
         flavor: 'A red-crested woodpecker hammers away at an old oak.'
     },
 
@@ -287,84 +325,84 @@ const ANIMALS = {
         id: 'deer', name: 'Deer', emoji: '🦌', tier: 'uncommon',
         payoutMin: 55, payoutMax: 110, xp: 25,
         specialDrop: { itemId: 'antler_fragment', name: 'Antler Fragment', chance: 0.08 },
-        zones: ['beginner_forest', 'arctic_tundra'],
+        zones: ['beginner_forest', 'arctic_tundra'], traits: [],
         flavor: 'A white-tailed deer grazes peacefully in the clearing.'
     },
     wild_boar: {
         id: 'wild_boar', name: 'Wild Boar', emoji: '🐗', tier: 'uncommon',
         payoutMin: 65, payoutMax: 125, xp: 25,
         specialDrop: { itemId: 'tusk_shard', name: 'Tusk Shard', chance: 0.07 },
-        zones: ['beginner_forest', 'murky_swamp'],
+        zones: ['beginner_forest', 'murky_swamp'], traits: ['aggressive'],
         flavor: 'A tusked boar charges through the forest floor.'
     },
     turkey: {
         id: 'turkey', name: 'Turkey', emoji: '🦃', tier: 'uncommon',
         payoutMin: 60, payoutMax: 115, xp: 25,
         specialDrop: null,
-        zones: ['beginner_forest'],
+        zones: ['beginner_forest'], traits: [],
         flavor: 'A gobbling tom turkey struts in the meadow.'
     },
     badger: {
         id: 'badger', name: 'Badger', emoji: '🦡', tier: 'uncommon',
         payoutMin: 48, payoutMax: 95, xp: 25,
         specialDrop: { itemId: 'badger_pelt', name: 'Badger Pelt', chance: 0.09 },
-        zones: ['beginner_forest', 'murky_swamp'],
+        zones: ['beginner_forest', 'murky_swamp'], traits: ['aggressive'],
         flavor: 'A feisty badger emerges from its burrow.'
     },
     beaver: {
         id: 'beaver', name: 'Beaver', emoji: '🦫', tier: 'uncommon',
         payoutMin: 52, payoutMax: 100, xp: 25,
         specialDrop: { itemId: 'beaver_pelt', name: 'Beaver Pelt', chance: 0.08 },
-        zones: ['murky_swamp'],
+        zones: ['murky_swamp'], traits: [],
         flavor: 'A beaver slaps its broad tail on the dark water.'
     },
     coyote: {
         id: 'coyote', name: 'Coyote', emoji: '🐕', tier: 'uncommon',
         payoutMin: 65, payoutMax: 120, xp: 25,
         specialDrop: { itemId: 'coyote_fang', name: 'Coyote Fang', chance: 0.05 },
-        zones: ['desert_wastes', 'beginner_forest'],
+        zones: ['desert_wastes', 'beginner_forest'], traits: ['elusive'],
         flavor: 'A lone coyote howls from a sun-bleached ridge.'
     },
     jackrabbit: {
         id: 'jackrabbit', name: 'Jackrabbit', emoji: '🐇', tier: 'uncommon',
         payoutMin: 50, payoutMax: 100, xp: 25,
         specialDrop: { itemId: 'jackrabbit_foot', name: "Jackrabbit's Foot", chance: 0.06 },
-        zones: ['desert_wastes'],
+        zones: ['desert_wastes'], traits: ['elusive'],
         flavor: 'A jackrabbit bolts across the sand flats in a zigzag blur.'
     },
     vulture: {
         id: 'vulture', name: 'Vulture', emoji: '🦅', tier: 'uncommon',
         payoutMin: 55, payoutMax: 105, xp: 25,
         specialDrop: { itemId: 'scavenger_feather', name: 'Scavenger Feather', chance: 0.07 },
-        zones: ['desert_wastes'],
+        zones: ['desert_wastes'], traits: [],
         flavor: 'A bald-headed vulture circles lazily on the hot thermals.'
     },
     roadrunner: {
         id: 'roadrunner', name: 'Roadrunner', emoji: '🐦', tier: 'uncommon',
         payoutMin: 52, payoutMax: 98, xp: 25,
         specialDrop: null,
-        zones: ['desert_wastes'],
+        zones: ['desert_wastes'], traits: ['elusive'],
         flavor: 'A roadrunner dashes across the cracked earth at blinding speed.'
     },
     desert_fox: {
         id: 'desert_fox', name: 'Desert Fox', emoji: '🦊', tier: 'uncommon',
         payoutMin: 60, payoutMax: 118, xp: 25,
         specialDrop: { itemId: 'sand_pelt', name: 'Sand Pelt', chance: 0.08 },
-        zones: ['desert_wastes'],
+        zones: ['desert_wastes'], traits: [],
         flavor: 'A fennec fox peers from behind a cactus with enormous ears perked up.'
     },
     crane: {
         id: 'crane', name: 'Crane', emoji: '🦢', tier: 'uncommon',
         payoutMin: 55, payoutMax: 105, xp: 25,
         specialDrop: { itemId: 'marsh_feather', name: 'Marsh Feather', chance: 0.06 },
-        zones: ['murky_swamp'],
+        zones: ['murky_swamp'], traits: [],
         flavor: 'A great crane stands motionless in the shallows, watching the water.'
     },
     wild_hog: {
         id: 'wild_hog', name: 'Wild Hog', emoji: '🐗', tier: 'uncommon',
         payoutMin: 62, payoutMax: 115, xp: 25,
         specialDrop: { itemId: 'hog_tusk', name: 'Hog Tusk', chance: 0.07 },
-        zones: ['murky_swamp'],
+        zones: ['murky_swamp'], traits: ['aggressive'],
         flavor: 'A mud-caked wild hog bursts from the reeds with a furious squeal.'
     },
 
@@ -373,91 +411,91 @@ const ANIMALS = {
         id: 'wolf', name: 'Wolf', emoji: '🐺', tier: 'rare',
         payoutMin: 130, payoutMax: 220, xp: 75,
         specialDrop: { itemId: 'wolf_pelt', name: 'Wolf Pelt', chance: 0.10 },
-        zones: ['beginner_forest', 'arctic_tundra'],
+        zones: ['beginner_forest', 'arctic_tundra'], traits: ['pack_hunter'],
         flavor: 'A grey wolf stalks you silently through the treeline.'
     },
     elk: {
         id: 'elk', name: 'Elk', emoji: '🫎', tier: 'rare',
         payoutMin: 160, payoutMax: 270, xp: 75,
         specialDrop: { itemId: 'elk_antler', name: 'Grand Antler', chance: 0.08 },
-        zones: ['beginner_forest', 'arctic_tundra'],
+        zones: ['beginner_forest', 'arctic_tundra'], traits: ['giant'],
         flavor: 'A massive bull elk bugles across the valley.'
     },
     lynx: {
         id: 'lynx', name: 'Lynx', emoji: '🐈', tier: 'rare',
         payoutMin: 145, payoutMax: 235, xp: 75,
         specialDrop: { itemId: 'lynx_fang', name: 'Lynx Fang', chance: 0.09 },
-        zones: ['arctic_tundra'],
+        zones: ['arctic_tundra'], traits: ['elusive'],
         flavor: 'A spotted lynx watches you with cold yellow eyes.'
     },
     bald_eagle: {
         id: 'bald_eagle', name: 'Bald Eagle', emoji: '🦅', tier: 'rare',
         payoutMin: 170, payoutMax: 290, xp: 75,
         specialDrop: { itemId: 'eagle_talon', name: 'Eagle Talon', chance: 0.06 },
-        zones: ['all'],
+        zones: ['all'], traits: ['elusive'],
         flavor: 'A bald eagle circles overhead, eyeing you keenly.'
     },
     mountain_goat: {
         id: 'mountain_goat', name: 'Mountain Goat', emoji: '🐐', tier: 'rare',
         payoutMin: 135, payoutMax: 215, xp: 75,
         specialDrop: { itemId: 'mountain_horn', name: 'Mountain Horn', chance: 0.07 },
-        zones: ['arctic_tundra', 'legendary_peaks'],
+        zones: ['arctic_tundra', 'legendary_peaks'], traits: ['elusive', 'armored'],
         flavor: 'A sure-footed mountain goat leaps between rocky ledges.'
     },
     rattlesnake: {
         id: 'rattlesnake', name: 'Rattlesnake', emoji: '🐍', tier: 'rare',
         payoutMin: 140, payoutMax: 240, xp: 75,
         specialDrop: { itemId: 'venom_sac', name: 'Venom Sac', chance: 0.10 },
-        zones: ['desert_wastes'],
+        zones: ['desert_wastes'], traits: ['venomous'],
         flavor: 'A diamondback rattlesnake coils in the sun, shaking its lethal rattle.'
     },
     hyena: {
         id: 'hyena', name: 'Hyena', emoji: '🐕', tier: 'rare',
         payoutMin: 150, payoutMax: 250, xp: 75,
         specialDrop: { itemId: 'hyena_fang', name: 'Hyena Fang', chance: 0.09 },
-        zones: ['desert_wastes'],
+        zones: ['desert_wastes'], traits: ['pack_hunter'],
         flavor: 'A spotted hyena cackles in the darkness at the edge of camp.'
     },
     caribou: {
         id: 'caribou', name: 'Caribou', emoji: '🦌', tier: 'rare',
         payoutMin: 155, payoutMax: 260, xp: 75,
         specialDrop: { itemId: 'caribou_antler', name: 'Caribou Antler', chance: 0.08 },
-        zones: ['arctic_tundra'],
+        zones: ['arctic_tundra'], traits: ['giant'],
         flavor: 'A caribou trudges across the frozen tundra, antlers caked in frost.'
     },
     arctic_fox: {
         id: 'arctic_fox', name: 'Arctic Fox', emoji: '🦊', tier: 'rare',
         payoutMin: 140, payoutMax: 230, xp: 75,
         specialDrop: { itemId: 'arctic_fox_pelt', name: 'Arctic Fox Pelt', chance: 0.10 },
-        zones: ['arctic_tundra'],
+        zones: ['arctic_tundra'], traits: ['elusive'],
         flavor: 'A pristine white arctic fox vanishes into the snowdrift in an instant.'
     },
     snowy_owl: {
         id: 'snowy_owl', name: 'Snowy Owl', emoji: '🦉', tier: 'rare',
         payoutMin: 160, payoutMax: 265, xp: 75,
         specialDrop: { itemId: 'snowy_feather', name: 'Snowy Feather', chance: 0.08 },
-        zones: ['arctic_tundra'],
+        zones: ['arctic_tundra'], traits: [],
         flavor: 'A great snowy owl swoops silently from the frozen treetops.'
     },
     giant_frog: {
         id: 'giant_frog', name: 'Giant Frog', emoji: '🐸', tier: 'rare',
         payoutMin: 135, payoutMax: 225, xp: 75,
         specialDrop: { itemId: 'swamp_gland', name: 'Swamp Gland', chance: 0.11 },
-        zones: ['murky_swamp'],
+        zones: ['murky_swamp'], traits: ['venomous', 'giant'],
         flavor: 'An enormous frog erupts from the mud, its toxic skin glistening.'
     },
     cottonmouth: {
         id: 'cottonmouth', name: 'Cottonmouth', emoji: '🐍', tier: 'rare',
         payoutMin: 145, payoutMax: 240, xp: 75,
         specialDrop: { itemId: 'cottonmouth_venom', name: 'Cottonmouth Venom', chance: 0.10 },
-        zones: ['murky_swamp'],
+        zones: ['murky_swamp'], traits: ['venomous'],
         flavor: 'A cottonmouth flashes its white mouth as a warning from the dark water.'
     },
     ancient_ram: {
         id: 'ancient_ram', name: 'Ancient Ram', emoji: '🐏', tier: 'rare',
         payoutMin: 165, payoutMax: 275, xp: 75,
         specialDrop: { itemId: 'ram_horn', name: 'Ram Horn', chance: 0.09 },
-        zones: ['legendary_peaks'],
+        zones: ['legendary_peaks'], traits: ['armored'],
         flavor: 'A battle-scarred ram stands unmoving at the edge of a sheer cliff.'
     },
 
@@ -466,77 +504,77 @@ const ANIMALS = {
         id: 'black_bear', name: 'Black Bear', emoji: '🐻', tier: 'epic',
         payoutMin: 300, payoutMax: 480, xp: 150,
         specialDrop: { itemId: 'bear_claw', name: 'Bear Claw', chance: 0.15 },
-        zones: ['beginner_forest', 'arctic_tundra'],
+        zones: ['beginner_forest', 'arctic_tundra'], traits: ['aggressive', 'giant'],
         flavor: 'A black bear rears up on its hind legs, sniffing the air.'
     },
     moose: {
         id: 'moose', name: 'Moose', emoji: '🫎', tier: 'epic',
         payoutMin: 320, payoutMax: 520, xp: 150,
         specialDrop: { itemId: 'moose_rack', name: 'Moose Rack', chance: 0.12 },
-        zones: ['beginner_forest', 'arctic_tundra'],
+        zones: ['beginner_forest', 'arctic_tundra'], traits: ['giant'],
         flavor: 'A towering moose crashes through the undergrowth.'
     },
     mountain_lion: {
         id: 'mountain_lion', name: 'Mountain Lion', emoji: '🦁', tier: 'epic',
         payoutMin: 340, payoutMax: 540, xp: 150,
         specialDrop: { itemId: 'lion_tooth', name: "Lion's Tooth", chance: 0.12 },
-        zones: ['legendary_peaks', 'desert_wastes'],
+        zones: ['legendary_peaks', 'desert_wastes'], traits: ['aggressive', 'elusive'],
         flavor: 'A mountain lion stalks you from the rocky outcrop above.'
     },
     wolverine: {
         id: 'wolverine', name: 'Wolverine', emoji: '🦡', tier: 'epic',
         payoutMin: 280, payoutMax: 450, xp: 150,
         specialDrop: { itemId: 'wolverine_fur', name: 'Wolverine Fur', chance: 0.10 },
-        zones: ['arctic_tundra', 'murky_swamp'],
+        zones: ['arctic_tundra', 'murky_swamp'], traits: ['aggressive'],
         flavor: 'A ferocious wolverine snarls and charges straight at you!'
     },
     musk_ox: {
         id: 'musk_ox', name: 'Musk Ox', emoji: '🐃', tier: 'epic',
         payoutMin: 290, payoutMax: 470, xp: 150,
         specialDrop: { itemId: 'thick_hide', name: 'Thick Hide', chance: 0.12 },
-        zones: ['arctic_tundra'],
+        zones: ['arctic_tundra'], traits: ['armored', 'giant'],
         flavor: 'A massive musk ox lowers its horns and paws the frozen ground.'
     },
     polar_bear: {
         id: 'polar_bear', name: 'Polar Bear', emoji: '🐻‍❄️', tier: 'epic',
         payoutMin: 330, payoutMax: 530, xp: 150,
         specialDrop: { itemId: 'polar_claw', name: 'Polar Claw', chance: 0.13 },
-        zones: ['arctic_tundra'],
+        zones: ['arctic_tundra'], traits: ['aggressive', 'giant'],
         flavor: 'A massive polar bear rises from the ice floe, blotting out the horizon.'
     },
     saber_cat: {
         id: 'saber_cat', name: 'Saber Cat', emoji: '🐯', tier: 'epic',
         payoutMin: 310, payoutMax: 505, xp: 150,
         specialDrop: { itemId: 'saber_fang', name: 'Saber Fang', chance: 0.14 },
-        zones: ['arctic_tundra', 'legendary_peaks'],
+        zones: ['arctic_tundra', 'legendary_peaks'], traits: ['aggressive'],
         flavor: 'A prehistoric saber cat prowls the permafrost with ancient, hungry eyes.'
     },
     alligator: {
         id: 'alligator', name: 'Alligator', emoji: '🐊', tier: 'epic',
         payoutMin: 285, payoutMax: 460, xp: 150,
         specialDrop: { itemId: 'gator_hide', name: 'Gator Hide', chance: 0.13 },
-        zones: ['murky_swamp'],
+        zones: ['murky_swamp'], traits: ['armored', 'aggressive'],
         flavor: 'An alligator lurches from the black water in an explosive ambush.'
     },
     panther: {
         id: 'panther', name: 'Panther', emoji: '🐆', tier: 'epic',
         payoutMin: 315, payoutMax: 510, xp: 150,
         specialDrop: { itemId: 'shadow_pelt', name: 'Shadow Pelt', chance: 0.11 },
-        zones: ['murky_swamp', 'legendary_peaks'],
+        zones: ['murky_swamp', 'legendary_peaks'], traits: ['elusive'],
         flavor: 'A jet-black panther drops from the canopy without making a sound.'
     },
     dire_wolf: {
         id: 'dire_wolf', name: 'Dire Wolf', emoji: '🐺', tier: 'epic',
         payoutMin: 330, payoutMax: 535, xp: 150,
         specialDrop: { itemId: 'dire_wolf_fang', name: 'Dire Wolf Fang', chance: 0.14 },
-        zones: ['legendary_peaks'],
+        zones: ['legendary_peaks'], traits: ['pack_hunter', 'aggressive'],
         flavor: 'A Dire Wolf the size of a pony emerges from the alpine mist, eyes burning red.'
     },
     alpha_bear: {
         id: 'alpha_bear', name: 'Alpha Bear', emoji: '🐻', tier: 'epic',
         payoutMin: 340, payoutMax: 540, xp: 150,
         specialDrop: { itemId: 'primal_claw', name: 'Primal Claw', chance: 0.15 },
-        zones: ['legendary_peaks'],
+        zones: ['legendary_peaks'], traits: ['aggressive', 'giant', 'enraged'],
         flavor: 'An Alpha Bear, scarred from a hundred battles, roars down the mountainside.'
     },
 
@@ -545,49 +583,49 @@ const ANIMALS = {
         id: 'snow_leopard', name: 'Snow Leopard', emoji: '🐆', tier: 'legendary',
         payoutMin: 650, payoutMax: 1100, xp: 500,
         specialDrop: { itemId: 'spirit_pelt', name: 'Spirit Pelt', chance: 0.20 },
-        zones: ['arctic_tundra', 'legendary_peaks'],
+        zones: ['arctic_tundra', 'legendary_peaks'], traits: ['elusive', 'spectral'],
         flavor: 'A ghostly snow leopard materialises from the blizzard.'
     },
     giant_elk: {
         id: 'giant_elk', name: 'Giant Elk', emoji: '🦌', tier: 'legendary',
         payoutMin: 850, payoutMax: 1300, xp: 500,
         specialDrop: { itemId: 'megaloceros_crown', name: 'Megaloceros Crown', chance: 0.18 },
-        zones: ['legendary_peaks'],
+        zones: ['legendary_peaks'], traits: ['giant', 'armored'],
         flavor: 'An ancient Giant Elk stands like a living monument in the mist.'
     },
     golden_fox: {
         id: 'golden_fox', name: 'Golden Fox', emoji: '🦊', tier: 'legendary',
         payoutMin: 750, payoutMax: 1150, xp: 500,
         specialDrop: { itemId: 'golden_fur', name: 'Golden Fur', chance: 1.00 },
-        zones: ['legendary_peaks', 'beginner_forest'],
+        zones: ['legendary_peaks', 'beginner_forest'], traits: ['elusive'],
         flavor: 'A shimmering golden fox vanishes between the trees in a flash of light.'
     },
     white_wolf: {
         id: 'white_wolf', name: 'White Wolf', emoji: '🐺', tier: 'legendary',
         payoutMin: 800, payoutMax: 1200, xp: 500,
         specialDrop: { itemId: 'spirit_essence', name: 'Spirit Essence', chance: 0.25 },
-        zones: ['legendary_peaks', 'arctic_tundra'],
+        zones: ['legendary_peaks', 'arctic_tundra'], traits: ['spectral', 'pack_hunter'],
         flavor: 'A spectral white wolf howls beneath the aurora borealis.'
     },
     obsidian_stag: {
         id: 'obsidian_stag', name: 'Obsidian Stag', emoji: '🦌', tier: 'legendary',
         payoutMin: 700, payoutMax: 1150, xp: 500,
         specialDrop: { itemId: 'obsidian_antler', name: 'Obsidian Antler', chance: 0.20 },
-        zones: ['legendary_peaks'],
+        zones: ['legendary_peaks'], traits: ['armored', 'giant'],
         flavor: 'An Obsidian Stag with jet-black antlers like volcanic glass glares from the summit.'
     },
     storm_hawk: {
         id: 'storm_hawk', name: 'Storm Hawk', emoji: '🦅', tier: 'legendary',
         payoutMin: 780, payoutMax: 1200, xp: 500,
         specialDrop: { itemId: 'storm_feather', name: 'Storm Feather', chance: 0.22 },
-        zones: ['legendary_peaks'],
+        zones: ['legendary_peaks'], traits: ['elusive', 'giant'],
         flavor: 'A Storm Hawk the size of a horse shrieks as lightning crackles across its wingspan.'
     },
     fire_lynx: {
         id: 'fire_lynx', name: 'Fire Lynx', emoji: '🐈', tier: 'legendary',
         payoutMin: 820, payoutMax: 1280, xp: 500,
         specialDrop: { itemId: 'ember_fang', name: 'Ember Fang', chance: 0.22 },
-        zones: ['legendary_peaks'],
+        zones: ['legendary_peaks'], traits: ['aggressive', 'enraged'],
         flavor: 'A Fire Lynx with smoldering eyes and an ashen coat stalks the lava fields.'
     },
 
@@ -596,21 +634,21 @@ const ANIMALS = {
         id: 'dire_bear', name: 'Dire Bear', emoji: '🐻', tier: 'event',
         payoutMin: 1600, payoutMax: 2800, xp: 1000,
         specialDrop: { itemId: 'ancient_claw', name: 'Ancient Claw', chance: 0.30 },
-        zones: ['murky_swamp'],
+        zones: ['murky_swamp'], traits: ['aggressive', 'giant', 'enraged'],
         flavor: 'An enormous prehistoric bear erupts from the swamp fog with a thunderous roar!'
     },
     thunderbird: {
         id: 'thunderbird', name: 'Thunderbird', emoji: '⚡', tier: 'event',
         payoutMin: 2200, payoutMax: 3600, xp: 1000,
         specialDrop: { itemId: 'thunderfeather', name: 'Thunderfeather', chance: 0.35 },
-        zones: ['all'],
+        zones: ['all'], traits: ['spectral', 'elusive', 'giant'],
         flavor: 'Lightning splits the sky as a titanic Thunderbird descends from the clouds!'
     },
     ghost_stag: {
         id: 'ghost_stag', name: 'Ghost Stag', emoji: '👻', tier: 'event',
         payoutMin: 1900, payoutMax: 3100, xp: 1000,
         specialDrop: { itemId: 'spectral_bone', name: 'Spectral Bone', chance: 0.40 },
-        zones: ['all'],
+        zones: ['all'], traits: ['spectral', 'elusive'],
         flavor: 'A translucent stag shimmers in the silver moonlight, barely real.'
     }
 };
@@ -980,6 +1018,7 @@ module.exports = {
     ZONE_LIST,
     ANIMALS,
     ANIMALS_BY_TIER,
+    ANIMAL_TRAITS,
     HUNTER_LEVELS,
     TIER_COLORS,
     LIMITS,
