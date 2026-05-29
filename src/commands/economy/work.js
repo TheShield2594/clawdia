@@ -5,6 +5,8 @@ const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getSalaryMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
+const { logTransaction } = require('../../utils/logTransaction');
+const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -26,13 +28,13 @@ const WORK_SCENARIOS = [
     'The grind never stops — another shift done as a {job}.',
 ];
 
-// Items that can be found during a work shift (positive/neutral only)
+// Items that can be found during a work shift (snake_case itemIds match effectsService canonical IDs)
 const LUCKY_FIND_ITEMS = [
-    { itemId: 'lucky charm',   emoji: '🍀', label: 'Lucky Charm' },
-    { itemId: 'streak shield', emoji: '🔥🛡️', label: 'Streak Shield' },
-    { itemId: 'lifesaver',     emoji: '🛟', label: 'Lifesaver' },
-    { itemId: 'coin booster',  emoji: '💰🚀', label: '2x Coin Booster' },
-    { itemId: 'xp booster',    emoji: '⭐🚀', label: '2x XP Booster' },
+    { itemId: 'lucky_charm',     emoji: '🍀',   label: 'Lucky Charm' },
+    { itemId: 'streak_shield',   emoji: '🔥🛡️', label: 'Streak Shield' },
+    { itemId: 'lifesaver',       emoji: '🛟',   label: 'Lifesaver' },
+    { itemId: 'coin_booster_2x', emoji: '💰🚀', label: '2x Coin Booster' },
+    { itemId: 'xp_booster_2x',  emoji: '⭐🚀', label: '2x XP Booster' },
 ];
 
 // Mutually exclusive special events, checked in priority order (rarest first)
@@ -116,7 +118,6 @@ module.exports = {
             const tierInfo = resolveTiers(guildSettings);
             const currentShifts = user.shiftsWorked || 0;
             const userTier = [...tierInfo].reverse().find(t => currentShifts >= t.minShifts) || tierInfo[0];
-            const nextTier = tierInfo.find(t => t.minShifts > currentShifts);
 
             // Dashboard jobs are the source of truth; fall back to defaults if none configured
             const allJobs = guildSettings?.jobs?.length > 0 ? guildSettings.jobs : DEFAULT_JOBS;
@@ -134,7 +135,10 @@ module.exports = {
             const salaryMult  = getSalaryMultiplier(user);
             const coinMult    = getCoinMultiplier(user);
             const serverMult  = getServerCoinMultiplier(guildSettings);
-            const earned = Math.round(basedEarned * streakMult * salaryMult * coinMult * serverMult);
+            const rawCombined = streakMult * salaryMult * coinMult * serverMult;
+            const combined    = clampMultiplier(rawCombined);
+            const capActive   = rawCombined > MAX_COMBINED_MULTIPLIER;
+            const earned      = Math.round(basedEarned * combined);
 
             const jobLabel = job.emoji ? `${job.emoji} ${job.name}` : job.name;
             const scenario = WORK_SCENARIOS[Math.floor(Math.random() * WORK_SCENARIOS.length)]
@@ -144,20 +148,57 @@ module.exports = {
             let finalEarned = earned;
             if (specialEvent) {
                 finalEarned = Math.max(0, earned + specialEvent.coinDelta);
-                if (specialEvent.item) {
-                    if (!Array.isArray(user.inventory)) user.inventory = [];
-                    const existing = user.inventory.find(i => i.itemId === specialEvent.item.itemId);
-                    if (existing) existing.quantity = (Number(existing.quantity) || 0) + 1;
-                    else user.inventory.push({ itemId: specialEvent.item.itemId, quantity: 1 });
+            }
+
+            // Atomic update — cooldown condition in query prevents double-credit on concurrent requests
+            const updated = await User.findOneAndUpdate(
+                {
+                    userId: interaction.user.id,
+                    guildId: interaction.guild.id,
+                    $or: [
+                        { lastWork: null },
+                        { lastWork: { $lt: new Date(now - 3600000) } }
+                    ]
+                },
+                {
+                    $inc: { balance: finalEarned, shiftsWorked: 1 },
+                    $set: { lastWork: new Date(now) }
+                },
+                { new: true }
+            );
+
+            if (!updated) {
+                return interaction.reply({ content: "You're already working a shift right now!", ephemeral: true });
+            }
+
+            // Inventory update for lucky find (separate, non-financial — no race risk)
+            if (specialEvent?.item) {
+                const itemId = specialEvent.item.itemId;
+                const hasItem = user.inventory?.some(i => i.itemId === itemId);
+                if (hasItem) {
+                    await User.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': itemId },
+                        { $inc: { 'inventory.$.quantity': 1 } }
+                    );
+                } else {
+                    await User.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { $push: { inventory: { itemId, quantity: 1 } } }
+                    );
                 }
             }
 
-            user.balance += finalEarned;
-            user.shiftsWorked = currentShifts + 1;
-            user.lastWork = new Date();
-            await user.save();
+            logTransaction({
+                userId: interaction.user.id,
+                guildId: interaction.guild.id,
+                type: 'work',
+                amount: finalEarned,
+                balance: updated.balance,
+                note: `${job.name} (${performance.label})${capActive ? ', mult capped' : ''}`
+            });
 
-            const promotedTo = tierInfo.find(t => t.minShifts === user.shiftsWorked);
+            const nextTier = tierInfo.find(t => t.minShifts > updated.shiftsWorked);
+            const promotedTo = tierInfo.find(t => t.minShifts === updated.shiftsWorked);
             const currency = guildSettings?.economy?.currency || '💰';
 
             const bonusLabels = [];
@@ -165,6 +206,7 @@ module.exports = {
             if (salaryMult > 1.0)  bonusLabels.push(`📈 ${salaryMult}x salary raise`);
             if (coinMult > 1.0)    bonusLabels.push(`💰🚀 ${coinMult}x coin booster`);
             if (serverMult > 1.0)  bonusLabels.push(`🌐 ${serverMult}x server boost`);
+            if (capActive)         bonusLabels.push(`⚠️ capped at ${MAX_COMBINED_MULTIPLIER}x`);
             const bonusStr = bonusLabels.length ? ` *(${bonusLabels.join(', ')})*` : '';
 
             const embed = new EmbedBuilder()
@@ -174,15 +216,15 @@ module.exports = {
                 .addFields(
                     { name: 'Earned',       value: `${currency} **${finalEarned.toLocaleString()}** coins${bonusStr}`, inline: true },
                     { name: 'Performance',  value: performance.label, inline: true },
-                    { name: 'Career Tier',  value: `${userTier.name} · ${user.shiftsWorked.toLocaleString()} shifts`, inline: false },
+                    { name: 'Career Tier',  value: `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts`, inline: false },
                     {
                         name: 'Next Promotion',
                         value: nextTier
-                            ? `${nextTier.name} in **${(nextTier.minShifts - user.shiftsWorked).toLocaleString()}** shifts`
+                            ? `${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** shifts`
                             : '✅ Max tier reached!',
                         inline: false
                     },
-                    { name: 'Balance', value: `${currency} ${user.balance.toLocaleString()}`, inline: false }
+                    { name: 'Balance', value: `${currency} ${updated.balance.toLocaleString()}`, inline: false }
                 )
                 .setFooter({ text: 'Cooldown: 1h' })
                 .setTimestamp();
