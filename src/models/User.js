@@ -436,6 +436,14 @@ const userSchema = new Schema({
         claimed:  { type: Boolean, default: false }
     }],
 
+    // Duel win/loss tracking
+    duelWins:   { type: Number, default: 0 },
+    duelLosses: { type: Number, default: 0 },
+
+    // Gift cap tracking (daily outgoing coin gifts)
+    dailyGiftSent:  { type: Number, default: 0 },
+    dailyGiftReset: { type: Date,   default: null },
+
     // Lifetime stats used for achievement checks
     lifetimeGambled: { type: Number, default: 0 },
     successfulRobs:  { type: Number, default: 0 },

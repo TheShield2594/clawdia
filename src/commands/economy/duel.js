@@ -93,10 +93,9 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
         const winnerId   = challengerWins ? challengerId : opponentId;
         const loserId    = challengerWins ? opponentId   : challengerId;
         const winnerName = challengerWins ? interaction.user.username : targetUser.username;
-        // Winner receives the full pot minus house cut; loser's stake was already taken by escrow
         await Promise.all([
-            User.updateOne({ userId: winnerId, guildId }, { $inc: { balance: winnerPayout }, $set: { lastDuel: new Date() } }),
-            User.updateOne({ userId: loserId,  guildId }, { $set: { lastDuel: new Date() } }),
+            User.updateOne({ userId: winnerId, guildId }, { $inc: { balance: winnerPayout, duelWins: 1 }, $set: { lastDuel: new Date() } }),
+            User.updateOne({ userId: loserId,  guildId }, { $inc: { duelLosses: 1 }, $set: { lastDuel: new Date() } }),
         ]);
         description = `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (after ${Math.round(houseCut * 100)}% house cut)!`;
     }
@@ -106,6 +105,11 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
         User.findOne({ userId: opponentId,   guildId }),
     ]);
 
+    const cWins   = challenger?.duelWins   ?? 0;
+    const cLosses = challenger?.duelLosses ?? 0;
+    const oWins   = opponent?.duelWins     ?? 0;
+    const oLosses = opponent?.duelLosses   ?? 0;
+
     const embed = new EmbedBuilder()
         .setColor(tie ? '#f39c12' : '#2ecc71')
         .setTitle(`⚔️ Duel Result — ${GAME_NAMES[game]}`)
@@ -113,6 +117,8 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
         .addFields(
             { name: `${interaction.user.username}'s Balance`, value: `${currency}${(challenger?.balance ?? 0).toLocaleString()}`, inline: true },
             { name: `${targetUser.username}'s Balance`,       value: `${currency}${(opponent?.balance  ?? 0).toLocaleString()}`, inline: true },
+            { name: `${interaction.user.username}'s Record`,  value: `${cWins}W / ${cLosses}L`, inline: true },
+            { name: `${targetUser.username}'s Record`,        value: `${oWins}W / ${oLosses}L`, inline: true },
         )
         .setTimestamp();
 
@@ -285,7 +291,18 @@ module.exports = {
             opt.setName('amount')
                 .setDescription('Amount to bet from your wallet')
                 .setRequired(true)
-                .setMinValue(1)),
+                .setMinValue(1))
+        .addStringOption(opt =>
+            opt.setName('game')
+                .setDescription('Minigame to play (default: random)')
+                .setRequired(false)
+                .addChoices(
+                    { name: '🪙 Coin Flip',           value: 'coinflip'   },
+                    { name: '🎲 Dice Roll',            value: 'dice'       },
+                    { name: '🃏 Higher Card',          value: 'highercard' },
+                    { name: '✊ Rock Paper Scissors',  value: 'rps'        },
+                    { name: '🎲 Random',               value: 'random'     }
+                )),
 
     async execute(interaction) {
         if (!interaction.guild) {
@@ -305,8 +322,9 @@ module.exports = {
         const maxBet   = guildSettings?.economy?.duelMaxBet  ?? 10000;
         const houseCut = guildSettings?.economy?.duelHouseCut ?? 0.05;
 
-        const target = interaction.options.getUser('user');
-        const amount = interaction.options.getInteger('amount');
+        const target    = interaction.options.getUser('user');
+        const amount    = interaction.options.getInteger('amount');
+        const gameChoice = interaction.options.getString('game') ?? 'random';
 
         if (target.id === interaction.user.id) {
             return interaction.reply({ content: "You can't duel yourself.", ephemeral: true });
@@ -344,7 +362,8 @@ module.exports = {
             .setDescription(
                 `**${interaction.user.username}** challenges <@${target.id}> to a duel!\n\n` +
                 `Bet: **${currency}${amount.toLocaleString()}** each\n` +
-                `House cut: **${Math.round(houseCut * 100)}%**\n\n` +
+                `House cut: **${Math.round(houseCut * 100)}%**\n` +
+                `Game: **${gameChoice === 'random' ? '🎲 Random' : GAME_NAMES[gameChoice]}**\n\n` +
                 `<@${target.id}>, do you accept?`
             )
             .setFooter({ text: 'Challenge expires in 60 seconds' })
@@ -387,7 +406,9 @@ module.exports = {
                 }
                 escrowTaken = true;
 
-                const game = MINI_GAMES[randomInt(MINI_GAMES.length)];
+                const game = (gameChoice === 'random')
+                    ? MINI_GAMES[randomInt(MINI_GAMES.length)]
+                    : gameChoice;
                 if (game === 'rps') {
                     await runRPS(interaction, msg, target, amount, currency, houseCut, duelId);
                 } else {
