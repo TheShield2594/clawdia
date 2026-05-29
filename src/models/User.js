@@ -473,6 +473,9 @@ const userSchema = new Schema({
     dailyGiftSent:  { type: Number, default: 0 },
     dailyGiftReset: { type: Date,   default: null },
 
+    // Crash game: bet amount deducted but not yet resolved (cleared on cash out or crash end)
+    pendingCrashRefund: { type: Number, default: 0 },
+
     // Lifetime stats used for achievement checks
     lifetimeGambled: { type: Number, default: 0 },
     successfulRobs:  { type: Number, default: 0 },
