@@ -220,6 +220,11 @@ module.exports = {
             if (capActive)          bonusLabels.push(`⚠️ capped at ${MAX_COMBINED_MULTIPLIER}x`);
             const bonusStr = bonusLabels.length ? ` *(${bonusLabels.join(', ')})*` : '';
 
+            const careerValue = nextTier
+                ? `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\nNext up: ${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** more shifts`
+                : `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\n✅ Max tier reached!`;
+            const careerValueIndented = careerValue.split('\n').map(line => '  ' + line).join('\n');
+
             if (challengeFires) {
                 const challenge = generateWorkChallenge(job.name);
                 const challengeEmbed = new EmbedBuilder()
@@ -265,12 +270,8 @@ module.exports = {
                 const displayEarned  = finalEarned + bonusEarned;
                 const displayBalance = updated.balance + bonusEarned;
 
-                const challengeCareerValue = nextTier
-                    ? `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\nNext up: ${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** more shifts`
-                    : `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\n✅ Max tier reached!`;
-
                 const challengeDescription = performance.exceptional
-                    ? `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} **${displayEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${challengeCareerValue}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${currency} ${displayBalance.toLocaleString()} coins`
+                    ? `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} **${displayEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${careerValueIndented}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${currency} ${displayBalance.toLocaleString()} coins`
                     : `${scenario}\n\n${currency} ${displayBalance.toLocaleString()} coins`;
 
                 const workEmbed = new EmbedBuilder()
@@ -284,7 +285,7 @@ module.exports = {
                     workEmbed.addFields(
                         { name: '💰 Earned',      value: `**${displayEarned.toLocaleString()}** coins${bonusStr}`, inline: true },
                         { name: '📊 Performance', value: performance.label, inline: true },
-                        { name: '📈 Career',      value: challengeCareerValue, inline: false }
+                        { name: '📈 Career',      value: careerValue, inline: false }
                     );
                 }
 
@@ -307,12 +308,8 @@ module.exports = {
             }
 
             // Normal (no challenge) path
-            const careerValue = nextTier
-                ? `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\nNext up: ${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** more shifts`
-                : `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\n✅ Max tier reached!`;
-
             const normalDescription = performance.exceptional
-                ? `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} **${finalEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${careerValue}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${currency} ${updated.balance.toLocaleString()} coins`
+                ? `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} **${finalEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${careerValueIndented}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${currency} ${updated.balance.toLocaleString()} coins`
                 : `${scenario}\n\n${currency} ${updated.balance.toLocaleString()} coins`;
 
             const embed = new EmbedBuilder()
