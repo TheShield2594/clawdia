@@ -13,8 +13,14 @@ const {
     LIMITS,
     PRESTIGE_BONUSES,
     FAILURE_SEVERITIES,
-    FISH_QUEST_TEMPLATES
+    FISH_QUEST_TEMPLATES,
+    FISH_TRAITS,
+    SIZE_TIERS,
+    FISH_BASE_WEIGHTS,
+    TIME_OF_DAY_BONUSES,
+    getTimeOfDay
 } = require('../data/fishData');
+const { getCurrentWeather } = require('./weatherService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { ensureHuntData, getMaxStamina: getHuntMaxStamina } = require('./huntService');
 
@@ -57,6 +63,9 @@ function ensureFishingData(user) {
     if (f.dailyCoins           == null) f.dailyCoins           = 0;
     if (f.dailyCasts           == null) f.dailyCasts           = 0;
     if (f.dailyWindowStart     == null) f.dailyWindowStart     = null;
+    if (f.personalBest         == null) f.personalBest         = { fish: null, weight: 0, payout: 0 };
+    if (f.weeklyRecord         == null) f.weeklyRecord         = { fish: null, weight: 0, userId: null, username: null, weekStart: null };
+    if (f.lastBossEncounter    == null) f.lastBossEncounter    = null;
 
     if (!f.unlockedLocations.includes('pond')) f.unlockedLocations.push('pond');
 
@@ -238,10 +247,28 @@ function rollTier(user, location, rod) {
         w.rare  += shift;
     }
 
+    // Weather bonus
+    const weather = getCurrentWeather();
+    const locBonus = weather.locationBonus?.[location.id] ?? {};
+    if (locBonus.rareChance)      { w.rare      = (w.rare      ?? 0) + locBonus.rareChance      * 100; w.common = Math.max(0, w.common - locBonus.rareChance * 100); }
+    if (locBonus.epicChance)      { w.epic      = (w.epic      ?? 0) + locBonus.epicChance      * 100; w.common = Math.max(0, w.common - locBonus.epicChance * 100); }
+    if (locBonus.legendaryChance) { w.legendary = (w.legendary ?? 0) + locBonus.legendaryChance * 100; w.common = Math.max(0, w.common - locBonus.legendaryChance * 100); }
+    if (locBonus.mythicalChance)  { w.event     = (w.event     ?? 0) + locBonus.mythicalChance  * 100; w.common = Math.max(0, w.common - locBonus.mythicalChance  * 100); }
+
+    // Time of day bonus
+    const tod = getTimeOfDay();
+    const todBonus = TIME_OF_DAY_BONUSES[tod]?.tierBonus ?? {};
+    for (const [tier, bonus] of Object.entries(todBonus)) {
+        const shift = (w.common ?? 0) * bonus;
+        w.common = Math.max(0, (w.common ?? 0) - shift);
+        w[tier]  = (w[tier] ?? 0) + shift;
+    }
+
     const tiers = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'event'];
     const items = tiers.map(t => ({ tier: t, weight: w[t] ?? 0 })).filter(i => i.weight > 0);
     return weightedRoll(items).tier;
 }
+
 
 // ─── FISH ROLL ───────────────────────────────────────────────────────────────
 
@@ -571,63 +598,122 @@ function executeCast(user, locationId) {
 
         } else {
             // Fish catch
-            const tier         = rollTier(user, location, rod);
-            const fish         = rollFish(tier, locationId ?? f.activeLocation);
-            const rawPayout    = randInt(fish.payoutMin, fish.payoutMax);
+            const tier = rollTier(user, location, rod);
+            const fish = rollFish(tier, locationId ?? f.activeLocation);
 
-            // Size variance: ±20% of base payout, adds flavor
-            let sizeLabel = null;
-            let sizeMultiplier = 1.0;
+            // ── Trait effects ──────────────────────────────────────────────
+            const traits = fish.traits ?? {};
+
+            // Slippery / elusive: re-roll success (simulate escape)
+            let traitSuccessMod = 0;
+            if (traits.slippery && FISH_TRAITS.slippery) traitSuccessMod += FISH_TRAITS.slippery.successMod;
+            if (traits.elusive  && FISH_TRAITS.elusive)  traitSuccessMod += FISH_TRAITS.elusive.successMod;
+            if (traitSuccessMod < 0 && Math.random() < Math.abs(traitSuccessMod)) {
+                // Fish escaped despite success roll
+                const severity = { id: 'slipped', label: 'Slipped Away', durLoss: 1, injuryMs: 0, xp: 2,
+                    msg: `The ${fish.name} slipped free — its ${traits.slippery ? 'slippery scales' : 'elusive nature'} made it impossible to hold!` };
+                applyDurabilityLoss(rod, severity.durLoss);
+                result.durabilityLost = severity.durLoss;
+                f.consecutiveFails += 1;
+                result.xpEarned = severity.xp;
+                result.success  = false;
+                result.failure  = { severity, message: severity.msg };
+                result.traitEscape = { fish, trait: traits.slippery ? 'slippery' : 'elusive' };
+                if (rod.currentDurability <= 0) result.rodBroke = true;
+                f.totalCasts += 1; f.dailyCasts += 1; f.stamina -= 1; f.lastCast = new Date();
+                tickConsumables(user);
+                result.expiredBait = baitBefore && !f.activeBait ? baitBefore : null;
+                result.activeBaitAfter = f.activeBait;
+                user.markModified('fishing');
+                return result;
+            }
+
+            const rawPayout = randInt(fish.payoutMin, fish.payoutMax);
+
+            // ── Size / weight (Issue #152) ──────────────────────────────────
+            let sizeLabel = null, sizeTierId = 'average', sizeMultiplier = 1.0, weightLbs = 0;
             if (fish.sizeVariance) {
-                const roll = Math.random();
-                if (roll < 0.15) {
-                    sizeMultiplier = 0.75 + Math.random() * 0.10;
-                    sizeLabel = 'Tiny';
-                } else if (roll < 0.35) {
-                    sizeMultiplier = 0.85 + Math.random() * 0.10;
-                    sizeLabel = 'Small';
-                } else if (roll < 0.65) {
-                    sizeLabel = 'Average';
-                } else if (roll < 0.85) {
-                    sizeMultiplier = 1.10 + Math.random() * 0.10;
-                    sizeLabel = 'Large';
-                } else {
-                    sizeMultiplier = 1.20 + Math.random() * 0.15;
-                    sizeLabel = 'Trophy';
+                const r = Math.random();
+                let cum = 0;
+                for (const st of SIZE_TIERS) {
+                    cum += st.chance;
+                    if (r < cum) {
+                        sizeTierId      = st.id;
+                        sizeLabel       = st.label;
+                        sizeMultiplier  = st.multiplier;
+                        // Calculate weight
+                        const baseW = FISH_BASE_WEIGHTS[fish.tier] ?? { min: 1, max: 10 };
+                        const base  = baseW.min + Math.random() * (baseW.max - baseW.min);
+                        weightLbs   = parseFloat((base * st.weightMult).toFixed(1));
+                        break;
+                    }
                 }
+                if (!sizeLabel) { sizeLabel = 'Average'; sizeMultiplier = 1.0; }
             }
             const sizedPayout = Math.round(rawPayout * sizeMultiplier);
 
-            // Critical catch
-            const critChance     = calculateCritChance(user);
+            // Giant trait: +15% payout
+            let traitPayoutMult = 1.0;
+            if (traits.giant) traitPayoutMult += FISH_TRAITS.giant.payoutMod;
+
+            // ── Critical catch ─────────────────────────────────────────────
+            let critChance = calculateCritChance(user);
+            // Armored trait: crit resistance
+            if (traits.armored) critChance *= 0.5;
             const isCrit         = Math.random() < critChance;
             const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
-            const preModPayout   = Math.round(sizedPayout * critMultiplier * streakMult);
+            const preModPayout   = Math.round(sizedPayout * critMultiplier * traitPayoutMult * streakMult);
 
             const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, preModPayout, location);
 
-            // Special material drop
+            // ── Special material drop ──────────────────────────────────────
             let specialDrop = null;
-            if (fish.specialDrop && Math.random() < (isCrit ? fish.specialDrop.chance * 2 : fish.specialDrop.chance)) {
+            let dropChance  = fish.specialDrop?.chance ?? 0;
+            if (isCrit)            dropChance *= 2;
+            if (traits.ancient)    dropChance *= 2; // ancient trait doubles mat chance
+            if (fish.specialDrop && Math.random() < dropChance) {
                 specialDrop = fish.specialDrop;
                 const matKey = fish.specialDrop.itemId;
                 if (f.materials[matKey] != null) f.materials[matKey] += 1;
                 else f.materials[matKey] = 1;
             }
 
-            // XP
+            // ── XP with glowing trait ──────────────────────────────────────
             let xpGain = fish.xp;
-            if (isCrit) xpGain = Math.round(xpGain * 1.5);
+            if (isCrit)          xpGain = Math.round(xpGain * 1.5);
+            if (traits.glowing)  xpGain = Math.round(xpGain * (1 + FISH_TRAITS.glowing.xpMod));
             if (f.activeXpScroll) xpGain = Math.round(xpGain * 1.5);
             xpGain = Math.round(xpGain * streakMult);
 
-            applyDurabilityLoss(rod, 1);
-            result.durabilityLost = 1;
+            // ── Durability (aggressive adds 1) ─────────────────────────────
+            const durLoss = traits.aggressive ? 2 : 1;
+            applyDurabilityLoss(rod, durLoss);
+            result.durabilityLost = durLoss;
+
+            // ── Venomous trait: extra stamina drain ────────────────────────
+            if (traits.venomous && f.stamina > 1) {
+                f.stamina -= 1; // extra drain (normal drain still at end)
+                result.venomousDrain = true;
+            }
 
             user.balance   += adjustedPayout;
             f.totalEarned  += adjustedPayout;
             f.dailyCoins   += adjustedPayout;
             if (adjustedPayout > f.bestPayout) f.bestPayout = adjustedPayout;
+
+            // ── Personal best / weight record ──────────────────────────────
+            let isPersonalBest = false, newRecord = null;
+            if (fish.sizeVariance && weightLbs > 0) {
+                if (!f.personalBest || weightLbs > f.personalBest.weight) {
+                    f.personalBest = { fish: fish.name, weight: weightLbs, payout: adjustedPayout, caughtAt: new Date() };
+                    isPersonalBest = true;
+                }
+                // Weekly server record stored on user (simplification; a real server record needs a guild-level store)
+                if (!f.weeklyRecord || weightLbs > f.weeklyRecord.weight) {
+                    f.weeklyRecord = { fish: fish.name, weight: weightLbs, weekStart: new Date() };
+                    newRecord = { type: 'personal', fish: fish.name, weight: weightLbs };
+                }
+            }
 
             f.successfulCasts += 1;
             f.consecutiveFails = 0;
@@ -639,9 +725,19 @@ function executeCast(user, locationId) {
             Object.assign(result, {
                 fish, tier, rawPayout: sizedPayout, finalPayout: adjustedPayout,
                 isCrit, critMultiplier: parseFloat(critMultiplier.toFixed(2)),
-                sizeLabel, specialDrop, xpEarned: xpGain,
-                levelUp: lvResult.leveledUp ? lvResult : null, cappedByHard
+                sizeLabel, sizeTierId, weightLbs, specialDrop, xpEarned: xpGain,
+                levelUp: lvResult.leveledUp ? lvResult : null, cappedByHard,
+                traitEffects: Object.keys(traits).filter(t => traits[t]),
+                isPersonalBest, newRecord
             });
+
+            // ── Boss encounter check (Issue #154) ──────────────────────────
+            // 8% chance for legendary/epic, 3% for rare, skipped for others
+            const bossTierChance = tier === 'legendary' ? 0.12 : tier === 'epic' ? 0.08 : tier === 'rare' ? 0.03 : 0;
+            if (bossTierChance > 0 && Math.random() < bossTierChance) {
+                result.bossEncounter = { fish, tier };
+                // Payout/rewards handled when player responds to the encounter
+            }
         }
 
         if (rod.currentDurability <= 0) result.rodBroke = true;
@@ -778,6 +874,47 @@ function updateFishQuestProgress(user, result, locationId) {
     user.markModified('quests');
 }
 
+// ─── BOSS ENCOUNTER RESOLUTION (Issue #154) ───────────────────────────────────
+
+/**
+ * Resolves a boss encounter. choice: 'fight' | 'loosen' | 'cut'
+ * Returns { outcome, bonusPayout, durabilityLost, message }
+ */
+function resolveBossEncounter(user, fish, tier, choice) {
+    const rod = user.fishing?.rods[user.fishing.equippedRodIndex];
+    let bonusPayout = 0, durabilityLost = 0, outcome = '';
+
+    if (choice === 'fight') {
+        const winChance = tier === 'legendary' ? 0.40 : tier === 'epic' ? 0.60 : 0.75;
+        if (Math.random() < winChance) {
+            bonusPayout   = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 1.5);
+            outcome       = 'win';
+            if (rod) { applyDurabilityLoss(rod, 3); durabilityLost = 3; }
+        } else {
+            outcome       = 'loss';
+            if (rod) { applyDurabilityLoss(rod, 6); durabilityLost = 6; }
+        }
+    } else if (choice === 'loosen') {
+        bonusPayout   = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 0.5);
+        outcome       = 'loosen';
+        if (rod) { applyDurabilityLoss(rod, 1); durabilityLost = 1; }
+    } else {
+        // Cut line — safe, no reward
+        outcome = 'cut';
+        if (rod) { applyDurabilityLoss(rod, 1); durabilityLost = 1; }
+    }
+
+    const messages = {
+        win:    `⚔️ You fought hard and landed the ${fish.name}! Bonus payout earned!`,
+        loss:   `💥 The ${fish.name} snapped your line and escaped! Your rod took heavy damage.`,
+        loosen: `〰️ You loosened the drag — the ${fish.name} tired itself out. Partial reward.`,
+        cut:    `✂️ You cut the line to safety. No reward, but your gear is intact.`
+    };
+
+    if (rod) user.markModified('fishing');
+    return { outcome, bonusPayout, durabilityLost, message: messages[outcome] };
+}
+
 // ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
 
 function formatMs(ms) {
@@ -822,6 +959,7 @@ module.exports = {
     activateConsumable,
     tickConsumables,
     executeCast,
+    resolveBossEncounter,
     assignDailyFishQuests,
     updateFishQuestProgress,
     formatMs,
