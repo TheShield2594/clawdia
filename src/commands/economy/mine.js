@@ -372,6 +372,24 @@ async function handleDig(interaction) {
         embed.addFields({ name: '💎 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petMineYieldPct}% yield)`, inline: true });
     }
     await interaction.editReply({ embeds: [embed] });
+
+    if (result.success && result.tier === 'legendary') {
+        const announceChannelId = guildSettings?.leveling?.announceChannel;
+        const announceChannel = announceChannelId
+            ? interaction.guild.channels.cache.get(announceChannelId) ?? interaction.channel
+            : interaction.channel;
+        const displayName = interaction.member?.displayName || interaction.user.username;
+        const announcementEmbed = new EmbedBuilder()
+            .setColor(TIER_COLORS.legendary)
+            .setTitle('✨ Legendary Strike! ✨')
+            .setDescription(
+                `**${displayName}** just struck a ${result.ore.emoji} **${result.ore.name}** [⭐⭐⭐⭐⭐]\n` +
+                `while mining in **${depth.emoji} ${depth.name}**.\n\n` +
+                `That's incredibly rare.`
+            )
+            .setTimestamp();
+        announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
+    }
 }
 
 // ─── PROFILE ──────────────────────────────────────────────────────────────────
@@ -1111,10 +1129,18 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
         const payoutDisplay = cappedByHard ? `~~${currency}${finalPayout}~~ (daily cap reached)` : `**${currency}${finalPayout.toLocaleString()}**`;
 
+        const isLegendary = tier === 'legendary';
+        const embedTitle = isLegendary
+            ? `⛏️✨ LEGENDARY STRIKE ✨⛏️`
+            : `${ore.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${ore.name} ${isCrit ? '✨' : ''}`;
+        const embedDesc = isLegendary
+            ? `You struck something impossible in the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${ore.emoji}  **${ore.name}**  [⭐⭐⭐⭐⭐]\n  *${ore.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+            : `*${ore.flavor}*`;
+
         const embed = new EmbedBuilder()
             .setColor(color)
-            .setTitle(`${ore.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${ore.name} ${isCrit ? '✨' : ''}`)
-            .setDescription(`*${ore.flavor}*`)
+            .setTitle(embedTitle)
+            .setDescription(embedDesc)
             .addFields(
                 { name: 'Depth',    value: `${depth.emoji} ${depth.name}`,         inline: true },
                 { name: 'Tier',     value: tierLabel,                               inline: true },
