@@ -16,12 +16,10 @@ function getCurrentWeather() {
 }
 
 function _rotateWeather() {
-    // Pick a random weather type (weighted toward clear/rain for realism)
-    const weights = { clear: 30, rain: 20, fog: 15, storm: 10, heatwave: 15, aurora: 10 };
-    const total   = Object.values(weights).reduce((s, w) => s + w, 0);
+    const total = Object.values(WEATHER_TYPES).reduce((s, w) => s + (w.spawnWeight ?? 10), 0);
     let r = Math.random() * total;
-    for (const [id, w] of Object.entries(weights)) {
-        r -= w;
+    for (const [id, entry] of Object.entries(WEATHER_TYPES)) {
+        r -= (entry.spawnWeight ?? 10);
         if (r <= 0) {
             currentWeatherId = id;
             break;

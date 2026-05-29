@@ -847,31 +847,37 @@ const FISH_BASE_WEIGHTS = {
 const WEATHER_TYPES = {
     clear: {
         id: 'clear', name: 'Clear Skies', emoji: '☀️',
+        spawnWeight: 30,
         durationMs: 2 * 3_600_000,
         locationBonus: {}
     },
     rain: {
         id: 'rain', name: 'Rain', emoji: '🌧️',
+        spawnWeight: 20,
         durationMs: 1.5 * 3_600_000,
         locationBonus: { river: { rareChance: 0.08 } }
     },
     fog: {
         id: 'fog', name: 'Fog', emoji: '🌫️',
+        spawnWeight: 15,
         durationMs: 2 * 3_600_000,
         locationBonus: { lake: { legendaryChance: 0.04 } }
     },
     storm: {
         id: 'storm', name: 'Storm', emoji: '⛈️',
+        spawnWeight: 10,
         durationMs: 1 * 3_600_000,
         locationBonus: { ocean: { epicChance: 0.06 } }
     },
     heatwave: {
         id: 'heatwave', name: 'Heatwave', emoji: '🌡️',
+        spawnWeight: 15,
         durationMs: 2 * 3_600_000,
         locationBonus: { pond: { junkMod: 0.05 }, river: { junkMod: 0.05 } }
     },
     aurora: {
         id: 'aurora', name: 'Aurora', emoji: '🌌',
+        spawnWeight: 10,
         durationMs: 1.5 * 3_600_000,
         locationBonus: { deep_sea: { mythicalChance: 0.05 } }
     }
@@ -890,7 +896,7 @@ function getTimeOfDay() {
 
 const TIME_OF_DAY_BONUSES = {
     dawn:     { tierBonus: { uncommon: 0.04, rare: 0.02 }, description: 'Dawn — trout & salmon boosted' },
-    noon:     { tierBonus: { common: 0.06 },               description: 'Noon — common fish more plentiful' },
+    noon:     { tierBonus: { uncommon: 0.04 },                description: 'Noon — common fish more plentiful' },
     dusk:     { tierBonus: { epic: 0.03, rare: 0.04 },     description: 'Dusk — predators are hunting' },
     midnight: { tierBonus: { legendary: 0.03, event: 0.02 }, description: 'Midnight — mythical creatures stir' }
 };
