@@ -3,6 +3,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const {
     DEPTHS, DEPTH_LIST, TIER_COLORS, LIMITS, PICKAXE_BY_TIER,
     MATERIAL_NAMES, CONSUMABLES, BLAST_PACKS,
@@ -862,7 +863,11 @@ async function handleShop(interaction, sub) {
                 { name: 'Balance',       value: `${currency}${user.balance.toLocaleString()}`, inline: true }
             )
             .setTimestamp();
-        return interaction.reply({ embeds: [embed] });
+        const pickaxeImg = await getItemImageAttachment(pickaxeData.slug || pickaxeData.id);
+        if (pickaxeImg) embed.setThumbnail(pickaxeImg.url);
+        const minePayload = { embeds: [embed] };
+        if (pickaxeImg) minePayload.files = [pickaxeImg.attachment];
+        return interaction.reply(minePayload);
     }
 
     if (sub === 'upgrade') {

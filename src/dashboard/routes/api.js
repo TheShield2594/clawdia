@@ -1094,6 +1094,113 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
     }
 });
 
+// ── Item Images ────────────────────────────────────────────────────────────────
+
+const multer = require('multer');
+const ItemImage = require('../../models/ItemImage');
+
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 512 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) return cb(new Error('Only image files are allowed'));
+        cb(null, true);
+    }
+});
+
+function checkAnyGuildAdmin(req, res, next) {
+    if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
+    const adminGuilds = req.user.guilds.filter(g => (g.permissions & 0x20) === 0x20 && req.client.guilds.cache.has(g.id));
+    if (!adminGuilds.length) return res.status(403).json({ error: 'Forbidden' });
+    next();
+}
+
+// Serve a guild shop item's image
+router.get('/item-image/shop/:guildId/:itemId', async (req, res) => {
+    try {
+        const guild = await require('../../models/Guild').findOne({ guildId: req.params.guildId }, { shop: 1 });
+        const item = guild?.shop?.find(i => i.itemId === req.params.itemId);
+        if (!item?.imageData?.length) return res.status(404).end();
+        res.set('Content-Type', item.imageType || 'image/png');
+        res.set('Cache-Control', 'public, max-age=86400');
+        res.send(item.imageData);
+    } catch { res.status(500).end(); }
+});
+
+// Upload image for a guild shop item
+router.post('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, upload.single('image'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No image file provided' });
+    try {
+        const guild = await require('../../models/Guild').findOne({ guildId: req.params.guildId });
+        if (!guild) return res.status(404).json({ error: 'Guild not found' });
+        const item = guild.shop.find(i => i.itemId === req.params.itemId);
+        if (!item) return res.status(404).json({ error: 'Shop item not found' });
+        item.imageData = req.file.buffer;
+        item.imageType = req.file.mimetype;
+        await guild.save();
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Shop item image upload error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Remove image from a guild shop item
+router.delete('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    try {
+        const guild = await require('../../models/Guild').findOne({ guildId: req.params.guildId });
+        if (!guild) return res.status(404).json({ error: 'Guild not found' });
+        const item = guild.shop.find(i => i.itemId === req.params.itemId);
+        if (!item) return res.status(404).json({ error: 'Shop item not found' });
+        item.imageData = null;
+        await guild.save();
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Shop item image delete error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Serve a global activity item image (hunt/fish/mine)
+router.get('/item-image/activity/:itemId', async (req, res) => {
+    try {
+        const img = await ItemImage.findOne({ itemId: req.params.itemId });
+        if (!img?.imageData?.length) return res.status(404).end();
+        res.set('Content-Type', img.imageType || 'image/png');
+        res.set('Cache-Control', 'public, max-age=86400');
+        res.send(img.imageData);
+    } catch { res.status(500).end(); }
+});
+
+// Upload/replace a global activity item image (any guild admin)
+router.post('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, checkWriteRateLimit, upload.single('image'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No image file provided' });
+    const { itemId } = req.params;
+    if (!/^[a-z0-9_-]{1,64}$/.test(itemId)) return res.status(400).json({ error: 'Invalid itemId' });
+    try {
+        await ItemImage.findOneAndUpdate(
+            { itemId },
+            { imageData: req.file.buffer, imageType: req.file.mimetype, updatedAt: new Date() },
+            { upsert: true }
+        );
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Activity item image upload error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Remove a global activity item image
+router.delete('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, checkWriteRateLimit, async (req, res) => {
+    try {
+        await ItemImage.deleteOne({ itemId: req.params.itemId });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Activity item image delete error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 module.exports = router;
 module.exports.computeRetention = computeRetention;
 module.exports.validateEventLogUpdate = validateEventLogUpdate;

@@ -11,6 +11,7 @@ const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const { chunkArray, paginate } = require('../../utils/paginator');
 const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
+const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 
 const PAGE_SIZE = 5;
 const CONFIRM_THRESHOLD = 500;
@@ -52,8 +53,7 @@ module.exports = {
                 .addIntegerOption(o => o.setName('price').setDescription('Price in coins').setRequired(true).setMinValue(1))
                 .addStringOption(o => o.setName('description').setDescription('Item description'))
                 .addRoleOption(o => o.setName('role').setDescription('Role to grant on purchase'))
-                .addIntegerOption(o => o.setName('stock').setDescription('Stock limit (-1 = unlimited)').setMinValue(-1))
-                .addStringOption(o => o.setName('image_url').setDescription('Image URL shown for this item')))
+                .addIntegerOption(o => o.setName('stock').setDescription('Stock limit (-1 = unlimited)').setMinValue(-1)))
         .addSubcommand(sub =>
             sub.setName('edit')
                 .setDescription('Edit an existing shop item (admin only)')
@@ -63,9 +63,7 @@ module.exports = {
                 .addStringOption(o => o.setName('description').setDescription('Updated item description'))
                 .addRoleOption(o => o.setName('role').setDescription('Updated role to grant on purchase'))
                 .addBooleanOption(o => o.setName('clear_role').setDescription('Remove the role reward from this item'))
-                .addIntegerOption(o => o.setName('stock').setDescription('Updated stock (-1 = unlimited)').setMinValue(-1))
-                .addStringOption(o => o.setName('image_url').setDescription('Updated image URL'))
-                .addBooleanOption(o => o.setName('clear_image').setDescription('Remove the image from this item')))
+                .addIntegerOption(o => o.setName('stock').setDescription('Updated stock (-1 = unlimited)').setMinValue(-1)))
         .addSubcommand(sub =>
             sub.setName('remove')
                 .setDescription('Remove an item from the shop (admin only)')
@@ -204,11 +202,12 @@ module.exports = {
                 if (freshItem.roleId) {
                     successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
                 }
-                if (freshItem.imageUrl) {
-                    successEmbed.setThumbnail(freshItem.imageUrl);
-                }
 
-                return reply({ embeds: [successEmbed], components: [] });
+                const successImg = await getItemImageAttachment(freshItem.itemId, interaction.guildId);
+                if (successImg) successEmbed.setThumbnail(successImg.url);
+                const successPayload = { embeds: [successEmbed], components: [] };
+                if (successImg) successPayload.files = [successImg.attachment];
+                return reply(successPayload);
             };
 
             if (item.price >= CONFIRM_THRESHOLD) {
@@ -227,9 +226,11 @@ module.exports = {
                     )
                     .setFooter({ text: 'This confirmation expires in 30 seconds' });
 
-                if (item.imageUrl) confirmEmbed.setThumbnail(item.imageUrl);
-
-                const msg = await interaction.reply({ embeds: [confirmEmbed], components: [row], fetchReply: true });
+                const confirmImg = await getItemImageAttachment(item.itemId, interaction.guildId);
+                if (confirmImg) confirmEmbed.setThumbnail(confirmImg.url);
+                const confirmPayload = { embeds: [confirmEmbed], components: [row], fetchReply: true };
+                if (confirmImg) confirmPayload.files = [confirmImg.attachment];
+                const msg = await interaction.reply(confirmPayload);
 
                 const collector = msg.createMessageComponentCollector({
                     componentType: ComponentType.Button,
@@ -281,13 +282,12 @@ module.exports = {
             const description = interaction.options.getString('description') ?? '';
             const role = interaction.options.getRole('role');
             const stock = interaction.options.getInteger('stock') ?? -1;
-            const imageUrl = interaction.options.getString('image_url') ?? '';
 
             if (guildSettings.shop.find(i => i.name.toLowerCase() === name.toLowerCase())) {
                 return interaction.reply({ content: 'An item with that name already exists.', ephemeral: true });
             }
 
-            guildSettings.shop.push({ name, description, price, roleId: role?.id ?? null, stock, imageUrl });
+            guildSettings.shop.push({ name, description, price, roleId: role?.id ?? null, stock });
             await guildSettings.save();
 
             return interaction.reply({ content: `Added **${name}** to the shop for ${currency}${price.toLocaleString()}.` });
@@ -312,8 +312,6 @@ module.exports = {
             const role = interaction.options.getRole('role');
             const clearRole = interaction.options.getBoolean('clear_role');
             const stock = interaction.options.getInteger('stock');
-            const imageUrl = interaction.options.getString('image_url');
-            const clearImage = interaction.options.getBoolean('clear_image');
 
             if (newName && newName.toLowerCase() !== name) {
                 if (guildSettings.shop.find(i => i.name.toLowerCase() === newName.toLowerCase())) {
@@ -329,11 +327,8 @@ module.exports = {
             if (clearRole) item.roleId = null;
             else if (role) item.roleId = role.id;
 
-            if (clearImage) item.imageUrl = '';
-            else if (imageUrl !== null) item.imageUrl = imageUrl;
-
             await guildSettings.save();
-            return interaction.reply({ content: `Updated **${item.name}**.` });
+            return interaction.reply({ content: `Updated **${item.name}**. Upload item images via the dashboard.` });
         }
 
         // ── REMOVE ────────────────────────────────────────────────────────────

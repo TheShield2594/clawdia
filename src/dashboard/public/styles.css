@@ -1227,3 +1227,19 @@ textarea { resize: vertical; min-height: 80px; }
     .dash-kpis { grid-template-columns: 1fr 1fr; }
     .dash-module-list { grid-template-columns: 1fr; }
 }
+
+/* ── Shop item image upload ───────────────────────────────────── */
+.shop-img-upload-row { display: flex; align-items: center; gap: .75rem; }
+.shop-img-preview-wrap { width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2, #1e1e2e); flex-shrink: 0; }
+
+/* ── Activity item images grid ───────────────────────────────── */
+.activity-img-grid { display: flex; flex-direction: column; gap: 1.25rem; margin-top: .5rem; }
+.activity-img-category { }
+.activity-img-cat-label { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-bottom: .5rem; }
+.activity-img-cat-items { display: flex; flex-wrap: wrap; gap: .75rem; }
+.activity-img-item { display: flex; flex-direction: column; align-items: center; gap: .35rem; width: 80px; }
+.activity-img-preview-wrap { position: relative; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2, #1e1e2e); }
+.activity-img-preview { width: 48px; height: 48px; object-fit: contain; border-radius: 6px; }
+.activity-img-emoji { position: absolute; font-size: 1.5rem; pointer-events: none; }
+.activity-img-label { font-size: .7rem; color: var(--text-dim); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px; }
+.activity-img-actions { display: flex; gap: .25rem; }

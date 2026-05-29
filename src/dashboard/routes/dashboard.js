@@ -5,6 +5,9 @@ const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { ACHIEVEMENTS } = require('../../data/achievements');
 const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
+const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES } = require('../../data/huntData');
+const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES } = require('../../data/fishData');
+const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES } = require('../../data/mineData');
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -114,6 +117,21 @@ async function renderGuildSettings(req, res) {
 
         const safeSettings = guildSettings.toObject();
 
+        const activityItems = [
+            ...WEAPON_TIERS.map(w => ({ id: w.slug, label: w.name, emoji: w.emoji, category: 'Hunt — Weapons' })),
+            ...Object.values(WEAPON_UPGRADES).map(u => ({ id: u.id, label: u.name, emoji: u.emoji, category: 'Hunt — Upgrades' })),
+            ...AMMO_PACKS.map(a => ({ id: a.id, label: a.name, emoji: a.emoji, category: 'Hunt — Ammo' })),
+            ...Object.values(HUNT_CONSUMABLES).map(c => ({ id: c.id, label: c.name, emoji: c.emoji, category: 'Hunt — Consumables' })),
+            ...ROD_TIERS.map(r => ({ id: r.slug, label: r.name, emoji: r.emoji, category: 'Fish — Rods' })),
+            ...Object.values(ROD_UPGRADES).map(u => ({ id: u.id, label: u.name, emoji: u.emoji, category: 'Fish — Upgrades' })),
+            ...BAIT_PACKS.map(b => ({ id: b.id, label: b.name, emoji: b.emoji, category: 'Fish — Bait' })),
+            ...Object.values(FISH_CONSUMABLES).map(c => ({ id: c.id, label: c.name, emoji: c.emoji, category: 'Fish — Consumables' })),
+            ...PICKAXE_TIERS.map(p => ({ id: p.slug, label: p.name, emoji: p.emoji, category: 'Mine — Pickaxes' })),
+            ...Object.values(PICKAXE_UPGRADES).map(u => ({ id: u.id, label: u.name, emoji: u.emoji, category: 'Mine — Upgrades' })),
+            ...BLAST_PACKS.map(b => ({ id: b.id, label: b.name, emoji: b.emoji, category: 'Mine — Blasts' })),
+            ...Object.values(MINE_CONSUMABLES).map(c => ({ id: c.id, label: c.name, emoji: c.emoji, category: 'Mine — Consumables' })),
+        ];
+
         res.render('guild-settings', {
             user: req.user,
             guild: { id: guild.id, name: guild.name, icon: guild.icon, ownerId: guild.ownerId, owner: req.user.id === guild.ownerId },
@@ -125,7 +143,8 @@ async function renderGuildSettings(req, res) {
             roles: roles,
             defaultJobs: DEFAULT_JOBS,
             defaultTiers: DEFAULT_TIERS,
-            builtinAchievements
+            builtinAchievements,
+            activityItems
         });
     } catch (error) {
         console.error('Dashboard error:', error);
