@@ -119,19 +119,23 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
     if (wildCount > 0 && outcome !== 'jackpot') extras += '\n> 🃏 *Wild card assisted!*';
     if (multFactor > 1 && outcome !== 'mult3')  extras += `\n> ⚡ *${multFactor}x Boost applied!*`;
 
+    const payoutVal = payout > 0 ? payout : bet;
+    const payoutLabel = payout > 0 ? '🏆 Payout' : '💀 Lost';
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
         .setColor(color)
         .setTitle(title)
-        .setDescription(`> **[ ${display} ]**\n\n${line}${extras}`)
-        .addFields(
-            { name: '💸 Bet',                                value: `${bet.toLocaleString()} coins`,    inline: true },
-            { name: payout > 0 ? '🏆 Payout' : '💀 Lost',   value: payout > 0 ? `${payout.toLocaleString()} coins` : `${bet.toLocaleString()} coins`, inline: true },
-            { name: '📊 Net',                                value: `**${netStr}** coins`,              inline: true },
-            { name: '💰 Balance',                            value: `**${balance.toLocaleString()}** coins` },
+        .setDescription(
+            `> **[ ${display} ]**\n\n${line}${extras}\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `  💸 Bet: ${bet.toLocaleString()}  ·  ${payoutLabel}: ${payoutVal.toLocaleString()}  ·  📊 Net: **${netStr}**\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━`
         )
-        .addFields({ name: '🏆 Jackpot Pool', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true })
+        .addFields(
+            { name: '💰 Balance',      value: `**${balance.toLocaleString()}** coins`,      inline: true },
+            { name: '🏆 Jackpot Pool', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true },
+        )
         .setFooter({ text: '🃏 Wild substitutes for any symbol  •  ⚡ Boost multiplies your win' })
         .setTimestamp();
 }

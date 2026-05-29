@@ -272,7 +272,7 @@ module.exports = {
 
                 const challengeDescription = performance.exceptional
                     ? `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} **${displayEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${careerValueIndented}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${currency} ${displayBalance.toLocaleString()} coins`
-                    : `${scenario}\n\n${currency} ${displayBalance.toLocaleString()} coins`;
+                    : `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 **${displayEarned.toLocaleString()} coins**${bonusStr}\n  Balance: ${currency} ${displayBalance.toLocaleString()} coins\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
                 const workEmbed = new EmbedBuilder()
                     .setColor(performance.color)
@@ -283,7 +283,6 @@ module.exports = {
 
                 if (!performance.exceptional) {
                     workEmbed.addFields(
-                        { name: '💰 Earned',      value: `**${displayEarned.toLocaleString()}** coins${bonusStr}`, inline: true },
                         { name: '📊 Performance', value: performance.label, inline: true },
                         { name: '📈 Career',      value: careerValue, inline: false }
                     );
@@ -310,7 +309,7 @@ module.exports = {
             // Normal (no challenge) path
             const normalDescription = performance.exceptional
                 ? `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} **${finalEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n${careerValueIndented}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${currency} ${updated.balance.toLocaleString()} coins`
-                : `${scenario}\n\n${currency} ${updated.balance.toLocaleString()} coins`;
+                : `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  💰 **${finalEarned.toLocaleString()} coins**${bonusStr}\n  Balance: ${currency} ${updated.balance.toLocaleString()} coins\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
             const embed = new EmbedBuilder()
                 .setColor(performance.color)
@@ -321,7 +320,6 @@ module.exports = {
 
             if (!performance.exceptional) {
                 embed.addFields(
-                    { name: '💰 Earned',      value: `**${finalEarned.toLocaleString()}** coins${bonusStr}`, inline: true },
                     { name: '📊 Performance', value: performance.label, inline: true },
                     { name: '📈 Career',      value: careerValue, inline: false }
                 );

@@ -161,20 +161,24 @@ async function playKeno(interaction, bet, picked) {
         let boostNote = '';
         if (totalCoinMult > 1.0 && adjustedPayout > bet) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
+        const payoutLabel = credit > 0 ? '🏆 Payout' : '💀 Lost';
+        const payoutAmt   = credit > 0 ? adjustedPayout : bet;
         const resultEmbed = new EmbedBuilder()
             .setAuthor(embedAuthor(interaction))
             .setThumbnail(THUMB)
             .setColor(color)
             .setTitle(title)
-            .setDescription(`${desc}${boostNote}`)
+            .setDescription(
+                `${desc}${boostNote}\n\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `  💸 Bet: ${bet.toLocaleString()}  ·  ${payoutLabel}: ${payoutAmt.toLocaleString()}  ·  📊 Net: **${netStr}**\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━`
+            )
             .addFields(
-                { name: '🎯 Your Numbers', value: pickedStr, inline: false },
-                { name: `🔵 Drawn Numbers`, value: drawnStr, inline: false },
-                { name: '✅ Matches', value: `**${matches}** / ${PICK_COUNT}`, inline: true },
-                { name: '💰 Bet',     value: `**${bet.toLocaleString()}** coins`, inline: true },
-                { name: credit > 0 ? '🏆 Payout' : '💀 Lost', value: credit > 0 ? `${adjustedPayout.toLocaleString()} coins` : `${bet.toLocaleString()} coins`, inline: true },
-                { name: '📊 Net',     value: `**${netStr}** coins`, inline: true },
-                { name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true },
+                { name: '🎯 Your Numbers', value: pickedStr,                                                    inline: false },
+                { name: '🔵 Drawn Numbers', value: drawnStr,                                                    inline: false },
+                { name: '✅ Matches',       value: `**${matches}** / ${PICK_COUNT}`,                            inline: true  },
+                { name: '💰 Balance',       value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`,     inline: true  },
             )
             .setFooter({ text: '3 matches = 3× · 4 matches = 10× · 5 matches = 50×' })
             .setTimestamp();
