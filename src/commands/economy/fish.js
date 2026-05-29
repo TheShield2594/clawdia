@@ -9,6 +9,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const {
     LOCATIONS, LOCATION_LIST, TIER_COLORS, LIMITS, ROD_BY_TIER,
     ROD_UPGRADES, MATERIAL_NAMES, BAIT_PACKS, CONSUMABLES,
@@ -1418,12 +1419,17 @@ async function handleBuyRod(interaction, user, currency) {
         )
         .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
+    const rodImg = await getItemImageAttachment(`fish:${rodData.slug || rodData.id}`).catch(() => null);
+    if (rodImg) confirmEmbed.setThumbnail(rodImg.url);
+
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('buyrod_confirm').setLabel('Buy').setStyle(ButtonStyle.Success).setEmoji('✅'),
         new ButtonBuilder().setCustomId('buyrod_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+    const fishConfirmPayload = { embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true };
+    if (rodImg) fishConfirmPayload.files = [rodImg.attachment];
+    const reply = await interaction.reply(fishConfirmPayload);
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
     collector.on('collect', async btn => {

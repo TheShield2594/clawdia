@@ -5,12 +5,12 @@ const {
     ButtonBuilder,
     ButtonStyle,
     ComponentType,
-    PermissionFlagsBits
 } = require('discord.js');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const { chunkArray, paginate } = require('../../utils/paginator');
 const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
+const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 
 const PAGE_SIZE = 5;
 const CONFIRM_THRESHOLD = 500;
@@ -45,31 +45,7 @@ module.exports = {
             sub.setName('buy')
                 .setDescription('Purchase an item from the shop')
                 .addStringOption(o => o.setName('item').setDescription('Exact name of the item to buy (see /shop view for the full list)').setRequired(true)))
-        .addSubcommand(sub =>
-            sub.setName('add')
-                .setDescription('Add an item to the shop (admin only)')
-                .addStringOption(o => o.setName('name').setDescription('Item name').setRequired(true))
-                .addIntegerOption(o => o.setName('price').setDescription('Price in coins').setRequired(true).setMinValue(1))
-                .addStringOption(o => o.setName('description').setDescription('Item description'))
-                .addRoleOption(o => o.setName('role').setDescription('Role to grant on purchase'))
-                .addIntegerOption(o => o.setName('stock').setDescription('Stock limit (-1 = unlimited)').setMinValue(-1))
-                .addStringOption(o => o.setName('image_url').setDescription('Image URL shown for this item')))
-        .addSubcommand(sub =>
-            sub.setName('edit')
-                .setDescription('Edit an existing shop item (admin only)')
-                .addStringOption(o => o.setName('name').setDescription('Existing item name').setRequired(true))
-                .addStringOption(o => o.setName('new_name').setDescription('Updated item name'))
-                .addIntegerOption(o => o.setName('price').setDescription('Updated price in coins').setMinValue(1))
-                .addStringOption(o => o.setName('description').setDescription('Updated item description'))
-                .addRoleOption(o => o.setName('role').setDescription('Updated role to grant on purchase'))
-                .addBooleanOption(o => o.setName('clear_role').setDescription('Remove the role reward from this item'))
-                .addIntegerOption(o => o.setName('stock').setDescription('Updated stock (-1 = unlimited)').setMinValue(-1))
-                .addStringOption(o => o.setName('image_url').setDescription('Updated image URL'))
-                .addBooleanOption(o => o.setName('clear_image').setDescription('Remove the image from this item')))
-        .addSubcommand(sub =>
-            sub.setName('remove')
-                .setDescription('Remove an item from the shop (admin only)')
-                .addStringOption(o => o.setName('name').setDescription('Item name').setRequired(true))),
+        .setDefaultMemberPermissions(null),
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
@@ -89,7 +65,7 @@ module.exports = {
         // ── VIEW ──────────────────────────────────────────────────────────────
         if (sub === 'view') {
             if (!guildSettings.shop.length) {
-                return interaction.reply({ content: 'The shop is empty. Admins can add items with `/shop add`.', ephemeral: true });
+                return interaction.reply({ content: 'The shop is empty. Admins can add items via the dashboard.', ephemeral: true });
             }
 
             const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
@@ -204,11 +180,12 @@ module.exports = {
                 if (freshItem.roleId) {
                     successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
                 }
-                if (freshItem.imageUrl) {
-                    successEmbed.setThumbnail(freshItem.imageUrl);
-                }
 
-                return reply({ embeds: [successEmbed], components: [] });
+                const successImg = await getItemImageAttachment(freshItem.itemId, interaction.guildId).catch(() => null);
+                if (successImg) successEmbed.setThumbnail(successImg.url);
+                const successPayload = { embeds: [successEmbed], components: [] };
+                if (successImg) successPayload.files = [successImg.attachment];
+                return reply(successPayload);
             };
 
             if (item.price >= CONFIRM_THRESHOLD) {
@@ -227,9 +204,11 @@ module.exports = {
                     )
                     .setFooter({ text: 'This confirmation expires in 30 seconds' });
 
-                if (item.imageUrl) confirmEmbed.setThumbnail(item.imageUrl);
-
-                const msg = await interaction.reply({ embeds: [confirmEmbed], components: [row], fetchReply: true });
+                const confirmImg = await getItemImageAttachment(item.itemId, interaction.guildId).catch(() => null);
+                if (confirmImg) confirmEmbed.setThumbnail(confirmImg.url);
+                const confirmPayload = { embeds: [confirmEmbed], components: [row], fetchReply: true };
+                if (confirmImg) confirmPayload.files = [confirmImg.attachment];
+                const msg = await interaction.reply(confirmPayload);
 
                 const collector = msg.createMessageComponentCollector({
                     componentType: ComponentType.Button,
@@ -270,88 +249,5 @@ module.exports = {
             return;
         }
 
-        // ── ADD ───────────────────────────────────────────────────────────────
-        if (sub === 'add') {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ content: 'You need Manage Server permission to edit the shop.', ephemeral: true });
-            }
-
-            const name = interaction.options.getString('name');
-            const price = interaction.options.getInteger('price');
-            const description = interaction.options.getString('description') ?? '';
-            const role = interaction.options.getRole('role');
-            const stock = interaction.options.getInteger('stock') ?? -1;
-            const imageUrl = interaction.options.getString('image_url') ?? '';
-
-            if (guildSettings.shop.find(i => i.name.toLowerCase() === name.toLowerCase())) {
-                return interaction.reply({ content: 'An item with that name already exists.', ephemeral: true });
-            }
-
-            guildSettings.shop.push({ name, description, price, roleId: role?.id ?? null, stock, imageUrl });
-            await guildSettings.save();
-
-            return interaction.reply({ content: `Added **${name}** to the shop for ${currency}${price.toLocaleString()}.` });
-        }
-
-        // ── EDIT ──────────────────────────────────────────────────────────────
-        if (sub === 'edit') {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ content: 'You need Manage Server permission to edit the shop.', ephemeral: true });
-            }
-
-            const name = interaction.options.getString('name').toLowerCase();
-            const item = guildSettings.shop.find(i => i.name.toLowerCase() === name);
-
-            if (!item) {
-                return interaction.reply({ content: `Item \`${name}\` not found.`, ephemeral: true });
-            }
-
-            const newName = interaction.options.getString('new_name');
-            const price = interaction.options.getInteger('price');
-            const description = interaction.options.getString('description');
-            const role = interaction.options.getRole('role');
-            const clearRole = interaction.options.getBoolean('clear_role');
-            const stock = interaction.options.getInteger('stock');
-            const imageUrl = interaction.options.getString('image_url');
-            const clearImage = interaction.options.getBoolean('clear_image');
-
-            if (newName && newName.toLowerCase() !== name) {
-                if (guildSettings.shop.find(i => i.name.toLowerCase() === newName.toLowerCase())) {
-                    return interaction.reply({ content: 'An item with that new name already exists.', ephemeral: true });
-                }
-                item.name = newName;
-            }
-
-            if (price !== null) item.price = price;
-            if (description !== null) item.description = description;
-            if (stock !== null) item.stock = stock;
-
-            if (clearRole) item.roleId = null;
-            else if (role) item.roleId = role.id;
-
-            if (clearImage) item.imageUrl = '';
-            else if (imageUrl !== null) item.imageUrl = imageUrl;
-
-            await guildSettings.save();
-            return interaction.reply({ content: `Updated **${item.name}**.` });
-        }
-
-        // ── REMOVE ────────────────────────────────────────────────────────────
-        if (sub === 'remove') {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ content: 'You need Manage Server permission to edit the shop.', ephemeral: true });
-            }
-
-            const name = interaction.options.getString('name').toLowerCase();
-            const before = guildSettings.shop.length;
-            guildSettings.shop = guildSettings.shop.filter(i => i.name.toLowerCase() !== name);
-
-            if (guildSettings.shop.length === before) {
-                return interaction.reply({ content: `Item \`${name}\` not found.`, ephemeral: true });
-            }
-
-            await guildSettings.save();
-            return interaction.reply({ content: `Removed **${name}** from the shop.` });
-        }
     }
 };

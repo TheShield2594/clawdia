@@ -9,6 +9,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const {
     ZONES, ZONE_LIST, TIER_COLORS, LIMITS, WEAPON_BY_TIER,
     CONSUMABLES, AMMO_PACKS,
@@ -1361,12 +1362,17 @@ async function handleBuyWeapon(interaction, user, currency) {
         )
         .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
+    const weaponImg = await getItemImageAttachment(`hunt:${weaponData.slug || weaponData.id}`).catch(() => null);
+    if (weaponImg) confirmEmbed.setThumbnail(weaponImg.url);
+
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('buygun_confirm').setLabel('Buy').setStyle(ButtonStyle.Success).setEmoji('✅'),
         new ButtonBuilder().setCustomId('buygun_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+    const huntConfirmPayload = { embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true };
+    if (weaponImg) huntConfirmPayload.files = [weaponImg.attachment];
+    const reply = await interaction.reply(huntConfirmPayload);
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
     collector.on('collect', async btn => {

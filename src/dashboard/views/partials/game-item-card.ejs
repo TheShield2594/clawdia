@@ -1,0 +1,29 @@
+<div class="game-item-card" id="gic-<%= item.id %>">
+    <div class="game-item-img-wrap">
+        <img
+            class="game-item-img"
+            id="gic-img-<%= item.id %>"
+            src="/api/item-image/activity/<%= item.id %>"
+            alt=""
+            onerror="this.style.display='none';document.getElementById('gic-emoji-<%= item.id %>').style.display='flex'"
+            onload="document.getElementById('gic-emoji-<%= item.id %>').style.display='none'"
+        >
+        <span class="game-item-emoji" id="gic-emoji-<%= item.id %>"><%= item.emoji %></span>
+    </div>
+    <div class="game-item-info">
+        <div class="game-item-name"><%= item.label %></div>
+        <div class="game-item-id"><%= item.id %></div>
+    </div>
+    <div class="game-item-actions">
+        <label class="btn btn-sm btn-primary game-item-upload-btn" title="Upload image">
+            Upload
+            <input
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                style="display:none"
+                onchange="uploadActivityImage('<%= item.id %>', this)"
+            >
+        </label>
+        <button class="btn btn-sm btn-danger" onclick="removeActivityImage('<%= item.id %>')" title="Remove image">✕</button>
+    </div>
+</div>

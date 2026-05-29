@@ -69,6 +69,14 @@
             <li class="nav-item" data-tab="birthdays"><span class="nav-emoji">🎂</span><span>Birthdays</span></li>
         </ul>
 
+        <!-- Games -->
+        <div class="dash-nav-label">// Games</div>
+        <ul class="dash-nav">
+            <li class="nav-item" data-tab="hunt"><span class="nav-emoji">🏹</span><span>Hunting</span></li>
+            <li class="nav-item" data-tab="fish"><span class="nav-emoji">🎣</span><span>Fishing</span></li>
+            <li class="nav-item" data-tab="mine"><span class="nav-emoji">⛏️</span><span>Mining</span></li>
+        </ul>
+
         <!-- Moderation -->
         <div class="dash-nav-label">// Moderation</div>
         <ul class="dash-nav">
@@ -757,9 +765,21 @@
                                 <small>-1 = unlimited stock</small>
                             </div>
                             <div class="field">
-                                <label class="field-label">Image URL</label>
-                                <input type="url" id="modal-item-image" placeholder="https://example.com/image.png">
-                                <small>Shown as a thumbnail when viewing or buying this item</small>
+                                <label class="field-label">Item Image</label>
+                                <div class="shop-img-upload-row">
+                                    <div class="shop-img-preview-wrap" id="shop-img-preview-wrap">
+                                        <img id="shop-img-preview" src="" alt="" style="display:none;width:64px;height:64px;object-fit:contain;border-radius:6px;border:1px solid var(--border)">
+                                        <span id="shop-img-placeholder" style="font-size:2rem">🖼️</span>
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;gap:.4rem">
+                                        <label class="btn btn-sm btn-primary" style="cursor:pointer;width:fit-content">
+                                            Upload image
+                                            <input type="file" id="modal-item-image-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="previewShopItemImage(this)">
+                                        </label>
+                                        <button class="btn btn-sm btn-danger" type="button" id="shop-img-clear-btn" onclick="clearShopItemImage()" style="display:none;width:fit-content">Remove image</button>
+                                    </div>
+                                </div>
+                                <small>64×64 px PNG recommended. Shown as thumbnail when purchasing.</small>
                             </div>
                         </div>
                         <div class="modal-actions">
@@ -813,6 +833,150 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Hunt -->
+                <section id="hunt" class="panel">
+                    <div class="panel-head">
+                        <h2>🏹 Hunting</h2>
+                        <p>Manage item images for the hunting mini-game. Images show as thumbnails when members browse and purchase items.</p>
+                    </div>
+
+                    <div class="ai-inner-tabs">
+                        <button class="hunt-inner-tab active" data-hunt-tab="hunt-weapons">🔫 Weapons</button>
+                        <button class="hunt-inner-tab" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
+                        <button class="hunt-inner-tab" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
+                        <button class="hunt-inner-tab" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
+                    </div>
+
+                    <div id="hunt-weapons" class="ai-inner-panel active">
+                        <p class="ai-inner-desc">Weapons used for hunting. Tier 1–5 progression.</p>
+                        <div class="game-items-grid">
+                            <% huntItems.weapons.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="hunt-upgrades" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Permanent module upgrades installed on weapons.</p>
+                        <div class="game-items-grid">
+                            <% huntItems.upgrades.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="hunt-ammo" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Ammunition packs consumed during hunts.</p>
+                        <div class="game-items-grid">
+                            <% huntItems.ammo.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="hunt-consumables" class="ai-inner-panel">
+                        <p class="ai-inner-desc">One-time use consumables for hunt boosts.</p>
+                        <div class="game-items-grid">
+                            <% huntItems.consumables.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Fish -->
+                <section id="fish" class="panel">
+                    <div class="panel-head">
+                        <h2>🎣 Fishing</h2>
+                        <p>Manage item images for the fishing mini-game.</p>
+                    </div>
+
+                    <div class="ai-inner-tabs">
+                        <button class="fish-inner-tab active" data-fish-tab="fish-rods">🎣 Rods</button>
+                        <button class="fish-inner-tab" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
+                        <button class="fish-inner-tab" data-fish-tab="fish-bait">🪱 Bait</button>
+                        <button class="fish-inner-tab" data-fish-tab="fish-consumables">🧪 Consumables</button>
+                    </div>
+
+                    <div id="fish-rods" class="ai-inner-panel active">
+                        <p class="ai-inner-desc">Fishing rods used to catch fish. Tier 1–5 progression.</p>
+                        <div class="game-items-grid">
+                            <% fishItems.rods.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="fish-upgrades" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Permanent module upgrades for rods.</p>
+                        <div class="game-items-grid">
+                            <% fishItems.upgrades.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="fish-bait" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Bait packs used when fishing.</p>
+                        <div class="game-items-grid">
+                            <% fishItems.bait.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="fish-consumables" class="ai-inner-panel">
+                        <p class="ai-inner-desc">One-time use consumables for fishing boosts.</p>
+                        <div class="game-items-grid">
+                            <% fishItems.consumables.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Mine -->
+                <section id="mine" class="panel">
+                    <div class="panel-head">
+                        <h2>⛏️ Mining</h2>
+                        <p>Manage item images for the mining mini-game.</p>
+                    </div>
+
+                    <div class="ai-inner-tabs">
+                        <button class="mine-inner-tab active" data-mine-tab="mine-pickaxes">⛏️ Pickaxes</button>
+                        <button class="mine-inner-tab" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
+                        <button class="mine-inner-tab" data-mine-tab="mine-blasts">💥 Blasts</button>
+                        <button class="mine-inner-tab" data-mine-tab="mine-consumables">🧪 Consumables</button>
+                    </div>
+
+                    <div id="mine-pickaxes" class="ai-inner-panel active">
+                        <p class="ai-inner-desc">Pickaxes used for mining. Tier 1–5 progression.</p>
+                        <div class="game-items-grid">
+                            <% mineItems.pickaxes.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="mine-upgrades" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Permanent module upgrades for pickaxes.</p>
+                        <div class="game-items-grid">
+                            <% mineItems.upgrades.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="mine-blasts" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Blast charge packs used when mining.</p>
+                        <div class="game-items-grid">
+                            <% mineItems.blasts.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="mine-consumables" class="ai-inner-panel">
+                        <p class="ai-inner-desc">One-time use consumables for mining boosts.</p>
+                        <div class="game-items-grid">
+                            <% mineItems.consumables.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                </section>
 
                 <!-- Achievements -->
                 <section id="achievements" class="panel">
@@ -1884,6 +2048,24 @@
             tab.addEventListener('click', () => switchRssInnerTab(tab.dataset.rssTab));
         });
 
+        // Game inner tab navigation (Hunt / Fish / Mine)
+        function makeGameTabSwitcher(tabClass, panelSelector, dataAttr) {
+            return function switchTab(tabId) {
+                document.querySelectorAll('.' + tabClass).forEach(t => t.classList.remove('active'));
+                document.querySelectorAll(panelSelector).forEach(p => p.classList.remove('active'));
+                const btn = document.querySelector('.' + tabClass + '[data-' + dataAttr + '="' + tabId + '"]');
+                const panel = document.getElementById(tabId);
+                if (btn) btn.classList.add('active');
+                if (panel) panel.classList.add('active');
+            };
+        }
+        const switchHuntTab = makeGameTabSwitcher('hunt-inner-tab', '#hunt .ai-inner-panel', 'hunt-tab');
+        const switchFishTab = makeGameTabSwitcher('fish-inner-tab', '#fish .ai-inner-panel', 'fish-tab');
+        const switchMineTab = makeGameTabSwitcher('mine-inner-tab', '#mine .ai-inner-panel', 'mine-tab');
+        document.querySelectorAll('.hunt-inner-tab').forEach(tab => tab.addEventListener('click', () => switchHuntTab(tab.dataset.huntTab)));
+        document.querySelectorAll('.fish-inner-tab').forEach(tab => tab.addEventListener('click', () => switchFishTab(tab.dataset.fishTab)));
+        document.querySelectorAll('.mine-inner-tab').forEach(tab => tab.addEventListener('click', () => switchMineTab(tab.dataset.mineTab)));
+
         if (location.hash) {
             const hash = location.hash.slice(1);
             const aiInnerMap = { knowledgebase: 'ai-knowledgebase', aisummaries: 'ai-summaries', aipersonas: 'ai-personas' };
@@ -2455,14 +2637,89 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
-                if (response.ok) toast('Settings saved ✓', 'success');
-                else {
+                if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
                     toast(err.error || 'Failed to save settings', 'error');
+                    return;
+                }
+
+                // After saving economy settings, upload/delete pending shop item images
+                if (section === 'economy') {
+                    const uploads = Object.entries(_shopItemPendingImages).map(([itemId, info]) => {
+                        const fd = new FormData();
+                        fd.append('image', info.file);
+                        return fetch(`/api/item-image/shop/${guildId}/${itemId}`, { method: 'POST', body: fd })
+                            .then(r => r.ok ? null : r.json().then(e => e.error || 'Upload failed'))
+                            .catch(() => 'Upload error');
+                    });
+                    const deletes = [..._shopItemClearedImages].map(itemId =>
+                        fetch(`/api/item-image/shop/${guildId}/${itemId}`, { method: 'DELETE' })
+                            .then(r => r.ok ? null : 'Delete failed')
+                            .catch(() => 'Delete error')
+                    );
+                    const results = await Promise.all([...uploads, ...deletes]);
+                    const errors = results.filter(Boolean);
+                    if (errors.length) toast('Settings saved, but image update failed: ' + errors[0], 'error');
+                    else {
+                        Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]);
+                        _shopItemClearedImages.clear();
+                        toast('Settings saved ✓', 'success');
+                    }
+                } else {
+                    toast('Settings saved ✓', 'success');
                 }
             } catch (error) {
                 console.error(error);
                 toast('An error occurred', 'error');
+            }
+        }
+
+        async function uploadActivityImage(itemId, input) {
+            var file = input.files[0];
+            if (!file) return;
+            var imgEl = document.getElementById('act-img-' + itemId);
+            var emojiEl = document.getElementById('act-emoji-' + itemId);
+            var fd = new FormData();
+            fd.append('image', file);
+            try {
+                var r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'POST', body: fd });
+                if (r.ok) {
+                    var dataUrl = await new Promise(function(res) {
+                        var reader = new FileReader();
+                        reader.onload = function(e) { res(e.target.result); };
+                        reader.readAsDataURL(file);
+                    });
+                    imgEl.src = dataUrl;
+                    imgEl.style.display = 'block';
+                    if (emojiEl) emojiEl.style.display = 'none';
+                    toast('Image uploaded ✓', 'success');
+                } else {
+                    var err = await r.json().catch(function(){ return {}; });
+                    toast(err.error || 'Upload failed', 'error');
+                }
+            } catch(e) {
+                toast('Upload error', 'error');
+            }
+            input.value = '';
+        }
+
+        async function removeActivityImage(itemId) {
+            if (!confirm('Remove image for this item?')) return;
+            try {
+                var r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'DELETE' });
+                if (r.ok) {
+                    var imgEl = document.getElementById('act-img-' + itemId);
+                    var emojiEl = document.getElementById('act-emoji-' + itemId);
+                    imgEl.src = '';
+                    imgEl.style.display = 'none';
+                    if (emojiEl) emojiEl.style.display = 'block';
+                    toast('Image removed', 'success');
+                } else {
+                    var err = await r.json().catch(function(){ return {}; });
+                    toast(err.error || 'Remove failed', 'error');
+                }
+            } catch(e) {
+                toast('Error removing image', 'error');
             }
         }
 
@@ -2650,6 +2907,10 @@
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
+        var _shopItemPendingImages = {}; // itemId -> { file, dataUrl }
+        var _shopItemClearedImages = new Set(); // itemIds whose images were explicitly removed
+        var _guildId = '<%= guild.id %>';
+
         function renderStoreItems() {
             var grid = document.getElementById('store-items-grid');
             if (!storeItems.length) {
@@ -2659,7 +2920,10 @@
             grid.innerHTML = storeItems.map(function(item, i) {
                 var roleName = item.roleId ? (_roleMap[item.roleId] || item.roleId) : null;
                 var stockText = (item.stock === -1 || item.stock == null) ? '∞ Unlimited' : item.stock + ' left';
-                var thumbHtml = item.imageUrl ? '<img class="store-card-thumb" src="' + escHtml(item.imageUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
+                var imgSrc = (item.itemId && _shopItemPendingImages[item.itemId])
+                    ? _shopItemPendingImages[item.itemId].dataUrl
+                    : (item.itemId ? '/api/item-image/shop/' + _guildId + '/' + escHtml(item.itemId) : '');
+                var thumbHtml = imgSrc ? '<img class="store-card-thumb" src="' + imgSrc + '" alt="" onerror="this.style.display=\'none\'">' : '';
                 return '<div class="store-card">' +
                     (thumbHtml ? '<div class="store-card-thumb-wrap">' + thumbHtml + '</div>' : '') +
                     '<div class="store-card-body">' +
@@ -2679,6 +2943,38 @@
             }).join('');
         }
 
+        function _genItemId() {
+            return 'item_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+        }
+
+        function previewShopItemImage(input) {
+            var file = input.files[0];
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var dataUrl = e.target.result;
+                document.getElementById('shop-img-preview').src = dataUrl;
+                document.getElementById('shop-img-preview').style.display = 'block';
+                document.getElementById('shop-img-placeholder').style.display = 'none';
+                document.getElementById('shop-img-clear-btn').style.display = 'inline-flex';
+                input._pendingFile = file;
+                input._pendingDataUrl = dataUrl;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function clearShopItemImage() {
+            document.getElementById('shop-img-preview').src = '';
+            document.getElementById('shop-img-preview').style.display = 'none';
+            document.getElementById('shop-img-placeholder').style.display = 'block';
+            document.getElementById('shop-img-clear-btn').style.display = 'none';
+            var fileInput = document.getElementById('modal-item-image-file');
+            fileInput._pendingFile = null;
+            fileInput._pendingDataUrl = null;
+            fileInput.value = '';
+            fileInput._clearExisting = true;
+        }
+
         function openItemModal(idx) {
             editingItemIdx = idx;
             document.getElementById('item-modal-title').textContent = idx === -1 ? 'Add Store Item' : 'Edit Store Item';
@@ -2688,7 +2984,38 @@
             document.getElementById('modal-item-price').value = item.price != null ? item.price : '';
             document.getElementById('modal-item-role').value = item.roleId || '';
             document.getElementById('modal-item-stock').value = (item.stock == null) ? -1 : item.stock;
-            document.getElementById('modal-item-image').value = item.imageUrl || '';
+
+            // Reset image preview
+            var fileInput = document.getElementById('modal-item-image-file');
+            fileInput.value = '';
+            fileInput._pendingFile = null;
+            fileInput._pendingDataUrl = null;
+            fileInput._clearExisting = false;
+            var preview = document.getElementById('shop-img-preview');
+            var placeholder = document.getElementById('shop-img-placeholder');
+            var clearBtn = document.getElementById('shop-img-clear-btn');
+            var pending = item.itemId && _shopItemPendingImages[item.itemId];
+            if (pending) {
+                preview.src = pending.dataUrl;
+                preview.style.display = 'block';
+                placeholder.style.display = 'none';
+                clearBtn.style.display = 'inline-flex';
+            } else if (item.itemId) {
+                var imgSrc = '/api/item-image/shop/' + _guildId + '/' + item.itemId;
+                preview.src = imgSrc;
+                preview.style.display = 'block';
+                placeholder.style.display = 'none';
+                clearBtn.style.display = 'inline-flex';
+                preview.onerror = function() {
+                    preview.style.display = 'none';
+                    placeholder.style.display = 'block';
+                    clearBtn.style.display = 'none';
+                };
+            } else {
+                preview.style.display = 'none';
+                placeholder.style.display = 'block';
+                clearBtn.style.display = 'none';
+            }
             document.getElementById('item-modal').style.display = 'flex';
         }
 
@@ -2700,14 +3027,28 @@
             if (!name) { toast('Item name is required', 'error'); return; }
             if (!Number.isFinite(price) || price < 0) { toast('Enter a valid price', 'error'); return; }
             var parsedStock = parseInt(document.getElementById('modal-item-stock').value, 10);
+            var fileInput = document.getElementById('modal-item-image-file');
+
+            var existingItem = editingItemIdx === -1 ? null : storeItems[editingItemIdx];
+            var itemId = (existingItem && existingItem.itemId) ? existingItem.itemId : _genItemId();
+
             var item = {
                 name: name,
+                itemId: itemId,
                 description: document.getElementById('modal-item-desc').value.trim(),
                 price: price,
                 roleId: document.getElementById('modal-item-role').value || null,
-                stock: Number.isNaN(parsedStock) ? -1 : parsedStock,
-                imageUrl: document.getElementById('modal-item-image').value.trim() || ''
+                stock: Number.isNaN(parsedStock) ? -1 : parsedStock
             };
+
+            if (fileInput._pendingFile) {
+                _shopItemPendingImages[itemId] = { file: fileInput._pendingFile, dataUrl: fileInput._pendingDataUrl };
+                _shopItemClearedImages.delete(itemId);
+            } else if (fileInput._clearExisting) {
+                delete _shopItemPendingImages[itemId];
+                if (existingItem && existingItem.itemId) _shopItemClearedImages.add(itemId);
+            }
+
             if (editingItemIdx === -1) storeItems.push(item);
             else storeItems[editingItemIdx] = item;
             closeItemModal();
