@@ -6,6 +6,7 @@ const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
 const { logTransaction } = require('../../utils/logTransaction');
 const { getTotalBonus } = require('../../services/petService');
+const { randomFrom, CRIME_WIN_LINES, CRIME_BUST_LINES } = require('../../utils/copyLines');
 
 const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
@@ -131,7 +132,7 @@ module.exports = {
 
                 logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success)` });
 
-                let desc = `Another score. The heat hasn't found you yet.`;
+                let desc = randomFrom(CRIME_WIN_LINES);
                 if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;
                 if (petCrimeBonus > 0) desc += `\n> 🐱 *Cat pet boosted your success chance!*`;
                 desc += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} Earned: ${earned.toLocaleString()} coins`;
@@ -211,7 +212,7 @@ module.exports = {
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')
                         .setTitle(`${crime.emoji} ${crime.displayName} — Busted`)
-                        .setDescription(`Your attempt went sideways. ${flavorText}\nYou were fined **${currency}${paid.toLocaleString()}**.`)
+                        .setDescription(`${randomFrom(CRIME_BUST_LINES)} ${flavorText}\nYou were fined **${currency}${paid.toLocaleString()}**.`)
                         .addFields(
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
                             { name: 'Balance',   value: `${currency}${updated.balance.toLocaleString()}`, inline: true }

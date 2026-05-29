@@ -8,6 +8,7 @@ const User = require('../../models/User');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
 const Guild = require('../../models/Guild');
+const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES } = require('../../utils/copyLines');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
 
@@ -107,11 +108,11 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
 
     const cfg = {
         jackpot: { color: '#FF00FF', title: '🎰 ✨ J A C K P O T ✨ 🎰', line: '🃏🃏🃏 **TRIPLE WILD — JACKPOT!** 🎉🎊🎉\n*The reels went absolutely wild!*' },
-        mult3:   { color: '#00FFFF', title: '🎰 ⚡ Triple Boost! ⚡',     line: '⚡⚡⚡ **TRIPLE MULTIPLIER BONUS!**\n*Electrifying win!*' },
-        three:   { color: '#00FF00', title: `🎰 🏆 Three ${symbol?.name ?? ''}s!`, line: `${symbol?.emoji.repeat(3)} **THREE OF A KIND!**\n*${symbol?.name} power!*` },
-        two:     { color: '#FFAA00', title: '🎰 Two of a Kind',           line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — partial win!` },
+        mult3:   { color: '#00FFFF', title: '🎰 ⚡ Triple Boost! ⚡',     line: `⚡⚡⚡ **TRIPLE MULTIPLIER BONUS!**\n*${randomFrom(SLOTS_WIN_LINES)}*` },
+        three:   { color: '#00FF00', title: `🎰 🏆 Three ${symbol?.name ?? ''}s!`, line: `${symbol?.emoji.repeat(3)} **THREE OF A KIND!**\n*${randomFrom(SLOTS_WIN_LINES)}*` },
+        two:     { color: '#FFAA00', title: '🎰 Two of a Kind',           line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — partial win!\n*${randomFrom(SLOTS_WIN_LINES)}*` },
         push:    { color: '#f39c12', title: '🎰 🎯 Lucky Push!',          line: '🎯 **Lucky Streak** saved you — bet returned!' },
-        lose:    { color: '#FF4444', title: '🎰 No Match',                line: '💨 *No matching symbols — better luck next time!*' },
+        lose:    { color: '#FF4444', title: '🎰 No Match',                line: `💨 *${randomFrom(SLOTS_LOSE_LINES)}*` },
     };
     const { color, title, line } = cfg[outcome] ?? cfg.lose;
 
