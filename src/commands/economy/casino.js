@@ -1,20 +1,19 @@
 const { SlashCommandBuilder } = require('discord.js');
 
 const games = [
-    require('../../games/casino/baccarat'),
     require('../../games/casino/blackjack'),
     require('../../games/casino/crash'),
-    require('../../games/casino/doubleornothing'),
+    require('../../games/casino/cupgame'),
     require('../../games/casino/higherlower'),
-    require('../../games/casino/plinko'),
+    require('../../games/casino/keno'),
+    require('../../games/casino/poker'),
     require('../../games/casino/roulette'),
     require('../../games/casino/slots'),
-    require('../../games/casino/wheel'),
 ];
 
 const builder = new SlashCommandBuilder()
     .setName('casino')
-    .setDescription('Play casino games: baccarat, blackjack, crash, plinko, roulette, slots, wheel, and more.');
+    .setDescription('Play casino games: blackjack, crash, cupgame, higher/lower, keno, poker, roulette, and slots.');
 
 for (const game of games) {
     builder.addSubcommand(sub => {
