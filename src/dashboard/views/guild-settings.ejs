@@ -69,6 +69,14 @@
             <li class="nav-item" data-tab="birthdays"><span class="nav-emoji">🎂</span><span>Birthdays</span></li>
         </ul>
 
+        <!-- Games -->
+        <div class="dash-nav-label">// Games</div>
+        <ul class="dash-nav">
+            <li class="nav-item" data-tab="hunt"><span class="nav-emoji">🏹</span><span>Hunting</span></li>
+            <li class="nav-item" data-tab="fish"><span class="nav-emoji">🎣</span><span>Fishing</span></li>
+            <li class="nav-item" data-tab="mine"><span class="nav-emoji">⛏️</span><span>Mining</span></li>
+        </ul>
+
         <!-- Moderation -->
         <div class="dash-nav-label">// Moderation</div>
         <ul class="dash-nav">
@@ -667,37 +675,6 @@
                     </div>
                     <div id="store-items-grid" class="store-grid"></div>
 
-                    <!-- Activity Item Images -->
-                    <div class="eco-section-head" style="margin-top:1.75rem">
-                        <span class="toggle-text"><strong>Activity Item Images</strong><span>Upload custom images (up to 64×64 px) for Hunt, Fish &amp; Mine shop items</span></span>
-                    </div>
-                    <div id="activity-images-grid" class="activity-img-grid">
-                        <% const _actGroups = {}; activityItems.forEach(function(item){ (_actGroups[item.category] = _actGroups[item.category] || []).push(item); }); %>
-                        <% Object.entries(_actGroups).forEach(function(entry){ var cat = entry[0], catItems = entry[1]; %>
-                        <div class="activity-img-category">
-                            <div class="activity-img-cat-label"><%= cat %></div>
-                            <div class="activity-img-cat-items">
-                                <% catItems.forEach(function(item){ %>
-                                <div class="activity-img-item" id="act-item-<%= item.id %>">
-                                    <div class="activity-img-preview-wrap">
-                                        <img class="activity-img-preview" src="/api/item-image/activity/<%= item.id %>" alt="" onerror="this.style.display='none';document.getElementById('act-emoji-<%- item.id %>').style.display='block'" id="act-img-<%= item.id %>">
-                                        <span class="activity-img-emoji" id="act-emoji-<%= item.id %>"><%= item.emoji %></span>
-                                    </div>
-                                    <div class="activity-img-label" title="<%= item.id %>"><%= item.label %></div>
-                                    <div class="activity-img-actions">
-                                        <label class="btn btn-sm btn-primary" title="Upload image" style="cursor:pointer;margin:0">
-                                            📁
-                                            <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" data-item-id="<%= item.id %>" onchange="uploadActivityImage('<%= item.id %>', this)">
-                                        </label>
-                                        <button class="btn btn-sm btn-danger" onclick="removeActivityImage('<%= item.id %>')" title="Remove image">✕</button>
-                                    </div>
-                                </div>
-                                <% }); %>
-                            </div>
-                        </div>
-                        <% }); %>
-                    </div>
-
                     <!-- Games -->
                     <div class="eco-section-head" style="margin-top:1.75rem">
                         <label class="toggle" style="margin:0;flex:1">
@@ -856,6 +833,150 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Hunt -->
+                <section id="hunt" class="panel">
+                    <div class="panel-head">
+                        <h2>🏹 Hunting</h2>
+                        <p>Manage item images for the hunting mini-game. Images show as thumbnails when members browse and purchase items.</p>
+                    </div>
+
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab hunt-inner-tab active" data-hunt-tab="hunt-weapons">🔫 Weapons</button>
+                        <button class="ai-inner-tab hunt-inner-tab" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
+                        <button class="ai-inner-tab hunt-inner-tab" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
+                        <button class="ai-inner-tab hunt-inner-tab" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
+                    </div>
+
+                    <div id="hunt-weapons" class="ai-inner-panel active">
+                        <p class="ai-inner-desc">Weapons used for hunting. Tier 1–5 progression.</p>
+                        <div class="game-items-grid">
+                            <% huntItems.weapons.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="hunt-upgrades" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Permanent module upgrades installed on weapons.</p>
+                        <div class="game-items-grid">
+                            <% huntItems.upgrades.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="hunt-ammo" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Ammunition packs consumed during hunts.</p>
+                        <div class="game-items-grid">
+                            <% huntItems.ammo.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="hunt-consumables" class="ai-inner-panel">
+                        <p class="ai-inner-desc">One-time use consumables for hunt boosts.</p>
+                        <div class="game-items-grid">
+                            <% huntItems.consumables.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Fish -->
+                <section id="fish" class="panel">
+                    <div class="panel-head">
+                        <h2>🎣 Fishing</h2>
+                        <p>Manage item images for the fishing mini-game.</p>
+                    </div>
+
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab fish-inner-tab active" data-fish-tab="fish-rods">🎣 Rods</button>
+                        <button class="ai-inner-tab fish-inner-tab" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
+                        <button class="ai-inner-tab fish-inner-tab" data-fish-tab="fish-bait">🪱 Bait</button>
+                        <button class="ai-inner-tab fish-inner-tab" data-fish-tab="fish-consumables">🧪 Consumables</button>
+                    </div>
+
+                    <div id="fish-rods" class="ai-inner-panel active">
+                        <p class="ai-inner-desc">Fishing rods used to catch fish. Tier 1–5 progression.</p>
+                        <div class="game-items-grid">
+                            <% fishItems.rods.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="fish-upgrades" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Permanent module upgrades for rods.</p>
+                        <div class="game-items-grid">
+                            <% fishItems.upgrades.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="fish-bait" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Bait packs used when fishing.</p>
+                        <div class="game-items-grid">
+                            <% fishItems.bait.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="fish-consumables" class="ai-inner-panel">
+                        <p class="ai-inner-desc">One-time use consumables for fishing boosts.</p>
+                        <div class="game-items-grid">
+                            <% fishItems.consumables.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Mine -->
+                <section id="mine" class="panel">
+                    <div class="panel-head">
+                        <h2>⛏️ Mining</h2>
+                        <p>Manage item images for the mining mini-game.</p>
+                    </div>
+
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab mine-inner-tab active" data-mine-tab="mine-pickaxes">⛏️ Pickaxes</button>
+                        <button class="ai-inner-tab mine-inner-tab" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
+                        <button class="ai-inner-tab mine-inner-tab" data-mine-tab="mine-blasts">💥 Blasts</button>
+                        <button class="ai-inner-tab mine-inner-tab" data-mine-tab="mine-consumables">🧪 Consumables</button>
+                    </div>
+
+                    <div id="mine-pickaxes" class="ai-inner-panel active">
+                        <p class="ai-inner-desc">Pickaxes used for mining. Tier 1–5 progression.</p>
+                        <div class="game-items-grid">
+                            <% mineItems.pickaxes.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="mine-upgrades" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Permanent module upgrades for pickaxes.</p>
+                        <div class="game-items-grid">
+                            <% mineItems.upgrades.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="mine-blasts" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Blast charge packs used when mining.</p>
+                        <div class="game-items-grid">
+                            <% mineItems.blasts.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                    <div id="mine-consumables" class="ai-inner-panel">
+                        <p class="ai-inner-desc">One-time use consumables for mining boosts.</p>
+                        <div class="game-items-grid">
+                            <% mineItems.consumables.forEach(function(item){ %>
+                            <%- include('partials/game-item-card', { item: item }) %>
+                            <% }); %>
+                        </div>
+                    </div>
+                </section>
 
                 <!-- Achievements -->
                 <section id="achievements" class="panel">
@@ -1926,6 +2047,24 @@
         document.querySelectorAll('.rss-inner-tab').forEach(tab => {
             tab.addEventListener('click', () => switchRssInnerTab(tab.dataset.rssTab));
         });
+
+        // Game inner tab navigation (Hunt / Fish / Mine)
+        function makeGameTabSwitcher(tabClass, panelSelector, dataAttr) {
+            return function switchTab(tabId) {
+                document.querySelectorAll('.' + tabClass).forEach(t => t.classList.remove('active'));
+                document.querySelectorAll(panelSelector).forEach(p => p.classList.remove('active'));
+                const btn = document.querySelector('.' + tabClass + '[data-' + dataAttr + '="' + tabId + '"]');
+                const panel = document.getElementById(tabId);
+                if (btn) btn.classList.add('active');
+                if (panel) panel.classList.add('active');
+            };
+        }
+        const switchHuntTab = makeGameTabSwitcher('hunt-inner-tab', '#hunt .ai-inner-panel', 'hunt-tab');
+        const switchFishTab = makeGameTabSwitcher('fish-inner-tab', '#fish .ai-inner-panel', 'fish-tab');
+        const switchMineTab = makeGameTabSwitcher('mine-inner-tab', '#mine .ai-inner-panel', 'mine-tab');
+        document.querySelectorAll('.hunt-inner-tab').forEach(tab => tab.addEventListener('click', () => switchHuntTab(tab.dataset.huntTab)));
+        document.querySelectorAll('.fish-inner-tab').forEach(tab => tab.addEventListener('click', () => switchFishTab(tab.dataset.fishTab)));
+        document.querySelectorAll('.mine-inner-tab').forEach(tab => tab.addEventListener('click', () => switchMineTab(tab.dataset.mineTab)));
 
         if (location.hash) {
             const hash = location.hash.slice(1);

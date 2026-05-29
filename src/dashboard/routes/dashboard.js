@@ -117,20 +117,26 @@ async function renderGuildSettings(req, res) {
 
         const safeSettings = guildSettings.toObject();
 
-        const activityItems = [
-            ...WEAPON_TIERS.map(w => ({ id: w.slug, label: w.name, emoji: w.emoji, category: 'Hunt — Weapons' })),
-            ...Object.values(WEAPON_UPGRADES).map(u => ({ id: u.id, label: u.name, emoji: u.emoji, category: 'Hunt — Upgrades' })),
-            ...AMMO_PACKS.map(a => ({ id: a.id, label: a.name, emoji: a.emoji, category: 'Hunt — Ammo' })),
-            ...Object.values(HUNT_CONSUMABLES).map(c => ({ id: c.id, label: c.name, emoji: c.emoji, category: 'Hunt — Consumables' })),
-            ...ROD_TIERS.map(r => ({ id: r.slug, label: r.name, emoji: r.emoji, category: 'Fish — Rods' })),
-            ...Object.values(ROD_UPGRADES).map(u => ({ id: u.id, label: u.name, emoji: u.emoji, category: 'Fish — Upgrades' })),
-            ...BAIT_PACKS.map(b => ({ id: b.id, label: b.name, emoji: b.emoji, category: 'Fish — Bait' })),
-            ...Object.values(FISH_CONSUMABLES).map(c => ({ id: c.id, label: c.name, emoji: c.emoji, category: 'Fish — Consumables' })),
-            ...PICKAXE_TIERS.map(p => ({ id: p.slug, label: p.name, emoji: p.emoji, category: 'Mine — Pickaxes' })),
-            ...Object.values(PICKAXE_UPGRADES).map(u => ({ id: u.id, label: u.name, emoji: u.emoji, category: 'Mine — Upgrades' })),
-            ...BLAST_PACKS.map(b => ({ id: b.id, label: b.name, emoji: b.emoji, category: 'Mine — Blasts' })),
-            ...Object.values(MINE_CONSUMABLES).map(c => ({ id: c.id, label: c.name, emoji: c.emoji, category: 'Mine — Consumables' })),
-        ];
+        const toItem = (item, idField = 'id') => ({ id: item[idField], label: item.name, emoji: item.emoji || '📦' });
+
+        const huntItems = {
+            weapons:     WEAPON_TIERS.map(w => toItem(w, 'slug')),
+            upgrades:    Object.values(WEAPON_UPGRADES).map(u => toItem(u)),
+            ammo:        AMMO_PACKS.map(a => toItem(a)),
+            consumables: Object.values(HUNT_CONSUMABLES).map(c => toItem(c))
+        };
+        const fishItems = {
+            rods:        ROD_TIERS.map(r => toItem(r, 'slug')),
+            upgrades:    Object.values(ROD_UPGRADES).map(u => toItem(u)),
+            bait:        BAIT_PACKS.map(b => toItem(b)),
+            consumables: Object.values(FISH_CONSUMABLES).map(c => toItem(c))
+        };
+        const mineItems = {
+            pickaxes:    PICKAXE_TIERS.map(p => toItem(p, 'slug')),
+            upgrades:    Object.values(PICKAXE_UPGRADES).map(u => toItem(u)),
+            blasts:      BLAST_PACKS.map(b => toItem(b)),
+            consumables: Object.values(MINE_CONSUMABLES).map(c => toItem(c))
+        };
 
         res.render('guild-settings', {
             user: req.user,
@@ -144,7 +150,9 @@ async function renderGuildSettings(req, res) {
             defaultJobs: DEFAULT_JOBS,
             defaultTiers: DEFAULT_TIERS,
             builtinAchievements,
-            activityItems
+            huntItems,
+            fishItems,
+            mineItems
         });
     } catch (error) {
         console.error('Dashboard error:', error);
