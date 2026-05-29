@@ -195,7 +195,7 @@ function calculateSuccessChance(user, weapon, zone) {
 
 // ─── CRIT CHANCE ─────────────────────────────────────────────────────────────
 
-function calculateCritChance(user) {
+function calculateCritChance(user, traits = []) {
     const h = user.hunt;
     let crit = 0.03;
 
@@ -203,8 +203,10 @@ function calculateCritChance(user) {
     const p = Math.min(h.prestige, PRESTIGE_BONUSES.length - 1);
     crit += PRESTIGE_BONUSES[p].critBonus;
 
-    // Luck charm
-    if (h.activeCharm === 'luck_charm') crit += 0.05;
+    // Luck charm — spectral trait halves its contribution
+    if (h.activeCharm === 'luck_charm') {
+        crit += traits.includes('spectral') ? 0.025 : 0.05;
+    }
 
     // Permanent lucky paw upgrade
     if (h.luckyPaw) crit += 0.01;
@@ -635,13 +637,13 @@ function executeHunt(user, zoneId) {
     if (success) {
         const rawPayout = randInt(animal.payoutMin, animal.payoutMax);
 
-        // Crit — armored trait negates crits
-        const critChance     = calculateCritChance(user);
+        // Crit — armored trait negates crits; spectral halves luck charm crit bonus
+        const critChance     = calculateCritChance(user, traits);
         const isCrit         = traits.includes('armored') ? false : Math.random() < critChance;
         const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
 
         if (traits.includes('armored')) {
-            result.traitEffects.push({ trait: 'armored', msg: 'Its thick hide absorbed your critical strike.' });
+            result.traitEffects.push({ trait: 'armored', msg: 'Its thick hide prevented a critical strike.' });
         }
 
         const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
@@ -681,7 +683,7 @@ function executeHunt(user, zoneId) {
         result.durabilityLost = durLoss;
 
         // Trait: venomous — costs an extra stamina
-        if (traits.includes('venomous') && h.stamina > 0) {
+        if (traits.includes('venomous')) {
             h.stamina = Math.max(0, h.stamina - 1);
             result.traitEffects.push({ trait: 'venomous', msg: 'Its venom sapped your strength (-1 extra stamina).' });
         }

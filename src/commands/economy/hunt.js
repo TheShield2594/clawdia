@@ -13,7 +13,8 @@ const {
     ZONES, ZONE_LIST, TIER_COLORS, LIMITS, WEAPON_BY_TIER,
     CONSUMABLES, AMMO_PACKS,
     WEAPON_TIERS, WEAPON_BY_SLUG, WEAPON_UPGRADES,
-    HUNTER_LEVELS, PRESTIGE_BONUSES, HUNT_QUEST_TEMPLATES
+    HUNTER_LEVELS, PRESTIGE_BONUSES, HUNT_QUEST_TEMPLATES,
+    ANIMAL_TRAITS
 } = require('../../data/huntData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const {
@@ -409,7 +410,6 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         }
 
         if (traits && traits.length > 0) {
-            const { ANIMAL_TRAITS } = require('../../data/huntData');
             const traitLine = traits.map(t => {
                 const def = ANIMAL_TRAITS[t];
                 return def ? `${def.emoji} **${def.name}**` : t;
@@ -462,7 +462,6 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         );
 
     if (failTraits && failTraits.length > 0) {
-        const { ANIMAL_TRAITS } = require('../../data/huntData');
         const traitLine = failTraits.map(t => {
             const def = ANIMAL_TRAITS[t];
             return def ? `${def.emoji} **${def.name}**` : t;
