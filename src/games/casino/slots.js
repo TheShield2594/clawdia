@@ -22,9 +22,11 @@ const SYMBOLS = [
     { emoji: '⚡', name: '2x Boost', type: 'multiplier', weight: 3, multiplier: 2 },
 ];
 
-const TOTAL_WEIGHT  = SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
-const SPIN_POOL     = SYMBOLS.filter(s => s.type === 'regular' || s.type === 'wild');
-const JACKPOT_MULTI = 50;
+const TOTAL_WEIGHT      = SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
+const SPIN_POOL         = SYMBOLS.filter(s => s.type === 'regular' || s.type === 'wild');
+const JACKPOT_FALLBACK  = 50;  // fixed multiplier used only if atomic claim fails
+const JACKPOT_SEED      = 5000;
+const JACKPOT_CONTRIB   = 10;
 
 function spinReel() {
     let r = Math.random() * TOTAL_WEIGHT;
@@ -51,7 +53,7 @@ function evaluate(reels, bet) {
     const multFactor = mults.reduce((acc, m) => acc * m.multiplier, 1);
 
     if (wildCount === 3)
-        return { payout: bet * JACKPOT_MULTI, outcome: 'jackpot', symbol: null, wildCount, multFactor };
+        return { payout: 0, outcome: 'jackpot', symbol: null, wildCount, multFactor }; // payout filled in by caller
     if (mults.length === 3)
         return { payout: bet * 4, outcome: 'mult3', symbol: null, wildCount, multFactor };
 
@@ -78,7 +80,7 @@ function embedAuthor(interaction) {
     };
 }
 
-function spinEmbed(display, bet, stage, interaction) {
+function spinEmbed(display, bet, stage, interaction, jackpotPool) {
     const statuses = [
         '🎰 **Spinning all reels…**',
         '🔒 **First reel locked!** Spinning remaining…',
@@ -91,12 +93,13 @@ function spinEmbed(display, bet, stage, interaction) {
         .setTitle('🎰 Slot Machine')
         .setDescription(`${statuses[stage]}\n\n> **[ ${display} ]**`)
         .addFields(
-            { name: '💰 Bet', value: `**${bet.toLocaleString()}** coins`, inline: true },
-            { name: '🎲 Status', value: `Reel ${stage}/3 locked`, inline: true },
+            { name: '💰 Bet',            value: `**${bet.toLocaleString()}** coins`,          inline: true },
+            { name: '🎲 Status',         value: `Reel ${stage}/3 locked`,                     inline: true },
+            { name: '🏆 Current Jackpot', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true },
         );
 }
 
-function resultEmbed(reels, result, bet, balance, interaction) {
+function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
     const { payout, outcome, symbol, wildCount, multFactor } = result;
     const display = reels.map(s => s.emoji).join('  ┃  ');
     const net     = payout - bet;
@@ -128,6 +131,7 @@ function resultEmbed(reels, result, bet, balance, interaction) {
             { name: '📊 Net',                                value: `**${netStr}** coins`,              inline: true },
             { name: '💰 Balance',                            value: `**${balance.toLocaleString()}** coins` },
         )
+        .addFields({ name: '🏆 Jackpot Pool', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true })
         .setFooter({ text: '🃏 Wild substitutes for any symbol  •  ⚡ Boost multiplies your win' })
         .setTimestamp();
 }
@@ -146,7 +150,7 @@ function paytableEmbed() {
             { name: '💎 Diamond',  value: '**15×** your bet',  inline: true },
             { name: '🌟 Star',     value: '**25×** your bet',  inline: true },
             { name: '​', value: '​', inline: false },
-            { name: '🃏🃏🃏 Triple Wild', value: '🏆 **JACKPOT — 50× bet**', inline: true },
+            { name: '🃏🃏🃏 Triple Wild', value: '🏆 **JACKPOT — wins the pool** (seeds at 5,000)', inline: true },
             { name: '⚡⚡⚡ Triple Boost', value: '**4× bet**', inline: true },
             { name: 'Two of a Kind', value: 'Half of the 3-of-a-kind payout', inline: false },
         )
@@ -176,7 +180,8 @@ module.exports = {
 };
 
 async function playSlots(interaction, bet) {
-    const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+    const userFilter  = { userId: interaction.user.id, guildId: interaction.guild.id };
+    const guildFilter = { guildId: interaction.guild.id };
     try {
         const [userDoc, guildSettings] = await Promise.all([
             User.findOneAndUpdate(
@@ -184,7 +189,7 @@ async function playSlots(interaction, bet) {
                 { $setOnInsert: { ...userFilter, balance: 0 } },
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             ),
-            Guild.findOne({ guildId: interaction.guild.id }),
+            Guild.findOne(guildFilter),
         ]);
         const luckyActive      = hasEffect(userDoc, 'lucky_charm');
         const luckyStreakBonus = getLuckyStreakBonus(userDoc);
@@ -192,10 +197,12 @@ async function playSlots(interaction, bet) {
         const serverMult       = getServerCoinMultiplier(guildSettings);
         const totalCoinMult    = coinMult * serverMult;
 
+        // Read current jackpot pool (use snapshot for conditional claim later)
+        const jackpotPool = guildSettings?.slots?.jackpotPool ?? JACKPOT_SEED;
+
         let reels  = [spinReel(), spinReel(), spinReel()];
         let result = evaluate(reels, bet);
-        let charmTriggered        = false;
-        let luckyStreakTriggered   = false;
+        let charmTriggered      = false;
 
         // Lucky Charm: on loss, 20% chance to re-spin
         if (result.outcome === 'lose' && luckyActive && Math.random() < 0.20) {
@@ -203,16 +210,46 @@ async function playSlots(interaction, bet) {
             result = evaluate(reels, bet);
             charmTriggered = true;
         }
-        // Lucky Streak: on remaining loss, 25% chance to convert to a push (bet returned)
+        // Lucky Streak: on remaining loss, convert to a push (bet returned)
         if (result.outcome === 'lose' && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
             result = { ...result, outcome: 'push', payout: bet };
-            luckyStreakTriggered = true;
+        }
+
+        // ── Jackpot / pool update ──────────────────────────────────────────
+        let finalJackpotPool = jackpotPool; // shown in result embed
+        let jackpotWon = false;
+
+        if (result.outcome === 'jackpot') {
+            // Atomically claim the pool — conditional on pool not having changed (race protection)
+            const claimed = await Guild.findOneAndUpdate(
+                { ...guildFilter, 'slots.jackpotPool': jackpotPool },
+                {
+                    $set: {
+                        'slots.jackpotPool':       JACKPOT_SEED,
+                        'slots.lastJackpotWinner': interaction.user.id,
+                        'slots.lastJackpotAmount': jackpotPool,
+                        'slots.lastJackpotAt':     new Date(),
+                    }
+                },
+                { new: false }
+            );
+            if (claimed) {
+                result = { ...result, payout: jackpotPool };
+                finalJackpotPool = JACKPOT_SEED;
+                jackpotWon = true;
+            } else {
+                // Pool changed since we read it — fall back to fixed 50x
+                result = { ...result, payout: bet * JACKPOT_FALLBACK };
+            }
+        } else {
+            // Increment pool by JACKPOT_CONTRIB on every non-jackpot spin
+            await Guild.updateOne(guildFilter, { $inc: { 'slots.jackpotPool': JACKPOT_CONTRIB } });
+            finalJackpotPool = jackpotPool + JACKPOT_CONTRIB;
         }
 
         // Apply coin booster to payout (net profit portion only)
         let adjustedPayout = result.payout;
         if (result.payout > 0 && totalCoinMult > 1.0) {
-            // Scale net profit by multiplier, keep original bet return whole
             adjustedPayout = bet + Math.round((result.payout - bet) * totalCoinMult);
         }
         const net = adjustedPayout - bet;
@@ -233,12 +270,24 @@ async function playSlots(interaction, bet) {
 
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
-        await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 0), bet, 0, interaction)], components: [] });
+        await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 0), bet, 0, interaction, jackpotPool)], components: [] });
         await delay(800);
-        await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 1), bet, 1, interaction)] });
+        await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 1), bet, 1, interaction, jackpotPool)] });
         await delay(800);
-        await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 2), bet, 2, interaction)] });
+        await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 2), bet, 2, interaction, jackpotPool)] });
         await delay(800);
+
+        // If jackpot won, post a public announcement first
+        if (jackpotWon) {
+            const displayName = interaction.member?.displayName || interaction.user.username;
+            interaction.channel?.send({
+                content: [
+                    '🎰✨ **JACKPOT WON!** ✨🎰',
+                    `${interaction.user} hit **TRIPLE WILD** and won the **${jackpotPool.toLocaleString()} coin** jackpot!`,
+                    `The jackpot resets to **${JACKPOT_SEED.toLocaleString()}** coins. Good luck next time!`,
+                ].join('\n'),
+            }).catch(() => null);
+        }
 
         const replayId   = `slots_replay_${interaction.id}_${Date.now()}`;
         const paytableId = `slots_pay_${interaction.id}_${Date.now()}`;
@@ -248,12 +297,11 @@ async function playSlots(interaction, bet) {
             new ButtonBuilder().setCustomId(paytableId).setLabel('📊 Paytable').setStyle(ButtonStyle.Secondary),
         );
 
-        const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, user.balance, interaction);
+        const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, user.balance, interaction, finalJackpotPool);
         if (charmTriggered) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + '\n> 🍀 *Lucky Charm gave you a second chance!*');
         }
-        // luckyStreakTriggered outcome already communicates via the 'push' embed title/line
         if (totalCoinMult > 1.0 && adjustedPayout > bet) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied to winnings!*`);

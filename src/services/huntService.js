@@ -655,7 +655,7 @@ function tickConsumables(user) {
  *   activeCharmAfter?: string
  * }
  */
-function executeHunt(user, zoneId) {
+function executeHunt(user, zoneId, options = {}) {
     const h      = user.hunt;
     const zone   = ZONES[zoneId ?? h.activeZone];
     const weapon = h.weapons[h.equippedWeaponIndex];
@@ -668,7 +668,9 @@ function executeHunt(user, zoneId) {
     }
 
     // Roll the animal upfront so traits can influence the success check
-    const tier   = rollTier(user, zone);
+    let tier = rollTier(user, zone);
+    // Tracking bonus: upgrade common to uncommon ~30% of the time for better prey
+    if (options.trackingBonus && tier === 'common' && Math.random() < 0.30) tier = 'uncommon';
     const animal = rollAnimal(tier, zoneId ?? h.activeZone);
     const traits = animal.traits ?? [];
 
@@ -676,6 +678,7 @@ function executeHunt(user, zoneId) {
     let successChance = calculateSuccessChance(user, weapon, zone);
     if (traits.includes('elusive'))  successChance -= 0.10;
     if (traits.includes('spectral') && h.activeCharm === 'luck_charm') successChance -= 0.015;
+    if (options.trackingBonus)       successChance += options.trackingBonus;
     successChance = Math.min(0.95, Math.max(0.10, successChance));
 
     const success = Math.random() < successChance;

@@ -37,6 +37,16 @@ const {
     applyXp
 } = require('../../services/huntService');
 
+// ─── HUNT TRACKING CLUES (one per zone, used in the tracking mechanic) ───────
+
+const ZONE_CLUES = {
+    beginner_forest:  ['soft soil paw prints near fallen logs', 'feathers scattered along a stream bank', 'gnawed bark on young saplings'],
+    desert_wastes:    ['claw marks on sun-bleached rocks', 'tracks in shifting sand near a dry riverbed', 'shed scales baking in the midday heat'],
+    arctic_tundra:    ['large hoofprints pressed deep into fresh snow', 'tufts of thick white fur caught on icy boulders', 'frozen breath marks near a glacial lake'],
+    murky_swamp:      ['webbed prints in the muddy bank', 'crushed reeds along a murky channel', 'slick trails through algae-covered shallows'],
+    legendary_peaks:  ['massive claw gouges on sheer cliff faces', 'enormous droppings near the summit ridge', 'a lingering magical aura around ancient standing stones'],
+};
+
 // ─── SHARED CHOICE LISTS ──────────────────────────────────────────────────────
 
 const ZONE_CHOICES    = ZONE_LIST.map(z => ({ name: z.name, value: z.id }));
@@ -358,9 +368,70 @@ async function executeStart(interaction) {
         user.markModified('hunt');
     }
 
-    await interaction.deferReply();
+    // ── Animal Tracking System ────────────────────────────────────────────────
+    // Show a tracks clue and 3 zone buttons. Correct guess = +30% success bonus.
+    let trackingBonus = 0;
+    const unlockedZones = h.unlockedZones.filter(z => ZONES[z]);
 
-    const result = executeHunt(user, zoneId);
+    if (unlockedZones.length >= 2 && ZONE_CLUES[zoneId]) {
+        const clueArr = ZONE_CLUES[zoneId];
+        const clue    = clueArr[Math.floor(Math.random() * clueArr.length)];
+
+        // Pick 2 other unlocked zones as distractors
+        const others  = unlockedZones.filter(z => z !== zoneId).sort(() => Math.random() - 0.5).slice(0, 2);
+        const options = [zoneId, ...others].sort(() => Math.random() - 0.5);
+
+        const trackEmbed = new EmbedBuilder()
+            .setColor('#8B4513')
+            .setTitle('🐾 Fresh Tracks Spotted!')
+            .setDescription(
+                `*You notice: ${clue}*\n\n` +
+                `**Which zone do these tracks lead to?**\n` +
+                `Identify correctly for **+30% success chance** and better prey.`
+            )
+            .setFooter({ text: 'You have 15 seconds — or the hunt starts without the tracking bonus.' });
+
+        const trackRow = new ActionRowBuilder().addComponents(
+            ...options.map(zId => new ButtonBuilder()
+                .setCustomId(`track_${zId}`)
+                .setLabel(`${ZONES[zId].emoji} ${ZONES[zId].name}`)
+                .setStyle(ButtonStyle.Primary)
+            )
+        );
+
+        await interaction.reply({ embeds: [trackEmbed], components: [trackRow] });
+
+        const trackMsg = await interaction.fetchReply();
+        const picked   = await new Promise(resolve => {
+            const col = trackMsg.createMessageComponentCollector({
+                filter: i => i.user.id === interaction.user.id,
+                time: 15_000,
+                max: 1,
+            });
+            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('track_', '')); });
+            col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+        });
+
+        const correct  = picked === zoneId;
+        if (correct) trackingBonus = 0.30;
+
+        const feedbackEmbed = new EmbedBuilder()
+            .setColor(correct ? '#00FF7F' : picked ? '#FF6B6B' : '#888888')
+            .setTitle(correct ? '✅ Correct Tracking!' : picked ? '❌ Wrong Track' : '⏰ Time\'s Up')
+            .setDescription(
+                correct
+                    ? `You identified **${zone.emoji} ${zone.name}** correctly!\n**+30% success chance** applied.`
+                    : picked
+                    ? `Those tracks led to **${ZONES[zoneId].emoji} ${ZONES[zoneId].name}**, not **${ZONES[picked]?.emoji ?? ''} ${ZONES[picked]?.name ?? picked}**. Hunting without bonus...`
+                    : `You didn't read the tracks in time. Hunting without bonus...`
+            );
+
+        await interaction.editReply({ embeds: [feedbackEmbed], components: [] });
+    } else {
+        await interaction.deferReply();
+    }
+
+    const result = executeHunt(user, zoneId, { trackingBonus });
     updateHuntQuestProgress(user, result, zoneId);
 
     const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
@@ -379,6 +450,10 @@ async function executeStart(interaction) {
     }
 
     const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
+    if (trackingBonus > 0) {
+        const desc = embed.data.description ?? '';
+        embed.setDescription(desc + '\n> 🐾 *Tracking bonus applied (+30% success)*');
+    }
     await interaction.editReply({ embeds: [embed] });
 }
 

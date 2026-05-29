@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS } = require('../../data/achievements');
@@ -57,48 +57,35 @@ module.exports = {
                     progress: () => [0, 1]
                 }));
 
-                const allDefs = [...ACHIEVEMENTS, ...customAchievements].filter(d => !disabled.has(d.id));
+                const allDefs     = [...ACHIEVEMENTS, ...customAchievements].filter(d => !disabled.has(d.id));
                 const visibleDefs = allDefs.filter(d => !d.secret || earnedMap.has(d.id));
 
-                // Group by category
-                const byCategory = {};
-                for (const def of allDefs) {
-                    const cat = def.category || 'custom';
-                    if (!byCategory[cat]) byCategory[cat] = [];
-                    byCategory[cat].push(def);
-                }
-
-                const earned  = allDefs.filter(d => earnedMap.has(d.id));
+                const earned    = allDefs.filter(d => earnedMap.has(d.id));
                 const unclaimed = earned.filter(d => {
                     const entry = earnedMap.get(d.id);
                     return entry && !entry.claimed && (d.xpReward || d.coinReward);
                 });
 
-                const embed = new EmbedBuilder()
-                    .setColor(0xF1C40F)
-                    .setTitle(`🏅 ${target.username}'s Achievements`)
-                    .setDescription(
-                        `**${earned.length}/${visibleDefs.length}** achievements earned` +
-                        (unclaimed.length ? `\n> ⚠️ ${unclaimed.length} unclaimed reward(s) — use \`/achievements claim\`` : '')
-                    )
-                    .setThumbnail(target.displayAvatarURL());
+                // Build ordered list of visible defs (respecting CATEGORY_ORDER)
+                const orderedDefs = CATEGORY_ORDER.flatMap(cat =>
+                    visibleDefs.filter(d => (d.category || 'custom') === cat)
+                );
 
-                const FIELD_MAX = 1024;
-                for (const cat of CATEGORY_ORDER) {
-                    const defs = byCategory[cat];
-                    if (!defs?.length) continue;
+                const PAGE_SIZE   = 10;
+                const totalPages  = Math.max(1, Math.ceil(orderedDefs.length / PAGE_SIZE));
+                const headerDesc  = `**${earned.length}/${visibleDefs.length}** achievements earned` +
+                    (unclaimed.length ? `\n> ⚠️ ${unclaimed.length} unclaimed reward(s) — use \`/achievements claim\`` : '');
 
-                    const lines = defs.map(def => {
+                function buildPageEmbed(page) {
+                    const slice = orderedDefs.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+                    const lines = slice.map(def => {
                         const entry = earnedMap.get(def.id);
                         if (entry) {
                             const claimFlag = (!entry.claimed && (def.xpReward || def.coinReward)) ? ' ⚠️' : '';
-                            return `${def.emoji} ~~**${def.name}**~~${claimFlag} ✅`;
+                            const earnDate  = entry.earnedAt ? ` *(${new Date(entry.earnedAt).toLocaleDateString()})* ` : ' ';
+                            return `${def.emoji} ~~**${def.name}**~~${earnDate}${claimFlag}✅`;
                         }
-
-                        // Secret achievements: hide everything until earned
-                        if (def.secret) {
-                            return `🔒 **???** — *Secret Achievement*`;
-                        }
+                        if (def.secret) return `🔒 **???** — *Secret Achievement*`;
 
                         let progressStr = '';
                         try {
@@ -106,35 +93,54 @@ module.exports = {
                             if (max > 1) {
                                 const pct = Math.min(Math.floor((cur / max) * 10), 10);
                                 const bar = '█'.repeat(pct) + '░'.repeat(10 - pct);
-                                progressStr = ` \`${bar}\` ${cur.toLocaleString()}/${max.toLocaleString()}`;
+                                progressStr = `\n    \`${bar}\` ${cur.toLocaleString()}/${max.toLocaleString()}`;
                             }
                         } catch { /* skip */ }
 
-                        return `${def.emoji} **${def.name}** — ${def.description}${progressStr}`;
+                        const rewardStr = (def.coinReward || def.xpReward)
+                            ? ` — 🎁 ${[def.coinReward ? `${def.coinReward.toLocaleString()} coins` : null, def.xpReward ? `${def.xpReward} XP` : null].filter(Boolean).join(' + ')}`
+                            : '';
+                        return `🔒 **${def.name}** — ${def.description}${rewardStr}${progressStr}`;
                     });
 
-                    const catLabel = `${CATEGORY_EMOJIS[cat] || '🔹'} ${CATEGORY_LABELS[cat] || cat}`;
-                    // Split into ≤1024-char chunks to respect Discord field limits
-                    const chunks = [];
-                    let current = '';
-                    for (const line of lines) {
-                        const addition = current ? '\n' + line : line;
-                        if (current.length + addition.length > FIELD_MAX) {
-                            chunks.push(current);
-                            current = line;
-                        } else {
-                            current += addition;
-                        }
-                    }
-                    if (current) chunks.push(current);
-
-                    for (let i = 0; i < chunks.length; i++) {
-                        const name = i === 0 ? catLabel : `${catLabel} (cont.)`;
-                        embed.addFields({ name, value: chunks[i] || 'None', inline: false });
-                    }
+                    return new EmbedBuilder()
+                        .setColor(0xF1C40F)
+                        .setTitle(`🏅 ${target.username}'s Achievements`)
+                        .setDescription(`${headerDesc}\n\n${lines.join('\n')}`)
+                        .setThumbnail(target.displayAvatarURL())
+                        .setFooter({ text: `Page ${page + 1}/${totalPages}` });
                 }
 
-                return interaction.reply({ embeds: [embed], ephemeral: false });
+                let currentPage = 0;
+                const prevId = `ach_prev_${interaction.id}`;
+                const nextId = `ach_next_${interaction.id}`;
+
+                function buildPageRow(page) {
+                    return new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(prevId).setLabel('◀ Prev').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+                        new ButtonBuilder().setCustomId(nextId).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= totalPages - 1),
+                    );
+                }
+
+                await interaction.reply({
+                    embeds: [buildPageEmbed(currentPage)],
+                    components: totalPages > 1 ? [buildPageRow(currentPage)] : [],
+                    ephemeral: false,
+                });
+
+                if (totalPages > 1) {
+                    const msg = await interaction.fetchReply();
+                    const col = msg.createMessageComponentCollector({
+                        filter: i => i.user.id === interaction.user.id && [prevId, nextId].includes(i.customId),
+                        time: 120_000,
+                    });
+                    col.on('collect', async i => {
+                        if (i.customId === prevId) currentPage = Math.max(0, currentPage - 1);
+                        else currentPage = Math.min(totalPages - 1, currentPage + 1);
+                        await i.update({ embeds: [buildPageEmbed(currentPage)], components: [buildPageRow(currentPage)] });
+                    });
+                    col.on('end', () => interaction.editReply({ components: [] }).catch(() => null));
+                }
             }
 
             if (sub === 'claim') {

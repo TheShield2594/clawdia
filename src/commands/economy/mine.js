@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const {
@@ -39,6 +39,15 @@ const UPGRADE_CHOICES  = Object.values(PICKAXE_UPGRADES).map(u => ({ name: `${u.
 const UNLOCK_CHOICES   = DEPTH_LIST.filter(d => !d.defaultUnlocked).map(d => ({ name: `${d.emoji} ${d.name}`, value: d.id }));
 
 const PRESTIGE_BADGES = ['', '🥉', '🥈', '🥇', '🏆', '💎'];
+
+// Depth risk levels for the pre-dig selection prompt
+const INTENSITY_LEVELS = [
+    { level: 1, name: 'Surface',  emoji: '☀️',  multiplier: 0.7, caveInRisk: 0.00, durLoss: 1 },
+    { level: 2, name: 'Shallow',  emoji: '🪨',  multiplier: 1.0, caveInRisk: 0.05, durLoss: 1 },
+    { level: 3, name: 'Mid',      emoji: '🔩',  multiplier: 1.4, caveInRisk: 0.12, durLoss: 2 },
+    { level: 4, name: 'Deep',     emoji: '💎',  multiplier: 2.0, caveInRisk: 0.20, durLoss: 3 },
+    { level: 5, name: 'Abyss',    emoji: '🌑',  multiplier: 3.0, caveInRisk: 0.30, durLoss: 4 },
+];
 
 module.exports = {
     cooldown: 30,
@@ -271,9 +280,52 @@ async function handleDig(interaction) {
         user.markModified('mining');
     }
 
-    await interaction.deferReply();
+    // ── Depth Risk Selection Prompt ────────────────────────────────────────────
+    // Show a risk/reward table and 5 intensity buttons before digging.
+    const riskTable = INTENSITY_LEVELS.map(l =>
+        `${l.emoji} **${l.name}** — ${l.multiplier}× payout  |  ${(l.caveInRisk * 100).toFixed(0)}% cave-in  |  ${l.durLoss} dur loss`
+    ).join('\n');
 
-    const result = executeMine(user, depthId);
+    const riskEmbed = new EmbedBuilder()
+        .setColor('#8B4513')
+        .setTitle('⛏️ Choose Mining Depth')
+        .setDescription(
+            `How deep will you dig in **${depth.emoji} ${depth.name}**?\n\n${riskTable}\n\n` +
+            `*Cave-in = 0 coins, extra durability loss.*`
+        )
+        .setFooter({ text: 'You have 20 seconds to decide — defaults to Shallow (1.0×) on timeout.' });
+
+    const intensityRow = new ActionRowBuilder().addComponents(
+        ...INTENSITY_LEVELS.map(l => new ButtonBuilder()
+            .setCustomId(`mine_intensity_${l.level}`)
+            .setLabel(`${l.emoji} ${l.name}`)
+            .setStyle(l.level <= 2 ? ButtonStyle.Secondary : l.level === 3 ? ButtonStyle.Primary : ButtonStyle.Danger)
+        )
+    );
+
+    await interaction.reply({ embeds: [riskEmbed], components: [intensityRow] });
+
+    const riskMsg    = await interaction.fetchReply();
+    const pickedLevel = await new Promise(resolve => {
+        const col = riskMsg.createMessageComponentCollector({
+            filter: i => i.user.id === interaction.user.id && i.customId.startsWith('mine_intensity_'),
+            time: 20_000,
+            max: 1,
+        });
+        col.on('collect', async i => { await i.deferUpdate(); resolve(parseInt(i.customId.replace('mine_intensity_', ''), 10)); });
+        col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(2); }); // default: Shallow
+    });
+
+    const chosenIntensity = INTENSITY_LEVELS.find(l => l.level === pickedLevel) ?? INTENSITY_LEVELS[1];
+
+    const confirmEmbed = new EmbedBuilder()
+        .setColor(chosenIntensity.level >= 4 ? '#FF4444' : chosenIntensity.level >= 3 ? '#FFA500' : '#00AA55')
+        .setTitle(`${chosenIntensity.emoji} Digging ${chosenIntensity.name}…`)
+        .setDescription(`**${chosenIntensity.multiplier}×** payout  |  **${(chosenIntensity.caveInRisk * 100).toFixed(0)}%** cave-in risk`);
+
+    await interaction.editReply({ embeds: [confirmEmbed], components: [] });
+
+    const result = executeMine(user, depthId, { intensity: chosenIntensity });
     updateMineQuestProgress(user, result, depthId);
 
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
@@ -292,6 +344,13 @@ async function handleDig(interaction) {
     }
 
     const embed = buildMineEmbed(result, user, depth, pickaxe, currency, interaction.user);
+    if (result.caveIn) {
+        const desc = embed.data.description ?? '';
+        embed.setDescription(desc + '\n> 💥 *Cave-in! No payout — watch your durability.*');
+    } else if (result.intensityLevel && result.intensityLevel.multiplier !== 1.0) {
+        const desc = embed.data.description ?? '';
+        embed.setDescription(desc + `\n> ${result.intensityLevel.emoji} *${result.intensityLevel.name} depth: ${result.intensityLevel.multiplier}× payout applied*`);
+    }
     await interaction.editReply({ embeds: [embed] });
 }
 
