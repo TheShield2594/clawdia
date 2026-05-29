@@ -50,14 +50,9 @@ module.exports = {
                 if (!guildSettings?.achievements?.enabled) {
                     return interaction.reply({ content: 'Achievements are not enabled on this server.', ephemeral: true });
                 }
-                // Use MongoDB aggregation to sort by number of earned achievements
-                users = await User.aggregate([
-                    { $match: { guildId: interaction.guild.id } },
-                    { $addFields: { achievementCount: { $size: { $ifNull: ['$achievements', []] } } } },
-                    { $match: { achievementCount: { $gt: 0 } } },
-                    { $sort: { achievementCount: -1 } },
-                    { $limit: 10 },
-                ]);
+                users = await User.find({ guildId: interaction.guild.id, achievementsCount: { $gt: 0 } })
+                    .sort({ achievementsCount: -1 })
+                    .limit(10);
                 title = '🏅 Achievement Leaderboard';
                 descriptionHeader = 'Top 10 by Total Achievements Earned';
             } else {
@@ -120,7 +115,7 @@ module.exports = {
                     const days = user.streak?.longest ?? 0;
                     description += `${medal} ${discordUser.tag} — 🔥 ${days} day${days !== 1 ? 's' : ''}\n`;
                 } else if (type === 'achievements') {
-                    const count = user.achievementCount ?? (user.achievements?.length ?? 0);
+                    const count = user.achievementsCount ?? 0;
                     description += `${medal} ${discordUser.tag} — 🏅 ${count} achievement${count !== 1 ? 's' : ''}\n`;
                 } else {
                     const wins   = user.duelWins   ?? 0;

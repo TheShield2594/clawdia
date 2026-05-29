@@ -535,24 +535,24 @@ const ACHIEVEMENTS = [
     {
         id: 'hunter_silver',
         name: '🥈 Hunter (Silver)',
-        description: 'Complete 100 hunts',
+        description: 'Complete 250 hunts',
         emoji: '🥈',
         category: 'hunt',
         xpReward: 150,
         coinReward: 1_000,
-        check: (user) => (user.hunt?.totalHunts || 0) >= 100,
-        progress: (user) => [Math.min(user.hunt?.totalHunts || 0, 100), 100]
+        check: (user) => (user.hunt?.totalHunts || 0) >= 250,
+        progress: (user) => [Math.min(user.hunt?.totalHunts || 0, 250), 250]
     },
     {
         id: 'hunter_gold',
         name: '🥇 Hunter (Gold)',
-        description: 'Complete 500 hunts',
+        description: 'Complete 750 hunts',
         emoji: '🥇',
         category: 'hunt',
         xpReward: 400,
         coinReward: 4_000,
-        check: (user) => (user.hunt?.totalHunts || 0) >= 500,
-        progress: (user) => [Math.min(user.hunt?.totalHunts || 0, 500), 500]
+        check: (user) => (user.hunt?.totalHunts || 0) >= 750,
+        progress: (user) => [Math.min(user.hunt?.totalHunts || 0, 750), 750]
     },
 
     // ── Tiered Achievements: Fishing ──────────────────────────────────────────
@@ -581,13 +581,13 @@ const ACHIEVEMENTS = [
     {
         id: 'angler_gold',
         name: '🥇 Angler (Gold)',
-        description: 'Make 500 fishing casts',
+        description: 'Make 1,000 fishing casts',
         emoji: '🥇',
         category: 'fishing',
         xpReward: 400,
         coinReward: 4_000,
-        check: (user) => (user.fishing?.totalCasts || 0) >= 500,
-        progress: (user) => [Math.min(user.fishing?.totalCasts || 0, 500), 500]
+        check: (user) => (user.fishing?.totalCasts || 0) >= 1_000,
+        progress: (user) => [Math.min(user.fishing?.totalCasts || 0, 1_000), 1_000]
     },
 
     // ── Tiered Achievements: Mining ───────────────────────────────────────────

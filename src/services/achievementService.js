@@ -36,6 +36,7 @@ async function checkAndAward(user, guildSettings) {
 
         user.achievements = user.achievements || [];
         user.achievements.push({ id: def.id, earnedAt: new Date(), claimed: false });
+        user.achievementsCount = (user.achievementsCount || 0) + 1;
         earnedIds.add(def.id);
         newlyEarned.push(def);
     }
@@ -85,6 +86,7 @@ async function grantCustomAchievement(user, achievementId) {
     if (already) return false;
     user.achievements = user.achievements || [];
     user.achievements.push({ id: achievementId, earnedAt: new Date(), claimed: false });
+    user.achievementsCount = (user.achievementsCount || 0) + 1;
     return true;
 }
 

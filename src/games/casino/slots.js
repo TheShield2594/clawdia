@@ -189,20 +189,40 @@ async function playSlots(interaction, bet) {
                 { $setOnInsert: { ...userFilter, balance: 0 } },
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             ),
-            Guild.findOne(guildFilter),
+            // Ensure slots.jackpotPool exists on the document before we try to match it
+            Guild.findOneAndUpdate(
+                { ...guildFilter, 'slots.jackpotPool': { $exists: false } },
+                { $set: { 'slots.jackpotPool': JACKPOT_SEED } },
+                { new: false }
+            ).then(() => Guild.findOne(guildFilter)),
         ]);
+
         const luckyActive      = hasEffect(userDoc, 'lucky_charm');
         const luckyStreakBonus = getLuckyStreakBonus(userDoc);
         const coinMult         = getCoinMultiplier(userDoc);
         const serverMult       = getServerCoinMultiplier(guildSettings);
         const totalCoinMult    = coinMult * serverMult;
 
-        // Read current jackpot pool (use snapshot for conditional claim later)
+        // ── Debit the bet FIRST, before any pool mutations ─────────────────
+        const debited = await User.findOneAndUpdate(
+            { ...userFilter, balance: { $gte: bet } },
+            { $inc: { balance: -bet } },
+            { new: true }
+        );
+        if (!debited) {
+            const fresh = await User.findOne(userFilter);
+            return interaction.editReply({
+                content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
+                embeds: [], components: [],
+            });
+        }
+
+        // Read current jackpot pool snapshot (after guaranteed initialization above)
         const jackpotPool = guildSettings?.slots?.jackpotPool ?? JACKPOT_SEED;
 
         let reels  = [spinReel(), spinReel(), spinReel()];
         let result = evaluate(reels, bet);
-        let charmTriggered      = false;
+        let charmTriggered = false;
 
         // Lucky Charm: on loss, 20% chance to re-spin
         if (result.outcome === 'lose' && luckyActive && Math.random() < 0.20) {
@@ -215,12 +235,12 @@ async function playSlots(interaction, bet) {
             result = { ...result, outcome: 'push', payout: bet };
         }
 
-        // ── Jackpot / pool update ──────────────────────────────────────────
-        let finalJackpotPool = jackpotPool; // shown in result embed
+        // ── Jackpot / pool update (bet already charged) ────────────────────
+        let finalJackpotPool = jackpotPool;
         let jackpotWon = false;
 
         if (result.outcome === 'jackpot') {
-            // Atomically claim the pool — conditional on pool not having changed (race protection)
+            // Atomically claim the pool — conditional on pool matching snapshot (race protection)
             const claimed = await Guild.findOneAndUpdate(
                 { ...guildFilter, 'slots.jackpotPool': jackpotPool },
                 {
@@ -238,11 +258,11 @@ async function playSlots(interaction, bet) {
                 finalJackpotPool = JACKPOT_SEED;
                 jackpotWon = true;
             } else {
-                // Pool changed since we read it — fall back to fixed 50x
+                // Pool changed since snapshot — fall back to fixed 50x; pool already reset by winner
                 result = { ...result, payout: bet * JACKPOT_FALLBACK };
+                finalJackpotPool = JACKPOT_SEED;
             }
         } else {
-            // Increment pool by JACKPOT_CONTRIB on every non-jackpot spin
             await Guild.updateOne(guildFilter, { $inc: { 'slots.jackpotPool': JACKPOT_CONTRIB } });
             finalJackpotPool = jackpotPool + JACKPOT_CONTRIB;
         }
@@ -252,21 +272,13 @@ async function playSlots(interaction, bet) {
         if (result.payout > 0 && totalCoinMult > 1.0) {
             adjustedPayout = bet + Math.round((result.payout - bet) * totalCoinMult);
         }
-        const net = adjustedPayout - bet;
 
+        // Credit the payout (bet already debited above)
         const user = await User.findOneAndUpdate(
-            { ...userFilter, balance: { $gte: bet } },
-            { $inc: { balance: net } },
+            userFilter,
+            { $inc: { balance: adjustedPayout } },
             { new: true }
         );
-
-        if (!user) {
-            const fresh = await User.findOne(userFilter);
-            return interaction.editReply({
-                content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
-                embeds: [], components: [],
-            });
-        }
 
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
