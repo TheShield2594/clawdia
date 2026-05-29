@@ -16,16 +16,29 @@ const EFFECT_CONFIGS = {
     salary_raise:       { label: 'Salary Raise',       emoji: '📈',   durationMs: 2  * 3_600_000, charges: -1 },
 };
 
-// Maps item names (as stored in inventory) to effect type keys
+// Maps item IDs (as stored in inventory) to effect type keys.
+// Snake_case keys are the canonical IDs; legacy space/title-case entries
+// remain for backward compatibility with items in existing inventories.
 const ITEM_TO_EFFECT = {
+    // Canonical snake_case IDs (primary — new items use these)
     'shield':             'shield',
     'padlock':            'padlock',
-    'lucky charm':        'lucky_charm',
     'lifesaver':          'lifesaver',
-    'invisibility cloak': 'invisibility_cloak',
     'knife':              'knife',
-    'robbery bag':        'robbery_bag',
+    'lucky_charm':        'lucky_charm',
+    'streak_shield':      'streak_shield',
+    'invisibility_cloak': 'invisibility_cloak',
+    'robbery_bag':        'robbery_bag',
+    'coin_booster_2x':    'coin_booster_2x',
+    'xp_booster_2x':      'xp_booster_2x',
+    'lucky_streak':       'lucky_streak',
+    'salary_raise':       'salary_raise',
+
+    // Legacy space-separated IDs (backward compat for existing inventory items)
+    'lucky charm':        'lucky_charm',
     'streak shield':      'streak_shield',
+    'invisibility cloak': 'invisibility_cloak',
+    'robbery bag':        'robbery_bag',
     '2x coin booster':    'coin_booster_2x',
     'coin booster':       'coin_booster_2x',
     '2x xp booster':      'xp_booster_2x',

@@ -15,10 +15,18 @@ const TIMER_SECONDS = 30;
 const OPENTDB_URL   = 'https://opentdb.com/api.php';
 
 const REWARDS = {
-    easy:   { win: 250,  lose: 50  },
-    medium: { win: 500,  lose: 100 },
-    hard:   { win: 1000, lose: 150 },
+    easy:   { win: 250, lose: 50  },
+    medium: { win: 500, lose: 100 },
+    hard:   { win: 750, lose: 150 },
 };
+
+const HARD_DAILY_LIMIT = 20;
+
+// Returns midnight UTC for today (used to detect daily reset)
+function todayUTC() {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
 
 function decodeHtml(str) {
     return str
@@ -171,10 +179,10 @@ module.exports = {
                 .setDescription('Question difficulty (default: random)')
                 .setRequired(false)
                 .addChoices(
-                    { name: '🟢 Easy   — Win 250,  Lose 50',  value: 'easy'   },
-                    { name: '🟡 Medium — Win 500,  Lose 100', value: 'medium' },
-                    { name: '🔴 Hard   — Win 1000, Lose 150', value: 'hard'   },
-                    { name: '⚪ Random (any difficulty)',      value: 'any'    },
+                    { name: '🟢 Easy   — Win 250, Lose 50',        value: 'easy'   },
+                    { name: '🟡 Medium — Win 500, Lose 100',       value: 'medium' },
+                    { name: '🔴 Hard   — Win 750, Lose 150 (cap 20/day)', value: 'hard'   },
+                    { name: '⚪ Random (any difficulty)',            value: 'any'    },
                 )),
     cooldown: 20,
 
@@ -200,6 +208,22 @@ async function runQuiz(interaction, diffChoice) {
     }
 
     const difficulty    = raw.difficulty;
+
+    // Enforce daily hard-attempt cap (20/day, resets at midnight UTC)
+    if (difficulty === 'hard') {
+        const today = todayUTC();
+        const needsReset = !user.dailyQuizHardReset || user.dailyQuizHardReset < today;
+        if (needsReset) {
+            await User.updateOne(userFilter, { $set: { dailyQuizHard: 0, dailyQuizHardReset: today } });
+            user.dailyQuizHard = 0;
+        }
+        if (user.dailyQuizHard >= HARD_DAILY_LIMIT) {
+            return interaction.editReply({
+                content: `🎓 You've reached the daily limit of **${HARD_DAILY_LIMIT}** hard questions. Come back tomorrow (midnight UTC)!`,
+                components: [],
+            });
+        }
+    }
     const rewards       = REWARDS[difficulty] ?? REWARDS.medium;
     const category      = decodeHtml(raw.category);
     const question      = decodeHtml(raw.question);
@@ -255,6 +279,10 @@ async function runQuiz(interaction, diffChoice) {
             updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
         }
 
+        if (difficulty === 'hard') {
+            await User.updateOne(userFilter, { $inc: { dailyQuizHard: 1 } });
+        }
+
         const replayId = `quiz_replay_${interaction.id}_${Date.now()}`;
         const replayRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(replayId).setLabel('🎓 Play Again').setStyle(ButtonStyle.Primary),
@@ -283,6 +311,10 @@ async function runQuiz(interaction, diffChoice) {
         const freshUser = await User.findOne(userFilter);
         const penalty   = Math.min(rewards.lose, freshUser?.balance ?? 0);
         const updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
+
+        if (difficulty === 'hard') {
+            await User.updateOne(userFilter, { $inc: { dailyQuizHard: 1 } });
+        }
 
         await interaction.editReply({
             embeds:     [timeoutEmbed(interaction, question, correctAnswer, difficulty, penalty, updated?.balance ?? 0)],

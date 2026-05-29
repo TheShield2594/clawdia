@@ -4,6 +4,7 @@ const Guild = require('../../models/Guild');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
+const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -28,7 +29,7 @@ module.exports = {
                 const timeLeft = dailyCooldown - (now - user.lastDaily.getTime());
                 const hours = Math.floor(timeLeft / 3600000);
                 const minutes = Math.floor((timeLeft % 3600000) / 60000);
-                
+
                 return interaction.reply({
                     content: `You've already claimed your daily reward! Come back in ${hours}h ${minutes}m.`,
                     ephemeral: true
@@ -39,17 +40,49 @@ module.exports = {
             const streakMult   = getStreakMultiplier(user.streak?.current ?? 0);
             const coinMult     = getCoinMultiplier(user);
             const serverMult   = getServerCoinMultiplier(guildSettings);
-            const actualAmount = Math.round(dailyAmount * streakMult * coinMult * serverMult);
-            user.balance += actualAmount;
-            user.lastDaily = new Date();
-            await user.save();
+            const rawCombined  = streakMult * coinMult * serverMult;
+            const combined     = clampMultiplier(rawCombined);
+            const actualAmount = Math.round(dailyAmount * combined);
+            const capActive    = rawCombined > MAX_COMBINED_MULTIPLIER;
 
-            logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'daily', amount: actualAmount, balance: user.balance, note: `streak ${user.streak?.current ?? 0}x, mult ${(streakMult * coinMult * serverMult).toFixed(2)}` });
+            // Atomic update — cooldown condition in query prevents double-credit on concurrent requests
+            const updated = await User.findOneAndUpdate(
+                {
+                    userId: interaction.user.id,
+                    guildId: interaction.guild.id,
+                    $or: [
+                        { lastDaily: null },
+                        { lastDaily: { $lt: new Date(now - dailyCooldown) } }
+                    ]
+                },
+                {
+                    $inc: { balance: actualAmount },
+                    $set: { lastDaily: new Date(now) }
+                },
+                { new: true }
+            );
+
+            if (!updated) {
+                return interaction.reply({
+                    content: "You've already claimed your daily reward! Try again later.",
+                    ephemeral: true
+                });
+            }
+
+            logTransaction({
+                userId: interaction.user.id,
+                guildId: interaction.guild.id,
+                type: 'daily',
+                amount: actualAmount,
+                balance: updated.balance,
+                note: `streak ${user.streak?.current ?? 0}, mult ${combined.toFixed(2)}${capActive ? ' (capped)' : ''}`
+            });
 
             const bonusLines = [];
             if (streakMult > 1.0) bonusLines.push(`🔥 **${streakMult}x streak bonus** applied!`);
             if (coinMult > 1.0)   bonusLines.push(`💰🚀 **${coinMult}x Coin Booster** active!`);
             if (serverMult > 1.0) bonusLines.push(`🌐 **${serverMult}x Server Boost** active!`);
+            if (capActive)        bonusLines.push(`⚠️ Combined multiplier capped at **${MAX_COMBINED_MULTIPLIER}x**.`);
             const bonusLine = bonusLines.length ? `\n${bonusLines.join('\n')}` : '';
 
             const embed = new EmbedBuilder()
@@ -57,7 +90,7 @@ module.exports = {
                 .setTitle('Daily Reward Claimed!')
                 .setDescription(`You received **${actualAmount.toLocaleString()}** coins!${bonusLine}`)
                 .addFields(
-                    { name: 'New Balance', value: `${user.balance.toLocaleString()} coins` }
+                    { name: 'New Balance', value: `${updated.balance.toLocaleString()} coins` }
                 )
                 .setFooter({ text: 'Cooldown: 24h' })
                 .setTimestamp();
