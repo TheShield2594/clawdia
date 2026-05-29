@@ -38,6 +38,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('showcase')
         .setDescription("Display a player's trophy case, rare materials, and achievements.")
+        .setDMPermission(false)
         .addUserOption(opt =>
             opt.setName('user')
                 .setDescription('The player to view (defaults to yourself)')
@@ -128,7 +129,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor(color)
                 .setTitle(`${target.username}'s Showcase`)
-                .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+                .setThumbnail(target.displayAvatarURL())
                 .addFields(
                     { name: '🏆 Trophy Case', value: trophyText },
                     { name: '⛏️ Rarest Materials', value: matsText },

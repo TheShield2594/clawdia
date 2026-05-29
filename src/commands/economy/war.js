@@ -52,7 +52,9 @@ async function executeChallenge(interaction) {
                     inviteCode,
                     announcementChannelId: interaction.channelId
                 }
-            }
+            },
+            // Ensure new docs have the required name field
+            $setOnInsert: { name: interaction.guild.name }
         },
         { upsert: true }
     );
@@ -305,7 +307,7 @@ async function resolveExpiredWar(guildId, guildSettings) {
         const expiresAt = new Date(Date.now() + 86400000);
         await User.updateMany(
             { guildId },
-            { $push: { activeEffects: { type: 'coin_boost_2x', expiresAt, charges: -1 } } }
+            { $push: { activeEffects: { type: 'coin_booster_2x', expiresAt, charges: -1 } } }
         );
     }
 }

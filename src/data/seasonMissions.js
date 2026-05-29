@@ -121,8 +121,12 @@ const MISSION_TEMPLATES = [
  * (not truly seeded here — just random selection at generation time).
  */
 function generateDailyMissions() {
-    const shuffled = [...MISSION_TEMPLATES].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, 3).map(t => ({
+    const pool = [...MISSION_TEMPLATES];
+    for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, 3).map(t => ({
         id: t.id,
         description: t.description,
         target: t.target,
