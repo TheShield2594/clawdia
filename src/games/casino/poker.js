@@ -35,49 +35,55 @@ function rankHand(hand) {
     const suits = hand.map(c => c.suit);
     const freq  = {};
     for (const r of ranks) freq[r] = (freq[r] || 0) + 1;
-    const counts = Object.values(freq).sort((a, b) => b - a);
-    const flush   = suits.every(s => s === suits[0]);
+    // Sort groups: highest count first, then highest rank first within same count
+    const entries  = Object.entries(freq).map(([r, c]) => [Number(r), c]).sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+    const counts   = entries.map(e => e[1]);
+    const tiebreak = entries.map(e => e[0]);
+    const flush    = suits.every(s => s === suits[0]);
     const straight = ranks[4] - ranks[0] === 4 && new Set(ranks).size === 5;
-    // Special case: A-2-3-4-5 wheel straight
+    // Special case: A-2-3-4-5 wheel straight — ace plays as 1
     const wheel = JSON.stringify(ranks) === JSON.stringify([2, 3, 4, 5, 14]);
 
-    if ((straight || wheel) && flush) return { score: 8, name: 'Straight Flush' };
-    if (counts[0] === 4)             return { score: 7, name: 'Four of a Kind' };
-    if (counts[0] === 3 && counts[1] === 2) return { score: 6, name: 'Full House' };
-    if (flush)                       return { score: 5, name: 'Flush' };
-    if (straight || wheel)           return { score: 4, name: 'Straight' };
-    if (counts[0] === 3)             return { score: 3, name: 'Three of a Kind' };
-    if (counts[0] === 2 && counts[1] === 2) return { score: 2, name: 'Two Pair' };
-    if (counts[0] === 2)             return { score: 1, name: 'One Pair' };
-    return { score: 0, name: 'High Card' };
+    if ((straight || wheel) && flush) return { score: 8, name: 'Straight Flush', tiebreak: wheel ? [5,4,3,2,1] : [...ranks].reverse() };
+    if (counts[0] === 4)             return { score: 7, name: 'Four of a Kind',  tiebreak };
+    if (counts[0] === 3 && counts[1] === 2) return { score: 6, name: 'Full House', tiebreak };
+    if (flush)                       return { score: 5, name: 'Flush',            tiebreak: [...ranks].reverse() };
+    if (straight || wheel)           return { score: 4, name: 'Straight',         tiebreak: wheel ? [5,4,3,2,1] : [...ranks].reverse() };
+    if (counts[0] === 3)             return { score: 3, name: 'Three of a Kind',  tiebreak };
+    if (counts[0] === 2 && counts[1] === 2) return { score: 2, name: 'Two Pair', tiebreak };
+    if (counts[0] === 2)             return { score: 1, name: 'One Pair',         tiebreak };
+    return { score: 0, name: 'High Card', tiebreak: [...ranks].reverse() };
 }
 
-// Best 5 from 7 cards
+function compareTuple(a, b) {
+    if (a.score !== b.score) return a.score - b.score;
+    for (let i = 0; i < Math.max(a.tiebreak.length, b.tiebreak.length); i++) {
+        const av = a.tiebreak[i] ?? 0;
+        const bv = b.tiebreak[i] ?? 0;
+        if (av !== bv) return av - bv;
+    }
+    return 0;
+}
+
+// Best 5 from 7 cards — compare full rank+tiebreak tuple
 function bestHand(cards) {
     let best = null;
     for (let i = 0; i < cards.length - 1; i++) {
         for (let j = i + 1; j < cards.length; j++) {
             const five = cards.filter((_, idx) => idx !== i && idx !== j);
             const h    = rankHand(five);
-            if (!best || h.score > best.score) best = { ...h, cards: five };
+            if (!best || compareTuple(h, best) > 0) best = { ...h, cards: five };
         }
     }
     return best;
 }
 
 function compareHands(playerAll, dealerAll) {
-    const p = bestHand(playerAll);
-    const d = bestHand(dealerAll);
-    if (p.score > d.score) return { result: 'win', playerHand: p, dealerHand: d };
-    if (p.score < d.score) return { result: 'lose', playerHand: p, dealerHand: d };
-
-    // Tiebreak by high card ranks in best hand
-    const pRanks = p.cards.map(c => RANK[c.value]).sort((a, b) => b - a);
-    const dRanks = d.cards.map(c => RANK[c.value]).sort((a, b) => b - a);
-    for (let i = 0; i < 5; i++) {
-        if (pRanks[i] > dRanks[i]) return { result: 'win', playerHand: p, dealerHand: d };
-        if (pRanks[i] < dRanks[i]) return { result: 'lose', playerHand: p, dealerHand: d };
-    }
+    const p   = bestHand(playerAll);
+    const d   = bestHand(dealerAll);
+    const cmp = compareTuple(p, d);
+    if (cmp > 0) return { result: 'win',  playerHand: p, dealerHand: d };
+    if (cmp < 0) return { result: 'lose', playerHand: p, dealerHand: d };
     return { result: 'push', playerHand: p, dealerHand: d };
 }
 
@@ -118,6 +124,7 @@ async function playPoker(interaction, bet) {
         const community  = [deck.pop(), deck.pop(), deck.pop(), deck.pop(), deck.pop()];
 
         let pot = bet;
+        let playerStake = bet; // tracks only what the player has actually contributed
         let folded = false;
 
         const gameId = `poker_${interaction.id}_${Date.now()}`;
@@ -173,7 +180,8 @@ async function playPoker(interaction, bet) {
             );
             if (raised) {
                 debited = raised;
-                pot += bet * 2; // player + simulated dealer call
+                playerStake += bet;
+                pot += bet * 2; // player raise + simulated dealer call
             }
             // If they can't afford the raise, treat as check
         }
@@ -229,7 +237,7 @@ async function playPoker(interaction, bet) {
             flopAction = r.customId.split('_')[1];
         } catch {
             settled = true;
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: pot - bet } });
+            await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
             return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
         }
 
@@ -245,6 +253,7 @@ async function playPoker(interaction, bet) {
                 );
                 if (raised) {
                     debited = raised;
+                    playerStake += raiseAmt;
                     pot += raiseAmt * 2;
                 }
             }
@@ -282,16 +291,16 @@ async function playPoker(interaction, bet) {
         let grossPayout = 0;
         let outcome     = result;
 
-        if (result === 'win')  grossPayout = pot * 2;
-        if (result === 'push') grossPayout = pot;
+        if (result === 'win')  grossPayout = playerStake * 2;
+        if (result === 'push') grossPayout = playerStake;
         if (result === 'lose' && streakBonus > 0 && Math.random() < streakBonus) {
-            grossPayout = pot;
+            grossPayout = playerStake;
             outcome = 'push';
         }
 
         let adjustedPayout = grossPayout;
-        if (grossPayout > pot && totalCoinMult > 1.0) {
-            adjustedPayout = pot + Math.round((grossPayout - pot) * totalCoinMult);
+        if (grossPayout > playerStake && totalCoinMult > 1.0) {
+            adjustedPayout = playerStake + Math.round((grossPayout - playerStake) * totalCoinMult);
         }
 
         let updated = debited;
@@ -304,7 +313,7 @@ async function playPoker(interaction, bet) {
         }
         settled = true;
 
-        const totalIn = pot; // total wagered by player
+        const totalIn = playerStake;
         const net     = adjustedPayout - totalIn;
         const netStr  = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
 
@@ -315,7 +324,7 @@ async function playPoker(interaction, bet) {
 
         const communityStr = `${handStr(flop)}  ${cardStr(turnCard)}  ${cardStr(riverCard)}`;
         let boostNote = '';
-        if (totalCoinMult > 1.0 && adjustedPayout > totalIn) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
+        if (totalCoinMult > 1.0 && adjustedPayout > playerStake) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
         const showdownEmbed = new EmbedBuilder()
             .setAuthor(embedAuthor(interaction))

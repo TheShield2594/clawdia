@@ -13,7 +13,7 @@ const games = [
 
 const builder = new SlashCommandBuilder()
     .setName('casino')
-    .setDescription('Play casino games: blackjack, crash, cup game, keno, poker, roulette, slots, and more.');
+    .setDescription('Play casino games: blackjack, crash, cupgame, higher/lower, keno, poker, roulette, and slots.');
 
 for (const game of games) {
     builder.addSubcommand(sub => {
