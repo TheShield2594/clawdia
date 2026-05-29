@@ -430,7 +430,23 @@ async function handleCast(interaction) {
         await delay(1200);
     }
 
+    // Fish/Shark pet: +5%/+15% yield (only if hunger >= 30)
+    const { getTotalBonus } = require('../../services/petService');
+    const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
+
     const result = executeCast(user, locationId, { reactionFactor });
+
+    if (result.success && result.finalPayout > 0 && petFishYieldPct > 0) {
+        const bonus = Math.round(result.finalPayout * petFishYieldPct / 100);
+        if (bonus > 0) {
+            user.balance              += bonus;
+            user.fishing.totalEarned  += bonus;
+            user.fishing.dailyCoins   += bonus;
+            result.finalPayout        += bonus;
+            result.petYieldBonus       = bonus;
+        }
+    }
+
     updateFishQuestProgress(user, result, locationId);
 
     const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
@@ -449,6 +465,10 @@ async function handleCast(interaction) {
     }
 
     const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
+
+    if (result.petYieldBonus > 0) {
+        embed.addFields({ name: '🐠 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petFishYieldPct}% yield)`, inline: true });
+    }
 
     // Annotate embed with reaction window result
     if (result.reactionFactor !== undefined) {

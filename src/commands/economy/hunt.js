@@ -432,7 +432,31 @@ async function executeStart(interaction) {
         await interaction.deferReply();
     }
 
+    // Wolf pet: +10% coin yield; Eagle pet: +15% XP (only if hunger >= 30)
+    const { getTotalBonus } = require('../../services/petService');
+    const petYieldPct = getTotalBonus(user.pets || [], 'hunt_yield');
+    const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
+
     const result = executeHunt(user, zoneId, { trackingBonus });
+
+    if (result.success && result.finalPayout > 0 && petYieldPct > 0) {
+        const bonus = Math.round(result.finalPayout * petYieldPct / 100);
+        if (bonus > 0) {
+            user.balance           += bonus;
+            user.hunt.totalEarned  += bonus;
+            user.hunt.dailyCoins   += bonus;
+            result.finalPayout     += bonus;
+            result.petYieldBonus    = bonus;
+        }
+    }
+    if (result.success && result.xpEarned > 0 && petXpPct > 0) {
+        const xpBonus = Math.round(result.xpEarned * petXpPct / 100);
+        if (xpBonus > 0) {
+            result.xpEarned      += xpBonus;
+            result.petXpBonus     = xpBonus;
+        }
+    }
+
     updateHuntQuestProgress(user, result, zoneId);
 
     const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
@@ -454,6 +478,12 @@ async function executeStart(interaction) {
     if (trackingBonus > 0) {
         const desc = embed.data.description ?? '';
         embed.setDescription(desc + '\n> 🐾 *Tracking bonus applied (+30% success)*');
+    }
+    if (result.petYieldBonus > 0) {
+        embed.addFields({ name: '🐺 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petYieldPct}% yield)`, inline: true });
+    }
+    if (result.petXpBonus > 0) {
+        embed.addFields({ name: '🦅 Pet XP Bonus', value: `+${result.petXpBonus} XP (${petXpPct}%)`, inline: true });
     }
     await interaction.editReply({ embeds: [embed] });
 }

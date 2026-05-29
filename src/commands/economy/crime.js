@@ -4,6 +4,8 @@ const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
+const { logTransaction } = require('../../utils/logTransaction');
+const { getTotalBonus } = require('../../services/petService');
 
 const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
@@ -106,25 +108,37 @@ module.exports = {
         const luckyActive = hasEffect(user, 'lucky_charm');
         if (luckyActive) successChance = Math.min(0.95, successChance + 0.20);
 
+        // Cat pet: +5% crime success chance (only if hunger >= 30)
+        const petCrimeBonus = getTotalBonus(user.pets || [], 'crime_success') / 100;
+        if (petCrimeBonus > 0) successChance = Math.min(0.95, successChance + petCrimeBonus);
+
         const success = Math.random() < successChance;
-        user.lastCrime = new Date();
+        const crimeTime = new Date();
 
         const streakMult = clampMultiplier(getStreakMultiplier(user.streak?.current ?? 0));
 
         try {
             let embed;
+            const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+
             if (success) {
                 const baseEarned = Math.floor(crime.minPayout + Math.random() * (crime.maxPayout - crime.minPayout));
                 const earned = Math.round(baseEarned * streakMult);
-                user.balance += earned;
-                await user.save();
+                const updated = await User.findOneAndUpdate(
+                    userFilter,
+                    { $inc: { balance: earned }, $set: { lastCrime: crimeTime } },
+                    { new: true }
+                );
+
+                logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success)` });
 
                 const streakLine = streakMult > 1.0 ? `\n> 🔥 *${streakMult}x streak bonus applied!*` : '';
+                const petLine = petCrimeBonus > 0 ? `\n> 🐱 *Cat pet boosted your success chance!*` : '';
                 embed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .setTitle(`${crime.emoji} Crime Pays — This Time`)
-                    .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.${luckyActive ? '\n> 🍀 *Lucky Charm boosted your success chance!*' : ''}${streakLine}`)
-                    .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
+                    .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.${luckyActive ? '\n> 🍀 *Lucky Charm boosted your success chance!*' : ''}${streakLine}${petLine}`)
+                    .addFields({ name: 'Balance', value: `${currency}${updated.balance.toLocaleString()}`, inline: true })
                     .setFooter({ text: 'Cooldown: 1.5h' })
                     .setTimestamp();
             } else {
@@ -137,7 +151,12 @@ module.exports = {
                     const wouldHaveLost = isCriticalFailure
                         ? Math.floor(user.balance * (DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN)))
                         : Math.floor(crime.minFine + Math.random() * (crime.maxFine - crime.minFine));
-                    await user.save();
+                    await User.findOneAndUpdate(
+                        userFilter,
+                        { $set: { lastCrime: crimeTime, activeEffects: user.activeEffects } }
+                    );
+
+                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_lifesaver', amount: 0, balance: user.balance, note: `${crime.name} (lifesaver, would have lost ${wouldHaveLost})` });
 
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
@@ -152,8 +171,13 @@ module.exports = {
                 } else if (isCriticalFailure) {
                     const lossRate = DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
                     const lost = Math.floor(user.balance * lossRate);
-                    user.balance = Math.max(0, user.balance - lost);
-                    await user.save();
+                    const updated = await User.findOneAndUpdate(
+                        userFilter,
+                        { $inc: { balance: -lost }, $set: { lastCrime: crimeTime } },
+                        { new: true }
+                    );
+
+                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: updated.balance, note: `${crime.name} (critical failure, ${Math.round(lossRate * 100)}% seized)` });
 
                     embed = new EmbedBuilder()
                         .setColor('#8B0000')
@@ -163,8 +187,8 @@ module.exports = {
                             `**The police seized ${Math.round(lossRate * 100)}% of your wallet.**`
                         )
                         .addFields(
-                            { name: '💸 Lost',      value: `${currency}${lost.toLocaleString()}`,         inline: true },
-                            { name: '💰 Remaining', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
+                            { name: '💸 Lost',      value: `${currency}${lost.toLocaleString()}`,          inline: true },
+                            { name: '💰 Remaining', value: `${currency}${updated.balance.toLocaleString()}`, inline: true }
                         )
                         .setFooter({ text: 'Cooldown: 1.5h • Purchase a Lifesaver from /shop to protect against critical failures' })
                         .setTimestamp();
@@ -173,8 +197,13 @@ module.exports = {
                     const maxFine = Math.max(crime.minFine, Math.floor(user.balance * 0.20));
                     const fine = Math.min(rawFine, maxFine);
                     const paid = Math.min(fine, user.balance);
-                    user.balance = Math.max(0, user.balance - paid);
-                    await user.save();
+                    const updated = await User.findOneAndUpdate(
+                        userFilter,
+                        { $inc: { balance: -paid }, $set: { lastCrime: crimeTime } },
+                        { new: true }
+                    );
+
+                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_fine', amount: -paid, balance: updated.balance, note: `${crime.name} (busted)` });
 
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')
@@ -182,7 +211,7 @@ module.exports = {
                         .setDescription(`Your attempt at **${crime.name}** went sideways. ${flavorText}\nYou were fined **${currency}${paid.toLocaleString()}**.`)
                         .addFields(
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
-                            { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`, inline: true }
+                            { name: 'Balance',   value: `${currency}${updated.balance.toLocaleString()}`, inline: true }
                         )
                         .setFooter({ text: 'Cooldown: 1.5h' })
                         .setTimestamp();
