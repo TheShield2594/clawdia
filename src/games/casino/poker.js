@@ -402,8 +402,9 @@ module.exports = {
             });
         }
 
-        if (!await confirmBet(interaction, bet, user.balance, 'Poker', guildSettings)) return;
-        await interaction.deferReply();
+        const { shouldProceed: pkProceed, alreadyReplied: pkReplied } = await confirmBet(interaction, bet, user.balance, 'Poker', guildSettings);
+        if (!pkProceed) return;
+        if (!pkReplied) await interaction.deferReply();
         await playPoker(interaction, bet);
     },
 };

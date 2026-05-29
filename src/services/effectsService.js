@@ -149,6 +149,14 @@ function getServerXpMultiplier(guildSettings) {
     return sb.multiplier ?? 1.5;
 }
 
+// Returns public-safe protection status for a target user (omits padlock intentionally).
+function getPublicProtectionStatus(user) {
+    pruneEffects(user);
+    const shield = user.activeEffects.find(e => e.type === 'shield');
+    const cloak  = user.activeEffects.find(e => e.type === 'invisibility_cloak');
+    return { shield: shield ?? null, cloak: cloak ?? null };
+}
+
 module.exports = {
     EFFECT_CONFIGS,
     resolveEffectType,
@@ -164,4 +172,5 @@ module.exports = {
     getLuckyStreakBonus,
     getServerCoinMultiplier,
     getServerXpMultiplier,
+    getPublicProtectionStatus,
 };

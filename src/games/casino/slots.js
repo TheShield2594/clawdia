@@ -168,8 +168,9 @@ module.exports = {
         const bet = interaction.options.getInteger('bet');
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
-        if (!await confirmBet(interaction, bet, wallet, 'Slots')) return;
-        await interaction.deferReply();
+        const { shouldProceed: slProceed, alreadyReplied: slReplied } = await confirmBet(interaction, bet, wallet, 'Slots');
+        if (!slProceed) return;
+        if (!slReplied) await interaction.deferReply();
         await playSlots(interaction, bet);
     },
 };
