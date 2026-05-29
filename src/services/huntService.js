@@ -10,7 +10,8 @@ const {
     HUNTER_LEVELS,
     LIMITS,
     PRESTIGE_BONUSES,
-    HUNT_QUEST_TEMPLATES
+    HUNT_QUEST_TEMPLATES,
+    TROPHY_QUALITIES
 } = require('../data/huntData');
 const { hasEffect, consumeEffect } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
@@ -215,6 +216,65 @@ function calculateCritChance(user, traits = []) {
     crit += Math.floor(h.level / 10) * 0.01;
 
     return Math.min(LIMITS.MAX_CRIT_CHANCE, crit);
+}
+
+// ─── TROPHY QUALITY ──────────────────────────────────────────────────────────
+
+/**
+ * Rolls a trophy quality tier for a successful hunt.
+ * Weights are shifted toward higher quality by weapon tier, crits, and consumables.
+ */
+function rollTrophyQuality(user, weapon, isCrit) {
+    const h = user.hunt;
+
+    // Base weights: [poor, normal, good, pristine, mythic]
+    const w = [25, 45, 18, 9, 3];
+
+    // Weapon tier: each tier above 1 shifts weight from poor/normal toward good+
+    const tierBonus = weapon.tier - 1; // 0–4
+    w[0] = Math.max(0, w[0] - tierBonus * 2);
+    w[1] = Math.max(0, w[1] - tierBonus);
+    w[2] += Math.floor(tierBonus * 1.5);
+    w[3] += tierBonus;
+    w[4] += Math.floor(tierBonus * 0.5);
+
+    // Critical hit: significant quality boost
+    if (isCrit) {
+        w[0] = Math.max(0, w[0] - 5);
+        w[1] = Math.max(0, w[1] - 5);
+        w[2] += 3;
+        w[3] += 5;
+        w[4] += 2;
+    }
+
+    // Luck charm
+    if (h.activeCharm === 'luck_charm') {
+        w[0] = Math.max(0, w[0] - 3);
+        w[2] += 1;
+        w[3] += 1;
+        w[4] += 1;
+    }
+
+    // Lucky paw permanent upgrade
+    if (h.luckyPaw) {
+        w[0] = Math.max(0, w[0] - 1);
+        w[3] += 1;
+    }
+
+    // Rifled barrel upgrade improves shot precision → quality
+    if (weapon.upgrade === 'rifled_barrel') {
+        w[0] = Math.max(0, w[0] - 2);
+        w[2] += 1;
+        w[3] += 1;
+    }
+
+    const total = w.reduce((s, v) => s + v, 0);
+    let r = Math.random() * total;
+    for (let i = 0; i < TROPHY_QUALITIES.length; i++) {
+        r -= w[i];
+        if (r <= 0) return TROPHY_QUALITIES[i];
+    }
+    return TROPHY_QUALITIES[TROPHY_QUALITIES.length - 1];
 }
 
 // ─── RNG HELPERS ─────────────────────────────────────────────────────────────
@@ -581,6 +641,7 @@ function tickConsumables(user) {
  *   finalPayout?: number,
  *   isCrit?: boolean,
  *   critMultiplier?: number,
+ *   trophyQuality?: { id, label, emoji, multiplier },
  *   specialDrop?: { itemId, name } | null,
  *   xpEarned: number,
  *   levelUp?: { oldLevel, newLevel },
@@ -646,8 +707,11 @@ function executeHunt(user, zoneId) {
             result.traitEffects.push({ trait: 'armored', msg: 'Its thick hide prevented a critical strike.' });
         }
 
+        // Trophy quality — rolled after crit so crit improves quality odds
+        const trophyQuality = rollTrophyQuality(user, weapon, isCrit);
+
         const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
-        let payoutBeforeMods = Math.round(rawPayout * critMultiplier * streakMult);
+        let payoutBeforeMods = Math.round(rawPayout * critMultiplier * streakMult * trophyQuality.multiplier);
 
         // Trait: enraged — +25% payout
         if (traits.includes('enraged')) {
@@ -706,12 +770,22 @@ function executeHunt(user, zoneId) {
         if (tier === 'legendary') h.legendaryKills += 1;
         if (tier === 'event')     h.eventKills     += 1;
 
+        // Store notable trophies (Good or better) in the collection
+        if (trophyQuality.id !== 'poor' && trophyQuality.id !== 'normal') {
+            if (!Array.isArray(h.trophies)) h.trophies = [];
+            const trophyName = `${trophyQuality.emoji} ${trophyQuality.label} ${animal.name}`;
+            if (!h.trophies.includes(trophyName)) {
+                h.trophies.push(trophyName);
+            }
+        }
+
         // XP & level
         const lvResult = applyXp(user, xpGain);
 
         Object.assign(result, {
             rawPayout, finalPayout: adjustedPayout,
             isCrit, critMultiplier: parseFloat(critMultiplier.toFixed(2)),
+            trophyQuality,
             specialDrop, xpEarned: xpGain,
             levelUp: lvResult.leveledUp ? lvResult : null,
             cappedByHard
@@ -925,6 +999,7 @@ module.exports = {
     applyXp,
     activateConsumable,
     tickConsumables,
+    rollTrophyQuality,
     executeHunt,
     assignDailyHuntQuests,
     updateHuntQuestProgress,

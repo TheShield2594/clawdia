@@ -386,19 +386,24 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     const h = user.hunt;
 
     if (result.success) {
-        const { animal, tier, traits, finalPayout, isCrit, critMultiplier, specialDrop, xpEarned, levelUp, cappedByHard, traitEffects } = result;
+        const { animal, tier, traits, finalPayout, isCrit, critMultiplier, trophyQuality, specialDrop, xpEarned, levelUp, cappedByHard, traitEffects } = result;
         const color = isCrit ? '#FFD700' : TIER_COLORS[tier];
 
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
         const payoutDisplay = cappedByHard ? `~~${currency}${finalPayout}~~ (daily cap reached)` : `**${currency}${finalPayout.toLocaleString()}**`;
 
+        const qualityLabel = trophyQuality
+            ? `${trophyQuality.emoji} **${trophyQuality.label}** (×${trophyQuality.multiplier.toFixed(2)})`
+            : '—';
+
         const embed = new EmbedBuilder()
             .setColor(color)
-            .setTitle(`${animal.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${animal.name} ${isCrit ? '✨' : ''}`)
+            .setTitle(`${animal.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${trophyQuality ? trophyQuality.label + ' ' : ''}${animal.name}${isCrit ? ' ✨' : ''}`)
             .setDescription(`*${animal.flavor}*`)
             .addFields(
                 { name: 'Zone',     value: `${zone.emoji} ${zone.name}`,         inline: true },
                 { name: 'Tier',     value: `${tierLabel}`,                        inline: true },
+                { name: 'Quality',  value: qualityLabel,                          inline: true },
                 { name: 'Reward',   value: payoutDisplay,                         inline: true },
                 { name: 'XP',       value: `+${xpEarned} XP${isCrit ? ' (crit bonus)' : ''}`, inline: true },
                 { name: 'Weapon',   value: `${weapon.name} ${weaponStatusEmoji(weapon.status)}\n${durabilityBar(weapon.currentDurability, weapon.maxDurability)} ${weapon.currentDurability}/${weapon.maxDurability}`, inline: true },
