@@ -80,7 +80,7 @@ module.exports = {
             .addFields(
                 choices.map(c => ({
                     name: `${c.emoji} ${c.displayName}`,
-                    value: `${c.riskLabel}\n[${c.riskTag}]`,
+                    value: `${c.riskLabel}\n🎯 ${Math.round(c.successRate * 100)}% success\n💵 ${c.minPayout}–${c.maxPayout}  ·  Fine: ${c.minFine}–${c.maxFine}`,
                     inline: true,
                 }))
             )
