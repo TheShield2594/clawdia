@@ -141,6 +141,25 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
         .setTimestamp();
 }
 
+function jackpotBroadcastEmbed(interaction, wonAmount, newPool) {
+    return new EmbedBuilder()
+        .setColor('#FF00FF')
+        .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+        .setDescription(
+            `🎰 ━━━━━━━━━━━━━━━━━━━━━━━ 🎰\n` +
+            `　　　**J A C K P O T**\n` +
+            `🎰 ━━━━━━━━━━━━━━━━━━━━━━━ 🎰\n\n` +
+            `${interaction.user} just hit **TRIPLE WILD** 🃏🃏🃏\n` +
+            `and walked away with the entire pool.\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `  💰 Won: **${wonAmount.toLocaleString()}** coins\n` +
+            `  🔄 New pool: **${newPool.toLocaleString()}** coins\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `> Think you can be next?`
+        )
+        .setTimestamp();
+}
+
 function paytableEmbed() {
     return new EmbedBuilder()
         .setColor('#FFD700')
@@ -294,16 +313,17 @@ async function playSlots(interaction, bet) {
         await interaction.editReply({ embeds: [spinEmbed(reelDisplay(reels, 2), bet, 2, interaction, jackpotPool)] });
         await delay(800);
 
-        // If jackpot won, post a public announcement first
-        if (jackpotWon) {
-            const displayName = interaction.member?.displayName || interaction.user.username;
-            interaction.channel?.send({
-                content: [
-                    '🎰✨ **JACKPOT WON!** ✨🎰',
-                    `${interaction.user} hit **TRIPLE WILD** and won the **${jackpotPool.toLocaleString()} coin** jackpot!`,
-                    `The jackpot resets to **${JACKPOT_SEED.toLocaleString()}** coins. Good luck next time!`,
-                ].join('\n'),
-            }).catch(() => null);
+        // If jackpot won, post the broadcast embed before the winner sees their result
+        if (jackpotWon && (guildSettings?.slots?.announceJackpot ?? true)) {
+            const pingHere       = guildSettings?.slots?.jackpotPingHere ?? false;
+            const jackpotChanId  = guildSettings?.slots?.jackpotChannelId ?? null;
+            const targetChannel  = jackpotChanId
+                ? (interaction.guild?.channels?.cache?.get(jackpotChanId) ?? interaction.channel)
+                : interaction.channel;
+            await targetChannel?.send({
+                content: pingHere ? '@here' : undefined,
+                embeds: [jackpotBroadcastEmbed(interaction, jackpotPool, JACKPOT_SEED)],
+            }).catch(err => console.error(`[Slots] jackpot broadcast failed — channel:${targetChannel?.id} interaction:${interaction.id}`, err));
         }
 
         const replayId   = `slots_replay_${interaction.id}_${Date.now()}`;
