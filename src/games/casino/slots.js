@@ -323,7 +323,7 @@ async function playSlots(interaction, bet) {
             await targetChannel?.send({
                 content: pingHere ? '@here' : undefined,
                 embeds: [jackpotBroadcastEmbed(interaction, jackpotPool, JACKPOT_SEED)],
-            }).catch(() => null);
+            }).catch(err => console.error(`[Slots] jackpot broadcast failed — channel:${targetChannel?.id} interaction:${interaction.id}`, err));
         }
 
         const replayId   = `slots_replay_${interaction.id}_${Date.now()}`;
