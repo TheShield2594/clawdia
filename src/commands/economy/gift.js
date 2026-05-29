@@ -4,13 +4,8 @@ const Guild = require('../../models/Guild');
 
 const DAILY_COIN_CAP = 10_000;
 
-function resetGiftCapIfNeeded(user) {
-    const now = Date.now();
-    if (!user.dailyGiftReset || now - new Date(user.dailyGiftReset).getTime() >= 86_400_000) {
-        user.dailyGiftSent  = 0;
-        user.dailyGiftReset = new Date();
-    }
-}
+// Items that cannot be gifted (soulbound — matches market.js)
+const SOULBOUND_ITEMS = new Set(['lifesaver', 'streak_shield']);
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -58,22 +53,29 @@ module.exports = {
             return interaction.reply({ content: "You can't gift a bot.", ephemeral: true });
         }
 
-        const [sender, recipient] = await Promise.all([
-            User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
-            User.findOneAndUpdate({ userId: target.id,           guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
-        ]);
-
         if (type === 'coins') {
-            const amount = interaction.options.getInteger('amount');
+            const amount  = interaction.options.getInteger('amount');
+            const guildId = interaction.guild.id;
+
             if (!amount) {
                 return interaction.reply({ content: 'Specify an `amount` when gifting coins.', ephemeral: true });
             }
-            if (sender.balance < amount) {
-                return interaction.reply({ content: `You only have **${currency}${sender.balance.toLocaleString()}** in your wallet.`, ephemeral: true });
+
+            // Read current state to provide user-facing balance/cap feedback before the atomic update
+            const senderNow = await User.findOne({ userId: interaction.user.id, guildId });
+            if (!senderNow || senderNow.balance < amount) {
+                return interaction.reply({
+                    content: `You only have **${currency}${(senderNow?.balance ?? 0).toLocaleString()}** in your wallet.`,
+                    ephemeral: true,
+                });
             }
 
-            resetGiftCapIfNeeded(sender);
-            const remaining = DAILY_COIN_CAP - (sender.dailyGiftSent || 0);
+            const capResetAge = senderNow.dailyGiftReset
+                ? Date.now() - new Date(senderNow.dailyGiftReset).getTime()
+                : Infinity;
+            const currentSent = capResetAge >= 86_400_000 ? 0 : (senderNow.dailyGiftSent ?? 0);
+            const remaining   = DAILY_COIN_CAP - currentSent;
+
             if (amount > remaining) {
                 return interaction.reply({
                     content: `Daily gift cap reached. You can still gift up to **${currency}${remaining.toLocaleString()}** today.`,
@@ -81,19 +83,43 @@ module.exports = {
                 });
             }
 
-            sender.balance          -= amount;
-            sender.dailyGiftSent    = (sender.dailyGiftSent || 0) + amount;
-            recipient.balance       += amount;
+            // Atomic deduction: filter enforces balance and daily cap atomically so concurrent
+            // gifts can't race past either check. Reset cap counter if the 24h window expired.
+            const capFilter = capResetAge >= 86_400_000
+                ? {}
+                : { $expr: { $lte: [{ $add: ['$dailyGiftSent', amount] }, DAILY_COIN_CAP] } };
 
-            await Promise.all([sender.save(), recipient.save()]);
+            const capUpdate = capResetAge >= 86_400_000
+                ? { $inc: { balance: -amount }, $set: { dailyGiftSent: amount, dailyGiftReset: new Date() } }
+                : { $inc: { balance: -amount, dailyGiftSent: amount } };
+
+            const deducted = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId, balance: { $gte: amount }, ...capFilter },
+                capUpdate,
+                { new: true }
+            );
+            if (!deducted) {
+                return interaction.reply({
+                    content: 'Could not complete the transfer — your balance or daily gift cap may have changed.',
+                    ephemeral: true,
+                });
+            }
+
+            await User.findOneAndUpdate(
+                { userId: target.id, guildId },
+                { $inc: { balance: amount } },
+                { upsert: true }
+            );
+
+            const newRemaining = DAILY_COIN_CAP - (deducted.dailyGiftSent ?? 0);
 
             const embed = new EmbedBuilder()
                 .setColor('#f1c40f')
                 .setTitle('🎁 Gift Sent!')
                 .setDescription(`**${interaction.user.username}** gifted **${currency}${amount.toLocaleString()}** to <@${target.id}>!`)
                 .addFields(
-                    { name: 'Your Wallet',      value: `${currency}${sender.balance.toLocaleString()}`,    inline: true },
-                    { name: 'Daily Cap Remaining', value: `${currency}${(remaining - amount).toLocaleString()}`, inline: true },
+                    { name: 'Your Wallet',         value: `${currency}${deducted.balance.toLocaleString()}`, inline: true },
+                    { name: 'Daily Cap Remaining', value: `${currency}${Math.max(0, newRemaining).toLocaleString()}`, inline: true },
                 )
                 .setTimestamp();
 
@@ -108,12 +134,21 @@ module.exports = {
 
         } else {
             // Gift item
-            const itemId  = interaction.options.getString('item');
-            const qty     = interaction.options.getInteger('quantity') ?? 1;
+            const itemId = interaction.options.getString('item');
+            const qty    = interaction.options.getInteger('quantity') ?? 1;
 
             if (!itemId) {
                 return interaction.reply({ content: 'Specify an `item` ID when gifting an item.', ephemeral: true });
             }
+
+            if (SOULBOUND_ITEMS.has(itemId)) {
+                return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be gifted.`, ephemeral: true });
+            }
+
+            const [sender, recipient] = await Promise.all([
+                User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
+                User.findOneAndUpdate({ userId: target.id,           guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
+            ]);
 
             const slot = sender.inventory.find(i => i.itemId === itemId);
             if (!slot || slot.quantity < qty) {
@@ -124,24 +159,21 @@ module.exports = {
             }
 
             // Cannot gift actively equipped effects
-            const activeTypes = (sender.activeEffects || []).map(e => e.type);
             const { resolveEffectType } = require('../../services/effectsService');
             const effectType = resolveEffectType(itemId);
-            if (effectType && activeTypes.includes(effectType)) {
+            if (effectType && (sender.activeEffects || []).some(e => e.type === effectType)) {
                 return interaction.reply({
                     content: `You can't gift \`${itemId}\` while it's active as an effect. Deactivate it first.`,
                     ephemeral: true,
                 });
             }
 
-            // Deduct from sender
             slot.quantity -= qty;
             if (slot.quantity <= 0) {
                 sender.inventory = sender.inventory.filter(i => i.itemId !== itemId);
             }
             sender.markModified('inventory');
 
-            // Add to recipient
             const recipientSlot = recipient.inventory.find(i => i.itemId === itemId);
             if (recipientSlot) {
                 recipientSlot.quantity += qty;

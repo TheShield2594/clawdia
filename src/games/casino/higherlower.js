@@ -157,10 +157,9 @@ module.exports = {
             Guild.findOne({ guildId: interaction.guild.id })
         ]);
         const wallet = user?.balance ?? 0;
-        if (!await confirmBet(interaction, bet, wallet, 'Higher or Lower', guildSettings)) return;
-        // Acknowledge immediately so Discord doesn't reject the interaction
-        // while User.findOneAndUpdate runs.
-        await interaction.deferReply();
+        const { shouldProceed: hlProceed, alreadyReplied: hlReplied } = await confirmBet(interaction, bet, wallet, 'Higher or Lower', guildSettings);
+        if (!hlProceed) return;
+        if (!hlReplied) await interaction.deferReply();
         try {
             if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
                 return interaction.editReply({ content: 'Economy games are disabled in this server.' });

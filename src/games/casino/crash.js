@@ -118,16 +118,6 @@ function liveMultiEmbed(multiplier, bet, playerLines) {
         .setFooter({ text: 'Hit Cash Out before it crashes!' });
 }
 
-function buildMultiCashOutRow(lobbyId, multiplier, userId, cashedOut) {
-    return new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`crash_co_${lobbyId}_${userId}`)
-            .setLabel(cashedOut ? '✅ Cashed Out' : `💰 Cash Out  ${multLabel(multiplier)}`)
-            .setStyle(cashedOut ? ButtonStyle.Secondary : ButtonStyle.Success)
-            .setDisabled(cashedOut),
-    );
-}
-
 // ── Final result embed ───────────────────────────────────────────────────────
 async function buildFinalEmbed(crashPoint, bet, players, client, guildId) {
     const crashLabel = multLabel(crashPoint);
@@ -165,8 +155,9 @@ module.exports = {
     async execute(interaction) {
         const bet  = interaction.options.getInteger('bet');
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        if (!await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash')) return;
-        await interaction.deferReply();
+        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash');
+        if (!shouldProceed) return;
+        if (!alreadyReplied) await interaction.deferReply();
         await openLobby(interaction, bet);
     },
 };
@@ -251,7 +242,15 @@ async function openLobby(interaction, bet) {
             return i.reply({ content: `You need **${bet.toLocaleString()}** coins to join.`, ephemeral: true });
         }
 
-        addPlayer(channelId, i.user.id);
+        const joined = addPlayer(channelId, i.user.id);
+        if (!joined) {
+            // Lobby became full or player was added concurrently — refund the deducted bet
+            await User.findOneAndUpdate(
+                { userId: i.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: bet } }
+            ).catch(err => console.error('[crash] join refund failed:', err));
+            return i.reply({ content: 'Could not join the lobby (it may have just filled up). Your coins have been refunded.', ephemeral: true });
+        }
         await i.deferUpdate().catch(() => {});
         await updateLobbyEmbed();
     });
@@ -269,12 +268,10 @@ async function openLobby(interaction, bet) {
         await startCrashGame(interaction, lobby, lobbyId);
     });
 
-    // Auto-start after join window
-    setTimeout(async () => {
-        if (!lobby.locked) {
-            lobby.locked = true;
-            joinCollector.stop('timeout');
-        }
+    // Auto-start after join window. Only stop the collector; the 'end' handler
+    // is responsible for setting lobby.locked and calling startCrashGame.
+    setTimeout(() => {
+        if (!lobby.locked) joinCollector.stop('timeout');
     }, LOBBY_JOIN_WINDOW_MS);
 }
 
@@ -290,7 +287,7 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         ? Math.min(100.00, parseFloat((generateCrashPoint() * 1.2).toFixed(2)))
         : generateCrashPoint();
 
-    // Instant crash — refund everyone and done
+    // Instant crash (1% chance) — standard loss, no reaction time
     if (crash <= 1.00) {
         const finalEmbed = await buildFinalEmbed(crash, bet, lobby.players, interaction.client, guildId);
         deleteLobby(channelId);
