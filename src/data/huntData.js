@@ -158,35 +158,40 @@ const ZONES = {
         unlockLevel: 1, unlockCost: 0, defaultUnlocked: true,
         difficultyMod: 0.00, payoutBonus: 0.00,
         tierWeights: { common: 52, uncommon: 30, rare: 13, epic: 4, legendary: 1, event: 0 },
-        description: 'A peaceful forest perfect for new hunters.'
+        description: 'A peaceful forest perfect for new hunters.',
+        zoneMaterials: ['rabbits_foot', 'feather', 'down_feather', 'acorn_cache', 'wolf_pelt', 'badger_pelt', 'antler_fragment', 'elk_antler', 'bear_claw', 'moose_rack', 'striped_pelt', 'hardwood_chip', 'crow_feather', 'opossum_pelt']
     },
     desert_wastes: {
         id: 'desert_wastes', name: 'Desert Wastes', emoji: '🏜️',
         unlockLevel: 10, unlockCost: 3000, defaultUnlocked: false,
         difficultyMod: -0.05, payoutBonus: 0.00,
         tierWeights: { common: 42, uncommon: 30, rare: 18, epic: 7, legendary: 2.5, event: 0.5 },
-        description: 'Harsh and unforgiving terrain with exotic wildlife.'
+        description: 'Harsh and unforgiving terrain with exotic wildlife.',
+        zoneMaterials: ['venom_sac', 'scorpion_claw', 'coyote_fang', 'hyena_fang', 'sand_pelt', 'jackrabbit_foot', 'scavenger_feather', 'lion_tooth']
     },
     arctic_tundra: {
         id: 'arctic_tundra', name: 'Arctic Tundra', emoji: '🏔️',
         unlockLevel: 20, unlockCost: 12000, defaultUnlocked: false,
         difficultyMod: -0.08, payoutBonus: 0.00,
         tierWeights: { common: 35, uncommon: 28, rare: 22, epic: 11, legendary: 3.5, event: 0.5 },
-        description: 'Freezing wilderness where rare creatures roam.'
+        description: 'Freezing wilderness where rare creatures roam.',
+        zoneMaterials: ['mammoth_tusk', 'arctic_fox_pelt', 'wolverine_fur', 'polar_claw', 'saber_fang', 'snowy_feather', 'caribou_antler', 'lynx_fang', 'thick_hide']
     },
     murky_swamp: {
         id: 'murky_swamp', name: 'Murky Swamp', emoji: '🌿',
         unlockLevel: 30, unlockCost: 30000, defaultUnlocked: false,
         difficultyMod: -0.10, payoutBonus: 0.00,
         tierWeights: { common: 32, uncommon: 27, rare: 22, epic: 13, legendary: 5, event: 1 },
-        description: 'Mysterious marshlands hiding dangerous prey.'
+        description: 'Mysterious marshlands hiding dangerous prey.',
+        zoneMaterials: ['swamp_scale', 'swamp_gland', 'cottonmouth_venom', 'gator_hide', 'marsh_feather', 'hog_tusk', 'shadow_pelt', 'beaver_pelt', 'slick_skin']
     },
     legendary_peaks: {
         id: 'legendary_peaks', name: 'Legendary Peaks', emoji: '⛰️',
         unlockLevel: 50, unlockCost: 75000, defaultUnlocked: false,
         difficultyMod: -0.12, payoutBonus: 0.20,
         tierWeights: { common: 15, uncommon: 22, rare: 28, epic: 22, legendary: 12, event: 1 },
-        description: 'The ultimate hunting ground. Master hunters only.'
+        description: 'The ultimate hunting ground. Master hunters only.',
+        zoneMaterials: ['ancient_relic', 'spirit_essence', 'spirit_pelt', 'ram_horn', 'dire_wolf_fang', 'primal_claw', 'obsidian_antler', 'storm_feather', 'ember_fang', 'megaloceros_crown']
     }
 };
 
@@ -384,6 +389,13 @@ const ANIMALS = {
         zones: ['desert_wastes'], traits: ['elusive'],
         flavor: 'A roadrunner dashes across the cracked earth at blinding speed.'
     },
+    scorpion: {
+        id: 'scorpion', name: 'Scorpion', emoji: '🦂', tier: 'uncommon',
+        payoutMin: 55, payoutMax: 108, xp: 25,
+        specialDrop: { itemId: 'scorpion_claw', name: 'Scorpion Claw', chance: 0.08 },
+        zones: ['desert_wastes'], traits: ['venomous'],
+        flavor: 'A large scorpion emerges from beneath a sun-bleached rock, stinger raised.'
+    },
     desert_fox: {
         id: 'desert_fox', name: 'Desert Fox', emoji: '🦊', tier: 'uncommon',
         payoutMin: 60, payoutMax: 118, xp: 25,
@@ -404,6 +416,13 @@ const ANIMALS = {
         specialDrop: { itemId: 'hog_tusk', name: 'Hog Tusk', chance: 0.07 },
         zones: ['murky_swamp'], traits: ['aggressive'],
         flavor: 'A mud-caked wild hog bursts from the reeds with a furious squeal.'
+    },
+    giant_salamander: {
+        id: 'giant_salamander', name: 'Giant Salamander', emoji: '🦎', tier: 'uncommon',
+        payoutMin: 58, payoutMax: 112, xp: 25,
+        specialDrop: { itemId: 'swamp_scale', name: 'Swamp Scale', chance: 0.07 },
+        zones: ['murky_swamp'], traits: [],
+        flavor: 'An enormous spotted salamander slides out of the black shallows, scales gleaming.'
     },
 
     // ── RARE ────────────────────────────────────────────────────────────────
@@ -498,6 +517,13 @@ const ANIMALS = {
         zones: ['legendary_peaks'], traits: ['armored'],
         flavor: 'A battle-scarred ram stands unmoving at the edge of a sheer cliff.'
     },
+    ruin_stalker: {
+        id: 'ruin_stalker', name: 'Ruin Stalker', emoji: '🗿', tier: 'rare',
+        payoutMin: 155, payoutMax: 265, xp: 75,
+        specialDrop: { itemId: 'ancient_relic', name: 'Ancient Relic', chance: 0.10 },
+        zones: ['legendary_peaks'], traits: ['armored', 'spectral'],
+        flavor: 'A creature of living stone guards a forgotten altar at the summit.'
+    },
 
     // ── EPIC ────────────────────────────────────────────────────────────────
     black_bear: {
@@ -534,6 +560,13 @@ const ANIMALS = {
         specialDrop: { itemId: 'thick_hide', name: 'Thick Hide', chance: 0.12 },
         zones: ['arctic_tundra'], traits: ['armored', 'giant'],
         flavor: 'A massive musk ox lowers its horns and paws the frozen ground.'
+    },
+    woolly_mammoth: {
+        id: 'woolly_mammoth', name: 'Woolly Mammoth', emoji: '🦣', tier: 'epic',
+        payoutMin: 310, payoutMax: 500, xp: 150,
+        specialDrop: { itemId: 'mammoth_tusk', name: 'Mammoth Tusk', chance: 0.14 },
+        zones: ['arctic_tundra'], traits: ['giant', 'armored'],
+        flavor: 'An ancient woolly mammoth emerges from the blizzard, curved tusks sheathed in ice.'
     },
     polar_bear: {
         id: 'polar_bear', name: 'Polar Bear', emoji: '🐻‍❄️', tier: 'epic',
@@ -812,7 +845,11 @@ const MATERIAL_NAMES = {
     primal_claw:        'Primal Claw',
     obsidian_antler:    'Obsidian Antler',
     storm_feather:      'Storm Feather',
-    ember_fang:         'Ember Fang'
+    ember_fang:         'Ember Fang',
+    scorpion_claw:      'Scorpion Claw',
+    mammoth_tusk:       'Mammoth Tusk',
+    swamp_scale:        'Swamp Scale',
+    ancient_relic:      'Ancient Relic'
 };
 
 // ─── CRAFTING RECIPES ─────────────────────────────────────────────────────────
