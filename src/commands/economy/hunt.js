@@ -373,7 +373,7 @@ async function executeStart(interaction) {
     let trackingBonus = 0;
     const unlockedZones = h.unlockedZones.filter(z => ZONES[z]);
 
-    if (unlockedZones.length >= 2 && ZONE_CLUES[zoneId]) {
+    if (unlockedZones.length >= 3 && ZONE_CLUES[zoneId]) {
         const clueArr = ZONE_CLUES[zoneId];
         const clue    = clueArr[Math.floor(Math.random() * clueArr.length)];
 

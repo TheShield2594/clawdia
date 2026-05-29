@@ -590,8 +590,10 @@ function executeMine(user, depthId, options = {}) {
             result.caveIn    = true;
             result.caveInDur = intensityDurLoss;
         } else if (multiplier !== 1.0 && result.finalPayout) {
-            // Apply multiplier (cave-in did not happen)
-            const bonus = Math.round(result.finalPayout * (multiplier - 1.0));
+            // Apply multiplier, clamped so it doesn't exceed the daily hard cap
+            const rawBonus      = Math.round(result.finalPayout * (multiplier - 1.0));
+            const remainingCap  = Math.max(0, LIMITS.DAILY_HARD_CAP - m.dailyCoins);
+            const bonus         = Math.min(rawBonus, remainingCap);
             user.balance   += bonus;
             m.totalEarned  += bonus;
             m.dailyCoins   += bonus;

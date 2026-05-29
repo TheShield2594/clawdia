@@ -293,7 +293,7 @@ async function handleDig(interaction) {
             `How deep will you dig in **${depth.emoji} ${depth.name}**?\n\n${riskTable}\n\n` +
             `*Cave-in = 0 coins, extra durability loss.*`
         )
-        .setFooter({ text: 'You have 20 seconds to decide — defaults to Shallow (1.0×) on timeout.' });
+        .setFooter({ text: 'You have 20 seconds to decide — defaults to Surface (0.7×, no cave-in risk) on timeout.' });
 
     const intensityRow = new ActionRowBuilder().addComponents(
         ...INTENSITY_LEVELS.map(l => new ButtonBuilder()
@@ -313,7 +313,7 @@ async function handleDig(interaction) {
             max: 1,
         });
         col.on('collect', async i => { await i.deferUpdate(); resolve(parseInt(i.customId.replace('mine_intensity_', ''), 10)); });
-        col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(2); }); // default: Shallow
+        col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(1); }); // default: Surface (no cave-in)
     });
 
     const chosenIntensity = INTENSITY_LEVELS.find(l => l.level === pickedLevel) ?? INTENSITY_LEVELS[1];
