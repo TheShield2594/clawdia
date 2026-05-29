@@ -9,6 +9,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
 const { generateWorkChallenge } = require('../../utils/workChallenge');
 const { getTotalBonus } = require('../../services/petService');
+const { randomFrom, WORK_ROUGH_LINES, WORK_EXCEPTIONAL_LINES } = require('../../utils/copyLines');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -148,8 +149,15 @@ module.exports = {
             const earned      = Math.round(basedEarned * combined);
 
             const jobLabel = job.emoji ? `${job.emoji} ${job.name}` : job.name;
-            const scenario = WORK_SCENARIOS[Math.floor(Math.random() * WORK_SCENARIOS.length)]
-                .replace('{job}', `**${jobLabel}**`);
+            let scenario;
+            if (performance.exceptional) {
+                scenario = randomFrom(WORK_EXCEPTIONAL_LINES) + ` Working as **${jobLabel}**.`;
+            } else if (performance.multiplier < 1) {
+                scenario = randomFrom(WORK_ROUGH_LINES) + ` Another shift as **${jobLabel}**.`;
+            } else {
+                scenario = WORK_SCENARIOS[Math.floor(Math.random() * WORK_SCENARIOS.length)]
+                    .replace('{job}', `**${jobLabel}**`);
+            }
 
             const specialEvent = rollSpecialEvent(earned, basePay);
             let finalEarned = earned;
