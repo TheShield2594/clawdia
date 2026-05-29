@@ -420,12 +420,21 @@ async function handleCast(interaction) {
             const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choice);
 
             if (bossResult.bonusPayout > 0) {
-                freshUser.balance         += bossResult.bonusPayout;
-                freshUser.fishing.totalEarned += bossResult.bonusPayout;
-                freshUser.fishing.dailyCoins  += bossResult.bonusPayout;
+                const bossLocation = LOCATIONS[freshUser.fishing.activeLocation] ?? location;
+                const { adjustedPayout } = applyPayoutModifiers(freshUser, bossResult.bonusPayout, bossLocation);
+                bossResult.bonusPayout = adjustedPayout;
+                freshUser.balance                 += adjustedPayout;
+                freshUser.fishing.totalEarned     += adjustedPayout;
+                freshUser.fishing.dailyCoins      += adjustedPayout;
+                if (adjustedPayout > freshUser.fishing.bestPayout) freshUser.fishing.bestPayout = adjustedPayout;
             }
             freshUser.markModified('fishing');
-            await freshUser.save().catch(e => console.error('[fish boss] save error:', e));
+            try {
+                await freshUser.save();
+            } catch (saveErr) {
+                console.error('[fish boss] save error:', saveErr);
+                return btn.update({ content: 'Something went wrong saving your boss result. Please try again.', embeds: [], components: [] });
+            }
 
             const freshCurrency = currency;
             const bossResultEmbed = new EmbedBuilder()

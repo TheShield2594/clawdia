@@ -199,11 +199,14 @@ function randInt(min, max) {
 
 /**
  * Decides whether a successful cast yields a fish, junk, or treasure.
+ * weather is optional; its locationBonus.junkMod shifts junk chance if present.
  */
-function rollCatchType(location) {
+function rollCatchType(location, weather) {
+    const junkMod       = weather?.locationBonus?.[location.id]?.junkMod ?? 0;
+    const adjustedJunk  = Math.min(1, Math.max(0, location.junkChance + junkMod));
     const r = Math.random();
-    if (r < location.junkChance)                           return 'junk';
-    if (r < location.junkChance + location.treasureChance) return 'treasure';
+    if (r < adjustedJunk)                              return 'junk';
+    if (r < adjustedJunk + location.treasureChance)    return 'treasure';
     return 'fish';
 }
 
@@ -543,7 +546,7 @@ function executeCast(user, locationId) {
     const result = { success, xpEarned: 0, durabilityLost: 0, rodBroke: false };
 
     if (success) {
-        const catchType = rollCatchType(location);
+        const catchType = rollCatchType(location, getCurrentWeather());
         result.catchType = catchType;
 
         const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
@@ -732,7 +735,7 @@ function executeCast(user, locationId) {
             });
 
             // ── Boss encounter check (Issue #154) ──────────────────────────
-            // 8% chance for legendary/epic, 3% for rare, skipped for others
+            // 12% chance for legendary, 8% for epic, 3% for rare, skipped for others
             const bossTierChance = tier === 'legendary' ? 0.12 : tier === 'epic' ? 0.08 : tier === 'rare' ? 0.03 : 0;
             if (bossTierChance > 0 && Math.random() < bossTierChance) {
                 result.bossEncounter = { fish, tier };
