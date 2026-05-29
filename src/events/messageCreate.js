@@ -138,11 +138,20 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
                 const msAgo = now - lastActive;
                 if (msAgo < 172800000) { // within 48h = streak continues
                     user.streak.current = (user.streak.current || 0) + 1;
+                    // Award a streak freeze at every 30-day interval (max 2 banked)
+                    if (user.streak.current % 30 === 0 && (user.streak.freezes ?? 0) < 2) {
+                        user.streak.freezes = (user.streak.freezes ?? 0) + 1;
+                    }
                 } else if (msAgo <= 259200000 && hasEffect(user, 'streak_shield')) { // 48–72h: one missed day, shield applies
                     consumeEffect(user, 'streak_shield');
                     user.streak.current = (user.streak.current || 0) + 1;
                     shieldActivated = true;
                 } else {
+                    // Streak broken — flag for freeze restore prompt on next /daily
+                    const brokenStreak = user.streak.current || 0;
+                    if (brokenStreak > 1 && (user.streak.freezes ?? 0) > 0) {
+                        user.streak.pendingRestore = brokenStreak;
+                    }
                     user.streak.current = 1; // broken
                 }
                 user.streak.longest = Math.max(user.streak.longest || 0, user.streak.current);
