@@ -13,12 +13,12 @@ const DEATH_LOSS_MIN = 0.15;
 const DEATH_LOSS_MAX = 0.30;
 
 const CRIMES = [
-    { name: 'pickpocketing',      emoji: '🤏', successRate: 0.60, minPayout: 80,   maxPayout: 200,  minFine: 50,  maxFine: 100 },
-    { name: 'selling fake merch', emoji: '🛍️', successRate: 0.55, minPayout: 100,  maxPayout: 300,  minFine: 75,  maxFine: 150 },
-    { name: 'hacking ATMs',       emoji: '💻', successRate: 0.45, minPayout: 200,  maxPayout: 500,  minFine: 100, maxFine: 200 },
-    { name: 'art forgery',        emoji: '🖼️', successRate: 0.40, minPayout: 300,  maxPayout: 700,  minFine: 150, maxFine: 300 },
-    { name: 'casino cheating',    emoji: '🎰', successRate: 0.35, minPayout: 400,  maxPayout: 1000, minFine: 200, maxFine: 400 },
-    { name: 'grand larceny',      emoji: '💎', successRate: 0.25, minPayout: 600,  maxPayout: 1500, minFine: 300, maxFine: 600 },
+    { name: 'pickpocketing',      displayName: 'Quick Snatch',  emoji: '🤏', riskEmoji: '🟢', riskLabel: 'Low risk · Small cut',        riskTag: 'Safe',      successRate: 0.60, minPayout: 80,   maxPayout: 200,  minFine: 50,  maxFine: 100 },
+    { name: 'selling fake merch', displayName: 'Street Hustle', emoji: '🛍️', riskEmoji: '🟢', riskLabel: 'Low risk · Small cut',        riskTag: 'Safe',      successRate: 0.55, minPayout: 100,  maxPayout: 300,  minFine: 75,  maxFine: 150 },
+    { name: 'hacking ATMs',       displayName: 'ATM Ghost',     emoji: '💻', riskEmoji: '🟡', riskLabel: 'Medium risk · Decent payout', riskTag: 'Balanced',  successRate: 0.45, minPayout: 200,  maxPayout: 500,  minFine: 100, maxFine: 200 },
+    { name: 'art forgery',        displayName: 'The Forgery',   emoji: '🖼️', riskEmoji: '🟡', riskLabel: 'Medium risk · Decent payout', riskTag: 'Balanced',  successRate: 0.40, minPayout: 300,  maxPayout: 700,  minFine: 150, maxFine: 300 },
+    { name: 'casino cheating',    displayName: 'Casino Con',    emoji: '🎰', riskEmoji: '🔴', riskLabel: 'High risk · Big money',       riskTag: 'Dangerous', successRate: 0.35, minPayout: 400,  maxPayout: 1000, minFine: 200, maxFine: 400 },
+    { name: 'grand larceny',      displayName: 'The Score',     emoji: '💎', riskEmoji: '🔴', riskLabel: 'High risk · Big money',       riskTag: 'Dangerous', successRate: 0.25, minPayout: 600,  maxPayout: 1500, minFine: 300, maxFine: 600 },
 ];
 
 const FINES = [
@@ -28,10 +28,6 @@ const FINES = [
     'Your partner-in-crime ratted you out.',
     'Your disguise fell off at the worst moment.',
 ];
-
-function capitalize(str) {
-    return str.charAt(0).toUpperCase() + str.slice(1);
-}
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -72,20 +68,23 @@ module.exports = {
         const row = new ActionRowBuilder().addComponents(
             choices.map(c => new ButtonBuilder()
                 .setCustomId(c.name)
-                .setLabel(`${c.emoji} ${capitalize(c.name)}`)
+                .setLabel(`${c.emoji} ${c.displayName}  ·  ${c.riskEmoji}`)
                 .setStyle(ButtonStyle.Secondary)
             )
         );
 
         const selectionEmbed = new EmbedBuilder()
             .setColor('#f39c12')
-            .setTitle('🦹 Choose Your Crime')
-            .setDescription(
-                choices.map(c =>
-                    `${c.emoji} **${capitalize(c.name)}** — ${Math.round(c.successRate * 100)}% success | ${currency}${c.minPayout}–${c.maxPayout} payout | Fine: ${currency}${c.minFine}–${c.maxFine}`
-                ).join('\n')
+            .setTitle('🌆 Tonight\'s Jobs')
+            .setDescription('Three options on the table.\nPick your play — or let the clock decide.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━')
+            .addFields(
+                choices.map(c => ({
+                    name: `${c.emoji} ${c.displayName}`,
+                    value: `${c.riskLabel}\n[${c.riskTag}]`,
+                    inline: true,
+                }))
             )
-            .setFooter({ text: 'You have 15 seconds to choose. No choice = random auto-selection.' })
+            .setFooter({ text: '15 seconds. No choice and it gets chosen for you.' })
             .setTimestamp();
 
         const response = await interaction.reply({ embeds: [selectionEmbed], components: [row], fetchReply: true });
@@ -132,13 +131,17 @@ module.exports = {
 
                 logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success)` });
 
-                const streakLine = streakMult > 1.0 ? `\n> 🔥 *${streakMult}x streak bonus applied!*` : '';
-                const petLine = petCrimeBonus > 0 ? `\n> 🐱 *Cat pet boosted your success chance!*` : '';
+                let desc = `Another score. The heat hasn't found you yet.`;
+                if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;
+                if (petCrimeBonus > 0) desc += `\n> 🐱 *Cat pet boosted your success chance!*`;
+                desc += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} Earned: ${earned.toLocaleString()} coins`;
+                if (streakMult > 1.0) desc += `\n  🔥 Streak bonus: ${streakMult}x applied`;
+                desc += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${updated.balance.toLocaleString()} coins`;
+
                 embed = new EmbedBuilder()
-                    .setColor('#f39c12')
-                    .setTitle(`${crime.emoji} Crime Pays — This Time`)
-                    .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.${luckyActive ? '\n> 🍀 *Lucky Charm boosted your success chance!*' : ''}${streakLine}${petLine}`)
-                    .addFields({ name: 'Balance', value: `${currency}${updated.balance.toLocaleString()}`, inline: true })
+                    .setColor('#2ecc71')
+                    .setTitle(`${crime.emoji} ${crime.displayName} — Clean Getaway`)
+                    .setDescription(desc)
                     .setFooter({ text: 'Cooldown: 1.5h' })
                     .setTimestamp();
             } else {
@@ -161,7 +164,7 @@ module.exports = {
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
                         .setTitle(`${crime.emoji} Saved by the Lifesaver!`)
-                        .setDescription(`Your attempt at **${crime.name}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver activated and saved you! No coins lost! (consumed)*`)
+                        .setDescription(`Your attempt at **${crime.displayName}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver activated and saved you! No coins lost! (consumed)*`)
                         .addFields(
                             { name: isCriticalFailure ? 'Death Loss Absorbed' : 'Fine Absorbed', value: `${currency}${Math.min(wouldHaveLost, user.balance).toLocaleString()}`, inline: true },
                             { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
@@ -179,17 +182,17 @@ module.exports = {
 
                     logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: updated.balance, note: `${crime.name} (critical failure, ${Math.round(lossRate * 100)}% seized)` });
 
+                    const critDesc =
+                        `You tried to pull it off.\nYou didn't make it out.\n\n> "${flavorText}"\n\n` +
+                        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                        `  💸 Seized: ${currency}${lost.toLocaleString()} coins  (${Math.round(lossRate * 100)}% of wallet)\n` +
+                        `  💰 Remaining: ${updated.balance.toLocaleString()} coins\n` +
+                        `━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
                     embed = new EmbedBuilder()
                         .setColor('#8B0000')
-                        .setTitle(`💀 ${crime.emoji} Critical Failure!`)
-                        .setDescription(
-                            `Your attempt at **${crime.name}** ended catastrophically. ${flavorText}\n\n` +
-                            `**The police seized ${Math.round(lossRate * 100)}% of your wallet.**`
-                        )
-                        .addFields(
-                            { name: '💸 Lost',      value: `${currency}${lost.toLocaleString()}`,          inline: true },
-                            { name: '💰 Remaining', value: `${currency}${updated.balance.toLocaleString()}`, inline: true }
-                        )
+                        .setTitle(`💀 ${crime.displayName} — Everything Went Wrong`)
+                        .setDescription(critDesc)
                         .setFooter({ text: 'Cooldown: 1.5h • Purchase a Lifesaver from /shop to protect against critical failures' })
                         .setTimestamp();
                 } else {
@@ -207,8 +210,8 @@ module.exports = {
 
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')
-                        .setTitle(`${crime.emoji} Busted!`)
-                        .setDescription(`Your attempt at **${crime.name}** went sideways. ${flavorText}\nYou were fined **${currency}${paid.toLocaleString()}**.`)
+                        .setTitle(`${crime.emoji} ${crime.displayName} — Busted`)
+                        .setDescription(`Your attempt went sideways. ${flavorText}\nYou were fined **${currency}${paid.toLocaleString()}**.`)
                         .addFields(
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
                             { name: 'Balance',   value: `${currency}${updated.balance.toLocaleString()}`, inline: true }
