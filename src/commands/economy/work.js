@@ -79,10 +79,10 @@ function rollSpecialEvent(earned, basePay, randomFn = Math.random) {
 }
 
 const PERFORMANCE_TIERS = [
-    { label: '💀 Rough Shift',   color: '#e74c3c', multiplier: 0.75, chance: 0.10 },
-    { label: '😐 Average Shift', color: '#95a5a6', multiplier: 1.00, chance: 0.45 },
-    { label: '😊 Good Shift',    color: '#2ecc71', multiplier: 1.25, chance: 0.35 },
-    { label: '🔥 Exceptional!',  color: '#f39c12', multiplier: 1.60, chance: 0.10 },
+    { label: '💀 Rough Shift',        title: '💀 Rough Shift',        color: '#e74c3c', multiplier: 0.75, chance: 0.10 },
+    { label: '😐 Average Shift',      title: '😐 Another Shift Done', color: '#95a5a6', multiplier: 1.00, chance: 0.45 },
+    { label: '😊 Good Shift',         title: '😊 Good Work Today',    color: '#2ecc71', multiplier: 1.25, chance: 0.35 },
+    { label: '🔥 Exceptional!',       title: '⚡ EXCEPTIONAL SHIFT ⚡', color: '#f39c12', multiplier: 1.60, chance: 0.10, exceptional: true },
 ];
 
 function rollPerformance() {
@@ -114,7 +114,11 @@ module.exports = {
             const now = Date.now();
             if (user.lastWork && now - user.lastWork.getTime() < 3600000) {
                 const minutes = Math.floor((3600000 - (now - user.lastWork.getTime())) / 60000);
-                return interaction.reply({ content: `You're too tired to work! Rest for **${minutes}** more minutes.`, ephemeral: true });
+                const cooldownEmbed = new EmbedBuilder()
+                    .setColor('#95a5a6')
+                    .setTitle('😴 Still Clocked Out')
+                    .setDescription(`You're recharging from your last shift.\nBack at it in **${minutes} minute${minutes !== 1 ? 's' : ''}**.\n\n> Your next shift could be Exceptional 🔥`);
+                return interaction.reply({ embeds: [cooldownEmbed], ephemeral: true });
             }
 
             const tierInfo = resolveTiers(guildSettings);
@@ -261,25 +265,28 @@ module.exports = {
                 const displayEarned  = finalEarned + bonusEarned;
                 const displayBalance = updated.balance + bonusEarned;
 
+                const challengeCareerValue = nextTier
+                    ? `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\nNext up: ${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** more shifts`
+                    : `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\n✅ Max tier reached!`;
+
+                const challengeDescription = performance.exceptional
+                    ? `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} **${displayEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${challengeCareerValue}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${currency} ${displayBalance.toLocaleString()} coins`
+                    : `${scenario}\n\n${currency} ${displayBalance.toLocaleString()} coins`;
+
                 const workEmbed = new EmbedBuilder()
                     .setColor(performance.color)
-                    .setTitle(`${performance.label} — Work Complete!`)
-                    .setDescription(scenario)
-                    .addFields(
-                        { name: 'Earned',      value: `${currency} **${displayEarned.toLocaleString()}** coins${bonusStr}`, inline: true },
-                        { name: 'Performance', value: performance.label, inline: true },
-                        { name: 'Career Tier', value: `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts`, inline: false },
-                        {
-                            name: 'Next Promotion',
-                            value: nextTier
-                                ? `${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** shifts`
-                                : '✅ Max tier reached!',
-                            inline: false
-                        },
-                        { name: 'Balance', value: `${currency} ${displayBalance.toLocaleString()}`, inline: false }
-                    )
+                    .setTitle(performance.title)
+                    .setDescription(challengeDescription)
                     .setFooter({ text: 'Cooldown: 1h' })
                     .setTimestamp();
+
+                if (!performance.exceptional) {
+                    workEmbed.addFields(
+                        { name: '💰 Earned',      value: `**${displayEarned.toLocaleString()}** coins${bonusStr}`, inline: true },
+                        { name: '📊 Performance', value: performance.label, inline: true },
+                        { name: '📈 Career',      value: challengeCareerValue, inline: false }
+                    );
+                }
 
                 if (bonusEarned > 0) {
                     workEmbed.addFields({ name: '🎯 Challenge Bonus!', value: `✅ Correct! You earned an extra **+${bonusEarned.toLocaleString()}** coins!` });
@@ -300,25 +307,28 @@ module.exports = {
             }
 
             // Normal (no challenge) path
+            const careerValue = nextTier
+                ? `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\nNext up: ${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** more shifts`
+                : `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\n✅ Max tier reached!`;
+
+            const normalDescription = performance.exceptional
+                ? `${scenario}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} **${finalEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${careerValue}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${currency} ${updated.balance.toLocaleString()} coins`
+                : `${scenario}\n\n${currency} ${updated.balance.toLocaleString()} coins`;
+
             const embed = new EmbedBuilder()
                 .setColor(performance.color)
-                .setTitle(`${performance.label} — Work Complete!`)
-                .setDescription(scenario)
-                .addFields(
-                    { name: 'Earned',       value: `${currency} **${finalEarned.toLocaleString()}** coins${bonusStr}`, inline: true },
-                    { name: 'Performance',  value: performance.label, inline: true },
-                    { name: 'Career Tier',  value: `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts`, inline: false },
-                    {
-                        name: 'Next Promotion',
-                        value: nextTier
-                            ? `${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** shifts`
-                            : '✅ Max tier reached!',
-                        inline: false
-                    },
-                    { name: 'Balance', value: `${currency} ${updated.balance.toLocaleString()}`, inline: false }
-                )
+                .setTitle(performance.title)
+                .setDescription(normalDescription)
                 .setFooter({ text: 'Cooldown: 1h' })
                 .setTimestamp();
+
+            if (!performance.exceptional) {
+                embed.addFields(
+                    { name: '💰 Earned',      value: `**${finalEarned.toLocaleString()}** coins${bonusStr}`, inline: true },
+                    { name: '📊 Performance', value: performance.label, inline: true },
+                    { name: '📈 Career',      value: careerValue, inline: false }
+                );
+            }
 
             if (specialEvent) {
                 embed.addFields(specialEvent.embedField);
