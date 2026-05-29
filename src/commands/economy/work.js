@@ -8,6 +8,7 @@ const { getCoinMultiplier, getSalaryMultiplier, getServerCoinMultiplier } = requ
 const { logTransaction } = require('../../utils/logTransaction');
 const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
 const { generateWorkChallenge } = require('../../utils/workChallenge');
+const { getTotalBonus } = require('../../services/petService');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -136,7 +137,8 @@ module.exports = {
             const salaryMult  = getSalaryMultiplier(user);
             const coinMult    = getCoinMultiplier(user);
             const serverMult  = getServerCoinMultiplier(guildSettings);
-            const rawCombined = streakMult * salaryMult * coinMult * serverMult;
+            const petWorkBonus = 1 + getTotalBonus(user.pets || [], 'work_earnings') / 100;
+            const rawCombined = streakMult * salaryMult * coinMult * serverMult * petWorkBonus;
             const combined    = clampMultiplier(rawCombined);
             const capActive   = rawCombined > MAX_COMBINED_MULTIPLIER;
             const earned      = Math.round(basedEarned * combined);
@@ -206,11 +208,12 @@ module.exports = {
             const currency = guildSettings?.economy?.currency || '💰';
 
             const bonusLabels = [];
-            if (streakMult > 1.0)  bonusLabels.push(`🔥 ${streakMult}x streak`);
-            if (salaryMult > 1.0)  bonusLabels.push(`📈 ${salaryMult}x salary raise`);
-            if (coinMult > 1.0)    bonusLabels.push(`💰🚀 ${coinMult}x coin booster`);
-            if (serverMult > 1.0)  bonusLabels.push(`🌐 ${serverMult}x server boost`);
-            if (capActive)         bonusLabels.push(`⚠️ capped at ${MAX_COMBINED_MULTIPLIER}x`);
+            if (streakMult > 1.0)   bonusLabels.push(`🔥 ${streakMult}x streak`);
+            if (salaryMult > 1.0)   bonusLabels.push(`📈 ${salaryMult}x salary raise`);
+            if (coinMult > 1.0)     bonusLabels.push(`💰🚀 ${coinMult}x coin booster`);
+            if (serverMult > 1.0)   bonusLabels.push(`🌐 ${serverMult}x server boost`);
+            if (petWorkBonus > 1.0) bonusLabels.push(`🐶 ${petWorkBonus.toFixed(2)}x pet bonus`);
+            if (capActive)          bonusLabels.push(`⚠️ capped at ${MAX_COMBINED_MULTIPLIER}x`);
             const bonusStr = bonusLabels.length ? ` *(${bonusLabels.join(', ')})*` : '';
 
             if (challengeFires) {

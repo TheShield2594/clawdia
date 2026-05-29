@@ -7,6 +7,8 @@ const { checkTempVoice } = require('../services/tempVoiceService');
 const { checkBirthdays } = require('../services/birthdayService');
 const { checkSeasonalEvents } = require('../services/seasonalEventService');
 const { runJob } = require('../utils/jobRunner');
+const User = require('../models/User');
+const { logTransaction } = require('../utils/logTransaction');
 
 module.exports = {
     name: 'ready',
@@ -53,6 +55,23 @@ module.exports = {
         cron.schedule('0 * * * *', () =>
             runJob('seasonalEventService', 'checkSeasonalEvents', () => checkSeasonalEvents(client))
         );
+
+        // Refund any bets that were deducted during a crash game that was interrupted by a restart
+        try {
+            const pending = await User.find({ pendingCrashRefund: { $gt: 0 } }).lean();
+            if (pending.length > 0) {
+                for (const u of pending) {
+                    await User.findOneAndUpdate(
+                        { _id: u._id },
+                        [{ $inc: { balance: '$pendingCrashRefund' } }, { $set: { pendingCrashRefund: 0 } }]
+                    );
+                    logTransaction({ userId: u.userId, guildId: u.guildId, type: 'crash_refund', amount: u.pendingCrashRefund, balance: u.balance + u.pendingCrashRefund, note: 'bot restart refund' });
+                }
+                console.log(`[READY] Refunded crash bets for ${pending.length} user(s)`);
+            }
+        } catch (err) {
+            console.error('[READY] Crash refund sweep failed:', err);
+        }
 
         console.log('[READY] Background services started');
     }

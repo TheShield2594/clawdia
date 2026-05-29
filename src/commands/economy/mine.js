@@ -326,7 +326,23 @@ async function handleDig(interaction) {
 
     await interaction.editReply({ embeds: [confirmEmbed], components: [] });
 
+    // Crystal Fox pet: +15% mine yield (only if hunger >= 30)
+    const { getTotalBonus } = require('../../services/petService');
+    const petMineYieldPct = getTotalBonus(user.pets || [], 'mine_yield');
+
     const result = executeMine(user, depthId, { intensity: chosenIntensity });
+
+    if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
+        const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
+        if (bonus > 0) {
+            user.balance              += bonus;
+            user.mining.totalEarned   += bonus;
+            user.mining.dailyCoins    += bonus;
+            result.finalPayout        += bonus;
+            result.petYieldBonus       = bonus;
+        }
+    }
+
     updateMineQuestProgress(user, result, depthId);
 
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
@@ -351,6 +367,9 @@ async function handleDig(interaction) {
     } else if (result.intensityLevel && result.intensityLevel.multiplier !== 1.0) {
         const desc = embed.data.description ?? '';
         embed.setDescription(desc + `\n> ${result.intensityLevel.emoji} *${result.intensityLevel.name} depth: ${result.intensityLevel.multiplier}× payout applied*`);
+    }
+    if (result.petYieldBonus > 0) {
+        embed.addFields({ name: '💎 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petMineYieldPct}% yield)`, inline: true });
     }
     await interaction.editReply({ embeds: [embed] });
 }
