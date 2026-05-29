@@ -863,7 +863,7 @@ async function handleShop(interaction, sub) {
                 { name: 'Balance',       value: `${currency}${user.balance.toLocaleString()}`, inline: true }
             )
             .setTimestamp();
-        const pickaxeImg = await getItemImageAttachment(pickaxeData.slug || pickaxeData.id);
+        const pickaxeImg = await getItemImageAttachment(`mine:${pickaxeData.slug || pickaxeData.id}`).catch(() => null);
         if (pickaxeImg) embed.setThumbnail(pickaxeImg.url);
         const minePayload = { embeds: [embed] };
         if (pickaxeImg) minePayload.files = [pickaxeImg.attachment];

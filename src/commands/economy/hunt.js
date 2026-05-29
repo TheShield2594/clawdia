@@ -1362,7 +1362,7 @@ async function handleBuyWeapon(interaction, user, currency) {
         )
         .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
-    const weaponImg = await getItemImageAttachment(weaponData.slug || weaponData.id);
+    const weaponImg = await getItemImageAttachment(`hunt:${weaponData.slug || weaponData.id}`).catch(() => null);
     if (weaponImg) confirmEmbed.setThumbnail(weaponImg.url);
 
     const row = new ActionRowBuilder().addComponents(

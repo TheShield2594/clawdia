@@ -117,25 +117,25 @@ async function renderGuildSettings(req, res) {
 
         const safeSettings = guildSettings.toObject();
 
-        const toItem = (item, idField = 'id') => ({ id: item[idField], label: item.name, emoji: item.emoji || '📦' });
+        const toItem = (ns, item, idField = 'id') => ({ id: `${ns}:${item[idField]}`, label: item.name, emoji: item.emoji || '📦' });
 
         const huntItems = {
-            weapons:     WEAPON_TIERS.map(w => toItem(w, 'slug')),
-            upgrades:    Object.values(WEAPON_UPGRADES).map(u => toItem(u)),
-            ammo:        AMMO_PACKS.map(a => toItem(a)),
-            consumables: Object.values(HUNT_CONSUMABLES).map(c => toItem(c))
+            weapons:     WEAPON_TIERS.map(w => toItem('hunt', w, 'slug')),
+            upgrades:    Object.values(WEAPON_UPGRADES).map(u => toItem('hunt', u)),
+            ammo:        AMMO_PACKS.map(a => toItem('hunt', a)),
+            consumables: Object.values(HUNT_CONSUMABLES).map(c => toItem('hunt', c))
         };
         const fishItems = {
-            rods:        ROD_TIERS.map(r => toItem(r, 'slug')),
-            upgrades:    Object.values(ROD_UPGRADES).map(u => toItem(u)),
-            bait:        BAIT_PACKS.map(b => toItem(b)),
-            consumables: Object.values(FISH_CONSUMABLES).map(c => toItem(c))
+            rods:        ROD_TIERS.map(r => toItem('fish', r, 'slug')),
+            upgrades:    Object.values(ROD_UPGRADES).map(u => toItem('fish', u)),
+            bait:        BAIT_PACKS.map(b => toItem('fish', b)),
+            consumables: Object.values(FISH_CONSUMABLES).map(c => toItem('fish', c))
         };
         const mineItems = {
-            pickaxes:    PICKAXE_TIERS.map(p => toItem(p, 'slug')),
-            upgrades:    Object.values(PICKAXE_UPGRADES).map(u => toItem(u)),
-            blasts:      BLAST_PACKS.map(b => toItem(b)),
-            consumables: Object.values(MINE_CONSUMABLES).map(c => toItem(c))
+            pickaxes:    PICKAXE_TIERS.map(p => toItem('mine', p, 'slug')),
+            upgrades:    Object.values(PICKAXE_UPGRADES).map(u => toItem('mine', u)),
+            blasts:      BLAST_PACKS.map(b => toItem('mine', b)),
+            consumables: Object.values(MINE_CONSUMABLES).map(c => toItem('mine', c))
         };
 
         res.render('guild-settings', {

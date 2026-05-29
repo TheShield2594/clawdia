@@ -1419,7 +1419,7 @@ async function handleBuyRod(interaction, user, currency) {
         )
         .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
-    const rodImg = await getItemImageAttachment(rodData.slug || rodData.id);
+    const rodImg = await getItemImageAttachment(`fish:${rodData.slug || rodData.id}`).catch(() => null);
     if (rodImg) confirmEmbed.setThumbnail(rodImg.url);
 
     const row = new ActionRowBuilder().addComponents(

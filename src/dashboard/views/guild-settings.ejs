@@ -842,10 +842,10 @@
                     </div>
 
                     <div class="ai-inner-tabs">
-                        <button class="ai-inner-tab hunt-inner-tab active" data-hunt-tab="hunt-weapons">🔫 Weapons</button>
-                        <button class="ai-inner-tab hunt-inner-tab" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
-                        <button class="ai-inner-tab hunt-inner-tab" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
-                        <button class="ai-inner-tab hunt-inner-tab" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
+                        <button class="hunt-inner-tab active" data-hunt-tab="hunt-weapons">🔫 Weapons</button>
+                        <button class="hunt-inner-tab" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
+                        <button class="hunt-inner-tab" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
+                        <button class="hunt-inner-tab" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
                     </div>
 
                     <div id="hunt-weapons" class="ai-inner-panel active">
@@ -890,10 +890,10 @@
                     </div>
 
                     <div class="ai-inner-tabs">
-                        <button class="ai-inner-tab fish-inner-tab active" data-fish-tab="fish-rods">🎣 Rods</button>
-                        <button class="ai-inner-tab fish-inner-tab" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
-                        <button class="ai-inner-tab fish-inner-tab" data-fish-tab="fish-bait">🪱 Bait</button>
-                        <button class="ai-inner-tab fish-inner-tab" data-fish-tab="fish-consumables">🧪 Consumables</button>
+                        <button class="fish-inner-tab active" data-fish-tab="fish-rods">🎣 Rods</button>
+                        <button class="fish-inner-tab" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
+                        <button class="fish-inner-tab" data-fish-tab="fish-bait">🪱 Bait</button>
+                        <button class="fish-inner-tab" data-fish-tab="fish-consumables">🧪 Consumables</button>
                     </div>
 
                     <div id="fish-rods" class="ai-inner-panel active">
@@ -938,10 +938,10 @@
                     </div>
 
                     <div class="ai-inner-tabs">
-                        <button class="ai-inner-tab mine-inner-tab active" data-mine-tab="mine-pickaxes">⛏️ Pickaxes</button>
-                        <button class="ai-inner-tab mine-inner-tab" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
-                        <button class="ai-inner-tab mine-inner-tab" data-mine-tab="mine-blasts">💥 Blasts</button>
-                        <button class="ai-inner-tab mine-inner-tab" data-mine-tab="mine-consumables">🧪 Consumables</button>
+                        <button class="mine-inner-tab active" data-mine-tab="mine-pickaxes">⛏️ Pickaxes</button>
+                        <button class="mine-inner-tab" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
+                        <button class="mine-inner-tab" data-mine-tab="mine-blasts">💥 Blasts</button>
+                        <button class="mine-inner-tab" data-mine-tab="mine-consumables">🧪 Consumables</button>
                     </div>
 
                     <div id="mine-pickaxes" class="ai-inner-panel active">
@@ -2643,8 +2643,8 @@
                     return;
                 }
 
-                // After saving economy settings, upload any pending shop item images
-                if (section === 'economy' && Object.keys(_shopItemPendingImages).length > 0) {
+                // After saving economy settings, upload/delete pending shop item images
+                if (section === 'economy') {
                     const uploads = Object.entries(_shopItemPendingImages).map(([itemId, info]) => {
                         const fd = new FormData();
                         fd.append('image', info.file);
@@ -2652,10 +2652,19 @@
                             .then(r => r.ok ? null : r.json().then(e => e.error || 'Upload failed'))
                             .catch(() => 'Upload error');
                     });
-                    const results = await Promise.all(uploads);
+                    const deletes = [..._shopItemClearedImages].map(itemId =>
+                        fetch(`/api/item-image/shop/${guildId}/${itemId}`, { method: 'DELETE' })
+                            .then(r => r.ok ? null : 'Delete failed')
+                            .catch(() => 'Delete error')
+                    );
+                    const results = await Promise.all([...uploads, ...deletes]);
                     const errors = results.filter(Boolean);
-                    if (errors.length) toast('Settings saved, but image upload failed: ' + errors[0], 'error');
-                    else { Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]); toast('Settings saved ✓', 'success'); }
+                    if (errors.length) toast('Settings saved, but image update failed: ' + errors[0], 'error');
+                    else {
+                        Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]);
+                        _shopItemClearedImages.clear();
+                        toast('Settings saved ✓', 'success');
+                    }
                 } else {
                     toast('Settings saved ✓', 'success');
                 }
@@ -2899,6 +2908,7 @@
         }
 
         var _shopItemPendingImages = {}; // itemId -> { file, dataUrl }
+        var _shopItemClearedImages = new Set(); // itemIds whose images were explicitly removed
         var _guildId = '<%= guild.id %>';
 
         function renderStoreItems() {
@@ -3033,8 +3043,10 @@
 
             if (fileInput._pendingFile) {
                 _shopItemPendingImages[itemId] = { file: fileInput._pendingFile, dataUrl: fileInput._pendingDataUrl };
+                _shopItemClearedImages.delete(itemId);
             } else if (fileInput._clearExisting) {
                 delete _shopItemPendingImages[itemId];
+                if (existingItem && existingItem.itemId) _shopItemClearedImages.add(itemId);
             }
 
             if (editingItemIdx === -1) storeItems.push(item);

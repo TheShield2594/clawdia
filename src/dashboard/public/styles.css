@@ -1234,7 +1234,6 @@ textarea { resize: vertical; min-height: 80px; }
 
 /* ── Activity item images grid ───────────────────────────────── */
 .activity-img-grid { display: flex; flex-direction: column; gap: 1.25rem; margin-top: .5rem; }
-.activity-img-category { }
 .activity-img-cat-label { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-bottom: .5rem; }
 .activity-img-cat-items { display: flex; flex-wrap: wrap; gap: .75rem; }
 .activity-img-item { display: flex; flex-direction: column; align-items: center; gap: .35rem; width: 80px; }
