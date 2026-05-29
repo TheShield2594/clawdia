@@ -7,6 +7,7 @@ const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getSalaryMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
+const { generateWorkChallenge } = require('../../utils/workChallenge');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -150,6 +151,9 @@ module.exports = {
                 finalEarned = Math.max(0, earned + specialEvent.coinDelta);
             }
 
+            // Challenge fires only when no special event is active (avoids embed conflicts)
+            const challengeFires = !specialEvent && Math.random() < 0.15;
+
             // Atomic update — cooldown condition in query prevents double-credit on concurrent requests
             const updated = await User.findOneAndUpdate(
                 {
@@ -194,7 +198,7 @@ module.exports = {
                 type: 'work',
                 amount: finalEarned,
                 balance: updated.balance,
-                note: `${job.name} (${performance.label})${capActive ? ', mult capped' : ''}`
+                note: `${job.name} (${performance.label})${capActive ? ', mult capped' : ''}${challengeFires ? ', challenge' : ''}`
             });
 
             const nextTier = tierInfo.find(t => t.minShifts > updated.shiftsWorked);
@@ -209,6 +213,90 @@ module.exports = {
             if (capActive)         bonusLabels.push(`⚠️ capped at ${MAX_COMBINED_MULTIPLIER}x`);
             const bonusStr = bonusLabels.length ? ` *(${bonusLabels.join(', ')})*` : '';
 
+            if (challengeFires) {
+                const challenge = generateWorkChallenge(job.name);
+                const challengeEmbed = new EmbedBuilder()
+                    .setColor(performance.color)
+                    .setTitle(challenge.title)
+                    .setDescription(`*${scenario}*\n\n${challenge.description}`)
+                    .addFields({ name: '💡 Bonus', value: 'Answer correctly for a **+40% bonus** on this shift!' })
+                    .setFooter({ text: 'You have 20 seconds to answer' })
+                    .setTimestamp();
+
+                const reply = await interaction.reply({ embeds: [challengeEmbed], components: [challenge.row], fetchReply: true });
+
+                let bonusEarned = 0;
+                let responseRef = null;
+
+                try {
+                    const response = await reply.awaitMessageComponent({
+                        time: challenge.timeLimit,
+                        filter: i => i.user.id === interaction.user.id,
+                    });
+                    responseRef = response;
+                    await responseRef.deferUpdate();
+
+                    if (response.customId === challenge.correctId) {
+                        bonusEarned = Math.round(earned * 0.4);
+                        await User.findOneAndUpdate(
+                            { userId: interaction.user.id, guildId: interaction.guild.id },
+                            { $inc: { balance: bonusEarned } }
+                        );
+                        logTransaction({
+                            userId: interaction.user.id,
+                            guildId: interaction.guild.id,
+                            type: 'work_challenge_bonus',
+                            amount: bonusEarned,
+                            balance: updated.balance + bonusEarned,
+                            note: `work challenge bonus (${challenge.type}) for ${job.name}`,
+                        });
+                    }
+                } catch {
+                    // timed out — base payout already secured
+                }
+
+                const displayEarned  = finalEarned + bonusEarned;
+                const displayBalance = updated.balance + bonusEarned;
+
+                const workEmbed = new EmbedBuilder()
+                    .setColor(performance.color)
+                    .setTitle(`${performance.label} — Work Complete!`)
+                    .setDescription(scenario)
+                    .addFields(
+                        { name: 'Earned',      value: `${currency} **${displayEarned.toLocaleString()}** coins${bonusStr}`, inline: true },
+                        { name: 'Performance', value: performance.label, inline: true },
+                        { name: 'Career Tier', value: `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts`, inline: false },
+                        {
+                            name: 'Next Promotion',
+                            value: nextTier
+                                ? `${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** shifts`
+                                : '✅ Max tier reached!',
+                            inline: false
+                        },
+                        { name: 'Balance', value: `${currency} ${displayBalance.toLocaleString()}`, inline: false }
+                    )
+                    .setFooter({ text: 'Cooldown: 1h' })
+                    .setTimestamp();
+
+                if (bonusEarned > 0) {
+                    workEmbed.addFields({ name: '🎯 Challenge Bonus!', value: `✅ Correct! You earned an extra **+${bonusEarned.toLocaleString()}** coins!` });
+                } else {
+                    workEmbed.addFields({ name: '🎯 Challenge Result', value: responseRef ? '❌ Wrong answer — no bonus this time.' : '⏱️ Time\'s up — no bonus this time.' });
+                }
+
+                if (promotedTo && promotedTo.minShifts > 0) {
+                    workEmbed.addFields({ name: '🎉 Promotion!', value: `You've been promoted to **${promotedTo.name}** — new jobs and higher pay are now available!` });
+                }
+
+                if (responseRef) {
+                    await responseRef.message.edit({ embeds: [workEmbed], components: [] }).catch(() => {});
+                } else {
+                    await interaction.editReply({ embeds: [workEmbed], components: [] }).catch(() => {});
+                }
+                return;
+            }
+
+            // Normal (no challenge) path
             const embed = new EmbedBuilder()
                 .setColor(performance.color)
                 .setTitle(`${performance.label} — Work Complete!`)
