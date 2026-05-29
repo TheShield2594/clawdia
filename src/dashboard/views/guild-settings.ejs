@@ -667,6 +667,37 @@
                     </div>
                     <div id="store-items-grid" class="store-grid"></div>
 
+                    <!-- Activity Item Images -->
+                    <div class="eco-section-head" style="margin-top:1.75rem">
+                        <span class="toggle-text"><strong>Activity Item Images</strong><span>Upload custom images (up to 64×64 px) for Hunt, Fish &amp; Mine shop items</span></span>
+                    </div>
+                    <div id="activity-images-grid" class="activity-img-grid">
+                        <% const _actGroups = {}; activityItems.forEach(function(item){ (_actGroups[item.category] = _actGroups[item.category] || []).push(item); }); %>
+                        <% Object.entries(_actGroups).forEach(function(entry){ var cat = entry[0], catItems = entry[1]; %>
+                        <div class="activity-img-category">
+                            <div class="activity-img-cat-label"><%= cat %></div>
+                            <div class="activity-img-cat-items">
+                                <% catItems.forEach(function(item){ %>
+                                <div class="activity-img-item" id="act-item-<%= item.id %>">
+                                    <div class="activity-img-preview-wrap">
+                                        <img class="activity-img-preview" src="/api/item-image/activity/<%= item.id %>" alt="" onerror="this.style.display='none';document.getElementById('act-emoji-<%- item.id %>').style.display='block'" id="act-img-<%= item.id %>">
+                                        <span class="activity-img-emoji" id="act-emoji-<%= item.id %>"><%= item.emoji %></span>
+                                    </div>
+                                    <div class="activity-img-label" title="<%= item.id %>"><%= item.label %></div>
+                                    <div class="activity-img-actions">
+                                        <label class="btn btn-sm btn-primary" title="Upload image" style="cursor:pointer;margin:0">
+                                            📁
+                                            <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" data-item-id="<%= item.id %>" onchange="uploadActivityImage('<%= item.id %>', this)">
+                                        </label>
+                                        <button class="btn btn-sm btn-danger" onclick="removeActivityImage('<%= item.id %>')" title="Remove image">✕</button>
+                                    </div>
+                                </div>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <% }); %>
+                    </div>
+
                     <!-- Games -->
                     <div class="eco-section-head" style="margin-top:1.75rem">
                         <label class="toggle" style="margin:0;flex:1">
@@ -757,9 +788,21 @@
                                 <small>-1 = unlimited stock</small>
                             </div>
                             <div class="field">
-                                <label class="field-label">Image URL</label>
-                                <input type="url" id="modal-item-image" placeholder="https://example.com/image.png">
-                                <small>Shown as a thumbnail when viewing or buying this item</small>
+                                <label class="field-label">Item Image</label>
+                                <div class="shop-img-upload-row">
+                                    <div class="shop-img-preview-wrap" id="shop-img-preview-wrap">
+                                        <img id="shop-img-preview" src="" alt="" style="display:none;width:64px;height:64px;object-fit:contain;border-radius:6px;border:1px solid var(--border)">
+                                        <span id="shop-img-placeholder" style="font-size:2rem">🖼️</span>
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;gap:.4rem">
+                                        <label class="btn btn-sm btn-primary" style="cursor:pointer;width:fit-content">
+                                            Upload image
+                                            <input type="file" id="modal-item-image-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="previewShopItemImage(this)">
+                                        </label>
+                                        <button class="btn btn-sm btn-danger" type="button" id="shop-img-clear-btn" onclick="clearShopItemImage()" style="display:none;width:fit-content">Remove image</button>
+                                    </div>
+                                </div>
+                                <small>64×64 px PNG recommended. Shown as thumbnail when purchasing.</small>
                             </div>
                         </div>
                         <div class="modal-actions">
@@ -2455,14 +2498,80 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
-                if (response.ok) toast('Settings saved ✓', 'success');
-                else {
+                if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
                     toast(err.error || 'Failed to save settings', 'error');
+                    return;
+                }
+
+                // After saving economy settings, upload any pending shop item images
+                if (section === 'economy' && Object.keys(_shopItemPendingImages).length > 0) {
+                    const uploads = Object.entries(_shopItemPendingImages).map(([itemId, info]) => {
+                        const fd = new FormData();
+                        fd.append('image', info.file);
+                        return fetch(`/api/item-image/shop/${guildId}/${itemId}`, { method: 'POST', body: fd })
+                            .then(r => r.ok ? null : r.json().then(e => e.error || 'Upload failed'))
+                            .catch(() => 'Upload error');
+                    });
+                    const results = await Promise.all(uploads);
+                    const errors = results.filter(Boolean);
+                    if (errors.length) toast('Settings saved, but image upload failed: ' + errors[0], 'error');
+                    else { Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]); toast('Settings saved ✓', 'success'); }
+                } else {
+                    toast('Settings saved ✓', 'success');
                 }
             } catch (error) {
                 console.error(error);
                 toast('An error occurred', 'error');
+            }
+        }
+
+        async function uploadActivityImage(itemId, input) {
+            var file = input.files[0];
+            if (!file) return;
+            var imgEl = document.getElementById('act-img-' + itemId);
+            var emojiEl = document.getElementById('act-emoji-' + itemId);
+            var fd = new FormData();
+            fd.append('image', file);
+            try {
+                var r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'POST', body: fd });
+                if (r.ok) {
+                    var dataUrl = await new Promise(function(res) {
+                        var reader = new FileReader();
+                        reader.onload = function(e) { res(e.target.result); };
+                        reader.readAsDataURL(file);
+                    });
+                    imgEl.src = dataUrl;
+                    imgEl.style.display = 'block';
+                    if (emojiEl) emojiEl.style.display = 'none';
+                    toast('Image uploaded ✓', 'success');
+                } else {
+                    var err = await r.json().catch(function(){ return {}; });
+                    toast(err.error || 'Upload failed', 'error');
+                }
+            } catch(e) {
+                toast('Upload error', 'error');
+            }
+            input.value = '';
+        }
+
+        async function removeActivityImage(itemId) {
+            if (!confirm('Remove image for this item?')) return;
+            try {
+                var r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'DELETE' });
+                if (r.ok) {
+                    var imgEl = document.getElementById('act-img-' + itemId);
+                    var emojiEl = document.getElementById('act-emoji-' + itemId);
+                    imgEl.src = '';
+                    imgEl.style.display = 'none';
+                    if (emojiEl) emojiEl.style.display = 'block';
+                    toast('Image removed', 'success');
+                } else {
+                    var err = await r.json().catch(function(){ return {}; });
+                    toast(err.error || 'Remove failed', 'error');
+                }
+            } catch(e) {
+                toast('Error removing image', 'error');
             }
         }
 
@@ -2650,6 +2759,9 @@
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
+        var _shopItemPendingImages = {}; // itemId -> { file, dataUrl }
+        var _guildId = '<%= guild.id %>';
+
         function renderStoreItems() {
             var grid = document.getElementById('store-items-grid');
             if (!storeItems.length) {
@@ -2659,7 +2771,10 @@
             grid.innerHTML = storeItems.map(function(item, i) {
                 var roleName = item.roleId ? (_roleMap[item.roleId] || item.roleId) : null;
                 var stockText = (item.stock === -1 || item.stock == null) ? '∞ Unlimited' : item.stock + ' left';
-                var thumbHtml = item.imageUrl ? '<img class="store-card-thumb" src="' + escHtml(item.imageUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
+                var imgSrc = (item.itemId && _shopItemPendingImages[item.itemId])
+                    ? _shopItemPendingImages[item.itemId].dataUrl
+                    : (item.itemId ? '/api/item-image/shop/' + _guildId + '/' + escHtml(item.itemId) : '');
+                var thumbHtml = imgSrc ? '<img class="store-card-thumb" src="' + imgSrc + '" alt="" onerror="this.style.display=\'none\'">' : '';
                 return '<div class="store-card">' +
                     (thumbHtml ? '<div class="store-card-thumb-wrap">' + thumbHtml + '</div>' : '') +
                     '<div class="store-card-body">' +
@@ -2679,6 +2794,38 @@
             }).join('');
         }
 
+        function _genItemId() {
+            return 'item_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+        }
+
+        function previewShopItemImage(input) {
+            var file = input.files[0];
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var dataUrl = e.target.result;
+                document.getElementById('shop-img-preview').src = dataUrl;
+                document.getElementById('shop-img-preview').style.display = 'block';
+                document.getElementById('shop-img-placeholder').style.display = 'none';
+                document.getElementById('shop-img-clear-btn').style.display = 'inline-flex';
+                input._pendingFile = file;
+                input._pendingDataUrl = dataUrl;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function clearShopItemImage() {
+            document.getElementById('shop-img-preview').src = '';
+            document.getElementById('shop-img-preview').style.display = 'none';
+            document.getElementById('shop-img-placeholder').style.display = 'block';
+            document.getElementById('shop-img-clear-btn').style.display = 'none';
+            var fileInput = document.getElementById('modal-item-image-file');
+            fileInput._pendingFile = null;
+            fileInput._pendingDataUrl = null;
+            fileInput.value = '';
+            fileInput._clearExisting = true;
+        }
+
         function openItemModal(idx) {
             editingItemIdx = idx;
             document.getElementById('item-modal-title').textContent = idx === -1 ? 'Add Store Item' : 'Edit Store Item';
@@ -2688,7 +2835,38 @@
             document.getElementById('modal-item-price').value = item.price != null ? item.price : '';
             document.getElementById('modal-item-role').value = item.roleId || '';
             document.getElementById('modal-item-stock').value = (item.stock == null) ? -1 : item.stock;
-            document.getElementById('modal-item-image').value = item.imageUrl || '';
+
+            // Reset image preview
+            var fileInput = document.getElementById('modal-item-image-file');
+            fileInput.value = '';
+            fileInput._pendingFile = null;
+            fileInput._pendingDataUrl = null;
+            fileInput._clearExisting = false;
+            var preview = document.getElementById('shop-img-preview');
+            var placeholder = document.getElementById('shop-img-placeholder');
+            var clearBtn = document.getElementById('shop-img-clear-btn');
+            var pending = item.itemId && _shopItemPendingImages[item.itemId];
+            if (pending) {
+                preview.src = pending.dataUrl;
+                preview.style.display = 'block';
+                placeholder.style.display = 'none';
+                clearBtn.style.display = 'inline-flex';
+            } else if (item.itemId) {
+                var imgSrc = '/api/item-image/shop/' + _guildId + '/' + item.itemId;
+                preview.src = imgSrc;
+                preview.style.display = 'block';
+                placeholder.style.display = 'none';
+                clearBtn.style.display = 'inline-flex';
+                preview.onerror = function() {
+                    preview.style.display = 'none';
+                    placeholder.style.display = 'block';
+                    clearBtn.style.display = 'none';
+                };
+            } else {
+                preview.style.display = 'none';
+                placeholder.style.display = 'block';
+                clearBtn.style.display = 'none';
+            }
             document.getElementById('item-modal').style.display = 'flex';
         }
 
@@ -2700,14 +2878,26 @@
             if (!name) { toast('Item name is required', 'error'); return; }
             if (!Number.isFinite(price) || price < 0) { toast('Enter a valid price', 'error'); return; }
             var parsedStock = parseInt(document.getElementById('modal-item-stock').value, 10);
+            var fileInput = document.getElementById('modal-item-image-file');
+
+            var existingItem = editingItemIdx === -1 ? null : storeItems[editingItemIdx];
+            var itemId = (existingItem && existingItem.itemId) ? existingItem.itemId : _genItemId();
+
             var item = {
                 name: name,
+                itemId: itemId,
                 description: document.getElementById('modal-item-desc').value.trim(),
                 price: price,
                 roleId: document.getElementById('modal-item-role').value || null,
-                stock: Number.isNaN(parsedStock) ? -1 : parsedStock,
-                imageUrl: document.getElementById('modal-item-image').value.trim() || ''
+                stock: Number.isNaN(parsedStock) ? -1 : parsedStock
             };
+
+            if (fileInput._pendingFile) {
+                _shopItemPendingImages[itemId] = { file: fileInput._pendingFile, dataUrl: fileInput._pendingDataUrl };
+            } else if (fileInput._clearExisting) {
+                delete _shopItemPendingImages[itemId];
+            }
+
             if (editingItemIdx === -1) storeItems.push(item);
             else storeItems[editingItemIdx] = item;
             closeItemModal();
