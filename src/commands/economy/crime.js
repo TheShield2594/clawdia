@@ -1,23 +1,22 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
 
-const COOLDOWN_MS      = 1.5 * 3_600_000; // 1.5 hours
-const BASE_SUCCESS     = 0.40;
-const DEATH_RATE       = 0.08;          // 8% of failures trigger critical death
-const DEATH_LOSS_MIN   = 0.15;
-const DEATH_LOSS_MAX   = 0.30;
+const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
+const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
+const DEATH_LOSS_MIN = 0.15;
+const DEATH_LOSS_MAX = 0.30;
 
 const CRIMES = [
-    { name: 'pickpocketing',       emoji: '🤏', minPayout: 80,   maxPayout: 200  },
-    { name: 'selling fake merch',  emoji: '🛍️', minPayout: 100,  maxPayout: 300  },
-    { name: 'hacking ATMs',        emoji: '💻', minPayout: 200,  maxPayout: 500  },
-    { name: 'art forgery',         emoji: '🖼️', minPayout: 300,  maxPayout: 700  },
-    { name: 'casino cheating',     emoji: '🎰', minPayout: 400,  maxPayout: 1000 },
-    { name: 'grand larceny',       emoji: '💎', minPayout: 600,  maxPayout: 1500 },
+    { name: 'pickpocketing',      emoji: '🤏', successRate: 0.60, minPayout: 80,   maxPayout: 200,  minFine: 50,  maxFine: 100 },
+    { name: 'selling fake merch', emoji: '🛍️', successRate: 0.55, minPayout: 100,  maxPayout: 300,  minFine: 75,  maxFine: 150 },
+    { name: 'hacking ATMs',       emoji: '💻', successRate: 0.45, minPayout: 200,  maxPayout: 500,  minFine: 100, maxFine: 200 },
+    { name: 'art forgery',        emoji: '🖼️', successRate: 0.40, minPayout: 300,  maxPayout: 700,  minFine: 150, maxFine: 300 },
+    { name: 'casino cheating',    emoji: '🎰', successRate: 0.35, minPayout: 400,  maxPayout: 1000, minFine: 200, maxFine: 400 },
+    { name: 'grand larceny',      emoji: '💎', successRate: 0.25, minPayout: 600,  maxPayout: 1500, minFine: 300, maxFine: 600 },
 ];
 
 const FINES = [
@@ -28,10 +27,14 @@ const FINES = [
     'Your disguise fell off at the worst moment.',
 ];
 
+function capitalize(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('crime')
-        .setDescription('Attempt a crime for 80–1,500 coins (40% success). Caught? You pay a fine instead. Cooldown: 1.5h.'),
+        .setDescription('Choose a crime and attempt it for coins. Higher risk = higher reward. Cooldown: 1.5h.'),
 
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -60,10 +63,46 @@ module.exports = {
             return interaction.reply({ content: `You're still on the radar from last time. Lay low for **${display}**.`, ephemeral: true });
         }
 
-        const crime = CRIMES[Math.floor(Math.random() * CRIMES.length)];
+        // Sample 3 random crimes and present them as buttons
+        const shuffled = [...CRIMES].sort(() => Math.random() - 0.5);
+        const choices = shuffled.slice(0, 3);
+
+        const row = new ActionRowBuilder().addComponents(
+            choices.map(c => new ButtonBuilder()
+                .setCustomId(c.name)
+                .setLabel(`${c.emoji} ${capitalize(c.name)}`)
+                .setStyle(ButtonStyle.Secondary)
+            )
+        );
+
+        const selectionEmbed = new EmbedBuilder()
+            .setColor('#f39c12')
+            .setTitle('🦹 Choose Your Crime')
+            .setDescription(
+                choices.map(c =>
+                    `${c.emoji} **${capitalize(c.name)}** — ${Math.round(c.successRate * 100)}% success | ${currency}${c.minPayout}–${c.maxPayout} payout | Fine: ${currency}${c.minFine}–${c.maxFine}`
+                ).join('\n')
+            )
+            .setFooter({ text: 'You have 15 seconds to choose. No choice = random auto-selection.' })
+            .setTimestamp();
+
+        const response = await interaction.reply({ embeds: [selectionEmbed], components: [row], fetchReply: true });
+
+        let crime;
+        let buttonInteraction = null;
+        try {
+            buttonInteraction = await response.awaitMessageComponent({
+                filter: i => i.user.id === interaction.user.id,
+                time: 15_000,
+            });
+            crime = CRIMES.find(c => c.name === buttonInteraction.customId);
+        } catch {
+            // Timeout — auto-select from the presented choices
+            crime = choices[Math.floor(Math.random() * choices.length)];
+        }
 
         // Lucky Charm: +20% success rate on crime
-        let successChance = BASE_SUCCESS;
+        let successChance = crime.successRate;
         const luckyActive = hasEffect(user, 'lucky_charm');
         if (luckyActive) successChance = Math.min(0.95, successChance + 0.20);
 
@@ -71,6 +110,7 @@ module.exports = {
         user.lastCrime = new Date();
 
         const streakMult = clampMultiplier(getStreakMultiplier(user.streak?.current ?? 0));
+
         try {
             let embed;
             if (success) {
@@ -91,14 +131,12 @@ module.exports = {
                 const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
                 const isCriticalFailure = Math.random() < DEATH_RATE;
 
-                // Lifesaver: absorbs any failure — no fine or death losses
                 const lifesaverActive = hasEffect(user, 'lifesaver');
                 if (lifesaverActive) {
                     consumeEffect(user, 'lifesaver');
                     const wouldHaveLost = isCriticalFailure
                         ? Math.floor(user.balance * (DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN)))
-                        : Math.floor(Math.random() * 151) + 50;
-                    user.lastCrime = new Date();
+                        : Math.floor(crime.minFine + Math.random() * (crime.maxFine - crime.minFine));
                     await user.save();
 
                     embed = new EmbedBuilder()
@@ -112,11 +150,9 @@ module.exports = {
                         .setFooter({ text: 'Cooldown: 1.5h' })
                         .setTimestamp();
                 } else if (isCriticalFailure) {
-                    // Critical failure: lose 15–30% of wallet; cooldown is the punishment (no separate wanted timer)
                     const lossRate = DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
                     const lost = Math.floor(user.balance * lossRate);
                     user.balance = Math.max(0, user.balance - lost);
-                    user.lastCrime = new Date();
                     await user.save();
 
                     embed = new EmbedBuilder()
@@ -133,12 +169,11 @@ module.exports = {
                         .setFooter({ text: 'Cooldown: 1.5h • Purchase a Lifesaver from /shop to protect against critical failures' })
                         .setTimestamp();
                 } else {
-                    const rawFine = Math.floor(Math.random() * 151) + 50;
-                    const maxFine = Math.max(50, Math.floor(user.balance * 0.20));
+                    const rawFine = Math.floor(crime.minFine + Math.random() * (crime.maxFine - crime.minFine));
+                    const maxFine = Math.max(crime.minFine, Math.floor(user.balance * 0.20));
                     const fine = Math.min(rawFine, maxFine);
                     const paid = Math.min(fine, user.balance);
                     user.balance = Math.max(0, user.balance - paid);
-                    user.lastCrime = new Date();
                     await user.save();
 
                     embed = new EmbedBuilder()
@@ -154,10 +189,14 @@ module.exports = {
                 }
             }
 
-            await interaction.reply({ embeds: [embed] });
+            if (buttonInteraction) {
+                await buttonInteraction.update({ embeds: [embed], components: [] });
+            } else {
+                await interaction.editReply({ embeds: [embed], components: [] });
+            }
         } catch (error) {
             console.error('Crime command error:', error);
-            if (!interaction.replied) {
+            if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: 'Something went wrong.', ephemeral: true });
             }
         }
