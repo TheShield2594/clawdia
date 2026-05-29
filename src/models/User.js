@@ -429,6 +429,34 @@ const userSchema = new Schema({
         lastClimbedNotification:   { type: Date, default: null }
     },
 
+    // Pet system
+    pets: [{
+        petId:     { type: String, required: true },
+        name:      { type: String, default: null },
+        hunger:    { type: Number, default: 100, min: 0, max: 100 },
+        lastFed:   { type: Date, default: Date.now },
+        adoptedAt: { type: Date, default: Date.now },
+        starving:  { type: Boolean, default: false },
+        starvingStartAt: { type: Date, default: null }
+    }],
+
+    // Season pass daily missions (reset at midnight UTC)
+    seasonMissions: [{
+        id:          { type: String, required: true },
+        description: { type: String },
+        target:      { type: Number },
+        event:       { type: String },
+        seasonXp:    { type: Number },
+        coinReward:  { type: Number },
+        progress:    { type: Number, default: 0 },
+        completed:   { type: Boolean, default: false },
+        claimed:     { type: Boolean, default: false }
+    }],
+    seasonMissionsDate: { type: Date, default: null },
+
+    // Season economy tracking (separate from balance; resets each economy season)
+    seasonCoins: { type: Number, default: 0 },
+
     // Achievement tracking
     achievements: [{
         id:       { type: String, required: true },
@@ -462,6 +490,7 @@ userSchema.index({ guildId: 1, 'streak.current': -1 });
 userSchema.index({ guildId: 1, 'streak.longest': -1 });
 userSchema.index({ guildId: 1, duelWins: -1 });
 userSchema.index({ guildId: 1, achievementsCount: -1 });
+userSchema.index({ guildId: 1, seasonCoins: -1 }); // used by executeLeaderboard / executeSeasonMe
 
 userSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
