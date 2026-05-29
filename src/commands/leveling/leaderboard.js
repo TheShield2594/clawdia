@@ -37,7 +37,10 @@ module.exports = {
                     ? 'Top 10 by Current Active Streak'
                     : 'Top 10 by Longest Streak Ever';
             } else if (type === 'duels') {
-                users = await User.find({ guildId: interaction.guild.id }).sort({ duelWins: -1 }).limit(10);
+                users = await User.find({
+                    guildId: interaction.guild.id,
+                    $or: [{ duelWins: { $gt: 0 } }, { duelLosses: { $gt: 0 } }],
+                }).sort({ duelWins: -1 }).limit(10);
                 title = '⚔️ Duel Leaderboard';
                 descriptionHeader = 'Top 10 Duelists by Win Count';
             } else {

@@ -87,20 +87,35 @@ async function handleList(interaction, currency) {
         return interaction.reply({ content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time.`, ephemeral: true });
     }
 
-    // Deduct item from inventory
+    // Deduct item from inventory before creating listing
     slot.quantity -= qty;
     if (slot.quantity <= 0) seller.inventory = seller.inventory.filter(i => i.itemId !== itemId);
     seller.markModified('inventory');
     await seller.save();
 
-    const listing = await MarketListing.create({
-        guildId:      interaction.guild.id,
-        sellerId:     interaction.user.id,
-        itemId,
-        quantity:     qty,
-        pricePerUnit: price,
-        expiresAt:    new Date(Date.now() + LISTING_TTL_MS),
-    });
+    let listing;
+    try {
+        listing = await MarketListing.create({
+            guildId:      interaction.guild.id,
+            sellerId:     interaction.user.id,
+            itemId,
+            quantity:     qty,
+            pricePerUnit: price,
+            expiresAt:    new Date(Date.now() + LISTING_TTL_MS),
+        });
+    } catch (err) {
+        // Restore inventory if listing creation fails
+        const restored = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        if (restored) {
+            const s = restored.inventory.find(i => i.itemId === itemId);
+            if (s) { s.quantity += qty; }
+            else   { restored.inventory.push({ itemId, quantity: qty }); }
+            restored.markModified('inventory');
+            await restored.save().catch(console.error);
+        }
+        console.error('[market list] MarketListing.create failed:', err);
+        return interaction.reply({ content: 'Failed to create listing. Your item has been returned.', ephemeral: true });
+    }
 
     const embed = new EmbedBuilder()
         .setColor('#3498db')
@@ -118,15 +133,12 @@ async function handleList(interaction, currency) {
 
 async function handleBrowse(interaction, currency) {
     const filterItem = interaction.options.getString('item')?.toLowerCase() ?? null;
-    const page       = (interaction.options.getInteger('page') ?? 1) - 1;
+    const rawPage    = (interaction.options.getInteger('page') ?? 1) - 1;
 
     const query = { guildId: interaction.guild.id };
     if (filterItem) query.itemId = filterItem;
 
-    const [listings, total] = await Promise.all([
-        MarketListing.find(query).sort({ pricePerUnit: 1 }).skip(page * PAGE_SIZE).limit(PAGE_SIZE),
-        MarketListing.countDocuments(query),
-    ]);
+    const total = await MarketListing.countDocuments(query);
 
     if (total === 0) {
         return interaction.reply({
@@ -136,6 +148,18 @@ async function handleBrowse(interaction, currency) {
             ephemeral: true,
         });
     }
+
+    const totalPages = Math.ceil(total / PAGE_SIZE);
+    const page = Math.max(0, Math.min(rawPage, totalPages - 1));
+
+    if (rawPage >= totalPages) {
+        return interaction.reply({
+            content: `Page ${rawPage + 1} is out of range. There are only **${totalPages}** page(s).`,
+            ephemeral: true,
+        });
+    }
+
+    const listings = await MarketListing.find(query).sort({ pricePerUnit: 1 }).skip(page * PAGE_SIZE).limit(PAGE_SIZE);
 
     const title = filterItem
         ? `📦 Marketplace — ${filterItem}`
@@ -147,7 +171,6 @@ async function handleBrowse(interaction, currency) {
         return `\`${String(l._id).slice(-6)}\`  @${sellerTag}  **${l.quantity}x \`${l.itemId}\`**  ${currency}${l.pricePerUnit.toLocaleString()}/ea  *(${currency}${total_price.toLocaleString()} total)*`;
     }));
 
-    const totalPages = Math.ceil(total / PAGE_SIZE);
     const embed = new EmbedBuilder()
         .setColor('#3498db')
         .setTitle(title)

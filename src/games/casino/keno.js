@@ -257,8 +257,9 @@ module.exports = {
             });
         }
 
-        if (!await confirmBet(interaction, bet, user.balance, 'Keno', guildSettings)) return;
-        await interaction.deferReply();
+        const { shouldProceed: knProceed, alreadyReplied: knReplied } = await confirmBet(interaction, bet, user.balance, 'Keno', guildSettings);
+        if (!knProceed) return;
+        if (!knReplied) await interaction.deferReply();
         await playKeno(interaction, bet, uniquePicked.sort((a, b) => a - b));
     },
 };

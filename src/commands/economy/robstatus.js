@@ -45,6 +45,7 @@ module.exports = {
             return interaction.reply({ content: `You're on cooldown. Try again in **${secs}s**.`, ephemeral: true });
         }
         statusCooldowns.set(cdKey, Date.now());
+        setTimeout(() => statusCooldowns.delete(cdKey), STATUS_COOLDOWN_MS);
 
         const victim = await User.findOne({ userId: target.id, guildId: interaction.guild.id });
 

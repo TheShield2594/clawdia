@@ -459,6 +459,7 @@ userSchema.set('optimisticConcurrency', true);
 userSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 userSchema.index({ guildId: 1, 'streak.current': -1 });
 userSchema.index({ guildId: 1, 'streak.longest': -1 });
+userSchema.index({ guildId: 1, duelWins: -1 });
 
 userSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
