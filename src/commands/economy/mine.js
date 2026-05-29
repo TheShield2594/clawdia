@@ -373,19 +373,18 @@ async function handleDig(interaction) {
     }
     await interaction.editReply({ embeds: [embed] });
 
-    if (result.success && result.tier === 'legendary') {
-        const announceChannelId = guildSettings?.leveling?.announceChannel;
+    if (result.success && result.tier === 'legendary' && guildSettings?.economy?.announceRareDrops !== false) {
+        const announceChannelId = guildSettings?.economy?.announcementChannelId;
         const announceChannel = announceChannelId
             ? interaction.guild.channels.cache.get(announceChannelId) ?? interaction.channel
             : interaction.channel;
-        const displayName = interaction.member?.displayName || interaction.user.username;
         const announcementEmbed = new EmbedBuilder()
-            .setColor(TIER_COLORS.legendary)
+            .setColor('#ff9800')
             .setTitle('✨ Legendary Strike! ✨')
             .setDescription(
-                `**${displayName}** just struck a ${result.ore.emoji} **${result.ore.name}** [⭐⭐⭐⭐⭐]\n` +
-                `while mining in **${depth.emoji} ${depth.name}**.\n\n` +
-                `That's incredibly rare.`
+                `<@${interaction.user.id}> just unearthed ${result.ore.emoji} **${result.ore.name}** [⭐⭐⭐⭐⭐]\n` +
+                `at the **${depth.name}** depth.\n\n` +
+                `That vein runs deep — and dangerous.`
             )
             .setTimestamp();
         announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
