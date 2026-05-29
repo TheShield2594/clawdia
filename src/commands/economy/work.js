@@ -234,6 +234,7 @@ module.exports = {
                         filter: i => i.user.id === interaction.user.id,
                     });
                     responseRef = response;
+                    await responseRef.deferUpdate();
 
                     if (response.customId === challenge.correctId) {
                         bonusEarned = Math.round(earned * 0.4);
@@ -288,7 +289,7 @@ module.exports = {
                 }
 
                 if (responseRef) {
-                    await responseRef.update({ embeds: [workEmbed], components: [] }).catch(() => {});
+                    await responseRef.message.edit({ embeds: [workEmbed], components: [] }).catch(() => {});
                 } else {
                     await interaction.editReply({ embeds: [workEmbed], components: [] }).catch(() => {});
                 }

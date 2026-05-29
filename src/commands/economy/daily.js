@@ -143,13 +143,18 @@ module.exports = {
                     );
                     await response.update({ embeds: [embed], components: [] });
                 }
-            } catch {
+            } catch (err) {
                 if (activateTimer) clearTimeout(activateTimer);
-                embed.spliceFields(0, embed.data.fields.length,
-                    { name: 'New Balance', value: `${updated.balance.toLocaleString()} coins` },
-                    { name: '🎯 Bonus Challenge', value: '⏱️ Time\'s up! No bonus this time — your daily reward is still yours.' },
-                );
-                await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+                if (err.name === 'InteractionCollectorError') {
+                    embed.spliceFields(0, embed.data.fields.length,
+                        { name: 'New Balance', value: `${updated.balance.toLocaleString()} coins` },
+                        { name: '🎯 Bonus Challenge', value: '⏱️ Time\'s up! No bonus this time — your daily reward is still yours.' },
+                    );
+                    await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+                } else {
+                    console.error('Daily challenge error:', err);
+                    await interaction.editReply({ components: [] }).catch(() => {});
+                }
             }
         } catch (error) {
             console.error('Daily error:', error);
