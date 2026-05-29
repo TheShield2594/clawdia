@@ -417,6 +417,288 @@ const FISH = {
         flavor: 'A single enormous tentacle rises from the abyss. The Kraken stirs.'
     },
 
+    // ── POND COMMONS ─────────────────────────────────────────────────────────
+    goldfish: {
+        id: 'goldfish', name: 'Goldfish', emoji: '🐠', tier: 'common',
+        payoutMin: 10, payoutMax: 24, xp: 8,
+        specialDrop: null,
+        locations: ['pond'],
+        sizeVariance: true,
+        traits: { schooling: true },
+        flavor: 'A shimmering goldfish catches the light as it darts away.'
+    },
+    sunfish: {
+        id: 'sunfish', name: 'Sunfish', emoji: '🌞', tier: 'common',
+        payoutMin: 14, payoutMax: 30, xp: 9,
+        specialDrop: { itemId: 'fish_scale', name: 'Fish Scale', chance: 0.04 },
+        locations: ['pond'],
+        sizeVariance: true,
+        traits: {},
+        flavor: 'A broad, flat sunfish basks just beneath the surface.'
+    },
+    crappie: {
+        id: 'crappie', name: 'Crappie', emoji: '🐟', tier: 'common',
+        payoutMin: 12, payoutMax: 26, xp: 8,
+        specialDrop: null,
+        locations: ['pond', 'lake'],
+        sizeVariance: true,
+        traits: { schooling: true },
+        flavor: 'A speckled crappie wriggles on your line.'
+    },
+    koi: {
+        id: 'koi', name: 'Koi', emoji: '🎏', tier: 'uncommon',
+        payoutMin: 60, payoutMax: 115, xp: 28,
+        specialDrop: { itemId: 'rare_scale', name: 'Rare Scale', chance: 0.06 },
+        locations: ['pond'],
+        sizeVariance: true,
+        traits: { giant: true },
+        flavor: 'A majestic, ornately-patterned koi glides through the shallows.'
+    },
+
+    // ── RIVER FISH ────────────────────────────────────────────────────────────
+    sturgeon: {
+        id: 'sturgeon', name: 'Sturgeon', emoji: '🦴', tier: 'rare',
+        payoutMin: 140, payoutMax: 255, xp: 80,
+        specialDrop: { itemId: 'rare_scale', name: 'Rare Scale', chance: 0.09 },
+        locations: ['river'],
+        sizeVariance: true,
+        traits: { armored: true, giant: true },
+        flavor: 'An ancient armored sturgeon surges from the riverbed.'
+    },
+    walleye: {
+        id: 'walleye', name: 'Walleye', emoji: '👁️', tier: 'uncommon',
+        payoutMin: 65, payoutMax: 120, xp: 26,
+        specialDrop: null,
+        locations: ['river', 'lake'],
+        sizeVariance: true,
+        traits: { elusive: true },
+        flavor: 'A glassy-eyed walleye stares up from the current.'
+    },
+    eel: {
+        id: 'eel', name: 'Eel', emoji: '〰️', tier: 'uncommon',
+        payoutMin: 55, payoutMax: 105, xp: 25,
+        specialDrop: { itemId: 'seaweed_bundle', name: 'Seaweed Bundle', chance: 0.07 },
+        locations: ['pond', 'river'],
+        sizeVariance: false,
+        traits: { slippery: true, aggressive: true },
+        flavor: 'A writhing eel coils around your line as you reel it in.'
+    },
+    silver_trout: {
+        id: 'silver_trout', name: 'Silver Trout', emoji: '🥈', tier: 'uncommon',
+        payoutMin: 70, payoutMax: 128, xp: 26,
+        specialDrop: { itemId: 'rare_scale', name: 'Rare Scale', chance: 0.05 },
+        locations: ['river'],
+        sizeVariance: true,
+        traits: { glowing: true },
+        flavor: 'A silver trout flashes like a coin in the rapids.'
+    },
+    gar: {
+        id: 'gar', name: 'Alligator Gar', emoji: '🐊', tier: 'rare',
+        payoutMin: 135, payoutMax: 240, xp: 78,
+        specialDrop: { itemId: 'shark_tooth', name: 'Shark Tooth', chance: 0.07 },
+        locations: ['river'],
+        sizeVariance: true,
+        traits: { aggressive: true, armored: true },
+        flavor: 'A snout full of needle teeth breaks the surface — alligator gar!'
+    },
+
+    // ── LAKE FISH ─────────────────────────────────────────────────────────────
+    lake_sturgeon: {
+        id: 'lake_sturgeon', name: 'Lake Sturgeon', emoji: '🪨', tier: 'epic',
+        payoutMin: 310, payoutMax: 520, xp: 155,
+        specialDrop: { itemId: 'rare_scale', name: 'Rare Scale', chance: 0.16 },
+        locations: ['lake'],
+        sizeVariance: true,
+        traits: { giant: true, armored: true, ancient: true },
+        flavor: 'A colossal lake sturgeon, ancient as the bedrock, tears your line taut.'
+    },
+    muskie: {
+        id: 'muskie', name: 'Muskellunge', emoji: '🗡️', tier: 'rare',
+        payoutMin: 145, payoutMax: 258, xp: 78,
+        specialDrop: null,
+        locations: ['lake'],
+        sizeVariance: true,
+        traits: { aggressive: true, elusive: true },
+        flavor: 'The toothy muskie strikes with explosive force.'
+    },
+    whitefish: {
+        id: 'whitefish', name: 'Lake Whitefish', emoji: '🤍', tier: 'uncommon',
+        payoutMin: 62, payoutMax: 118, xp: 25,
+        specialDrop: { itemId: 'fish_scale', name: 'Fish Scale', chance: 0.06 },
+        locations: ['lake'],
+        sizeVariance: true,
+        traits: {},
+        flavor: 'A pale whitefish drifts upward from the cold lake depths.'
+    },
+    black_crappie: {
+        id: 'black_crappie', name: 'Black Crappie', emoji: '⚫', tier: 'uncommon',
+        payoutMin: 58, payoutMax: 108, xp: 24,
+        specialDrop: null,
+        locations: ['lake'],
+        sizeVariance: true,
+        traits: { schooling: true },
+        flavor: 'A large black crappie, speckled and plump.'
+    },
+    silver_carp: {
+        id: 'silver_carp', name: 'Silver Carp', emoji: '🪙', tier: 'uncommon',
+        payoutMin: 60, payoutMax: 112, xp: 25,
+        specialDrop: { itemId: 'fish_scale', name: 'Fish Scale', chance: 0.05 },
+        locations: ['lake'],
+        sizeVariance: true,
+        traits: { schooling: true },
+        flavor: 'A silver carp leaps from the misty surface.'
+    },
+
+    // ── OCEAN FISH ────────────────────────────────────────────────────────────
+    mahi_mahi: {
+        id: 'mahi_mahi', name: 'Mahi-Mahi', emoji: '🌈', tier: 'rare',
+        payoutMin: 155, payoutMax: 272, xp: 80,
+        specialDrop: { itemId: 'rare_scale', name: 'Rare Scale', chance: 0.10 },
+        locations: ['ocean'],
+        sizeVariance: true,
+        traits: { glowing: true },
+        flavor: 'A radiant mahi-mahi bursts from the waves in a spray of color.'
+    },
+    stingray: {
+        id: 'stingray', name: 'Stingray', emoji: '🔷', tier: 'uncommon',
+        payoutMin: 72, payoutMax: 136, xp: 26,
+        specialDrop: { itemId: 'shark_tooth', name: 'Shark Tooth', chance: 0.06 },
+        locations: ['ocean'],
+        sizeVariance: true,
+        traits: { venomous: true },
+        flavor: 'A broad stingray glides up from the sandy shallows.'
+    },
+    anglerfish: {
+        id: 'anglerfish', name: 'Anglerfish', emoji: '💡', tier: 'rare',
+        payoutMin: 148, payoutMax: 260, xp: 78,
+        specialDrop: { itemId: 'tentacle_ink', name: 'Tentacle Ink', chance: 0.08 },
+        locations: ['ocean', 'deep_sea'],
+        sizeVariance: false,
+        traits: { glowing: true, aggressive: true },
+        flavor: "A nightmarish anglerfish snaps its luminous lure at you."
+    },
+    reef_shark: {
+        id: 'reef_shark', name: 'Reef Shark', emoji: '🦈', tier: 'epic',
+        payoutMin: 295, payoutMax: 498, xp: 152,
+        specialDrop: { itemId: 'shark_tooth', name: 'Shark Tooth', chance: 0.18 },
+        locations: ['ocean'],
+        sizeVariance: true,
+        traits: { aggressive: true },
+        flavor: 'A reef shark circles once and then slams into your lure.'
+    },
+    lionfish: {
+        id: 'lionfish', name: 'Lionfish', emoji: '🦁', tier: 'rare',
+        payoutMin: 138, payoutMax: 248, xp: 76,
+        specialDrop: { itemId: 'rare_scale', name: 'Rare Scale', chance: 0.09 },
+        locations: ['ocean'],
+        sizeVariance: true,
+        traits: { venomous: true, armored: true },
+        flavor: 'A flamboyant lionfish fans its toxic spines as you reel it in.'
+    },
+
+    // ── ABYSS CREATURES ───────────────────────────────────────────────────────
+    abyssal_eel: {
+        id: 'abyssal_eel', name: 'Abyssal Eel', emoji: '🌑', tier: 'epic',
+        payoutMin: 340, payoutMax: 555, xp: 158,
+        specialDrop: { itemId: 'tentacle_ink', name: 'Tentacle Ink', chance: 0.14 },
+        locations: ['deep_sea'],
+        sizeVariance: false,
+        traits: { abyssal: true, aggressive: true, slippery: true },
+        flavor: 'A pitch-black eel longer than your boat writhes up from the void.'
+    },
+    void_ray: {
+        id: 'void_ray', name: 'Void Ray', emoji: '🌌', tier: 'epic',
+        payoutMin: 330, payoutMax: 545, xp: 155,
+        specialDrop: { itemId: 'mythic_scale', name: 'Mythic Scale', chance: 0.10 },
+        locations: ['deep_sea'],
+        sizeVariance: false,
+        traits: { abyssal: true, glowing: true },
+        flavor: 'A manta-like creature from the void pulses with dark light.'
+    },
+    lanternfish: {
+        id: 'lanternfish', name: 'Lanternfish', emoji: '🏮', tier: 'rare',
+        payoutMin: 155, payoutMax: 275, xp: 82,
+        specialDrop: { itemId: 'old_coin', name: 'Old Coin', chance: 0.07 },
+        locations: ['deep_sea'],
+        sizeVariance: false,
+        traits: { glowing: true, schooling: true },
+        flavor: 'A bioluminescent lanternfish bobs to the surface, glowing faintly.'
+    },
+    deep_horror: {
+        id: 'deep_horror', name: 'Deep Horror', emoji: '👁️', tier: 'legendary',
+        payoutMin: 780, payoutMax: 1300, xp: 520,
+        specialDrop: { itemId: 'mythic_scale', name: 'Mythic Scale', chance: 0.22 },
+        locations: ['deep_sea'],
+        sizeVariance: false,
+        traits: { abyssal: true, aggressive: true, ancient: true },
+        flavor: 'Something unspeakable rises from the abyss. You dare not look directly at it.'
+    },
+    colossal_isopod: {
+        id: 'colossal_isopod', name: 'Colossal Isopod', emoji: '🦞', tier: 'epic',
+        payoutMin: 360, payoutMax: 580, xp: 162,
+        specialDrop: { itemId: 'old_coin', name: 'Old Coin', chance: 0.09 },
+        locations: ['deep_sea'],
+        sizeVariance: true,
+        traits: { armored: true, giant: true },
+        flavor: 'An armored isopod the size of a dog rolls onto your deck.'
+    },
+
+    // ── LEGENDARY ADDITIONS ───────────────────────────────────────────────────
+    megalodon: {
+        id: 'megalodon', name: 'Megalodon', emoji: '🦷', tier: 'legendary',
+        payoutMin: 1200, payoutMax: 1900, xp: 800,
+        specialDrop: { itemId: 'shark_tooth', name: 'Shark Tooth', chance: 0.40 },
+        locations: ['ocean', 'deep_sea'],
+        sizeVariance: true,
+        traits: { giant: true, aggressive: true, ancient: true },
+        flavor: '🚨 The ocean darkens. A jaw the size of a doorway rises from the deep — MEGALODON!'
+    },
+    phoenix_koi: {
+        id: 'phoenix_koi', name: 'Phoenix Koi', emoji: '🔥', tier: 'legendary',
+        payoutMin: 1000, payoutMax: 1650, xp: 700,
+        specialDrop: { itemId: 'mythic_scale', name: 'Mythic Scale', chance: 0.30 },
+        locations: ['pond'],
+        sizeVariance: true,
+        traits: { glowing: true, ancient: true },
+        flavor: '🔥 The water ignites — a blazing Phoenix Koi erupts from the depths of the pond!'
+    },
+    void_serpent: {
+        id: 'void_serpent', name: 'Void Serpent', emoji: '🌀', tier: 'legendary',
+        payoutMin: 1100, payoutMax: 1750, xp: 750,
+        specialDrop: { itemId: 'mythic_scale', name: 'Mythic Scale', chance: 0.28 },
+        locations: ['deep_sea'],
+        sizeVariance: false,
+        traits: { abyssal: true, aggressive: true, giant: true },
+        flavor: '🌀 Reality warps as the Void Serpent coils around your line from the abyss!'
+    },
+    celestial_whale: {
+        id: 'celestial_whale', name: 'Celestial Whale', emoji: '🌠', tier: 'legendary',
+        payoutMin: 1300, payoutMax: 2000, xp: 850,
+        specialDrop: { itemId: 'mythic_scale', name: 'Mythic Scale', chance: 0.35 },
+        locations: ['ocean', 'deep_sea'],
+        sizeVariance: false,
+        traits: { giant: true, ancient: true, glowing: true },
+        flavor: '🌠 Stars appear at midday as a Celestial Whale breaches beside your boat!'
+    },
+    ancient_turtle: {
+        id: 'ancient_turtle', name: 'Ancient Turtle', emoji: '🐢', tier: 'legendary',
+        payoutMin: 900, payoutMax: 1450, xp: 650,
+        specialDrop: { itemId: 'old_coin', name: 'Old Coin', chance: 0.35 },
+        locations: ['ocean', 'lake'],
+        sizeVariance: true,
+        traits: { armored: true, ancient: true, giant: true },
+        flavor: '🐢 A turtle older than memory surfaces — it has seen empires rise and fall!'
+    },
+    deep_kraken: {
+        id: 'deep_kraken', name: 'Deep Kraken', emoji: '🦑', tier: 'legendary',
+        payoutMin: 1050, payoutMax: 1700, xp: 750,
+        specialDrop: { itemId: 'tentacle_ink', name: 'Tentacle Ink', chance: 0.45 },
+        locations: ['deep_sea'],
+        sizeVariance: false,
+        traits: { abyssal: true, giant: true, aggressive: true },
+        flavor: '🦑 The sea SCREAMS as the Deep Kraken erupts from the abyss!'
+    },
+
     // ── EVENT / MYTHICAL ─────────────────────────────────────────────────────
     sea_dragon: {
         id: 'sea_dragon', name: 'Sea Dragon', emoji: '🐲', tier: 'event',
@@ -524,6 +806,100 @@ const FISHER_LEVELS = [
     { level: 49, xpRequired: 79000,  title: 'Deep Sea Fisher',  unlocks: [] },
     { level: 50, xpRequired: 83000,  title: 'Legendary Fisher', unlocks: ['deep_sea'] }
 ];
+
+// ─── FISH TRAITS ──────────────────────────────────────────────────────────────
+// Traits define special behaviors that modify catch mechanics.
+const FISH_TRAITS = {
+    slippery:   { description: 'Lower success chance (-8%)',              successMod: -0.08 },
+    aggressive: { description: 'Higher durability damage (+1)',           durabilityMod: 1  },
+    giant:      { description: 'Bonus payout (+15%)',                     payoutMod: 0.15   },
+    venomous:   { description: 'Stamina penalty (-1 extra stamina)',       staminaDrain: 1   },
+    schooling:  { description: 'Increased repeat catch chance',           repeatBonus: true },
+    glowing:    { description: 'Bonus XP (+30%)',                         xpMod: 0.30       },
+    ancient:    { description: 'Rare material chance doubled',            ancientMat: true  },
+    abyssal:    { description: 'Ignores bait tier boost',                 ignoresBait: true },
+    armored:    { description: 'Crit resistance (halves crit multiplier)', critResist: true  },
+    elusive:    { description: 'Extra success check (-5%)',               successMod: -0.05 }
+};
+
+// ─── SIZE TIERS (Issue #152) ──────────────────────────────────────────────────
+// Extended size tiers with weight calculation.
+const SIZE_TIERS = [
+    { id: 'tiny',     label: 'Tiny',     multiplier: 0.70, weightMult: 0.50, chance: 0.10 },
+    { id: 'small',    label: 'Small',    multiplier: 0.85, weightMult: 0.75, chance: 0.20 },
+    { id: 'average',  label: 'Average',  multiplier: 1.00, weightMult: 1.00, chance: 0.35 },
+    { id: 'large',    label: 'Large',    multiplier: 1.30, weightMult: 1.40, chance: 0.22 },
+    { id: 'trophy',   label: 'Trophy',   multiplier: 1.80, weightMult: 2.20, chance: 0.10 },
+    { id: 'colossal', label: 'Colossal', multiplier: 2.50, weightMult: 3.50, chance: 0.03 }
+];
+
+// Base weights in lbs per fish tier (rough scaling)
+const FISH_BASE_WEIGHTS = {
+    common:    { min: 0.2, max: 3   },
+    uncommon:  { min: 1,   max: 12  },
+    rare:      { min: 5,   max: 50  },
+    epic:      { min: 20,  max: 200 },
+    legendary: { min: 100, max: 800 },
+    event:     { min: 200, max: 999 }
+};
+
+// ─── WEATHER SYSTEM (Issue #153) ──────────────────────────────────────────────
+const WEATHER_TYPES = {
+    clear: {
+        id: 'clear', name: 'Clear Skies', emoji: '☀️',
+        spawnWeight: 30,
+        durationMs: 2 * 3_600_000,
+        locationBonus: {}
+    },
+    rain: {
+        id: 'rain', name: 'Rain', emoji: '🌧️',
+        spawnWeight: 20,
+        durationMs: 1.5 * 3_600_000,
+        locationBonus: { river: { rareChance: 0.08 } }
+    },
+    fog: {
+        id: 'fog', name: 'Fog', emoji: '🌫️',
+        spawnWeight: 15,
+        durationMs: 2 * 3_600_000,
+        locationBonus: { lake: { legendaryChance: 0.04 } }
+    },
+    storm: {
+        id: 'storm', name: 'Storm', emoji: '⛈️',
+        spawnWeight: 10,
+        durationMs: 1 * 3_600_000,
+        locationBonus: { ocean: { epicChance: 0.06 } }
+    },
+    heatwave: {
+        id: 'heatwave', name: 'Heatwave', emoji: '🌡️',
+        spawnWeight: 15,
+        durationMs: 2 * 3_600_000,
+        locationBonus: { pond: { junkMod: 0.05 }, river: { junkMod: 0.05 } }
+    },
+    aurora: {
+        id: 'aurora', name: 'Aurora', emoji: '🌌',
+        spawnWeight: 10,
+        durationMs: 1.5 * 3_600_000,
+        locationBonus: { deep_sea: { mythicalChance: 0.05 } }
+    }
+};
+
+const WEATHER_LIST = Object.values(WEATHER_TYPES);
+
+// Time of day bonuses (based on UTC hour)
+function getTimeOfDay() {
+    const h = new Date().getUTCHours();
+    if (h >= 5  && h < 9)  return 'dawn';
+    if (h >= 9  && h < 17) return 'noon';
+    if (h >= 17 && h < 21) return 'dusk';
+    return 'midnight';
+}
+
+const TIME_OF_DAY_BONUSES = {
+    dawn:     { tierBonus: { uncommon: 0.04, rare: 0.02 }, description: 'Dawn — trout & salmon boosted' },
+    noon:     { tierBonus: { uncommon: 0.04 },                description: 'Noon — common fish more plentiful' },
+    dusk:     { tierBonus: { epic: 0.03, rare: 0.04 },     description: 'Dusk — predators are hunting' },
+    midnight: { tierBonus: { legendary: 0.03, event: 0.02 }, description: 'Midnight — mythical creatures stir' }
+};
 
 // ─── TIER DISPLAY ─────────────────────────────────────────────────────────────
 
@@ -800,5 +1176,12 @@ module.exports = {
     MATERIAL_NAMES,
     FISH_CRAFT_RECIPES,
     FISH_QUEST_TEMPLATES,
-    FAILURE_SEVERITIES
+    FAILURE_SEVERITIES,
+    FISH_TRAITS,
+    SIZE_TIERS,
+    FISH_BASE_WEIGHTS,
+    WEATHER_TYPES,
+    WEATHER_LIST,
+    TIME_OF_DAY_BONUSES,
+    getTimeOfDay
 };
