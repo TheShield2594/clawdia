@@ -31,9 +31,11 @@ module.exports = {
 
             const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
             const streakDays = user.streak?.current ?? 0;
+            const freezeCount = user.streak?.freezes ?? 0;
+            const freezeTag = freezeCount > 0 ? ` · ❄️ ${freezeCount} freeze${freezeCount !== 1 ? 's' : ''} banked` : '';
             const streakInfo = streakMult > 1.0
-                ? `🔥 ${streakDays}-day streak · **${streakMult}x** coins & XP`
-                : `❄️ ${streakDays}-day streak · 1.0x (7 days for bonus)`;
+                ? `🔥 ${streakDays}-day streak · **${streakMult}x** coins & XP${freezeTag}`
+                : `❄️ ${streakDays}-day streak · 1.0x (7 days for bonus)${freezeTag}`;
 
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
