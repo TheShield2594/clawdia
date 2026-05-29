@@ -287,8 +287,9 @@ module.exports = {
             });
         }
 
-        if (!await confirmBet(interaction, bet, user.balance, 'Cup Game', guildSettings)) return;
-        await interaction.deferReply();
+        const { shouldProceed: cgProceed, alreadyReplied: cgReplied } = await confirmBet(interaction, bet, user.balance, 'Cup Game', guildSettings);
+        if (!cgProceed) return;
+        if (!cgReplied) await interaction.deferReply();
         await playCupGame(interaction, bet);
     },
 };

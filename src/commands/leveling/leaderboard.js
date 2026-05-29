@@ -14,7 +14,8 @@ module.exports = {
                     { name: 'Levels',          value: 'levels' },
                     { name: 'Economy',         value: 'economy' },
                     { name: 'Streaks',         value: 'streaks' },
-                    { name: 'Streaks (Longest All-Time)', value: 'streaks_longest' }
+                    { name: 'Streaks (Longest All-Time)', value: 'streaks_longest' },
+                    { name: 'Duels (Most Wins)',          value: 'duels'           }
                 )),
     async execute(interaction) {
         const type = interaction.options.getString('type') || 'levels';
@@ -35,6 +36,13 @@ module.exports = {
                 descriptionHeader = type === 'streaks'
                     ? 'Top 10 by Current Active Streak'
                     : 'Top 10 by Longest Streak Ever';
+            } else if (type === 'duels') {
+                users = await User.find({
+                    guildId: interaction.guild.id,
+                    $or: [{ duelWins: { $gt: 0 } }, { duelLosses: { $gt: 0 } }],
+                }).sort({ duelWins: -1 }).limit(10);
+                title = '⚔️ Duel Leaderboard';
+                descriptionHeader = 'Top 10 Duelists by Win Count';
             } else {
                 const sortField = type === 'levels' ? { level: -1, xp: -1 } : { balance: -1, bank: -1 };
                 users = await User.find({ guildId: interaction.guild.id }).sort(sortField).limit(10);
@@ -91,9 +99,13 @@ module.exports = {
                 } else if (type === 'streaks') {
                     const days = user.streak?.current ?? 0;
                     description += `${medal} ${discordUser.tag} — 🔥 ${days} day${days !== 1 ? 's' : ''}\n`;
-                } else {
+                } else if (type === 'streaks_longest') {
                     const days = user.streak?.longest ?? 0;
                     description += `${medal} ${discordUser.tag} — 🔥 ${days} day${days !== 1 ? 's' : ''}\n`;
+                } else {
+                    const wins   = user.duelWins   ?? 0;
+                    const losses = user.duelLosses ?? 0;
+                    description += `${medal} ${discordUser.tag} — ⚔️ ${wins}W / ${losses}L\n`;
                 }
             }
 

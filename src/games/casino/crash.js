@@ -7,8 +7,15 @@ const {
 const User = require('../../models/User');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect } = require('../../services/effectsService');
+const {
+    LOBBY_JOIN_WINDOW_MS,
+    MAX_PLAYERS,
+    createLobby,
+    getLobby,
+    deleteLobby,
+    addPlayer,
+} = require('../../utils/crashLobby');
 
-const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f4a5.png';
 const GROWTH  = 1.12;
 const TICK_MS = 1200;
 const MIN_BET = 10;
@@ -32,9 +39,7 @@ function multLabel(m) {
     return m >= 10 ? m.toFixed(1) + 'x' : m.toFixed(2) + 'x';
 }
 
-// Color transitions from calm green → danger red as multiplier climbs
-function crashColor(m, cashedOut) {
-    if (cashedOut) return '#00cc66';
+function crashColor(m) {
     if (m < 1.5)  return '#00ff88';
     if (m < 2.0)  return '#44ff44';
     if (m < 3.0)  return '#aaee00';
@@ -44,7 +49,6 @@ function crashColor(m, cashedOut) {
     return '#ff2200';
 }
 
-// Risk label changes as multiplier rises
 function riskLabel(m) {
     if (m < 1.5)  return '🟢 Safe Zone';
     if (m < 2.0)  return '🟢 Low Risk';
@@ -55,109 +59,90 @@ function riskLabel(m) {
     return '🚨 EXTREME!';
 }
 
-// Log-scale bar that fills on a 1x–100x range, with zone color blocks
 function progressBar(m) {
     const total  = 20;
     const filled = Math.min(total, Math.round((Math.log(m) / Math.log(100)) * total));
     const empty  = total - filled;
     const glyph  = m < 5 ? '▰' : m < 15 ? '▮' : '█';
-    const bar    = glyph.repeat(filled) + '▱'.repeat(empty);
-    return `\`${bar}\``;
+    return `\`${glyph.repeat(filled)}${'▱'.repeat(empty)}\``;
 }
 
-function embedAuthor(interaction) {
-    return {
-        name: interaction.member?.displayName || interaction.user.username,
-        iconURL: interaction.user.displayAvatarURL({ dynamic: true }),
-    };
-}
-
-function liveEmbed(multiplier, bet, interaction, cashedOut, cashedOutAt) {
-    const label  = multLabel(multiplier);
-    const color  = crashColor(multiplier, cashedOut);
-    const risk   = riskLabel(multiplier);
-    const bar    = progressBar(multiplier);
-
-    let desc;
-    if (cashedOut) {
-        desc = `✅ **Cashed out at ${multLabel(cashedOutAt)}** — riding out the crash…\n\n${bar}  ${label}`;
-    } else {
-        desc = `🚀 **Multiplier rising** — hit Cash Out before it crashes!\n\n${bar}  **${label}**`;
-    }
-
+// ── Lobby embed (join window) ───────────────────────────────────────────────
+function lobbyEmbed(lobby, playerNames) {
+    const secsLeft = Math.max(0, Math.ceil((lobby.joinDeadline - Date.now()) / 1000));
+    const lines = playerNames.length
+        ? playerNames.map(n => `• ${n}`).join('\n')
+        : '*No players yet*';
     return new EmbedBuilder()
-        .setAuthor(embedAuthor(interaction))
-        .setThumbnail(THUMB)
-        .setColor(color)
-        .setTitle('💥 Crash')
-        .setDescription(desc)
-        .addFields(
-            { name: '📈 Multiplier', value: `**${label}**`,                       inline: true },
-            { name: '⚠️ Risk Level', value: risk,                                  inline: true },
-            { name: '💰 Bet',        value: `${bet.toLocaleString()} coins`,       inline: true },
+        .setColor('#5865F2')
+        .setTitle('💥 Crash — Lobby Open')
+        .setDescription(
+            `**Bet:** ${lobby.bet.toLocaleString()} coins each\n` +
+            `**Joining:** ${lobby.players.size}/${MAX_PLAYERS} players\n\n` +
+            `**Players:**\n${lines}\n\n` +
+            `Lobby closes in **${secsLeft}s** or when host starts.`
         )
-        .setFooter({ text: 'Cash out before it crashes to secure your winnings!' });
+        .setFooter({ text: 'Click Join to enter · Host can start early' })
+        .setTimestamp();
 }
 
-function crashedEmbed(crashPoint, bet, cashedOut, cashedOutAt, newBalance, interaction) {
-    const crashLabel = multLabel(crashPoint);
-    let color, headline, fields;
+function buildLobbyRow(lobbyId) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`crash_join_${lobbyId}`)
+            .setLabel('Join Lobby')
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+            .setCustomId(`crash_start_${lobbyId}`)
+            .setLabel('Start Now')
+            .setStyle(ButtonStyle.Success),
+    );
+}
 
-    if (cashedOut) {
-        const payout = Math.floor(bet * cashedOutAt);
-        const net    = payout - bet;
-        color    = '#00cc66';
-        headline = `✅ You cashed out at **${multLabel(cashedOutAt)}** before the crash!`;
-        fields   = [
-            { name: '💸 Bet',           value: `${bet.toLocaleString()} coins`,    inline: true },
-            { name: '🏆 Payout',        value: `${payout.toLocaleString()} coins`, inline: true },
-            { name: '📊 Net',           value: `**+${net.toLocaleString()}** coins`, inline: true },
-            { name: '💥 Crashed At',    value: `**${crashLabel}**`,                inline: true },
-            { name: '💰 New Balance',   value: `**${newBalance.toLocaleString()}** coins`, inline: true },
-        ];
-    } else {
-        color    = '#ff3333';
-        headline = `💀 You didn't cash out in time! Everything is gone.`;
-        fields   = [
-            { name: '💥 Crashed At',  value: `**${crashLabel}**`,                  inline: true },
-            { name: '💀 Lost',        value: `${bet.toLocaleString()} coins`,       inline: true },
-            { name: '💰 New Balance', value: `**${newBalance.toLocaleString()}** coins`, inline: true },
-        ];
-    }
-
+// ── Live game embed (multiplayer) ───────────────────────────────────────────
+function liveMultiEmbed(multiplier, bet, playerLines) {
+    const bar  = progressBar(multiplier);
+    const label = multLabel(multiplier);
     return new EmbedBuilder()
-        .setAuthor(embedAuthor(interaction))
-        .setThumbnail(THUMB)
-        .setColor(color)
+        .setColor(crashColor(multiplier))
+        .setTitle('💥 Crash — Live')
+        .setDescription(
+            `🚀 **Multiplier rising!**\n\n${bar}  **${label}**\n\n` +
+            `${riskLabel(multiplier)}\n\n` +
+            '**Players:**\n' + (playerLines.join('\n') || '*—*')
+        )
+        .addFields(
+            { name: '📈 Multiplier', value: `**${label}**`,                    inline: true },
+            { name: '💰 Bet',        value: `${bet.toLocaleString()} coins`,   inline: true },
+        )
+        .setFooter({ text: 'Hit Cash Out before it crashes!' });
+}
+
+// ── Final result embed ───────────────────────────────────────────────────────
+async function buildFinalEmbed(crashPoint, bet, players, client, guildId) {
+    const crashLabel = multLabel(crashPoint);
+    const lines = [];
+    for (const [uid, state] of players.entries()) {
+        const user = await client.users.fetch(uid).catch(() => ({ username: uid }));
+        if (state.cashedOutAt) {
+            const payout = Math.floor(bet * state.cashedOutAt);
+            const net    = payout - bet;
+            lines.push(`✅ **${user.username}** cashed at **${multLabel(state.cashedOutAt)}** (+${net.toLocaleString()} coins)`);
+        } else {
+            lines.push(`💀 **${user.username}** didn't cash out (-${bet.toLocaleString()} coins)`);
+        }
+    }
+    return new EmbedBuilder()
+        .setColor('#ff3333')
         .setTitle(`💥 Crashed at ${crashLabel}!`)
-        .setDescription(headline)
-        .addFields(fields)
+        .setDescription(lines.join('\n') || '*No players*')
         .setFooter({ text: 'The house always has a 1% edge — play responsibly!' })
         .setTimestamp();
 }
 
-function buildCashOutRow(id, multiplier, disabled) {
-    return new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(id)
-            .setLabel(disabled ? '✅ Cashed Out' : `💰 Cash Out  ${multLabel(multiplier)}`)
-            .setStyle(disabled ? ButtonStyle.Secondary : ButtonStyle.Success)
-            .setDisabled(disabled),
-    );
-}
-
-function buildResultRow(replayId) {
-    return new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(replayId)
-            .setLabel('💥 Play Again')
-            .setStyle(ButtonStyle.Primary),
-    );
-}
-
 module.exports = {
     name: 'crash',
-    description: 'Bet on a rising multiplier — cash out before it crashes!',
+    description: 'Multiplayer crash — bet and cash out before the curve crashes!',
     cooldown: 10,
     configure: sub => sub
         .addIntegerOption(opt =>
@@ -168,153 +153,247 @@ module.exports = {
                 .setRequired(true)),
 
     async execute(interaction) {
-        const bet = interaction.options.getInteger('bet');
+        const bet  = interaction.options.getInteger('bet');
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        const wallet = user?.balance ?? 0;
-        if (!await confirmBet(interaction, bet, wallet, 'Crash')) return;
-        await interaction.deferReply();
-        await playCrash(interaction, bet);
+        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash');
+        if (!shouldProceed) return;
+        if (!alreadyReplied) await interaction.deferReply();
+        await openLobby(interaction, bet);
     },
 };
 
-async function playCrash(interaction, bet) {
-    try {
-        const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+async function openLobby(interaction, bet) {
+    const channelId = interaction.channel.id;
+    const lobbyId   = `${channelId}_${Date.now()}`;
 
-        await User.findOneAndUpdate(
-            userFilter,
-            { $setOnInsert: { ...userFilter, balance: 0 } },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
+    // Prevent two lobbies in the same channel
+    if (getLobby(channelId)) {
+        return interaction.editReply({ content: 'A crash lobby is already open in this channel.', components: [] });
+    }
 
-        const debited = await User.findOneAndUpdate(
-            { ...userFilter, balance: { $gte: bet } },
-            { $inc: { balance: -bet } },
-            { new: true }
-        );
+    const lobby = createLobby(channelId, interaction.user.id, bet);
+    if (!lobby) {
+        return interaction.editReply({ content: 'A crash lobby is already open in this channel.', components: [] });
+    }
 
-        if (!debited) {
-            const fresh = await User.findOne(userFilter);
-            return interaction.editReply({
-                content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
-                components: [],
-            });
+    // Deduct host's bet immediately
+    const deducted = await User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
+        { $inc: { balance: -bet } },
+        { new: true }
+    );
+    if (!deducted) {
+        deleteLobby(channelId);
+        return interaction.editReply({ content: `❌ Not enough coins! You need **${bet.toLocaleString()}** coins.`, components: [] });
+    }
+
+    addPlayer(channelId, interaction.user.id);
+
+    const msg = await interaction.editReply({
+        embeds:     [lobbyEmbed(lobby, [interaction.user.username])],
+        components: [buildLobbyRow(lobbyId)],
+    });
+
+    // Lobby join collector
+    const joinCollector = msg.createMessageComponentCollector({
+        filter: i => i.customId === `crash_join_${lobbyId}` || i.customId === `crash_start_${lobbyId}`,
+        time:   LOBBY_JOIN_WINDOW_MS + 5_000,
+    });
+
+    async function updateLobbyEmbed() {
+        const names = [];
+        for (const uid of lobby.players.keys()) {
+            const u = await interaction.client.users.fetch(uid).catch(() => ({ username: uid }));
+            names.push(u.username);
         }
+        await interaction.editReply({
+            embeds:     [lobbyEmbed(lobby, names)],
+            components: [buildLobbyRow(lobbyId)],
+        }).catch(() => {});
+    }
 
-        // Lucky Charm: boost crash point by 20% (higher crash = more time to cash out)
-        const luckyActive = hasEffect(debited, 'lucky_charm');
-        const crash    = luckyActive
-            ? Math.min(100.00, parseFloat((generateCrashPoint() * 1.2).toFixed(2)))
-            : generateCrashPoint();
-        const cashOutId = `crash_co_${interaction.id}_${Date.now()}`;
+    joinCollector.on('collect', async i => {
+        if (lobby.locked) { await i.deferUpdate().catch(() => {}); return; }
 
-        // Instant crash — no time to react
-        if (crash <= 1.00) {
-            const replayId = `crash_replay_${interaction.id}_${Date.now()}`;
-            const fresh    = await User.findOne(userFilter);
-            await interaction.editReply({
-                embeds:     [crashedEmbed(1.00, bet, false, 0, fresh?.balance ?? debited.balance, interaction)],
-                components: [buildResultRow(replayId)],
-            });
-            setupReplay(interaction, replayId, bet);
+        if (i.customId === `crash_start_${lobbyId}`) {
+            if (i.user.id !== lobby.hostId) {
+                return i.reply({ content: 'Only the host can start early.', ephemeral: true });
+            }
+            await i.deferUpdate().catch(() => {});
+            joinCollector.stop('started');
             return;
         }
 
-        let tick        = 0;
-        let currentMult = multiplierAt(0);
-        let cashedOut   = false;
-        let cashedOutAt = 0;
-        let gameOver    = false;
-        const crashTick   = ticksUntilCrash(crash);
-        const collectorMs = (crashTick + 3) * TICK_MS + 8000;
+        // Join button
+        if (lobby.players.has(i.user.id)) {
+            return i.reply({ content: "You're already in this lobby.", ephemeral: true });
+        }
+        if (lobby.players.size >= MAX_PLAYERS) {
+            return i.reply({ content: 'Lobby is full.', ephemeral: true });
+        }
 
-        await interaction.editReply({
-            embeds:     [liveEmbed(currentMult, bet, interaction, false, 0)],
-            components: [buildCashOutRow(cashOutId, currentMult, false)],
-        });
+        // Deduct joining player's bet
+        const deducted = await User.findOneAndUpdate(
+            { userId: i.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
+            { $inc: { balance: -bet } },
+            { new: true }
+        );
+        if (!deducted) {
+            return i.reply({ content: `You need **${bet.toLocaleString()}** coins to join.`, ephemeral: true });
+        }
 
-        const message   = await interaction.fetchReply();
-        const collector = message.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && i.customId === cashOutId,
-            max:    1,
-            time:   collectorMs,
-        });
-
-        collector.on('collect', async i => {
-            if (gameOver || cashedOut) { await i.deferUpdate().catch(() => {}); return; }
-
-            cashedOut   = true;
-            cashedOutAt = currentMult;
-            const payout = Math.floor(bet * cashedOutAt);
-
+        const joined = addPlayer(channelId, i.user.id);
+        if (!joined) {
+            // Lobby became full or player was added concurrently — refund the deducted bet
             await User.findOneAndUpdate(
-                { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: payout } },
-            );
+                { userId: i.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: bet } }
+            ).catch(err => console.error('[crash] join refund failed:', err));
+            return i.reply({ content: 'Could not join the lobby (it may have just filled up). Your coins have been refunded.', ephemeral: true });
+        }
+        await i.deferUpdate().catch(() => {});
+        await updateLobbyEmbed();
+    });
 
-            await i.update({
-                embeds:     [liveEmbed(currentMult, bet, interaction, true, cashedOutAt)],
-                components: [buildCashOutRow(cashOutId, currentMult, true)],
-            }).catch(() => {});
-        });
+    joinCollector.on('end', async (_, reason) => {
+        if (lobby.locked) return; // already started
+        lobby.locked = true;
 
-        const interval = setInterval(async () => {
-            if (gameOver) return;
+        if (lobby.players.size === 0) {
+            deleteLobby(channelId);
+            await interaction.editReply({ content: 'Nobody joined — lobby cancelled.', components: [] }).catch(() => {});
+            return;
+        }
 
-            tick++;
-            currentMult = multiplierAt(tick);
+        await startCrashGame(interaction, lobby, lobbyId);
+    });
 
-            if (currentMult >= crash) {
-                gameOver = true;
-                clearInterval(interval);
-                collector.stop('crashed');
-
-                const freshUser  = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-                const replayId   = `crash_replay_${interaction.id}_${Date.now()}`;
-
-                await interaction.editReply({
-                    embeds:     [crashedEmbed(crash, bet, cashedOut, cashedOutAt, freshUser?.balance ?? debited.balance, interaction)],
-                    components: [buildResultRow(replayId)],
-                }).catch(() => {});
-
-                setupReplay(interaction, replayId, bet);
-                return;
-            }
-
-            if (!cashedOut) {
-                await interaction.editReply({
-                    embeds:     [liveEmbed(currentMult, bet, interaction, false, 0)],
-                    components: [buildCashOutRow(cashOutId, currentMult, false)],
-                }).catch(() => {});
-            }
-        }, TICK_MS);
-
-        collector.on('end', (_, reason) => {
-            if (reason !== 'crashed' && !gameOver) {
-                gameOver = true;
-                clearInterval(interval);
-            }
-        });
-
-    } catch (err) {
-        console.error('[Crash] error:', err);
-        await interaction.editReply({ content: 'Something went wrong. Please try again.', components: [] }).catch(() => {});
-    }
+    // Auto-start after join window. Only stop the collector; the 'end' handler
+    // is responsible for setting lobby.locked and calling startCrashGame.
+    setTimeout(() => {
+        if (!lobby.locked) joinCollector.stop('timeout');
+    }, LOBBY_JOIN_WINDOW_MS);
 }
 
-function setupReplay(interaction, replayId, bet) {
-    interaction.fetchReply().then(msg => {
-        const collector = msg.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && i.customId === replayId,
-            max: 1,
-            time: 60_000,
-        });
-        collector.on('collect', async i => {
-            await i.deferUpdate();
-            await playCrash(interaction, bet);
-        });
-        collector.on('end', (_, reason) => {
-            if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
-        });
+async function startCrashGame(interaction, lobby, lobbyId) {
+    const channelId = lobby.channelId;
+    const bet       = lobby.bet;
+    const guildId   = interaction.guild.id;
+
+    // Determine crash point (use Lucky Charm of host if active)
+    const hostDoc     = await User.findOne({ userId: lobby.hostId, guildId });
+    const luckyActive = hostDoc ? hasEffect(hostDoc, 'lucky_charm') : false;
+    const crash       = luckyActive
+        ? Math.min(100.00, parseFloat((generateCrashPoint() * 1.2).toFixed(2)))
+        : generateCrashPoint();
+
+    // Instant crash (1% chance) — standard loss, no reaction time
+    if (crash <= 1.00) {
+        const finalEmbed = await buildFinalEmbed(crash, bet, lobby.players, interaction.client, guildId);
+        deleteLobby(channelId);
+        return interaction.editReply({ embeds: [finalEmbed], components: [] }).catch(() => {});
+    }
+
+    let tick        = 0;
+    let currentMult = multiplierAt(0);
+    let gameOver    = false;
+    const crashTick   = ticksUntilCrash(crash);
+    const collectorMs = (crashTick + 3) * TICK_MS + 8000;
+
+    async function getPlayerLines() {
+        const lines = [];
+        for (const [uid, state] of lobby.players.entries()) {
+            const u = await interaction.client.users.fetch(uid).catch(() => ({ username: uid }));
+            if (state.cashedOutAt) {
+                lines.push(`✅ **${u.username}** cashed at **${multLabel(state.cashedOutAt)}**`);
+            } else {
+                lines.push(`🎮 **${u.username}** — still in`);
+            }
+        }
+        return lines;
+    }
+
+    // Build per-player cash out rows — show each player their own button via ephemeral
+    // Since Discord has one shared message, we show a single public embed and the
+    // cash out button is public. Each player can click it; we filter by userId.
+    await interaction.editReply({
+        embeds:     [liveMultiEmbed(currentMult, bet, await getPlayerLines())],
+        components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`crash_co_${lobbyId}`)
+                .setLabel(`💰 Cash Out  ${multLabel(currentMult)}`)
+                .setStyle(ButtonStyle.Success),
+        )],
     }).catch(() => {});
+
+    const message   = await interaction.fetchReply().catch(() => null);
+    if (!message) { deleteLobby(channelId); return; }
+
+    const collector = message.createMessageComponentCollector({
+        filter: i => i.customId === `crash_co_${lobbyId}` && lobby.players.has(i.user.id),
+        time:   collectorMs,
+    });
+
+    collector.on('collect', async i => {
+        if (gameOver) { await i.deferUpdate().catch(() => {}); return; }
+        const state = lobby.players.get(i.user.id);
+        if (!state || state.cashedOutAt !== null) {
+            return i.reply({ content: "You've already cashed out.", ephemeral: true });
+        }
+
+        state.cashedOutAt = currentMult;
+        const payout = Math.floor(bet * currentMult);
+        await User.findOneAndUpdate(
+            { userId: i.user.id, guildId },
+            { $inc: { balance: payout } }
+        );
+
+        await i.reply({
+            content: `✅ Cashed out at **${multLabel(currentMult)}** — **+${(payout - bet).toLocaleString()} coins**!`,
+            ephemeral: true,
+        }).catch(() => {});
+
+        // Update shared embed with new player lines
+        const lines = await getPlayerLines();
+        await interaction.editReply({
+            embeds: [liveMultiEmbed(currentMult, bet, lines)],
+        }).catch(() => {});
+    });
+
+    lobby.interval = setInterval(async () => {
+        if (gameOver) return;
+
+        tick++;
+        currentMult = multiplierAt(tick);
+
+        if (currentMult >= crash) {
+            gameOver = true;
+            clearInterval(lobby.interval);
+            collector.stop('crashed');
+
+            const finalEmbed = await buildFinalEmbed(crash, bet, lobby.players, interaction.client, guildId);
+            deleteLobby(channelId);
+            await interaction.editReply({ embeds: [finalEmbed], components: [] }).catch(() => {});
+            return;
+        }
+
+        const lines = await getPlayerLines();
+        await interaction.editReply({
+            embeds:     [liveMultiEmbed(currentMult, bet, lines)],
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`crash_co_${lobbyId}`)
+                    .setLabel(`💰 Cash Out  ${multLabel(currentMult)}`)
+                    .setStyle(ButtonStyle.Success),
+            )],
+        }).catch(() => {});
+    }, TICK_MS);
+
+    collector.on('end', (_, reason) => {
+        if (reason !== 'crashed' && !gameOver) {
+            gameOver = true;
+            clearInterval(lobby.interval);
+            deleteLobby(channelId);
+        }
+    });
 }

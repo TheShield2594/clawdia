@@ -185,9 +185,9 @@ module.exports = {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
-        if (!await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings)) return;
-
-        await interaction.deferReply();
+        const { shouldProceed: rProceed, alreadyReplied: rReplied } = await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings);
+        if (!rProceed) return;
+        if (!rReplied) await interaction.deferReply();
         await playRoulette(interaction, betKey, bet, target);
     },
 };
