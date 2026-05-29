@@ -3,6 +3,7 @@ const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect, timeRemaining } = require('../../services/effectsService');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
+const { getTotalBonus } = require('../../services/petService');
 
 const ROBBER_COOLDOWN_MS = 1 * 3_600_000; // 1 hour
 const VICTIM_IMMUNITY_MS = 30 * 60_000;   // 30 minutes
@@ -129,6 +130,7 @@ module.exports = {
             // ── Build success chance ──────────────────────────────────────────
             let successChance = BASE_SUCCESS_CHANCE;
             if (hasEffect(robber, 'knife'))       successChance += 0.15;  // Knife: +15%
+            successChance += getTotalBonus(robber.pets || [], 'rob_success') / 100; // Fox pet: +8%
             successChance = Math.max(0, Math.min(0.95, successChance));
 
             const success = Math.random() < successChance;

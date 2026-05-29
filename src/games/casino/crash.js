@@ -176,10 +176,10 @@ async function openLobby(interaction, bet) {
         return interaction.editReply({ content: 'A crash lobby is already open in this channel.', components: [] });
     }
 
-    // Deduct host's bet immediately
+    // Deduct host's bet immediately; mark as pending so a restart can refund it
     const deducted = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
-        { $inc: { balance: -bet } },
+        { $inc: { balance: -bet, pendingCrashRefund: bet } },
         { new: true }
     );
     if (!deducted) {
@@ -232,10 +232,10 @@ async function openLobby(interaction, bet) {
             return i.reply({ content: 'Lobby is full.', ephemeral: true });
         }
 
-        // Deduct joining player's bet
+        // Deduct joining player's bet; mark as pending so a restart can refund it
         const deducted = await User.findOneAndUpdate(
             { userId: i.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
-            { $inc: { balance: -bet } },
+            { $inc: { balance: -bet, pendingCrashRefund: bet } },
             { new: true }
         );
         if (!deducted) {
@@ -289,6 +289,13 @@ async function startCrashGame(interaction, lobby, lobbyId) {
 
     // Instant crash (1% chance) — standard loss, no reaction time
     if (crash <= 1.00) {
+        const loserIds = [...lobby.players.keys()];
+        if (loserIds.length > 0) {
+            User.updateMany(
+                { userId: { $in: loserIds }, guildId },
+                { $set: { pendingCrashRefund: 0 } }
+            ).catch(err => console.error('[crash] failed to clear pendingCrashRefund on instant crash:', err));
+        }
         const finalEmbed = await buildFinalEmbed(crash, bet, lobby.players, interaction.client, guildId);
         deleteLobby(channelId);
         return interaction.editReply({ embeds: [finalEmbed], components: [] }).catch(() => {});
@@ -345,7 +352,7 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         const payout = Math.floor(bet * currentMult);
         await User.findOneAndUpdate(
             { userId: i.user.id, guildId },
-            { $inc: { balance: payout } }
+            { $inc: { balance: payout }, $set: { pendingCrashRefund: 0 } }
         );
 
         await i.reply({
@@ -370,6 +377,17 @@ async function startCrashGame(interaction, lobby, lobbyId) {
             gameOver = true;
             clearInterval(lobby.interval);
             collector.stop('crashed');
+
+            // Clear pendingCrashRefund for players who didn't cash out (they lose normally)
+            const loserIds = [...lobby.players.entries()]
+                .filter(([, s]) => s.cashedOutAt === null)
+                .map(([uid]) => uid);
+            if (loserIds.length > 0) {
+                User.updateMany(
+                    { userId: { $in: loserIds }, guildId },
+                    { $set: { pendingCrashRefund: 0 } }
+                ).catch(err => console.error('[crash] failed to clear pendingCrashRefund:', err));
+            }
 
             const finalEmbed = await buildFinalEmbed(crash, bet, lobby.players, interaction.client, guildId);
             deleteLobby(channelId);
