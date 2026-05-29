@@ -9,6 +9,7 @@ const {
 } = require('discord.js');
 const axios = require('axios');
 const User  = require('../../models/User');
+const FALLBACK_QUESTIONS = require('../../data/quizFallback');
 
 const THUMB         = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f393.png';
 const TIMER_SECONDS = 30;
@@ -40,10 +41,17 @@ function decodeHtml(str) {
 async function fetchQuestion(difficulty) {
     const params = { amount: 1, type: 'multiple' };
     if (difficulty !== 'any') params.difficulty = difficulty;
-    const { data } = await axios.get(OPENTDB_URL, { params, timeout: 8000 });
+    const { data } = await axios.get(OPENTDB_URL, { params, timeout: 4000 });
     if (data.response_code !== 0 || !data.results?.length)
         throw new Error(`OpenTDB response_code: ${data.response_code}`);
-    return data.results[0];
+    return { raw: data.results[0], offline: false };
+}
+
+function fetchFallbackQuestion(difficulty) {
+    const key = difficulty === 'any' ? ['easy', 'medium', 'hard'][Math.floor(Math.random() * 3)] : difficulty;
+    const bank = FALLBACK_QUESTIONS[key] ?? FALLBACK_QUESTIONS.medium;
+    const raw  = bank[Math.floor(Math.random() * bank.length)];
+    return { raw: { ...raw, difficulty: key, category: 'General Knowledge' }, offline: true };
 }
 
 function shuffleArray(arr) {
@@ -103,10 +111,13 @@ function embedAuthor(interaction) {
     };
 }
 
-function questionEmbed(question, category, difficulty, rewards, balance, interaction, elapsed = 0) {
+function questionEmbed(question, category, difficulty, rewards, balance, interaction, elapsed = 0, offline = false) {
     const diffEmoji = DIFF_EMOJI[difficulty] ?? '⚪';
     const catEmoji  = categoryEmoji(category);
     const color     = DIFF_COLOR[difficulty] ?? '#5865F2';
+    const footerText = offline
+        ? `${TIMER_SECONDS}s to answer — pick from the menu below  •  ⚠️ Using offline question bank`
+        : `${TIMER_SECONDS}s to answer — pick from the menu below`;
 
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
@@ -122,7 +133,7 @@ function questionEmbed(question, category, difficulty, rewards, balance, interac
             { name: '❌ Wrong / Timeout',      value: `**−${rewards.lose.toLocaleString()}** coins`, inline: true },
             { name: '💰 Balance',              value: `**${balance.toLocaleString()}** coins`,    inline: true },
         )
-        .setFooter({ text: `${TIMER_SECONDS}s to answer — pick from the menu below` });
+        .setFooter({ text: footerText });
 }
 
 function resultEmbed(interaction, isCorrect, question, correctAnswer, chosenAnswer, difficulty, rewards, netChange, newBalance) {
@@ -199,12 +210,12 @@ async function runQuiz(interaction, diffChoice) {
     let user = await User.findOne(userFilter);
     if (!user) user = await User.create(userFilter);
 
-    let raw;
+    let raw, offline;
     try {
-        raw = await fetchQuestion(diffChoice);
+        ({ raw, offline } = await fetchQuestion(diffChoice));
     } catch (err) {
-        console.error('[Quiz] fetch error:', err.message);
-        return interaction.editReply({ content: '⚠️ Couldn\'t reach the trivia server right now. Please try again in a moment.', components: [] });
+        console.error('[Quiz] fetch error — using fallback:', err.message);
+        ({ raw, offline } = fetchFallbackQuestion(diffChoice));
     }
 
     const difficulty    = raw.difficulty;
@@ -242,7 +253,7 @@ async function runQuiz(interaction, diffChoice) {
 
     const startTime = Date.now();
     await interaction.editReply({
-        embeds:     [questionEmbed(question, category, difficulty, rewards, user.balance, interaction, 0)],
+        embeds:     [questionEmbed(question, category, difficulty, rewards, user.balance, interaction, 0, offline)],
         components: [menuRow],
     });
 
@@ -250,7 +261,7 @@ async function runQuiz(interaction, diffChoice) {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         if (elapsed >= TIMER_SECONDS) { clearInterval(timerInterval); return; }
         await interaction.editReply({
-            embeds:     [questionEmbed(question, category, difficulty, rewards, user.balance, interaction, elapsed)],
+            embeds:     [questionEmbed(question, category, difficulty, rewards, user.balance, interaction, elapsed, offline)],
             components: [menuRow],
         }).catch(() => clearInterval(timerInterval));
     }, 8_000);

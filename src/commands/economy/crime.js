@@ -5,8 +5,7 @@ const { hasEffect, consumeEffect } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
 
-const COOLDOWN_MS      = 2.5 * 3_600_000; // 2.5 hours
-const WANTED_MS        = 0.5 * 3_600_000; // 30 min wanted cooldown after death
+const COOLDOWN_MS      = 1.5 * 3_600_000; // 1.5 hours
 const BASE_SUCCESS     = 0.40;
 const DEATH_RATE       = 0.08;          // 8% of failures trigger critical death
 const DEATH_LOSS_MIN   = 0.15;
@@ -32,7 +31,7 @@ const FINES = [
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('crime')
-        .setDescription('Attempt a crime for 80–1,500 coins (40% success). Caught? You pay a fine instead. Cooldown: 2.5h.'),
+        .setDescription('Attempt a crime for 80–1,500 coins (40% success). Caught? You pay a fine instead. Cooldown: 1.5h.'),
 
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -86,7 +85,7 @@ module.exports = {
                     .setTitle(`${crime.emoji} Crime Pays — This Time`)
                     .setDescription(`Your attempt at **${crime.name}** was a success! You pocketed **${currency}${earned.toLocaleString()}**.${luckyActive ? '\n> 🍀 *Lucky Charm boosted your success chance!*' : ''}${streakLine}`)
                     .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
-                    .setFooter({ text: 'Cooldown: 2.5h' })
+                    .setFooter({ text: 'Cooldown: 1.5h' })
                     .setTimestamp();
             } else {
                 const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
@@ -110,34 +109,33 @@ module.exports = {
                             { name: isCriticalFailure ? 'Death Loss Absorbed' : 'Fine Absorbed', value: `${currency}${Math.min(wouldHaveLost, user.balance).toLocaleString()}`, inline: true },
                             { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                         )
-                        .setFooter({ text: 'Cooldown: 2.5h' })
+                        .setFooter({ text: 'Cooldown: 1.5h' })
                         .setTimestamp();
                 } else if (isCriticalFailure) {
-                    // Critical failure: lose 15–30% of wallet, enter "wanted" status
+                    // Critical failure: lose 15–30% of wallet; cooldown is the punishment (no separate wanted timer)
                     const lossRate = DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
                     const lost = Math.floor(user.balance * lossRate);
                     user.balance = Math.max(0, user.balance - lost);
-                    user.wantedUntil = new Date(Date.now() + WANTED_MS);
                     user.lastCrime = new Date();
                     await user.save();
 
                     embed = new EmbedBuilder()
                         .setColor('#8B0000')
-                        .setTitle(`💀 ${crime.emoji} Caught — You're Wanted!`)
+                        .setTitle(`💀 ${crime.emoji} Critical Failure!`)
                         .setDescription(
                             `Your attempt at **${crime.name}** ended catastrophically. ${flavorText}\n\n` +
-                            `**The police seized ${Math.round(lossRate * 100)}% of your wallet.**\n` +
-                            `> 🚨 You are now **wanted** for 30 minutes — the crime cooldown (2.5h) still applies after.`
+                            `**The police seized ${Math.round(lossRate * 100)}% of your wallet.**`
                         )
                         .addFields(
-                            { name: '💸 Lost',           value: `${currency}${lost.toLocaleString()}`,          inline: true },
-                            { name: '💰 Remaining',      value: `${currency}${user.balance.toLocaleString()}`,  inline: true },
-                            { name: '⏳ Wanted For',     value: '30 min (+ 2.5h cooldown)',                     inline: true }
+                            { name: '💸 Lost',      value: `${currency}${lost.toLocaleString()}`,         inline: true },
+                            { name: '💰 Remaining', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                         )
-                        .setFooter({ text: 'Cooldown: 2.5h • Purchase a Lifesaver from /shop to protect against death events' })
+                        .setFooter({ text: 'Cooldown: 1.5h • Purchase a Lifesaver from /shop to protect against critical failures' })
                         .setTimestamp();
                 } else {
-                    const fine = Math.floor(Math.random() * 151) + 50;
+                    const rawFine = Math.floor(Math.random() * 151) + 50;
+                    const maxFine = Math.max(50, Math.floor(user.balance * 0.20));
+                    const fine = Math.min(rawFine, maxFine);
                     const paid = Math.min(fine, user.balance);
                     user.balance = Math.max(0, user.balance - paid);
                     user.lastCrime = new Date();
@@ -151,7 +149,7 @@ module.exports = {
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
                             { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                         )
-                        .setFooter({ text: 'Cooldown: 2.5h' })
+                        .setFooter({ text: 'Cooldown: 1.5h' })
                         .setTimestamp();
                 }
             }
