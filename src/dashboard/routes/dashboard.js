@@ -5,6 +5,9 @@ const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { ACHIEVEMENTS } = require('../../data/achievements');
 const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
+const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES } = require('../../data/huntData');
+const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES } = require('../../data/fishData');
+const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES } = require('../../data/mineData');
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -114,6 +117,27 @@ async function renderGuildSettings(req, res) {
 
         const safeSettings = guildSettings.toObject();
 
+        const toItem = (ns, item, idField = 'id') => ({ id: `${ns}:${item[idField]}`, label: item.name, emoji: item.emoji || '📦' });
+
+        const huntItems = {
+            weapons:     WEAPON_TIERS.map(w => toItem('hunt', w, 'slug')),
+            upgrades:    Object.values(WEAPON_UPGRADES).map(u => toItem('hunt', u)),
+            ammo:        AMMO_PACKS.map(a => toItem('hunt', a)),
+            consumables: Object.values(HUNT_CONSUMABLES).map(c => toItem('hunt', c))
+        };
+        const fishItems = {
+            rods:        ROD_TIERS.map(r => toItem('fish', r, 'slug')),
+            upgrades:    Object.values(ROD_UPGRADES).map(u => toItem('fish', u)),
+            bait:        BAIT_PACKS.map(b => toItem('fish', b)),
+            consumables: Object.values(FISH_CONSUMABLES).map(c => toItem('fish', c))
+        };
+        const mineItems = {
+            pickaxes:    PICKAXE_TIERS.map(p => toItem('mine', p, 'slug')),
+            upgrades:    Object.values(PICKAXE_UPGRADES).map(u => toItem('mine', u)),
+            blasts:      BLAST_PACKS.map(b => toItem('mine', b)),
+            consumables: Object.values(MINE_CONSUMABLES).map(c => toItem('mine', c))
+        };
+
         res.render('guild-settings', {
             user: req.user,
             guild: { id: guild.id, name: guild.name, icon: guild.icon, ownerId: guild.ownerId, owner: req.user.id === guild.ownerId },
@@ -125,7 +149,10 @@ async function renderGuildSettings(req, res) {
             roles: roles,
             defaultJobs: DEFAULT_JOBS,
             defaultTiers: DEFAULT_TIERS,
-            builtinAchievements
+            builtinAchievements,
+            huntItems,
+            fishItems,
+            mineItems
         });
     } catch (error) {
         console.error('Dashboard error:', error);
