@@ -117,13 +117,15 @@ function resultEmbed({ result, won, betKey, target, bet, profit, balance, intera
         .setThumbnail(THUMB)
         .setColor(color)
         .setTitle(`🎡 Roulette — ${won ? 'Winner!' : 'No Luck'}`)
-        .setDescription(`${pocketStrip(result)}\n\n${headline}\n*${colorDesc}*`)
+        .setDescription(
+            `${pocketStrip(result)}\n\n${headline}\n*${colorDesc}*\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `  📊 Net: **${netStr}**  ·  💰 Balance: **${balance.toLocaleString()}** coins\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━`
+        )
         .addFields(
-            { name: '🎯 Bet',      value: `${describeBet(betKey, target)} (${betOdds(betKey)})`, inline: true  },
-            { name: '💰 Wager',    value: `${bet.toLocaleString()} coins`,                        inline: true  },
-            { name: '​',           value: '​',                                                     inline: false },
-            { name: '📊 Net',      value: `**${netStr}** coins`,                                  inline: true  },
-            { name: '💰 Balance',  value: `**${balance.toLocaleString()}** coins`,                inline: true  },
+            { name: '🎯 Bet',   value: `${describeBet(betKey, target)} (${betOdds(betKey)})`, inline: true },
+            { name: '💰 Wager', value: `${bet.toLocaleString()} coins`,                        inline: true },
         )
         .setFooter({ text: 'European Roulette  •  Straight number pays 35:1' })
         .setTimestamp();
