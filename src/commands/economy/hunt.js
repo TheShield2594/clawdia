@@ -486,6 +486,24 @@ async function executeStart(interaction) {
         embed.addFields({ name: '🦅 Pet XP Bonus', value: `+${result.petXpBonus} XP (${petXpPct}%)`, inline: true });
     }
     await interaction.editReply({ embeds: [embed] });
+
+    if (result.success && result.tier === 'legendary') {
+        const announceChannelId = guildSettings?.leveling?.announceChannel;
+        const announceChannel = announceChannelId
+            ? interaction.guild.channels.cache.get(announceChannelId) ?? interaction.channel
+            : interaction.channel;
+        const displayName = interaction.member?.displayName || interaction.user.username;
+        const announcementEmbed = new EmbedBuilder()
+            .setColor(TIER_COLORS.legendary)
+            .setTitle('✨ Legendary Find! ✨')
+            .setDescription(
+                `**${displayName}** just found a ${result.animal.emoji} **${result.animal.name}** [⭐⭐⭐⭐⭐]\n` +
+                `while hunting in **${zone.emoji} ${zone.name}**.\n\n` +
+                `That's incredibly rare.`
+            )
+            .setTimestamp();
+        announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
+    }
 }
 
 function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
@@ -502,10 +520,18 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             ? `${trophyQuality.emoji} **${trophyQuality.label}** (×${trophyQuality.multiplier.toFixed(2)})`
             : '—';
 
+        const isLegendary = tier === 'legendary';
+        const embedTitle = isLegendary
+            ? `🌟✨ LEGENDARY FIND ✨🌟`
+            : `${animal.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${trophyQuality ? trophyQuality.label + ' ' : ''}${animal.name}${isCrit ? ' ✨' : ''}`;
+        const embedDesc = isLegendary
+            ? `You found something impossible in the wild.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${animal.emoji}  **${animal.name}**  [⭐⭐⭐⭐⭐]\n  *${animal.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+            : `*${animal.flavor}*`;
+
         const embed = new EmbedBuilder()
             .setColor(color)
-            .setTitle(`${animal.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${trophyQuality ? trophyQuality.label + ' ' : ''}${animal.name}${isCrit ? ' ✨' : ''}`)
-            .setDescription(`*${animal.flavor}*`)
+            .setTitle(embedTitle)
+            .setDescription(embedDesc)
             .addFields(
                 { name: 'Zone',     value: `${zone.emoji} ${zone.name}`,         inline: true },
                 { name: 'Tier',     value: `${tierLabel}`,                        inline: true },
