@@ -287,7 +287,20 @@ const userSchema = new Schema({
 
         dailyCoins:       { type: Number, default: 0 },
         dailyCasts:       { type: Number, default: 0 },
-        dailyWindowStart: { type: Date,   default: null }
+        dailyWindowStart: { type: Date,   default: null },
+
+        personalBest: {
+            fish:     { type: String, default: null },
+            weight:   { type: Number, default: 0    },
+            payout:   { type: Number, default: 0    },
+            caughtAt: { type: Date,   default: null }
+        },
+        weeklyRecord: {
+            fish:      { type: String, default: null },
+            weight:    { type: Number, default: 0    },
+            weekStart: { type: Date,   default: null }
+        },
+        lastBossEncounter: { type: Date, default: null }
     },
     // ─────────────────────────────────────────────────────────────────────────
 
