@@ -527,7 +527,7 @@ function tickConsumables(user) {
  *   activeBaitAfter?: string | null
  * }
  */
-function executeCast(user, locationId) {
+function executeCast(user, locationId, options = {}) {
     const f        = user.fishing;
     const location = LOCATIONS[locationId ?? f.activeLocation];
     const rod      = f.rods[f.equippedRodIndex];
@@ -780,6 +780,20 @@ function executeCast(user, locationId) {
     result.activeBaitAfter = f.activeBait;
 
     user.markModified('fishing');
+
+    // ── Reaction window adjustment (applied AFTER normal cast logic) ──────────
+    // options.reactionFactor: 0 = missed (no payout), 1.0 = normal, 1.2 = fast reel bonus
+    if (options.reactionFactor !== undefined && options.reactionFactor !== 1.0 && result.finalPayout) {
+        const correction = Math.round(result.finalPayout * (options.reactionFactor - 1.0));
+        user.balance     += correction;
+        f.totalEarned    += correction;
+        f.dailyCoins     += correction;
+        result.finalPayout   += correction;
+        result.reactionFactor = options.reactionFactor;
+    } else if (options.reactionFactor !== undefined) {
+        result.reactionFactor = options.reactionFactor;
+    }
+
     return result;
 }
 

@@ -169,7 +169,14 @@ const guildSchema = new Schema({
         betConfirmThreshold: { type: Number, default: 10000, min: 0 },
         announcementChannelId: { type: String, default: null }
     },
-    
+
+    slots: {
+        jackpotPool:       { type: Number, default: 5000 },
+        lastJackpotWinner: { type: String, default: null },
+        lastJackpotAmount: { type: Number, default: null },
+        lastJackpotAt:     { type: Date,   default: null }
+    },
+
     rssFeeds: [{
         url: { type: String, required: true },
         channelId: { type: String, required: true },
