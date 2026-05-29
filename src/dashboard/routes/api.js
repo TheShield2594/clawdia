@@ -1099,7 +1099,7 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
 const multer = require('multer');
 const ItemImage = require('../../models/ItemImage');
 
-const upload = multer({
+const _uploadRaw = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 512 * 1024 },
     fileFilter: (_req, file, cb) => {
@@ -1107,6 +1107,14 @@ const upload = multer({
         cb(null, true);
     }
 });
+
+function uploadImage(req, res, next) {
+    _uploadRaw.single('image')(req, res, err => {
+        if (!err) return next();
+        const status = (err instanceof multer.MulterError || err.message === 'Only image files are allowed') ? 400 : 500;
+        res.status(status).json({ error: err.message || 'Upload error' });
+    });
+}
 
 function checkAnyGuildAdmin(req, res, next) {
     if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
@@ -1128,7 +1136,7 @@ router.get('/item-image/shop/:guildId/:itemId', async (req, res) => {
 });
 
 // Upload image for a guild shop item
-router.post('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, upload.single('image'), async (req, res) => {
+router.post('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, uploadImage, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
     try {
         const guild = await require('../../models/Guild').findOne({ guildId: req.params.guildId });
@@ -1173,10 +1181,10 @@ router.get('/item-image/activity/:itemId', async (req, res) => {
 });
 
 // Upload/replace a global activity item image (any guild admin)
-router.post('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, checkWriteRateLimit, upload.single('image'), async (req, res) => {
+router.post('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, checkWriteRateLimit, uploadImage, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
     const { itemId } = req.params;
-    if (!/^[a-z0-9_-]{1,64}$/.test(itemId)) return res.status(400).json({ error: 'Invalid itemId' });
+    if (!/^[a-z0-9_:\-]{1,64}$/.test(itemId)) return res.status(400).json({ error: 'Invalid itemId' });
     try {
         await ItemImage.findOneAndUpdate(
             { itemId },

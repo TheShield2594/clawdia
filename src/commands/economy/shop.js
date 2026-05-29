@@ -181,7 +181,7 @@ module.exports = {
                     successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
                 }
 
-                const successImg = await getItemImageAttachment(freshItem.itemId, interaction.guildId);
+                const successImg = await getItemImageAttachment(freshItem.itemId, interaction.guildId).catch(() => null);
                 if (successImg) successEmbed.setThumbnail(successImg.url);
                 const successPayload = { embeds: [successEmbed], components: [] };
                 if (successImg) successPayload.files = [successImg.attachment];
@@ -204,7 +204,7 @@ module.exports = {
                     )
                     .setFooter({ text: 'This confirmation expires in 30 seconds' });
 
-                const confirmImg = await getItemImageAttachment(item.itemId, interaction.guildId);
+                const confirmImg = await getItemImageAttachment(item.itemId, interaction.guildId).catch(() => null);
                 if (confirmImg) confirmEmbed.setThumbnail(confirmImg.url);
                 const confirmPayload = { embeds: [confirmEmbed], components: [row], fetchReply: true };
                 if (confirmImg) confirmPayload.files = [confirmImg.attachment];
