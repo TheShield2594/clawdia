@@ -1044,6 +1044,16 @@ const HUNT_QUEST_TEMPLATES = [
     }
 ];
 
+// ─── TROPHY QUALITY TIERS ────────────────────────────────────────────────────
+
+const TROPHY_QUALITIES = [
+    { id: 'poor',     label: 'Poor',     emoji: '🟤', multiplier: 0.70 },
+    { id: 'normal',   label: 'Normal',   emoji: '⬜', multiplier: 1.00 },
+    { id: 'good',     label: 'Good',     emoji: '🟢', multiplier: 1.20 },
+    { id: 'pristine', label: 'Pristine', emoji: '🔷', multiplier: 1.50 },
+    { id: 'mythic',   label: 'Mythic',   emoji: '🟣', multiplier: 2.50 },
+];
+
 module.exports = {
     WEAPON_TIERS,
     WEAPON_BY_SLUG,
@@ -1062,5 +1072,6 @@ module.exports = {
     PRESTIGE_BONUSES,
     MATERIAL_NAMES,
     CRAFT_RECIPES,
-    HUNT_QUEST_TEMPLATES
+    HUNT_QUEST_TEMPLATES,
+    TROPHY_QUALITIES
 };
