@@ -555,6 +555,24 @@ async function handleCast(interaction) {
     }
 
     await interaction.editReply({ embeds: [embed] });
+
+    if (result.success && result.tier === 'legendary') {
+        const announceChannelId = guildSettings?.leveling?.announceChannel;
+        const announceChannel = announceChannelId
+            ? interaction.guild.channels.cache.get(announceChannelId) ?? interaction.channel
+            : interaction.channel;
+        const displayName = interaction.member?.displayName || interaction.user.username;
+        const announcementEmbed = new EmbedBuilder()
+            .setColor(TIER_COLORS.legendary)
+            .setTitle('✨ Legendary Catch! ✨')
+            .setDescription(
+                `**${displayName}** just pulled a ${result.fish.emoji} **${result.fish.name}** [⭐⭐⭐⭐⭐]\n` +
+                `while fishing in **${location.emoji} ${location.name}**.\n\n` +
+                `That's incredibly rare.`
+            )
+            .setTimestamp();
+        announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
+    }
 }
 
 // ─── EMBED BUILDER ────────────────────────────────────────────────────────────
@@ -618,10 +636,18 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
             ? `~~${currency}${finalPayout}~~ (daily cap)`
             : `**${currency}${finalPayout.toLocaleString()}**`;
 
+        const isLegendary = tier === 'legendary';
+        const embedTitle = isLegendary
+            ? `🌊✨ LEGENDARY CATCH ✨🌊`
+            : `${fish.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${fish.name}${sizeStr}${isCrit ? ' ✨' : ''}`;
+        const embedDesc = isLegendary
+            ? `You pulled something impossible from the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${fish.emoji}  **${fish.name}**${sizeStr}  [⭐⭐⭐⭐⭐]\n  *${fish.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+            : `*${fish.flavor}*`;
+
         const embed = new EmbedBuilder()
             .setColor(color)
-            .setTitle(`${fish.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${fish.name}${sizeStr}${isCrit ? ' ✨' : ''}`)
-            .setDescription(`*${fish.flavor}*`)
+            .setTitle(embedTitle)
+            .setDescription(embedDesc)
             .addFields(
                 { name: 'Location', value: `${location.emoji} ${location.name}`,    inline: true },
                 { name: 'Tier',     value: tierLabel,                                inline: true },
