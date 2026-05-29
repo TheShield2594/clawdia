@@ -490,6 +490,7 @@ userSchema.index({ guildId: 1, 'streak.current': -1 });
 userSchema.index({ guildId: 1, 'streak.longest': -1 });
 userSchema.index({ guildId: 1, duelWins: -1 });
 userSchema.index({ guildId: 1, achievementsCount: -1 });
+userSchema.index({ guildId: 1, seasonCoins: -1 }); // used by executeLeaderboard / executeSeasonMe
 
 userSchema.pre('save', function(next) {
     this.updatedAt = Date.now();

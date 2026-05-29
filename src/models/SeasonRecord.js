@@ -15,5 +15,6 @@ const seasonRecordSchema = new Schema({
 });
 
 seasonRecordSchema.index({ guildId: 1, endedAt: -1 });
+seasonRecordSchema.index({ guildId: 1, seasonId: 1 }, { unique: true });
 
 module.exports = model('SeasonRecord', seasonRecordSchema);

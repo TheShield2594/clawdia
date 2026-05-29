@@ -62,6 +62,7 @@ async function syncHungerAndRunaway(user, interaction) {
     for (let i = 0; i < keepPets.length; i++) {
         const d = keepPets[i];
         user.pets[i].hunger = d.hunger;
+        user.pets[i].lastFed = d.lastFed;   // persist advanced decay cursor
         user.pets[i].starving = d.starving;
         if (d.starvingStartAt) user.pets[i].starvingStartAt = d.starvingStartAt;
     }
@@ -145,9 +146,9 @@ async function executeAdopt(interaction) {
 }
 
 async function executeStatus(interaction) {
-    const user = await resolveUser(interaction);
-
     await interaction.deferReply();
+
+    const user = await resolveUser(interaction);
     await syncHungerAndRunaway(user, interaction);
 
     if (!user.pets || user.pets.length === 0) {
@@ -192,9 +193,9 @@ async function executeFeed(interaction) {
     const materialId = interaction.options.getString('material');
     const petIndex = interaction.options.getInteger('slot') ?? 0;
 
-    const user = await resolveUser(interaction);
-
     await interaction.deferReply();
+
+    const user = await resolveUser(interaction);
     await syncHungerAndRunaway(user, interaction);
 
     if (!user.pets || user.pets.length === 0) {
@@ -322,6 +323,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('pet')
         .setDescription('Manage your pets.')
+        .setDMPermission(false)
         .addSubcommand(sub =>
             sub.setName('adopt')
                 .setDescription('Adopt a pet from the shop.')

@@ -16,27 +16,40 @@ const HUNGER_RESTORE_FAVORITE = 25;
 const HUNGER_RESTORE_OTHER = 10;
 const STARVING_THRESHOLD = 30;
 const RUNAWAY_DAYS = 3;
+const MS_PER_DAY = 86400000;
 
 /**
  * Apply daily hunger decay to all pets. Call from a scheduled job or lazily on pet commands.
  * Returns the updated pet array.
+ *
+ * Idempotent: advances lastFed by the processed days so repeated calls
+ * don't re-apply the same decay. starvingStartAt is only set when hunger
+ * reaches 0 (not merely below the STARVING_THRESHOLD) so checkRunaway
+ * counts time at zero hunger only.
  */
 function applyHungerDecay(pets) {
     const now = Date.now();
     return pets.map(pet => {
         const lastFed = pet.lastFed ? new Date(pet.lastFed).getTime() : now;
-        const daysPassed = Math.floor((now - lastFed) / 86400000);
+        const daysPassed = Math.floor((now - lastFed) / MS_PER_DAY);
         if (daysPassed <= 0) return pet;
 
         const decay = daysPassed * HUNGER_DECAY_PER_DAY;
         const newHunger = Math.max(0, pet.hunger - decay);
-        const nowStarving = newHunger < STARVING_THRESHOLD;
+        // Advance the decay cursor by the days processed so re-calls are no-ops
+        const newLastFed = new Date(lastFed + daysPassed * MS_PER_DAY);
+
+        // Only start the runaway clock when hunger hits 0
+        const wasAtZero = pet.hunger === 0;
+        const nowAtZero = newHunger === 0;
+        const newStarvingStartAt = (nowAtZero && !wasAtZero) ? new Date() : pet.starvingStartAt;
 
         return {
             ...pet.toObject ? pet.toObject() : pet,
             hunger: newHunger,
-            starving: nowStarving,
-            starvingStartAt: (nowStarving && !pet.starving) ? new Date() : pet.starvingStartAt
+            lastFed: newLastFed,
+            starving: newHunger < STARVING_THRESHOLD,
+            starvingStartAt: newStarvingStartAt
         };
     });
 }
@@ -103,6 +116,7 @@ function getTotalBonus(pets, bonusType) {
 module.exports = {
     PET_DEFINITIONS,
     HUNGER_DECAY_PER_DAY,
+    MS_PER_DAY,
     STARVING_THRESHOLD,
     RUNAWAY_DAYS,
     applyHungerDecay,

@@ -6,6 +6,7 @@ const { generateDailyMissions } = require('../../data/seasonMissions');
 
 // ── Battle pass tier reward definitions ──────────────────────────────────────
 // 20 tiers; alternating between coin bonuses, cosmetic badges, material bundles, rare items
+// itemId present → add 1× to user.inventory on claim; cosmetic badges have no itemId
 const TIER_REWARDS = [
     { tier: 1,  coins: 500,   label: '💰 500 coins' },
     { tier: 2,  coins: 0,     label: '🎖️ Apprentice Badge' },
@@ -16,7 +17,7 @@ const TIER_REWARDS = [
     { tier: 7,  coins: 3000,  label: '💰 3,000 coins' },
     { tier: 8,  coins: 0,     label: '🎭 Prestige Frame Badge' },
     { tier: 9,  coins: 4000,  label: '💰 4,000 coins' },
-    { tier: 10, coins: 0,     label: '🛡️ Lifesaver (rare item)' },
+    { tier: 10, coins: 0,     label: '🛡️ Lifesaver (rare item)',      itemId: 'lifesaver'     },
     { tier: 11, coins: 5000,  label: '💰 5,000 coins' },
     { tier: 12, coins: 0,     label: '🌟 Elite Badge' },
     { tier: 13, coins: 6000,  label: '💰 6,000 coins' },
@@ -26,7 +27,7 @@ const TIER_REWARDS = [
     { tier: 17, coins: 10000, label: '💰 10,000 coins' },
     { tier: 18, coins: 0,     label: '🔥 Legend Badge' },
     { tier: 19, coins: 15000, label: '💰 15,000 coins' },
-    { tier: 20, coins: 0,     label: '❄️ Streak Shield (rare item)' }
+    { tier: 20, coins: 0,     label: '❄️ Streak Shield (rare item)',   itemId: 'streak_shield' }
 ];
 
 const XP_PER_TIER = 100;
@@ -150,8 +151,15 @@ async function executeClaim(interaction) {
     const reward = TIER_REWARDS.find(r => r.tier === tier);
     if (!reward) return interaction.reply({ content: 'Invalid tier.', ephemeral: true });
 
-    user.season.claimedTiers.push(tier);
+    // Guard against missing sub-document array on old docs
+    if (!Array.isArray(user.season?.claimedTiers)) {
+        if (!user.season) user.season = {};
+        user.season.claimedTiers = [];
+    }
+
     if (reward.coins > 0) user.balance += reward.coins;
+    if (reward.itemId) user.inventory.push({ itemId: reward.itemId, quantity: 1 });
+    user.season.claimedTiers.push(tier);
     user.markModified('season');
 
     try {
@@ -227,7 +235,9 @@ async function executeClaimMission(interaction) {
     const mission = user.seasonMissions?.[missionIndex];
 
     if (!mission) return interaction.reply({ content: 'Invalid mission number.', ephemeral: true });
-    if (!mission.completed) return interaction.reply({ content: 'Mission not completed yet.', ephemeral: true });
+    // Derive completion from progress vs target (completed flag is set by action handlers)
+    const isDone = mission.completed || mission.progress >= mission.target;
+    if (!isDone) return interaction.reply({ content: 'Mission not completed yet.', ephemeral: true });
     if (mission.claimed) return interaction.reply({ content: 'Already claimed!', ephemeral: true });
 
     user.seasonMissions[missionIndex].claimed = true;
