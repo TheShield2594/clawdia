@@ -25,6 +25,10 @@ const userSchema = new Schema({
     wantedUntil: { type: Date, default: null },
     shiftsWorked: { type: Number, default: 0 },
 
+    // Daily hard quiz attempt counter (resets midnight UTC)
+    dailyQuizHard: { type: Number, default: 0 },
+    dailyQuizHardReset: { type: Date, default: null },
+
     inventory: [{
         itemId: { type: String, required: true },
         quantity: { type: Number, default: 1 }
