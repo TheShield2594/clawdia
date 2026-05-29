@@ -5,6 +5,7 @@ const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
+const { generateDailyChallenge } = require('../../utils/dailyChallenge');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -95,7 +96,61 @@ module.exports = {
                 .setFooter({ text: 'Cooldown: 24h' })
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed] });
+            const challenge = generateDailyChallenge();
+            embed.addFields({ name: '🎯 Bonus Challenge', value: `${challenge.description}\n*Answer correctly for a **+50% bonus** on your daily reward!*` });
+
+            const reply = await interaction.reply({ embeds: [embed], components: [challenge.row], fetchReply: true });
+
+            let activateTimer = null;
+            if (challenge.type === 'react_fast' && challenge.activeRow) {
+                activateTimer = setTimeout(() => {
+                    interaction.editReply({ components: [challenge.activeRow] }).catch(() => {});
+                }, challenge.activateDelay);
+            }
+
+            try {
+                const response = await reply.awaitMessageComponent({
+                    time: challenge.timeLimit,
+                    filter: i => i.user.id === interaction.user.id,
+                });
+                if (activateTimer) clearTimeout(activateTimer);
+
+                if (response.customId === challenge.correctId) {
+                    const bonusAmount = Math.round(actualAmount * 0.5);
+                    const bonusUpdated = await User.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { $inc: { balance: bonusAmount } },
+                        { new: true }
+                    );
+                    logTransaction({
+                        userId: interaction.user.id,
+                        guildId: interaction.guild.id,
+                        type: 'daily_challenge_bonus',
+                        amount: bonusAmount,
+                        balance: bonusUpdated?.balance ?? updated.balance + bonusAmount,
+                        note: `daily challenge bonus (${challenge.type})`,
+                    });
+                    embed.setColor('#ffd700');
+                    embed.spliceFields(0, embed.data.fields.length,
+                        { name: 'New Balance', value: `${(bonusUpdated?.balance ?? updated.balance + bonusAmount).toLocaleString()} coins` },
+                        { name: '🎯 Bonus Challenge', value: `✅ Correct! You earned an extra **+${bonusAmount.toLocaleString()}** coins!` },
+                    );
+                    await response.update({ embeds: [embed], components: [] });
+                } else {
+                    embed.spliceFields(0, embed.data.fields.length,
+                        { name: 'New Balance', value: `${updated.balance.toLocaleString()} coins` },
+                        { name: '🎯 Bonus Challenge', value: '❌ Wrong answer! No bonus this time — your daily reward is still yours.' },
+                    );
+                    await response.update({ embeds: [embed], components: [] });
+                }
+            } catch {
+                if (activateTimer) clearTimeout(activateTimer);
+                embed.spliceFields(0, embed.data.fields.length,
+                    { name: 'New Balance', value: `${updated.balance.toLocaleString()} coins` },
+                    { name: '🎯 Bonus Challenge', value: '⏱️ Time\'s up! No bonus this time — your daily reward is still yours.' },
+                );
+                await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+            }
         } catch (error) {
             console.error('Daily error:', error);
             await interaction.reply({ content: 'Failed to claim daily reward.', ephemeral: true });
