@@ -171,10 +171,13 @@ const guildSchema = new Schema({
     },
 
     slots: {
-        jackpotPool:       { type: Number, default: 5000 },
-        lastJackpotWinner: { type: String, default: null },
-        lastJackpotAmount: { type: Number, default: null },
-        lastJackpotAt:     { type: Date,   default: null }
+        jackpotPool:       { type: Number,  default: 5000 },
+        lastJackpotWinner: { type: String,  default: null },
+        lastJackpotAmount: { type: Number,  default: null },
+        lastJackpotAt:     { type: Date,    default: null },
+        announceJackpot:   { type: Boolean, default: true },
+        jackpotPingHere:   { type: Boolean, default: false },
+        jackpotChannelId:  { type: String,  default: null },
     },
 
     rssFeeds: [{
