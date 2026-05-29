@@ -23,6 +23,7 @@ function shuffleCount(bet) {
 
 const CUPS = ['🥤', '🥤', '🥤'];
 const BALL = '🔴';
+const BASE_WIN_MULT = 2.8; // 1/3 chance × 2.8 = ~93% RTP before lucky effects
 
 function cupsDisplay(ballPos, showBall = false) {
     return CUPS.map((cup, i) => (showBall && i === ballPos) ? BALL : cup).join('  ');
@@ -96,7 +97,7 @@ async function playCupGame(interaction, bet) {
 
             positions = swapTwo(positions, a, b);
 
-            const shuffleDisplay = positions.map((_, i) => CUPS[i]).join('  ');
+            const shuffleDisplay = positions.map(pos => CUPS[pos]).join('  ');
             const shuffleEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
@@ -158,7 +159,7 @@ async function playCupGame(interaction, bet) {
         const serverMult       = getServerCoinMultiplier(guildSettings);
         const totalCoinMult    = coinMult * serverMult;
 
-        let grossPayout = won ? bet * 3 : 0;
+        let grossPayout = won ? Math.floor(bet * BASE_WIN_MULT) : 0;
         let charmTriggered = false;
         let streakTriggered = false;
 
@@ -199,7 +200,7 @@ async function playCupGame(interaction, bet) {
         if (won) {
             color = '#2ecc71';
             title = '🎩 Correct! You found the ball!';
-            desc  = `> ${revealAll}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n🎉 You picked **${guessLabel}** — the ball was there! **3×** payout!`;
+            desc  = `> ${revealAll}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n🎉 You picked **${guessLabel}** — the ball was there! **${BASE_WIN_MULT}×** payout!`;
         } else if (charmTriggered || streakTriggered) {
             color = '#f39c12';
             title = '🎩 Wrong Cup — Lucky Save!';
@@ -225,7 +226,7 @@ async function playCupGame(interaction, bet) {
                 { name: '📊 Net',     value: `**${netStr}** coins`, inline: true },
                 { name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true },
             )
-            .setFooter({ text: `Difficulty: ${steps} shuffles · Win = 3×` })
+            .setFooter({ text: `Difficulty: ${steps} shuffles · Win = ${BASE_WIN_MULT}×` })
             .setTimestamp();
 
         const replayId = `cup_replay_${interaction.id}_${Date.now()}`;

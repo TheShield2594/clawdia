@@ -17,7 +17,9 @@ const POOL_SIZE  = 40;
 const PICK_COUNT = 5;
 const DRAW_COUNT = 10;
 
-const PAYOUTS = { 3: 3, 4: 10, 5: 50 };
+// Approximate RTP ~78% (hypergeometric: P2≈27.8%, P3≈7.9%, P4≈0.96%, P5≈0.038%)
+// EV = 0.278×1 + 0.079×4 + 0.0096×15 + 0.00038×100 ≈ 0.778
+const PAYOUTS = { 2: 1, 3: 4, 4: 15, 5: 100 };
 
 function drawNumbers() {
     const pool = Array.from({ length: POOL_SIZE }, (_, i) => i + 1);
@@ -84,7 +86,7 @@ async function playKeno(interaction, bet, picked) {
                     { name: '✅ Matches', value: `**${hits}** / ${PICK_COUNT}`, inline: true },
                     { name: '💰 Bet', value: `**${bet.toLocaleString()}** coins`, inline: true },
                 )
-                .setFooter({ text: `3 matches = 3× · 4 = 10× · 5 = 50×` });
+                .setFooter({ text: `2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×` });
             await interaction.editReply({ embeds: [embed] });
             await delay(800);
         }
@@ -144,6 +146,9 @@ async function playKeno(interaction, bet, picked) {
         } else if (matches === 3) {
             color = '#FFAA00'; title = '🎱 3 Matches — Winner!';
             desc  = '🎯🎯🎯 **Three matches — you won!**';
+        } else if (matches === 2) {
+            color = '#f39c12'; title = '🎱 2 Matches — Bet Returned!';
+            desc  = '🎯🎯 **Two matches — your bet is back!**';
         } else if (charmTriggered || streakTriggered) {
             color = '#f39c12'; title = '🎱 Lucky Save!';
             desc  = charmTriggered ? '🍀 **Lucky Charm** returned your bet!' : '🎯 **Lucky Streak** returned your bet!';
