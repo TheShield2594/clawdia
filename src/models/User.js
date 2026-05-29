@@ -435,6 +435,7 @@ const userSchema = new Schema({
         earnedAt: { type: Date, default: Date.now },
         claimed:  { type: Boolean, default: false }
     }],
+    achievementsCount: { type: Number, default: 0 },
 
     // Duel win/loss tracking
     duelWins:   { type: Number, default: 0 },
@@ -460,6 +461,7 @@ userSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 userSchema.index({ guildId: 1, 'streak.current': -1 });
 userSchema.index({ guildId: 1, 'streak.longest': -1 });
 userSchema.index({ guildId: 1, duelWins: -1 });
+userSchema.index({ guildId: 1, achievementsCount: -1 });
 
 userSchema.pre('save', function(next) {
     this.updatedAt = Date.now();

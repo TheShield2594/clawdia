@@ -467,7 +467,7 @@ function tickConsumables(user) {
 
 // ─── FULL MINE EXECUTION ─────────────────────────────────────────────────────
 
-function executeMine(user, depthId) {
+function executeMine(user, depthId, options = {}) {
     const m       = user.mining;
     const depth   = DEPTHS[depthId ?? m.activeDepth];
     const pickaxe = m.pickaxes[m.equippedPickaxeIndex];
@@ -569,6 +569,40 @@ function executeMine(user, depthId) {
             pickaxe.status = 'broken';
             result.pickaxeBroke = true;
             result.collapseEvent = { weaponName: pickaxe.name };
+        }
+    }
+
+    // ── Depth Risk System (intensity 1–5 selected before digging) ────────────
+    if (options.intensity && result.success) {
+        const { multiplier, caveInRisk, durLoss: intensityDurLoss } = options.intensity;
+        result.intensityLevel = options.intensity;
+
+        if (caveInRisk > 0 && Math.random() < caveInRisk) {
+            // Cave-in: reverse payout, apply double durability loss, mark cave-in
+            if (result.finalPayout) {
+                user.balance      -= result.finalPayout;
+                m.totalEarned     -= result.finalPayout;
+                m.dailyCoins      -= result.finalPayout;
+                result.finalPayout = 0;
+            }
+            applyDurabilityLoss(pickaxe, intensityDurLoss); // extra durLoss on cave-in
+            if (pickaxe.currentDurability <= 0) { pickaxe.status = 'broken'; result.pickaxeBroke = true; }
+            result.caveIn    = true;
+            result.caveInDur = intensityDurLoss;
+        } else if (multiplier !== 1.0 && result.finalPayout) {
+            // Apply multiplier, clamped so it doesn't exceed the daily hard cap
+            const rawBonus      = Math.round(result.finalPayout * (multiplier - 1.0));
+            const remainingCap  = Math.max(0, LIMITS.DAILY_HARD_CAP - m.dailyCoins);
+            const bonus         = Math.min(rawBonus, remainingCap);
+            user.balance   += bonus;
+            m.totalEarned  += bonus;
+            m.dailyCoins   += bonus;
+            result.finalPayout += bonus;
+            // Extra durability loss at higher intensities
+            if (intensityDurLoss > 1) {
+                applyDurabilityLoss(pickaxe, intensityDurLoss - 1); // -1 because base already applied
+                if (pickaxe.currentDurability <= 0) { pickaxe.status = 'broken'; result.pickaxeBroke = true; }
+            }
         }
     }
 

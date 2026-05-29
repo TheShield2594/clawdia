@@ -527,7 +527,7 @@ function tickConsumables(user) {
  *   activeBaitAfter?: string | null
  * }
  */
-function executeCast(user, locationId) {
+function executeCast(user, locationId, options = {}) {
     const f        = user.fishing;
     const location = LOCATIONS[locationId ?? f.activeLocation];
     const rod      = f.rods[f.equippedRodIndex];
@@ -539,11 +539,14 @@ function executeCast(user, locationId) {
         };
     }
 
+    const reactionFactor = options.reactionFactor ?? 1.0;
+
     const successChance = calculateSuccessChance(user, rod, location);
-    const success       = Math.random() < successChance;
+    // reactionFactor === 0 means the player missed the reel-in window; treat as a miss
+    const success       = reactionFactor > 0 && Math.random() < successChance;
     const baitBefore    = f.activeBait;
 
-    const result = { success, xpEarned: 0, durabilityLost: 0, rodBroke: false };
+    const result = { success, xpEarned: 0, durabilityLost: 0, rodBroke: false, reactionFactor: options.reactionFactor !== undefined ? reactionFactor : undefined };
 
     if (success) {
         const catchType = rollCatchType(location, getCurrentWeather());
@@ -552,7 +555,7 @@ function executeCast(user, locationId) {
         const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
         if (catchType === 'junk') {
             const junk         = weightedRoll(JUNK_ITEMS);
-            const payout       = Math.round(randInt(junk.payoutMin, junk.payoutMax) * streakMult);
+            const payout       = Math.round(randInt(junk.payoutMin, junk.payoutMax) * streakMult * reactionFactor);
             const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payout, location);
 
             applyDurabilityLoss(rod, 1);
@@ -576,7 +579,7 @@ function executeCast(user, locationId) {
 
         } else if (catchType === 'treasure') {
             const treasure     = weightedRoll(TREASURE_ITEMS);
-            const payout       = Math.round(randInt(treasure.payoutMin, treasure.payoutMax) * streakMult);
+            const payout       = Math.round(randInt(treasure.payoutMin, treasure.payoutMax) * streakMult * reactionFactor);
             const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payout, location);
 
             applyDurabilityLoss(rod, 1);
@@ -665,7 +668,7 @@ function executeCast(user, locationId) {
             if (traits.armored) critChance *= 0.5;
             const isCrit         = Math.random() < critChance;
             const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
-            const preModPayout   = Math.round(sizedPayout * critMultiplier * traitPayoutMult * streakMult);
+            const preModPayout   = Math.round(sizedPayout * critMultiplier * traitPayoutMult * streakMult * reactionFactor);
 
             const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, preModPayout, location);
 

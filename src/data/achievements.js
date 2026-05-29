@@ -519,6 +519,146 @@ const ACHIEVEMENTS = [
         check: (user) => (user.fishing?.totalCasts || 0) >= 5_000,
         progress: (user) => [Math.min(user.fishing?.totalCasts || 0, 5_000), 5_000]
     },
+
+    // ── Tiered Achievements: Hunt ─────────────────────────────────────────────
+    {
+        id: 'hunter_bronze',
+        name: '🥉 Hunter (Bronze)',
+        description: 'Complete 10 hunts',
+        emoji: '🥉',
+        category: 'hunt',
+        xpReward: 50,
+        coinReward: 300,
+        check: (user) => (user.hunt?.totalHunts || 0) >= 10,
+        progress: (user) => [Math.min(user.hunt?.totalHunts || 0, 10), 10]
+    },
+    {
+        id: 'hunter_silver',
+        name: '🥈 Hunter (Silver)',
+        description: 'Complete 250 hunts',
+        emoji: '🥈',
+        category: 'hunt',
+        xpReward: 150,
+        coinReward: 1_000,
+        check: (user) => (user.hunt?.totalHunts || 0) >= 250,
+        progress: (user) => [Math.min(user.hunt?.totalHunts || 0, 250), 250]
+    },
+    {
+        id: 'hunter_gold',
+        name: '🥇 Hunter (Gold)',
+        description: 'Complete 750 hunts',
+        emoji: '🥇',
+        category: 'hunt',
+        xpReward: 400,
+        coinReward: 4_000,
+        check: (user) => (user.hunt?.totalHunts || 0) >= 750,
+        progress: (user) => [Math.min(user.hunt?.totalHunts || 0, 750), 750]
+    },
+
+    // ── Tiered Achievements: Fishing ──────────────────────────────────────────
+    {
+        id: 'angler_bronze',
+        name: '🥉 Angler (Bronze)',
+        description: 'Make 10 fishing casts',
+        emoji: '🥉',
+        category: 'fishing',
+        xpReward: 50,
+        coinReward: 300,
+        check: (user) => (user.fishing?.totalCasts || 0) >= 10,
+        progress: (user) => [Math.min(user.fishing?.totalCasts || 0, 10), 10]
+    },
+    {
+        id: 'angler_silver',
+        name: '🥈 Angler (Silver)',
+        description: 'Make 100 fishing casts',
+        emoji: '🥈',
+        category: 'fishing',
+        xpReward: 150,
+        coinReward: 1_000,
+        check: (user) => (user.fishing?.totalCasts || 0) >= 100,
+        progress: (user) => [Math.min(user.fishing?.totalCasts || 0, 100), 100]
+    },
+    {
+        id: 'angler_gold',
+        name: '🥇 Angler (Gold)',
+        description: 'Make 1,000 fishing casts',
+        emoji: '🥇',
+        category: 'fishing',
+        xpReward: 400,
+        coinReward: 4_000,
+        check: (user) => (user.fishing?.totalCasts || 0) >= 1_000,
+        progress: (user) => [Math.min(user.fishing?.totalCasts || 0, 1_000), 1_000]
+    },
+
+    // ── Tiered Achievements: Mining ───────────────────────────────────────────
+    {
+        id: 'miner_bronze',
+        name: '🥉 Miner (Bronze)',
+        description: 'Complete 10 mining digs',
+        emoji: '🥉',
+        category: 'economy',
+        xpReward: 50,
+        coinReward: 300,
+        check: (user) => (user.mining?.totalMines || 0) >= 10,
+        progress: (user) => [Math.min(user.mining?.totalMines || 0, 10), 10]
+    },
+    {
+        id: 'miner_silver',
+        name: '🥈 Miner (Silver)',
+        description: 'Complete 100 mining digs',
+        emoji: '🥈',
+        category: 'economy',
+        xpReward: 150,
+        coinReward: 1_000,
+        check: (user) => (user.mining?.totalMines || 0) >= 100,
+        progress: (user) => [Math.min(user.mining?.totalMines || 0, 100), 100]
+    },
+    {
+        id: 'miner_gold',
+        name: '🥇 Miner (Gold)',
+        description: 'Complete 500 mining digs',
+        emoji: '🥇',
+        category: 'economy',
+        xpReward: 400,
+        coinReward: 4_000,
+        check: (user) => (user.mining?.totalMines || 0) >= 500,
+        progress: (user) => [Math.min(user.mining?.totalMines || 0, 500), 500]
+    },
+
+    // ── Tiered Achievements: Gambler ──────────────────────────────────────────
+    {
+        id: 'gambler_bronze',
+        name: '🥉 Gambler (Bronze)',
+        description: 'Wager 1,000 coins lifetime',
+        emoji: '🥉',
+        category: 'economy',
+        xpReward: 40,
+        coinReward: 200,
+        check: (user) => (user.lifetimeGambled || 0) >= 1_000,
+        progress: (user) => [Math.min(user.lifetimeGambled || 0, 1_000), 1_000]
+    },
+    {
+        id: 'gambler_silver',
+        name: '🥈 Gambler (Silver)',
+        description: 'Wager 50,000 coins lifetime',
+        emoji: '🥈',
+        category: 'economy',
+        xpReward: 120,
+        coinReward: 1_200,
+        check: (user) => (user.lifetimeGambled || 0) >= 50_000,
+        progress: (user) => [Math.min(user.lifetimeGambled || 0, 50_000), 50_000]
+    },
+    {
+        id: 'gambler_gold',
+        name: '🥇 Gambler (Gold)',
+        description: 'Wager 250,000 coins lifetime',
+        emoji: '🥇',
+        category: 'economy',
+        xpReward: 300,
+        coinReward: 5_000,
+        check: (user) => (user.lifetimeGambled || 0) >= 250_000,
+        progress: (user) => [Math.min(user.lifetimeGambled || 0, 250_000), 250_000]
+    },
 ];
 
 const CATEGORY_LABELS = {
