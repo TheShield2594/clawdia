@@ -9,7 +9,7 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
 
-const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0db.png';
+const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0bd.png';
 const MIN_BET = 10;
 const MAX_BET = 5000;
 

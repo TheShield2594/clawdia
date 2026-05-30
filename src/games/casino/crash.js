@@ -5,7 +5,6 @@ const {
     ButtonStyle,
 } = require('discord.js');
 const User = require('../../models/User');
-const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect } = require('../../services/effectsService');
 const {
@@ -72,33 +71,36 @@ function progressBar(m) {
 
 function getCurrentWeekStart() {
     const now  = new Date();
-    const day  = now.getDay(); // 0 = Sun
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1); // shift to Monday
-    const mon  = new Date(now);
-    mon.setDate(diff);
-    mon.setHours(0, 0, 0, 0);
-    return mon;
+    const day  = now.getUTCDay(); // 0 = Sun
+    const diff = now.getUTCDate() - day + (day === 0 ? -6 : 1); // shift to Monday
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), diff));
 }
 
 async function updateCrashStats(userId, guildId, multiplier) {
     const weekStart = getCurrentWeekStart();
-    const user = await User.findOne({ userId, guildId }).catch(() => null);
-    if (!user) return;
 
-    const sameWeek = user.crashStats?.weekStart &&
-        new Date(user.crashStats.weekStart).getTime() >= weekStart.getTime();
+    // Same-week path: atomically raise weekBest and allTimeBest without reading first.
+    const sameWeek = await User.updateOne(
+        { userId, guildId, 'crashStats.weekStart': { $gte: weekStart } },
+        { $max: { 'crashStats.weekBest': multiplier, 'crashStats.allTimeBest': multiplier } }
+    ).catch(() => null);
 
-    const currentWeekBest = sameWeek ? (user.crashStats.weekBest ?? 0) : 0;
-    const newWeekBest     = Math.max(currentWeekBest, multiplier);
-    const newAllTime      = Math.max(user.crashStats?.allTimeBest ?? 0, multiplier);
-
-    await User.updateOne({ userId, guildId }, {
-        $set: {
-            'crashStats.weekBest':    newWeekBest,
-            'crashStats.weekStart':   weekStart,
-            'crashStats.allTimeBest': newAllTime,
-        },
-    }).catch(() => {});
+    if (sameWeek?.matchedCount === 0) {
+        // Week rollover or first record: reset weekBest/weekStart, still $max allTimeBest.
+        await User.updateOne(
+            {
+                userId, guildId,
+                $or: [
+                    { 'crashStats.weekStart': { $lt: weekStart } },
+                    { 'crashStats.weekStart': null },
+                ],
+            },
+            {
+                $set: { 'crashStats.weekBest': multiplier, 'crashStats.weekStart': weekStart },
+                $max: { 'crashStats.allTimeBest': multiplier },
+            }
+        ).catch(() => {});
+    }
 }
 
 async function buildWeeklyLeaderboard(guildId, client) {
