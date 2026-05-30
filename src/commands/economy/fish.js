@@ -558,10 +558,8 @@ async function handleCast(interaction) {
 
     if (result.success && result.tier === 'legendary' && guildSettings?.economy?.announceRareDrops !== false) {
         const announceChannelId = guildSettings?.economy?.announcementChannelId;
-        const announceChannel = announceChannelId
-            ? interaction.guild.channels.cache.get(announceChannelId) ?? interaction.channel
-            : interaction.channel;
-        const displayName = interaction.member?.displayName || interaction.user.username;
+        const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
+        const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
         const announcementEmbed = new EmbedBuilder()
             .setColor('#ff9800')
             .setTitle('✨ Legendary Catch! ✨')

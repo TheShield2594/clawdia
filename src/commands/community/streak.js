@@ -18,7 +18,7 @@ module.exports = {
 
             if (!user) {
                 return interaction.reply({
-                    content: `${target.id === interaction.user.id ? 'You have' : `${target.tag} has`} no activity recorded yet.`,
+                    content: `${target.id === interaction.user.id ? 'You have' : `${target.username} has`} no activity recorded yet.`,
                     ephemeral: true
                 });
             }
