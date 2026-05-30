@@ -41,6 +41,10 @@ const {
     applyXp
 } = require('../../services/huntService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../data/featuredRotation');
+const { getTimeBand } = require('../../utils/timeBand');
+const { logBigWin } = require('../../utils/bigWinLogger');
+const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 
 // ─── HUNT TRACKING CLUES (one per zone, used in the tracking mechanic) ───────
 
@@ -458,6 +462,9 @@ async function executeStart(interaction) {
     const petYieldPct = getTotalBonus(user.pets || [], 'hunt_yield');
     const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
 
+    const featured       = getDailyFeatured(interaction.guild.id);
+    const isFeaturedZone = zoneId === featured.huntZone.id;
+
     const result = executeHunt(user, zoneId, { trackingBonus });
 
     // Pity counter: reset on rare+ success, increment otherwise
@@ -485,6 +492,19 @@ async function executeStart(interaction) {
         }
     }
 
+    // Featured zone bonus: +25% payout
+    if (result.success && result.finalPayout > 0 && isFeaturedZone) {
+        const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
+        if (featBonus > 0) {
+            user.balance              += featBonus;
+            user.hunt.totalEarned     += featBonus;
+            user.hunt.dailyCoins      += featBonus;
+            result.finalPayout        += featBonus;
+            result.featuredZoneBonus   = featBonus;
+        }
+    }
+    if (result.success && result.finalPayout > user.hunt.bestPayout) user.hunt.bestPayout = result.finalPayout;
+
     updateHuntQuestProgress(user, result, zoneId);
 
     const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
@@ -502,6 +522,17 @@ async function executeStart(interaction) {
         return interaction.editReply({ content: 'Something went wrong saving your hunt. Please try again.' });
     }
 
+    // Log big win, then await hourly leader update and re-fetch for accurate footer
+    if (result.success && result.finalPayout > 0) {
+        const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+        if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'hunt', details: result.animal ? `${result.animal.name} [${result.tier}]` : null });
+        }
+        await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'hunt', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.animal ? `${result.animal.emoji} ${result.animal.name} (${currency}${result.finalPayout.toLocaleString()})` : null }).catch(() => null);
+    }
+    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'hunt').catch(() => null);
+
+    const timeBand = getTimeBand();
     const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
     if (trackingBonus > 0) {
         const desc = embed.data.description ?? '';
@@ -513,6 +544,23 @@ async function executeStart(interaction) {
     if (result.petXpBonus > 0) {
         embed.addFields({ name: '🦅 Pet XP Bonus', value: `+${result.petXpBonus} XP (${petXpPct}%)`, inline: true });
     }
+    if (result.featuredZoneBonus > 0) {
+        embed.addFields({ name: '🌟 Featured Zone Bonus', value: `+${result.featuredZoneBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
+    }
+
+    // Hourly leader footer
+    const leaderNote = hourlyLeader
+        ? `🏆 Hourly leader: ${hourlyLeader.username} — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
+        : '🏆 No hourly leader yet — be the first!';
+    const footerBase = `${timeBand.emoji} ${timeBand.label}`;
+    const currentFooter = embed.data.footer?.text ?? '';
+    embed.setFooter({ text: currentFooter ? `${currentFooter} · ${footerBase} · ${leaderNote}` : `${footerBase} · ${leaderNote}` });
+
+    if (isFeaturedZone) {
+        const desc = embed.data.description ?? '';
+        embed.setDescription(desc + `\n> 🌟 *Featured Zone: ${zone.emoji} ${zone.name} — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout bonus active!*`);
+    }
+
     await interaction.editReply({ embeds: [embed] });
 
     if (result.success && result.tier === 'legendary' && guildSettings?.economy?.announceRareDrops !== false) {
