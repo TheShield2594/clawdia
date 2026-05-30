@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
+const { runShopBrowse }          = require('../../utils/shopBrowse');
 const {
     DEPTHS, DEPTH_LIST, TIER_COLORS, LIMITS, PICKAXE_BY_TIER,
     MATERIAL_NAMES, CONSUMABLES, BLAST_PACKS,
@@ -804,74 +805,81 @@ async function handleShop(interaction, sub) {
     const m = user.mining;
 
     if (sub === 'list') {
-        const COLOR = '#b5651d';
-        const embeds = [];
-        const files  = [];
+        const pickaxeItems = PICKAXE_TIERS.map(p => ({
+            imageId: `mine:${p.slug}`,
+            name:    p.name,
+            price:   p.cost,
+            emoji:   p.emoji,
+            badge:   `T${p.tier}`,
+            subline: `${Math.round(p.successRate * 100)}% • +${Math.round(p.rarityBoost * 100)}% rare`
+        }));
+        const pickaxeList = PICKAXE_TIERS.map(p =>
+            `${p.emoji} **${p.name}** — ${currency}${p.cost.toLocaleString()} · \`/mine shop pickaxe type:${p.slug}\``
+        ).join('\n');
 
-        embeds.push(new EmbedBuilder()
-            .setColor(COLOR)
-            .setTitle('⛏️ Mining Shop — Pickaxes')
-            .setDescription('Browse the available pickaxes. Upgrades, blast charges, consumables and depths are listed below.')
-        );
+        const upgradeItems = Object.values(PICKAXE_UPGRADES).map(u => ({
+            imageId: `mine:${u.id}`,
+            name:    u.name,
+            emoji:   u.emoji,
+            subline: `${Math.round(u.costMultiplier * 100)}% of pickaxe`
+        }));
+        const upgradeList = Object.values(PICKAXE_UPGRADES).map(u =>
+            `${u.emoji} **${u.name}** — *${u.description}* · \`/mine shop upgrade module:${u.id}\``
+        ).join('\n');
 
-        for (const p of PICKAXE_TIERS) {
-            const card = new EmbedBuilder()
-                .setColor(COLOR)
-                .setTitle(`${p.emoji} T${p.tier} ${p.name}`)
-                .addFields(
-                    { name: 'Cost',         value: `${currency}${p.cost.toLocaleString()}`,                       inline: true },
-                    { name: 'Durability',   value: `${p.baseDurability}`,                                          inline: true },
-                    { name: 'Success',      value: `${Math.round(p.successRate * 100)}%`,                          inline: true },
-                    { name: 'Rarity Boost', value: `+${Math.round(p.rarityBoost * 100)}%`,                         inline: true },
-                    { name: 'Charge',       value: p.requiresCharge ? p.chargeType.replace(/_/g, ' ') : 'None',    inline: true },
-                    { name: 'Buy',          value: `\`/mine shop pickaxe type:${p.slug}\``,                         inline: true }
-                );
-            const img = await getItemImageAttachment(`mine:${p.slug}`).catch(() => null);
-            if (img) {
-                card.setThumbnail(img.url);
-                files.push(img.attachment);
-            }
-            embeds.push(card);
-        }
+        const blastItems = BLAST_PACKS.map(b => ({
+            imageId: `mine:${b.id}`,
+            name:    b.name,
+            price:   b.cost,
+            emoji:   b.emoji
+        }));
+        const blastList = BLAST_PACKS.map(b =>
+            `${b.emoji} **${b.name}** — ${currency}${b.cost} · \`/mine shop buy item:${b.id}\``
+        ).join('\n');
 
-        embeds.push(new EmbedBuilder()
-            .setColor(COLOR)
-            .setTitle('🛠️ Shop Extras')
-            .addFields(
-                {
-                    name: '🔩 Upgrades (one per pickaxe)',
-                    value: Object.values(PICKAXE_UPGRADES).map(u =>
-                        `${u.emoji} **${u.name}** — ${Math.round(u.costMultiplier * 100)}% of pickaxe cost\n> ${u.description}`
-                    ).join('\n'),
-                    inline: false
-                },
-                {
-                    name: '💥 Blast Charges',
-                    value: BLAST_PACKS.map(b =>
-                        `${b.emoji} **${b.name}** — ${currency}${b.cost}\n> ${b.description}`
-                    ).join('\n'),
-                    inline: false
-                },
-                {
-                    name: '🎒 Consumables',
-                    value: Object.values(CONSUMABLES).map(c =>
-                        `${c.emoji} **${c.name}** — ${currency}${c.cost}\n> ${c.description}`
-                    ).join('\n'),
-                    inline: false
-                },
-                {
-                    name: '🗺️ Depths to Unlock',
-                    value: DEPTH_LIST.filter(d => !d.defaultUnlocked).map(d =>
-                        `${d.emoji} **${d.name}** — ${currency}${d.unlockCost.toLocaleString()} • Requires Lv.${d.unlockLevel}\n> ${d.description}`
-                    ).join('\n'),
-                    inline: false
-                }
-            )
-            .setFooter({ text: 'Use /mine shop pickaxe|buy|upgrade|repair|unlock to purchase' })
-            .setTimestamp()
-        );
+        const consumableItems = Object.values(CONSUMABLES).map(c => ({
+            imageId: `mine:${c.id}`,
+            name:    c.name,
+            price:   c.cost,
+            emoji:   c.emoji
+        }));
+        const consumableList = Object.values(CONSUMABLES).map(c =>
+            `${c.emoji} **${c.name}** — ${currency}${c.cost} · \`/mine shop buy item:${c.id}\``
+        ).join('\n');
 
-        return interaction.reply({ embeds, files });
+        const depthItems = DEPTH_LIST.map(d => {
+            const unlocked = m.unlockedDepths?.includes(d.id) ?? d.defaultUnlocked;
+            const isActive = m.activeDepth === d.id;
+            return {
+                imageId: `mine:${d.id}`,
+                name:    d.name,
+                emoji:   d.emoji,
+                badge:   isActive ? 'ACTIVE' : (unlocked ? 'OWNED' : `Lv.${d.unlockLevel}`),
+                subline: unlocked ? (isActive ? 'Currently mining' : 'Unlocked') : `${currency}${d.unlockCost.toLocaleString()}`
+            };
+        });
+        const depthList = DEPTH_LIST.map(d => {
+            const unlocked = m.unlockedDepths?.includes(d.id) ?? d.defaultUnlocked;
+            const isActive = m.activeDepth === d.id;
+            const status = unlocked
+                ? (isActive ? '✅ **ACTIVE**' : '✅ Unlocked')
+                : `🔒 Lv.${d.unlockLevel} / ${currency}${d.unlockCost.toLocaleString()}`;
+            return `${d.emoji} **${d.name}** — ${status}`;
+        }).join('\n');
+
+        return runShopBrowse(interaction, {
+            activity: 'mine',
+            title:    'Mining Shop',
+            currency,
+            footer:   'pickaxe • upgrade • buy • use • repair • unlock',
+            pages: [
+                { id: 'pickaxes',    label: 'Pickaxes',    emoji: '🪓',  subtitle: 'Stronger picks bite deeper veins.',     items: pickaxeItems,    listText: pickaxeList    },
+                { id: 'upgrades',    label: 'Upgrades',    emoji: '🔩',  subtitle: 'One module per pickaxe, permanent.',     items: upgradeItems,    listText: upgradeList    },
+                { id: 'blasts',      label: 'Blast Charges', emoji: '💥', subtitle: 'Crack through stubborn rock.',          items: blastItems,      listText: blastList      },
+                { id: 'consumables', label: 'Consumables', emoji: '🎒',  subtitle: 'Repairs, charms and quick boosts.',      items: consumableItems, listText: consumableList },
+                { id: 'depths',      label: 'Depths',      emoji: '🗺️', subtitle: 'New depths, new ores.',                  items: depthItems,      listText: depthList      }
+            ]
+        });
     }
 
     if (sub === 'pickaxe') {
