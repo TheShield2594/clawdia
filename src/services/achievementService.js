@@ -2,6 +2,7 @@
 
 const { ACHIEVEMENTS } = require('../data/achievements');
 const { delay } = require('../utils/delay');
+const { createAchievementCard } = require('../utils/cardGenerator');
 
 /**
  * Check all applicable achievements for a user and award any newly earned ones.
@@ -68,7 +69,7 @@ async function announceAchievements(client, guildSettings, user, member, achieve
     const channel = guild.channels.cache.get(channelId);
     if (!channel) return;
 
-    const { EmbedBuilder } = require('discord.js');
+    const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
     const mention = member?.displayName ? `${member.displayName} (<@${user.userId}>)` : `<@${user.userId}>`;
 
     for (let i = 0; i < achievements.length; i++) {
@@ -88,7 +89,7 @@ async function announceAchievements(client, guildSettings, user, member, achieve
 
         await delay(800);
 
-        // Step 2 — reveal
+        // Step 2 — reveal with canvas image
         const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
         const rewards = [];
         if (ach.xpReward)   rewards.push(`+${ach.xpReward} XP`);
@@ -103,7 +104,15 @@ async function announceAchievements(client, guildSettings, user, member, achieve
             )
             .setFooter({ text: 'Use /achievements to view all achievements' });
 
-        await msg.edit({ embeds: [revealEmbed] }).catch(() => null);
+        // Attach the Minecraft-style canvas card
+        let files = [];
+        try {
+            const buf = await createAchievementCard(ach.name, ach.description, ach.xpReward);
+            revealEmbed.setImage('attachment://achievement.png');
+            files = [new AttachmentBuilder(buf, { name: 'achievement.png' })];
+        } catch { /* non-critical — send embed without card */ }
+
+        await msg.edit({ embeds: [revealEmbed], files }).catch(() => null);
     }
 }
 

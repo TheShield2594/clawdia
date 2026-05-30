@@ -1,7 +1,8 @@
 const Guild = require('../models/Guild');
-const User = require('../models/User');
+const User  = require('../models/User');
 const SeasonRecord = require('../models/SeasonRecord');
-const { createWarVictoryBanner } = require('../utils/cardGenerator');
+const { createWarVictoryBanner, createSeasonRecapCard } = require('../utils/cardGenerator');
+const { PET_DEFINITIONS, heartBar } = require('./petService');
 
 const WAR_BOOSTER_DURATION_MS = 24 * 60 * 60 * 1000;
 const WAR_BADGE_DURATION_MS   = 30 * 24 * 60 * 60 * 1000;
@@ -218,16 +219,21 @@ async function resolveOneSeason(client, guildDoc) {
         .select('userId seasonCoins')
         .lean();
 
-    let resolvedNames = {};
+    // Single guild fetch shared by name resolution, recap DMs, and announcement
+    let seasonDiscordGuild = null;
+    let announceChannelId  = null;
     try {
-        const discordGuild = await client.guilds.fetch(guildId).catch(() => null);
-        if (discordGuild) {
-            for (const u of topUsers.slice(0, 3)) {
-                const member = await discordGuild.members.fetch(u.userId).catch(() => null);
-                resolvedNames[u.userId] = member?.user?.username ?? 'Unknown';
-            }
-        }
+        seasonDiscordGuild = await client.guilds.fetch(guildId).catch(() => null);
+        announceChannelId  = seasonDiscordGuild?.systemChannelId ?? null;
     } catch {}
+
+    let resolvedNames = {};
+    if (seasonDiscordGuild) {
+        for (const u of topUsers.slice(0, 3)) {
+            const member = await seasonDiscordGuild.members.fetch(u.userId).catch(() => null);
+            resolvedNames[u.userId] = member?.user?.username ?? 'Unknown';
+        }
+    }
 
     // Freeze the leaderboard. Unique index on (guildId, seasonId) makes this idempotent.
     try {
@@ -248,9 +254,52 @@ async function resolveOneSeason(client, guildDoc) {
         if (err.code !== 11000) throw err;
     }
 
+    // Gather active participants for recap before resetting their coins
+    const activePlayers = await User.find(
+        { guildId, 'season.seasonId': season.id, 'season.xp': { $gt: 0 } },
+        'userId season duelWins duelLosses questsCompleted hunt fishing mining'
+    ).lean();
+
+    // Build a rank map by seasonCoins for the recap cards
+    const allRanked = await User.find(
+        { guildId, 'season.seasonId': season.id },
+        'userId seasonCoins'
+    ).sort({ seasonCoins: -1 }).lean();
+    const rankMap          = new Map(allRanked.map((u, i) => [u.userId, i + 1]));
+    const totalParticipants = allRanked.length;
+
     // Reset seasonCoins for everyone in the guild
     await User.updateMany({ guildId }, { $set: { seasonCoins: 0 } })
         .catch(err => console.error('[scheduler] seasonCoins reset failed:', err.message));
+
+    // DM each active player a personalised recap card (fire-and-forget)
+    if (activePlayers.length > 0 && seasonDiscordGuild) {
+        const { AttachmentBuilder } = require('discord.js');
+        const capturedChannelId = announceChannelId;
+        (async () => {
+            for (const u of activePlayers) {
+                try {
+                    const member = await seasonDiscordGuild.members.fetch(u.userId).catch(() => null);
+                    if (!member) continue;
+
+                    const rank = rankMap.get(u.userId) ?? null;
+                    const buf  = await createSeasonRecapCard(u, season.name ?? season.id, rank, totalParticipants);
+                    const file = new AttachmentBuilder(buf, { name: 'season_recap.png' });
+
+                    await member.send({
+                        content: `🏁 **Your ${season.name ?? season.id} recap is here!** Screenshot and share it — see you next season!`,
+                        files:   [file],
+                    }).catch(() => {});
+                } catch { /* non-critical per-user failure */ }
+            }
+
+            if (capturedChannelId) {
+                await postAnnouncement(client, guildId, capturedChannelId,
+                    `📸 **Season ended!** Check your DMs for your personalised recap card. Share it here and show off your season!`
+                );
+            }
+        })().catch(err => console.error('[scheduler] season recap DMs failed:', err.message));
+    }
 
     const { EmbedBuilder } = require('discord.js');
     const currency = guildDoc.economy?.currency ?? '💰';
@@ -265,14 +314,6 @@ async function resolveOneSeason(client, guildDoc) {
         .setDescription('The season leaderboard has been frozen and season coins have been reset.')
         .addFields({ name: '🏆 Final Top 3', value: winnerLines })
         .setTimestamp();
-
-    // Announcement channel: reuse the war channel only if set on the season; otherwise
-    // fall back to the system channel of the guild.
-    let announceChannelId = null;
-    try {
-        const discordGuild = await client.guilds.fetch(guildId).catch(() => null);
-        announceChannelId = discordGuild?.systemChannelId ?? null;
-    } catch {}
 
     await postAnnouncement(client, guildId, announceChannelId, embed);
     return true;
@@ -367,4 +408,79 @@ async function awardWeeklyLeaderboardBadges(client) {
     }
 }
 
-module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges };
+// ── Pet of the Week ───────────────────────────────────────────────────────────
+
+async function selectPetOfTheWeek(client) {
+    const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+    const { generatePetSprite } = require('../utils/cardGenerator');
+
+    const guilds = await Guild.find({}, 'guildId economy').lean();
+
+    for (const guildDoc of guilds) {
+        const guildId = guildDoc.guildId;
+        try {
+            const users = await User.find({ guildId, 'pets.0': { $exists: true } }, 'userId pets').lean();
+            if (!users.length) continue;
+
+            // Find pet with most weekly interactions
+            let bestUser = null, bestPet = null, bestCount = 0;
+            for (const u of users) {
+                for (const pet of (u.pets ?? [])) {
+                    if ((pet.weeklyInteractions || 0) > bestCount) {
+                        bestCount = pet.weeklyInteractions;
+                        bestPet   = pet;
+                        bestUser  = u;
+                    }
+                }
+            }
+
+            // Reset weekly interaction counts + clear old POTW flags for all pets in guild
+            await User.updateMany({ guildId }, { $set: { 'pets.$[].potw': false, 'pets.$[].weeklyInteractions': 0 } });
+
+            if (!bestPet || bestCount === 0) continue;
+
+            // Set POTW on winning pet
+            await User.updateOne(
+                { guildId, userId: bestUser.userId, 'pets._id': bestPet._id },
+                { $set: { 'pets.$.potw': true } }
+            );
+
+            // Determine announcement channel
+            let channelId = guildDoc.economy?.announcementChannelId ?? null;
+            if (!channelId) {
+                const dg = await client.guilds.fetch(guildId).catch(() => null);
+                if (dg) channelId = dg.systemChannelId ?? null;
+            }
+            if (!channelId) continue;
+
+            const def      = PET_DEFINITIONS[bestPet.petId];
+            const name     = bestPet.name || def?.name || bestPet.petId;
+            const bondDays = Math.floor((Date.now() - new Date(bestPet.adoptedAt).getTime()) / 86400000);
+
+            const embed = new EmbedBuilder()
+                .setColor('#ffd700')
+                .setTitle('🌟 Pet of the Week!')
+                .setDescription(
+                    `This week's most beloved pet is:\n\n` +
+                    `${def?.emoji ?? '🐾'} **${name}** — owned by <@${bestUser.userId}>\n\n` +
+                    `_${bestCount} interaction${bestCount !== 1 ? 's' : ''} this week_`
+                )
+                .addFields({ name: '❤️ Bond', value: `${heartBar(bondDays)} ${bondDays} days`, inline: true })
+                .setFooter({ text: 'Earn the ribbon by feeding, playing with, or resting your pet!' })
+                .setTimestamp();
+
+            let files = [];
+            try {
+                const spriteBuf = await generatePetSprite(bestPet.petId, 80);
+                embed.setThumbnail('attachment://potw_sprite.png');
+                files = [new AttachmentBuilder(spriteBuf, { name: 'potw_sprite.png' })];
+            } catch { /* non-critical */ }
+
+            await postAnnouncement(client, guildId, channelId, { embeds: [embed], files });
+        } catch (err) {
+            console.error(`[scheduler] selectPetOfTheWeek failed for guild ${guildId}:`, err.message);
+        }
+    }
+}
+
+module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek };
