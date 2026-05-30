@@ -6,6 +6,7 @@ const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
 const { checkBirthdays } = require('../services/birthdayService');
 const { checkSeasonalEvents } = require('../services/seasonalEventService');
+const { resolveExpiredWars, resolveExpiredSeasons } = require('../services/schedulerService');
 const { runJob } = require('../utils/jobRunner');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
@@ -54,6 +55,14 @@ module.exports = {
         // Check seasonal event auto-start/auto-end once per hour
         cron.schedule('0 * * * *', () =>
             runJob('seasonalEventService', 'checkSeasonalEvents', () => checkSeasonalEvents(client))
+        );
+
+        // Auto-resolve expired server wars and economy seasons every 5 minutes
+        cron.schedule('*/5 * * * *', () =>
+            runJob('schedulerService', 'resolveExpiredWars', () => resolveExpiredWars(client))
+        );
+        cron.schedule('*/5 * * * *', () =>
+            runJob('schedulerService', 'resolveExpiredSeasons', () => resolveExpiredSeasons(client))
         );
 
         // Refund any bets that were deducted during a crash game that was interrupted by a restart

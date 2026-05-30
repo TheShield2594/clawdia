@@ -1,11 +1,13 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
-const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS } = require('../../data/materialRarity');
+const { MATERIAL_RARITY, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
+const { ACHIEVEMENTS } = require('../../data/achievements');
 
-const PRESTIGE_LABELS = { 0: null, 1: '🥉 Bronze', 2: '🥈 Silver', 3: '🥇 Gold', 4: '💎 Platinum', 5: '👑 Diamond' };
+const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
 
-// Collect all materials from all three tracks into a flat list with amounts
+const DIVIDER = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
+
 function collectMaterials(user) {
     const results = [];
     const tracks = ['hunt', 'fishing', 'mining'];
@@ -19,25 +21,34 @@ function collectMaterials(user) {
         }
     }
 
-    // Sort by tier desc, then qty desc
     results.sort((a, b) => b.tier - a.tier || b.qty - a.qty);
     return results;
 }
 
-function collectTrophies(user) {
-    const all = [
-        ...(user.hunt?.trophies ?? []).map(t => ({ name: t, source: 'hunt' })),
-        ...(user.fishing?.trophies ?? []).map(t => ({ name: t, source: 'fish' })),
-        ...(user.mining?.trophies ?? []).map(t => ({ name: t, source: 'mine' }))
-    ];
-    return all;
+function topAchievements(user) {
+    const earned = user.achievements ?? [];
+    const enriched = earned
+        .map(a => ({ earned: a, def: ACHIEVEMENT_BY_ID[a.id] }))
+        .filter(x => x.def);
+    enriched.sort((a, b) => (b.def.xpReward ?? 0) - (a.def.xpReward ?? 0));
+    return enriched.slice(0, 3);
+}
+
+function countMaterials(user) {
+    const tracks = ['hunt', 'fishing', 'mining'];
+    let total = 0;
+    for (const track of tracks) {
+        const mats = user[track]?.materials ?? {};
+        for (const qty of Object.values(mats)) if (qty > 0) total++;
+    }
+    return total;
 }
 
 module.exports = {
     cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('showcase')
-        .setDescription("Display a player's trophy case, rare materials, and achievements.")
+        .setDescription("Display a player's trophy card — rarest items and top achievements.")
         .setDMPermission(false)
         .addUserOption(opt =>
             opt.setName('user')
@@ -66,78 +77,81 @@ module.exports = {
 
             const currency = guildSettings?.economy?.currency ?? '💰';
             const allMaterials = collectMaterials(profileUser);
-            const top5Mats = allMaterials.slice(0, 5);
-            const trophies = collectTrophies(profileUser);
+            const topMats = allMaterials.slice(0, 3);
+            const topAchs = topAchievements(profileUser);
+            const topTier = allMaterials[0]?.tier ?? 0;
+            const legendaryCount = allMaterials.filter(m => m.tier === 5).length;
 
-            // ── Trophy Case ──────────────────────────────────────────────────────
-            let trophyText;
-            if (trophies.length === 0) {
-                trophyText = '*No trophies yet — go hunt some legendaries!*';
-            } else {
-                const shown = trophies.slice(0, 6);
-                trophyText = shown.map(t => `🏆 ${t.name}`).join('  ') +
-                    (trophies.length > 6 ? `\n*...and ${trophies.length - 6} more*` : '');
+            // ── Empty state ──────────────────────────────────────────────────────
+            const hasAnything = topAchs.length > 0 || allMaterials.length > 0;
+            if (!hasAnything) {
+                const emptyEmbed = new EmbedBuilder()
+                    .setColor('#9e9e9e')
+                    .setTitle(`✨ Showcase — ${target.username}`)
+                    .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+                    .setDescription(
+                        'Nothing remarkable yet.\n' +
+                        'Keep hunting, fishing, and mining.\n' +
+                        'Your showcase fills up over time.'
+                    )
+                    .setTimestamp();
+                return interaction.reply({ embeds: [emptyEmbed] });
             }
 
-            // ── Rarest Materials ─────────────────────────────────────────────────
-            let matsText;
-            if (top5Mats.length === 0) {
-                matsText = '*No materials collected yet*';
-            } else {
-                matsText = top5Mats.map(m =>
-                    `${m.emoji} **${m.label}** ×${m.qty} ${TIER_STARS[m.tier]}`
-                ).join('\n');
-            }
-
-            // ── Prestige Badges ──────────────────────────────────────────────────
-            const huntPrestige  = profileUser.hunt?.prestige ?? 0;
-            const fishPrestige  = profileUser.fishing?.prestige ?? 0;
-            const minePrestige  = profileUser.mining?.prestige ?? 0;
-            const prestigeLines = [];
-            if (PRESTIGE_LABELS[huntPrestige])  prestigeLines.push(`Hunt: ${PRESTIGE_LABELS[huntPrestige]}`);
-            if (PRESTIGE_LABELS[fishPrestige])  prestigeLines.push(`Fish: ${PRESTIGE_LABELS[fishPrestige]}`);
-            if (PRESTIGE_LABELS[minePrestige])  prestigeLines.push(`Mine: ${PRESTIGE_LABELS[minePrestige]}`);
-            const prestigeText = prestigeLines.length > 0 ? prestigeLines.join('\n') : '*No prestige yet*';
-
-            // ── Recent Achievements ──────────────────────────────────────────────
-            const recentAchs = (profileUser.achievements ?? [])
-                .slice()
-                .sort((a, b) => new Date(b.earnedAt) - new Date(a.earnedAt))
-                .slice(0, 3);
-            const achText = recentAchs.length > 0
-                ? recentAchs.map(a => `🏅 \`${a.id}\``).join('  ')
+            // ── Top Achievements ─────────────────────────────────────────────────
+            const achText = topAchs.length > 0
+                ? topAchs.map(({ def }) => `${def.emoji ?? '🏅'} ${def.name}`).join('    ')
                 : '*No achievements yet*';
 
-            // ── Lifetime Stats ───────────────────────────────────────────────────
-            const totalHunts = profileUser.hunt?.totalHunts ?? 0;
-            const legendaryKills = profileUser.hunt?.legendaryKills ?? 0;
-            const questsDone = profileUser.questsCompleted ?? 0;
-            const duelWins = profileUser.duelWins ?? 0;
-            const statsText = [
-                `Total Hunts: **${totalHunts.toLocaleString()}**`,
-                `Legendary Kills: **${legendaryKills.toLocaleString()}**`,
-                `Quests Completed: **${questsDone.toLocaleString()}**`,
-                `Duel Wins: **${duelWins.toLocaleString()}**`
-            ].join('   ');
+            // ── Rarest Finds ─────────────────────────────────────────────────────
+            const matsText = topMats.length > 0
+                ? topMats.map(m => `${m.emoji} ${m.label} ${TIER_STARS[m.tier]}`).join('\n')
+                : '*No materials collected yet*';
 
-            // ── Build Embed ──────────────────────────────────────────────────────
-            // Pick embed color by highest rarity material tier
-            const topTier = top5Mats[0]?.tier ?? 1;
-            const colors = { 1: '#9e9e9e', 2: '#4caf50', 3: '#2196f3', 4: '#9c27b0', 5: '#ff9800' };
-            const color = colors[topTier] ?? '#5865f2';
+            // ── Stats Line ───────────────────────────────────────────────────────
+            const level = profileUser.level ?? 0;
+            const streak = profileUser.streak?.current ?? 0;
+            const matsOwned = countMaterials(profileUser);
+            const totalMatsKnown = Object.keys(MATERIAL_RARITY).length;
+            const balance = (profileUser.balance ?? 0) + (profileUser.bank ?? 0);
+            const achCount = profileUser.achievementsCount ?? (profileUser.achievements?.length ?? 0);
+
+            const statsLine1 = `Level ${level}  ·  🔥 ${streak}-day streak  ·  ${matsOwned} / ${totalMatsKnown} materials`;
+            const statsLine2 = `${currency} ${balance.toLocaleString()}  ·  🏅 ${achCount} achievements`;
+
+            // ── Build description ────────────────────────────────────────────────
+            const sections = [
+                DIVIDER,
+                '  🏆 **Top Achievements**',
+                DIVIDER,
+                `  ${achText}`,
+                '',
+                DIVIDER,
+                '  💎 **Rarest Finds**',
+                DIVIDER,
+                `  ${matsText.split('\n').join('\n  ')}`,
+                '',
+                DIVIDER,
+                '  📊 **Stats**',
+                DIVIDER,
+                `  ${statsLine1}`,
+                '',
+                `  ${statsLine2}`,
+                DIVIDER,
+            ];
+
+            if (legendaryCount === 0) {
+                sections.push('');
+                sections.push('> No legendary items yet — they exist. Keep looking.');
+            }
+
+            const color = topTier > 0 ? TIER_COLORS[topTier] : '#9e9e9e';
 
             const embed = new EmbedBuilder()
                 .setColor(color)
-                .setTitle(`${target.username}'s Showcase`)
-                .setThumbnail(target.displayAvatarURL())
-                .addFields(
-                    { name: '🏆 Trophy Case', value: trophyText },
-                    { name: '⛏️ Rarest Materials', value: matsText },
-                    { name: '🎖️ Prestige Badges', value: prestigeText, inline: true },
-                    { name: '🏅 Recent Achievements', value: achText, inline: true },
-                    { name: '📊 Lifetime Stats', value: statsText }
-                )
-                .setFooter({ text: `Achievements: ${profileUser.achievementsCount ?? 0} earned` })
+                .setTitle(`✨ Showcase — ${target.username}`)
+                .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+                .setDescription(sections.join('\n'))
                 .setTimestamp();
 
             return interaction.reply({ embeds: [embed] });
