@@ -2,18 +2,7 @@
 
 const { EmbedBuilder } = require('discord.js');
 const { delay } = require('./delay');
-
-// Rarity ribbon: tier 1=Common(🟢), 2=Uncommon(🔵), 3=Rare(🟣), 4=Epic(🟡), 5=Legendary(🌌)
-const RIBBON_DOTS = ['🟢', '🔵', '🟣', '🟡', '🌌'];
-
-// Returns the formatted rarity ribbon string for a given tier (1–5).
-// e.g. rarityRibbon(4) → "🟢 ─ 🔵 ─ 🟣 ─ [🟡] ─ 🌌"
-function rarityRibbon(tier) {
-    return RIBBON_DOTS.map((dot, i) => {
-        const t = i + 1;
-        return t === tier ? `[${dot}]` : dot;
-    }).join(' ─ ');
-}
+const { TIER_RIBBON: rarityRibbon } = require('../data/materialRarity');
 
 // Formats a canonical multiplier stack-bar line.
 // multipliers: Array of { emoji, label } where label is the pre-formatted string
