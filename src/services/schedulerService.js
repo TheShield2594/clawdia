@@ -494,4 +494,77 @@ async function selectPetOfTheWeek(client) {
     }
 }
 
-module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek };
+// ── Hourly Micro-Competition Announcements ────────────────────────────────────
+
+const HOURLY_CATEGORY_LABELS = {
+    fish: { title: '🎣 Rarest Catch Last Hour',  reward: 500,  emoji: '🐟' },
+    mine: { title: '⛏️ Biggest Dig Last Hour',    reward: 500,  emoji: '💎' },
+    hunt: { title: '🏹 Largest Haul Last Hour',   reward: 500,  emoji: '🦌' },
+};
+
+async function announceHourlyWinners(client) {
+    const { EmbedBuilder } = require('discord.js');
+    const HourlyWinner = require('../models/HourlyWinner');
+    const User         = require('../models/User');
+    const { getPreviousHourKey } = require('../utils/hourlyWinner');
+
+    const prevHour = getPreviousHourKey();
+    const winners  = await HourlyWinner.find({ hour: prevHour, rewarded: false }).lean();
+    if (!winners.length) return;
+
+    // Group by guild
+    const byGuild = new Map();
+    for (const w of winners) {
+        if (!byGuild.has(w.guildId)) byGuild.set(w.guildId, []);
+        byGuild.get(w.guildId).push(w);
+    }
+
+    // Mark all as rewarded atomically
+    await HourlyWinner.updateMany(
+        { _id: { $in: winners.map(w => w._id) } },
+        { $set: { rewarded: true } }
+    );
+
+    for (const [guildId, guildWinners] of byGuild) {
+        try {
+            const guildDoc = await Guild.findOne({ guildId }, 'economy name').lean();
+            const channelId = guildDoc?.economy?.announcementChannelId ?? null;
+            if (!channelId) continue;
+
+            const discordGuild = await client.guilds.fetch(guildId).catch(() => null);
+            if (!discordGuild) continue;
+
+            const rewardAmount = 500;
+            const lines = [];
+
+            for (const winner of guildWinners) {
+                const meta = HOURLY_CATEGORY_LABELS[winner.category];
+                if (!meta) continue;
+
+                // Grant coin reward
+                await User.findOneAndUpdate(
+                    { userId: winner.userId, guildId },
+                    { $inc: { balance: rewardAmount } }
+                ).catch(() => {});
+
+                const detail = winner.details ? ` with **${winner.details}**` : '';
+                lines.push(`${meta.emoji} **${meta.title}**\n<@${winner.userId}> (${winner.username})${detail} — rewarded **+${rewardAmount.toLocaleString()} coins**`);
+            }
+
+            if (!lines.length) continue;
+
+            const embed = new EmbedBuilder()
+                .setColor('#FFD700')
+                .setTitle('🏆 Last Hour\'s Champions')
+                .setDescription(lines.join('\n\n'))
+                .setFooter({ text: 'Hourly micro-competitions reset each hour. Hunt, fish, and mine to compete!' })
+                .setTimestamp();
+
+            await postAnnouncement(client, guildId, channelId, embed);
+        } catch (err) {
+            console.error(`[scheduler] announceHourlyWinners failed for guild ${guildId}:`, err.message);
+        }
+    }
+}
+
+module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners };

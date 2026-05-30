@@ -9,6 +9,9 @@ const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, CRIME_WIN_LINES, CRIME_BUST_LINES } = require('../../utils/copyLines');
 const { delay } = require('../../utils/delay');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
+const { getTimeBand } = require('../../utils/timeBand');
+const { logBigWin } = require('../../utils/bigWinLogger');
 
 const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
@@ -80,28 +83,42 @@ module.exports = {
         }
 
         // Sample 3 random crimes and present them as buttons
+        const featured = getDailyFeatured(interaction.guild.id);
+        const timeBand = getTimeBand();
+
+        // Ensure the featured crime appears in the choices at least once
         const shuffled = [...CRIMES].sort(() => Math.random() - 0.5);
-        const choices = shuffled.slice(0, 3);
+        let choices = shuffled.slice(0, 3);
+        if (!choices.some(c => c.name === featured.crime.name)) {
+            choices[Math.floor(Math.random() * 3)] = CRIMES.find(c => c.name === featured.crime.name) ?? choices[0];
+        }
 
         const row = new ActionRowBuilder().addComponents(
-            choices.map(c => new ButtonBuilder()
-                .setCustomId(c.name)
-                .setLabel(`${c.emoji} ${c.displayName}  ·  ${c.riskEmoji}`)
-                .setStyle(ButtonStyle.Secondary)
-            )
+            choices.map(c => {
+                const isFeatured = c.name === featured.crime.name;
+                return new ButtonBuilder()
+                    .setCustomId(c.name)
+                    .setLabel(`${isFeatured ? '🌟 ' : ''}${c.emoji} ${c.displayName}  ·  ${c.riskEmoji}`)
+                    .setStyle(isFeatured ? ButtonStyle.Primary : ButtonStyle.Secondary);
+            })
         );
 
-        const crimeLines = choices.map(c =>
-            `**${c.emoji} ${c.displayName}** ${c.riskEmoji}\n` +
-            `${c.riskLabel}\n` +
-            `🎯 ${Math.round(c.successRate * 100)}% success · 💵 ${c.minPayout}–${c.maxPayout} · Fine: ${c.minFine}–${c.maxFine}`
-        ).join('\n\n');
+        const crimeLines = choices.map(c => {
+            const isFeatured = c.name === featured.crime.name;
+            const featuredTag = isFeatured ? `\n  🌟 **FEATURED** — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout bonus!` : '';
+            return (
+                `**${isFeatured ? '🌟 ' : ''}${c.emoji} ${c.displayName}** ${c.riskEmoji}\n` +
+                `${c.riskLabel}\n` +
+                `🎯 ${Math.round(c.successRate * 100)}% success · 💵 ${c.minPayout}–${c.maxPayout} · Fine: ${c.minFine}–${c.maxFine}` +
+                featuredTag
+            );
+        }).join('\n\n');
 
         const selectionEmbed = new EmbedBuilder()
             .setColor('#f39c12')
             .setTitle('🌆 Tonight\'s Jobs')
             .setDescription(`Three options on the table. Pick your play — or let the clock decide.\n\n${crimeLines}`)
-            .setFooter({ text: '15 seconds. No choice and it gets chosen for you.' })
+            .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · 15 seconds. No choice and it gets chosen for you.` })
             .setTimestamp();
 
         const response = await interaction.reply({ embeds: [selectionEmbed], components: [row], fetchReply: true });
@@ -140,26 +157,36 @@ module.exports = {
             const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
             if (success) {
+                const isFeaturedCrime = crime.name === featured.crime.name;
                 const baseEarned = Math.floor(crime.minPayout + Math.random() * (crime.maxPayout - crime.minPayout));
-                const earned = Math.round(baseEarned * streakMult);
+                let earned = Math.round(baseEarned * streakMult);
+                if (isFeaturedCrime) earned = Math.round(earned * (1 + FEATURED_PAYOUT_BONUS));
+
                 const updated = await User.findOneAndUpdate(
                     userFilter,
                     { $inc: { balance: earned }, $set: { lastCrime: crimeTime } },
                     { new: true }
                 );
 
-                logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success)` });
+                logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success)${isFeaturedCrime ? ' [featured]' : ''}` });
+
+                // Log big win if payout is large enough
+                const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+                if (earned >= bigWinThreshold) {
+                    logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: earned, source: 'crime', details: crime.displayName });
+                }
 
                 let desc = randomFrom(CRIME_WIN_LINES);
                 if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;
                 if (petCrimeBonus > 0) desc += `\n> 🐱 *Cat pet boosted your success chance!*`;
+                if (isFeaturedCrime) desc += `\n> 🌟 *Featured job — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout applied!*`;
                 desc += `\n\n────────────────────\n  ${currency} Earned: ${earned.toLocaleString()} coins`;
                 if (streakMult > 1.0) desc += `\n  🔥 Streak bonus: ${streakMult}x applied`;
                 desc += `\n────────────────────\n  Balance: ${updated.balance.toLocaleString()} coins`;
 
                 embed = new EmbedBuilder()
-                    .setColor('#2ecc71')
-                    .setTitle(`${crime.emoji} ${crime.displayName} — Clean Getaway`)
+                    .setColor(isFeaturedCrime ? '#FFD700' : '#2ecc71')
+                    .setTitle(`${isFeaturedCrime ? '🌟 ' : ''}${crime.emoji} ${crime.displayName} — Clean Getaway`)
                     .setDescription(desc)
                     .setFooter({ text: 'Cooldown: 1.5h' })
                     .setTimestamp();

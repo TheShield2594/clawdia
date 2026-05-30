@@ -6,7 +6,7 @@ const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
 const { checkBirthdays } = require('../services/birthdayService');
 const { checkSeasonalEvents } = require('../services/seasonalEventService');
-const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges } = require('../services/schedulerService');
+const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, announceHourlyWinners } = require('../services/schedulerService');
 const { runJob } = require('../utils/jobRunner');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
@@ -69,6 +69,11 @@ module.exports = {
         cron.schedule('59 23 * * 0', () =>
             runJob('schedulerService', 'awardWeeklyLeaderboardBadges', () => awardWeeklyLeaderboardBadges(client)),
             { timezone: 'Etc/UTC' }
+        );
+
+        // Announce last hour's micro-competition winners and reset at the top of every hour
+        cron.schedule('0 * * * *', () =>
+            runJob('schedulerService', 'announceHourlyWinners', () => announceHourlyWinners(client))
         );
 
         // Refund any bets that were deducted during a crash game that was interrupted by a restart

@@ -47,6 +47,13 @@ const { ensureHuntData } = require('../../services/huntService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
 const { randomFrom, FISH_MISS_POOL } = require('../../utils/copyLines');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../data/featuredRotation');
+const { getTimeBand } = require('../../utils/timeBand');
+const { logBigWin } = require('../../utils/bigWinLogger');
+const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
+
+// Rarity score for hourly fish competition (rarest catch wins)
+const FISH_TIER_SCORE = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5, event: 6 };
 
 const LOCATION_CHOICES = LOCATION_LIST.map(l => ({ name: l.name, value: l.id }));
 
@@ -389,6 +396,10 @@ async function handleCast(interaction) {
         user.markModified('fishing');
     }
 
+    const featured          = getDailyFeatured(interaction.guild.id);
+    const isFeaturedSpot    = locationId === featured.fishSpot.id;
+    const timeBand          = getTimeBand();
+
     await interaction.deferReply();
 
     // ── Reaction Window Mechanic ───────────────────────────────────────────────
@@ -397,10 +408,12 @@ async function handleCast(interaction) {
     const reelId = `fish_reel_${interaction.id}_${Date.now()}`;
     const delay  = ms => new Promise(r => setTimeout(r, ms));
 
+    const featuredNote = isFeaturedSpot ? `\n\n🌟 **Featured Spot!** +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout & +${Math.round(FEATURED_RARE_BONUS * 100)}% rare chance active.` : '';
+
     const luringEmbed = new EmbedBuilder()
-        .setColor('#4169E1')
+        .setColor(isFeaturedSpot ? '#FFD700' : '#4169E1')
         .setTitle('🎣 Cast!')
-        .setDescription('*Your lure hits the water with a satisfying plop…*\n\n🎣 **Lure in water… waiting…**')
+        .setDescription(`*Your lure hits the water with a satisfying plop…*\n\n🎣 **Lure in water… waiting…**${featuredNote}`)
         .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) });
 
     await interaction.editReply({ embeds: [luringEmbed], components: [] });
@@ -480,9 +493,24 @@ async function handleCast(interaction) {
         }
     }
 
+    // Featured spot bonus: +25% payout
+    if (result.success && result.finalPayout > 0 && isFeaturedSpot) {
+        const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
+        if (featBonus > 0) {
+            user.balance                += featBonus;
+            user.fishing.totalEarned    += featBonus;
+            user.fishing.dailyCoins     += featBonus;
+            result.finalPayout          += featBonus;
+            result.featuredSpotBonus     = featBonus;
+        }
+    }
+
     updateFishQuestProgress(user, result, locationId);
 
     const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
+
+    // Fetch hourly leader before save
+    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'fish').catch(() => null);
 
     try {
         await user.save();
@@ -497,11 +525,36 @@ async function handleCast(interaction) {
         return interaction.editReply({ content: 'Something went wrong saving your catch. Please try again.' });
     }
 
+    // Log big win and update hourly leader (fire-and-forget)
+    if (result.success) {
+        const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+        if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'fish', details: result.fish ? `${result.fish.name} [${result.tier}]` : null });
+        }
+        const tierScore = FISH_TIER_SCORE[result.tier] ?? 0;
+        if (tierScore > 0 && result.fish) {
+            tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'fish', userId: interaction.user.id, username: interaction.user.username, value: tierScore, details: `${result.fish.emoji ?? ''} ${result.fish.name} (${result.tier})`.trim() }).catch(() => null);
+        }
+    }
+
     const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
 
     if (result.petYieldBonus > 0) {
         embed.addFields({ name: '🐠 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petFishYieldPct}% yield)`, inline: true });
     }
+    if (result.featuredSpotBonus > 0) {
+        embed.addFields({ name: '🌟 Featured Spot Bonus', value: `+${result.featuredSpotBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
+    }
+
+    // Hourly leader footer
+    let leaderNote;
+    if (hourlyLeader) {
+        leaderNote = `🏆 Rarest this hour: <@${hourlyLeader.userId}> — ${hourlyLeader.details ?? 'N/A'}`;
+    } else {
+        leaderNote = '🏆 No hourly leader yet — be the first!';
+    }
+    const existingFooter = embed.data.footer?.text ?? '';
+    embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
 
     // Annotate embed with reaction window result
     if (result.reactionFactor !== undefined) {
