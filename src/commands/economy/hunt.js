@@ -10,6 +10,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
+const { runShopBrowse }          = require('../../utils/shopBrowse');
 const {
     ZONES, ZONE_LIST, TIER_COLORS, LIMITS, WEAPON_BY_TIER,
     CONSUMABLES, AMMO_PACKS,
@@ -1341,46 +1342,81 @@ async function executeShop(interaction, sub) {
 async function showShopList(interaction, user, currency) {
     const h = user.hunt;
 
-    const weaponSection = WEAPON_TIERS.map(w => {
-        const ammo = w.requiresAmmo ? `${w.ammoType.replace(/_/g, ' ')} (${currency}${w.ammoCost}/hunt)` : 'None';
-        return `**T${w.tier} ${w.emoji} ${w.name}** — ${currency}${w.cost.toLocaleString()}\n   Success: ${Math.round(w.successRate * 100)}% | Rarity: +${Math.round(w.rarityBoost * 100)}% | Ammo: ${ammo}`;
-    }).join('\n');
-
-    const upgradeSection = Object.values(WEAPON_UPGRADES).map(u =>
-        `${u.emoji} **${u.name}** — ~${Math.round(u.costMultiplier * 100)}% of weapon price\n   *${u.description}*`
+    const weaponItems = WEAPON_TIERS.map(w => ({
+        imageId: `hunt:${w.slug}`,
+        name:    w.name,
+        price:   w.cost,
+        emoji:   w.emoji,
+        badge:   `T${w.tier}`,
+        subline: `${Math.round(w.successRate * 100)}% • +${Math.round(w.rarityBoost * 100)}% rare`
+    }));
+    const weaponList = WEAPON_TIERS.map(w =>
+        `${w.emoji} **${w.name}** — ${currency}${w.cost.toLocaleString()} · \`/hunt shop weapon type:${w.slug}\``
     ).join('\n');
 
-    const ammoSection = AMMO_PACKS.map(a =>
-        `${a.emoji} **${a.name}** — ${currency}${a.cost}\n   *${a.description}*`
+    const upgradeItems = Object.values(WEAPON_UPGRADES).map(u => ({
+        imageId: `hunt:${u.id}`,
+        name:    u.name,
+        emoji:   u.emoji,
+        subline: `~${Math.round(u.costMultiplier * 100)}% of weapon`
+    }));
+    const upgradeList = Object.values(WEAPON_UPGRADES).map(u =>
+        `${u.emoji} **${u.name}** — *${u.description}* · \`/hunt shop upgrade module:${u.id}\``
     ).join('\n');
 
-    const consumableSection = Object.values(CONSUMABLES).map(c =>
-        `${c.emoji} **${c.name}** — ${currency}${c.cost}\n   *${c.description}*`
+    const ammoItems = AMMO_PACKS.map(a => ({
+        imageId: `hunt:${a.id}`,
+        name:    a.name,
+        price:   a.cost,
+        emoji:   a.emoji
+    }));
+    const ammoList = AMMO_PACKS.map(a =>
+        `${a.emoji} **${a.name}** — ${currency}${a.cost} · \`/hunt shop buy item:${a.id}\``
     ).join('\n');
 
-    const zoneSection = ZONE_LIST.map(zone => {
-        const unlocked = h.unlockedZones.includes(zone.id);
-        const isActive = h.activeZone === zone.id;
+    const consumableItems = Object.values(CONSUMABLES).map(c => ({
+        imageId: `hunt:${c.id}`,
+        name:    c.name,
+        price:   c.cost,
+        emoji:   c.emoji
+    }));
+    const consumableList = Object.values(CONSUMABLES).map(c =>
+        `${c.emoji} **${c.name}** — ${currency}${c.cost} · \`/hunt shop buy item:${c.id}\``
+    ).join('\n');
+
+    const zoneItems = ZONE_LIST.map(z => {
+        const unlocked = h.unlockedZones.includes(z.id);
+        const isActive = h.activeZone === z.id;
+        return {
+            imageId: `hunt:${z.id}`,
+            name:    z.name,
+            emoji:   z.emoji,
+            badge:   isActive ? 'ACTIVE' : (unlocked ? 'OWNED' : `Lv.${z.unlockLevel}`),
+            subline: unlocked ? (isActive ? 'Currently hunting' : 'Unlocked') : (z.unlockCost > 0 ? `${currency}${z.unlockCost.toLocaleString()}` : 'Free')
+        };
+    });
+    const zoneList = ZONE_LIST.map(z => {
+        const unlocked = h.unlockedZones.includes(z.id);
+        const isActive = h.activeZone === z.id;
         const status = unlocked
             ? (isActive ? '✅ **ACTIVE**' : '✅ Unlocked')
-            : `🔒 Lv.${zone.unlockLevel}${zone.unlockCost > 0 ? ` / ${currency}${zone.unlockCost.toLocaleString()}` : ' (free)'}`;
-        return `${zone.emoji} **${zone.name}** — ${status}\n   *${zone.description}*`;
+            : `🔒 Lv.${z.unlockLevel}${z.unlockCost > 0 ? ` / ${currency}${z.unlockCost.toLocaleString()}` : ' (free)'}`;
+        return `${z.emoji} **${z.name}** — ${status}`;
     }).join('\n');
 
-    const embed = new EmbedBuilder()
-        .setColor('#f39c12')
-        .setTitle('🏪 Hunt Shop')
-        .addFields(
-            { name: '🔫 Weapons',                        value: weaponSection,     inline: false },
-            { name: '🔧 Weapon Upgrades (1 per weapon)', value: upgradeSection,    inline: false },
-            { name: '🔶 Ammunition',                     value: ammoSection,       inline: false },
-            { name: '🧪 Consumables',                    value: consumableSection, inline: false },
-            { name: '🗺️ Zones',                          value: zoneSection,       inline: false }
-        )
-        .setFooter({ text: '/hunt shop weapon • /hunt shop upgrade • /hunt shop buy • /hunt shop use • /hunt shop repair • /hunt shop unlock' })
-        .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+    return runShopBrowse(interaction, {
+        activity: 'hunt',
+        title:    'Hunt Shop',
+        currency,
+        footer:   'weapon • upgrade • buy • use • repair • unlock',
+        pages: [
+            { id: 'weapons',     label: 'Weapons',     emoji: '🔫',  subtitle: 'Pick your tier — better gear, better trophies.', items: weaponItems,     listText: weaponList     },
+            { id: 'upgrades',    label: 'Upgrades',    emoji: '🔧',  subtitle: 'One module per weapon, permanent.',                items: upgradeItems,    listText: upgradeList    },
+            { id: 'ammo',        label: 'Ammunition',  emoji: '🔶',  subtitle: 'Keep your rifle fed.',                              items: ammoItems,       listText: ammoList       },
+            { id: 'consumables', label: 'Consumables', emoji: '🧪',  subtitle: 'Bait, charms, repairs and more.',                   items: consumableItems, listText: consumableList },
+            { id: 'zones',       label: 'Zones',       emoji: '🗺️', subtitle: 'New regions, new prey.',                            items: zoneItems,       listText: zoneList       }
+        ]
+    });
 }
 
 async function handleBuyWeapon(interaction, user, currency) {
