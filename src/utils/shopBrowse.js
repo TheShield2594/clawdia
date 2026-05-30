@@ -18,9 +18,12 @@ async function loadImagesByItemIds(itemIds) {
     const out = {};
     const ids = [...new Set(itemIds.filter(Boolean))];
     if (!ids.length) return out;
-    const docs = await ItemImage.find({ itemId: { $in: ids } }).lean();
+    const docs = await ItemImage.find({ itemId: { $in: ids } });
     for (const d of docs) {
-        if (d.imageData?.length) out[d.itemId] = d.imageData;
+        const raw = d.imageData;
+        if (!raw) continue;
+        const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw.buffer || raw);
+        if (buf.length) out[d.itemId] = buf;
     }
     return out;
 }
@@ -130,8 +133,15 @@ async function runShopBrowse(interaction, config) {
     if (!interaction.deferred && !interaction.replied) {
         await interaction.deferReply();
     }
-    const initial = await buildMessage(pageIdx);
-    const reply   = await interaction.editReply(initial);
+    let reply;
+    try {
+        const initial = await buildMessage(pageIdx);
+        reply = await interaction.editReply(initial);
+    } catch (err) {
+        console.error('[shopBrowse] initial render error:', err);
+        await interaction.editReply({ content: 'Failed to render the shop. Please try again.', embeds: [], components: [], files: [] }).catch(() => {});
+        return;
+    }
 
     const collector = reply.createMessageComponentCollector({ time: 5 * 60_000 });
 
