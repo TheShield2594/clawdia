@@ -263,6 +263,23 @@ module.exports = {
             if (capActive)        bonusLines.push(`⚠️ Combined multiplier capped at **${MAX_COMBINED_MULTIPLIER}x**.`);
 
             const streakColor = getStreakColor(streakCurrent);
+            // ── Streak rank lookup ────────────────────────────────────────────────
+            let streakRank = null;
+            if (streakCurrent > 0) {
+                const aheadCount = await User.countDocuments({
+                    guildId: interaction.guild.id,
+                    'streak.current': { $gt: streakCurrent }
+                });
+                streakRank = aheadCount + 1;
+            }
+            // ─────────────────────────────────────────────────────────────────────
+
+            const rankMedals = { 1: '🥇', 2: '🥈', 3: '🥉' };
+            const rankMedal = streakRank && rankMedals[streakRank] ? `${rankMedals[streakRank]} ` : '';
+            const rankText = streakRank
+                ? `🔥 Your ${streakCurrent}-day streak · ${rankMedal}Ranked #${streakRank} on this server  •  Cooldown: 24h`
+                : 'Cooldown: 24h';
+
             const rewardEmbed = new EmbedBuilder()
                 .setColor(streakColor)
                 .setTitle(getStreakTitle(streakCurrent, isMilestone))
@@ -270,7 +287,7 @@ module.exports = {
                     getStreakDescription(streakCurrent, isMilestone) + '\n\n' +
                     buildRewardBlock(actualAmount, streakCurrent, streakMult, updated.balance, bonusLines, droppedItem, isMilestone, streakCurrent)
                 )
-                .setFooter({ text: 'Cooldown: 24h' })
+                .setFooter({ text: rankText })
                 .setTimestamp();
 
             const freezeCount = user.streak?.freezes ?? 0;
@@ -290,20 +307,41 @@ module.exports = {
                 : await interaction.reply(sendOpts);
 
             // ── Milestone public announcement ─────────────────────────────────────
-            if (isMilestone) {
+            if (isMilestone && guildSettings?.economy?.announceStreakMilestones !== false) {
                 const announcementChannelId = guildSettings?.economy?.announcementChannelId;
                 const channel = announcementChannelId
                     ? interaction.guild.channels.cache.get(announcementChannelId)
                     : null;
 
                 if (channel?.isTextBased()) {
+                    const milestoneConfigs = {
+                        7: {
+                            title: '🔥 One Week Strong',
+                            description: `${interaction.user} has claimed their daily reward 7 days in a row.\nThat streak is just getting started.`,
+                            color: '#f39c12'
+                        },
+                        30: {
+                            title: '🔥 30-Day Streak Milestone',
+                            description: `${interaction.user} has kept their streak alive for a full month.\nConsistent. Relentless.` +
+                                (droppedItem ? `\n\nThey received a ${droppedItem.emoji} **${droppedItem.name}** for the dedication.` : ''),
+                            color: '#FFD700'
+                        },
+                        100: {
+                            title: '🏆 100-Day Streak — Legendary Dedication',
+                            description: `${interaction.user} has claimed their daily reward every single day\nfor 100 days straight.\n\nThis server has witnessed something rare.`,
+                            color: '#9b59b6'
+                        }
+                    };
+                    const cfg = milestoneConfigs[streakCurrent] ?? {
+                        title: `🔥 ${streakCurrent}-Day Streak Milestone!`,
+                        description: `${interaction.user} just hit a **${streakCurrent}-day streak**!` +
+                            (droppedItem ? `\nThey found a ${droppedItem.emoji} **${droppedItem.name}** from their milestone drop!` : ''),
+                        color: streakColor
+                    };
                     const milestoneAnnounce = new EmbedBuilder()
-                        .setColor(streakColor)
-                        .setTitle(`🔥 ${streakCurrent}-Day Streak Milestone!`)
-                        .setDescription(
-                            `${interaction.user} just hit a **${streakCurrent}-day streak**!\n` +
-                            (droppedItem ? `They found a ${droppedItem.emoji} **${droppedItem.name}** from their milestone drop!` : '')
-                        )
+                        .setColor(cfg.color)
+                        .setTitle(cfg.title)
+                        .setDescription(cfg.description)
                         .setTimestamp();
                     channel.send({ embeds: [milestoneAnnounce] }).catch(() => {});
                 }
