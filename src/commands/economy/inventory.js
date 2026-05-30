@@ -139,6 +139,8 @@ module.exports = {
         ]);
 
         const currency = guildSettings?.economy?.currency ?? '💰';
+        // Read-only: prune expired effects in memory for display only, no save performed.
+        // Matches the pattern in /balance, /rank, and /profile.
         if (userData) pruneEffects(userData);
 
         const huntMats    = userData?.hunt?.materials    ?? {};
