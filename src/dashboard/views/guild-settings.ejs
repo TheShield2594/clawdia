@@ -1724,26 +1724,28 @@
                             <input type="text" id="ai-model" value="<%= settings.ai.model || '' %>" placeholder="Leave empty for provider default">
                             <small id="ai-model-hint">Default: gpt-4o-mini</small>
                         </div>
+                        <form class="ai-keys-form" autocomplete="off" onsubmit="return false">
                         <div class="field ai-key-field" data-provider="openai">
                             <label class="field-label" for="ai-openai-key">OpenAI API key</label>
-                            <input type="password" id="ai-openai-key" value="" placeholder="<%= settings.ai.openaiKey ? '••••••••••••' : 'sk-…' %>">
+                            <input type="password" id="ai-openai-key" value="" autocomplete="new-password" placeholder="<%= settings.ai.openaiKey ? '••••••••••••' : 'sk-…' %>">
                             <small><% if (settings.ai.openaiKey) { %>Key configured — enter a new value to replace it<% } else { %>Leave empty to use the bot's default key<% } %></small>
                         </div>
                         <div class="field ai-key-field" data-provider="anthropic">
                             <label class="field-label" for="ai-anthropic-key">Anthropic API key</label>
-                            <input type="password" id="ai-anthropic-key" value="" placeholder="<%= settings.ai.anthropicKey ? '••••••••••••' : 'sk-ant-…' %>">
+                            <input type="password" id="ai-anthropic-key" value="" autocomplete="new-password" placeholder="<%= settings.ai.anthropicKey ? '••••••••••••' : 'sk-ant-…' %>">
                             <small><% if (settings.ai.anthropicKey) { %>Key configured — enter a new value to replace it<% } else { %>Leave empty to use the bot's default key<% } %></small>
                         </div>
                         <div class="field ai-key-field" data-provider="gemini">
                             <label class="field-label" for="ai-gemini-key">Gemini API key</label>
-                            <input type="password" id="ai-gemini-key" value="" placeholder="<%= settings.ai.geminiKey ? '••••••••••••' : 'AIza…' %>">
+                            <input type="password" id="ai-gemini-key" value="" autocomplete="new-password" placeholder="<%= settings.ai.geminiKey ? '••••••••••••' : 'AIza…' %>">
                             <small><% if (settings.ai.geminiKey) { %>Key configured — enter a new value to replace it<% } else { %>Leave empty to use the bot's default key<% } %></small>
                         </div>
                         <div class="field ai-key-field" data-provider="openrouter">
                             <label class="field-label" for="ai-openrouter-key">OpenRouter API key</label>
-                            <input type="password" id="ai-openrouter-key" value="" placeholder="<%= settings.ai.openrouterKey ? '••••••••••••' : 'sk-or-…' %>">
+                            <input type="password" id="ai-openrouter-key" value="" autocomplete="new-password" placeholder="<%= settings.ai.openrouterKey ? '••••••••••••' : 'sk-or-…' %>">
                             <small><% if (settings.ai.openrouterKey) { %>Key configured — enter a new value to replace it<% } else { %>Get a key at openrouter.ai. Use any model OpenRouter supports (e.g. <code>anthropic/claude-3.5-sonnet</code>).<% } %></small>
                         </div>
+                        </form>
                         <div class="field ai-key-field" data-provider="ollama">
                             <label class="field-label" for="ai-ollama-url">Ollama base URL</label>
                             <input type="text" id="ai-ollama-url" value="<%= settings.ai.ollamaBaseUrl || 'http://localhost:11434' %>" placeholder="http://localhost:11434">
@@ -2677,8 +2679,8 @@
         async function uploadActivityImage(itemId, input) {
             var file = input.files[0];
             if (!file) return;
-            var imgEl = document.getElementById('act-img-' + itemId);
-            var emojiEl = document.getElementById('act-emoji-' + itemId);
+            var emojiEl = document.getElementById('gic-emoji-' + itemId);
+            var imgEl = document.getElementById('gic-img-' + itemId);
             var fd = new FormData();
             fd.append('image', file);
             try {
@@ -2689,8 +2691,18 @@
                         reader.onload = function(e) { res(e.target.result); };
                         reader.readAsDataURL(file);
                     });
-                    imgEl.src = dataUrl;
-                    imgEl.style.display = 'block';
+                    // Card was rendered without an <img>; create one and insert before the emoji
+                    if (!imgEl && emojiEl) {
+                        imgEl = document.createElement('img');
+                        imgEl.className = 'game-item-img';
+                        imgEl.id = 'gic-img-' + itemId;
+                        imgEl.alt = '';
+                        emojiEl.parentNode.insertBefore(imgEl, emojiEl);
+                    }
+                    if (imgEl) {
+                        imgEl.src = dataUrl;
+                        imgEl.style.display = 'block';
+                    }
                     if (emojiEl) emojiEl.style.display = 'none';
                     toast('Image uploaded ✓', 'success');
                 } else {
@@ -2708,11 +2720,13 @@
             try {
                 var r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'DELETE' });
                 if (r.ok) {
-                    var imgEl = document.getElementById('act-img-' + itemId);
-                    var emojiEl = document.getElementById('act-emoji-' + itemId);
-                    imgEl.src = '';
-                    imgEl.style.display = 'none';
-                    if (emojiEl) emojiEl.style.display = 'block';
+                    var imgEl = document.getElementById('gic-img-' + itemId);
+                    var emojiEl = document.getElementById('gic-emoji-' + itemId);
+                    if (imgEl) {
+                        imgEl.src = '';
+                        imgEl.style.display = 'none';
+                    }
+                    if (emojiEl) emojiEl.style.display = 'flex';
                     toast('Image removed', 'success');
                 } else {
                     var err = await r.json().catch(function(){ return {}; });

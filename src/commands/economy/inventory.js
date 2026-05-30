@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
+const { getItemLore } = require('../../data/defaultShopItems');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
 
@@ -79,9 +80,12 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
 
     if (inventory.length) {
         const lines = inventory.map(entry => {
-            const shopItem = shopItems.find(s => s.name.toLowerCase() === entry.itemId.toLowerCase());
+            const shopItem = shopItems.find(s => s.name.toLowerCase() === entry.itemId.toLowerCase()
+                                              || (s.itemId && s.itemId.toLowerCase() === entry.itemId.toLowerCase()));
             const worth = shopItem ? ` (worth ${currency}${shopItem.price} each)` : '';
-            return `**${entry.itemId}** ×${entry.quantity}${worth}`;
+            const lore = getItemLore(entry.itemId);
+            const loreLine = lore ? `\n*${lore}*` : '';
+            return `**${entry.itemId}** ×${entry.quantity}${worth}${loreLine}`;
         });
         embed.addFields({ name: '🛍️ Shop Items', value: lines.join('\n'), inline: false });
         hasContent = true;

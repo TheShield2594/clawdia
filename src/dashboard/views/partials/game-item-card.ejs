@@ -1,14 +1,18 @@
 <div class="game-item-card" id="gic-<%= item.id %>">
     <div class="game-item-img-wrap">
-        <img
-            class="game-item-img"
-            id="gic-img-<%= item.id %>"
-            src="/api/item-image/activity/<%= item.id %>"
-            alt=""
-            onerror="this.style.display='none';document.getElementById('gic-emoji-<%= item.id %>').style.display='flex'"
-            onload="document.getElementById('gic-emoji-<%= item.id %>').style.display='none'"
-        >
-        <span class="game-item-emoji" id="gic-emoji-<%= item.id %>"><%= item.emoji %></span>
+        <% if (item.hasImage) { %>
+            <img
+                class="game-item-img"
+                id="gic-img-<%= item.id %>"
+                src="/api/item-image/activity/<%= item.id %>"
+                alt=""
+                onerror="this.style.display='none';document.getElementById('gic-emoji-<%= item.id %>').style.display='flex'"
+                onload="document.getElementById('gic-emoji-<%= item.id %>').style.display='none'"
+            >
+            <span class="game-item-emoji" id="gic-emoji-<%= item.id %>" style="display:none"><%= item.emoji %></span>
+        <% } else { %>
+            <span class="game-item-emoji" id="gic-emoji-<%= item.id %>"><%= item.emoji %></span>
+        <% } %>
     </div>
     <div class="game-item-info">
         <div class="game-item-name"><%= item.label %></div>

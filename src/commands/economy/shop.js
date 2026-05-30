@@ -9,7 +9,7 @@ const {
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const { chunkArray, paginate } = require('../../utils/paginator');
-const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
+const { ensureDefaultShopItems, getItemLore } = require('../../data/defaultShopItems');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 
 const PAGE_SIZE = 5;
@@ -171,10 +171,14 @@ module.exports = {
                     await interaction.member.roles.add(freshItem.roleId).catch(console.error);
                 }
 
+                const successLore = getItemLore(freshItem.itemId);
+                const successDesc = successLore
+                    ? `You bought **${freshItem.name}** for ${currency}${freshItem.price.toLocaleString()}.\n\n*${successLore}*`
+                    : `You bought **${freshItem.name}** for ${currency}${freshItem.price.toLocaleString()}.`;
                 const successEmbed = new EmbedBuilder()
                     .setColor('#00ff00')
                     .setTitle('Purchase Successful')
-                    .setDescription(`You bought **${freshItem.name}** for ${currency}${freshItem.price.toLocaleString()}.`)
+                    .setDescription(successDesc)
                     .addFields({ name: 'New Balance', value: `${currency}${chargedUser.balance.toLocaleString()}`, inline: true });
 
                 if (freshItem.roleId) {
@@ -194,10 +198,14 @@ module.exports = {
                     new ButtonBuilder().setCustomId('shop_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
                 );
 
+                const confirmLore = getItemLore(item.itemId);
+                const confirmDesc = confirmLore
+                    ? `Buy **${item.name}** for **${currency}${item.price.toLocaleString()}**?\n\n*${confirmLore}*`
+                    : `Buy **${item.name}** for **${currency}${item.price.toLocaleString()}**?`;
                 const confirmEmbed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .setTitle('Confirm Purchase')
-                    .setDescription(`Buy **${item.name}** for **${currency}${item.price.toLocaleString()}**?`)
+                    .setDescription(confirmDesc)
                     .addFields(
                         { name: 'Your Balance', value: `${currency}${userData.balance.toLocaleString()}`, inline: true },
                         { name: 'After Purchase', value: `${currency}${(userData.balance - item.price).toLocaleString()}`, inline: true }
