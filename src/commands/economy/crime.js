@@ -91,17 +91,16 @@ module.exports = {
             )
         );
 
+        const crimeLines = choices.map(c =>
+            `**${c.emoji} ${c.displayName}** ${c.riskEmoji}\n` +
+            `${c.riskLabel}\n` +
+            `🎯 ${Math.round(c.successRate * 100)}% success · 💵 ${c.minPayout}–${c.maxPayout} · Fine: ${c.minFine}–${c.maxFine}`
+        ).join('\n\n');
+
         const selectionEmbed = new EmbedBuilder()
             .setColor('#f39c12')
             .setTitle('🌆 Tonight\'s Jobs')
-            .setDescription('Three options on the table.\nPick your play — or let the clock decide.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━')
-            .addFields(
-                choices.map(c => ({
-                    name: `${c.emoji} ${c.displayName}`,
-                    value: `${c.riskLabel}\n🎯 ${Math.round(c.successRate * 100)}% success\n💵 ${c.minPayout}–${c.maxPayout}  ·  Fine: ${c.minFine}–${c.maxFine}`,
-                    inline: true,
-                }))
-            )
+            .setDescription(`Three options on the table. Pick your play — or let the clock decide.\n\n${crimeLines}`)
             .setFooter({ text: '15 seconds. No choice and it gets chosen for you.' })
             .setTimestamp();
 
@@ -154,9 +153,9 @@ module.exports = {
                 let desc = randomFrom(CRIME_WIN_LINES);
                 if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;
                 if (petCrimeBonus > 0) desc += `\n> 🐱 *Cat pet boosted your success chance!*`;
-                desc += `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${currency} Earned: ${earned.toLocaleString()} coins`;
+                desc += `\n\n────────────────────\n  ${currency} Earned: ${earned.toLocaleString()} coins`;
                 if (streakMult > 1.0) desc += `\n  🔥 Streak bonus: ${streakMult}x applied`;
-                desc += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  Balance: ${updated.balance.toLocaleString()} coins`;
+                desc += `\n────────────────────\n  Balance: ${updated.balance.toLocaleString()} coins`;
 
                 embed = new EmbedBuilder()
                     .setColor('#2ecc71')
@@ -204,10 +203,10 @@ module.exports = {
 
                     const critDesc =
                         `You tried to pull it off.\nYou didn't make it out.\n\n> "${flavorText}"\n\n` +
-                        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                        `────────────────────\n` +
                         `  💸 Seized: ${currency}${lost.toLocaleString()} coins  (${Math.round(lossRate * 100)}% of wallet)\n` +
                         `  💰 Remaining: ${updated.balance.toLocaleString()} coins\n` +
-                        `━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+                        `────────────────────`;
 
                     embed = new EmbedBuilder()
                         .setColor('#8B0000')

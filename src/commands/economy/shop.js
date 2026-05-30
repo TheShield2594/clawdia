@@ -8,30 +8,97 @@ const {
 } = require('discord.js');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
-const { chunkArray, paginate } = require('../../utils/paginator');
-const { ensureDefaultShopItems, getItemLore } = require('../../data/defaultShopItems');
+const Transaction = require('../../models/Transaction');
+const { ensureDefaultShopItems, getItemLore, getItemRarity, RARITY_ORDER } = require('../../data/defaultShopItems');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
+const { runShopBrowse } = require('../../utils/shopBrowse');
+const { logTransaction } = require('../../utils/logTransaction');
 
-const PAGE_SIZE = 5;
 const CONFIRM_THRESHOLD = 500;
+const NEW_ITEM_TTL_MS   = 48 * 3_600_000; // 48 hours
 
-function buildViewEmbed(slice, guildName, currency, userBalance, absoluteStart) {
-    const lines = slice.map((item, i) => {
-        const stock = item.stock === -1 ? '∞' : item.stock;
-        const roleTag = item.roleId ? ` → <@&${item.roleId}>` : '';
-        return `**${absoluteStart + i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})${roleTag}\n${item.description || '*No description*'}`;
-    });
+const RARITY_EMOJIS = {
+    Common:   '⚪',
+    Uncommon: '🟢',
+    Rare:     '🔵',
+    Epic:     '🟣',
+    Mythic:   '🟠',
+};
 
-    const embed = new EmbedBuilder()
-        .setColor('#FFD700')
-        .setTitle(`${guildName} Shop`)
-        .setDescription(lines.join('\n\n'));
+// Extract the leading emoji from a description string (e.g. '🔒 Protects…' → '🔒')
+function extractEmoji(str) {
+    if (!str) return '';
+    const m = str.match(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})/u);
+    return m ? m[0] : '';
+}
 
-    const footerParts = [`Use /shop buy <item name> to purchase`];
-    if (userBalance !== null) footerParts.push(`Your balance: ${currency}${userBalance.toLocaleString()}`);
-    embed.setFooter({ text: footerParts.join(' · ') });
+// Returns the set of itemIds bought by 3+ unique users in the last 24h
+async function getTrendingItemIds(guildId) {
+    const since = new Date(Date.now() - 24 * 3_600_000);
+    const rows = await Transaction.aggregate([
+        { $match: { guildId, type: 'shop_buy', createdAt: { $gte: since } } },
+        { $group: { _id: '$note', buyers: { $addToSet: '$userId' } } },
+        { $match: { 'buyers.2': { $exists: true } } },
+    ]);
+    return new Set(rows.map(r => r._id));
+}
 
-    return embed;
+// Build the runShopBrowse page descriptors from the guild's shop items
+async function buildShopPages(guildSettings, currency) {
+    const trending = await getTrendingItemIds(guildSettings.guildId);
+    const now = Date.now();
+
+    // Group items by rarity
+    const byRarity = {};
+    for (const item of guildSettings.shop) {
+        const rarity = getItemRarity(item.itemId, item.price);
+        if (!byRarity[rarity]) byRarity[rarity] = [];
+        byRarity[rarity].push(item);
+    }
+
+    const pages = [];
+    for (const rarity of RARITY_ORDER) {
+        const items = byRarity[rarity];
+        if (!items || items.length === 0) continue;
+
+        const tierActivity = `shop_${rarity.toLowerCase()}`;
+        const emoji = RARITY_EMOJIS[rarity] || '⚫';
+
+        const pageItems = items.map(item => {
+            let badge = null;
+            const iid = item.itemId || item.name;
+            if (item.createdAt && now - new Date(item.createdAt).getTime() < NEW_ITEM_TTL_MS) {
+                badge = 'NEW';
+            } else if (trending.has(iid)) {
+                badge = 'TRENDING';
+            }
+            const stock = item.stock === -1 ? '∞' : String(item.stock);
+            return {
+                name:    item.name,
+                emoji:   extractEmoji(item.description),
+                price:   item.price,
+                badge,
+                subline: `Stock: ${stock}${item.roleId ? ' · Role reward' : ''}`,
+            };
+        });
+
+        // Compact list text shown in the embed description below the banner
+        const listText = items.map((item, i) => {
+            const stock = item.stock === -1 ? '∞' : item.stock;
+            return `**${i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})`;
+        }).join('\n') + `\n\n*Use /shop buy <item name> to purchase*`;
+
+        pages.push({
+            id:       `rarity_${rarity.toLowerCase()}`,
+            label:    `${rarity}`,
+            emoji,
+            subtitle: `${items.length} item${items.length !== 1 ? 's' : ''}`,
+            items:    pageItems,
+            listText,
+        });
+    }
+
+    return pages;
 }
 
 module.exports = {
@@ -68,12 +135,22 @@ module.exports = {
                 return interaction.reply({ content: 'The shop is empty. Admins can add items via the dashboard.', ephemeral: true });
             }
 
+            const pages = await buildShopPages(guildSettings, currency);
+            if (!pages.length) {
+                return interaction.reply({ content: 'The shop is empty.', ephemeral: true });
+            }
+
             const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             const userBalance = userData?.balance ?? 0;
-            const pages = chunkArray(guildSettings.shop, PAGE_SIZE).map((slice, page) =>
-                buildViewEmbed(slice, interaction.guild.name, currency, userBalance, page * PAGE_SIZE)
-            );
-            return paginate(interaction, pages);
+            const balanceFooter = `Balance: ${currency}${userBalance.toLocaleString()} · Use /shop buy <item name>`;
+
+            return runShopBrowse(interaction, {
+                activity: pages[0].id.replace('rarity_', 'shop_'),
+                title:    `${interaction.guild.name} Shop`,
+                currency,
+                footer:   balanceFooter,
+                pages,
+            });
         }
 
         // ── BUY ───────────────────────────────────────────────────────────────
@@ -170,6 +247,15 @@ module.exports = {
                 if (freshItem.roleId) {
                     await interaction.member.roles.add(freshItem.roleId).catch(console.error);
                 }
+
+                logTransaction({
+                    userId:  interaction.user.id,
+                    guildId: interaction.guild.id,
+                    type:    'shop_buy',
+                    amount:  -freshItem.price,
+                    balance: chargedUser.balance,
+                    note:    inventoryId,
+                });
 
                 const successLore = getItemLore(freshItem.itemId);
                 const successDesc = successLore

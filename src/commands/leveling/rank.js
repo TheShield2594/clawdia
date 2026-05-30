@@ -4,6 +4,29 @@ const Guild = require('../../models/Guild');
 const { createRankCard } = require('../../utils/cardGenerator');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
 
+const BOOSTER_TYPES  = new Set(['coin_booster_2x', 'xp_booster_2x', 'lucky_streak', 'salary_raise']);
+const BOOST_TYPES    = new Set(['coin_booster_2x', 'xp_booster_2x']);
+
+// Best rarity rank for Epic+ materials pulled from hunt/fish/mine (simplified)
+const MATERIAL_RARITY_RANK = { epic: 3, legendary: 4, mythic: 5 };
+function getRarestCatch(userData) {
+    const candidates = [];
+    const checkMaterials = mats => {
+        if (!Array.isArray(mats)) return;
+        for (const m of mats) {
+            if (!m.itemId && !m.id) continue;
+            const rank = MATERIAL_RARITY_RANK[m.rarity?.toLowerCase()];
+            if (rank) candidates.push({ rank, name: m.name || m.itemId || m.id });
+        }
+    };
+    checkMaterials(userData.hunting?.materials);
+    checkMaterials(userData.fishing?.materials);
+    checkMaterials(userData.mining?.materials);
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.rank - a.rank);
+    return candidates[0].name;
+}
+
 module.exports = {
     cooldown: 5,
     data: new SlashCommandBuilder()
@@ -32,11 +55,13 @@ module.exports = {
             const rank       = allUsers.findIndex(u => u.userId === targetUser.id) + 1;
             const requiredXp = user.level * 100 + 100;
 
-            const card       = await createRankCard(targetUser, user, rank, requiredXp);
-            const attachment = new AttachmentBuilder(card, { name: 'rank.png' });
+            const activeBoosters  = (user.activeEffects || []).filter(e => BOOSTER_TYPES.has(e.type));
+            const hasActiveBoost  = activeBoosters.some(e => BOOST_TYPES.has(e.type));
+            const streakCurrent   = user.streak?.current ?? 0;
+            const rarestCatch     = getRarestCatch(user);
 
-            const BOOSTER_TYPES = new Set(['coin_booster_2x', 'xp_booster_2x', 'lucky_streak', 'salary_raise']);
-            const activeBoosters = (user.activeEffects || []).filter(e => BOOSTER_TYPES.has(e.type));
+            const card       = await createRankCard(targetUser, user, rank, requiredXp, { streakCurrent, hasActiveBoost, rarestCatch });
+            const attachment = new AttachmentBuilder(card, { name: 'rank.png' });
 
             const serverCoinMult = getServerCoinMultiplier(guildSettings);
             const serverXpMult   = getServerXpMultiplier(guildSettings);

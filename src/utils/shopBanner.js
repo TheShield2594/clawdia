@@ -12,9 +12,14 @@ const COLS     = 4;
 const HEADER_H = 80;
 
 const THEMES = {
-    hunt: { bgTop: '#1a3318', bgBottom: '#0a160a', accent: '#27ae60', tile: '#27512f', tileInner: '#16331c', name: '#ffffff', price: '#f1c40f', muted: '#9bc8a3' },
-    fish: { bgTop: '#0d2538', bgBottom: '#07182a', accent: '#2980b9', tile: '#1f4566', tileInner: '#12283d', name: '#ffffff', price: '#f1c40f', muted: '#9bc1dc' },
-    mine: { bgTop: '#2e1c10', bgBottom: '#170c05', accent: '#b5651d', tile: '#4d3119', tileInner: '#2b1a0c', name: '#ffffff', price: '#f1c40f', muted: '#d1a988' }
+    hunt:          { bgTop: '#1a3318', bgBottom: '#0a160a', accent: '#27ae60', tile: '#27512f', tileInner: '#16331c', name: '#ffffff', price: '#f1c40f', muted: '#9bc8a3' },
+    fish:          { bgTop: '#0d2538', bgBottom: '#07182a', accent: '#2980b9', tile: '#1f4566', tileInner: '#12283d', name: '#ffffff', price: '#f1c40f', muted: '#9bc1dc' },
+    mine:          { bgTop: '#2e1c10', bgBottom: '#170c05', accent: '#b5651d', tile: '#4d3119', tileInner: '#2b1a0c', name: '#ffffff', price: '#f1c40f', muted: '#d1a988' },
+    shop_common:   { bgTop: '#1c1c1c', bgBottom: '#111111', accent: '#7f8c8d', tile: '#333333', tileInner: '#222222', name: '#ffffff', price: '#f1c40f', muted: '#aaaaaa' },
+    shop_uncommon: { bgTop: '#152a15', bgBottom: '#0c1c0c', accent: '#27ae60', tile: '#1e4a1e', tileInner: '#0f2a0f', name: '#ffffff', price: '#f1c40f', muted: '#a9d1a9' },
+    shop_rare:     { bgTop: '#0e1f3a', bgBottom: '#071428', accent: '#2980b9', tile: '#1a3866', tileInner: '#0f2040', name: '#ffffff', price: '#f1c40f', muted: '#8ab4d6' },
+    shop_epic:     { bgTop: '#1a0c2e', bgBottom: '#100720', accent: '#9b59b6', tile: '#301848', tileInner: '#1c0c2e', name: '#ffffff', price: '#f1c40f', muted: '#c49ed6' },
+    shop_mythic:   { bgTop: '#2e1800', bgBottom: '#1c1000', accent: '#e67e22', tile: '#4d2e00', tileInner: '#2d1a00', name: '#ffffff', price: '#f1c40f', muted: '#d4a76a' },
 };
 
 function getTheme(activity) {
