@@ -1244,14 +1244,14 @@ textarea { resize: vertical; min-height: 80px; }
 .activity-img-actions { display: flex; gap: .25rem; }
 
 /* ── Game item cards (Hunt / Fish / Mine) ────────────────────── */
-.game-items-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .75rem; margin-top: .75rem; }
-.game-item-card { display: flex; align-items: center; gap: .75rem; padding: .6rem .75rem; background: var(--surface-2, #1e1e2e); border: 1px solid var(--border); border-radius: 10px; transition: border-color .15s; }
-.game-item-card:hover { border-color: var(--claw-500, #7c5cbf); }
-.game-item-img-wrap { position: relative; width: 48px; height: 48px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-3, #181825); overflow: hidden; }
-.game-item-img { width: 48px; height: 48px; object-fit: contain; border-radius: 6px; display: block; }
-.game-item-emoji { font-size: 1.6rem; line-height: 1; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0; }
-.game-item-info { flex: 1; min-width: 0; }
-.game-item-name { font-size: .85rem; font-weight: 600; color: var(--text-primary, #cdd6f4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.game-item-id { font-size: .72rem; color: var(--text-mute, #6c7086); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.game-item-actions { display: flex; gap: .35rem; flex-shrink: 0; }
+.game-items-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .85rem; margin-top: .75rem; }
+.game-item-card { display: flex; flex-direction: column; gap: .75rem; padding: 1rem; background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); transition: border-color .2s ease, box-shadow .2s ease; }
+.game-item-card:hover { border-color: rgba(249,115,22,.4); box-shadow: 0 0 0 3px rgba(249,115,22,.07); }
+.game-item-img-wrap { position: relative; width: 100%; height: 96px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-3, #181825); overflow: hidden; }
+.game-item-img { max-width: 100%; max-height: 96px; object-fit: contain; border-radius: 6px; display: block; }
+.game-item-emoji { font-size: 3rem; line-height: 1; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0; }
+.game-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .25rem; }
+.game-item-name { font-size: .95rem; font-weight: 700; color: var(--text-primary, #cdd6f4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.game-item-id { font-size: .75rem; color: var(--text-mute, #6c7086); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.game-item-actions { display: flex; gap: .4rem; flex-shrink: 0; }
 .game-item-upload-btn { cursor: pointer; }
