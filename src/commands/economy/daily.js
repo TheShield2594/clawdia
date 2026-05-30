@@ -7,6 +7,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
 const { generateDailyChallenge } = require('../../utils/dailyChallenge');
 const { DROP_TABLE, RARE_DROP_TABLE, DROP_MILESTONES, DROP_BASE_CHANCE, weightedRandom } = require('../../data/dailyDropTable');
+const { stackBar } = require('../../utils/rewardReveal');
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -33,12 +34,20 @@ function getStreakDescription(streak, isMilestone) {
     return "Good to see you today.";
 }
 
-function buildRewardBlock(amount, streak, streakMult, balance, bonusLines, droppedItem, isMilestone, streakCurrent) {
+function buildRewardBlock(amount, streak, streakMult, coinMult, serverMult, combined, balance, capActive, droppedItem, isMilestone, streakCurrent, currency) {
     const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
     const lines = [div];
     lines.push(`💰 Today's Reward: **${amount.toLocaleString()} coins**`);
-    if (streak >= 7 && streakMult > 1.0) lines.push(`🔥 Streak Bonus: **${streakMult}x**  (day ${streak})`);
-    if (bonusLines.length) lines.push(...bonusLines);
+
+    // Canonical stack-bar line when any multiplier is active
+    const mults = [];
+    if (streakMult > 1.0) mults.push({ emoji: '🔥', label: `${streak}d` });
+    if (coinMult > 1.0)   mults.push({ emoji: '💰🚀', label: `${coinMult}x` });
+    if (serverMult > 1.0) mults.push({ emoji: '🌐', label: `${serverMult}x` });
+    const bar = stackBar(mults, combined, amount, currency);
+    if (bar) lines.push(bar);
+    if (capActive) lines.push(`⚠️ Combined multiplier capped at **${MAX_COMBINED_MULTIPLIER}x**.`);
+
     lines.push(div);
     lines.push(`Balance: **${balance.toLocaleString()} coins**`);
     if (droppedItem) {
@@ -257,11 +266,7 @@ module.exports = {
             }
             // ─────────────────────────────────────────────────────────────────────
 
-            const bonusLines = [];
-            if (coinMult > 1.0)   bonusLines.push(`💰🚀 **${coinMult}x Coin Booster** active!`);
-            if (serverMult > 1.0) bonusLines.push(`🌐 **${serverMult}x Server Boost** active!`);
-            if (capActive)        bonusLines.push(`⚠️ Combined multiplier capped at **${MAX_COMBINED_MULTIPLIER}x**.`);
-
+            const currency = guildSettings?.economy?.currency || '💰';
             const streakColor = getStreakColor(streakCurrent);
             // ── Streak rank lookup ────────────────────────────────────────────────
             let streakRank = null;
@@ -285,7 +290,7 @@ module.exports = {
                 .setTitle(getStreakTitle(streakCurrent, isMilestone))
                 .setDescription(
                     getStreakDescription(streakCurrent, isMilestone) + '\n\n' +
-                    buildRewardBlock(actualAmount, streakCurrent, streakMult, updated.balance, bonusLines, droppedItem, isMilestone, streakCurrent)
+                    buildRewardBlock(actualAmount, streakCurrent, streakMult, coinMult, serverMult, combined, updated.balance, capActive, droppedItem, isMilestone, streakCurrent, currency)
                 )
                 .setFooter({ text: rankText })
                 .setTimestamp();
@@ -381,7 +386,7 @@ module.exports = {
                     const finalBalance = bonusUpdated?.balance ?? updated.balance + bonusAmount;
                     rewardEmbed.setDescription(
                         getStreakDescription(streakCurrent, isMilestone) + '\n\n' +
-                        buildRewardBlock(actualAmount, streakCurrent, streakMult, finalBalance, bonusLines, droppedItem, isMilestone, streakCurrent)
+                        buildRewardBlock(actualAmount, streakCurrent, streakMult, coinMult, serverMult, combined, finalBalance, capActive, droppedItem, isMilestone, streakCurrent, currency)
                     );
                     const winChallengeEmbed = new EmbedBuilder()
                         .setColor('#ffd700')

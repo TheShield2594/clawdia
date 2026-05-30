@@ -12,6 +12,8 @@ const {
     MINER_LEVELS, PRESTIGE_BONUSES, MINE_QUEST_TEMPLATES
 } = require('../../data/mineData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
+const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
+const { randomFrom, MINE_CAVE_LINES } = require('../../utils/copyLines');
 const {
     ensureMineData,
     applyStaminaRegen,
@@ -364,7 +366,7 @@ async function handleDig(interaction) {
     const embed = buildMineEmbed(result, user, depth, pickaxe, currency, interaction.user);
     if (result.caveIn) {
         const desc = embed.data.description ?? '';
-        embed.setDescription(desc + '\n> 💥 *Cave-in! No payout — watch your durability.*');
+        embed.setDescription(desc + `\n> 💥 *${randomFrom(MINE_CAVE_LINES)}*`);
     } else if (result.intensityLevel && result.intensityLevel.multiplier !== 1.0) {
         const desc = embed.data.description ?? '';
         embed.setDescription(desc + `\n> ${result.intensityLevel.emoji} *${result.intensityLevel.name} depth: ${result.intensityLevel.multiplier}× payout applied*`);
@@ -1161,12 +1163,13 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
         const payoutDisplay = cappedByHard ? `~~${currency}${finalPayout}~~ (daily cap reached)` : `**${currency}${finalPayout.toLocaleString()}**`;
 
         const isLegendary = tier === 'legendary';
+        const ribbon = TIER_RIBBON(TIER_NUM[tier] ?? 1);
         const embedTitle = isLegendary
             ? `⛏️✨ LEGENDARY STRIKE ✨⛏️`
             : `${ore.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${ore.name} ${isCrit ? '✨' : ''}`;
         const embedDesc = isLegendary
-            ? `You struck something impossible in the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${ore.emoji}  **${ore.name}**  [⭐⭐⭐⭐⭐]\n  *${ore.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
-            : `*${ore.flavor}*`;
+            ? `${ribbon}\n\nYou struck something impossible in the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${ore.emoji}  **${ore.name}**  [⭐⭐⭐⭐⭐]\n  *${ore.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+            : `${ribbon}\n\n*${ore.flavor}*`;
 
         const embed = new EmbedBuilder()
             .setColor(color)
