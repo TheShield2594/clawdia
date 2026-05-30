@@ -141,24 +141,43 @@ async function handleList(interaction, currency) {
     return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-// Returns a seller rep label: '👑 N sales' or '🆕 first listing'
-async function getSellerRep(guildId, sellerId) {
-    const count = await Transaction.countDocuments({ guildId, userId: sellerId, type: 'market_sell' });
-    return count > 0 ? `👑 ${count} sale${count !== 1 ? 's' : ''}` : '🆕 first listing';
+// Batch-fetches seller rep counts and Discord usernames for a page slice.
+// Returns { repMap: Map<sellerId, label>, tagMap: Map<sellerId, username> }
+async function fetchPageContext(slice, guildId, client) {
+    const sellerIds = [...new Set(slice.map(l => l.sellerId))];
+
+    const [repRows] = await Promise.all([
+        Transaction.aggregate([
+            { $match: { guildId, userId: { $in: sellerIds }, type: 'market_sell' } },
+            { $group: { _id: '$userId', count: { $sum: 1 } } },
+        ]),
+    ]);
+
+    const repMap = new Map(sellerIds.map(id => [id, '🆕 first listing']));
+    for (const row of repRows) {
+        repMap.set(row._id, `👑 ${row.count} sale${row.count !== 1 ? 's' : ''}`);
+    }
+
+    const tagResults = await Promise.all(
+        sellerIds.map(id => client.users.fetch(id).then(u => [id, u.username]).catch(() => [id, 'Unknown']))
+    );
+    const tagMap = new Map(tagResults);
+
+    return { repMap, tagMap };
 }
 
-// Formats a single listing line for embed display
-async function formatLine(l, currency, client) {
-    const sellerTag  = await client.users.fetch(l.sellerId).then(u => u.username).catch(() => 'Unknown');
-    const rep        = await getSellerRep(l.guildId, l.sellerId);
-    const totalPrice = l.pricePerUnit * l.quantity;
-    const meta       = ITEM_META[l.itemId];
-    const effectCfg  = EFFECT_CONFIGS[l.itemId];
-    const itemEmoji  = effectCfg?.emoji ?? '';
+// Formats a single listing line using pre-fetched context (no per-item DB/API calls)
+function formatLine(l, currency, repMap, tagMap) {
+    const sellerTag   = tagMap.get(l.sellerId) ?? 'Unknown';
+    const rep         = repMap.get(l.sellerId) ?? '🆕 first listing';
+    const totalPrice  = l.pricePerUnit * l.quantity;
+    const meta        = ITEM_META[l.itemId];
+    const effectCfg   = EFFECT_CONFIGS[l.itemId];
+    const itemEmoji   = effectCfg?.emoji ?? '';
     const displayName = meta ? `${itemEmoji} ${meta.name}`.trim() : `\`${l.itemId}\``;
-    const loreText   = getItemLore(l.itemId);
-    const loreSuffix = loreText ? `\n  *${loreText.slice(0, 80)}${loreText.length > 80 ? '…' : ''}*` : '';
-    const rarity     = getItemRarity(l.itemId, l.pricePerUnit);
+    const loreText    = getItemLore(l.itemId);
+    const loreSuffix  = loreText ? `\n  *${loreText.slice(0, 80)}${loreText.length > 80 ? '…' : ''}*` : '';
+    const rarity      = getItemRarity(l.itemId, l.pricePerUnit);
     return `\`${String(l._id).slice(-6)}\`  @${sellerTag} *(${rep})*\n**${l.quantity}x ${displayName}** — ${currency}${l.pricePerUnit.toLocaleString()}/ea  *(${currency}${totalPrice.toLocaleString()} total)*  · ${rarity}${loreSuffix}`;
 }
 
@@ -203,7 +222,9 @@ async function handleBrowse(interaction, currency) {
         const safePage   = Math.min(page, totalPages - 1);
         const slice      = sorted.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
-        const lines = await Promise.all(slice.map(l => formatLine(l, currency, interaction.client)));
+        // Batch all DB/API calls for the page in two round-trips
+        const { repMap, tagMap } = await fetchPageContext(slice, interaction.guild.id, interaction.client);
+        const lines = slice.map(l => formatLine(l, currency, repMap, tagMap));
 
         const sortLabel = sortMode === SORT_RARITY ? '🏷️ Rarity sort' : '💰 Price sort';
         return new EmbedBuilder()
@@ -300,19 +321,29 @@ async function handleBuy(interaction, currency) {
             return editReply({ content: 'This listing was just sold. Your coins have been refunded.', embeds: [], components: [] });
         }
 
-        await Promise.all([
-            User.updateOne({ userId: listing.sellerId, guildId: interaction.guild.id }, { $inc: { balance: sellerReceives } }),
-            (async () => {
-                const buyerDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-                const slot = buyerDoc.inventory.find(i => i.itemId === listing.itemId);
-                if (slot) { slot.quantity += listing.quantity; }
-                else       { buyerDoc.inventory.push({ itemId: listing.itemId, quantity: listing.quantity }); }
-                buyerDoc.markModified('inventory');
-                await buyerDoc.save();
-            })(),
-            logTransaction({ userId: listing.sellerId, guildId: interaction.guild.id, type: 'market_sell',    amount: sellerReceives, balance: 0, note: listing.itemId }),
-            logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'market_buy', amount: -totalCost,     balance: buyer.balance, note: listing.itemId }),
-        ]);
+        // Update buyer inventory first; roll back the buyer deduction if it fails
+        try {
+            const buyerDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+            const slot = buyerDoc.inventory.find(i => i.itemId === listing.itemId);
+            if (slot) { slot.quantity += listing.quantity; }
+            else       { buyerDoc.inventory.push({ itemId: listing.itemId, quantity: listing.quantity }); }
+            buyerDoc.markModified('inventory');
+            await buyerDoc.save();
+        } catch (inventoryErr) {
+            console.error('[market buy] inventory update failed, refunding buyer:', inventoryErr);
+            await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(console.error);
+            return editReply({ content: 'Something went wrong crediting the item. Your coins have been refunded.', embeds: [], components: [] });
+        }
+
+        // Credit seller and capture their new balance for accurate logging
+        const updatedSeller = await User.findOneAndUpdate(
+            { userId: listing.sellerId, guildId: interaction.guild.id },
+            { $inc: { balance: sellerReceives } },
+            { new: true }
+        );
+
+        logTransaction({ userId: listing.sellerId, guildId: interaction.guild.id, type: 'market_sell', amount: sellerReceives, balance: updatedSeller?.balance ?? 0, note: listing.itemId });
+        logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'market_buy', amount: -totalCost, balance: buyer.balance, note: listing.itemId });
 
         return editReply({
             embeds: [new EmbedBuilder()

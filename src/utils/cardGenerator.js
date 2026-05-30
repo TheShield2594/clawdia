@@ -6,6 +6,13 @@ try {
 } catch {
     // DejaVu not present; canvas falls back to its built-in default
 }
+try {
+    registerFont('/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', { family: 'Noto Color Emoji' });
+} catch {
+    // Emoji font unavailable; emoji characters will fall back to replacement glyphs
+}
+
+const EMOJI_FONT = '"DejaVu Sans", "Noto Color Emoji"';
 
 function truncateText(ctx, text, maxWidth) {
     if (ctx.measureText(text).width <= maxWidth) return text;
@@ -145,7 +152,7 @@ async function createRankCard(user, userData, rank, requiredXp, opts = {}) {
     if (rarestCatch) {
         ctx.font      = '14px "DejaVu Sans"';
         ctx.fillStyle = '#9b59b6';
-        ctx.fillText(`✨ Rarest catch: ${rarestCatch}`, barX, barY + 68);
+        ctx.fillText(`★ Rarest catch: ${rarestCatch}`, barX, barY + 68);
     }
 
     // Avatar
@@ -190,8 +197,8 @@ async function createRankCard(user, userData, rank, requiredXp, opts = {}) {
         ctx.strokeStyle = '#ff6200';
         ctx.lineWidth   = 2;
         ctx.stroke();
-        // Flame emoji
-        ctx.font         = '18px "DejaVu Sans"';
+        // Flame emoji (Noto Color Emoji provides the glyph when available)
+        ctx.font         = `18px ${EMOJI_FONT}`;
         ctx.textBaseline = 'middle';
         ctx.textAlign    = 'center';
         ctx.fillStyle    = '#ff6200';

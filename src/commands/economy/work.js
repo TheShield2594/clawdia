@@ -301,8 +301,8 @@ module.exports = {
 
                 if (!performance.exceptional) {
                     workEmbed.addFields(
-                        { name: '📊 Performance', value: performance.label, inline: true },
-                        { name: '📈 Career',      value: careerValue, inline: false }
+                        { name: '📊 Performance', value: performance.label, inline: false },
+                        { name: '📈 Career',      value: careerValue,       inline: false }
                     );
                 }
 

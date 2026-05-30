@@ -12,6 +12,8 @@ function resolveTiers(guildSettings) {
     return DEFAULT_TIERS;
 }
 
+const EMBED_DESC_LIMIT = 4096;
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('jobs')
@@ -67,14 +69,31 @@ module.exports = {
                 ? `${nextTier.minShifts - currentShifts} more shifts to unlock ${nextTier.name} jobs`
                 : 'Max career tier reached — all jobs unlocked!';
 
+            const header =
+                `Career: **${userTierEmoji} ${userTier.name}** · ${currentShifts} shifts worked\n` +
+                `Use **/work** every hour to earn coins!\n\n`;
+
+            // Guard against Discord's 4096-char embed description limit
+            const HEADER_LEN = header.length;
+            const BUDGET     = EMBED_DESC_LIMIT - HEADER_LEN;
+            let body         = sections.join('\n\n');
+            if (body.length > BUDGET) {
+                let included = 0;
+                let truncated = '';
+                for (const section of sections) {
+                    const candidate = (truncated ? truncated + '\n\n' : '') + section;
+                    if (candidate.length > BUDGET - 30) break;
+                    truncated = candidate;
+                    included++;
+                }
+                const remaining = sections.length - included;
+                body = truncated + (remaining > 0 ? `\n\n*…+${remaining} more tier${remaining !== 1 ? 's' : ''} not shown*` : '');
+            }
+
             const embed = new EmbedBuilder()
                 .setColor('#5865F2')
                 .setTitle('📋 Job Listings')
-                .setDescription(
-                    `Career: **${userTierEmoji} ${userTier.name}** · ${currentShifts} shifts worked\n` +
-                    `Use **/work** every hour to earn coins!\n\n` +
-                    sections.join('\n\n')
-                )
+                .setDescription(header + body)
                 .setFooter({ text: footerText })
                 .setTimestamp();
 
