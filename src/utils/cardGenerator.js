@@ -317,4 +317,217 @@ async function createWealthTierBanner(username, tierLabel, tierColor) {
     return canvas.toBuffer();
 }
 
-module.exports = { createWelcomeCard, createRankCard, createWarVictoryBanner, createWealthTierBanner };
+// ── Pet sprite generator ──────────────────────────────────────────────────────
+
+const PET_SPRITE_COLORS = {
+    dog:         { bg: '#c8a96e', ring: '#8b6914' },
+    cat:         { bg: '#b0b0b0', ring: '#555555' },
+    bird:        { bg: '#4fc3f7', ring: '#0277bd' },
+    fish:        { bg: '#ff7043', ring: '#bf360c' },
+    fox:         { bg: '#ef6c00', ring: '#bf360c' },
+    wolf:        { bg: '#546e7a', ring: '#263238' },
+    eagle:       { bg: '#795548', ring: '#4e342e' },
+    shark:       { bg: '#607d8b', ring: '#37474f' },
+    crystal_fox: { bg: '#7c4dff', ring: '#311b92' },
+};
+
+const PET_SPRITE_EMOJIS = {
+    dog: '🐶', cat: '🐱', bird: '🐦', fish: '🐠',
+    fox: '🦊', wolf: '🐺', eagle: '🦅', shark: '🦈', crystal_fox: '💎',
+};
+
+async function generatePetSprite(petId, size = 80) {
+    const canvas = createCanvas(size, size);
+    const ctx    = canvas.getContext('2d');
+    const colors = PET_SPRITE_COLORS[petId] ?? { bg: '#9e9e9e', ring: '#616161' };
+    const r      = size / 2;
+
+    ctx.beginPath();
+    ctx.arc(r, r, r, 0, Math.PI * 2);
+    ctx.fillStyle = colors.bg;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(r, r, r - 3, 0, Math.PI * 2);
+    ctx.strokeStyle = colors.ring;
+    ctx.lineWidth   = 4;
+    ctx.stroke();
+
+    const emoji    = PET_SPRITE_EMOJIS[petId] ?? '🐾';
+    const fontSize = Math.floor(size * 0.48);
+    ctx.font         = `${fontSize}px ${EMOJI_FONT}`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, r, r + fontSize * 0.05);
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'alphabetic';
+
+    return canvas.toBuffer('image/png');
+}
+
+// ── Minecraft-style achievement card ─────────────────────────────────────────
+
+function _drawAchievementIcon(ctx, x, y, size) {
+    const s = size / 18;
+    ctx.fillStyle = '#5de0e6';
+    for (const [bx, by] of [[9,1],[10,1],[8,2],[9,2],[7,3],[8,3],[6,4],[7,4],[5,5],[6,5],[4,6],[5,6],[3,7],[4,7],[2,8],[3,8]]) {
+        ctx.fillRect(x + bx * s, y + by * s, s, s);
+    }
+    ctx.fillStyle = '#8aeef2';
+    for (const [gx, gy] of [[1,8],[2,8],[3,8],[4,8],[5,8]]) ctx.fillRect(x + gx * s, y + gy * s, s, s);
+    ctx.fillStyle = '#8b5e3c';
+    for (const [hx, hy] of [[2,9],[2,10],[2,11],[2,12],[1,10],[3,10]]) ctx.fillRect(x + hx * s, y + hy * s, s, s);
+}
+
+function _achTier(xpReward) {
+    if (!xpReward || xpReward <= 50)  return { label: 'Bronze',   color: '#cd7f32' };
+    if (xpReward <= 200)              return { label: 'Silver',   color: '#c0c0c0' };
+    if (xpReward <= 500)              return { label: 'Gold',     color: '#ffd700' };
+    return                                   { label: 'Platinum', color: '#e5e4e2' };
+}
+
+async function createAchievementCard(text, description, xpReward) {
+    const W = 520, H = 110, ICON_SIZE = 58, PAD = 16;
+    const canvas = createCanvas(W, H);
+    const ctx    = canvas.getContext('2d');
+    const tier   = _achTier(xpReward);
+
+    ctx.fillStyle = '#3c3c3c';
+    ctx.fillRect(0, 0, W, H);
+
+    // Tier colour strip at top
+    ctx.fillStyle = tier.color;
+    ctx.fillRect(0, 0, W, 5);
+
+    // Bevel border
+    ctx.fillStyle = '#5a5a5a';
+    ctx.fillRect(0, 5, W, 3);
+    ctx.fillRect(0, 5, 3, H - 5);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, H - 3, W, 3);
+    ctx.fillRect(W - 3, 5, 3, H - 5);
+
+    // Icon slot
+    const iconX = PAD, iconY = (H - ICON_SIZE) / 2;
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(iconX, iconY, ICON_SIZE, ICON_SIZE);
+    ctx.strokeStyle = '#111111'; ctx.lineWidth = 2; ctx.strokeRect(iconX, iconY, ICON_SIZE, ICON_SIZE);
+    ctx.strokeStyle = '#555555'; ctx.lineWidth = 1; ctx.strokeRect(iconX + 2, iconY + 2, ICON_SIZE - 4, ICON_SIZE - 4);
+    _drawAchievementIcon(ctx, iconX + 2, iconY + 2, ICON_SIZE - 4);
+
+    // Text
+    const textX      = iconX + ICON_SIZE + 14;
+    const maxTextW   = W - textX - PAD;
+    ctx.textBaseline = 'top';
+
+    ctx.font      = 'bold 13px Arial, sans-serif';
+    ctx.fillStyle = '#ffdf00';
+    ctx.fillText('Achievement Unlocked!', textX, 14);
+
+    ctx.font      = 'bold 11px Arial, sans-serif';
+    ctx.fillStyle = tier.color;
+    ctx.textAlign = 'right';
+    ctx.fillText(`[${tier.label}]`, W - PAD, 14);
+    ctx.textAlign = 'left';
+
+    let fontSize = 21;
+    ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+    while (ctx.measureText(text).width > maxTextW && fontSize > 10) {
+        fontSize--;
+        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, textX, 36);
+
+    if (description) {
+        ctx.font      = 'italic 12px Arial, sans-serif';
+        ctx.fillStyle = '#aaaaaa';
+        ctx.fillText(truncateText(ctx, description, maxTextW), textX, 62);
+    }
+
+    return canvas.toBuffer('image/png');
+}
+
+// ── End-of-season recap card ──────────────────────────────────────────────────
+
+async function createSeasonRecapCard(user, seasonName, leaderboardRank, totalPlayers) {
+    const W = 700, H = 420;
+    const canvas = createCanvas(W, H);
+    const ctx    = canvas.getContext('2d');
+    const gold   = '#FFD700';
+
+    // Background
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+
+    // Gold accent bars
+    ctx.fillStyle = gold;
+    ctx.fillRect(0, 0, W, 8);
+    ctx.fillRect(0, H - 8, W, 8);
+
+    // Header
+    ctx.font = 'bold 30px "DejaVu Sans"';
+    ctx.fillStyle = gold;
+    ctx.fillText('YOUR SEASON', 30, 52);
+
+    ctx.font      = 'italic 17px "DejaVu Sans"';
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillText(truncateText(ctx, seasonName ?? 'Season Recap', W - 60), 30, 76);
+
+    // Divider
+    ctx.strokeStyle = '#333366'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(30, 90); ctx.lineTo(W - 30, 90); ctx.stroke();
+
+    // Stats grid (2 columns × 3 rows)
+    const biggestWin = Math.max(user.hunt?.bestPayout ?? 0, user.fishing?.bestPayout ?? 0, user.mining?.bestPayout ?? 0);
+    const stats = [
+        { label: 'Season Tier',    value: `Tier ${user.season?.tier ?? 0}`                    },
+        { label: 'Season XP',      value: `${(user.season?.xp ?? 0).toLocaleString()} XP`     },
+        { label: 'Best Win',       value: `${biggestWin.toLocaleString()} coins`               },
+        { label: 'Leaderboard',    value: leaderboardRank ? `#${leaderboardRank} / ${totalPlayers}` : 'Unranked' },
+        { label: 'Duel Record',    value: `${user.duelWins ?? 0}W / ${user.duelLosses ?? 0}L`  },
+        { label: 'Quests Done',    value: `${user.questsCompleted ?? 0}`                       },
+    ];
+
+    const colW = (W - 60) / 2;
+    const rowH = 65;
+    const startY = 110;
+
+    for (let i = 0; i < stats.length; i++) {
+        const col = i % 2, row = Math.floor(i / 2);
+        const x = 30 + col * colW, y = startY + row * rowH;
+
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(x, y, colW - 10, rowH - 8);
+
+        ctx.font = '13px "DejaVu Sans"'; ctx.fillStyle = '#888888';
+        ctx.fillText(stats[i].label, x + 10, y + 20);
+
+        ctx.font = 'bold 20px "DejaVu Sans"'; ctx.fillStyle = '#ffffff';
+        ctx.fillText(truncateText(ctx, stats[i].value, colW - 30), x + 10, y + 48);
+    }
+
+    // Tier progress ribbon bar
+    const tier      = user.season?.tier ?? 0;
+    const maxTiers  = 50;
+    const barX = 30, barY = startY + 3 * rowH + 10, barW = W - 60, barH = 20;
+    const topQuartile   = Math.max(1, Math.floor((totalPlayers ?? 1) * 0.25));
+    const inTopQuartile = leaderboardRank && leaderboardRank <= topQuartile;
+
+    ctx.fillStyle = '#222244';
+    ctx.fillRect(barX, barY, barW, barH);
+    const progress = Math.min((tier / maxTiers) * barW, barW);
+    ctx.fillStyle  = inTopQuartile ? gold : '#5865F2';
+    ctx.fillRect(barX, barY, progress, barH);
+
+    ctx.font = '13px "DejaVu Sans"'; ctx.fillStyle = '#dddddd';
+    ctx.fillText(`Tier ${tier} / ${maxTiers}${inTopQuartile ? ' — 🏆 Top 25%!' : ''}`, barX, barY + barH + 18);
+
+    // Next-season teaser
+    ctx.font = 'italic 14px "DejaVu Sans"'; ctx.fillStyle = '#555588';
+    ctx.fillText('New season coming soon — your next adventure awaits!', 30, H - 18);
+
+    return canvas.toBuffer('image/png');
+}
+
+module.exports = { createWelcomeCard, createRankCard, createWarVictoryBanner, createWealthTierBanner, generatePetSprite, createAchievementCard, createSeasonRecapCard };

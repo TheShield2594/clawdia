@@ -578,6 +578,9 @@ const guildSchema = new Schema({
         endsAt:    { type: Date, default: null }
     },
 
+    // Scheduler claim timestamp for Pet of the Week job (prevents duplicate runs)
+    potwLastRunAt: { type: Date, default: null },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });

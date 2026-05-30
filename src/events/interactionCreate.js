@@ -45,7 +45,7 @@ async function trackQuestCommandUse(interaction) {
     const { completed, nearComplete } = await onCommandUse(user, guildSettings);
     await user.save();
 
-    await notifyQuestComplete(guildSettings, interaction.member, completed, interaction.channel);
+    await notifyQuestComplete(guildSettings, interaction.member, completed, interaction.channel, user);
     await notifyQuestNearComplete(guildSettings, interaction.member, nearComplete, interaction.channel);
 }
 
