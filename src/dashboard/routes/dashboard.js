@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Guild = require('../../models/Guild');
+const ItemImage = require('../../models/ItemImage');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { ACHIEVEMENTS } = require('../../data/achievements');
@@ -117,7 +118,15 @@ async function renderGuildSettings(req, res) {
 
         const safeSettings = guildSettings.toObject();
 
-        const toItem = (ns, item, idField = 'id') => ({ id: `${ns}:${item[idField]}`, label: item.name, emoji: item.emoji || '📦' });
+        // Pre-load the set of activity item images that actually exist so the
+        // template can skip rendering <img> tags that would otherwise 404.
+        const uploadedImageDocs = await ItemImage.find({}, { itemId: 1 }).lean();
+        const uploadedImageIds = new Set(uploadedImageDocs.map(d => d.itemId));
+
+        const toItem = (ns, item, idField = 'id') => {
+            const id = `${ns}:${item[idField]}`;
+            return { id, label: item.name, emoji: item.emoji || '📦', hasImage: uploadedImageIds.has(id) };
+        };
 
         const huntItems = {
             weapons:     WEAPON_TIERS.map(w => toItem('hunt', w, 'slug')),
