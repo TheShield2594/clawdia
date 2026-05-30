@@ -82,7 +82,10 @@ async function renderTile(ctx, item, x, y, theme, currency) {
     let drewImage = false;
     if (item.imageBuffer) {
         try {
-            const img = await loadImage(item.imageBuffer);
+            const img = await Promise.race([
+                loadImage(item.imageBuffer),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('loadImage timeout')), 2000))
+            ]);
             const fit = fitContain(img.width, img.height, imgW - 16, imgH - 16);
             const dx  = imgX + (imgW - fit.w) / 2;
             const dy  = imgY + (imgH - fit.h) / 2;
