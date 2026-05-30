@@ -500,6 +500,13 @@ const userSchema = new Schema({
     // Crash game: bet amount deducted but not yet resolved (cleared on cash out or crash end)
     pendingCrashRefund: { type: Number, default: 0 },
 
+    // Crash weekly leaderboard — tracks best cash-out multiplier per calendar week
+    crashStats: {
+        weekBest:     { type: Number, default: 0 },
+        weekStart:    { type: Date,   default: null },
+        allTimeBest:  { type: Number, default: 0 },
+    },
+
     // Lifetime stats used for achievement checks
     lifetimeGambled: { type: Number, default: 0 },
     successfulRobs:  { type: Number, default: 0 },
