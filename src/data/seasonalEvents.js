@@ -12,6 +12,13 @@ const SEASONAL_EVENTS = {
         coinMultiplier: 1.0,
         // Month range: December (month index 11, days 1-31)
         autoStart: { month: 12, dayStart: 1, dayEnd: 31 },
+        milestones: [
+            { threshold: 100,  label: 'Common Loot Box',      emoji: '📦' },
+            { threshold: 250,  label: 'Uncommon Loot Box',    emoji: '📦' },
+            { threshold: 500,  label: 'Rare Loot Box',        emoji: '🎁' },
+            { threshold: 1000, label: 'Legendary Loot Box',   emoji: '🎁' },
+            { threshold: 2000, label: 'Snowflake Crown',      emoji: '👑' },
+        ],
         lootBox: {
             itemId: 'winter_loot_box',
             name: 'Winter Loot Box',
@@ -44,6 +51,13 @@ const SEASONAL_EVENTS = {
         coinMultiplier: 1.0,
         // Month range: October (month index 9, days 1-31)
         autoStart: { month: 10, dayStart: 1, dayEnd: 31 },
+        milestones: [
+            { threshold: 100,  label: 'Common Loot Box',      emoji: '📦' },
+            { threshold: 250,  label: 'Uncommon Loot Box',    emoji: '📦' },
+            { threshold: 500,  label: 'Rare Loot Box',        emoji: '🎁' },
+            { threshold: 1000, label: 'Legendary Loot Box',   emoji: '🎁' },
+            { threshold: 2000, label: "Witch's Hat",          emoji: '🧙' },
+        ],
         lootBox: {
             itemId: 'halloween_loot_box',
             name: 'Halloween Loot Box',
@@ -76,6 +90,13 @@ const SEASONAL_EVENTS = {
         coinMultiplier: 1.25,
         // Month range: July (month index 6, days 1-31)
         autoStart: { month: 7, dayStart: 1, dayEnd: 31 },
+        milestones: [
+            { threshold: 100,  label: 'Common Loot Box',      emoji: '📦' },
+            { threshold: 250,  label: 'Uncommon Loot Box',    emoji: '📦' },
+            { threshold: 500,  label: 'Rare Loot Box',        emoji: '🎁' },
+            { threshold: 1000, label: 'Legendary Loot Box',   emoji: '🎁' },
+            { threshold: 2000, label: 'Golden Surfboard',     emoji: '🏄' },
+        ],
         lootBox: {
             itemId: 'summer_loot_box',
             name: 'Summer Loot Box',
@@ -108,6 +129,13 @@ const SEASONAL_EVENTS = {
         coinMultiplier: 1.0,
         // Month range: February days 7-14
         autoStart: { month: 2, dayStart: 7, dayEnd: 14 },
+        milestones: [
+            { threshold: 100,  label: 'Common Loot Box',      emoji: '📦' },
+            { threshold: 250,  label: 'Uncommon Loot Box',    emoji: '📦' },
+            { threshold: 500,  label: 'Rare Loot Box',        emoji: '🎁' },
+            { threshold: 1000, label: 'Legendary Loot Box',   emoji: '🎁' },
+            { threshold: 2000, label: 'Golden Rose',          emoji: '🌹' },
+        ],
         lootBox: {
             itemId: 'valentines_loot_box',
             name: "Valentine's Loot Box",

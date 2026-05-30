@@ -3,6 +3,9 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const SeasonRecord = require('../../models/SeasonRecord');
 const { generateDailyMissions } = require('../../data/seasonMissions');
+const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
+const { getEventCurrencyBalance } = require('../../services/seasonalEventService');
+const { progressBar } = require('../../utils/progressBar');
 
 // ── Battle pass tier reward definitions ──────────────────────────────────────
 // 20 tiers; alternating between coin bonuses, cosmetic badges, material bundles, rare items
@@ -457,6 +460,94 @@ async function executeAdminEnd(interaction) {
     return interaction.editReply({ embeds: [embed] });
 }
 
+// ── Seasonal event progress subcommand ───────────────────────────────────────
+
+async function executeSeasonEvent(interaction) {
+    const [user, guildSettings] = await Promise.all([
+        User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+            { upsert: true, new: true }
+        ),
+        Guild.findOne({ guildId: interaction.guild.id })
+    ]);
+
+    const activeEvent = guildSettings?.activeEvent;
+    if (!activeEvent?.type) {
+        return interaction.reply({ content: 'No seasonal event is running on this server right now.', ephemeral: true });
+    }
+
+    const eventDef = SEASONAL_EVENTS[activeEvent.type];
+    if (!eventDef) {
+        return interaction.reply({ content: 'No seasonal event data found.', ephemeral: true });
+    }
+
+    const currency = eventDef.currency;
+    const balance = getEventCurrencyBalance(user, currency.id);
+    const milestones = eventDef.milestones ?? [];
+
+    // Days remaining and date range
+    const now = new Date();
+    const endsAt = activeEvent.endsAt ? new Date(activeEvent.endsAt) : null;
+    const startedAt = activeEvent.startedAt ? new Date(activeEvent.startedAt) : null;
+    const daysRemaining = endsAt ? Math.max(0, Math.ceil((endsAt - now) / 86400000)) : null;
+
+    const dateRange = startedAt && endsAt
+        ? `<t:${Math.floor(startedAt.getTime() / 1000)}:D> – <t:${Math.floor(endsAt.getTime() / 1000)}:D>`
+        : null;
+
+    const descLines = [];
+    if (dateRange) descLines.push(dateRange);
+    if (daysRemaining !== null) descLines.push(`${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} remaining`);
+    if (daysRemaining !== null && daysRemaining <= 3 && daysRemaining > 0) descLines.push('⚠️ Event ending soon!');
+
+    // Next milestone and progress bar
+    const nextMilestone = milestones.find(m => m.threshold > balance);
+    let progressValue;
+    if (!milestones.length) {
+        progressValue = '*No milestones defined for this event.*';
+    } else if (!nextMilestone) {
+        progressValue = `✅ All milestones completed! **${balance.toLocaleString()} ${currency.emoji}** earned total.`;
+    } else {
+        const prevThreshold = milestones.filter(m => m.threshold <= balance).at(-1)?.threshold ?? 0;
+        const bar = progressBar(balance - prevThreshold, nextMilestone.threshold - prevThreshold);
+        progressValue = [
+            `${bar}  ${balance.toLocaleString()} / ${nextMilestone.threshold.toLocaleString()}`,
+            `Next reward: ${nextMilestone.emoji} **${nextMilestone.label}** at ${nextMilestone.threshold.toLocaleString()} ${currency.emoji}`,
+        ].join('\n');
+    }
+
+    // Milestone list with ✅ / ▶ / ○ indicators
+    const milestoneList = milestones.map(m => {
+        if (balance >= m.threshold) return `✅ ${m.threshold.toLocaleString()} ${currency.emoji} → ${m.label}`;
+        if (m === nextMilestone)    return `▶ ${m.threshold.toLocaleString()} ${currency.emoji} → **${m.label}**  ← next`;
+        return `○ ${m.threshold.toLocaleString()} ${currency.emoji} → ${m.label}`;
+    }).join('\n') || '*No milestones defined*';
+
+    // Active multiplier info
+    const bonusLines = [];
+    if ((activeEvent.xpMultiplier ?? 1) > 1) bonusLines.push(`${activeEvent.xpMultiplier}x XP active during this event`);
+    if ((activeEvent.coinMultiplier ?? 1) > 1) bonusLines.push(`${activeEvent.coinMultiplier}x Coins active during this event`);
+
+    const embed = new EmbedBuilder()
+        .setColor(activeEvent.color ?? '#5865F2')
+        .setTitle(`${activeEvent.emoji ?? '🎉'} ${activeEvent.name}`)
+        .setDescription(descLines.join('\n') || null)
+        .addFields(
+            { name: `${currency.emoji} Your ${currency.name}`, value: `**${balance.toLocaleString()}**`, inline: true },
+            { name: 'Season Progress', value: progressValue },
+            { name: '🏆 Milestone Rewards', value: milestoneList },
+        );
+
+    if (bonusLines.length > 0) {
+        embed.addFields({ name: '✨ Active Bonuses', value: bonusLines.join('\n') });
+    }
+
+    embed.setFooter({ text: '🛍️ Season shop: /eventshop' }).setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
 // ── Module export ─────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -525,6 +616,10 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('end')
                 .setDescription('[Admin] End the current economy season and freeze the leaderboard.')
+        )
+        .addSubcommand(sub =>
+            sub.setName('event')
+                .setDescription('View your progress in the active seasonal event with milestone rewards.')
         ),
 
     async execute(interaction) {
@@ -539,6 +634,7 @@ module.exports = {
             if (sub === 'history')       return await executeHistory(interaction);
             if (sub === 'start')         return await executeAdminStart(interaction);
             if (sub === 'end')           return await executeAdminEnd(interaction);
+            if (sub === 'event')         return await executeSeasonEvent(interaction);
         } catch (err) {
             console.error('[season] error:', err);
             const msg = { content: 'Something went wrong with the season command.', ephemeral: true };
