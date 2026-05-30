@@ -299,10 +299,11 @@ async function createWealthTierBanner(username, tierLabel, tierColor) {
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
     ctx.fillText('💰', 80, 100);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
 
     ctx.font = 'bold 42px "DejaVu Sans"';
     ctx.fillStyle = tierColor;
-    ctx.textAlign = 'left';
     ctx.fillText(tierLabel, 140, 80);
 
     ctx.font = '22px "DejaVu Sans"';
@@ -313,8 +314,6 @@ async function createWealthTierBanner(username, tierLabel, tierColor) {
     ctx.fillStyle = '#888888';
     ctx.fillText('has reached a legendary wealth milestone!', 140, 155);
 
-    ctx.textBaseline = 'alphabetic';
-    ctx.textAlign = 'left';
     return canvas.toBuffer();
 }
 

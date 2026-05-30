@@ -205,13 +205,13 @@ async function executeClaim(interaction) {
 
     // Next tier teaser
     const nextTier = TIER_REWARDS.find(r => r.tier === tier + 1);
-    const xpToNext = nextTier ? Math.max(0, (tier) * XP_PER_TIER - (user.season?.xp ?? 0)) : 0;
+    const xpToNext = nextTier ? Math.max(0, (tier + 1) * XP_PER_TIER - (user.season?.xp ?? 0)) : 0;
 
     const lore = TIER_LORE[tier - 1] ?? 'Your dedication speaks louder than words.';
 
     const embed = new EmbedBuilder()
         .setColor('#ffd700')
-        .setTitle(`# ${reward.label}`)
+        .setTitle(reward.label)
         .setDescription(
             `> *${lore}*\n\n` +
             `You received: **${reward.label}**` +
