@@ -487,19 +487,17 @@ async function executeStart(interaction) {
     }
     await interaction.editReply({ embeds: [embed] });
 
-    if (result.success && result.tier === 'legendary') {
-        const announceChannelId = guildSettings?.leveling?.announceChannel;
-        const announceChannel = announceChannelId
-            ? interaction.guild.channels.cache.get(announceChannelId) ?? interaction.channel
-            : interaction.channel;
-        const displayName = interaction.member?.displayName || interaction.user.username;
+    if (result.success && result.tier === 'legendary' && guildSettings?.economy?.announceRareDrops !== false) {
+        const announceChannelId = guildSettings?.economy?.announcementChannelId;
+        const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
+        const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
         const announcementEmbed = new EmbedBuilder()
-            .setColor(TIER_COLORS.legendary)
-            .setTitle('✨ Legendary Find! ✨')
+            .setColor('#ff9800')
+            .setTitle('✨ Legendary Trophy! ✨')
             .setDescription(
-                `**${displayName}** just found a ${result.animal.emoji} **${result.animal.name}** [⭐⭐⭐⭐⭐]\n` +
-                `while hunting in **${zone.emoji} ${zone.name}**.\n\n` +
-                `That's incredibly rare.`
+                `<@${interaction.user.id}> just brought down a ${result.animal.emoji} **${result.animal.name}** [⭐⭐⭐⭐⭐]\n` +
+                `deep in the **${zone.name}**.\n\n` +
+                `Only a handful of hunters have ever managed that.`
             )
             .setTimestamp();
         announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
