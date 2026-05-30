@@ -19,6 +19,8 @@ const {
     ANIMAL_TRAITS
 } = require('../../data/huntData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
+const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
+const { randomFrom, HUNT_EMPTY_LINES } = require('../../utils/copyLines');
 const {
     ensureHuntData,
     applyStaminaRegen,
@@ -520,12 +522,13 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             : '—';
 
         const isLegendary = tier === 'legendary';
+        const ribbon = TIER_RIBBON(TIER_NUM[tier] ?? 1);
         const embedTitle = isLegendary
             ? `🌟✨ LEGENDARY FIND ✨🌟`
             : `${animal.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${trophyQuality ? trophyQuality.label + ' ' : ''}${animal.name}${isCrit ? ' ✨' : ''}`;
         const embedDesc = isLegendary
-            ? `You found something impossible in the wild.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${animal.emoji}  **${animal.name}**  [⭐⭐⭐⭐⭐]\n  *${animal.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
-            : `*${animal.flavor}*`;
+            ? `${ribbon}\n\nYou found something impossible in the wild.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${animal.emoji}  **${animal.name}**  [⭐⭐⭐⭐⭐]\n  *${animal.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+            : `${ribbon}\n\n*${animal.flavor}*`;
 
         const embed = new EmbedBuilder()
             .setColor(color)
@@ -588,7 +591,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     const embed = new EmbedBuilder()
         .setColor('#e74c3c')
         .setTitle(buildFailureTitle(failure.severity.id))
-        .setDescription(failAnimal ? `*Encountered: ${failAnimal.emoji} **${failAnimal.name}***\n${failure.message}` : `*${failure.message}*`)
+        .setDescription(failAnimal ? `*Encountered: ${failAnimal.emoji} **${failAnimal.name}***\n${failure.message}` : `*${failure.severity.id === 'clean_miss' ? randomFrom(HUNT_EMPTY_LINES) : failure.message}*`)
         .addFields(
             { name: 'Zone',    value: `${zone.emoji} ${zone.name}`,  inline: true },
             { name: 'Reward',  value: 'Nothing',                      inline: true },

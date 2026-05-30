@@ -71,4 +71,18 @@ const TIER_LABELS = { 1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic', 5: 'Lege
 const TIER_STARS  = { 1: '⭐', 2: '⭐⭐', 3: '⭐⭐⭐', 4: '⭐⭐⭐⭐', 5: '⭐⭐⭐⭐⭐' };
 const TIER_COLORS = { 1: '#9e9e9e', 2: '#4caf50', 3: '#2196f3', 4: '#9c27b0', 5: '#ff9800' };
 
-module.exports = { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS };
+// Maps tier name strings (used in hunt/fish/mine results) to numeric tier levels.
+const TIER_NUM = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5 };
+
+const RIBBON_DOTS = ['🟢', '🔵', '🟣', '🟡', '🌌'];
+
+// Returns the formatted rarity ribbon for a tier number (1–5).
+// e.g. TIER_RIBBON(3) → "🟢 ─ 🔵 ─ [🟣] ─ 🟡 ─ 🌌"
+function TIER_RIBBON(tier) {
+    return RIBBON_DOTS.map((dot, i) => {
+        const t = i + 1;
+        return t === tier ? `[${dot}]` : dot;
+    }).join(' ─ ');
+}
+
+module.exports = { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS, TIER_NUM, TIER_RIBBON };

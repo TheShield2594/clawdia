@@ -5,6 +5,7 @@ const { hasEffect, consumeEffect, timeRemaining } = require('../../services/effe
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, ROB_WIN_LINES, ROB_FAIL_LINES } = require('../../utils/copyLines');
+const { delay } = require('../../utils/delay');
 
 const ROBBER_COOLDOWN_MS = 1 * 3_600_000; // 1 hour
 const VICTIM_IMMUNITY_MS = 30 * 60_000;   // 30 minutes
@@ -134,6 +135,22 @@ module.exports = {
             successChance += getTotalBonus(robber.pets || [], 'rob_success') / 100; // Fox pet: +8%
             successChance = Math.max(0, Math.min(0.95, successChance));
 
+            // ── Suspense reveal ───────────────────────────────────────────────
+            await interaction.reply({
+                embeds: [new EmbedBuilder()
+                    .setColor('#8B4513')
+                    .setTitle('🔎 Casing the House…')
+                    .setDescription(`*Scoping out ${target.username}'s place...*`)]
+            });
+            await delay(800);
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setColor('#8B4513')
+                    .setTitle('🔓 Picking the Lock…')
+                    .setDescription('*Almost in...*')]
+            });
+            await delay(800);
+
             const success = Math.random() < successChance;
 
             let embed;
@@ -218,11 +235,13 @@ module.exports = {
                 }
             }
 
-            await interaction.reply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed] });
         } catch (error) {
             console.error('Rob command error:', error);
-            if (!interaction.replied) {
+            if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: 'Something went wrong.', ephemeral: true });
+            } else {
+                await interaction.editReply({ content: 'Something went wrong.' }).catch(() => {});
             }
         }
     }
