@@ -40,6 +40,7 @@ const {
     updateWeaponStatus,
     applyXp
 } = require('../../services/huntService');
+const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 // ─── HUNT TRACKING CLUES (one per zone, used in the tracking mechanic) ───────
 
@@ -328,18 +329,35 @@ async function executeStart(interaction) {
     }
 
     if (h.lastHunt && Date.now() - h.lastHunt.getTime() < LIMITS.HUNT_COOLDOWN_MS) {
-        const remaining = LIMITS.HUNT_COOLDOWN_MS - (Date.now() - h.lastHunt.getTime());
+        const nextAt = new Date(h.lastHunt.getTime() + LIMITS.HUNT_COOLDOWN_MS);
         return interaction.reply({
-            content: `You need to catch your breath. Ready again in **${formatMs(remaining)}**.`,
-            ephemeral: true
+            embeds: [buildCooldownEmbed({
+                title: '🫁 Catching Your Breath',
+                description: 'You just came back from a hunt.\nGive it a moment before heading back out.',
+                color: '#5a8a3c',
+                nextAt,
+            })],
+            ephemeral: true,
         });
     }
 
     if (h.stamina <= 0) {
         const regenMs = msUntilNextStamina(user);
+        const nextAt  = new Date(Date.now() + regenMs);
+        const sinceRare = h.sinceRare ?? 0;
+        const pityStat  = sinceRare >= 5
+            ? `🎯 ${sinceRare} hunts since last Rare+ • next rare guaranteed around hunt ~50`
+            : null;
         return interaction.reply({
-            content: `You're exhausted! Stamina regens in **${formatMs(regenMs)}**. Buy a Stamina Tonic from \`/hunt shop\` to recover faster.`,
-            ephemeral: true
+            embeds: [buildCooldownEmbed({
+                title: '😮‍💨 Out of Stamina',
+                description: "You've pushed yourself to the limit.\nRest up — the wilderness will wait.\nBuy a **Stamina Tonic** from `/hunt shop` to recover faster.",
+                color: '#5a8a3c',
+                nextAt,
+                pityStat,
+                nextRewardPreview: 'Full stamina = 10 hunts · Rare+ drops guaranteed by hunt ~50',
+            })],
+            ephemeral: true,
         });
     }
 
@@ -441,6 +459,13 @@ async function executeStart(interaction) {
     const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
 
     const result = executeHunt(user, zoneId, { trackingBonus });
+
+    // Pity counter: reset on rare+ success, increment otherwise
+    if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
+        user.hunt.sinceRare = 0;
+    } else {
+        user.hunt.sinceRare = (user.hunt.sinceRare ?? 0) + 1;
+    }
 
     if (result.success && result.finalPayout > 0 && petYieldPct > 0) {
         const bonus = Math.round(result.finalPayout * petYieldPct / 100);

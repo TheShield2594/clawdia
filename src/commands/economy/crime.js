@@ -8,6 +8,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, CRIME_WIN_LINES, CRIME_BUST_LINES } = require('../../utils/copyLines');
 const { delay } = require('../../utils/delay');
+const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
@@ -51,16 +52,31 @@ module.exports = {
         );
 
         if (user.wantedUntil && Date.now() < user.wantedUntil.getTime()) {
-            const remaining = user.wantedUntil.getTime() - Date.now();
-            const mins = Math.ceil(remaining / 60_000);
-            return interaction.reply({ content: `🚨 You're still **wanted by the police**! Lay low for **${mins} min** before attempting another crime.`, ephemeral: true });
+            const nextAt = new Date(user.wantedUntil.getTime());
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '🚨 Still Wanted',
+                    description: 'The police are still looking for you.\nStay off the streets until the heat dies down.',
+                    color: '#e74c3c',
+                    nextAt,
+                    nextRewardPreview: 'Once clear: Grand Larceny pays 600–1500 coins · Casino Con is next on the board',
+                })],
+                ephemeral: true,
+            });
         }
 
         if (user.lastCrime && Date.now() - user.lastCrime.getTime() < COOLDOWN_MS) {
-            const remaining = COOLDOWN_MS - (Date.now() - user.lastCrime.getTime());
-            const mins = Math.ceil(remaining / 60_000);
-            const display = mins >= 60 ? (mins % 60 === 0 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 60)}h ${mins % 60}m`) : `${mins}m`;
-            return interaction.reply({ content: `You're still on the radar from last time. Lay low for **${display}**.`, ephemeral: true });
+            const nextAt = new Date(user.lastCrime.getTime() + COOLDOWN_MS);
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '🌆 Laying Low',
+                    description: "You're still on the radar from last time.\nLie low. Let the heat fade.",
+                    color: '#f39c12',
+                    nextAt,
+                    nextRewardPreview: 'Next run: three new crimes roll — pick the right one for up to 1,500 coins',
+                })],
+                ephemeral: true,
+            });
         }
 
         // Sample 3 random crimes and present them as buttons

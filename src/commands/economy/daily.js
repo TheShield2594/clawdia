@@ -8,6 +8,7 @@ const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/econo
 const { generateDailyChallenge } = require('../../utils/dailyChallenge');
 const { DROP_TABLE, RARE_DROP_TABLE, DROP_MILESTONES, DROP_BASE_CHANCE, weightedRandom } = require('../../data/dailyDropTable');
 const { stackBar } = require('../../utils/rewardReveal');
+const { buildCooldownEmbed, getNextStreakMilestone } = require('../../utils/cooldownEmbed');
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -79,19 +80,27 @@ module.exports = {
             const dailyCooldown = 86400000;
 
             if (user.lastDaily && now - user.lastDaily.getTime() < dailyCooldown) {
-                const timeLeft = dailyCooldown - (now - user.lastDaily.getTime());
-                const hours = Math.floor(timeLeft / 3600000);
-                const minutes = Math.floor((timeLeft % 3600000) / 60000);
+                const streak = user.streak?.current ?? 0;
+                const nextAt = new Date(user.lastDaily.getTime() + dailyCooldown);
+                const dailyAmount = guildSettings?.economy?.dailyAmount ?? 100;
+                const streakMult  = getStreakMultiplier(streak);
+                const coinMult    = getCoinMultiplier(user);
+                const serverMult  = getServerCoinMultiplier(guildSettings);
+                const estNext     = Math.round(dailyAmount * clampMultiplier(streakMult * coinMult * serverMult));
+
+                const topDrop = DROP_TABLE.reduce((best, d) => d.weight > best.weight ? d : best, DROP_TABLE[0]);
+                const nextRewardPreview = `Coming tomorrow: **~${estNext.toLocaleString()} coins** · possible ${topDrop.emoji} ${topDrop.name} drop`;
 
                 return interaction.reply({
-                    embeds: [
-                        new EmbedBuilder()
-                            .setColor('#888888')
-                            .setTitle('⏳ Already Claimed')
-                            .setDescription(`You've already claimed your daily reward!\nCome back in **${hours}h ${minutes}m**.`)
-                            .setTimestamp()
-                    ],
-                    ephemeral: true
+                    embeds: [buildCooldownEmbed({
+                        title: '☀️ Come Back Tomorrow',
+                        description: "You've already claimed today's reward.\nCheck in again when the clock resets.",
+                        color: getStreakColor(streak),
+                        nextAt,
+                        milestoneTeaser: getNextStreakMilestone(streak),
+                        nextRewardPreview,
+                    })],
+                    ephemeral: true,
                 });
             }
 
@@ -212,15 +221,15 @@ module.exports = {
             );
 
             if (!updated) {
+                const streak  = user.streak?.current ?? 0;
                 const errorMsg = {
-                    embeds: [
-                        new EmbedBuilder()
-                            .setColor('#888888')
-                            .setTitle('⏳ Already Claimed')
-                            .setDescription("You've already claimed your daily reward! Try again later.")
-                            .setTimestamp()
-                    ],
-                    ephemeral: true
+                    embeds: [buildCooldownEmbed({
+                        title: '☀️ Already Claimed',
+                        description: "You've already claimed today's reward.\nCheck in again when the clock resets.",
+                        color: getStreakColor(streak),
+                        milestoneTeaser: getNextStreakMilestone(streak),
+                    })],
+                    ephemeral: true,
                 };
                 return usedFollowUp ? interaction.followUp(errorMsg) : interaction.reply(errorMsg);
             }
@@ -298,6 +307,11 @@ module.exports = {
             const freezeCount = user.streak?.freezes ?? 0;
             if (freezeCount > 0) {
                 rewardEmbed.addFields({ name: '❄️ Streak Freezes', value: `${freezeCount} banked`, inline: true });
+            }
+
+            const milestoneTeaser = getNextStreakMilestone(streakCurrent);
+            if (milestoneTeaser) {
+                rewardEmbed.addFields({ name: '📊 Streak Progress', value: milestoneTeaser, inline: false });
             }
 
             const challenge = generateDailyChallenge();
