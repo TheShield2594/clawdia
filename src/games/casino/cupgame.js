@@ -9,30 +9,23 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
 
-const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a9.png';
+const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0db.png';
 const MIN_BET = 10;
 const MAX_BET = 5000;
 
-// Number of shuffle steps scales with bet size
+const QUEEN  = '🂽';  // Queen of hearts (face up)
+const DECOYS = ['🂡', '🂱']; // Ace of spades, Ace of hearts (decoys)
+const HIDDEN = '🂠';  // Card back
+
+// Win multiplier: 1/3 chance × 2.8 ≈ 93% RTP
+const BASE_WIN_MULT = 2.8;
+
+// Shuffle steps scale with bet size
 function shuffleCount(bet) {
     if (bet >= 2500) return 8;
     if (bet >= 1000) return 6;
     if (bet >= 500)  return 5;
     return 4;
-}
-
-const CUPS = ['🥤', '🥤', '🥤'];
-const BALL = '🔴';
-const BASE_WIN_MULT = 2.8; // 1/3 chance × 2.8 = ~93% RTP before lucky effects
-
-function cupsDisplay(ballPos, showBall = false) {
-    return CUPS.map((cup, i) => (showBall && i === ballPos) ? BALL : cup).join('  ');
-}
-
-function swapTwo(arr, a, b) {
-    const copy = [...arr];
-    [copy[a], copy[b]] = [copy[b], copy[a]];
-    return copy;
 }
 
 function embedAuthor(interaction) {
@@ -42,7 +35,13 @@ function embedAuthor(interaction) {
     };
 }
 
-async function playCupGame(interaction, bet) {
+// Build a face-up display from final queen position
+function buildReveal(queenPos) {
+    let di = 0;
+    return [0, 1, 2].map(i => i === queenPos ? QUEEN : DECOYS[di++]);
+}
+
+async function playMonte(interaction, bet) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -65,24 +64,46 @@ async function playCupGame(interaction, bet) {
 
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
-        // Initial state — show the ball under cup 0
-        let ballPos = Math.floor(Math.random() * 3);
+        // Place the Queen at a random starting position
+        let queenPos = Math.floor(Math.random() * 3);
+        const initialCards = buildReveal(queenPos);
 
+        // Show cards face-up so player can see the Queen
         const revealEmbed = new EmbedBuilder()
             .setAuthor(embedAuthor(interaction))
             .setThumbnail(THUMB)
             .setColor('#f1c40f')
-            .setTitle('🎩 Cup Game — Watch Closely!')
-            .setDescription(`The ball is under cup **${ballPos + 1}**!\n\n> ${cupsDisplay(ballPos, true)}\n> 1️⃣  ·  2️⃣  ·  3️⃣`)
+            .setTitle('🃏 Three Card Monte — Watch the Queen!')
+            .setDescription(
+                `The **Queen** is at position **${queenPos + 1}**!\n\n` +
+                `> ${initialCards.join('   ')}\n` +
+                `> 1️⃣  ·  2️⃣  ·  3️⃣`,
+            )
             .addFields({ name: '💰 Bet', value: `**${bet.toLocaleString()}** coins`, inline: true })
-            .setFooter({ text: 'Watch the ball — shuffling begins soon…' });
+            .setFooter({ text: 'Watch the Queen — shuffling begins soon…' });
 
         await interaction.editReply({ embeds: [revealEmbed] });
-        await delay(1500);
+        await delay(1800);
 
-        // Shuffle phase — track ball position through swaps
+        // Flip all cards face-down
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#5865F2')
+                .setTitle('🃏 Three Card Monte — Cards Flipped!')
+                .setDescription(
+                    `Cards are now face down — follow the Queen!\n\n` +
+                    `> ${HIDDEN}   ${HIDDEN}   ${HIDDEN}\n` +
+                    `> 1️⃣  ·  2️⃣  ·  3️⃣`,
+                )
+                .addFields({ name: '💰 Bet', value: `**${bet.toLocaleString()}** coins`, inline: true })
+                .setFooter({ text: 'Shuffling begins…' })],
+        });
+        await delay(700);
+
+        // Shuffle phase — show each swap
         const steps = shuffleCount(bet);
-        let positions = [0, 1, 2];
 
         for (let step = 0; step < steps; step++) {
             let a, b;
@@ -91,67 +112,76 @@ async function playCupGame(interaction, bet) {
                 b = Math.floor(Math.random() * 3);
             } while (a === b);
 
-            // Move the ball if it's in one of the swapped cups
-            if (ballPos === a) ballPos = b;
-            else if (ballPos === b) ballPos = a;
+            if (queenPos === a) queenPos = b;
+            else if (queenPos === b) queenPos = a;
 
-            positions = swapTwo(positions, a, b);
-
-            const shuffleDisplay = positions.map(pos => CUPS[pos]).join('  ');
-            const shuffleEmbed = new EmbedBuilder()
-                .setAuthor(embedAuthor(interaction))
-                .setThumbnail(THUMB)
-                .setColor('#5865F2')
-                .setTitle('🎩 Cup Game — Shuffling…')
-                .setDescription(`Swap ${step + 1}/${steps}\n\n> ${shuffleDisplay}\n> 1️⃣  ·  2️⃣  ·  3️⃣`)
-                .addFields({ name: '💰 Bet', value: `**${bet.toLocaleString()}** coins`, inline: true })
-                .setFooter({ text: 'Follow the ball!' });
-
-            await interaction.editReply({ embeds: [shuffleEmbed] });
-            await delay(600);
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setAuthor(embedAuthor(interaction))
+                    .setThumbnail(THUMB)
+                    .setColor('#5865F2')
+                    .setTitle('🃏 Three Card Monte — Shuffling…')
+                    .setDescription(
+                        `Swap ${step + 1}/${steps} — cards **${a + 1}** ↔ **${b + 1}**\n\n` +
+                        `> ${HIDDEN}   ${HIDDEN}   ${HIDDEN}\n` +
+                        `> 1️⃣  ·  2️⃣  ·  3️⃣`,
+                    )
+                    .addFields({ name: '💰 Bet', value: `**${bet.toLocaleString()}** coins`, inline: true })
+                    .setFooter({ text: 'Keep your eye on the Queen!' })],
+            });
+            await delay(550);
         }
 
+        // Tell mechanic: 40% chance a subtle cosmetic hint appears.
+        // The hint card is chosen randomly (1/3 chance it's the actual queen).
+        // This creates psychological tension without mechanically skewing the odds.
+        const tellCard = Math.floor(Math.random() * 3);
+        const tellText = Math.random() < 0.40
+            ? `\n\n👁️ *You notice card **${tellCard + 1}** seems slightly warped…*`
+            : '';
+
         // Prompt the player to pick
-        const gameId = `cup_${interaction.id}_${Date.now()}`;
-        const pickEmbed = new EmbedBuilder()
-            .setAuthor(embedAuthor(interaction))
-            .setThumbnail(THUMB)
-            .setColor('#f1c40f')
-            .setTitle('🎩 Cup Game — Pick a Cup!')
-            .setDescription(`Shuffling done! Where's the ball?\n\n> 🥤  🥤  🥤\n> 1️⃣  ·  2️⃣  ·  3️⃣`)
-            .addFields({ name: '💰 Bet', value: `**${bet.toLocaleString()}** coins`, inline: true })
-            .setFooter({ text: 'You have 30 seconds to choose.' });
+        const gameId = `monte_${interaction.id}_${Date.now()}`;
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`cup_1_${gameId}`).setLabel('Cup 1').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(`cup_2_${gameId}`).setLabel('Cup 2').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(`cup_3_${gameId}`).setLabel('Cup 3').setStyle(ButtonStyle.Primary),
-        );
-
-        await interaction.editReply({ embeds: [pickEmbed], components: [row] });
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#f1c40f')
+                .setTitle('🃏 Three Card Monte — Find the Queen!')
+                .setDescription(
+                    `Shuffling done! Where's the Queen?${tellText}\n\n` +
+                    `> ${HIDDEN}   ${HIDDEN}   ${HIDDEN}\n` +
+                    `> 1️⃣  ·  2️⃣  ·  3️⃣`,
+                )
+                .addFields(
+                    { name: '💰 Bet',     value: `**${bet.toLocaleString()}** coins`,                    inline: true },
+                    { name: '🏆 Win Pays', value: `**${Math.floor(bet * BASE_WIN_MULT).toLocaleString()}** coins`, inline: true },
+                )
+                .setFooter({ text: 'You have 30 seconds to choose.' })],
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`monte_1_${gameId}`).setLabel('Card 1').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`monte_2_${gameId}`).setLabel('Card 2').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`monte_3_${gameId}`).setLabel('Card 3').setStyle(ButtonStyle.Primary),
+            )],
+        });
 
         const msg = await interaction.fetchReply();
         let guess;
         try {
-            const response = await msg.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.startsWith('cup_') && i.customId.endsWith(gameId),
+            const resp = await msg.awaitMessageComponent({
+                filter: i => i.user.id === interaction.user.id && i.customId.startsWith('monte_') && i.customId.endsWith(gameId),
                 time: 30_000,
             });
-            await response.deferUpdate();
-            guess = parseInt(response.customId.split('_')[1], 10) - 1; // 0-indexed
+            await resp.deferUpdate();
+            guess = parseInt(resp.customId.split('_')[1], 10) - 1; // 0-indexed
         } catch {
-            // Timeout — refund and exit
             settled = true;
             await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } });
-            await interaction.editReply({
-                content: '⏱️ Time\'s up! Your bet was refunded.',
-                embeds: [],
-                components: [],
-            }).catch(() => {});
-            return;
+            return interaction.editReply({ content: '⏱️ Time\'s up! Your bet was refunded.', embeds: [], components: [] }).catch(() => {});
         }
 
-        const won = guess === ballPos;
+        const won = guess === queenPos;
 
         const luckyActive      = hasEffect(debited, 'lucky_charm');
         const luckyStreakBonus = getLuckyStreakBonus(debited);
@@ -159,17 +189,16 @@ async function playCupGame(interaction, bet) {
         const serverMult       = getServerCoinMultiplier(guildSettings);
         const totalCoinMult    = coinMult * serverMult;
 
-        let grossPayout = won ? Math.floor(bet * BASE_WIN_MULT) : 0;
-        let charmTriggered = false;
+        let grossPayout     = won ? Math.floor(bet * BASE_WIN_MULT) : 0;
+        let charmTriggered  = false;
         let streakTriggered = false;
 
-        // Lucky Charm: on loss, 20% chance to return bet
         if (!won && luckyActive && Math.random() < 0.20) {
-            grossPayout = bet;
+            grossPayout    = bet;
             charmTriggered = true;
         }
         if (!won && !charmTriggered && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
-            grossPayout = bet;
+            grossPayout     = bet;
             streakTriggered = true;
         }
 
@@ -180,61 +209,52 @@ async function playCupGame(interaction, bet) {
 
         let updated = debited;
         if (adjustedPayout > 0) {
-            updated = await User.findOneAndUpdate(
-                userFilter,
-                { $inc: { balance: adjustedPayout } },
-                { new: true }
-            );
+            updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: adjustedPayout } }, { new: true });
         }
         settled = true;
 
         const net    = adjustedPayout - bet;
         const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
-
-        // Reveal all cups
-        const revealAll = CUPS.map((cup, i) => i === ballPos ? BALL : cup).join('  ');
-        const guessLabel = `Cup ${guess + 1}`;
-        const ballLabel  = `Cup ${ballPos + 1}`;
+        const reveal = buildReveal(queenPos);
 
         let color, title, desc;
         if (won) {
             color = '#2ecc71';
-            title = '🎩 Correct! You found the ball!';
-            desc  = `> ${revealAll}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n🎉 You picked **${guessLabel}** — the ball was there! **${BASE_WIN_MULT}×** payout!`;
+            title = '🃏 Correct! You found the Queen!';
+            desc  = `> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n🎉 You picked **Card ${guess + 1}** — the Queen was there! **${BASE_WIN_MULT}×** payout!`;
         } else if (charmTriggered || streakTriggered) {
             color = '#f39c12';
-            title = '🎩 Wrong Cup — Lucky Save!';
-            desc  = `> ${revealAll}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\nYou picked **${guessLabel}** but the ball was under **${ballLabel}**.\n${charmTriggered ? '🍀 **Lucky Charm** returned your bet!' : '🎯 **Lucky Streak** returned your bet!'}`;
+            title = '🃏 Wrong Card — Lucky Save!';
+            desc  = `> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\nYou picked **Card ${guess + 1}** but the Queen was at **Card ${queenPos + 1}**.\n${charmTriggered ? '🍀 **Lucky Charm** returned your bet!' : '🎯 **Lucky Streak** returned your bet!'}`;
         } else {
             color = '#e74c3c';
-            title = '🎩 Wrong Cup!';
-            desc  = `> ${revealAll}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\nYou picked **${guessLabel}** but the ball was under **${ballLabel}**.`;
+            title = '🃏 Wrong Card!';
+            desc  = `> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\nYou picked **Card ${guess + 1}** but the Queen was at **Card ${queenPos + 1}**.`;
         }
 
-        let boostNote = '';
-        if (totalCoinMult > 1.0 && adjustedPayout > bet) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
+        if (totalCoinMult > 1.0 && adjustedPayout > bet) desc += `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
-        const resultEmbed = new EmbedBuilder()
-            .setAuthor(embedAuthor(interaction))
-            .setThumbnail(THUMB)
-            .setColor(color)
-            .setTitle(title)
-            .setDescription(`${desc}${boostNote}`)
-            .addFields(
-                { name: '💰 Bet',     value: `**${bet.toLocaleString()}** coins`, inline: true },
-                { name: adjustedPayout > 0 ? '🏆 Payout' : '💀 Lost', value: adjustedPayout > 0 ? `${adjustedPayout.toLocaleString()} coins` : `${bet.toLocaleString()} coins`, inline: true },
-                { name: '📊 Net',     value: `**${netStr}** coins`, inline: true },
-                { name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true },
-            )
-            .setFooter({ text: `Difficulty: ${steps} shuffles · Win = ${BASE_WIN_MULT}×` })
-            .setTimestamp();
+        const replayId = `monte_replay_${interaction.id}_${Date.now()}`;
 
-        const replayId = `cup_replay_${interaction.id}_${Date.now()}`;
-        const replayRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(replayId).setLabel('🎩 Play Again').setStyle(ButtonStyle.Primary),
-        );
-
-        await interaction.editReply({ embeds: [resultEmbed], components: [replayRow] });
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor(color)
+                .setTitle(title)
+                .setDescription(desc)
+                .addFields(
+                    { name: '💰 Bet',     value: `**${bet.toLocaleString()}** coins`, inline: true },
+                    { name: adjustedPayout > 0 ? '🏆 Payout' : '💀 Lost', value: adjustedPayout > 0 ? `${adjustedPayout.toLocaleString()} coins` : `${bet.toLocaleString()} coins`, inline: true },
+                    { name: '📊 Net',     value: `**${netStr}** coins`,                inline: true },
+                    { name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true },
+                )
+                .setFooter({ text: `${steps} shuffles · Queen odds 1-in-3 · ${BASE_WIN_MULT}× payout` })
+                .setTimestamp()],
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(replayId).setLabel('🃏 Play Again').setStyle(ButtonStyle.Primary),
+            )],
+        });
 
         const replyMsg = await interaction.fetchReply();
         replyMsg.createMessageComponentCollector({
@@ -243,16 +263,16 @@ async function playCupGame(interaction, bet) {
             time: 60_000,
         }).on('collect', async i => {
             await i.deferUpdate();
-            await playCupGame(interaction, bet);
+            await playMonte(interaction, bet);
         }).on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
         });
 
     } catch (err) {
-        console.error('[CupGame] error:', err);
+        console.error('[Monte] error:', err);
         if (debited && !settled) {
             await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } })
-                .catch(e => console.error('[CupGame] rollback failed:', e));
+                .catch(e => console.error('[Monte] rollback failed:', e));
         }
         await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', components: [] }).catch(() => {});
     }
@@ -260,7 +280,7 @@ async function playCupGame(interaction, bet) {
 
 module.exports = {
     name: 'cupgame',
-    description: 'Shell game — watch the shuffle, pick the cup hiding the ball',
+    description: 'Three Card Monte — follow the Queen through the shuffle and find her!',
     cooldown: 5,
     configure: sub => sub
         .addIntegerOption(opt =>
@@ -287,9 +307,9 @@ module.exports = {
             });
         }
 
-        const { shouldProceed: cgProceed, alreadyReplied: cgReplied } = await confirmBet(interaction, bet, user.balance, 'Cup Game', guildSettings);
-        if (!cgProceed) return;
-        if (!cgReplied) await interaction.deferReply();
-        await playCupGame(interaction, bet);
+        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user.balance, 'Three Card Monte', guildSettings);
+        if (!shouldProceed) return;
+        if (!alreadyReplied) await interaction.deferReply();
+        await playMonte(interaction, bet);
     },
 };

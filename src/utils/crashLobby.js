@@ -35,11 +35,20 @@ function deleteLobby(channelId) {
     lobbies.delete(channelId);
 }
 
-function addPlayer(channelId, userId) {
+function addPlayer(channelId, userId, autoCashout = null) {
     const lobby = lobbies.get(channelId);
     if (!lobby || lobby.locked || lobby.players.size >= MAX_PLAYERS) return false;
     if (lobby.players.has(userId)) return false;
-    lobby.players.set(userId, { cashedOutAt: null });
+    lobby.players.set(userId, { cashedOutAt: null, autoCashout });
+    return true;
+}
+
+function setPlayerAutoCashout(channelId, userId, target) {
+    const lobby = lobbies.get(channelId);
+    if (!lobby) return false;
+    const state = lobby.players.get(userId);
+    if (!state) return false;
+    state.autoCashout = target;
     return true;
 }
 
@@ -50,4 +59,5 @@ module.exports = {
     getLobby,
     deleteLobby,
     addPlayer,
+    setPlayerAutoCashout,
 };
