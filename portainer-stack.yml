@@ -4,8 +4,8 @@ version: '3.8'
 #
 # BEFORE DEPLOYING:
 #   1. Build and push the image to GHCR:
-#        docker build -t ghcr.io/theshield2594/ultrabot:latest .
-#        docker push ghcr.io/theshield2594/ultrabot:latest
+#        docker build -t ghcr.io/theshield2594/clawdia:latest .
+#        docker push ghcr.io/theshield2594/clawdia:latest
 #
 #   2. If the GHCR package is private, add registry credentials in Portainer first:
 #        Portainer > Registries > Add registry > Custom registry
@@ -33,7 +33,7 @@ services:
       start_period: 30s
 
   bot:
-    image: ghcr.io/theshield2594/ultrabot:latest
+    image: ghcr.io/theshield2594/clawdia:latest
     container_name: ultrabot
     restart: unless-stopped
     environment:
