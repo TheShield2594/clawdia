@@ -44,6 +44,28 @@ function formatNumbers(picked, drawn, revealed) {
     }).join('  ');
 }
 
+// Renders all 40 numbers in a 4-row × 10-col monospace grid.
+// picked numbers are marked ●, drawn numbers are marked ■, matches are marked ★.
+function formatKenoGrid(picked, drawn) {
+    const rows = [];
+    for (let row = 0; row < 4; row++) {
+        const cells = [];
+        for (let col = 1; col <= 10; col++) {
+            const n = row * 10 + col;
+            const isPicked = picked.includes(n);
+            const isDrawn  = drawn.includes(n);
+            let cell;
+            if (isPicked && isDrawn) cell = `★${String(n).padStart(2)}`;
+            else if (isPicked)       cell = `●${String(n).padStart(2)}`;
+            else if (isDrawn)        cell = `■${String(n).padStart(2)}`;
+            else                     cell = ` ${String(n).padStart(2)}`;
+            cells.push(cell);
+        }
+        rows.push(cells.join(' '));
+    }
+    return `\`\`\`\n${rows.join('\n')}\n\n● picked  ■ drawn  ★ match\`\`\``;
+}
+
 async function playKeno(interaction, bet, picked) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
@@ -157,7 +179,7 @@ async function playKeno(interaction, bet, picked) {
             desc  = matches > 0 ? `You matched ${matches} — need 3+ to win.` : '💨 No matches this time.';
         }
 
-        const drawnStr = drawn.map(n => picked.includes(n) ? `**[${n}]**` : `${n}`).join('  ');
+        const kenoGrid = formatKenoGrid(picked, drawn);
         let boostNote = '';
         if (totalCoinMult > 1.0 && adjustedPayout > bet) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
@@ -170,17 +192,17 @@ async function playKeno(interaction, bet, picked) {
             .setTitle(title)
             .setDescription(
                 `${desc}${boostNote}\n\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `  💸 Bet: ${bet.toLocaleString()}  ·  ${payoutLabel}: ${payoutAmt.toLocaleString()}  ·  📊 Net: **${netStr}**\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━━━━━`
+                `────────────────────\n` +
+                `💸 Bet: ${bet.toLocaleString()}  ·  ${payoutLabel}: ${payoutAmt.toLocaleString()}  ·  📊 Net: **${netStr}**\n` +
+                `────────────────────`
             )
             .addFields(
-                { name: '🎯 Your Numbers', value: pickedStr,                                                    inline: false },
-                { name: '🔵 Drawn Numbers', value: drawnStr,                                                    inline: false },
-                { name: '✅ Matches',       value: `**${matches}** / ${PICK_COUNT}`,                            inline: true  },
-                { name: '💰 Balance',       value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`,     inline: true  },
+                { name: '🎯 Your Numbers',   value: pickedStr,                                                inline: false },
+                { name: '🔢 Number Grid',    value: kenoGrid,                                                 inline: false },
+                { name: '✅ Matches',         value: `**${matches}** / ${PICK_COUNT}`,                        inline: true  },
+                { name: '💰 Balance',         value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true  },
             )
-            .setFooter({ text: '3 matches = 3× · 4 matches = 10× · 5 matches = 50×' })
+            .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' })
             .setTimestamp();
 
         const replayId = `keno_replay_${interaction.id}_${Date.now()}`;

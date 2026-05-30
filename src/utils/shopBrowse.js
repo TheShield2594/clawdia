@@ -9,9 +9,14 @@ const ItemImage = require('../models/ItemImage');
 const { renderCategoryBanner, getTheme } = require('./shopBanner');
 
 const COLOR_HEX = {
-    hunt: '#27ae60',
-    fish: '#2980b9',
-    mine: '#b5651d'
+    hunt:          '#27ae60',
+    fish:          '#2980b9',
+    mine:          '#b5651d',
+    shop_common:   '#7f8c8d',
+    shop_uncommon: '#27ae60',
+    shop_rare:     '#2980b9',
+    shop_epic:     '#9b59b6',
+    shop_mythic:   '#e67e22',
 };
 
 async function loadImagesByItemIds(itemIds) {

@@ -12,6 +12,8 @@ function resolveTiers(guildSettings) {
     return DEFAULT_TIERS;
 }
 
+const EMBED_DESC_LIMIT = 4096;
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('jobs')
@@ -38,44 +40,62 @@ module.exports = {
             }
 
             const userTierEmoji = TIER_EMOJIS[userTier.tier] || '🟢';
-            const embed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setTitle('📋 Job Listings')
-                .setDescription(
-                    `Your career tier: **${userTierEmoji} ${userTier.name}** · ${currentShifts} shifts worked\n` +
-                    `Use **/work** every hour to earn coins!\n​`
-                )
-                .setTimestamp();
 
+            // Build the full job listing as a single description block with tier dividers
+            const sections = [];
             for (const tierMeta of tierInfo) {
                 const jobs = byTier[tierMeta.tier];
                 if (!jobs || jobs.length === 0) continue;
 
-                const unlocked = userTier.tier >= tierMeta.tier;
-                const unlockText = unlocked ? '' : ` *(unlocks at ${tierMeta.minShifts} shifts)*`;
-                const tierEmoji = TIER_EMOJIS[tierMeta.tier] || '⚪';
+                const unlocked    = userTier.tier >= tierMeta.tier;
+                const unlockText  = unlocked ? '' : ` *(unlocks at ${tierMeta.minShifts} shifts)*`;
+                const tierEmoji   = TIER_EMOJIS[tierMeta.tier] || '⚪';
+                const tierHeader  = `**${tierEmoji} Tier ${tierMeta.tier}: ${tierMeta.name}**${unlockText}`;
+
                 const jobLines = jobs.map(j => {
                     const label = j.emoji ? `${j.emoji} ${j.name}` : j.name;
-                    const pay = (j.minPay != null && j.maxPay != null)
+                    const pay   = (j.minPay != null && j.maxPay != null)
                         ? `${currency}${j.minPay}–${j.maxPay}`
                         : '–';
-                    const lock = unlocked ? '' : ' 🔒';
-                    return `${label}${lock} — **${pay}**`;
+                    const lock  = unlocked ? '' : ' 🔒';
+                    return `  ${label}${lock} — **${pay}**`;
                 }).join('\n');
 
-                embed.addFields({
-                    name: `${tierEmoji} Tier ${tierMeta.tier}: ${tierMeta.name}${unlockText}`,
-                    value: jobLines || 'No jobs configured.',
-                    inline: false,
-                });
+                sections.push(`${tierHeader}\n${jobLines}`);
             }
 
             const nextTier = tierInfo.find(t => t.minShifts > currentShifts);
-            if (nextTier) {
-                embed.setFooter({ text: `${nextTier.minShifts - currentShifts} more shifts to unlock ${nextTier.name} jobs` });
-            } else {
-                embed.setFooter({ text: 'Max career tier reached — all jobs unlocked!' });
+            const footerText = nextTier
+                ? `${nextTier.minShifts - currentShifts} more shifts to unlock ${nextTier.name} jobs`
+                : 'Max career tier reached — all jobs unlocked!';
+
+            const header =
+                `Career: **${userTierEmoji} ${userTier.name}** · ${currentShifts} shifts worked\n` +
+                `Use **/work** every hour to earn coins!\n\n`;
+
+            // Guard against Discord's 4096-char embed description limit
+            const HEADER_LEN = header.length;
+            const BUDGET     = EMBED_DESC_LIMIT - HEADER_LEN;
+            let body         = sections.join('\n\n');
+            if (body.length > BUDGET) {
+                let included = 0;
+                let truncated = '';
+                for (const section of sections) {
+                    const candidate = (truncated ? truncated + '\n\n' : '') + section;
+                    if (candidate.length > BUDGET - 30) break;
+                    truncated = candidate;
+                    included++;
+                }
+                const remaining = sections.length - included;
+                body = truncated + (remaining > 0 ? `\n\n*…+${remaining} more tier${remaining !== 1 ? 's' : ''} not shown*` : '');
             }
+
+            const embed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setTitle('📋 Job Listings')
+                .setDescription(header + body)
+                .setFooter({ text: footerText })
+                .setTimestamp();
 
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
