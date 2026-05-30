@@ -10,6 +10,7 @@ const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = req
 const { checkRivalry } = require('../services/rivalryService');
 const { checkAndAward, announceAchievements } = require('../services/achievementService');
 const { checkAndBroadcastWealthMilestone } = require('../utils/wealthMilestone');
+const { applyXpGain, announceLevelUp } = require('../utils/applyXpGain');
 const BASE_BAD_WORDS = require('../data/profanityList');
 
 // Pre-compile base word regexes once at module load — avoids per-message regex construction
@@ -194,7 +195,7 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
             announceAchievements(message.client, guildSettings, user, message.member, newlyEarned).catch(() => null);
         }
 
-        await notifyQuestComplete(guildSettings, message.member, completedQuests, message.channel);
+        await notifyQuestComplete(guildSettings, message.member, completedQuests, message.channel, user);
         await notifyQuestNearComplete(guildSettings, message.member, nearCompleteQuests, message.channel);
         if (assignedNewDaily) {
             await notifyDailyQuestReset(guildSettings, message.member, user, message.channel);
@@ -267,54 +268,11 @@ async function handleLeveling(message, guildSettings) {
     xpGain = Math.floor(xpGain);
 
     if (user) {
-        user.xp += xpGain;
+        const { leveled } = applyXpGain(user, xpGain);
         user.messages += 1;
         user.lastXpGain = new Date();
-
-        const requiredXp = user.level * 100 + 100;
-
-        if (user.xp >= requiredXp) {
-            user.level += 1;
-            user.xp = 0;
-
-            const userOptOut   = user.disableLevelUpAnnounce === true;
-            const guildOptOut  = guildSettings.leveling?.disableLevelUpAnnounce === true;
-            if (!userOptOut && !guildOptOut) {
-                const { EmbedBuilder } = require('discord.js');
-                const TIER_STYLES = [
-                    { min: 0,   color: '#cd7f32', label: 'Bronze',  glyph: '⬡' },
-                    { min: 10,  color: '#c0c0c0', label: 'Silver',  glyph: '◈' },
-                    { min: 25,  color: '#ffd700', label: 'Gold',    glyph: '◆' },
-                    { min: 50,  color: '#b9f2ff', label: 'Diamond', glyph: '◇' },
-                    { min: 100, color: '#ff6200', label: 'Mythic',  glyph: '✦' },
-                ];
-                const tierStyle = [...TIER_STYLES].reverse().find(t => user.level >= t.min) ?? TIER_STYLES[0];
-
-                const lvlEmbed = new EmbedBuilder()
-                    .setColor(tierStyle.color)
-                    .setTitle(`${tierStyle.glyph} TIER ${tierStyle.label.toUpperCase()} PROMOTION`)
-                    .setDescription(
-                        `<@${message.author.id}> has advanced to **Level ${user.level}**!\n\n` +
-                        `*${tierStyle.label} tier — keep climbing!*`
-                    )
-                    .setThumbnail(message.author.displayAvatarURL({ extension: 'png', size: 128 }))
-                    .setTimestamp();
-
-                const rewardChannelId = guildSettings.leveling.rewardChannelId || guildSettings.leveling.announceChannel;
-                if (guildSettings.leveling.announceInChannel && !rewardChannelId) {
-                    await message.channel.send({ embeds: [lvlEmbed] }).catch(console.error);
-                } else if (rewardChannelId) {
-                    const ch = message.guild.channels.cache.get(rewardChannelId);
-                    if (ch) await ch.send({ embeds: [lvlEmbed] }).catch(console.error);
-                }
-            }
-
-            if (guildSettings.levelRoles?.length) {
-                const reward = guildSettings.levelRoles
-                    .filter(lr => lr.level <= user.level)
-                    .sort((a, b) => b.level - a.level)[0];
-                if (reward) await message.member.roles.add(reward.roleId).catch(console.error);
-            }
+        if (leveled) {
+            await announceLevelUp(user, guildSettings, message.member, message.guild, message.channel);
         }
 
         await user.save();

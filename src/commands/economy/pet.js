@@ -18,6 +18,7 @@ const {
     heartBar,
 } = require('../../services/petService');
 const { generatePetSprite } = require('../../utils/cardGenerator');
+const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
 
 const HUNGER_BAR_LENGTH = 10;
 
@@ -202,7 +203,10 @@ async function executeAdopt(interaction) {
 async function executeStatus(interaction) {
     await interaction.deferReply();
 
-    const user = await resolveUser(interaction);
+    const [user, guildSettings] = await Promise.all([
+        resolveUser(interaction),
+        Guild.findOne({ guildId: interaction.guild.id }),
+    ]);
     await syncHungerAndRunaway(user, interaction);
 
     if (!user.pets || user.pets.length === 0) {
@@ -212,7 +216,7 @@ async function executeStatus(interaction) {
     await user.save().catch(() => {});
 
     let currentIndex = 0;
-    const ownerAvatarURL = interaction.user.displayAvatarURL({ dynamic: true });
+    const ownerAvatarURL = interaction.user.displayAvatarURL();
 
     const reply = await interaction.editReply({
         embeds:     [buildPetEmbed(user.pets[currentIndex], currentIndex, user.pets.length, ownerAvatarURL)],
@@ -262,14 +266,27 @@ async function executeStatus(interaction) {
             }
 
             const xpGain = 15 + Math.floor(Math.random() * 11); // 15–25 XP
-            freshUser.xp = (freshUser.xp || 0) + xpGain;
-            freshUser.pets[idx].lastPlay            = new Date();
-            freshUser.pets[idx].weeklyInteractions  = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
+            const { leveled } = applyXpGain(freshUser, xpGain);
+            freshUser.pets[idx].lastPlay           = new Date();
+            freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
 
-            try { await freshUser.save(); } catch { /* best effort */ }
+            try {
+                await freshUser.save();
+            } catch (err) {
+                if (err.name === 'VersionError') {
+                    return btn.reply({ content: '⚠️ Action conflict — please try again.', ephemeral: true });
+                }
+                console.error('[pet] play save error:', err);
+                return btn.reply({ content: '❌ Failed to save. Please try again.', ephemeral: true });
+            }
 
-            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n✨ **+${xpGain} XP** earned!`, ephemeral: true });
+            if (leveled) {
+                announceLevelUp(freshUser, guildSettings, btn.member, btn.guild, interaction.channel).catch(() => {});
+            }
+
+            const levelNote = leveled ? `\n🎉 **Level up! You're now level ${freshUser.level}!**` : '';
+            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n✨ **+${xpGain} XP** earned!${levelNote}`, ephemeral: true });
             await interaction.editReply({
                 embeds:     [buildPetEmbed(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL)],
                 components: buildNavComponents(interaction.user.id, idx, freshUser.pets.length),
@@ -289,7 +306,15 @@ async function executeStatus(interaction) {
             freshUser.pets[idx].weeklyInteractions  = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
 
-            try { await freshUser.save(); } catch { /* best effort */ }
+            try {
+                await freshUser.save();
+            } catch (err) {
+                if (err.name === 'VersionError') {
+                    return btn.reply({ content: '⚠️ Action conflict — please try again.', ephemeral: true });
+                }
+                console.error('[pet] rest save error:', err);
+                return btn.reply({ content: '❌ Failed to save. Please try again.', ephemeral: true });
+            }
 
             await btn.reply({ content: `🛏️ **${name}** is now resting! Hunger will decay at half speed for **2 hours**.`, ephemeral: true });
             await interaction.editReply({
@@ -305,7 +330,16 @@ async function executeStatus(interaction) {
 
             freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
-            await freshUser.save().catch(() => {});
+
+            try {
+                await freshUser.save();
+            } catch (err) {
+                if (err.name === 'VersionError') {
+                    return btn.reply({ content: '⚠️ Action conflict — please try again.', ephemeral: true });
+                }
+                console.error('[pet] showcase save error:', err);
+                return btn.reply({ content: '❌ Failed to save. Please try again.', ephemeral: true });
+            }
 
             const showcaseEmbed = new EmbedBuilder()
                 .setColor(getMoodColor(pet.hunger))
@@ -465,21 +499,16 @@ async function executeList(interaction) {
 async function executeLeaderboard(interaction) {
     await interaction.deferReply();
 
-    const users = await User.find(
-        { guildId: interaction.guild.id, 'pets.0': { $exists: true } },
-        'userId pets'
-    ).lean();
-
-    const entries = [];
-    for (const u of users) {
-        for (const pet of u.pets) {
-            const bondDays = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
-            entries.push({ userId: u.userId, pet, bondDays });
-        }
-    }
-
-    entries.sort((a, b) => b.bondDays - a.bondDays);
-    const top = entries.slice(0, 10);
+    const top = await User.aggregate([
+        { $match: { guildId: interaction.guild.id, 'pets.0': { $exists: true } } },
+        { $unwind: '$pets' },
+        { $addFields: {
+            bondDays: { $toInt: { $divide: [{ $subtract: [new Date(), '$pets.adoptedAt'] }, 86400000] } }
+        }},
+        { $sort: { bondDays: -1 } },
+        { $limit: 10 },
+        { $project: { _id: 0, userId: 1, pet: '$pets', bondDays: 1 } },
+    ]);
 
     const medals = ['🥇', '🥈', '🥉'];
     const lines  = top.map((e, i) => {

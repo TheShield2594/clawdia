@@ -101,9 +101,16 @@ function applyHungerDecay(pets) {
         const daysPassed = Math.floor((now - lastFed) / MS_PER_DAY);
         if (daysPassed <= 0) return pet;
 
-        const isResting = pet.restUntil && new Date(pet.restUntil).getTime() > now;
-        const decayRate = isResting ? HUNGER_DECAY_RESTING : HUNGER_DECAY_PER_DAY;
-        const decay = daysPassed * decayRate;
+        // Prorate decay: compute overlap of the decay window with the rest window
+        const REST_WINDOW_MS  = 2 * 60 * 60 * 1000; // rest lasts 2 hours
+        const restUntilMs     = pet.restUntil ? new Date(pet.restUntil).getTime() : 0;
+        const restStartMs     = restUntilMs - REST_WINDOW_MS;
+        const restedMs        = restUntilMs > 0
+            ? Math.max(0, Math.min(restUntilMs, now) - Math.max(restStartMs, lastFed))
+            : 0;
+        const restedDays      = restedMs / MS_PER_DAY;
+        const normalDays      = Math.max(0, daysPassed - restedDays);
+        const decay           = restedDays * HUNGER_DECAY_RESTING + normalDays * HUNGER_DECAY_PER_DAY;
         const newHunger = Math.max(0, pet.hunger - decay);
         // Advance the decay cursor by the days processed so re-calls are no-ops
         const newLastFed = new Date(lastFed + daysPassed * MS_PER_DAY);

@@ -224,7 +224,9 @@ async function resolveOneSeason(client, guildDoc) {
     let announceChannelId  = null;
     try {
         seasonDiscordGuild = await client.guilds.fetch(guildId).catch(() => null);
-        announceChannelId  = seasonDiscordGuild?.systemChannelId ?? null;
+        announceChannelId  = guildDoc.economy?.announcementChannelId
+            ?? seasonDiscordGuild?.systemChannelId
+            ?? null;
     } catch {}
 
     let resolvedNames = {};
@@ -414,11 +416,20 @@ async function selectPetOfTheWeek(client) {
     const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
     const { generatePetSprite } = require('../utils/cardGenerator');
 
-    const guilds = await Guild.find({}, 'guildId economy').lean();
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const guilds  = await Guild.find({}, 'guildId economy potwLastRunAt').lean();
 
     for (const guildDoc of guilds) {
         const guildId = guildDoc.guildId;
         try {
+            // Atomic claim: only proceed if this guild hasn't been processed this week
+            const claimed = await Guild.findOneAndUpdate(
+                { guildId, $or: [{ potwLastRunAt: null }, { potwLastRunAt: { $lte: weekAgo } }] },
+                { $set: { potwLastRunAt: new Date() } },
+                { new: false }
+            );
+            if (!claimed) continue; // another worker already ran POTW for this guild this week
+
             const users = await User.find({ guildId, 'pets.0': { $exists: true } }, 'userId pets').lean();
             if (!users.length) continue;
 
