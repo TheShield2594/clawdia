@@ -7,7 +7,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect } = require('../../services/effectsService');
+const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -26,11 +26,10 @@ function cardLabel(value) {
     return face[value] ?? String(value);
 }
 
-// Render a card as a visual block using code block formatting
 function cardDisplay(card) {
     const lbl  = cardLabel(card.value);
     const suit = card.suit;
-    const pad  = lbl.length === 2 ? '' : ' '; // align single-char labels
+    const pad  = lbl.length === 2 ? '' : ' ';
     return [
         '┌───────┐',
         `│ ${lbl}${pad}    │`,
@@ -42,22 +41,54 @@ function cardDisplay(card) {
     ].join('\n');
 }
 
-// Small inline card label: A♠ or 10♥
 function cardInline(card) {
     return `**${cardLabel(card.value)}${card.suit}**`;
 }
 
-// Probability next card is higher / lower / equal, given current value
+// Probability of next card being strictly higher/lower, using same-size deck assumption.
 function probabilities(value) {
-    const higher = 13 - value;   // cards strictly above
-    const lower  = value - 1;    // cards strictly below
-    const equal  = 1;
+    const higher = 13 - value;
+    const lower  = value - 1;
     const total  = 13;
     return {
-        higher: Math.round((higher / total) * 100),
-        lower:  Math.round((lower  / total) * 100),
-        equal:  Math.round((equal  / total) * 100),
+        higher: higher / total,
+        lower:  lower  / total,
+        equal:  1      / total,
     };
+}
+
+// Probability-scaled multiplier with 5% house edge. Returns 0 if direction is impossible.
+// Cap at 13x for the riskiest single-card guesses.
+function winMultiplier(value, direction) {
+    const prob = direction === 'higher' ? (13 - value) / 13 : (value - 1) / 13;
+    if (prob <= 0) return 0;
+    return Math.min(13.0, parseFloat((0.95 / prob).toFixed(2)));
+}
+
+// Streak bonus: consecutive correct guesses multiply profit (not the whole payout).
+function streakMultiplier(streak) {
+    if (streak <= 1) return 1.00;
+    if (streak === 2) return 1.15;
+    if (streak === 3) return 1.35;
+    if (streak === 4) return 1.60;
+    return 2.00; // 5+
+}
+
+function streakLabel(streak) {
+    if (streak <= 0) return '';
+    if (streak === 1) return ' 🔥';
+    if (streak === 2) return ' 🔥🔥';
+    if (streak === 3) return ' 🔥🔥🔥';
+    if (streak === 4) return ' 🔥🔥🔥🔥';
+    return ` 🔥×${streak}`;
+}
+
+// Calculate actual payout: bet + (bet × rawMult - bet) × streakMult
+function calcRawPayout(bet, value, direction, streak) {
+    const mult  = winMultiplier(value, direction);
+    if (mult === 0) return 0;
+    const sMult = streakMultiplier(streak);
+    return Math.floor(bet + (bet * mult - bet) * sMult);
 }
 
 function embedAuthor(interaction) {
@@ -67,59 +98,64 @@ function embedAuthor(interaction) {
     };
 }
 
-function questionEmbed(card, bet, history, interaction) {
-    const prob = probabilities(card.value);
-    const histStr = history.length
-        ? history.map(c => cardInline(c)).join('  →  ')
-        : '*No history yet*';
+function questionEmbed(card, bet, history, interaction, streak) {
+    const prob   = probabilities(card.value);
+    const multH  = winMultiplier(card.value, 'higher');
+    const multL  = winMultiplier(card.value, 'lower');
+    const payH   = calcRawPayout(bet, card.value, 'higher', streak);
+    const payL   = calcRawPayout(bet, card.value, 'lower',  streak);
+    const histStr = history.length ? history.map(c => cardInline(c)).join(' → ') : '*No history yet*';
+    const sLabel  = streak >= 2 ? `\n> 🔥 **${streak}-win streak** (${streakMultiplier(streak).toFixed(2)}× profit bonus)` : '';
+
+    const higherField = multH > 0
+        ? `${(prob.higher * 100).toFixed(0)}% chance · pays **${payH.toLocaleString()}** (${multH.toFixed(2)}×)`
+        : '*Impossible*';
+    const lowerField = multL > 0
+        ? `${(prob.lower * 100).toFixed(0)}% chance · pays **${payL.toLocaleString()}** (${multL.toFixed(2)}×)`
+        : '*Impossible*';
 
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
         .setColor('#5865F2')
         .setTitle('🃏 Higher or Lower')
-        .setDescription(
-            `**Current Card**\n\`\`\`\n${cardDisplay(card)}\n\`\`\``,
-        )
+        .setDescription(`**Current Card**\n\`\`\`\n${cardDisplay(card)}\n\`\`\`${sLabel}`)
         .addFields(
-            { name: '⬆️ Higher',   value: `${prob.higher}% chance`, inline: true },
-            { name: '🟰 Equal',    value: `${prob.equal}% (push)`,  inline: true },
-            { name: '⬇️ Lower',    value: `${prob.lower}% chance`,  inline: true },
-            { name: '💰 Bet',      value: `**${bet.toLocaleString()}** coins`, inline: true },
-            { name: '🏆 Win Pays', value: `**${(bet * 2).toLocaleString()}** coins`, inline: true },
-            { name: '📜 History',  value: histStr, inline: false },
+            { name: '⬆️ Higher',    value: higherField,                                       inline: true },
+            { name: '⬇️ Lower',     value: lowerField,                                        inline: true },
+            { name: '🟰 Tie',       value: `${(prob.equal * 100).toFixed(0)}% → push`,        inline: true },
+            { name: '💰 Bet',       value: `**${bet.toLocaleString()}** coins`,               inline: true },
+            { name: '📜 History',   value: histStr,                                           inline: false },
         )
-        .setFooter({ text: 'Equal value = push (bet returned)  •  You have 15 seconds to choose' });
+        .setFooter({ text: 'Equal value = push (bet returned)  •  15 seconds to choose' });
 }
 
-function resultEmbed(interaction, current, next, pickedHigher, outcome, bet, newBalance, history) {
-    const histStr = history.map(c => cardInline(c)).join('  →  ');
+function resultEmbed(interaction, current, next, pickedHigher, outcome, bet, payout, newBalance, history, streak) {
+    const histStr = history.map(c => cardInline(c)).join(' → ');
+    const sLabel  = streak > 0 ? streakLabel(streak) : '';
 
     const configs = {
-        win:  { color: '#2ecc71', title: '🃏 Correct!',     desc: `✅ The next card was **${cardInline(next)}** — you guessed **${pickedHigher ? 'Higher' : 'Lower'}** correctly!` },
-        loss: { color: '#e74c3c', title: '🃏 Wrong!',       desc: `❌ The next card was **${cardInline(next)}** — you guessed **${pickedHigher ? 'Higher' : 'Lower'}** but it was ${next.value > current.value ? 'higher' : 'lower'}.` },
-        push: { color: '#f1c40f', title: '🃏 Push — Tie!',  desc: `🟰 The next card was also **${cardInline(next)}** — same value! Your bet is returned.` },
+        win:  { color: '#2ecc71', title: `🃏 Correct!${sLabel}`,  desc: `✅ Next card was ${cardInline(next)} — **${pickedHigher ? 'Higher' : 'Lower'}** was right!` },
+        loss: { color: '#e74c3c', title: '🃏 Wrong!',              desc: `❌ Next card was ${cardInline(next)} — you guessed **${pickedHigher ? 'Higher' : 'Lower'}** incorrectly.` },
+        push: { color: '#f1c40f', title: '🃏 Push — Tie!',         desc: `🟰 Next card was also ${cardInline(next)} — same value! Bet returned.` },
     };
     const { color, title, desc } = configs[outcome];
 
-    const net    = outcome === 'win' ? bet : outcome === 'push' ? 0 : -bet;
-    const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
+    const netRaw = payout - bet;
+    const netStr = netRaw >= 0 ? `+${netRaw.toLocaleString()}` : `${netRaw.toLocaleString()}`;
 
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
         .setColor(color)
         .setTitle(title)
-        .setDescription(
-            `${desc}\n\n` +
-            `\`\`\`\n${cardDisplay(next)}\n\`\`\``,
-        )
+        .setDescription(`${desc}\n\n\`\`\`\n${cardDisplay(next)}\n\`\`\``)
         .addFields(
-            { name: '🃏 Was',        value: cardInline(current),                    inline: true },
-            { name: '🃏 Next',       value: cardInline(next),                       inline: true },
-            { name: '📊 Net',        value: `**${netStr}** coins`,                  inline: true },
-            { name: '💰 Balance',    value: `**${newBalance.toLocaleString()}** coins`, inline: true },
-            { name: '📜 History',    value: histStr || '*none*',                    inline: false },
+            { name: '🃏 Was',     value: cardInline(current),                       inline: true },
+            { name: '🃏 Next',    value: cardInline(next),                          inline: true },
+            { name: '📊 Net',     value: `**${netStr}** coins`,                     inline: true },
+            { name: '💰 Balance', value: `**${newBalance.toLocaleString()}** coins`, inline: true },
+            { name: '📜 History', value: histStr || '*none*',                        inline: false },
         )
         .setTimestamp();
 }
@@ -132,15 +168,15 @@ function timeoutEmbed(interaction, card, bet, newBalance) {
         .setTitle('🃏 Higher or Lower — Timed Out')
         .setDescription(`⏱️ You didn't pick in time. Your bet of **${bet.toLocaleString()}** coins has been refunded.`)
         .addFields(
-            { name: '🃏 Card Was',    value: cardInline(card),                        inline: true },
-            { name: '💰 Balance',     value: `**${newBalance.toLocaleString()}** coins`, inline: true },
+            { name: '🃏 Card Was',  value: cardInline(card),                          inline: true },
+            { name: '💰 Balance',   value: `**${newBalance.toLocaleString()}** coins`, inline: true },
         )
         .setTimestamp();
 }
 
 module.exports = {
     name: 'higherlower',
-    description: 'Bet on whether the next card will be higher or lower',
+    description: 'Bet on whether the next card will be higher or lower — payouts scale with probability',
     cooldown: 5,
     configure: sub => sub
         .addIntegerOption(opt =>
@@ -154,17 +190,19 @@ module.exports = {
         const bet = interaction.options.getInteger('bet');
         const [user, guildSettings] = await Promise.all([
             User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
-            Guild.findOne({ guildId: interaction.guild.id })
+            Guild.findOne({ guildId: interaction.guild.id }),
         ]);
         const wallet = user?.balance ?? 0;
+
+        if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
+            return interaction.reply({ content: 'Economy games are disabled in this server.', ephemeral: true });
+        }
+
         const { shouldProceed: hlProceed, alreadyReplied: hlReplied } = await confirmBet(interaction, bet, wallet, 'Higher or Lower', guildSettings);
         if (!hlProceed) return;
         if (!hlReplied) await interaction.deferReply();
-        try {
-            if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
-                return interaction.editReply({ content: 'Economy games are disabled in this server.' });
-            }
 
+        try {
             const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
             await User.findOneAndUpdate(
@@ -181,12 +219,11 @@ module.exports = {
 
             if (!debited) {
                 return interaction.editReply({
-                    content: `❌ Insufficient funds. You need **${bet.toLocaleString()}** coins to place this bet.`,
+                    content: `❌ Insufficient funds. You need **${bet.toLocaleString()}** coins.`,
                 });
             }
 
-            const luckyActive = hasEffect(debited, 'lucky_charm');
-            await playHigherLower(interaction, bet, userFilter, [], luckyActive);
+            await playHigherLower(interaction, bet, userFilter, guildSettings, [], 0);
 
         } catch (err) {
             console.error('[HigherLower] error:', err);
@@ -195,18 +232,29 @@ module.exports = {
     },
 };
 
-async function playHigherLower(interaction, bet, userFilter, history, luckyActive = false) {
+async function playHigherLower(interaction, bet, userFilter, guildSettings, history, streak) {
     const current = rollCard();
-    const upId    = `hl_up_${interaction.id}_${Date.now()}`;
-    const downId  = `hl_down_${interaction.id}_${Date.now()}`;
+    const canHigh = winMultiplier(current.value, 'higher') > 0;
+    const canLow  = winMultiplier(current.value, 'lower')  > 0;
+
+    const upId   = `hl_up_${interaction.id}_${Date.now()}`;
+    const downId = `hl_down_${interaction.id}_${Date.now()}`;
 
     const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(upId).setLabel('⬆️ Higher').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(downId).setLabel('⬇️ Lower').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+            .setCustomId(upId)
+            .setLabel('⬆️ Higher')
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(!canHigh),
+        new ButtonBuilder()
+            .setCustomId(downId)
+            .setLabel('⬇️ Lower')
+            .setStyle(ButtonStyle.Danger)
+            .setDisabled(!canLow),
     );
 
     await interaction.editReply({
-        embeds:     [questionEmbed(current, bet, history, interaction)],
+        embeds:     [questionEmbed(current, bet, history, interaction, streak)],
         components: [row],
     });
 
@@ -222,41 +270,68 @@ async function playHigherLower(interaction, bet, userFilter, history, luckyActiv
             const next         = rollCard();
             const pickedHigher = i.customId === upId;
 
-            let outcome, delta;
+            // Fetch user once per resolution for all effect checks
+            const userDoc    = await User.findOne(userFilter);
+            const luckyActive = hasEffect(userDoc, 'lucky_charm');
+            const coinMult   = getCoinMultiplier(userDoc);
+            const serverMult = getServerCoinMultiplier(guildSettings);
+            const lsBonus  = getLuckyStreakBonus(userDoc);
+
+            let outcome, rawPayout, newStreak;
+
             if (next.value === current.value) {
-                outcome = 'push';
-                delta   = bet; // refund
+                // Tie: push regardless of direction picked
+                outcome    = 'push';
+                rawPayout  = bet;
+                newStreak  = streak; // ties don't break streak
             } else {
                 const won = pickedHigher ? next.value > current.value : next.value < current.value;
-                // Lucky Charm: on loss, 20% chance to push (return bet)
+
                 if (!won && luckyActive && Math.random() < 0.20) {
-                    outcome = 'push';
-                    delta   = bet;
+                    // Lucky Charm: return bet on loss
+                    outcome   = 'push';
+                    rawPayout = bet;
+                    newStreak = 0;
+                } else if (won) {
+                    newStreak = streak + 1;
+                    rawPayout = calcRawPayout(bet, current.value, pickedHigher ? 'higher' : 'lower', newStreak);
+
+                    // Apply coin / server multiplier to profits only
+                    const totalMult = coinMult * serverMult;
+                    if (totalMult > 1.0) {
+                        rawPayout = bet + Math.round((rawPayout - bet) * totalMult);
+                    }
+
+                    outcome = 'win';
                 } else {
-                    outcome = won ? 'win' : 'loss';
-                    delta   = won ? bet * 2 : 0;
+                    if (lsBonus > 0 && Math.random() < lsBonus) {
+                        outcome   = 'push';
+                        rawPayout = bet;
+                    } else {
+                        outcome   = 'loss';
+                        rawPayout = 0;
+                    }
+                    newStreak = 0;
                 }
             }
 
             const updated = await User.findOneAndUpdate(
                 userFilter,
-                { $inc: { balance: delta } },
+                { $inc: { balance: rawPayout } },
                 { new: true }
             );
 
             const newHistory = [...history, current];
-
-            const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
-            const replayRow = new ActionRowBuilder().addComponents(
+            const replayId   = `hl_replay_${interaction.id}_${Date.now()}`;
+            const replayRow  = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(replayId).setLabel('🃏 Play Again').setStyle(ButtonStyle.Primary),
             );
 
             await i.update({
-                embeds:     [resultEmbed(interaction, current, next, pickedHigher, outcome, bet, updated?.balance ?? 0, newHistory)],
+                embeds:     [resultEmbed(interaction, current, next, pickedHigher, outcome, bet, rawPayout, updated?.balance ?? 0, newHistory, newStreak)],
                 components: [replayRow],
             });
 
-            // Replay: deduct bet again and restart
             message.createMessageComponentCollector({
                 filter: ri => ri.user.id === interaction.user.id && ri.customId === replayId,
                 max: 1,
@@ -270,17 +345,17 @@ async function playHigherLower(interaction, bet, userFilter, history, luckyActiv
                     );
                     if (!newDebited) {
                         const fresh = await User.findOne(userFilter);
-                        await ri.update({
+                        return ri.update({
                             content: `❌ Not enough coins! Balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
                             embeds: [], components: [],
                         });
-                        return;
                     }
                     await ri.deferUpdate();
-                    await playHigherLower(interaction, bet, userFilter, newHistory.slice(-5), luckyActive);
+                    // Carry the streak into the next round (newStreak already encodes win/tie/loss)
+                    await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), newStreak);
                 } catch (replayErr) {
                     console.error('[HigherLower] replay error:', replayErr);
-                    await interaction.editReply({ content: 'Something went wrong on replay. Please try again.', embeds: [], components: [] }).catch(() => {});
+                    await interaction.editReply({ content: 'Something went wrong on replay.', embeds: [], components: [] }).catch(() => {});
                 }
             }).on('end', (_, reason) => {
                 if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
@@ -295,7 +370,6 @@ async function playHigherLower(interaction, bet, userFilter, history, luckyActiv
 
     collector.on('end', async (collected, _reason) => {
         if (collected.size > 0) return;
-        // Timeout — refund
         await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(() => {});
         const fresh = await User.findOne(userFilter);
         await interaction.editReply({
