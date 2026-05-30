@@ -283,7 +283,8 @@ const guildSchema = new Schema({
         roleId: { type: String, default: null },
         stock:     { type: Number, default: -1 },
         imageData: { type: Buffer, default: null },
-        imageType: { type: String, default: 'image/png' }
+        imageType: { type: String, default: 'image/png' },
+        createdAt: { type: Date, default: null }
     }],
 
     shopDefaultsSeeded: { type: Boolean, default: false },
