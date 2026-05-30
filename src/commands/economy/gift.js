@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { getItemLore } = require('../../data/defaultShopItems');
 
 const DAILY_COIN_CAP = 10_000;
 
@@ -190,10 +191,15 @@ module.exports = {
                 .setDescription(`**${interaction.user.username}** gifted **${qty}x \`${itemId}\`** to <@${target.id}>!`)
                 .setTimestamp();
 
+            const lore = getItemLore(itemId);
+            const recipientDesc = lore
+                ? `**${interaction.user.username}** sent you **${qty}x \`${itemId}\`**!\n\n> *${lore}*`
+                : `**${interaction.user.username}** sent you **${qty}x \`${itemId}\`**!`;
+
             const recipientEmbed = new EmbedBuilder()
                 .setColor('#2ecc71')
                 .setTitle('🎁 You Received a Gift!')
-                .setDescription(`**${interaction.user.username}** sent you **${qty}x \`${itemId}\`**!`)
+                .setDescription(recipientDesc)
                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed] });

@@ -2,6 +2,10 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User           = require('../../models/User');
 const Guild          = require('../../models/Guild');
 const MarketListing  = require('../../models/MarketListing');
+const { DEFAULT_SHOP_ITEMS, getItemLore } = require('../../data/defaultShopItems');
+const { EFFECT_CONFIGS } = require('../../services/effectsService');
+
+const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
 
 const MAX_LISTINGS_PER_USER = 5;
 const LISTING_TTL_MS        = 48 * 3_600_000; // 48 hours
@@ -165,10 +169,15 @@ async function handleBrowse(interaction, currency) {
         ? `📦 Marketplace — ${filterItem}`
         : `📦 Server Marketplace`;
 
-    const lines = await Promise.all(listings.map(async (l, idx) => {
-        const sellerTag = await interaction.client.users.fetch(l.sellerId).then(u => u.username).catch(() => 'Unknown');
+    const lines = await Promise.all(listings.map(async (l) => {
+        const sellerTag   = await interaction.client.users.fetch(l.sellerId).then(u => u.username).catch(() => 'Unknown');
         const total_price = l.pricePerUnit * l.quantity;
-        return `\`${String(l._id).slice(-6)}\`  @${sellerTag}  **${l.quantity}x \`${l.itemId}\`**  ${currency}${l.pricePerUnit.toLocaleString()}/ea  *(${currency}${total_price.toLocaleString()} total)*`;
+        const meta        = ITEM_META[l.itemId];
+        const effectCfg   = EFFECT_CONFIGS[l.itemId];
+        const displayName = meta ? `${effectCfg?.emoji ?? ''} ${meta.name}`.trim() : `\`${l.itemId}\``;
+        const loreText    = getItemLore(l.itemId);
+        const loreSuffix  = loreText ? `\n  *${loreText.slice(0, 80)}${loreText.length > 80 ? '…' : ''}*` : '';
+        return `\`${String(l._id).slice(-6)}\`  @${sellerTag}  **${l.quantity}x ${displayName}**  ${currency}${l.pricePerUnit.toLocaleString()}/ea  *(${currency}${total_price.toLocaleString()} total)*${loreSuffix}`;
     }));
 
     const embed = new EmbedBuilder()

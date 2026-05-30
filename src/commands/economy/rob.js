@@ -6,6 +6,7 @@ const { checkAndAward, announceAchievements } = require('../../services/achievem
 const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, ROB_WIN_LINES, ROB_FAIL_LINES } = require('../../utils/copyLines');
 const { delay } = require('../../utils/delay');
+const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 const ROBBER_COOLDOWN_MS = 1 * 3_600_000; // 1 hour
 const VICTIM_IMMUNITY_MS = 30 * 60_000;   // 30 minutes
@@ -77,9 +78,17 @@ module.exports = {
 
         // Cooldown check
         if (robber.lastRob && Date.now() - new Date(robber.lastRob).getTime() < ROBBER_COOLDOWN_MS) {
-            const remaining = ROBBER_COOLDOWN_MS - (Date.now() - new Date(robber.lastRob).getTime());
-            const mins = Math.ceil(remaining / 60_000);
-            return interaction.reply({ content: `You're laying low after your last heist. Try again in **${mins} min**.`, ephemeral: true });
+            const nextAt = new Date(new Date(robber.lastRob).getTime() + ROBBER_COOLDOWN_MS);
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '🕵️ Laying Low',
+                    description: "You're keeping a low profile after your last heist.\nThe streets will be safe for you again soon.",
+                    color: '#e67e22',
+                    nextAt,
+                    nextRewardPreview: 'Next heist: 40% base success · Robbery Bag + Knife can tip it in your favour',
+                })],
+                ephemeral: true,
+            });
         }
         if (victim?.lastRobbedAt && Date.now() - new Date(victim.lastRobbedAt).getTime() < VICTIM_IMMUNITY_MS) {
             const remaining = VICTIM_IMMUNITY_MS - (Date.now() - new Date(victim.lastRobbedAt).getTime());

@@ -12,6 +12,7 @@ const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, WORK_ROUGH_LINES, WORK_EXCEPTIONAL_LINES } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
 const { delay } = require('../../utils/delay');
+const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -116,12 +117,17 @@ module.exports = {
 
             const now = Date.now();
             if (user.lastWork && now - user.lastWork.getTime() < 3600000) {
-                const minutes = Math.floor((3600000 - (now - user.lastWork.getTime())) / 60000);
-                const cooldownEmbed = new EmbedBuilder()
-                    .setColor('#95a5a6')
-                    .setTitle('😴 Still Clocked Out')
-                    .setDescription(`You're recharging from your last shift.\nBack at it in **${minutes} minute${minutes !== 1 ? 's' : ''}**.\n\n> Your next shift could be Exceptional 🔥`);
-                return interaction.reply({ embeds: [cooldownEmbed], ephemeral: true });
+                const nextAt = new Date(user.lastWork.getTime() + 3600000);
+                return interaction.reply({
+                    embeds: [buildCooldownEmbed({
+                        title: '💼 Still Clocked Out',
+                        description: "You're recharging from your last shift.\nRest up — the grind will be there.",
+                        color: '#e67e22',
+                        nextAt,
+                        nextRewardPreview: 'Next shift: chance at 🔥 Exceptional performance · 💸 Bonus Tip · 🎁 Lucky Find',
+                    })],
+                    ephemeral: true,
+                });
             }
 
             const tierInfo = resolveTiers(guildSettings);

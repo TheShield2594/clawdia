@@ -33,6 +33,7 @@ const {
     updatePickaxeStatus,
     applyXp
 } = require('../../services/mineService');
+const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 const DEPTH_CHOICES    = DEPTH_LIST.map(d => ({ name: d.name, value: d.id }));
 const PICKAXE_CHOICES  = PICKAXE_TIERS.map(p => ({ name: `${p.emoji} ${p.name} — ${p.cost.toLocaleString()} coins`, value: p.slug }));
@@ -232,26 +233,53 @@ async function handleDig(interaction) {
     }
 
     if (m.injuryUntil && Date.now() < m.injuryUntil.getTime()) {
-        const remaining = m.injuryUntil.getTime() - Date.now();
+        const nextAt = new Date(m.injuryUntil.getTime());
         return interaction.reply({
-            content: `You're injured and need to rest. Back to work in **${formatMs(remaining)}**.`,
-            ephemeral: true
+            embeds: [buildCooldownEmbed({
+                title: '🤕 Recovering from Cave-in',
+                description: "You took a hit down there. Rest up before heading back underground.",
+                color: '#b5651d',
+                nextAt,
+            })],
+            ephemeral: true,
         });
     }
 
     if (m.lastMine && Date.now() - m.lastMine.getTime() < LIMITS.MINE_COOLDOWN_MS) {
-        const remaining = LIMITS.MINE_COOLDOWN_MS - (Date.now() - m.lastMine.getTime());
+        const nextAt = new Date(m.lastMine.getTime() + LIMITS.MINE_COOLDOWN_MS);
+        const sinceRare = m.sinceRare ?? 0;
+        const depthHint = m.stamina >= 5
+            ? 'Tip: Deep intensity (💎) doubles your yield — try it when stamina is full'
+            : null;
         return interaction.reply({
-            content: `You need a breather. Ready again in **${formatMs(remaining)}**.`,
-            ephemeral: true
+            embeds: [buildCooldownEmbed({
+                title: '⛏️ Catching Your Breath',
+                description: 'You just came up from a dig.\nTake a short break before heading back down.',
+                color: '#b5651d',
+                nextAt,
+                nextRewardPreview: depthHint ?? 'Next dig: Abyss tier multiplies your payout by 3×',
+            })],
+            ephemeral: true,
         });
     }
 
     if (m.stamina <= 0) {
-        const regenMs = msUntilNextStamina(user);
+        const regenMs   = msUntilNextStamina(user);
+        const nextAt    = new Date(Date.now() + regenMs);
+        const sinceRare = m.sinceRare ?? 0;
+        const pityStat  = sinceRare >= 5
+            ? `🎯 ${sinceRare} mines since last Rare+ material • rare guaranteed around mine ~40`
+            : null;
         return interaction.reply({
-            content: `You're exhausted! Stamina regens in **${formatMs(regenMs)}**. Buy an Energy Tonic from \`/mine shop\` to recover faster.`,
-            ephemeral: true
+            embeds: [buildCooldownEmbed({
+                title: '😮‍💨 Out of Stamina',
+                description: "You've dug yourself to exhaustion.\nBuy an **Energy Tonic** from `/mine shop` to recover faster.",
+                color: '#b5651d',
+                nextAt,
+                pityStat,
+                nextRewardPreview: 'Full stamina + Deep intensity = best rare material odds',
+            })],
+            ephemeral: true,
         });
     }
 
@@ -334,6 +362,13 @@ async function handleDig(interaction) {
     const petMineYieldPct = getTotalBonus(user.pets || [], 'mine_yield');
 
     const result = executeMine(user, depthId, { intensity: chosenIntensity });
+
+    // Pity counter: reset on rare+ success, increment otherwise
+    if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
+        user.mining.sinceRare = 0;
+    } else {
+        user.mining.sinceRare = (user.mining.sinceRare ?? 0) + 1;
+    }
 
     if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
         const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
