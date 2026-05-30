@@ -10,6 +10,7 @@ const {
 const axios = require('axios');
 const User  = require('../../models/User');
 const FALLBACK_QUESTIONS = require('../../data/quizFallback');
+const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 const THUMB         = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f393.png';
 const TIMER_SECONDS = 30;
@@ -229,8 +230,15 @@ async function runQuiz(interaction, diffChoice) {
             user.dailyQuizHard = 0;
         }
         if (user.dailyQuizHard >= HARD_DAILY_LIMIT) {
+            const tomorrow = new Date(todayUTC().getTime() + 86_400_000);
             return interaction.editReply({
-                content: `🎓 You've reached the daily limit of **${HARD_DAILY_LIMIT}** hard questions. Come back tomorrow (midnight UTC)!`,
+                embeds: [buildCooldownEmbed({
+                    title: '🎓 Hard Cap Reached',
+                    description: `You've answered all **${HARD_DAILY_LIMIT}** hard questions allowed today.\nYour brain deserves the rest.`,
+                    color: '#9b59b6',
+                    nextAt: tomorrow,
+                    nextRewardPreview: `Tomorrow: ${HARD_DAILY_LIMIT} more Hard questions · 750 coins each for correct answers`,
+                })],
                 components: [],
             });
         }

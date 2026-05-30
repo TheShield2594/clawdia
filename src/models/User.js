@@ -198,6 +198,7 @@ const userSchema = new Schema({
         eventKills:        { type: Number, default: 0 },
         bestPayout:        { type: Number, default: 0 },
         consecutiveFails:  { type: Number, default: 0 },
+        sinceRare:         { type: Number, default: 0 },  // hunts since last rare+ drop
 
         // Anti-exploit: rolling 24-hour window tracking
         dailyCoins:        { type: Number, default: 0 },
@@ -284,6 +285,7 @@ const userSchema = new Schema({
         eventCatches:     { type: Number, default: 0 },
         bestPayout:       { type: Number, default: 0 },
         consecutiveFails: { type: Number, default: 0 },
+        sinceRare:        { type: Number, default: 0 },  // casts since last rare+ catch
 
         dailyCoins:       { type: Number, default: 0 },
         dailyCasts:       { type: Number, default: 0 },
@@ -395,6 +397,7 @@ const userSchema = new Schema({
         eventFinds:       { type: Number, default: 0 },
         bestPayout:       { type: Number, default: 0 },
         consecutiveFails: { type: Number, default: 0 },
+        sinceRare:        { type: Number, default: 0 },  // mines since last rare+ material
 
         dailyCoins:       { type: Number, default: 0 },
         dailyMines:       { type: Number, default: 0 },
