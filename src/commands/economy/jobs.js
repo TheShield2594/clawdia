@@ -38,44 +38,45 @@ module.exports = {
             }
 
             const userTierEmoji = TIER_EMOJIS[userTier.tier] || '🟢';
-            const embed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setTitle('📋 Job Listings')
-                .setDescription(
-                    `Your career tier: **${userTierEmoji} ${userTier.name}** · ${currentShifts} shifts worked\n` +
-                    `Use **/work** every hour to earn coins!\n​`
-                )
-                .setTimestamp();
 
+            // Build the full job listing as a single description block with tier dividers
+            const sections = [];
             for (const tierMeta of tierInfo) {
                 const jobs = byTier[tierMeta.tier];
                 if (!jobs || jobs.length === 0) continue;
 
-                const unlocked = userTier.tier >= tierMeta.tier;
-                const unlockText = unlocked ? '' : ` *(unlocks at ${tierMeta.minShifts} shifts)*`;
-                const tierEmoji = TIER_EMOJIS[tierMeta.tier] || '⚪';
+                const unlocked    = userTier.tier >= tierMeta.tier;
+                const unlockText  = unlocked ? '' : ` *(unlocks at ${tierMeta.minShifts} shifts)*`;
+                const tierEmoji   = TIER_EMOJIS[tierMeta.tier] || '⚪';
+                const tierHeader  = `**${tierEmoji} Tier ${tierMeta.tier}: ${tierMeta.name}**${unlockText}`;
+
                 const jobLines = jobs.map(j => {
                     const label = j.emoji ? `${j.emoji} ${j.name}` : j.name;
-                    const pay = (j.minPay != null && j.maxPay != null)
+                    const pay   = (j.minPay != null && j.maxPay != null)
                         ? `${currency}${j.minPay}–${j.maxPay}`
                         : '–';
-                    const lock = unlocked ? '' : ' 🔒';
-                    return `${label}${lock} — **${pay}**`;
+                    const lock  = unlocked ? '' : ' 🔒';
+                    return `  ${label}${lock} — **${pay}**`;
                 }).join('\n');
 
-                embed.addFields({
-                    name: `${tierEmoji} Tier ${tierMeta.tier}: ${tierMeta.name}${unlockText}`,
-                    value: jobLines || 'No jobs configured.',
-                    inline: false,
-                });
+                sections.push(`${tierHeader}\n${jobLines}`);
             }
 
             const nextTier = tierInfo.find(t => t.minShifts > currentShifts);
-            if (nextTier) {
-                embed.setFooter({ text: `${nextTier.minShifts - currentShifts} more shifts to unlock ${nextTier.name} jobs` });
-            } else {
-                embed.setFooter({ text: 'Max career tier reached — all jobs unlocked!' });
-            }
+            const footerText = nextTier
+                ? `${nextTier.minShifts - currentShifts} more shifts to unlock ${nextTier.name} jobs`
+                : 'Max career tier reached — all jobs unlocked!';
+
+            const embed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setTitle('📋 Job Listings')
+                .setDescription(
+                    `Career: **${userTierEmoji} ${userTier.name}** · ${currentShifts} shifts worked\n` +
+                    `Use **/work** every hour to earn coins!\n\n` +
+                    sections.join('\n\n')
+                )
+                .setFooter({ text: footerText })
+                .setTimestamp();
 
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
