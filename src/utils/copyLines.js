@@ -54,6 +54,13 @@ const ROB_FAIL_LINES = [
     'They were ready for you.',
     'The target had backup. You didn\'t.',
     'Next time, scout the target first.',
+    'The dog gave you up — barked the whole block awake.',
+    'Floodlights. Sirens. And you standing there.',
+    'Security footage doesn\'t lie. Neither does your mugshot.',
+    'You got three steps in before the alarm tripped.',
+    'They must have known you were coming.',
+    'You froze. That was your one window.',
+    'Neighborhood watch, meet neighborhood criminal.',
 ];
 
 const BJ_WIN_LINES = [
@@ -83,6 +90,30 @@ const BJ_PUSH_LINES = [
     'Tied up. The table shrugs.',
 ];
 
+const HUNT_EMPTY_LINES = [
+    'The trail went cold.',
+    'A branch snapped — and it was gone.',
+    'You found tracks. The animal found an exit.',
+    'The forest was quiet. Too quiet.',
+    'You waited. Nothing moved.',
+];
+
+const FISH_MISS_POOL = [
+    'The line went slack. Whatever it was, it\'s gone.',
+    'Something was there. Now it\'s not.',
+    'You reeled in nothing but patience.',
+    'The water gives back nothing today.',
+    'Just weed and silence.',
+];
+
+const MINE_CAVE_LINES = [
+    'The ceiling groaned. Then it gave.',
+    'Too deep, too fast — the shaft collapsed.',
+    'Rock and dust. Nothing to show for it.',
+    'The walls weren\'t bluffing.',
+    'You made it out. Your dignity didn\'t.',
+];
+
 module.exports = {
     randomFrom,
     CRIME_WIN_LINES,
@@ -97,4 +128,7 @@ module.exports = {
     BJ_LOSE_LINES,
     BJ_BUST_LINES,
     BJ_PUSH_LINES,
+    HUNT_EMPTY_LINES,
+    FISH_MISS_POOL,
+    MINE_CAVE_LINES,
 };

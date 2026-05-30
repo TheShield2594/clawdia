@@ -44,6 +44,8 @@ const {
 const { getCurrentWeather } = require('../../services/weatherService');
 const { FISH_TRAITS, TIME_OF_DAY_BONUSES, getTimeOfDay } = require('../../data/fishData');
 const { ensureHuntData } = require('../../services/huntService');
+const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
+const { randomFrom, FISH_MISS_POOL } = require('../../utils/copyLines');
 
 const LOCATION_CHOICES = LOCATION_LIST.map(l => ({ name: l.name, value: l.id }));
 
@@ -424,7 +426,7 @@ async function handleCast(interaction) {
             embeds: [new EmbedBuilder()
                 .setColor('#888888')
                 .setTitle('🐟 The Fish Got Away!')
-                .setDescription('*You were too slow — the fish slipped free.*\n\nStamina spent, no reward.')
+                .setDescription(`*${randomFrom(FISH_MISS_POOL)}*\n\nStamina spent, no reward.`)
                 .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) })],
             components: [],
         });
@@ -636,12 +638,13 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
             : `**${currency}${finalPayout.toLocaleString()}**`;
 
         const isLegendary = tier === 'legendary';
+        const ribbon = TIER_RIBBON(TIER_NUM[tier] ?? 1);
         const embedTitle = isLegendary
             ? `🌊✨ LEGENDARY CATCH ✨🌊`
             : `${fish.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${fish.name}${sizeStr}${isCrit ? ' ✨' : ''}`;
         const embedDesc = isLegendary
-            ? `You pulled something impossible from the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${fish.emoji}  **${fish.name}**${sizeStr}  [⭐⭐⭐⭐⭐]\n  *${fish.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
-            : `*${fish.flavor}*`;
+            ? `${ribbon}\n\nYou pulled something impossible from the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${fish.emoji}  **${fish.name}**${sizeStr}  [⭐⭐⭐⭐⭐]\n  *${fish.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+            : `${ribbon}\n\n*${fish.flavor}*`;
 
         const embed = new EmbedBuilder()
             .setColor(color)

@@ -6,6 +6,7 @@ const { generateDailyMissions } = require('../../data/seasonMissions');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { getEventCurrencyBalance } = require('../../services/seasonalEventService');
 const { progressBar } = require('../../utils/progressBar');
+const { rewardReveal } = require('../../utils/rewardReveal');
 
 // ── Battle pass tier reward definitions ──────────────────────────────────────
 // 20 tiers; alternating between coin bonuses, cosmetic badges, material bundles, rare items
@@ -178,7 +179,14 @@ async function executeClaim(interaction) {
         .setDescription(`You received: **${reward.label}**${reward.coins > 0 ? `\n+${reward.coins.toLocaleString()} ${currency} added to your wallet` : ''}`)
         .setTimestamp();
 
-    return interaction.reply({ embeds: [embed] });
+    return rewardReveal({
+        interaction,
+        suspenseTitle: `🎫 Opening Tier ${tier} Reward…`,
+        suspenseText: '*Unlocking your season pass reward…*',
+        suspenseColor: '#5865f2',
+        resultEmbed: embed,
+        delayMs: 900,
+    });
 }
 
 async function executeMissions(interaction) {
