@@ -9,6 +9,7 @@ const { generateDailyChallenge } = require('../../utils/dailyChallenge');
 const { DROP_TABLE, RARE_DROP_TABLE, DROP_MILESTONES, DROP_BASE_CHANCE, weightedRandom } = require('../../data/dailyDropTable');
 const { stackBar } = require('../../utils/rewardReveal');
 const { buildCooldownEmbed, getNextStreakMilestone } = require('../../utils/cooldownEmbed');
+const { getTimeBand } = require('../../utils/timeBand');
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -58,6 +59,65 @@ function buildRewardBlock(amount, streak, streakMult, coinMult, serverMult, comb
         lines.push(`You found a ${droppedItem.emoji} **${droppedItem.name}** in today's reward!`);
     }
     return lines.join('\n');
+}
+
+const CALENDAR_BUTTON_ID = 'daily_calendar';
+
+function buildCalendarEmbed(user, dailyAmount, currentStreak) {
+    const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
+    const lines = [];
+
+    // Past 6 days: infer claimed if streak covers them
+    for (let i = 6; i >= 1; i--) {
+        const dayNum = currentStreak - i;
+        if (dayNum < 1) {
+            lines.push(`\`D-${i}\` ❌ Missed`);
+        } else {
+            const suffix = i === 1 ? ' ← Yesterday' : '';
+            lines.push(`\`D-${i}\` ✅ Day ${dayNum}${suffix}`);
+        }
+    }
+
+    // Today
+    const claimed = user.lastDaily && Date.now() - user.lastDaily.getTime() < 86400000;
+    const todayIcon   = claimed ? '✅' : '🟢';
+    const todayStatus = claimed ? 'Claimed!' : 'Ready now!';
+    lines.push(`\`TODAY\` **▶ Day ${currentStreak} — ${todayIcon} ${todayStatus}**`);
+
+    lines.push('');
+    lines.push('*Upcoming days:*');
+
+    // Next 6 days
+    for (let i = 1; i <= 6; i++) {
+        const futureStreak = currentStreak + i;
+        const mult      = getStreakMultiplier(futureStreak);
+        const estCoins  = Math.round(dailyAmount * Math.min(mult, MAX_COMBINED_MULTIPLIER));
+        const milestone = DROP_MILESTONES.includes(futureStreak);
+        if (milestone) {
+            lines.push(`\`D+${i}\` ⭐ **Day ${futureStreak} — MILESTONE!** ~${estCoins.toLocaleString()} coins + guaranteed drop!`);
+        } else {
+            lines.push(`\`D+${i}\` 🔮 Day ${futureStreak} — ~${estCoins.toLocaleString()} coins · 5% item drop`);
+        }
+    }
+
+    const timeBand = getTimeBand();
+    const embed = new EmbedBuilder()
+        .setColor(getStreakColor(currentStreak))
+        .setTitle('📅 Daily Calendar')
+        .setDescription(`**${currentStreak}-Day Streak**\n${div}\n${lines.join('\n')}\n${div}`)
+        .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · Claim daily to keep your streak alive!` })
+        .setTimestamp();
+
+    const freezes = user.streak?.freezes ?? 0;
+    if (freezes > 0) {
+        embed.addFields({
+            name: '❄️ Streak Freezes',
+            value: `${freezes} banked — automatically used if you miss a day`,
+            inline: false
+        });
+    }
+
+    return embed;
 }
 
 module.exports = {
@@ -374,10 +434,17 @@ module.exports = {
                 }, challenge.activateDelay);
             }
 
+            const calendarRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(CALENDAR_BUTTON_ID)
+                    .setLabel('📅 View Calendar')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+
             try {
                 const response = await reply.awaitMessageComponent({
                     time: challenge.timeLimit,
-                    filter: i => i.user.id === interaction.user.id,
+                    filter: i => i.user.id === interaction.user.id && i.customId !== CALENDAR_BUTTON_ID,
                 });
                 if (activateTimer) clearTimeout(activateTimer);
 
@@ -406,13 +473,13 @@ module.exports = {
                         .setColor('#ffd700')
                         .setTitle('⚡ Quick Challenge — Earned!')
                         .setDescription(`✅ Correct! You earned an extra **+${bonusAmount.toLocaleString()} coins**!`);
-                    await response.update({ embeds: [rewardEmbed, winChallengeEmbed], components: [] });
+                    await response.update({ embeds: [rewardEmbed, winChallengeEmbed], components: [calendarRow] });
                 } else {
                     const loseChallengeEmbed = new EmbedBuilder()
                         .setColor('#5865F2')
                         .setTitle('⚡ Quick Challenge')
                         .setDescription('❌ Wrong answer! No bonus this time — your daily reward is still yours.');
-                    await response.update({ embeds: [rewardEmbed, loseChallengeEmbed], components: [] });
+                    await response.update({ embeds: [rewardEmbed, loseChallengeEmbed], components: [calendarRow] });
                 }
             } catch (err) {
                 if (activateTimer) clearTimeout(activateTimer);
@@ -421,11 +488,26 @@ module.exports = {
                         .setColor('#5865F2')
                         .setTitle('⚡ Quick Challenge')
                         .setDescription("⏱️ Time's up! No bonus this time — your daily reward is still yours.");
-                    await reply.edit({ embeds: [rewardEmbed, timeoutChallengeEmbed], components: [] }).catch(() => {});
+                    await reply.edit({ embeds: [rewardEmbed, timeoutChallengeEmbed], components: [calendarRow] }).catch(() => {});
                 } else {
                     console.error('Daily challenge error:', err);
                     await reply.edit({ components: [] }).catch(() => {});
                 }
+            }
+
+            // Calendar button handler (60s window after challenge resolves)
+            try {
+                const calendarResponse = await reply.awaitMessageComponent({
+                    time: 60_000,
+                    filter: i => i.user.id === interaction.user.id && i.customId === CALENDAR_BUTTON_ID,
+                });
+                const dailyAmountForCalendar = guildSettings?.economy?.dailyAmount ?? 100;
+                const calendarEmbed = buildCalendarEmbed(user, dailyAmountForCalendar, streakCurrent);
+                await calendarResponse.reply({ embeds: [calendarEmbed], ephemeral: true });
+                await reply.edit({ components: [] }).catch(() => {});
+            } catch {
+                // Timeout — just remove the calendar button
+                await reply.edit({ components: [] }).catch(() => {});
             }
         } catch (error) {
             console.error('Daily error:', error);

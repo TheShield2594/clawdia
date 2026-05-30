@@ -34,6 +34,10 @@ const {
     applyXp
 } = require('../../services/mineService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
+const { getTimeBand } = require('../../utils/timeBand');
+const { logBigWin } = require('../../utils/bigWinLogger');
+const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 
 const DEPTH_CHOICES    = DEPTH_LIST.map(d => ({ name: d.name, value: d.id }));
 const PICKAXE_CHOICES  = PICKAXE_TIERS.map(p => ({ name: `${p.emoji} ${p.name} — ${p.cost.toLocaleString()} coins`, value: p.slug }));
@@ -314,18 +318,26 @@ async function handleDig(interaction) {
 
     // ── Depth Risk Selection Prompt ────────────────────────────────────────────
     // Show a risk/reward table and 5 intensity buttons before digging.
+    const featured         = getDailyFeatured(interaction.guild.id);
+    const isFeaturedDepth  = depthId === featured.mineDepth.id;
+    const timeBand         = getTimeBand();
+
     const riskTable = INTENSITY_LEVELS.map(l =>
         `${l.emoji} **${l.name}** — ${l.multiplier}× payout  |  ${(l.caveInRisk * 100).toFixed(0)}% cave-in  |  ${l.durLoss} dur loss`
     ).join('\n');
 
+    const featuredDepthNote = isFeaturedDepth
+        ? `\n\n🌟 **Featured Depth!** Mining here grants **+${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout** today!`
+        : '';
+
     const riskEmbed = new EmbedBuilder()
-        .setColor('#8B4513')
+        .setColor(isFeaturedDepth ? '#FFD700' : '#8B4513')
         .setTitle('⛏️ Choose Mining Depth')
         .setDescription(
-            `How deep will you dig in **${depth.emoji} ${depth.name}**?\n\n${riskTable}\n\n` +
+            `How deep will you dig in **${depth.emoji} ${depth.name}**?${featuredDepthNote}\n\n${riskTable}\n\n` +
             `*Cave-in = 0 coins, extra durability loss.*`
         )
-        .setFooter({ text: 'You have 20 seconds to decide — defaults to Surface (0.7×, no cave-in risk) on timeout.' });
+        .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · 20 seconds to decide — defaults to Surface (0.7×, no cave-in risk) on timeout.` });
 
     const intensityRow = new ActionRowBuilder().addComponents(
         ...INTENSITY_LEVELS.map(l => new ButtonBuilder()
@@ -370,6 +382,17 @@ async function handleDig(interaction) {
         user.mining.sinceRare = (user.mining.sinceRare ?? 0) + 1;
     }
 
+    if (result.success && result.finalPayout > 0 && isFeaturedDepth) {
+        const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
+        if (featBonus > 0) {
+            user.balance               += featBonus;
+            user.mining.totalEarned    += featBonus;
+            user.mining.dailyCoins     += featBonus;
+            result.finalPayout         += featBonus;
+            result.featuredDepthBonus   = featBonus;
+        }
+    }
+
     if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
         const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
         if (bonus > 0) {
@@ -385,6 +408,9 @@ async function handleDig(interaction) {
 
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
+    // Fetch hourly leader before save
+    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'mine').catch(() => null);
+
     try {
         await user.save();
         if (mineAchievements.length) {
@@ -398,6 +424,15 @@ async function handleDig(interaction) {
         return interaction.editReply({ content: 'Something went wrong saving your mine. Please try again.' });
     }
 
+    // Log big win and update hourly leader (fire-and-forget)
+    if (result.success && result.finalPayout > 0) {
+        const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+        if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'mine', details: result.ore ? `${result.ore.name} [${result.tier}]` : null });
+        }
+        tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
+    }
+
     const embed = buildMineEmbed(result, user, depth, pickaxe, currency, interaction.user);
     if (result.caveIn) {
         const desc = embed.data.description ?? '';
@@ -406,9 +441,20 @@ async function handleDig(interaction) {
         const desc = embed.data.description ?? '';
         embed.setDescription(desc + `\n> ${result.intensityLevel.emoji} *${result.intensityLevel.name} depth: ${result.intensityLevel.multiplier}× payout applied*`);
     }
+    if (result.featuredDepthBonus > 0) {
+        embed.addFields({ name: '🌟 Featured Depth Bonus', value: `+${result.featuredDepthBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
+    }
     if (result.petYieldBonus > 0) {
         embed.addFields({ name: '💎 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petMineYieldPct}% yield)`, inline: true });
     }
+
+    // Hourly leader footer
+    const leaderNote = hourlyLeader
+        ? `🏆 Biggest dig this hour: <@${hourlyLeader.userId}> — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
+        : '🏆 No hourly leader yet — be the first!';
+    const existingFooter = embed.data.footer?.text ?? '';
+    embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
+
     await interaction.editReply({ embeds: [embed] });
 
     if (result.success && result.tier === 'legendary' && guildSettings?.economy?.announceRareDrops !== false) {
