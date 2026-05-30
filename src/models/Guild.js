@@ -133,7 +133,8 @@ const guildSchema = new Schema({
         noXpChannelIds: [{ type: String }],
         rewardChannelId: { type: String, default: null },
         voiceXpEnabled: { type: Boolean, default: false },
-        voiceXpRate: { type: Number, default: 1.0 }
+        voiceXpRate: { type: Number, default: 1.0 },
+        disableLevelUpAnnounce: { type: Boolean, default: false }
     },
     
     serverBoost: {

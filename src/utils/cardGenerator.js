@@ -210,4 +210,112 @@ async function createRankCard(user, userData, rank, requiredXp, opts = {}) {
     return canvas.toBuffer();
 }
 
-module.exports = { createWelcomeCard, createRankCard };
+const WAR_VICTORY_LINES = [
+    'Victory belongs to the bold!',
+    'The battlefield remembers the brave.',
+    'Strength, unity, conquest.',
+    'They fought — and they prevailed.',
+    'No mercy. No retreat. All glory.',
+];
+
+async function createWarVictoryBanner(winnerName, winnerScore, loserName, loserScore, mvpName) {
+    const canvas = createCanvas(900, 260);
+    const ctx = canvas.getContext('2d');
+    const gold = '#FFD700';
+
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Gold accent bar
+    ctx.fillStyle = gold;
+    ctx.fillRect(0, 0, canvas.width, 8);
+    ctx.fillRect(0, canvas.height - 8, canvas.width, 8);
+
+    // Trophy icon area
+    ctx.font = `bold 64px ${EMOJI_FONT}`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText('🏆', 80, 90);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+
+    // Winner title
+    ctx.font = 'bold 36px "DejaVu Sans"';
+    ctx.fillStyle = gold;
+    const titleText = truncateText(ctx, `${winnerName} WINS THE WAR`, canvas.width - 160 - 20);
+    ctx.fillText(titleText, 150, 70);
+
+    // Score bar
+    const total = (winnerScore + loserScore) || 1;
+    const barX = 150, barY = 85, barW = 680, barH = 22;
+    const winFrac = Math.min(winnerScore / total, 1);
+    ctx.fillStyle = '#2e2e4a';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = gold;
+    ctx.fillRect(barX, barY, Math.floor(winFrac * barW), barH);
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillRect(barX + Math.floor(winFrac * barW), barY, barW - Math.floor(winFrac * barW), barH);
+
+    ctx.font = '16px "DejaVu Sans"';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`${winnerScore.toLocaleString()} pts`, barX, barY + barH + 20);
+    ctx.textAlign = 'right';
+    ctx.fillText(`${loserScore.toLocaleString()} pts`, barX + barW, barY + barH + 20);
+    ctx.textAlign = 'left';
+
+    // Flavor line
+    const flavor = WAR_VICTORY_LINES[Math.floor(Math.random() * WAR_VICTORY_LINES.length)];
+    ctx.font = 'italic 17px "DejaVu Sans"';
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillText(`"${flavor}"`, 150, 150);
+
+    // MVP line
+    if (mvpName) {
+        ctx.font = 'bold 20px "DejaVu Sans"';
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText(`🏅 MVP: ${truncateText(ctx, mvpName, 400)}`, 150, 185);
+    }
+
+    // Spoils
+    ctx.font = '16px "DejaVu Sans"';
+    ctx.fillStyle = '#98FB98';
+    ctx.fillText('Spoils: 2× coin booster (24h) + 🎖️ War Victor badge (30d)', 150, 215);
+
+    return canvas.toBuffer();
+}
+
+async function createWealthTierBanner(username, tierLabel, tierColor) {
+    const canvas = createCanvas(900, 200);
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#111122';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = tierColor;
+    ctx.fillRect(0, 0, canvas.width, 8);
+    ctx.fillRect(0, canvas.height - 8, canvas.width, 8);
+
+    ctx.font = `bold 64px ${EMOJI_FONT}`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText('💰', 80, 100);
+
+    ctx.font = 'bold 42px "DejaVu Sans"';
+    ctx.fillStyle = tierColor;
+    ctx.textAlign = 'left';
+    ctx.fillText(tierLabel, 140, 80);
+
+    ctx.font = '22px "DejaVu Sans"';
+    ctx.fillStyle = '#dddddd';
+    ctx.fillText(truncateText(ctx, username, 700), 140, 120);
+
+    ctx.font = 'italic 16px "DejaVu Sans"';
+    ctx.fillStyle = '#888888';
+    ctx.fillText('has reached a legendary wealth milestone!', 140, 155);
+
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    return canvas.toBuffer();
+}
+
+module.exports = { createWelcomeCard, createRankCard, createWarVictoryBanner, createWealthTierBanner };
