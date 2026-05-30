@@ -21,24 +21,15 @@ function getPreviousHourKey() {
 }
 
 // Try to set or update the hourly leader; only replaces if newValue > existing.value.
+// Single atomic upsert: inserts if absent, updates if new value beats existing.
 async function tryUpdateHourlyWinner({ guildId, category, userId, username, value, details }) {
     const hour = getCurrentHourKey();
     try {
-        // Attempt insert first; if it fails (duplicate), conditionally update
-        const updated = await HourlyWinner.findOneAndUpdate(
-            { guildId, hour, category, value: { $lt: value } },
-            { $set: { userId, username, value, details } },
-            { new: true }
+        await HourlyWinner.findOneAndUpdate(
+            { guildId, hour, category, $or: [{ value: { $lt: value } }, { value: { $exists: false } }] },
+            { $set: { userId, username, value, details }, $setOnInsert: { rewarded: false } },
+            { upsert: true, new: true }
         );
-
-        if (!updated) {
-            // No existing record or existing is already higher — try upsert (insert if absent)
-            await HourlyWinner.updateOne(
-                { guildId, hour, category },
-                { $setOnInsert: { userId, username, value, details, rewarded: false } },
-                { upsert: true }
-            );
-        }
     } catch (err) {
         if (err.code !== 11000) console.error('[hourly] update failed:', err.message);
     }

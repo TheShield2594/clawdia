@@ -392,6 +392,7 @@ async function handleDig(interaction) {
             result.featuredDepthBonus   = featBonus;
         }
     }
+    if (result.success && result.finalPayout > user.mining.bestPayout) user.mining.bestPayout = result.finalPayout;
 
     if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
         const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
@@ -408,9 +409,6 @@ async function handleDig(interaction) {
 
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
-    // Fetch hourly leader before save
-    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'mine').catch(() => null);
-
     try {
         await user.save();
         if (mineAchievements.length) {
@@ -424,14 +422,15 @@ async function handleDig(interaction) {
         return interaction.editReply({ content: 'Something went wrong saving your mine. Please try again.' });
     }
 
-    // Log big win and update hourly leader (fire-and-forget)
+    // Log big win, then await hourly leader update and re-fetch for accurate footer
     if (result.success && result.finalPayout > 0) {
         const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
         if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
             logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'mine', details: result.ore ? `${result.ore.name} [${result.tier}]` : null });
         }
-        tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
+        await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
     }
+    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'mine').catch(() => null);
 
     const embed = buildMineEmbed(result, user, depth, pickaxe, currency, interaction.user);
     if (result.caveIn) {
@@ -450,7 +449,7 @@ async function handleDig(interaction) {
 
     // Hourly leader footer
     const leaderNote = hourlyLeader
-        ? `🏆 Biggest dig this hour: <@${hourlyLeader.userId}> — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
+        ? `🏆 Biggest dig this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
         : '🏆 No hourly leader yet — be the first!';
     const existingFooter = embed.data.footer?.text ?? '';
     embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });

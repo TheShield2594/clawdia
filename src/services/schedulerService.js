@@ -508,45 +508,48 @@ async function announceHourlyWinners(client) {
     const User         = require('../models/User');
     const { getPreviousHourKey } = require('../utils/hourlyWinner');
 
-    const prevHour = getPreviousHourKey();
-    const winners  = await HourlyWinner.find({ hour: prevHour, rewarded: false }).lean();
-    if (!winners.length) return;
+    const prevHour   = getPreviousHourKey();
+    const candidates = await HourlyWinner.find({ hour: prevHour, rewarded: false }).lean();
+    if (!candidates.length) return;
 
-    // Group by guild
+    // Claim each winner atomically to prevent double-pay under concurrent runs
+    const actualWinners = [];
+    for (const w of candidates) {
+        const claimed = await HourlyWinner.findOneAndUpdate(
+            { _id: w._id, rewarded: false },
+            { $set: { rewarded: true } },
+            { new: true }
+        );
+        if (claimed) actualWinners.push(w);
+    }
+    if (!actualWinners.length) return;
+
+    // Grant coin rewards first, decoupled from announcement availability
+    const rewardAmount = 500;
+    for (const winner of actualWinners) {
+        await User.findOneAndUpdate(
+            { userId: winner.userId, guildId: winner.guildId },
+            { $inc: { balance: rewardAmount } }
+        ).catch(() => {});
+    }
+
+    // Announce per guild (best-effort — reward already granted above)
     const byGuild = new Map();
-    for (const w of winners) {
+    for (const w of actualWinners) {
         if (!byGuild.has(w.guildId)) byGuild.set(w.guildId, []);
         byGuild.get(w.guildId).push(w);
     }
 
-    // Mark all as rewarded atomically
-    await HourlyWinner.updateMany(
-        { _id: { $in: winners.map(w => w._id) } },
-        { $set: { rewarded: true } }
-    );
-
     for (const [guildId, guildWinners] of byGuild) {
         try {
-            const guildDoc = await Guild.findOne({ guildId }, 'economy name').lean();
+            const guildDoc  = await Guild.findOne({ guildId }, 'economy name').lean();
             const channelId = guildDoc?.economy?.announcementChannelId ?? null;
             if (!channelId) continue;
 
-            const discordGuild = await client.guilds.fetch(guildId).catch(() => null);
-            if (!discordGuild) continue;
-
-            const rewardAmount = 500;
             const lines = [];
-
             for (const winner of guildWinners) {
                 const meta = HOURLY_CATEGORY_LABELS[winner.category];
                 if (!meta) continue;
-
-                // Grant coin reward
-                await User.findOneAndUpdate(
-                    { userId: winner.userId, guildId },
-                    { $inc: { balance: rewardAmount } }
-                ).catch(() => {});
-
                 const detail = winner.details ? ` with **${winner.details}**` : '';
                 lines.push(`${meta.emoji} **${meta.title}**\n<@${winner.userId}> (${winner.username})${detail} — rewarded **+${rewardAmount.toLocaleString()} coins**`);
             }

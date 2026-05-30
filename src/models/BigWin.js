@@ -11,5 +11,6 @@ const bigWinSchema = new Schema({
 });
 
 bigWinSchema.index({ guildId: 1, createdAt: -1 });
+bigWinSchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 3600 });
 
 module.exports = model('BigWin', bigWinSchema);
