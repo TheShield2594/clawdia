@@ -9,6 +9,7 @@ const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMult
 const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = require('../services/effectsService');
 const { checkRivalry } = require('../services/rivalryService');
 const { checkAndAward, announceAchievements } = require('../services/achievementService');
+const { checkAndBroadcastWealthMilestone } = require('../utils/wealthMilestone');
 const BASE_BAD_WORDS = require('../data/profanityList');
 
 // Pre-compile base word regexes once at module load — avoids per-message regex construction
@@ -186,6 +187,9 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
 
         await user.save();
 
+        // Check wealth milestones after any coins may have been awarded (streak rewards, etc.)
+        checkAndBroadcastWealthMilestone(message.client, guildSettings, user, message.channel).catch(() => {});
+
         if (newlyEarned.length) {
             announceAchievements(message.client, guildSettings, user, message.member, newlyEarned).catch(() => null);
         }
@@ -273,16 +277,36 @@ async function handleLeveling(message, guildSettings) {
             user.level += 1;
             user.xp = 0;
 
-            const levelUpMsg = guildSettings.leveling.levelUpMessage
-                .replace(/{user}/g, `<@${message.author.id}>`)
-                .replace(/{level}/g, user.level);
+            const userOptOut   = user.disableLevelUpAnnounce === true;
+            const guildOptOut  = guildSettings.leveling?.disableLevelUpAnnounce === true;
+            if (!userOptOut && !guildOptOut) {
+                const { EmbedBuilder } = require('discord.js');
+                const TIER_STYLES = [
+                    { min: 0,   color: '#cd7f32', label: 'Bronze',  glyph: '⬡' },
+                    { min: 10,  color: '#c0c0c0', label: 'Silver',  glyph: '◈' },
+                    { min: 25,  color: '#ffd700', label: 'Gold',    glyph: '◆' },
+                    { min: 50,  color: '#b9f2ff', label: 'Diamond', glyph: '◇' },
+                    { min: 100, color: '#ff6200', label: 'Mythic',  glyph: '✦' },
+                ];
+                const tierStyle = [...TIER_STYLES].reverse().find(t => user.level >= t.min) ?? TIER_STYLES[0];
 
-            const rewardChannelId = guildSettings.leveling.rewardChannelId || guildSettings.leveling.announceChannel;
-            if (guildSettings.leveling.announceInChannel && !rewardChannelId) {
-                await message.reply(levelUpMsg).catch(console.error);
-            } else if (rewardChannelId) {
-                const ch = message.guild.channels.cache.get(rewardChannelId);
-                if (ch) await ch.send(levelUpMsg).catch(console.error);
+                const lvlEmbed = new EmbedBuilder()
+                    .setColor(tierStyle.color)
+                    .setTitle(`${tierStyle.glyph} TIER ${tierStyle.label.toUpperCase()} PROMOTION`)
+                    .setDescription(
+                        `<@${message.author.id}> has advanced to **Level ${user.level}**!\n\n` +
+                        `*${tierStyle.label} tier — keep climbing!*`
+                    )
+                    .setThumbnail(message.author.displayAvatarURL({ extension: 'png', size: 128 }))
+                    .setTimestamp();
+
+                const rewardChannelId = guildSettings.leveling.rewardChannelId || guildSettings.leveling.announceChannel;
+                if (guildSettings.leveling.announceInChannel && !rewardChannelId) {
+                    await message.channel.send({ embeds: [lvlEmbed] }).catch(console.error);
+                } else if (rewardChannelId) {
+                    const ch = message.guild.channels.cache.get(rewardChannelId);
+                    if (ch) await ch.send({ embeds: [lvlEmbed] }).catch(console.error);
+                }
             }
 
             if (guildSettings.levelRoles?.length) {
