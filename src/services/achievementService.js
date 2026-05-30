@@ -1,6 +1,7 @@
 'use strict';
 
 const { ACHIEVEMENTS } = require('../data/achievements');
+const { delay } = require('../utils/delay');
 
 /**
  * Check all applicable achievements for a user and award any newly earned ones.
@@ -8,8 +9,6 @@ const { ACHIEVEMENTS } = require('../data/achievements');
  *
  * @param {object} user           - Mongoose user document (already modified, not yet saved)
  * @param {object} guildSettings  - Mongoose guild document
- * @param {object} client         - Discord.js client (for announcement posting)
- * @param {object} member         - GuildMember for the user (optional, used for DMs / name display)
  * @returns {Array} newly earned achievement definitions (built-in + custom)
  */
 async function checkAndAward(user, guildSettings) {
@@ -45,8 +44,19 @@ async function checkAndAward(user, guildSettings) {
     return newlyEarned;
 }
 
+// XP → embed color tier
+function getTierColor(xpReward) {
+    if (!xpReward || xpReward <= 50)  return 0x9e9e9e; // common
+    if (xpReward <= 200)              return 0x4caf50; // uncommon
+    if (xpReward <= 500)              return 0x2196f3; // rare
+    if (xpReward <= 999)              return 0x9c27b0; // epic
+    return 0xFFD700;                                    // legendary
+}
+
 /**
  * Post achievement unlock announcements to the configured channel.
+ * Each achievement is revealed in two steps (mystery → reveal) with an 800ms gap,
+ * and multiple unlocks are staggered with 400ms between them.
  */
 async function announceAchievements(client, guildSettings, user, member, achievements) {
     const channelId = guildSettings.achievements?.announcementChannelId;
@@ -59,21 +69,41 @@ async function announceAchievements(client, guildSettings, user, member, achieve
     if (!channel) return;
 
     const { EmbedBuilder } = require('discord.js');
-    const displayName = member?.displayName || `<@${user.userId}>`;
+    const mention = member?.displayName ? `${member.displayName} (<@${user.userId}>)` : `<@${user.userId}>`;
 
-    for (const ach of achievements) {
-        const embed = new EmbedBuilder()
-            .setColor(0xF1C40F)
-            .setTitle(`${ach.emoji} Achievement Unlocked!`)
-            .setDescription(`**${displayName}** earned **${ach.name}**\n${ach.description}`)
-            .setFooter({ text: `Use /achievements to view all achievements` });
+    for (let i = 0; i < achievements.length; i++) {
+        if (i > 0) await delay(400);
 
+        const ach = achievements[i];
+        const tierColor = getTierColor(ach.xpReward);
+
+        // Step 1 — mystery beat
+        const mysteryEmbed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('🏅 Achievement Unlocked...')
+            .setDescription('???');
+
+        const msg = await channel.send({ embeds: [mysteryEmbed] }).catch(() => null);
+        if (!msg) continue;
+
+        await delay(800);
+
+        // Step 2 — reveal
+        const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
         const rewards = [];
         if (ach.xpReward)   rewards.push(`+${ach.xpReward} XP`);
         if (ach.coinReward) rewards.push(`+${ach.coinReward.toLocaleString()} coins`);
-        if (rewards.length) embed.addFields({ name: 'Rewards (use /achievements claim)', value: rewards.join(' · '), inline: false });
+        const rewardLine = rewards.length ? `${separator}\n  ${rewards.join('  ·  ')}\n${separator}` : separator;
 
-        await channel.send({ embeds: [embed] }).catch(() => null);
+        const revealEmbed = new EmbedBuilder()
+            .setColor(tierColor)
+            .setTitle('🏅 Achievement Unlocked!')
+            .setDescription(
+                `${ach.emoji || ''} **${ach.name}**\n\n${ach.description}\n\n${rewardLine}\n  ${mention}`
+            )
+            .setFooter({ text: 'Use /achievements to view all achievements' });
+
+        await msg.edit({ embeds: [revealEmbed] }).catch(() => null);
     }
 }
 
