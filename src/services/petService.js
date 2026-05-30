@@ -12,11 +12,78 @@ const PET_DEFINITIONS = {
 };
 
 const HUNGER_DECAY_PER_DAY = 10;
+const HUNGER_DECAY_RESTING  = 5;   // half-speed decay while resting
 const HUNGER_RESTORE_FAVORITE = 25;
 const HUNGER_RESTORE_OTHER = 10;
 const STARVING_THRESHOLD = 30;
 const RUNAWAY_DAYS = 3;
 const MS_PER_DAY = 86400000;
+
+// ── Mood system ───────────────────────────────────────────────────────────────
+
+const MOOD_LINES = {
+    blissful: [
+        '"I could nap here forever... this is the life."',
+        '"You fed me so well — I might just purr until tomorrow."',
+        '"Life is good. Very good. *Extremely* good."',
+        '"I am completely and utterly content. Please don\'t move me."',
+        '"If happiness had a shape, it would be whatever snack I just had."',
+        '"This is peak existence and I refuse to acknowledge anything beyond this moment."',
+    ],
+    content: [
+        '"Thanks for checking in. I\'m doing okay."',
+        '"Life\'s pretty chill right now, honestly."',
+        '"A little hungry, but nothing to panic over."',
+        '"I\'m maintaining. Vibes are neutral-to-good."',
+        '"Not complaining. But a snack wouldn\'t hurt."',
+        '"I could do with a small treat if you\'re offering."',
+    ],
+    pleading: [
+        '"Excuse me... I hate to bring this up... but food?"',
+        '"I\'m not saying I\'m starving. I\'m saying my stomach is sad."',
+        '"A single crumb. That\'s all I ask."',
+        '"I keep looking at my bowl and it keeps being empty."',
+        '"If this is a test of loyalty, I\'m passing it hungry."',
+        '"Hello? Feed me? Pretty please? With a bow on top?"',
+    ],
+    concerning: [
+        '"...I don\'t have the energy for a full complaint. Please hurry."',
+        '"*stares at you with big, hollow eyes*"',
+        '"I\'m holding it together. Barely."',
+        '"Feed me before this becomes a dramatic backstory."',
+        '"I have decided to be disappointed in you. With love."',
+        '"This... is fine. Everything is fine. *It is not fine.*"',
+    ],
+};
+
+function getMoodBand(hunger) {
+    if (hunger >= 90) return 'blissful';
+    if (hunger >= 50) return 'content';
+    if (hunger >= 20) return 'pleading';
+    return 'concerning';
+}
+
+function getMoodLine(pet) {
+    const band = getMoodBand(pet.hunger);
+    const lines = MOOD_LINES[band];
+    const dayIndex = Math.floor(Date.now() / 86400000);
+    const petHash  = (pet.petId  || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    const nameHash = (pet.name   || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    return lines[(petHash + nameHash + dayIndex) % lines.length];
+}
+
+function getMoodColor(hunger) {
+    if (hunger >= 90) return '#4caf50'; // blissful — green
+    if (hunger >= 50) return '#ff9800'; // content  — orange
+    if (hunger >= 20) return '#f44336'; // pleading — red
+    return '#9c27b0';                   // concerning — purple
+}
+
+const HEART_BAR_LENGTH = 8;
+function heartBar(bondDays) {
+    const filled = Math.min(Math.floor(bondDays / 10), HEART_BAR_LENGTH);
+    return '❤️'.repeat(filled) + '🖤'.repeat(HEART_BAR_LENGTH - filled);
+}
 
 /**
  * Apply daily hunger decay to all pets. Call from a scheduled job or lazily on pet commands.
@@ -34,7 +101,16 @@ function applyHungerDecay(pets) {
         const daysPassed = Math.floor((now - lastFed) / MS_PER_DAY);
         if (daysPassed <= 0) return pet;
 
-        const decay = daysPassed * HUNGER_DECAY_PER_DAY;
+        // Prorate decay: compute overlap of the decay window with the rest window
+        const REST_WINDOW_MS  = 2 * 60 * 60 * 1000; // rest lasts 2 hours
+        const restUntilMs     = pet.restUntil ? new Date(pet.restUntil).getTime() : 0;
+        const restStartMs     = restUntilMs - REST_WINDOW_MS;
+        const restedMs        = restUntilMs > 0
+            ? Math.max(0, Math.min(restUntilMs, now) - Math.max(restStartMs, lastFed))
+            : 0;
+        const restedDays      = restedMs / MS_PER_DAY;
+        const normalDays      = Math.max(0, daysPassed - restedDays);
+        const decay           = restedDays * HUNGER_DECAY_RESTING + normalDays * HUNGER_DECAY_PER_DAY;
         const newHunger = Math.max(0, pet.hunger - decay);
         // Advance the decay cursor by the days processed so re-calls are no-ops
         const newLastFed = new Date(lastFed + daysPassed * MS_PER_DAY);
@@ -119,9 +195,13 @@ module.exports = {
     MS_PER_DAY,
     STARVING_THRESHOLD,
     RUNAWAY_DAYS,
+    MOOD_LINES,
     applyHungerDecay,
     checkRunaway,
     feedPet,
     getPetBonus,
-    getTotalBonus
+    getTotalBonus,
+    getMoodLine,
+    getMoodColor,
+    heartBar,
 };
