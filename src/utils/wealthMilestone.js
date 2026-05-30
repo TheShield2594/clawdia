@@ -53,8 +53,9 @@ async function checkAndBroadcastWealthMilestone(client, guildSettings, user, cha
             .setColor(milestone.color)
             .setTitle(`${milestone.label}`)
             .setDescription(`<@${user.userId}> has crossed a legendary wealth milestone!`)
-            .setImage('attachment://wealth_banner.png')
             .setTimestamp();
+
+        if (attachment) embed.setImage('attachment://wealth_banner.png');
 
         await channel.send({
             embeds: [embed],

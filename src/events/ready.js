@@ -67,7 +67,8 @@ module.exports = {
 
         // Award weekly leaderboard badges every Sunday at 23:59 UTC
         cron.schedule('59 23 * * 0', () =>
-            runJob('schedulerService', 'awardWeeklyLeaderboardBadges', () => awardWeeklyLeaderboardBadges(client))
+            runJob('schedulerService', 'awardWeeklyLeaderboardBadges', () => awardWeeklyLeaderboardBadges(client)),
+            { timezone: 'Etc/UTC' }
         );
 
         // Refund any bets that were deducted during a crash game that was interrupted by a restart

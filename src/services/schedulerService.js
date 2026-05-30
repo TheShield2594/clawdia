@@ -54,6 +54,7 @@ async function resolveOneWar(client, guildDoc) {
     // Determine winning/losing guild ids for badge and booster grants
     const winnerGuildId = iWon ? guildId : (tied ? null : opponentGuildId);
     const winnerName    = iWon ? guildDoc.name : (tied ? null : oppName);
+    const loserName     = iWon ? oppName        : (tied ? null : guildDoc.name);
     const winnerScore   = iWon ? myScore : oppScore;
     const loserScore    = iWon ? oppScore : myScore;
 
@@ -100,7 +101,7 @@ async function resolveOneWar(client, guildDoc) {
     let bannerAttachment = null;
     if (!tied && winnerName) {
         try {
-            const buf = await createWarVictoryBanner(winnerName, winnerScore, oppName, loserScore, mvpName);
+            const buf = await createWarVictoryBanner(winnerName, winnerScore, loserName, loserScore, mvpName);
             bannerAttachment = new AttachmentBuilder(buf, { name: 'war_victory.png' });
         } catch (err) {
             console.error('[scheduler] war banner generation failed:', err.message);
@@ -125,7 +126,7 @@ async function resolveOneWar(client, guildDoc) {
                 .setColor('#FFD700')
                 .setTitle(`🏆 ${winnerName} WINS THE WAR`)
                 .setDescription(
-                    `**${winnerName}** has crushed **${oppName}**!\n\n` +
+                    `**${winnerName}** has crushed **${loserName}**!\n\n` +
                     `**Score:** ${winnerScore.toLocaleString()} — ${loserScore.toLocaleString()}\n\n` +
                     `All members receive a **2× coin booster** for 24 hours and a **🎖️ War Victor** badge for 30 days!`
                 )
