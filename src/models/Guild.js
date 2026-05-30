@@ -284,7 +284,7 @@ const guildSchema = new Schema({
         stock:     { type: Number, default: -1 },
         imageData: { type: Buffer, default: null },
         imageType: { type: String, default: 'image/png' },
-        createdAt: { type: Date, default: Date.now }
+        createdAt: { type: Date, default: null }
     }],
 
     shopDefaultsSeeded: { type: Boolean, default: false },
