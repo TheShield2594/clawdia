@@ -369,8 +369,20 @@ async function notifyDailyQuestReset(guildSettings, member, user, fallbackChanne
     ).catch(() => {});
 }
 
-// Send quest completion notification to the configured channel (or fallback channel)
-async function notifyQuestComplete(guild, member, rewards, fallbackChannel) {
+// Returns the next incomplete daily quest for a user, or null.
+function _nextQuest(user) {
+    const now  = new Date();
+    const active = (user?.quests ?? []).filter(q => !q.completedAt && q.expiresAt > now);
+    if (!active.length) return null;
+    const def = getDefById(active[0].questId);
+    if (!def) return null;
+    const pct = active[0].progress ? Math.floor((active[0].progress / def.target) * 100) : 0;
+    return { def, progress: active[0].progress ?? 0, pct };
+}
+
+// Send quest completion notification — includes QUEST COMPLETE banner + next-quest preview.
+// `user` is optional; pass it to include the "Up Next" teaser.
+async function notifyQuestComplete(guild, member, rewards, fallbackChannel, user) {
     if (!rewards?.length) return;
 
     const settings = guild.settings ?? guild;
@@ -383,19 +395,34 @@ async function notifyQuestComplete(guild, member, rewards, fallbackChannel) {
     const { EmbedBuilder } = require('discord.js');
     for (const reward of rewards) {
         if (!reward) continue;
-        const def        = reward.def;
-        const catEmoji   = CATEGORY_EMOJIS[def?.category] ?? '🗺️';
-        const diffColor  = DIFFICULTY_COLORS[def?.difficulty] ?? '🟢';
-        const diffName   = def?.difficulty ? (def.difficulty.charAt(0).toUpperCase() + def.difficulty.slice(1)) : 'Quest';
+        const def       = reward.def;
+        const catEmoji  = CATEGORY_EMOJIS[def?.category] ?? '🗺️';
+        const diffColor = DIFFICULTY_COLORS[def?.difficulty] ?? '🟢';
+        const diffName  = def?.difficulty ? (def.difficulty.charAt(0).toUpperCase() + def.difficulty.slice(1)) : 'Quest';
+
         const embed = new EmbedBuilder()
             .setColor(def?.difficulty === 'hard' ? 0xED4245 : def?.difficulty === 'medium' ? 0xFEE75C : 0x57F287)
             .setAuthor({ name: `${member.displayName} completed a quest!`, iconURL: member.displayAvatarURL({ dynamic: true }) })
-            .setDescription(`${catEmoji} **${def?.name ?? 'Quest'}** ${diffColor} ${diffName}\n${def?.description ?? ''}`)
+            .setTitle('✅ QUEST COMPLETE')
+            .setDescription(`${catEmoji} **${def?.name ?? 'Quest'}** ${diffColor} ${diffName}\n*${def?.description ?? ''}*`)
             .addFields(
-                { name: 'XP Earned',    value: `+${reward.xp} XP`,      inline: true },
-                { name: 'Coins Earned', value: `+${reward.coins} coins`, inline: true }
+                { name: '✨ XP Earned',    value: `+${reward.xp} XP`,       inline: true },
+                { name: '💰 Coins Earned', value: `+${reward.coins} coins`,  inline: true },
             )
             .setTimestamp();
+
+        // Next-quest teaser (anticipation loop)
+        const next = _nextQuest(user);
+        if (next) {
+            const nextCat = CATEGORY_EMOJIS[next.def.category] ?? '🗺️';
+            const bar     = next.pct > 0 ? ` (${next.pct}% done)` : '';
+            embed.addFields({
+                name:   '▶️ Up Next',
+                value:  `${nextCat} **${next.def.name}** — *${next.def.description}*${bar}`,
+                inline: false,
+            });
+        }
+
         await channel.send({ embeds: [embed] }).catch(() => {});
     }
 }

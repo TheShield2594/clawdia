@@ -434,14 +434,22 @@ const userSchema = new Schema({
 
     // Pet system
     pets: [{
-        petId:     { type: String, required: true },
-        name:      { type: String, default: null },
-        hunger:    { type: Number, default: 100, min: 0, max: 100 },
-        lastFed:   { type: Date, default: Date.now },
-        adoptedAt: { type: Date, default: Date.now },
-        starving:  { type: Boolean, default: false },
-        starvingStartAt: { type: Date, default: null }
+        petId:              { type: String,  required: true },
+        name:               { type: String,  default: null },
+        hunger:             { type: Number,  default: 100, min: 0, max: 100 },
+        lastFed:            { type: Date,    default: Date.now },
+        adoptedAt:          { type: Date,    default: Date.now },
+        starving:           { type: Boolean, default: false },
+        starvingStartAt:    { type: Date,    default: null },
+        lastPlay:           { type: Date,    default: null },
+        restUntil:          { type: Date,    default: null },
+        potw:               { type: Boolean, default: false },
+        weeklyInteractions: { type: Number,  default: 0    },
     }],
+
+    // Pet of the Week tracking
+    petInteractionLog: { type: Date,    default: null },
+    petOfTheWeek:      { type: Boolean, default: false },
 
     // Season pass daily missions (reset at midnight UTC)
     seasonMissions: [{
