@@ -10,6 +10,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
+const { runShopBrowse }          = require('../../utils/shopBrowse');
 const {
     LOCATIONS, LOCATION_LIST, TIER_COLORS, LIMITS, ROD_BY_TIER,
     ROD_UPGRADES, MATERIAL_NAMES, BAIT_PACKS, CONSUMABLES,
@@ -1394,45 +1395,80 @@ async function handleShop(interaction, sub) {
 async function showShopList(interaction, user, currency) {
     const f = user.fishing;
 
-    const rodSection = ROD_TIERS.map(r =>
-        `${r.emoji} **T${r.tier} ${r.name}** — ${currency}${r.cost.toLocaleString()}\n   ${r.description}`
+    const rodItems = ROD_TIERS.map(r => ({
+        imageId: `fish:${r.slug}`,
+        name:    r.name,
+        price:   r.cost,
+        emoji:   r.emoji,
+        badge:   `T${r.tier}`
+    }));
+    const rodList = ROD_TIERS.map(r =>
+        `${r.emoji} **T${r.tier} ${r.name}** — ${currency}${r.cost.toLocaleString()} · \`/fish shop rod type:${r.slug}\``
     ).join('\n');
 
-    const upgradeSection = Object.values(ROD_UPGRADES).map(u =>
-        `${u.emoji} **${u.name}** — ~${Math.round(u.costMultiplier * 100)}% of rod price\n   *${u.description}*`
+    const upgradeItems = Object.values(ROD_UPGRADES).map(u => ({
+        imageId: `fish:${u.id}`,
+        name:    u.name,
+        emoji:   u.emoji,
+        subline: `~${Math.round(u.costMultiplier * 100)}% of rod`
+    }));
+    const upgradeList = Object.values(ROD_UPGRADES).map(u =>
+        `${u.emoji} **${u.name}** — *${u.description}* · \`/fish shop upgrade module:${u.id}\``
     ).join('\n');
 
-    const baitSection = BAIT_PACKS.map(p =>
-        `${p.emoji} **${p.name}** — ${currency}${p.cost} \`${p.id}\``
+    const baitItems = BAIT_PACKS.map(p => ({
+        imageId: `fish:${p.id}`,
+        name:    p.name,
+        price:   p.cost,
+        emoji:   p.emoji
+    }));
+    const baitList = BAIT_PACKS.map(p =>
+        `${p.emoji} **${p.name}** — ${currency}${p.cost} · \`/fish shop buy item:${p.id}\``
     ).join('\n');
 
-    const consumableSection = Object.values(CONSUMABLES).map(c =>
-        `${c.emoji} **${c.name}** — ${currency}${c.cost}\n   *${c.description}*`
+    const consumableItems = Object.values(CONSUMABLES).map(c => ({
+        imageId: `fish:${c.id}`,
+        name:    c.name,
+        price:   c.cost,
+        emoji:   c.emoji
+    }));
+    const consumableList = Object.values(CONSUMABLES).map(c =>
+        `${c.emoji} **${c.name}** — ${currency}${c.cost} · \`/fish shop buy item:${c.id}\``
     ).join('\n');
 
-    const locationSection = LOCATION_LIST.map(loc => {
+    const locationItems = LOCATION_LIST.map(loc => {
+        const unlocked = f.unlockedLocations.includes(loc.id);
+        const isActive = f.activeLocation === loc.id;
+        return {
+            imageId: `fish:${loc.id}`,
+            name:    loc.name,
+            emoji:   loc.emoji,
+            badge:   isActive ? 'ACTIVE' : (unlocked ? 'OWNED' : `Lv.${loc.unlockLevel}`),
+            subline: unlocked ? (isActive ? 'Currently fishing' : 'Unlocked') : (loc.unlockCost > 0 ? `${currency}${loc.unlockCost.toLocaleString()}` : 'Free')
+        };
+    });
+    const locationList = LOCATION_LIST.map(loc => {
         const unlocked = f.unlockedLocations.includes(loc.id);
         const isActive = f.activeLocation === loc.id;
         const status = unlocked
             ? (isActive ? '✅ **ACTIVE**' : '✅ Unlocked')
             : `🔒 Lv.${loc.unlockLevel}${loc.unlockCost > 0 ? ` / ${currency}${loc.unlockCost.toLocaleString()}` : ' (free)'}`;
-        return `${loc.emoji} **${loc.name}** — ${status}\n   *${loc.description}*`;
+        return `${loc.emoji} **${loc.name}** — ${status}`;
     }).join('\n');
 
-    const embed = new EmbedBuilder()
-        .setColor('#f39c12')
-        .setTitle('🏪 Fishing Shop')
-        .addFields(
-            { name: '🎣 Rods',                     value: rodSection,        inline: false },
-            { name: '🔧 Rod Upgrades (1 per rod)', value: upgradeSection,    inline: false },
-            { name: '🪱 Bait Packs',               value: baitSection,       inline: false },
-            { name: '🧪 Consumables',              value: consumableSection,  inline: false },
-            { name: '🗺️ Locations',                value: locationSection,   inline: false }
-        )
-        .setFooter({ text: '/fish shop rod • /fish shop upgrade • /fish shop buy • /fish shop use • /fish shop repair • /fish shop unlock' })
-        .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+    return runShopBrowse(interaction, {
+        activity: 'fish',
+        title:    'Fishing Shop',
+        currency,
+        footer:   'rod • upgrade • buy • use • repair • unlock',
+        pages: [
+            { id: 'rods',        label: 'Rods',        emoji: '🎣',  subtitle: 'Better rods, better catches.',           items: rodItems,        listText: rodList        },
+            { id: 'upgrades',    label: 'Upgrades',    emoji: '🔧',  subtitle: 'One module per rod, permanent.',         items: upgradeItems,    listText: upgradeList    },
+            { id: 'bait',        label: 'Bait',        emoji: '🪱',  subtitle: 'The right bait pulls the right fish.',   items: baitItems,       listText: baitList       },
+            { id: 'consumables', label: 'Consumables', emoji: '🧪',  subtitle: 'Luck, XP and quick boosts.',             items: consumableItems, listText: consumableList },
+            { id: 'locations',   label: 'Locations',   emoji: '🗺️', subtitle: 'New waters, new species.',                items: locationItems,   listText: locationList   }
+        ]
+    });
 }
 
 async function handleBuyRod(interaction, user, currency) {
