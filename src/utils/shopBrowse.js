@@ -127,8 +127,11 @@ async function runShopBrowse(interaction, config) {
         };
     }
 
+    if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply();
+    }
     const initial = await buildMessage(pageIdx);
-    const reply   = await interaction.reply({ ...initial, fetchReply: true });
+    const reply   = await interaction.editReply(initial);
 
     const collector = reply.createMessageComponentCollector({ time: 5 * 60_000 });
 
