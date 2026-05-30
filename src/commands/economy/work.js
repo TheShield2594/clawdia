@@ -10,6 +10,8 @@ const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/econo
 const { generateWorkChallenge } = require('../../utils/workChallenge');
 const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, WORK_ROUGH_LINES, WORK_EXCEPTIONAL_LINES } = require('../../utils/copyLines');
+const { stackBar } = require('../../utils/rewardReveal');
+const { delay } = require('../../utils/delay');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -219,14 +221,16 @@ module.exports = {
             const promotedTo = tierInfo.find(t => t.minShifts === updated.shiftsWorked);
             const currency = guildSettings?.economy?.currency || '💰';
 
-            const bonusLabels = [];
-            if (streakMult > 1.0)   bonusLabels.push(`🔥 ${streakMult}x streak`);
-            if (salaryMult > 1.0)   bonusLabels.push(`📈 ${salaryMult}x salary raise`);
-            if (coinMult > 1.0)     bonusLabels.push(`💰🚀 ${coinMult}x coin booster`);
-            if (serverMult > 1.0)   bonusLabels.push(`🌐 ${serverMult}x server boost`);
-            if (petWorkBonus > 1.0) bonusLabels.push(`🐶 ${petWorkBonus.toFixed(2)}x pet bonus`);
-            if (capActive)          bonusLabels.push(`⚠️ capped at ${MAX_COMBINED_MULTIPLIER}x`);
-            const bonusStr = bonusLabels.length ? ` *(${bonusLabels.join(', ')})*` : '';
+            // Canonical stack-bar for multiplier display
+            const multEntries = [];
+            if (streakMult > 1.0)   multEntries.push({ emoji: '🔥', label: `${streakMult}x` });
+            if (salaryMult > 1.0)   multEntries.push({ emoji: '📈', label: `${salaryMult}x` });
+            if (coinMult > 1.0)     multEntries.push({ emoji: '💰🚀', label: `${coinMult}x` });
+            if (serverMult > 1.0)   multEntries.push({ emoji: '🌐', label: `${serverMult}x` });
+            if (petWorkBonus > 1.0) multEntries.push({ emoji: '🐶', label: `${petWorkBonus.toFixed(2)}x` });
+            const bar = stackBar(multEntries, combined, finalEarned, currency);
+            const capNote = capActive ? `\n  ⚠️ capped at ${MAX_COMBINED_MULTIPLIER}x` : '';
+            const bonusStr = bar ? `\n  ${bar}${capNote}` : '';
 
             const careerValue = nextTier
                 ? `${userTier.name} · ${updated.shiftsWorked.toLocaleString()} shifts\nNext up: ${nextTier.name} in **${(nextTier.minShifts - updated.shiftsWorked).toLocaleString()}** more shifts`
@@ -344,7 +348,18 @@ module.exports = {
                 });
             }
 
-            await interaction.reply({ embeds: [embed] });
+            if (specialEvent) {
+                // Suspense reveal for special work events
+                const suspenseEmbed = new EmbedBuilder()
+                    .setColor(performance.color)
+                    .setTitle('💼 Shift Update…')
+                    .setDescription(`*${scenario}*`);
+                await interaction.reply({ embeds: [suspenseEmbed] });
+                await delay(900);
+                await interaction.editReply({ embeds: [embed] });
+            } else {
+                await interaction.reply({ embeds: [embed] });
+            }
         } catch (error) {
             console.error('Work error:', error);
             await interaction.reply({ content: 'Failed to work.', ephemeral: true });

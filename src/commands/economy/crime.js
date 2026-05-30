@@ -7,6 +7,7 @@ const { clampMultiplier } = require('../../config/economy');
 const { logTransaction } = require('../../utils/logTransaction');
 const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, CRIME_WIN_LINES, CRIME_BUST_LINES } = require('../../utils/copyLines');
+const { delay } = require('../../utils/delay');
 
 const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
@@ -98,6 +99,8 @@ module.exports = {
                 time: 15_000,
             });
             crime = CRIMES.find(c => c.name === buttonInteraction.customId);
+            // Acknowledge the button immediately so Discord doesn't time it out
+            await buttonInteraction.deferUpdate();
         } catch {
             // Timeout — auto-select from the presented choices
             crime = choices[Math.floor(Math.random() * choices.length)];
@@ -222,11 +225,14 @@ module.exports = {
                 }
             }
 
-            if (buttonInteraction) {
-                await buttonInteraction.update({ embeds: [embed], components: [] });
-            } else {
-                await interaction.editReply({ embeds: [embed], components: [] });
-            }
+            // Suspense delay between selection and result reveal
+            const suspenseEmbed = new EmbedBuilder()
+                .setColor('#f39c12')
+                .setTitle(`${crime.emoji} Running the Job…`)
+                .setDescription(`*${crime.displayName} in progress…*`);
+            await interaction.editReply({ embeds: [suspenseEmbed], components: [] });
+            await delay(900);
+            await interaction.editReply({ embeds: [embed], components: [] });
         } catch (error) {
             console.error('Crime command error:', error);
             if (!interaction.replied && !interaction.deferred) {
