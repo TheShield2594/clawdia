@@ -472,6 +472,19 @@ const userSchema = new Schema({
     duelWins:   { type: Number, default: 0 },
     duelLosses: { type: Number, default: 0 },
 
+    // Transient social badges (war victor, leaderboard #1, etc.) with optional expiry
+    badges: [{
+        id:        { type: String, required: true },
+        label:     { type: String, required: true },
+        expiresAt: { type: Date, default: null }
+    }],
+
+    // Highest wealth milestone tier ever broadcast (0=none,1=1M,2=10M,3=100M,4=1B)
+    wealthTier: { type: Number, default: 0 },
+
+    // Opt-out of level-up announce embeds in chat
+    disableLevelUpAnnounce: { type: Boolean, default: false },
+
     // Gift cap tracking (daily outgoing coin gifts)
     dailyGiftSent:  { type: Number, default: 0 },
     dailyGiftReset: { type: Date,   default: null },
