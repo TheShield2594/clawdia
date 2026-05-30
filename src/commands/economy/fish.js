@@ -46,6 +46,7 @@ const { FISH_TRAITS, TIME_OF_DAY_BONUSES, getTimeOfDay } = require('../../data/f
 const { ensureHuntData } = require('../../services/huntService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
 const { randomFrom, FISH_MISS_POOL } = require('../../utils/copyLines');
+const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 const LOCATION_CHOICES = LOCATION_LIST.map(l => ({ name: l.name, value: l.id }));
 
@@ -310,28 +311,50 @@ async function handleCast(interaction) {
 
     // ── Injury cooldown ────────────────────────────────────────────────
     if (f.injuryUntil && Date.now() < f.injuryUntil.getTime()) {
-        const remaining = f.injuryUntil.getTime() - Date.now();
+        const nextAt = new Date(f.injuryUntil.getTime());
         return interaction.reply({
-            content: `You're still drying off from your mishap! Back in action in **${formatMs(remaining)}**.`,
-            ephemeral: true
+            embeds: [buildCooldownEmbed({
+                title: '🤕 Drying Off',
+                description: "You're still recovering from your last mishap.\nThe fish will be there when you're back.",
+                color: '#1e6fa5',
+                nextAt,
+            })],
+            ephemeral: true,
         });
     }
 
     // ── Cast cooldown ──────────────────────────────────────────────────
     if (f.lastCast && Date.now() - f.lastCast.getTime() < LIMITS.CAST_COOLDOWN_MS) {
-        const remaining = LIMITS.CAST_COOLDOWN_MS - (Date.now() - f.lastCast.getTime());
+        const nextAt = new Date(f.lastCast.getTime() + LIMITS.CAST_COOLDOWN_MS);
         return interaction.reply({
-            content: `Your line is still settling. Ready again in **${formatMs(remaining)}**.`,
-            ephemeral: true
+            embeds: [buildCooldownEmbed({
+                title: '🎣 Line Still Settling',
+                description: 'Give your line a moment before the next cast.\nPatience is half of fishing.',
+                color: '#1e6fa5',
+                nextAt,
+            })],
+            ephemeral: true,
         });
     }
 
     // ── Stamina check ──────────────────────────────────────────────────
     if (f.stamina <= 0) {
-        const regenMs = msUntilNextStamina(user);
+        const regenMs   = msUntilNextStamina(user);
+        const nextAt    = new Date(Date.now() + regenMs);
+        const sinceRare = f.sinceRare ?? 0;
+        const pityStat  = sinceRare >= 5
+            ? `🎯 ${sinceRare} casts since last Rare+ catch • next rare guaranteed around cast ~50`
+            : null;
         return interaction.reply({
-            content: `You're too tired to cast! Stamina regens in **${formatMs(regenMs)}**. Buy an Energy Drink from \`/fish shop\` to recover faster.`,
-            ephemeral: true
+            embeds: [buildCooldownEmbed({
+                title: '😮‍💨 Too Tired to Cast',
+                description: "You've worn yourself out on the water.\nBuy an **Energy Drink** from `/fish shop` to speed up recovery.",
+                color: '#1e6fa5',
+                nextAt,
+                pityStat,
+                nextRewardPreview: 'Full stamina = 10 casts · Boss encounters unlock at Prestige 1+',
+            })],
+            ephemeral: true,
         });
     }
 
@@ -438,6 +461,13 @@ async function handleCast(interaction) {
     const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
 
     const result = executeCast(user, locationId, { reactionFactor });
+
+    // Pity counter: reset on rare+ success, increment otherwise
+    if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
+        user.fishing.sinceRare = 0;
+    } else {
+        user.fishing.sinceRare = (user.fishing.sinceRare ?? 0) + 1;
+    }
 
     if (result.success && result.finalPayout > 0 && petFishYieldPct > 0) {
         const bonus = Math.round(result.finalPayout * petFishYieldPct / 100);

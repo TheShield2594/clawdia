@@ -7,6 +7,7 @@ const {
     getEventCurrencyId,
     addEventCurrency,
 } = require('../../services/seasonalEventService');
+const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 const COOLDOWN_MS      = 5 * 60 * 1000; // 5 minutes
 const HIT_CHANCE       = 0.65;          // 65% to hit
@@ -54,9 +55,15 @@ module.exports = {
         if (attacker?.lastSnowball) {
             const elapsed = Date.now() - new Date(attacker.lastSnowball).getTime();
             if (elapsed < COOLDOWN_MS) {
-                const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
+                const nextAt = new Date(new Date(attacker.lastSnowball).getTime() + COOLDOWN_MS);
                 return interaction.editReply({
-                    content: `❄️ You need to restock your snowballs! Try again in **${remaining}s**.`
+                    embeds: [buildCooldownEmbed({
+                        title: '❄️ Restocking Snowballs',
+                        description: "You're scooping fresh snow for the next volley.\nPick your next target while you wait.",
+                        color: '#a8d8f0',
+                        nextAt,
+                        nextRewardPreview: 'Hit: steal 5% of target\'s wallet + 20 coins + ❄️ Snowflakes',
+                    })],
                 });
             }
         }

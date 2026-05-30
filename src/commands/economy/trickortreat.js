@@ -7,6 +7,7 @@ const {
     getEventCurrencyId,
     addEventCurrency,
 } = require('../../services/seasonalEventService');
+const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 const COOLDOWN_MS    = 60 * 60 * 1000; // 1 hour
 const CANDY_REWARD   = 5;              // event currency
@@ -49,9 +50,15 @@ module.exports = {
         if (existingUser?.lastTrickOrTreat) {
             const elapsed = Date.now() - new Date(existingUser.lastTrickOrTreat).getTime();
             if (elapsed < COOLDOWN_MS) {
-                const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 60_000);
+                const nextAt = new Date(new Date(existingUser.lastTrickOrTreat).getTime() + COOLDOWN_MS);
                 return interaction.editReply({
-                    content: `🎃 You already went trick-or-treating! Come back in **${remaining} min**.`
+                    embeds: [buildCooldownEmbed({
+                        title: '🎃 The Doors Are Closed',
+                        description: "The neighbors need a moment before they answer again.\nThere are still plenty of houses on the street.",
+                        color: '#ff6b00',
+                        nextAt,
+                        nextRewardPreview: 'Next knock: 65% treat · chance at ✨ Golden Candy (200 coins) + 🍬 Candy event currency',
+                    })],
                 });
             }
         }
@@ -73,7 +80,13 @@ module.exports = {
                 { new: true }
             );
             if (!claimed) {
-                return interaction.editReply({ content: '🎃 You already went trick-or-treating! Try again later.' });
+                return interaction.editReply({
+                    embeds: [buildCooldownEmbed({
+                        title: '🎃 The Doors Are Closed',
+                        description: "You already went trick-or-treating! The street will open up again soon.",
+                        color: '#ff6b00',
+                    })],
+                });
             }
             user = claimed;
         } else {

@@ -8,6 +8,7 @@ const {
     hasEffect,
     timeRemaining,
 } = require('../../services/effectsService');
+const { getItemLore } = require('../../data/defaultShopItems');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -62,13 +63,17 @@ module.exports = {
                 .setTitle(`${cfg.emoji} Activated: ${cfg.label}`)
                 .setTimestamp();
 
+            let activationDesc;
             if (effect.expiresAt) {
-                embed.setDescription(`Effect active for **${timeRemaining(effect.expiresAt)}**.`);
+                activationDesc = `Effect active for **${timeRemaining(effect.expiresAt)}**.`;
             } else if (effect.charges === 1) {
-                embed.setDescription('Single-use effect is now ready. It will trigger automatically on the next qualifying event.');
+                activationDesc = 'Single-use effect is now ready. It will trigger automatically on the next qualifying event.';
             } else {
-                embed.setDescription('Effect is permanently active until removed.');
+                activationDesc = 'Effect is permanently active until removed.';
             }
+
+            const lore = getItemLore(invEntry.itemId);
+            embed.setDescription(lore ? `${activationDesc}\n\n> *${lore}*` : activationDesc);
 
             embed.addFields({
                 name: 'Remaining in inventory',
@@ -97,10 +102,14 @@ module.exports = {
         }
         await user.save();
 
+        const loreText   = shopItem?.lore ?? getItemLore(itemName.toLowerCase());
+        const baseDesc   = shopItem?.description || 'Item consumed from your inventory.';
+        const genericDesc = loreText ? `${baseDesc}\n\n> *${loreText}*` : baseDesc;
+
         const embed = new EmbedBuilder()
             .setColor('#2ecc71')
             .setTitle(`✅ Used: ${shopItem?.name ?? itemName}`)
-            .setDescription(shopItem?.description || 'Item consumed from your inventory.')
+            .setDescription(genericDesc)
             .setTimestamp();
 
         if (roleGranted) {
