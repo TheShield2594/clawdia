@@ -21,6 +21,20 @@ const GAME_NAMES = {
     rps:        '✊ Rock Paper Scissors',
 };
 
+const VICTORY_FLAVOR = {
+    coinflip:   'Called it. Every time.',
+    dice:       "The dice don't lie.",
+    highercard: 'Higher card. Lower ego.',
+    rps:        'Reads people well.',
+};
+
+const DUEL_LOSS_LINES = [
+    'Better luck next time.',
+    'The gap is clear. Train harder.',
+    'It happens to everyone. Once.',
+    'They were just better. Today.',
+];
+
 const SUITS  = ['♠', '♥', '♦', '♣'];
 const VALUES = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const CARD_RANK = Object.fromEntries(VALUES.map((v, i) => [v, i]));
@@ -123,6 +137,34 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
         .setTimestamp();
 
     await interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+
+    // Post the victory card as a separate channel follow-up (non-ephemeral)
+    if (!tie) {
+        const winnerUser = challengerWins ? interaction.user : targetUser;
+        const loserUser  = challengerWins ? targetUser       : interaction.user;
+        const flavor     = VICTORY_FLAVOR[game] ?? 'A clean win.';
+        const lossLine   = DUEL_LOSS_LINES[Math.floor(Math.random() * DUEL_LOSS_LINES.length)];
+        const divider    = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
+        const winLine    = winnerPayout.toLocaleString();
+
+        const victoryCard = new EmbedBuilder()
+            .setColor('#FFD700')
+            .setTitle('🏆 Duel Victory')
+            .setDescription(
+                `<@${winnerUser.id}> defeated <@${loserUser.id}> in a ${GAME_NAMES[game]}\n\n` +
+                `${divider}\n` +
+                `  💰 Won: **${currency}${winLine}**\n` +
+                `  ⚔️ Method: **${GAME_NAMES[game]}**\n` +
+                `${divider}\n\n` +
+                `> *${flavor}*\n` +
+                `> ${lossLine}`
+            )
+            .setThumbnail(winnerUser.displayAvatarURL({ dynamic: true }))
+            .setFooter({ text: `Challenged by ${loserUser.username}` })
+            .setTimestamp();
+
+        await interaction.followUp({ embeds: [victoryCard] }).catch(() => {});
+    }
 }
 
 function errorEmbed(title, description) {
