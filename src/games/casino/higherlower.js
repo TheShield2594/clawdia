@@ -105,7 +105,7 @@ function questionEmbed(card, bet, history, interaction, streak) {
     const payH   = calcRawPayout(bet, card.value, 'higher', streak);
     const payL   = calcRawPayout(bet, card.value, 'lower',  streak);
     const histStr = history.length ? history.map(c => cardInline(c)).join(' → ') : '*No history yet*';
-    const sLabel  = streak >= 1 ? `\n> 🔥 **${streak}-win streak** (${streakMultiplier(streak).toFixed(2)}× profit bonus)` : '';
+    const sLabel  = streak >= 2 ? `\n> 🔥 **${streak}-win streak** (${streakMultiplier(streak).toFixed(2)}× profit bonus)` : '';
 
     const higherField = multH > 0
         ? `${(prob.higher * 100).toFixed(0)}% chance · pays **${payH.toLocaleString()}** (${multH.toFixed(2)}×)`
@@ -223,7 +223,7 @@ module.exports = {
                 });
             }
 
-            await playHigherLower(interaction, bet, userFilter, guildSettings, [], 0, hasEffect(debited, 'lucky_charm'));
+            await playHigherLower(interaction, bet, userFilter, guildSettings, [], 0);
 
         } catch (err) {
             console.error('[HigherLower] error:', err);
@@ -232,7 +232,7 @@ module.exports = {
     },
 };
 
-async function playHigherLower(interaction, bet, userFilter, guildSettings, history, streak, luckyActive) {
+async function playHigherLower(interaction, bet, userFilter, guildSettings, history, streak) {
     const current = rollCard();
     const canHigh = winMultiplier(current.value, 'higher') > 0;
     const canLow  = winMultiplier(current.value, 'lower')  > 0;
@@ -271,8 +271,9 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             const pickedHigher = i.customId === upId;
 
             // Fetch user once per resolution for all effect checks
-            const userDoc  = await User.findOne(userFilter);
-            const coinMult = getCoinMultiplier(userDoc);
+            const userDoc    = await User.findOne(userFilter);
+            const luckyActive = hasEffect(userDoc, 'lucky_charm');
+            const coinMult   = getCoinMultiplier(userDoc);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const lsBonus  = getLuckyStreakBonus(userDoc);
 
@@ -350,8 +351,8 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                         });
                     }
                     await ri.deferUpdate();
-                    // Carry the streak into the next round
-                    await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), outcome === 'win' ? newStreak : 0, luckyActive);
+                    // Carry the streak into the next round (newStreak already encodes win/tie/loss)
+                    await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), newStreak);
                 } catch (replayErr) {
                     console.error('[HigherLower] replay error:', replayErr);
                     await interaction.editReply({ content: 'Something went wrong on replay.', embeds: [], components: [] }).catch(() => {});

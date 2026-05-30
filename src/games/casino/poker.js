@@ -127,12 +127,10 @@ function dealerPostFlopEquity(dealerHole, playerHole, community) {
     const dBest = bestHand([...dealerHole, ...community]);
     const pBest = bestHand([...playerHole, ...community]);
     const cmp   = compareTuple(dBest, pBest);
-    // Convert score comparison to rough equity bands
-    if (cmp > 1) return 0.80;  // dealer is ahead by more than 1 rank tier
-    if (cmp === 1) return 0.65;
-    if (cmp === 0) return 0.50; // tied on best hand
-    if (cmp === -1) return 0.35;
-    return 0.20; // player is well ahead
+    // compareTuple can return unbounded values; use sign only
+    if (cmp > 0) return 0.65; // dealer ahead
+    if (cmp === 0) return 0.50; // tied
+    return 0.35; // player ahead
 }
 
 // Dealer post-flop decision: fold or continue (check/raise).
@@ -195,29 +193,35 @@ async function playPoker(interaction, bet) {
         // If dealer folds pre-flop (very weak hand), player wins immediately
         if (dealerPreAction === 'fold') {
             settled = true;
-            // Player wins just their bet back (dealer folded their ante too → pot collapses)
-            const winAmount = Math.floor(bet * 1.5); // small early-exit bonus
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: winAmount } });
+            const coinMult   = getCoinMultiplier(debited);
+            const serverMult = getServerCoinMultiplier(guildSettings);
+            const totalMult  = coinMult * serverMult;
+            const baseWin    = Math.floor(bet * 1.5); // small early-exit bonus
+            let winAmount    = baseWin;
+            if (totalMult > 1.0) winAmount = bet + Math.round((baseWin - bet) * totalMult);
 
-            const foldEmbed = new EmbedBuilder()
-                .setAuthor(embedAuthor(interaction))
-                .setThumbnail(THUMB)
-                .setColor('#2ecc71')
-                .setTitle('♠ Poker — Dealer Folded Pre-Flop!')
-                .setDescription(
-                    `The dealer peeked at their hand (**${handStr(dealerHole)}**) and folded immediately.\n\n` +
-                    `🏆 You collect the early pot!`,
-                )
-                .addFields(
-                    { name: '🃏 Dealer Hand',  value: handStr(dealerHole),                inline: true },
-                    { name: '🏆 Payout',       value: `**${winAmount.toLocaleString()}** coins`, inline: true },
-                    { name: '📊 Net',          value: `**+${(winAmount - bet).toLocaleString()}** coins`, inline: true },
-                    { name: '💰 Balance',      value: `**${((debited.balance + winAmount)).toLocaleString()}** coins`, inline: true },
-                )
-                .setFooter({ text: 'Dealer had a weak hand — quick win!' })
-                .setTimestamp();
+            const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: winAmount } }, { new: true });
 
-            return interaction.editReply({ embeds: [foldEmbed], components: [] });
+            return interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setAuthor(embedAuthor(interaction))
+                    .setThumbnail(THUMB)
+                    .setColor('#2ecc71')
+                    .setTitle('♠ Poker — Dealer Folded Pre-Flop!')
+                    .setDescription(
+                        `The dealer peeked at their hand (**${handStr(dealerHole)}**) and folded immediately.\n\n` +
+                        `🏆 You collect the early pot!`,
+                    )
+                    .addFields(
+                        { name: '🃏 Dealer Hand',  value: handStr(dealerHole),                          inline: true },
+                        { name: '🏆 Payout',       value: `**${winAmount.toLocaleString()}** coins`,    inline: true },
+                        { name: '📊 Net',          value: `**+${(winAmount - bet).toLocaleString()}** coins`, inline: true },
+                        { name: '💰 Balance',      value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true },
+                    )
+                    .setFooter({ text: 'Dealer had a weak hand — quick win!' })
+                    .setTimestamp()],
+                components: [],
+            });
         }
 
         if (dealerRaised) {
@@ -288,9 +292,12 @@ async function playPoker(interaction, bet) {
             if (raised) {
                 debited = raised;
                 playerStake += extraBet;
-                pot += extraBet * (preFlopAction === 'raise' ? 2 : 1); // raise: player + dealer call
+                pot += extraBet * (preFlopAction === 'raise' ? 2 : 1);
+            } else if (preFlopAction === 'call') {
+                // Can't afford to call dealer's raise → forced fold
+                folded = true;
             }
-            // If they can't afford it, treat as check
+            // 'raise' with insufficient funds silently becomes a check
         }
 
         if (folded) {
@@ -325,8 +332,8 @@ async function playPoker(interaction, bet) {
             const coinMult   = getCoinMultiplier(debited);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
-            let winPayout    = playerStake * 2; // player's stake × 2 (dealer matched)
-            if (totalMult > 1.0) winPayout = playerStake + Math.round((winPayout - playerStake) * totalMult);
+            let winPayout    = pot;
+            if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
 
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
 
@@ -412,7 +419,13 @@ async function playPoker(interaction, bet) {
                     debited = raised;
                     playerStake += raiseAmt;
                     pot += raiseAmt * (flopAction === 'raise' ? 2 : 1);
+                } else if (flopAction === 'call') {
+                    // Can't afford to call dealer's bet → forced fold
+                    folded = true;
                 }
+            } else if (flopAction === 'call') {
+                // Zero balance → can't call → forced fold
+                folded = true;
             }
         }
 
