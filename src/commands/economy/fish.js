@@ -504,13 +504,11 @@ async function handleCast(interaction) {
             result.featuredSpotBonus     = featBonus;
         }
     }
+    if (result.success && result.finalPayout > user.fishing.bestPayout) user.fishing.bestPayout = result.finalPayout;
 
     updateFishQuestProgress(user, result, locationId);
 
     const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
-
-    // Fetch hourly leader before save
-    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'fish').catch(() => null);
 
     try {
         await user.save();
@@ -525,17 +523,14 @@ async function handleCast(interaction) {
         return interaction.editReply({ content: 'Something went wrong saving your catch. Please try again.' });
     }
 
-    // Log big win and update hourly leader (fire-and-forget)
+    // Await hourly winner update then re-fetch for accurate footer
     if (result.success) {
-        const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-        if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
-            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'fish', details: result.fish ? `${result.fish.name} [${result.tier}]` : null });
-        }
         const tierScore = FISH_TIER_SCORE[result.tier] ?? 0;
         if (tierScore > 0 && result.fish) {
-            tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'fish', userId: interaction.user.id, username: interaction.user.username, value: tierScore, details: `${result.fish.emoji ?? ''} ${result.fish.name} (${result.tier})`.trim() }).catch(() => null);
+            await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'fish', userId: interaction.user.id, username: interaction.user.username, value: tierScore, details: `${result.fish.emoji ?? ''} ${result.fish.name} (${result.tier})`.trim() }).catch(() => null);
         }
     }
+    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'fish').catch(() => null);
 
     const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
 
@@ -549,7 +544,7 @@ async function handleCast(interaction) {
     // Hourly leader footer
     let leaderNote;
     if (hourlyLeader) {
-        leaderNote = `🏆 Rarest this hour: <@${hourlyLeader.userId}> — ${hourlyLeader.details ?? 'N/A'}`;
+        leaderNote = `🏆 Rarest this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? 'N/A'}`;
     } else {
         leaderNote = '🏆 No hourly leader yet — be the first!';
     }
@@ -618,6 +613,14 @@ async function handleCast(interaction) {
                 return btn.update({ content: 'Something went wrong saving your boss result. Please try again.', embeds: [], components: [] });
             }
 
+            // Log big win for boss payout
+            if (bossResult.bonusPayout > 0) {
+                const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+                if (bossResult.bonusPayout >= bigWinThreshold) {
+                    logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: bossResult.bonusPayout, source: 'fish', details: `${result.bossEncounter.fish.emoji ?? ''} ${result.bossEncounter.fish.name} [boss]`.trim() });
+                }
+            }
+
             const freshCurrency = currency;
             const bossResultEmbed = new EmbedBuilder()
                 .setColor(bossResult.outcome === 'win' ? '#2ecc71' : bossResult.outcome === 'loss' ? '#e74c3c' : '#95a5a6')
@@ -638,6 +641,14 @@ async function handleCast(interaction) {
             }
         });
         return;
+    }
+
+    // Non-boss path: log big win after all payouts finalized
+    if (result.success) {
+        const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+        if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'fish', details: result.fish ? `${result.fish.name} [${result.tier}]` : null });
+        }
     }
 
     await interaction.editReply({ embeds: [embed] });

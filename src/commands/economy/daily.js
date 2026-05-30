@@ -502,7 +502,7 @@ module.exports = {
                     filter: i => i.user.id === interaction.user.id && i.customId === CALENDAR_BUTTON_ID,
                 });
                 const dailyAmountForCalendar = guildSettings?.economy?.dailyAmount ?? 100;
-                const calendarEmbed = buildCalendarEmbed(user, dailyAmountForCalendar, streakCurrent);
+                const calendarEmbed = buildCalendarEmbed(updated, dailyAmountForCalendar, streakCurrent);
                 await calendarResponse.reply({ embeds: [calendarEmbed], ephemeral: true });
                 await reply.edit({ components: [] }).catch(() => {});
             } catch {
