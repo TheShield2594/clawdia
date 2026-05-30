@@ -804,17 +804,40 @@ async function handleShop(interaction, sub) {
     const m = user.mining;
 
     if (sub === 'list') {
-        const embed = new EmbedBuilder()
-            .setColor('#b5651d')
-            .setTitle('⛏️ Mining Shop')
+        const COLOR = '#b5651d';
+        const embeds = [];
+        const files  = [];
+
+        embeds.push(new EmbedBuilder()
+            .setColor(COLOR)
+            .setTitle('⛏️ Mining Shop — Pickaxes')
+            .setDescription('Browse the available pickaxes. Upgrades, blast charges, consumables and depths are listed below.')
+        );
+
+        for (const p of PICKAXE_TIERS) {
+            const card = new EmbedBuilder()
+                .setColor(COLOR)
+                .setTitle(`${p.emoji} T${p.tier} ${p.name}`)
+                .addFields(
+                    { name: 'Cost',         value: `${currency}${p.cost.toLocaleString()}`,                       inline: true },
+                    { name: 'Durability',   value: `${p.baseDurability}`,                                          inline: true },
+                    { name: 'Success',      value: `${Math.round(p.successRate * 100)}%`,                          inline: true },
+                    { name: 'Rarity Boost', value: `+${Math.round(p.rarityBoost * 100)}%`,                         inline: true },
+                    { name: 'Charge',       value: p.requiresCharge ? p.chargeType.replace(/_/g, ' ') : 'None',    inline: true },
+                    { name: 'Buy',          value: `\`/mine shop pickaxe type:${p.slug}\``,                         inline: true }
+                );
+            const img = await getItemImageAttachment(`mine:${p.slug}`).catch(() => null);
+            if (img) {
+                card.setThumbnail(img.url);
+                files.push(img.attachment);
+            }
+            embeds.push(card);
+        }
+
+        embeds.push(new EmbedBuilder()
+            .setColor(COLOR)
+            .setTitle('🛠️ Shop Extras')
             .addFields(
-                {
-                    name: '🪓 Pickaxes',
-                    value: PICKAXE_TIERS.map(p =>
-                        `${p.emoji} **${p.name}** — ${currency}${p.cost.toLocaleString()}\n> Success: ${Math.round(p.successRate * 100)}% • Rarity: +${Math.round(p.rarityBoost * 100)}% • Durability: ${p.baseDurability}${p.requiresCharge ? ` • Requires: ${p.chargeType.replace(/_/g, ' ')}` : ''}`
-                    ).join('\n'),
-                    inline: false
-                },
                 {
                     name: '🔩 Upgrades (one per pickaxe)',
                     value: Object.values(PICKAXE_UPGRADES).map(u =>
@@ -845,8 +868,10 @@ async function handleShop(interaction, sub) {
                 }
             )
             .setFooter({ text: 'Use /mine shop pickaxe|buy|upgrade|repair|unlock to purchase' })
-            .setTimestamp();
-        return interaction.reply({ embeds: [embed] });
+            .setTimestamp()
+        );
+
+        return interaction.reply({ embeds, files });
     }
 
     if (sub === 'pickaxe') {

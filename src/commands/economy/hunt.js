@@ -1340,11 +1340,39 @@ async function executeShop(interaction, sub) {
 
 async function showShopList(interaction, user, currency) {
     const h = user.hunt;
+    const COLOR = '#f39c12';
+    const embeds = [];
+    const files  = [];
 
-    const weaponSection = WEAPON_TIERS.map(w => {
-        const ammo = w.requiresAmmo ? `${w.ammoType.replace(/_/g, ' ')} (${currency}${w.ammoCost}/hunt)` : 'None';
-        return `**T${w.tier} ${w.emoji} ${w.name}** — ${currency}${w.cost.toLocaleString()}\n   Success: ${Math.round(w.successRate * 100)}% | Rarity: +${Math.round(w.rarityBoost * 100)}% | Ammo: ${ammo}`;
-    }).join('\n');
+    embeds.push(new EmbedBuilder()
+        .setColor(COLOR)
+        .setTitle('🏪 Hunt Shop — Weapons')
+        .setDescription('Browse the available weapons. Upgrades, ammo, consumables and zones are listed below.')
+    );
+
+    for (const w of WEAPON_TIERS) {
+        const ammoText = w.requiresAmmo
+            ? `${w.ammoType.replace(/_/g, ' ')} (${currency}${w.ammoCost}/hunt)`
+            : 'None required';
+        const card = new EmbedBuilder()
+            .setColor(COLOR)
+            .setTitle(`${w.emoji} T${w.tier} ${w.name}`)
+            .setDescription(w.description)
+            .addFields(
+                { name: 'Cost',         value: `${currency}${w.cost.toLocaleString()}`,                                inline: true },
+                { name: 'Durability',   value: `${w.baseDurability}`,                                                  inline: true },
+                { name: 'Success',      value: `${Math.round(w.successRate * 100)}%`,                                  inline: true },
+                { name: 'Rarity Boost', value: w.rarityBoost > 0 ? `+${Math.round(w.rarityBoost * 100)}%` : 'None',    inline: true },
+                { name: 'Ammo',         value: ammoText,                                                               inline: true },
+                { name: 'Buy',          value: `\`/hunt shop weapon type:${w.slug}\``,                                  inline: true }
+            );
+        const img = await getItemImageAttachment(`hunt:${w.slug}`).catch(() => null);
+        if (img) {
+            card.setThumbnail(img.url);
+            files.push(img.attachment);
+        }
+        embeds.push(card);
+    }
 
     const upgradeSection = Object.values(WEAPON_UPGRADES).map(u =>
         `${u.emoji} **${u.name}** — ~${Math.round(u.costMultiplier * 100)}% of weapon price\n   *${u.description}*`
@@ -1367,20 +1395,20 @@ async function showShopList(interaction, user, currency) {
         return `${zone.emoji} **${zone.name}** — ${status}\n   *${zone.description}*`;
     }).join('\n');
 
-    const embed = new EmbedBuilder()
-        .setColor('#f39c12')
-        .setTitle('🏪 Hunt Shop')
+    embeds.push(new EmbedBuilder()
+        .setColor(COLOR)
+        .setTitle('🛠️ Shop Extras')
         .addFields(
-            { name: '🔫 Weapons',                        value: weaponSection,     inline: false },
             { name: '🔧 Weapon Upgrades (1 per weapon)', value: upgradeSection,    inline: false },
             { name: '🔶 Ammunition',                     value: ammoSection,       inline: false },
             { name: '🧪 Consumables',                    value: consumableSection, inline: false },
             { name: '🗺️ Zones',                          value: zoneSection,       inline: false }
         )
         .setFooter({ text: '/hunt shop weapon • /hunt shop upgrade • /hunt shop buy • /hunt shop use • /hunt shop repair • /hunt shop unlock' })
-        .setTimestamp();
+        .setTimestamp()
+    );
 
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({ embeds, files });
 }
 
 async function handleBuyWeapon(interaction, user, currency) {

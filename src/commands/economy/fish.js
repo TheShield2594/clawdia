@@ -1393,10 +1393,32 @@ async function handleShop(interaction, sub) {
 
 async function showShopList(interaction, user, currency) {
     const f = user.fishing;
+    const COLOR = '#f39c12';
+    const embeds = [];
+    const files  = [];
 
-    const rodSection = ROD_TIERS.map(r =>
-        `${r.emoji} **T${r.tier} ${r.name}** — ${currency}${r.cost.toLocaleString()}\n   ${r.description}`
-    ).join('\n');
+    embeds.push(new EmbedBuilder()
+        .setColor(COLOR)
+        .setTitle('🏪 Fishing Shop — Rods')
+        .setDescription('Browse the available rods. Upgrades, bait, consumables and locations are listed below.')
+    );
+
+    for (const r of ROD_TIERS) {
+        const card = new EmbedBuilder()
+            .setColor(COLOR)
+            .setTitle(`${r.emoji} T${r.tier} ${r.name}`)
+            .setDescription(r.description)
+            .addFields(
+                { name: 'Cost', value: `${currency}${r.cost.toLocaleString()}`, inline: true },
+                { name: 'Buy',  value: `\`/fish shop rod type:${r.slug}\``,      inline: true }
+            );
+        const img = await getItemImageAttachment(`fish:${r.slug}`).catch(() => null);
+        if (img) {
+            card.setThumbnail(img.url);
+            files.push(img.attachment);
+        }
+        embeds.push(card);
+    }
 
     const upgradeSection = Object.values(ROD_UPGRADES).map(u =>
         `${u.emoji} **${u.name}** — ~${Math.round(u.costMultiplier * 100)}% of rod price\n   *${u.description}*`
@@ -1419,20 +1441,20 @@ async function showShopList(interaction, user, currency) {
         return `${loc.emoji} **${loc.name}** — ${status}\n   *${loc.description}*`;
     }).join('\n');
 
-    const embed = new EmbedBuilder()
-        .setColor('#f39c12')
-        .setTitle('🏪 Fishing Shop')
+    embeds.push(new EmbedBuilder()
+        .setColor(COLOR)
+        .setTitle('🛠️ Shop Extras')
         .addFields(
-            { name: '🎣 Rods',                     value: rodSection,        inline: false },
             { name: '🔧 Rod Upgrades (1 per rod)', value: upgradeSection,    inline: false },
             { name: '🪱 Bait Packs',               value: baitSection,       inline: false },
-            { name: '🧪 Consumables',              value: consumableSection,  inline: false },
+            { name: '🧪 Consumables',              value: consumableSection, inline: false },
             { name: '🗺️ Locations',                value: locationSection,   inline: false }
         )
         .setFooter({ text: '/fish shop rod • /fish shop upgrade • /fish shop buy • /fish shop use • /fish shop repair • /fish shop unlock' })
-        .setTimestamp();
+        .setTimestamp()
+    );
 
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({ embeds, files });
 }
 
 async function handleBuyRod(interaction, user, currency) {
