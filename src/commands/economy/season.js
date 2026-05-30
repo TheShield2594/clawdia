@@ -37,6 +37,30 @@ const TIER_REWARDS = [
 const XP_PER_TIER = 100;
 const MAX_TIERS = 20;
 
+// Flavor lore shown on claim embeds
+const TIER_LORE = [
+    'Every journey starts with a single step.',
+    'The spark of ambition ignites here.',
+    'Diligence rewarded — this is just the beginning.',
+    'Forged in discipline, tempered by purpose.',
+    'Halfway to legendary. The path sharpens.',
+    'Matter responds to mastery.',
+    'A warrior refined — not born.',
+    'Prestige is earned, never given.',
+    'Nine tiers climbed. Eleven more await.',
+    'The rarest items demand the rarest resolve.',
+    'Champions do not rest at the summit.',
+    'A radiant mark for those who endure.',
+    'Six thousand reasons to keep going.',
+    'Only the tireless reach this depth.',
+    'Wealth and will in equal measure.',
+    'Radiance touches those who refuse to quit.',
+    'Ten thousand coins — a testament to grind.',
+    'Legends write their names in fire.',
+    'Fifteen thousand. The last stretch burns bright.',
+    'You have reached the pinnacle. The season bows to you.',
+];
+
 function getTierFromXp(xp) {
     return Math.min(MAX_TIERS, Math.floor(xp / XP_PER_TIER));
 }
@@ -173,11 +197,58 @@ async function executeClaim(interaction) {
         throw err;
     }
 
+    // Social proof: how many users in this guild have claimed this tier
+    const claimedCount = await User.countDocuments({
+        guildId: interaction.guild.id,
+        'season.claimedTiers': tier
+    }).catch(() => null);
+
+    // Next tier teaser
+    const nextTier = TIER_REWARDS.find(r => r.tier === tier + 1);
+    const xpToNext = nextTier ? Math.max(0, (tier) * XP_PER_TIER - (user.season?.xp ?? 0)) : 0;
+
+    const lore = TIER_LORE[tier - 1] ?? 'Your dedication speaks louder than words.';
+
     const embed = new EmbedBuilder()
         .setColor('#ffd700')
-        .setTitle(`🎁 Tier ${tier} Reward Claimed!`)
-        .setDescription(`You received: **${reward.label}**${reward.coins > 0 ? `\n+${reward.coins.toLocaleString()} ${currency} added to your wallet` : ''}`)
-        .setTimestamp();
+        .setTitle(`# ${reward.label}`)
+        .setDescription(
+            `> *${lore}*\n\n` +
+            `You received: **${reward.label}**` +
+            (reward.coins > 0 ? `\n+**${reward.coins.toLocaleString()} ${currency}** added to your wallet` : '')
+        );
+
+    if (nextTier) {
+        embed.addFields({
+            name: `⏭️ Next: Tier ${nextTier.tier}`,
+            value: `${nextTier.label}${xpToNext > 0 ? ` — ${xpToNext} XP away` : ' — **Ready to claim!**'}`
+        });
+    }
+
+    if (claimedCount !== null) {
+        embed.setFooter({ text: `${claimedCount.toLocaleString()} player${claimedCount === 1 ? '' : 's'} have unlocked Tier ${tier}` });
+    }
+
+    embed.setTimestamp();
+
+    // Broadcast to announcement channel for mythic-tier (≥ 10) rewards
+    if (tier >= 10) {
+        const announceChannelId = guildSettings?.economy?.announcementChannelId;
+        if (announceChannelId) {
+            const announceChannel = interaction.guild.channels.cache.get(announceChannelId);
+            if (announceChannel?.isTextBased?.()) {
+                const broadcastEmbed = new EmbedBuilder()
+                    .setColor('#ff6200')
+                    .setTitle('🌟 Mythic Tier Unlocked!')
+                    .setDescription(
+                        `<@${interaction.user.id}> just claimed **Tier ${tier}** of the Season Pass!\n` +
+                        `Reward: **${reward.label}**`
+                    )
+                    .setTimestamp();
+                announceChannel.send({ embeds: [broadcastEmbed] }).catch(() => {});
+            }
+        }
+    }
 
     return rewardReveal({
         interaction,
