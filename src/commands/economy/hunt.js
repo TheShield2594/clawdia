@@ -46,14 +46,56 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 
-// ─── HUNT TRACKING CLUES (one per zone, used in the tracking mechanic) ───────
+// ─── STEALTH APPROACH OPTIONS (per zone) ─────────────────────────────────────
+// Each zone has a hint about the animal's behaviour + 3 approach strategies.
+// One approach is correct; correct = stealthBonus, wrong = noise penalty.
 
-const ZONE_CLUES = {
-    beginner_forest:  ['soft soil paw prints near fallen logs', 'feathers scattered along a stream bank', 'gnawed bark on young saplings'],
-    desert_wastes:    ['claw marks on sun-bleached rocks', 'tracks in shifting sand near a dry riverbed', 'shed scales baking in the midday heat'],
-    arctic_tundra:    ['large hoofprints pressed deep into fresh snow', 'tufts of thick white fur caught on icy boulders', 'frozen breath marks near a glacial lake'],
-    murky_swamp:      ['webbed prints in the muddy bank', 'crushed reeds along a murky channel', 'slick trails through algae-covered shallows'],
-    legendary_peaks:  ['massive claw gouges on sheer cliff faces', 'enormous droppings near the summit ridge', 'a lingering magical aura around ancient standing stones'],
+const ZONE_APPROACHES = {
+    beginner_forest: {
+        hint: 'A deer is grazing peacefully in a sun-dappled clearing, ears flicking at every sound.',
+        options: [
+            { id: 'undergrowth', label: '🌿 Creep through the undergrowth', stealthBonus: 0.25 },
+            { id: 'sprint',      label: '🏃 Sprint straight in to close the gap', stealthBonus: -0.10 },
+            { id: 'call',        label: '📢 Mimic a bird call to distract it', stealthBonus: 0.05 },
+        ],
+        correctId: 'undergrowth',
+    },
+    desert_wastes: {
+        hint: 'A desert serpent basks motionless on a sun-warmed rock — utterly still, eyes open.',
+        options: [
+            { id: 'rock_crawl', label: '🪨 Crawl low between boulders', stealthBonus: 0.25 },
+            { id: 'open_run',   label: '💨 Sprint across the open sand', stealthBonus: -0.10 },
+            { id: 'shade_wait', label: '☁️ Wait for a cloud to pass over', stealthBonus: 0.05 },
+        ],
+        correctId: 'rock_crawl',
+    },
+    arctic_tundra: {
+        hint: 'A white wolf moves in tight circles — it\'s caught a scent. One wrong step and it bolts.',
+        options: [
+            { id: 'downwind',   label: '💨 Circle downwind before closing in', stealthBonus: 0.25 },
+            { id: 'upwind',     label: '🌬️ Walk directly into the wind toward it', stealthBonus: -0.10 },
+            { id: 'white_out',  label: '🌨️ Use a snow squall as cover', stealthBonus: 0.05 },
+        ],
+        correctId: 'downwind',
+    },
+    murky_swamp: {
+        hint: 'A large reptile floats just below the surface — only its eyes are visible.',
+        options: [
+            { id: 'wade_slow',  label: '🌊 Wade in slowly without splashing', stealthBonus: 0.25 },
+            { id: 'throw_rock', label: '🪨 Throw a rock to distract it first', stealthBonus: -0.10 },
+            { id: 'reed_hide',  label: '🌾 Hide in the reeds and wait for it to surface', stealthBonus: 0.05 },
+        ],
+        correctId: 'wade_slow',
+    },
+    legendary_peaks: {
+        hint: 'An ancient creature roosts on a cliff ledge — its senses are preternatural.',
+        options: [
+            { id: 'cliff_path', label: '🧗 Climb the cliff path at dusk, shadow-side', stealthBonus: 0.25 },
+            { id: 'direct',     label: '⚔️ Charge straight up the ridge', stealthBonus: -0.10 },
+            { id: 'below',      label: '🎯 Position below and let it come to you', stealthBonus: 0.05 },
+        ],
+        correctId: 'cliff_path',
+    },
 };
 
 // ─── SHARED CHOICE LISTS ──────────────────────────────────────────────────────
@@ -394,65 +436,132 @@ async function executeStart(interaction) {
         user.markModified('hunt');
     }
 
-    // ── Animal Tracking System ────────────────────────────────────────────────
-    // Show a tracks clue and 3 zone buttons. Correct guess = +30% success bonus.
-    let trackingBonus = 0;
-    const unlockedZones = h.unlockedZones.filter(z => ZONES[z]);
+    // ── Stealth Approach + Precision Aim ─────────────────────────────────────
+    // Phase 1 — Stealth: player reads a behaviour hint and picks the right approach.
+    //   Correct  → stealthBonus = +0.25 success chance, common→uncommon upgrade ~30%
+    //   Partial  → stealthBonus = +0.05 (safe but suboptimal)
+    //   Wrong    → stealthBonus = −0.10 (spooked the animal)
+    //   Timeout  → stealthBonus = 0
+    // Phase 2 — Aim: a single quick timing window for the shot.
+    //   Perfect (<0.8s) → aimBonus = +0.18 crit chance
+    //   Good    (<2.5s) → aimBonus = +0.08 crit chance
+    //   Timeout         → aimBonus = 0
 
-    if (unlockedZones.length >= 3 && ZONE_CLUES[zoneId]) {
-        const clueArr = ZONE_CLUES[zoneId];
-        const clue    = clueArr[Math.floor(Math.random() * clueArr.length)];
+    let stealthBonus = 0;
+    let aimBonus     = 0;
 
-        // Pick 2 other unlocked zones as distractors
-        const others  = unlockedZones.filter(z => z !== zoneId).sort(() => Math.random() - 0.5).slice(0, 2);
-        const options = [zoneId, ...others].sort(() => Math.random() - 0.5);
+    const approachData = ZONE_APPROACHES[zoneId];
+    const delay = ms => new Promise(r => setTimeout(r, ms));
 
-        const trackEmbed = new EmbedBuilder()
-            .setColor('#8B4513')
-            .setTitle('🐾 Fresh Tracks Spotted!')
+    if (approachData) {
+        // Shuffle the 3 options
+        const shuffled = [...approachData.options].sort(() => Math.random() - 0.5);
+
+        const stealthEmbed = new EmbedBuilder()
+            .setColor('#556B2F')
+            .setTitle(`🌿 Approaching ${zone.emoji} ${zone.name}…`)
             .setDescription(
-                `*You notice: ${clue}*\n\n` +
-                `**Which zone do these tracks lead to?**\n` +
-                `Identify correctly for **+30% success chance** and better prey.`
+                `*${approachData.hint}*\n\n` +
+                `**How do you close in on your prey?**\n` +
+                `Choose wisely — the animal will react to your approach.`
             )
-            .setFooter({ text: 'You have 15 seconds — or the hunt starts without the tracking bonus.' });
+            .setFooter({ text: 'You have 15 seconds — or the hunt begins without a stealth bonus.' });
 
-        const trackRow = new ActionRowBuilder().addComponents(
-            ...options.map(zId => new ButtonBuilder()
-                .setCustomId(`track_${zId}`)
-                .setLabel(`${ZONES[zId].emoji} ${ZONES[zId].name}`)
+        const stealthRow = new ActionRowBuilder().addComponents(
+            ...shuffled.map(opt => new ButtonBuilder()
+                .setCustomId(`stealth_${opt.id}`)
+                .setLabel(opt.label)
                 .setStyle(ButtonStyle.Primary)
             )
         );
 
-        await interaction.reply({ embeds: [trackEmbed], components: [trackRow] });
+        await interaction.reply({ embeds: [stealthEmbed], components: [stealthRow] });
+        const huntMsg = await interaction.fetchReply();
 
-        const trackMsg = await interaction.fetchReply();
-        const picked   = await new Promise(resolve => {
-            const col = trackMsg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id,
+        const pickedId = await new Promise(resolve => {
+            const col = huntMsg.createMessageComponentCollector({
+                filter: i => i.user.id === interaction.user.id && i.customId.startsWith('stealth_'),
                 time: 15_000,
                 max: 1,
             });
-            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('track_', '')); });
+            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('stealth_', '')); });
             col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
         });
 
-        const correct  = picked === zoneId;
-        if (correct) trackingBonus = 0.30;
+        const chosen = shuffled.find(o => o.id === pickedId);
+        if (chosen) {
+            stealthBonus = chosen.stealthBonus;
+        }
 
-        const feedbackEmbed = new EmbedBuilder()
-            .setColor(correct ? '#00FF7F' : picked ? '#FF6B6B' : '#888888')
-            .setTitle(correct ? '✅ Correct Tracking!' : picked ? '❌ Wrong Track' : '⏰ Time\'s Up')
+        const isCorrect  = pickedId === approachData.correctId;
+        const isTimeout  = pickedId === null;
+        const stealthResultEmbed = new EmbedBuilder()
+            .setColor(isCorrect ? '#00FF7F' : isTimeout ? '#888888' : stealthBonus < 0 ? '#FF6B6B' : '#FFA500')
+            .setTitle(
+                isTimeout  ? '⏰ Hesitated too long…' :
+                isCorrect  ? '🤫 Perfect approach!' :
+                stealthBonus < 0 ? '🔊 You spooked the animal!' :
+                '🤔 Decent approach…'
+            )
             .setDescription(
-                correct
-                    ? `You identified **${zone.emoji} ${zone.name}** correctly!\n**+30% success chance** applied.`
-                    : picked
-                    ? `Those tracks led to **${ZONES[zoneId].emoji} ${ZONES[zoneId].name}**, not **${ZONES[picked]?.emoji ?? ''} ${ZONES[picked]?.name ?? picked}**. Hunting without bonus...`
-                    : `You didn't read the tracks in time. Hunting without bonus...`
+                isTimeout  ? `You moved before thinking — hunting without a stealth bonus.` :
+                isCorrect  ? `You read the terrain perfectly. **+25% success chance** and chance of better prey.` :
+                stealthBonus < 0 ? `The animal heard you coming. **−10% success chance** this hunt.` :
+                `Not the ideal approach, but you stayed quiet enough. **+5% success chance.**`
             );
 
-        await interaction.editReply({ embeds: [feedbackEmbed], components: [] });
+        await interaction.editReply({ embeds: [stealthResultEmbed], components: [] });
+        await delay(800);
+
+        // ── Aim Phase ──────────────────────────────────────────────────────────
+        // Show "target in sights" then after a short wait show the FIRE! button.
+        const aimWaitMs = 1000 + Math.floor(Math.random() * 1001);
+        const aimSightsEmbed = new EmbedBuilder()
+            .setColor('#8B0000')
+            .setTitle('🎯 Target in Sights…')
+            .setDescription('*Hold your breath… wait for the right moment…*')
+            .setFooter({ text: 'Ready your shot — don\'t fire too early.' });
+        await interaction.editReply({ embeds: [aimSightsEmbed], components: [] });
+        await delay(aimWaitMs);
+
+        const fireId  = `hunt_fire_${interaction.id}`;
+        const aimEmbed = new EmbedBuilder()
+            .setColor('#FF0000')
+            .setTitle('💥 FIRE!')
+            .setDescription('**Take the shot — NOW!**');
+        const aimRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(fireId).setLabel('🔫 Fire!').setStyle(ButtonStyle.Danger)
+        );
+        await interaction.editReply({ embeds: [aimEmbed], components: [aimRow] });
+        const aimTime = Date.now();
+
+        const shotMs = await new Promise(resolve => {
+            const col = huntMsg.createMessageComponentCollector({
+                filter: i => i.user.id === interaction.user.id && i.customId === fireId,
+                time: 2500,
+                max: 1,
+            });
+            col.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - aimTime); });
+            col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+        });
+
+        if (shotMs !== null && shotMs < 800) {
+            aimBonus = 0.18;
+        } else if (shotMs !== null) {
+            aimBonus = 0.08;
+        }
+
+        const aimResultEmbed = new EmbedBuilder()
+            .setColor(aimBonus >= 0.18 ? '#FFD700' : aimBonus > 0 ? '#00CC66' : '#888888')
+            .setTitle(aimBonus >= 0.18 ? '🎯 Perfect Shot!' : aimBonus > 0 ? '✅ Clean Shot!' : '⏰ Shot rushed…')
+            .setDescription(
+                aimBonus >= 0.18 ? `Textbook precision. **+18% crit chance** this hunt.` :
+                aimBonus > 0     ? `Solid hit. **+8% crit chance** this hunt.` :
+                                   `You hesitated on the trigger. No aim bonus this hunt.`
+            );
+        await interaction.editReply({ embeds: [aimResultEmbed], components: [] });
+        await delay(600);
+
     } else {
         await interaction.deferReply();
     }
@@ -465,7 +574,7 @@ async function executeStart(interaction) {
     const featured       = getDailyFeatured(interaction.guild.id);
     const isFeaturedZone = zoneId === featured.huntZone.id;
 
-    const result = executeHunt(user, zoneId, { trackingBonus });
+    const result = executeHunt(user, zoneId, { stealthBonus, aimBonus });
 
     // Pity counter: reset on rare+ success, increment otherwise
     if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
@@ -534,9 +643,15 @@ async function executeStart(interaction) {
 
     const timeBand = getTimeBand();
     const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
-    if (trackingBonus > 0) {
+    {
         const desc = embed.data.description ?? '';
-        embed.setDescription(desc + '\n> 🐾 *Tracking bonus applied (+30% success)*');
+        const lines = [];
+        if (stealthBonus > 0.10) lines.push(`> 🤫 *Perfect approach — +25% success, chance of better prey*`);
+        else if (stealthBonus > 0) lines.push(`> 🌿 *Decent approach — +5% success*`);
+        else if (stealthBonus < 0) lines.push(`> 🔊 *Spooked the animal — −10% success*`);
+        if (aimBonus >= 0.18) lines.push(`> 🎯 *Perfect shot — +18% crit chance*`);
+        else if (aimBonus > 0) lines.push(`> ✅ *Clean shot — +8% crit chance*`);
+        if (lines.length) embed.setDescription(desc + '\n' + lines.join('\n'));
     }
     if (result.petYieldBonus > 0) {
         embed.addFields({ name: '🐺 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petYieldPct}% yield)`, inline: true });

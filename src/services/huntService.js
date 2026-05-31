@@ -669,8 +669,8 @@ function executeHunt(user, zoneId, options = {}) {
 
     // Roll the animal upfront so traits can influence the success check
     let tier = rollTier(user, zone);
-    // Tracking bonus: upgrade common to uncommon ~30% of the time for better prey
-    if (options.trackingBonus && tier === 'common' && Math.random() < 0.30) tier = 'uncommon';
+    // Stealth bonus: patient approach upgrades common prey to uncommon ~30% of the time
+    if (options.stealthBonus > 0 && tier === 'common' && Math.random() < 0.30) tier = 'uncommon';
     const animal = rollAnimal(tier, zoneId ?? h.activeZone);
     const traits = animal.traits ?? [];
 
@@ -678,7 +678,7 @@ function executeHunt(user, zoneId, options = {}) {
     let successChance = calculateSuccessChance(user, weapon, zone);
     if (traits.includes('elusive'))  successChance -= 0.10;
     if (traits.includes('spectral') && h.activeCharm === 'luck_charm') successChance -= 0.015;
-    if (options.trackingBonus)       successChance += options.trackingBonus;
+    if (options.stealthBonus)        successChance += options.stealthBonus;
     successChance = Math.min(0.95, Math.max(0.10, successChance));
 
     const success = Math.random() < successChance;
@@ -701,8 +701,9 @@ function executeHunt(user, zoneId, options = {}) {
     if (success) {
         const rawPayout = randInt(animal.payoutMin, animal.payoutMax);
 
-        // Crit — armored trait negates crits; spectral halves luck charm crit bonus
-        const critChance     = calculateCritChance(user, traits);
+        // Crit — armored trait negates crits; aim bonus from precision shot boosts crit chance
+        let critChance = calculateCritChance(user, traits);
+        if (options.aimBonus > 0) critChance = Math.min(LIMITS.MAX_CRIT_CHANCE, critChance + options.aimBonus);
         const isCrit         = traits.includes('armored') ? false : Math.random() < critChance;
         const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
 
