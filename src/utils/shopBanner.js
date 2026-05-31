@@ -30,10 +30,9 @@ async function renderCategoryBanner({ activity, title, subtitle, items, currency
     const theme = getTheme(activity);
     const safeItems = items.slice(0, 16);
     const count = Math.max(1, safeItems.length);
-    const cols  = Math.min(COLS, count);
     const rows  = Math.ceil(count / COLS);
 
-    const width  = cols * TILE_W + (cols + 1) * TILE_PAD;
+    const width  = COLS * TILE_W + (COLS + 1) * TILE_PAD;
     const height = HEADER_H + rows * TILE_H + (rows + 1) * TILE_PAD;
 
     const canvas = createCanvas(width, height);
@@ -63,7 +62,10 @@ async function renderCategoryBanner({ activity, title, subtitle, items, currency
     for (let i = 0; i < safeItems.length; i++) {
         const col = i % COLS;
         const row = Math.floor(i / COLS);
-        const x   = TILE_PAD + col * (TILE_W + TILE_PAD);
+        const itemsInRow = Math.min(COLS, safeItems.length - row * COLS);
+        const rowWidth   = itemsInRow * TILE_W + (itemsInRow - 1) * TILE_PAD;
+        const rowOffset  = Math.floor((width - rowWidth) / 2);
+        const x   = rowOffset + col * (TILE_W + TILE_PAD);
         const y   = HEADER_H + TILE_PAD + row * (TILE_H + TILE_PAD);
         await renderTile(ctx, safeItems[i], x, y, theme, currency);
     }
