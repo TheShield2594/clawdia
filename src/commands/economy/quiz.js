@@ -9,6 +9,7 @@ const {
 } = require('discord.js');
 const axios = require('axios');
 const User  = require('../../models/User');
+const Guild = require('../../models/Guild');
 const FALLBACK_QUESTIONS = require('../../data/quizFallback');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
@@ -199,6 +200,13 @@ module.exports = {
     cooldown: 20,
 
     async execute(interaction) {
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        if (guildSettings?.economy?.enabled === false) {
+            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        }
+        if (guildSettings?.economy?.quizEnabled === false) {
+            return interaction.reply({ content: 'The quiz command is disabled on this server.', ephemeral: true });
+        }
         const diffChoice = interaction.options.getString('difficulty') ?? 'any';
         await interaction.deferReply();
         await runQuiz(interaction, diffChoice);
