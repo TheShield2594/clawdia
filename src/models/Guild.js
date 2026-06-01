@@ -165,6 +165,9 @@ const guildSchema = new Schema({
         // wheelExtraSpinCost: { type: Number, default: 200, min: 1 },
         duelEnabled: { type: Boolean, default: true },
         duelMaxBet: { type: Number, default: 10000, min: 1 },
+        casinoEnabled: { type: Boolean, default: true },
+        crimeEnabled: { type: Boolean, default: true },
+        quizEnabled: { type: Boolean, default: true },
         // max: 0.5 ensures winnerPayout >= amount so netGain is never negative
         duelHouseCut: { type: Number, default: 0.05, min: 0, max: 0.5 },
         betConfirmThreshold: { type: Number, default: 10000, min: 0 },

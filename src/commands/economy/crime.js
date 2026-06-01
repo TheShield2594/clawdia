@@ -45,6 +45,9 @@ module.exports = {
         if (guildSettings?.economy?.enabled === false) {
             return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
         }
+        if (guildSettings?.economy?.crimeEnabled === false) {
+            return interaction.reply({ content: 'The crime command is disabled on this server.', ephemeral: true });
+        }
 
         const currency = guildSettings?.economy?.currency || '💰';
 
