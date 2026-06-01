@@ -2085,7 +2085,7 @@
 
         // AI inner tab navigation
         function switchAiInnerTab(tabId) {
-            document.querySelectorAll('.ai-inner-tab:not(.rss-inner-tab)').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('#ai .ai-inner-tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('#ai .ai-inner-panel').forEach(p => p.classList.remove('active'));
             const btn = document.querySelector(`.ai-inner-tab[data-ai-tab="${tabId}"]`);
             const panel = document.getElementById(tabId);
