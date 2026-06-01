@@ -60,7 +60,7 @@ const WEAPON_TIERS = [
         description: 'A blood-red enchanted rifle that draws out rare prey.'
     },
     {
-        tier: 9, slug: 'admantine_rifle', name: 'Admantine Rifle', emoji: '💜',
+        tier: 9, slug: 'admantine_rifle', name: 'Adamantine Rifle', emoji: '💜',
         cost: 1200000, baseDurability: 325, successRate: 0.84, rarityBoost: 0.25,
         requiresAmmo: true, ammoType: 'titanium_round', ammoCost: 20,
         repairCostPer20: 28000,
@@ -137,7 +137,7 @@ const AMMO_PACKS = [
     {
         id: 'titanium_round_pack', name: 'Titanium Rounds (20)', emoji: '💎',
         cost: 360, ammoType: 'titanium_round', quantity: 20,
-        description: 'Ammunition for Admantine through Altair Rifles (T9–T12)'
+        description: 'Ammunition for Adamantine through Altair Rifles (T9–T12)'
     }
 ];
 
