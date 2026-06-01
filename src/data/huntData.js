@@ -12,31 +12,80 @@ const WEAPON_TIERS = [
     },
     {
         tier: 2, slug: 'iron_rifle', name: 'Iron Rifle', emoji: '🔫',
-        cost: 2500, baseDurability: 120, successRate: 0.56, rarityBoost: 0.02,
+        cost: 2500, baseDurability: 110, successRate: 0.53, rarityBoost: 0.02,
         requiresAmmo: true, ammoType: 'iron_shot', ammoCost: 5,
         repairCostPer20: 180,
         description: 'A solid iron rifle with better accuracy and range.'
     },
     {
-        tier: 3, slug: 'steel_rifle', name: 'Steel Rifle', emoji: '🔫',
-        cost: 8000, baseDurability: 160, successRate: 0.65, rarityBoost: 0.05,
+        tier: 3, slug: 'copper_rifle', name: 'Copper Rifle', emoji: '🟤',
+        cost: 5500, baseDurability: 140, successRate: 0.59, rarityBoost: 0.04,
+        requiresAmmo: true, ammoType: 'iron_shot', ammoCost: 5,
+        repairCostPer20: 320,
+        description: 'A copper-forged rifle with improved precision.'
+    },
+    {
+        tier: 4, slug: 'steel_rifle', name: 'Steel Rifle', emoji: '🔫',
+        cost: 12000, baseDurability: 170, successRate: 0.65, rarityBoost: 0.06,
         requiresAmmo: true, ammoType: 'steel_shot', ammoCost: 10,
-        repairCostPer20: 400,
+        repairCostPer20: 550,
         description: 'A precision steel rifle for serious hunters.'
     },
     {
-        tier: 4, slug: 'composite_rifle', name: 'Composite Rifle', emoji: '🔫',
-        cost: 28000, baseDurability: 200, successRate: 0.74, rarityBoost: 0.09,
-        requiresAmmo: true, ammoType: 'composite_round', ammoCost: 15,
-        repairCostPer20: 900,
-        description: 'Military-grade composite rifle for elite hunters.'
+        tier: 5, slug: 'cobalt_rifle', name: 'Cobalt Rifle', emoji: '🔵',
+        cost: 30000, baseDurability: 200, successRate: 0.70, rarityBoost: 0.09,
+        requiresAmmo: true, ammoType: 'steel_shot', ammoCost: 10,
+        repairCostPer20: 1100,
+        description: 'A cobalt-alloy rifle favored by veteran hunters.'
     },
     {
-        tier: 5, slug: 'titanium_rifle', name: 'Titanium Rifle', emoji: '✨',
-        cost: 90000, baseDurability: 250, successRate: 0.80, rarityBoost: 0.14,
+        tier: 6, slug: 'gold_rifle', name: 'Gold Rifle', emoji: '🌟',
+        cost: 80000, baseDurability: 230, successRate: 0.74, rarityBoost: 0.12,
+        requiresAmmo: true, ammoType: 'composite_round', ammoCost: 15,
+        repairCostPer20: 2500,
+        description: 'A gilded rifle that commands respect in any hunting ground.'
+    },
+    {
+        tier: 7, slug: 'platinum_rifle', name: 'Platinum Rifle', emoji: '✨',
+        cost: 200000, baseDurability: 260, successRate: 0.78, rarityBoost: 0.16,
+        requiresAmmo: true, ammoType: 'composite_round', ammoCost: 15,
+        repairCostPer20: 5500,
+        description: 'A sleek platinum rifle engineered for elite hunters.'
+    },
+    {
+        tier: 8, slug: 'crimson_rifle', name: 'Crimson Rifle', emoji: '🔴',
+        cost: 500000, baseDurability: 290, successRate: 0.81, rarityBoost: 0.20,
+        requiresAmmo: true, ammoType: 'composite_round', ammoCost: 15,
+        repairCostPer20: 12000,
+        description: 'A blood-red enchanted rifle that draws out rare prey.'
+    },
+    {
+        tier: 9, slug: 'admantine_rifle', name: 'Admantine Rifle', emoji: '💜',
+        cost: 1200000, baseDurability: 325, successRate: 0.84, rarityBoost: 0.25,
         requiresAmmo: true, ammoType: 'titanium_round', ammoCost: 20,
-        repairCostPer20: 2000,
-        description: 'The pinnacle of hunting weaponry. Near-mythical accuracy.'
+        repairCostPer20: 28000,
+        description: 'Forged from the hardest known metal. Near-indestructible.'
+    },
+    {
+        tier: 10, slug: 'fateful_rifle', name: 'Fateful Rifle', emoji: '🌑',
+        cost: 3000000, baseDurability: 360, successRate: 0.87, rarityBoost: 0.30,
+        requiresAmmo: true, ammoType: 'titanium_round', ammoCost: 20,
+        repairCostPer20: 60000,
+        description: 'A rifle imbued with the power of fate itself.'
+    },
+    {
+        tier: 11, slug: 'angelic_rifle', name: 'Angelic Rifle', emoji: '💛',
+        cost: 7500000, baseDurability: 400, successRate: 0.90, rarityBoost: 0.36,
+        requiresAmmo: true, ammoType: 'titanium_round', ammoCost: 20,
+        repairCostPer20: 130000,
+        description: 'A divine weapon blessed by celestial forces.'
+    },
+    {
+        tier: 12, slug: 'altair_rifle', name: 'Altair Rifle', emoji: '⭐',
+        cost: 20000000, baseDurability: 450, successRate: 0.93, rarityBoost: 0.44,
+        requiresAmmo: true, ammoType: 'titanium_round', ammoCost: 20,
+        repairCostPer20: 280000,
+        description: 'The star-forged pinnacle of hunting. Mythical in every sense.'
     }
 ];
 
@@ -73,22 +122,22 @@ const AMMO_PACKS = [
     {
         id: 'iron_shot_pack', name: 'Iron Shot (20)', emoji: '🔶',
         cost: 90, ammoType: 'iron_shot', quantity: 20,
-        description: 'Ammunition for Iron Rifle'
+        description: 'Ammunition for Iron & Copper Rifles (T2–T3)'
     },
     {
         id: 'steel_shot_pack', name: 'Steel Shot (20)', emoji: '⚫',
         cost: 180, ammoType: 'steel_shot', quantity: 20,
-        description: 'Ammunition for Steel Rifle'
+        description: 'Ammunition for Steel & Cobalt Rifles (T4–T5)'
     },
     {
         id: 'composite_round_pack', name: 'Composite Rounds (20)', emoji: '🔵',
         cost: 270, ammoType: 'composite_round', quantity: 20,
-        description: 'Ammunition for Composite Rifle'
+        description: 'Ammunition for Gold, Platinum & Crimson Rifles (T6–T8)'
     },
     {
         id: 'titanium_round_pack', name: 'Titanium Rounds (20)', emoji: '💎',
         cost: 360, ammoType: 'titanium_round', quantity: 20,
-        description: 'Ammunition for Titanium Rifle'
+        description: 'Ammunition for Admantine through Altair Rifles (T9–T12)'
     }
 ];
 
