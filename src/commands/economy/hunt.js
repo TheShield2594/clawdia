@@ -1221,10 +1221,10 @@ async function executeInv(interaction, sub) {
 
     if (sub === 'ammo') {
         const allAmmo = [
-            ['iron_shot',       '🔶', 'Iron Shot        (T2 Iron Rifle)'],
-            ['steel_shot',      '⚫', 'Steel Shot       (T3 Steel Rifle)'],
-            ['composite_round', '🔵', 'Composite Round  (T4 Composite Rifle)'],
-            ['titanium_round',  '💎', 'Titanium Round   (T5 Titanium Rifle)']
+            ['iron_shot',       '🔶', 'Iron Shot        (T2–T3: Iron, Copper)'],
+            ['steel_shot',      '⚫', 'Steel Shot       (T4–T5: Steel, Cobalt)'],
+            ['composite_round', '🔵', 'Composite Round  (T6–T8: Gold, Platinum, Crimson)'],
+            ['titanium_round',  '💎', 'Titanium Round   (T9–T12: Adamantine → Altair)']
         ];
 
         const lines = allAmmo.map(([type, emoji, label]) => {
