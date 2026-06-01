@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
+const Guild = require('../../models/Guild');
 
 const games = [
     require('../../games/casino/blackjack'),
@@ -31,6 +32,13 @@ module.exports = {
         return game?.cooldown ?? 3;
     },
     async execute(interaction) {
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        if (guildSettings?.economy?.enabled === false) {
+            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        }
+        if (guildSettings?.economy?.casinoEnabled === false) {
+            return interaction.reply({ content: 'Casino games are disabled on this server.', ephemeral: true });
+        }
         const sub = interaction.options.getSubcommand();
         const game = games.find(g => g.name === sub);
         if (!game) {

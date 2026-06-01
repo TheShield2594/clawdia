@@ -637,96 +637,158 @@
                         <p>Tune currency rewards, manage the store, games, and jobs.</p>
                     </div>
 
-                    <!-- General -->
-                    <label class="toggle">
-                        <span class="toggle-text"><strong>Enable economy</strong><span>Allow members to earn and spend currency</span></span>
-                        <span class="switch"><input type="checkbox" id="economy-enabled" <%= settings.economy.enabled ? 'checked' : '' %>><span class="slider"></span></span>
-                    </label>
-                    <div class="field">
-                        <label class="field-label" for="economy-currency">Currency symbol</label>
-                        <input type="text" id="economy-currency" value="<%= settings.economy.currency %>">
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="economy-daily">Daily reward amount</label>
-                        <input type="text" id="economy-daily" value="<%= settings.economy.dailyAmount %>">
-                    </div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                        <div><label class="field-label" for="economy-work-min">Work payout (min)</label><input type="text" id="economy-work-min" value="<%= settings.economy.workMin %>"></div>
-                        <div><label class="field-label" for="economy-work-max">Work payout (max)</label><input type="text" id="economy-work-max" value="<%= settings.economy.workMax %>"></div>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="economy-announcement-channel">Announcements channel</label>
-                        <select id="economy-announcement-channel">
-                            <option value="">None (no announcements)</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.economy.announcementChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
-                        <small>Channel where shop purchases and economy events are announced</small>
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab eco-inner-tab active" data-eco-tab="eco-tab-settings">⚙️ Settings &amp; Store</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-games">🎮 Games</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-careers">💼 Careers</button>
                     </div>
 
-                    <!-- Store -->
-                    <div class="eco-section-head">
-                        <label class="toggle" style="margin:0;flex:1">
-                            <span class="toggle-text"><strong>Store</strong><span>Items available for purchase with /shop buy</span></span>
-                            <span class="switch"><input type="checkbox" id="economy-shop-enabled" <%= settings.economy.shopEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    <!-- Settings & Store -->
+                    <div id="eco-tab-settings" class="ai-inner-panel active">
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable economy</strong><span>Allow members to earn and spend currency</span></span>
+                            <span class="switch"><input type="checkbox" id="economy-enabled" <%= settings.economy.enabled ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
-                        <button class="btn btn-sm btn-primary" onclick="openItemModal(-1)">+ Add item</button>
+                        <div class="field">
+                            <label class="field-label" for="economy-currency">Currency symbol</label>
+                            <input type="text" id="economy-currency" value="<%= settings.economy.currency %>">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="economy-daily">Daily reward amount</label>
+                            <input type="text" id="economy-daily" value="<%= settings.economy.dailyAmount %>">
+                        </div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div><label class="field-label" for="economy-work-min">Work payout (min)</label><input type="text" id="economy-work-min" value="<%= settings.economy.workMin %>"></div>
+                            <div><label class="field-label" for="economy-work-max">Work payout (max)</label><input type="text" id="economy-work-max" value="<%= settings.economy.workMax %>"></div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="economy-announcement-channel">Announcements channel</label>
+                            <select id="economy-announcement-channel">
+                                <option value="">None (no announcements)</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>" <%= settings.economy.announcementChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                            <small>Channel where shop purchases and economy events are announced</small>
+                        </div>
+
+                        <!-- Store -->
+                        <div class="eco-section-head" style="margin-top:1.5rem">
+                            <label class="toggle" style="margin:0;flex:1">
+                                <span class="toggle-text"><strong>Store</strong><span>Items available for purchase with /shop buy</span></span>
+                                <span class="switch"><input type="checkbox" id="economy-shop-enabled" <%= settings.economy.shopEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
+                            <button class="btn btn-sm btn-primary" onclick="openItemModal(-1)">+ Add item</button>
+                        </div>
+                        <div id="store-items-grid" class="store-grid"></div>
+
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                        </div>
                     </div>
-                    <div id="store-items-grid" class="store-grid"></div>
 
                     <!-- Games -->
-                    <div class="eco-section-head" style="margin-top:1.75rem">
-                        <label class="toggle" style="margin:0;flex:1">
-                            <span class="toggle-text"><strong>Games</strong><span>Economy mini-games members can play for coins</span></span>
-                            <span class="switch"><input type="checkbox" id="economy-games-enabled" <%= settings.economy.gamesEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
-                        </label>
-                    </div>
-                    <div class="games-grid">
-                        <div class="game-card">
-                            <div class="game-card-icon">🪙</div>
-                            <div class="game-card-info">
-                                <span class="game-card-name">Coinflip</span>
-                                <span class="game-card-desc">Bet coins — heads or tails wins double</span>
-                            </div>
-                            <label class="switch"><input type="checkbox" id="economy-coinflip-enabled" <%= settings.economy.coinflipEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                    <div id="eco-tab-games" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Toggle individual economy games on or off for your server.</p>
+                        <div class="eco-section-head" style="margin-bottom:.75rem">
+                            <label class="toggle" style="margin:0;flex:1">
+                                <span class="toggle-text"><strong>Enable all games</strong><span>Master switch for all economy games</span></span>
+                                <span class="switch"><input type="checkbox" id="economy-games-enabled" <%= settings.economy.gamesEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
                         </div>
-                        <div class="game-card">
-                            <div class="game-card-icon">🎲</div>
-                            <div class="game-card-info">
-                                <span class="game-card-name">Dice Roll</span>
-                                <span class="game-card-desc">Roll dice and multiply your wager</span>
+                        <div class="games-grid">
+                            <div class="game-card">
+                                <div class="game-card-icon">🪙</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Coinflip</span>
+                                    <span class="game-card-desc">Bet coins — heads or tails wins double</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-coinflip-enabled" <%= settings.economy.coinflipEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
                             </div>
-                            <label class="switch"><input type="checkbox" id="economy-roll-enabled" <%= settings.economy.rollEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            <div class="game-card">
+                                <div class="game-card-icon">🎲</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Dice Roll</span>
+                                    <span class="game-card-desc">Roll dice and multiply your wager</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-roll-enabled" <%= settings.economy.rollEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🃏</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Blackjack</span>
+                                    <span class="game-card-desc">Beat the dealer to win your bet</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-blackjack-enabled" <%= settings.economy.blackjackEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🎰</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Casino</span>
+                                    <span class="game-card-desc">Slots, roulette, poker, crash and more</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-casino-enabled" <%= settings.economy.casinoEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">⚔️</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Duel</span>
+                                    <span class="game-card-desc">Challenge another member to a coin wager</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-duel-enabled" <%= settings.economy.duelEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🦹</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Crime</span>
+                                    <span class="game-card-desc">Attempt a heist for a chance at big coins</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-crime-enabled" <%= settings.economy.crimeEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🥷</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Rob</span>
+                                    <span class="game-card-desc">Steal coins from another member's wallet</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-rob-enabled" <%= settings.economy.robEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🎓</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Quiz</span>
+                                    <span class="game-card-desc">Answer trivia questions to earn coins</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-quiz-enabled" <%= settings.economy.quizEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
                         </div>
-                        <div class="game-card">
-                            <div class="game-card-icon">🃏</div>
-                            <div class="game-card-info">
-                                <span class="game-card-name">Blackjack</span>
-                                <span class="game-card-desc">Beat the dealer to win your bet</span>
-                            </div>
-                            <label class="switch"><input type="checkbox" id="economy-blackjack-enabled" <%= settings.economy.blackjackEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
                         </div>
                     </div>
 
-                    <!-- Career Tiers -->
-                    <div class="eco-section-head" style="margin-top:1.75rem">
-                        <span class="toggle-text"><strong>Career Tiers</strong><span>Rename tiers and set how many shifts unlock each one</span></span>
-                    </div>
-                    <div id="job-tiers-grid" class="job-tiers-grid"></div>
+                    <!-- Careers -->
+                    <div id="eco-tab-careers" class="ai-inner-panel">
+                        <!-- Career Tiers -->
+                        <div class="eco-section-head">
+                            <span class="toggle-text"><strong>Career Tiers</strong><span>Rename tiers and set how many shifts unlock each one</span></span>
+                        </div>
+                        <div id="job-tiers-grid" class="job-tiers-grid"></div>
 
-                    <!-- Jobs -->
-                    <div class="eco-section-head" style="margin-top:1.5rem">
-                        <label class="toggle" style="margin:0;flex:1">
-                            <span class="toggle-text"><strong>Jobs</strong><span>Jobs shown when members use /work</span></span>
-                            <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
-                        </label>
-                        <button class="btn btn-sm btn-primary" onclick="openJobModal(-1)">+ Add job</button>
-                    </div>
-                    <div id="jobs-list" class="jobs-list"></div>
+                        <!-- Jobs -->
+                        <div class="eco-section-head" style="margin-top:1.5rem">
+                            <label class="toggle" style="margin:0;flex:1">
+                                <span class="toggle-text"><strong>Jobs</strong><span>Jobs shown when members use /work</span></span>
+                                <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
+                            <button class="btn btn-sm btn-primary" onclick="openJobModal(-1)">+ Add job</button>
+                        </div>
+                        <div id="jobs-list" class="jobs-list"></div>
 
-                    <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                        </div>
                     </div>
                 </section>
 
@@ -2061,6 +2123,8 @@
                 if (panel) panel.classList.add('active');
             };
         }
+        const switchEcoTab = makeGameTabSwitcher('eco-inner-tab', '#economy .ai-inner-panel', 'eco-tab');
+        document.querySelectorAll('.eco-inner-tab').forEach(tab => tab.addEventListener('click', () => switchEcoTab(tab.dataset.ecoTab)));
         const switchHuntTab = makeGameTabSwitcher('hunt-inner-tab', '#hunt .ai-inner-panel', 'hunt-tab');
         const switchFishTab = makeGameTabSwitcher('fish-inner-tab', '#fish .ai-inner-panel', 'fish-tab');
         const switchMineTab = makeGameTabSwitcher('mine-inner-tab', '#mine .ai-inner-panel', 'mine-tab');
@@ -2441,6 +2505,11 @@
                     'economy.coinflipEnabled': document.getElementById('economy-coinflip-enabled').checked,
                     'economy.rollEnabled': document.getElementById('economy-roll-enabled').checked,
                     'economy.blackjackEnabled': document.getElementById('economy-blackjack-enabled').checked,
+                    'economy.casinoEnabled': document.getElementById('economy-casino-enabled').checked,
+                    'economy.duelEnabled': document.getElementById('economy-duel-enabled').checked,
+                    'economy.crimeEnabled': document.getElementById('economy-crime-enabled').checked,
+                    'economy.robEnabled': document.getElementById('economy-rob-enabled').checked,
+                    'economy.quizEnabled': document.getElementById('economy-quiz-enabled').checked,
                     'economy.jobsEnabled': document.getElementById('economy-jobs-enabled').checked,
                     'economy.announcementChannelId': document.getElementById('economy-announcement-channel').value || null,
                     shop: storeItems,
