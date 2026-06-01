@@ -60,7 +60,7 @@ const WEAPON_TIERS = [
         description: 'A blood-red enchanted rifle that draws out rare prey.'
     },
     {
-        tier: 9, slug: 'admantine_rifle', name: 'Adamantine Rifle', emoji: '💜',
+        tier: 9, slug: 'adamantine_rifle', name: 'Adamantine Rifle', emoji: '💜',
         cost: 1200000, baseDurability: 325, successRate: 0.84, rarityBoost: 0.25,
         requiresAmmo: true, ammoType: 'titanium_round', ammoCost: 20,
         repairCostPer20: 28000,
