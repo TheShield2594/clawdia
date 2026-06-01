@@ -36,6 +36,9 @@ module.exports = {
         if (guildSettings?.economy?.enabled === false) {
             return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
         }
+        if (guildSettings?.economy?.gamesEnabled === false) {
+            return interaction.reply({ content: 'Economy games are disabled on this server.', ephemeral: true });
+        }
         if (guildSettings?.economy?.casinoEnabled === false) {
             return interaction.reply({ content: 'Casino games are disabled on this server.', ephemeral: true });
         }
