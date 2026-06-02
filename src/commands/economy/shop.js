@@ -9,7 +9,7 @@ const {
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const Transaction = require('../../models/Transaction');
-const { ensureDefaultShopItems, getItemLore, getItemRarity, RARITY_ORDER } = require('../../data/defaultShopItems');
+const { ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, RARITY_ORDER } = require('../../data/defaultShopItems');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse } = require('../../utils/shopBrowse');
 const { logTransaction } = require('../../utils/logTransaction');
@@ -56,12 +56,27 @@ async function buildShopPages(guildSettings, currency) {
         byRarity[rarity].push(item);
     }
 
-    const pages = [];
+    // Separate prestige items into their own page
+    const prestigeItems = [];
+    const standardByRarity = {};
     for (const rarity of RARITY_ORDER) {
         const items = byRarity[rarity];
+        if (!items) continue;
+        for (const item of items) {
+            if (isPrestigeItem(item.itemId)) {
+                prestigeItems.push(item);
+            } else {
+                if (!standardByRarity[rarity]) standardByRarity[rarity] = [];
+                standardByRarity[rarity].push(item);
+            }
+        }
+    }
+
+    const pages = [];
+    for (const rarity of RARITY_ORDER) {
+        const items = standardByRarity[rarity];
         if (!items || items.length === 0) continue;
 
-        const tierActivity = `shop_${rarity.toLowerCase()}`;
         const emoji = RARITY_EMOJIS[rarity] || '⚫';
 
         const pageItems = items.map(item => {
@@ -82,7 +97,6 @@ async function buildShopPages(guildSettings, currency) {
             };
         });
 
-        // Compact list text shown in the embed description below the banner
         const listText = items.map((item, i) => {
             const stock = item.stock === -1 ? '∞' : item.stock;
             return `**${i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})`;
@@ -93,6 +107,44 @@ async function buildShopPages(guildSettings, currency) {
             label:    `${rarity}`,
             emoji,
             subtitle: `${items.length} item${items.length !== 1 ? 's' : ''}`,
+            items:    pageItems,
+            listText,
+        });
+    }
+
+    // Prestige page — high-cost aspirational items shown last with special treatment
+    if (prestigeItems.length > 0) {
+        const pageItems = prestigeItems.map(item => {
+            let badge = null;
+            const iid = item.itemId || item.name;
+            if (item.createdAt && now - new Date(item.createdAt).getTime() < NEW_ITEM_TTL_MS) {
+                badge = 'NEW';
+            } else if (trending.has(iid)) {
+                badge = 'TRENDING';
+            }
+            const stock = item.stock === -1 ? '∞' : String(item.stock);
+            return {
+                name:    item.name,
+                emoji:   extractEmoji(item.description),
+                price:   item.price,
+                badge,
+                subline: `Stock: ${stock} · Prestige`,
+            };
+        });
+        const listText =
+            `**✨ Prestige items** — high-cost purchases that flex your wealth and unlock server perks.\n` +
+            `*Save up and make a statement.*\n\n` +
+            prestigeItems.map((item, i) => {
+                const stock = item.stock === -1 ? '∞' : item.stock;
+                return `**${i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})`;
+            }).join('\n') +
+            `\n\n*Use /shop buy <item name> to purchase*`;
+
+        pages.push({
+            id:       'prestige',
+            label:    'Prestige',
+            emoji:    '✨',
+            subtitle: `${prestigeItems.length} aspirational item${prestigeItems.length !== 1 ? 's' : ''}`,
             items:    pageItems,
             listText,
         });

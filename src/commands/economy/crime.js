@@ -6,12 +6,13 @@ const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
 const { logTransaction } = require('../../utils/logTransaction');
 const { getTotalBonus } = require('../../services/petService');
-const { randomFrom, CRIME_WIN_LINES, CRIME_BUST_LINES } = require('../../utils/copyLines');
+const { randomFrom, CRIME_WIN_LINES, CRIME_BUST_LINES, getCrimeFlavorText } = require('../../utils/copyLines');
 const { delay } = require('../../utils/delay');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
+const { isDistrictActive } = require('../../services/districtService');
 
 const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
@@ -62,7 +63,7 @@ module.exports = {
             return interaction.reply({
                 embeds: [buildCooldownEmbed({
                     title: '🚨 Still Wanted',
-                    description: 'The police are still looking for you.\nStay off the streets until the heat dies down.',
+                    description: 'The city has eyes on you. Lay low. 🚨\nDon\'t even think about running another job until the heat breaks.',
                     color: '#e74c3c',
                     nextAt,
                     nextRewardPreview: 'Once clear: Grand Larceny pays 600–1500 coins · Casino Con is next on the board',
@@ -179,7 +180,9 @@ module.exports = {
                     logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: earned, source: 'crime', details: crime.displayName });
                 }
 
-                let desc = randomFrom(CRIME_WIN_LINES);
+                let flavorWin = getCrimeFlavorText(crime.name, 'win')
+                    .replace('{amount}', earned.toLocaleString());
+                let desc = flavorWin;
                 if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;
                 if (petCrimeBonus > 0) desc += `\n> 🐱 *Cat pet boosted your success chance!*`;
                 if (isFeaturedCrime) desc += `\n> 🌟 *Featured job — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout applied!*`;
@@ -231,8 +234,11 @@ module.exports = {
 
                     logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: updated.balance, note: `${crime.name} (critical failure, ${Math.round(lossRate * 100)}% seized)` });
 
+                    const critNarrative = getCrimeFlavorText(crime.name, 'fail')
+                        .replace('{fine}', lost.toLocaleString())
+                        .replace('{amount}', lost.toLocaleString());
                     const critDesc =
-                        `You tried to pull it off.\nYou didn't make it out.\n\n> "${flavorText}"\n\n` +
+                        `${critNarrative}\n\n> *${flavorText}*\n\n` +
                         `────────────────────\n` +
                         `  💸 Seized: ${currency}${lost.toLocaleString()} coins  (${Math.round(lossRate * 100)}% of wallet)\n` +
                         `  💰 Remaining: ${updated.balance.toLocaleString()} coins\n` +
@@ -245,9 +251,11 @@ module.exports = {
                         .setFooter({ text: 'Cooldown: 1.5h • Purchase a Lifesaver from /shop to protect against critical failures' })
                         .setTimestamp();
                 } else {
+                    const undergroundActive = isDistrictActive(guildSettings, 'underground');
                     const rawFine = Math.floor(crime.minFine + Math.random() * (crime.maxFine - crime.minFine));
                     const maxFine = Math.max(crime.minFine, Math.floor(user.balance * 0.20));
-                    const fine = Math.min(rawFine, maxFine);
+                    let fine = Math.min(rawFine, maxFine);
+                    if (undergroundActive) fine = Math.floor(fine * 0.85);
                     const paid = Math.min(fine, user.balance);
                     const updated = await User.findOneAndUpdate(
                         userFilter,
@@ -257,10 +265,14 @@ module.exports = {
 
                     logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_fine', amount: -paid, balance: updated.balance, note: `${crime.name} (busted)` });
 
+                    const bustNarrative = getCrimeFlavorText(crime.name, 'fail')
+                        .replace('{fine}', paid.toLocaleString())
+                        .replace('{amount}', paid.toLocaleString());
+                    const undergroundStr = undergroundActive ? '\n> 🌑 *Underground district active — fine reduced by 15%!*' : '';
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')
                         .setTitle(`${crime.emoji} ${crime.displayName} — Busted`)
-                        .setDescription(`${randomFrom(CRIME_BUST_LINES)} ${flavorText}\nYou were fined **${currency}${paid.toLocaleString()}**.`)
+                        .setDescription(`${bustNarrative}\n\n> *${flavorText}*${undergroundStr}`)
                         .addFields(
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
                             { name: 'Balance',   value: `${currency}${updated.balance.toLocaleString()}`, inline: true }

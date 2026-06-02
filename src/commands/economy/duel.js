@@ -8,6 +8,7 @@ const {
 const { randomInt } = require('crypto');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { isDistrictActive } = require('../../services/districtService');
 
 const DUEL_COOLDOWN_MS = 5 * 60_000;
 const ACCEPT_TIMEOUT_MS = 60_000;
@@ -90,9 +91,13 @@ function buildRpsRow(role, duelId) {
 async function finalizeDuel({ interaction, targetUser, challengerId, opponentId, amount, currency, houseCut, challengerWins, tie, game, gameResult }) {
     const guildId = interaction.guild.id;
     // Escrow already deducted both stakes; compute payout from pot
+    const guildDoc = await Guild.findOne({ guildId }).lean();
+    const arenaActive = isDistrictActive(guildDoc, 'arena');
     const pot         = 2 * amount;
     const houseAmount = Math.floor(pot * houseCut);
-    const winnerPayout = pot - houseAmount; // escrowed funds returned to winner
+    // Arena district adds +15% of the pot on top of the normal payout; house cut still applies.
+    const arenaBonus   = arenaActive ? Math.floor(pot * 0.15) : 0;
+    const winnerPayout = pot - houseAmount + arenaBonus; // escrowed funds returned to winner
     const netGain      = winnerPayout - amount; // winner's profit above their own stake
 
     let description;
@@ -111,7 +116,8 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
             User.updateOne({ userId: winnerId, guildId }, { $inc: { balance: winnerPayout, duelWins: 1 }, $set: { lastDuel: new Date() } }),
             User.updateOne({ userId: loserId,  guildId }, { $inc: { duelLosses: 1 }, $set: { lastDuel: new Date() } }),
         ]);
-        description = `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (after ${Math.round(houseCut * 100)}% house cut)!`;
+        const arenaStr = arenaActive ? ` + ⚔️ Arena bonus: ${currency}${arenaBonus.toLocaleString()}` : '';
+        description = `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (${Math.round(houseCut * 100)}% house cut${arenaStr})!`;
     }
 
     const [challenger, opponent] = await Promise.all([

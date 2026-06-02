@@ -186,6 +186,19 @@ const guildSchema = new Schema({
         jackpotChannelId:  { type: String,  default: null },
     },
 
+    // Progressive jackpot pool fed by all casino bets
+    casinoJackpot: {
+        pool:                 { type: Number,  default: 10000 },
+        betsCount:            { type: Number,  default: 0 },     // total eligible bets since last drop
+        seedAmount:           { type: Number,  default: 10000 },
+        contributionRate:     { type: Number,  default: 0.005 }, // 0.5%
+        announceChannelId:    { type: String,  default: null },
+        lastWinnerId:         { type: String,  default: null },
+        lastWinnerName:       { type: String,  default: null },
+        lastWonAmount:        { type: Number,  default: null },
+        lastWonAt:            { type: Date,    default: null },
+    },
+
     rssFeeds: [{
         url: { type: String, required: true },
         channelId: { type: String, required: true },
@@ -292,6 +305,29 @@ const guildSchema = new Schema({
     }],
 
     shopDefaultsSeeded: { type: Boolean, default: false },
+
+    // Server investment districts — cooperative money sink
+    districts: {
+        type: [{
+            districtId:    { type: String, required: true },
+            pool:          { type: Number, default: 0 },
+            goal:          { type: Number, default: 1_000_000 },
+            activeUntil:   { type: Date,   default: null },
+            topContributors: [{
+                userId:   { type: String, required: true },
+                username: { type: String, default: '' },
+                amount:   { type: Number, default: 0 },
+            }],
+        }],
+        default: () => [
+            { districtId: 'marketplace', pool: 0, goal: 1_000_000, activeUntil: null, topContributors: [] },
+            { districtId: 'bank',        pool: 0, goal: 1_000_000, activeUntil: null, topContributors: [] },
+            { districtId: 'underground', pool: 0, goal: 1_000_000, activeUntil: null, topContributors: [] },
+            { districtId: 'wilderness',  pool: 0, goal: 1_000_000, activeUntil: null, topContributors: [] },
+            { districtId: 'arena',       pool: 0, goal: 1_000_000, activeUntil: null, topContributors: [] },
+        ],
+    },
+    districtAnnounceChannelId: { type: String, default: null },
 
     jobTiers: [{
         tier:      { type: Number, required: true, min: 1, max: 4 },
