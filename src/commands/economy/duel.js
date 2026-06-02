@@ -8,6 +8,7 @@ const {
 const { randomInt } = require('crypto');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { isDistrictActive } = require('../../services/districtService');
 
 const DUEL_COOLDOWN_MS = 5 * 60_000;
 const ACCEPT_TIMEOUT_MS = 60_000;
@@ -90,9 +91,13 @@ function buildRpsRow(role, duelId) {
 async function finalizeDuel({ interaction, targetUser, challengerId, opponentId, amount, currency, houseCut, challengerWins, tie, game, gameResult }) {
     const guildId = interaction.guild.id;
     // Escrow already deducted both stakes; compute payout from pot
+    const guildDoc = await Guild.findOne({ guildId }).lean();
+    const arenaActive = isDistrictActive(guildDoc, 'arena');
     const pot         = 2 * amount;
     const houseAmount = Math.floor(pot * houseCut);
-    const winnerPayout = pot - houseAmount; // escrowed funds returned to winner
+    // Arena district: +15% prize pool (reduces house cut to 0 and adds 15% bonus)
+    const arenaBonus   = arenaActive ? Math.floor(pot * 0.15) : 0;
+    const winnerPayout = pot - houseAmount + arenaBonus; // escrowed funds returned to winner
     const netGain      = winnerPayout - amount; // winner's profit above their own stake
 
     let description;
