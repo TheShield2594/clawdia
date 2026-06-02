@@ -6,7 +6,7 @@ const Guild = require('../../models/Guild');
 const { CRAFT_RECIPES: HUNT_RECIPES, CONSUMABLES: HUNT_CONSUMABLES, MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../data/huntData');
 const { CRAFT_RECIPES: MINE_RECIPES, CONSUMABLES: MINE_CONSUMABLES, MATERIAL_NAMES: MINE_MATERIAL_NAMES } = require('../../data/mineData');
 const { ensureHuntData } = require('../../services/huntService');
-const { ensureMineData, activateMineLock } = require('../../services/mineService');
+const { ensureMineData } = require('../../services/mineService');
 
 const ALL_RECIPES     = { ...HUNT_RECIPES, ...MINE_RECIPES };
 const ALL_MAT_NAMES   = { ...HUNT_MATERIAL_NAMES, ...MINE_MATERIAL_NAMES };
@@ -172,15 +172,16 @@ module.exports = {
                     outputDesc = '🐾 **Lucky Paw** — permanently +1% critical hit chance!';
                 }
             } else if (recipe.output.type === 'mine_consumable') {
-                if (recipe.output.id === 'mine_lock') {
-                    // Activate the mine lock immediately (last-write wins)
-                    activateMineLock(user);
-                    outputDesc = '🔒 **Mine Lock** — your mine is now protected from the next raid!';
-                } else {
-                    m.consumables[recipe.output.id] = (m.consumables[recipe.output.id] ?? 0) + recipe.output.qty;
-                    const def = MINE_CONSUMABLES[recipe.output.id];
-                    outputDesc = `${def?.emoji ?? '📦'} **${recipe.output.qty}× ${def?.name ?? recipe.output.id}**`;
+                // Guard: can't craft a mine_lock while one is already active
+                if (recipe.output.id === 'mine_lock' && m.mineLockActive) {
+                    return interaction.reply({
+                        content: 'Your mine already has an active **Mine Lock**. Use it up before crafting another.',
+                        ephemeral: true
+                    });
                 }
+                m.consumables[recipe.output.id] = (m.consumables[recipe.output.id] ?? 0) + recipe.output.qty;
+                const def = MINE_CONSUMABLES[recipe.output.id];
+                outputDesc = `${def?.emoji ?? '📦'} **${recipe.output.qty}× ${def?.name ?? recipe.output.id}**`;
             } else if (recipe.output.type === 'mine_charge') {
                 m.charges[recipe.output.id] = (m.charges[recipe.output.id] ?? 0) + recipe.output.qty;
                 outputDesc = `💥 **${recipe.output.qty}× ${recipe.output.id.replace(/_/g, ' ')}** (mine charge)`;
