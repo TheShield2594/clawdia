@@ -95,7 +95,7 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
     const arenaActive = isDistrictActive(guildDoc, 'arena');
     const pot         = 2 * amount;
     const houseAmount = Math.floor(pot * houseCut);
-    // Arena district: +15% prize pool (reduces house cut to 0 and adds 15% bonus)
+    // Arena district adds +15% of the pot on top of the normal payout; house cut still applies.
     const arenaBonus   = arenaActive ? Math.floor(pot * 0.15) : 0;
     const winnerPayout = pot - houseAmount + arenaBonus; // escrowed funds returned to winner
     const netGain      = winnerPayout - amount; // winner's profit above their own stake
@@ -116,7 +116,8 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
             User.updateOne({ userId: winnerId, guildId }, { $inc: { balance: winnerPayout, duelWins: 1 }, $set: { lastDuel: new Date() } }),
             User.updateOne({ userId: loserId,  guildId }, { $inc: { duelLosses: 1 }, $set: { lastDuel: new Date() } }),
         ]);
-        description = `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (after ${Math.round(houseCut * 100)}% house cut)!`;
+        const arenaStr = arenaActive ? ` + ⚔️ Arena bonus: ${currency}${arenaBonus.toLocaleString()}` : '';
+        description = `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (${Math.round(houseCut * 100)}% house cut${arenaStr})!`;
     }
 
     const [challenger, opponent] = await Promise.all([

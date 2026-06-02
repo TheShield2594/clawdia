@@ -186,9 +186,6 @@ module.exports = {
                 if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;
                 if (petCrimeBonus > 0) desc += `\n> 🐱 *Cat pet boosted your success chance!*`;
                 if (isFeaturedCrime) desc += `\n> 🌟 *Featured job — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout applied!*`;
-                // Crime streak bonus flavor
-                const crimeStreak = user._crimeStreak ?? 0;
-                if (crimeStreak >= 2) desc += `\n> 🔥 *${crimeStreak + 1} clean jobs in a row. The streets are talking.*`;
                 desc += `\n\n────────────────────\n  ${currency} Earned: ${earned.toLocaleString()} coins`;
                 if (streakMult > 1.0) desc += `\n  🔥 Streak bonus: ${streakMult}x applied`;
                 desc += `\n────────────────────\n  Balance: ${updated.balance.toLocaleString()} coins`;
