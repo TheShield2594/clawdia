@@ -2,6 +2,7 @@
 // name is the display label shown to users in /shop view.
 // lore is short flavor text (1-2 sentences) shown in shop detail / inventory.
 // rarity: Common → Uncommon → Rare → Epic → Mythic
+// category: 'standard' (default) | 'prestige' (aspiration/high-cost items)
 const DEFAULT_SHOP_ITEMS = [
     { name: 'Padlock',            itemId: 'padlock',           rarity: 'Rare',     price: 5000,  description: '🔒 Protects your bank from /rob — only your wallet is at risk.', lore: "The combination is your deepest secret. Or 1234. One of those." },
     { name: 'Shield',             itemId: 'shield',            rarity: 'Mythic',   price: 10000, description: '🛡️ Blocks all /rob attempts against you for 12 hours.',          lore: "Dented in several suspicious places. Still works." },
@@ -15,6 +16,16 @@ const DEFAULT_SHOP_ITEMS = [
     { name: '2x XP Booster',      itemId: 'xp_booster_2x',    rarity: 'Uncommon', price: 2500,  description: '⭐🚀 2x XP from chat and activities for 1 hour.',                  lore: "A jolt of clarity disguised as a beverage. Caffeine for the soul." },
     { name: 'Lucky Streak',       itemId: 'lucky_streak',      rarity: 'Common',   price: 1500,  description: '🎯 +25% win chance on games for 30 minutes.',                      lore: "The universe owes you one. This is collecting." },
     { name: 'Salary Raise',       itemId: 'salary_raise',      rarity: 'Rare',     price: 4000,  description: '📈 1.5x earnings on /work shifts for 2 hours.',                    lore: "A briefly forged memo your boss won't remember signing." },
+
+    // ── Prestige / Aspiration items ──────────────────────────────────────────
+    { name: 'Custom Job Title',       itemId: 'custom_job_title',        rarity: 'Epic',   price: 75000,  category: 'prestige', description: '✏️ Set a custom job title shown on your /profile for 30 days.',     lore: "The business card says whatever you want. Nobody checks." },
+    { name: 'VIP Badge',              itemId: 'vip_badge',               rarity: 'Epic',   price: 150000, category: 'prestige', description: '💎 Grants the server\'s VIP role for 30 days.',                        lore: "The velvet rope parts. You walk through." },
+    { name: 'Golden Profile Frame',   itemId: 'golden_profile_frame',    rarity: 'Mythic', price: 250000, category: 'prestige', description: '🖼️ Gold border and accent color on your /profile for 30 days.',     lore: "Subtle enough to be classy. Loud enough to be noticed." },
+    { name: 'Server Trophy',          itemId: 'server_trophy',           rarity: 'Mythic', price: 500000, category: 'prestige', description: '🏆 Your name displayed as Top Earner in a pinned embed for 7 days.', lore: "Seven days. Your name. The whole server looking." },
+    { name: 'Zone Unlock Token',      itemId: 'zone_unlock_token',       rarity: 'Rare',   price: 80000,  category: 'prestige', description: '🗺️ Unlock any hunt/fish/mine zone regardless of level.',             lore: "The gatekeepers step aside. Turns out coin is the key." },
+    { name: 'Pet Slot Expansion',     itemId: 'pet_slot_expansion',      rarity: 'Epic',   price: 60000,  category: 'prestige', description: '🐾 Allows owning one additional pet simultaneously (stackable ×3).', lore: "More companions. More chaos. Entirely worth it." },
+    { name: 'Permanent Stamina +1',   itemId: 'permanent_stamina',       rarity: 'Mythic', price: 100000, category: 'prestige', description: '⚡ Permanently increases your max hunt/fish/mine stamina by 1.',     lore: "The grind never ends. At least now you last a little longer." },
+    { name: 'Prestige Accelerator',   itemId: 'prestige_accelerator',    rarity: 'Mythic', price: 200000, category: 'prestige', description: '🚀 -20% XP required for your next prestige (one-time use).',         lore: "The shortcut nobody talks about. Until they use it." },
 ];
 
 const ITEM_LORE_BY_ID = Object.fromEntries(
@@ -32,11 +43,16 @@ const RARITY_ORDER = ['Common', 'Uncommon', 'Rare', 'Epic', 'Mythic'];
 function getItemRarity(itemId, price = 0) {
     const meta = DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId);
     if (meta?.rarity) return meta.rarity;
-    if (price <= 2000) return 'Common';
-    if (price <= 3500) return 'Uncommon';
-    if (price <= 6000) return 'Rare';
-    if (price <= 9000) return 'Epic';
+    if (price <= 2000)   return 'Common';
+    if (price <= 3500)   return 'Uncommon';
+    if (price <= 6000)   return 'Rare';
+    if (price <= 9000)   return 'Epic';
     return 'Mythic';
+}
+
+// Returns true if the item is in the prestige/aspiration category.
+function isPrestigeItem(itemId) {
+    return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'prestige';
 }
 
 // Idempotent: appends any default items missing from the guild's shop and flips
@@ -57,4 +73,4 @@ function ensureDefaultShopItems(guildSettings) {
     return added || true;
 }
 
-module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, RARITY_ORDER };
+module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, RARITY_ORDER };

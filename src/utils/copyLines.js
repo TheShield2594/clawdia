@@ -18,6 +18,113 @@ const CRIME_BUST_LINES = [
     'Everyone gets caught eventually. Today was your day.',
 ];
 
+// Per-crime narrative lines: success and failure, indexed by crime.name
+const CRIME_NARRATIVE = {
+    'pickpocketing': {
+        win: [
+            'You brushed past them on the escalator. Wallet? Gone. They\'re still looking for their floor. 🎩',
+            'Three seconds. That\'s all it took. They\'ll blame it on the subway. +**{amount}** coins.',
+            'Smooth hands, smoother exit. They\'ll notice at checkout — you\'ll be long gone.',
+            'You were practically invisible. The crowd did the rest.',
+            'A nudge, a lift, a walk. Textbook.',
+        ],
+        fail: [
+            'You reached for their pocket and grabbed... their hand. They stared at you for a very long time. Fine: **{fine}** coins.',
+            'Your fingers slipped. They turned around. You pretended to sneeze for 40 seconds. 😬',
+            'Rookie move — you went for the back pocket. Always the front pocket. Always.',
+            'They felt it. You froze. The whole bus saw.',
+            'You picked the one person on the street with a security lanyard and a bad day.',
+        ],
+    },
+    'selling fake merch': {
+        win: [
+            'The fake watches sold out in an hour. You packed up before anyone looked closely. 🕶️',
+            'Limited edition? Sure. You had a printer. They had hope. +**{amount}** coins.',
+            'You set up on a corner, made your pitch, and vanished before the refund requests came in.',
+            'Three tourists, four sales, one very convincing accent. Clean.',
+            'The booth looked legit. You were not. They\'ll never know the difference.',
+        ],
+        fail: [
+            'A customer came back with a receipt *and* a cop. You were still at the table.',
+            'The merch fell apart on the spot. Right in front of them. In front of everyone.',
+            'Someone recognized the brand logo was backwards. You really should\'ve double-checked. 😬',
+            'Consumer protection officer. Right there. Who even has those on speed dial?',
+            'They asked for proof of authenticity. You didn\'t have any. The conversation ended poorly.',
+        ],
+    },
+    'hacking ATMs': {
+        win: [
+            'The ATM blinked twice, dispensed, and you were already across the street. 💻',
+            'Thirty seconds on the keypad and the machine became very cooperative. +**{amount}** coins.',
+            'In, out, no trace. The bank\'s logs will show a glitch. Glitches happen.',
+            'You\'ve done this before. It shows. Clean extraction.',
+            'The machine didn\'t even flinch. Neither did you.',
+        ],
+        fail: [
+            'The machine locked up and called home. You didn\'t notice until the blue lights arrived.',
+            'Your script had a typo. A single typo. The ATM laughed at you — metaphorically.',
+            'Camera. Right above the keypad. There\'s always a camera.',
+            'The bank patched that exploit last Tuesday. You had not been informed.',
+            'The error code it spit out had your IP address in it. Somehow. Fine: **{fine}** coins.',
+        ],
+    },
+    'art forgery': {
+        win: [
+            'The buyer didn\'t even bring a blacklight. Amateur. +**{amount}** coins. 🖼️',
+            'Your brushwork was flawless. Frankly, the original wasn\'t this clean.',
+            'Sold at auction under a pseudonym. No one asked questions. Nobody ever does.',
+            'The provenance paperwork you forged was better than the real thing.',
+            'The collector smiled, signed, and handed you a check. Easiest **{amount}** coins you ever made.',
+        ],
+        fail: [
+            'The buyer brought an expert. An actual expert. The painting started crying.',
+            'The ink was still wet when they picked it up. Not ideal for a "17th century masterpiece."',
+            'Someone recognized the canvas brand. From a craft store. A current craft store. 😬',
+            'The signature was backwards. You painted in a mirror. It was a long afternoon.',
+            'The frame was antique. The paint was not. Fine: **{fine}** coins.',
+        ],
+    },
+    'casino cheating': {
+        win: [
+            'The dealer never saw the switch. The cameras were pointed the wrong way. +**{amount}** coins. 🎰',
+            'Marked cards. A very subtle system. A very large payout.',
+            'You counted every card since deck two. Nobody noticed. Beautiful.',
+            'The chip swap happened in plain sight. That\'s the point. It worked.',
+            'Walked out with **{amount}** coins and the calm of someone who knows exactly what they did.',
+        ],
+        fail: [
+            'The pit boss had been watching for twenty minutes before you realized. 🚔',
+            'They switched decks mid-hand. Your whole system evaporated.',
+            'The chip you palmed had a tracker in it. That\'s new.',
+            'Someone at your table was also cheating — and they spotted you first.',
+            'Camera. Corner. Ceiling. You were on it the whole time. Fine: **{fine}** coins.',
+        ],
+    },
+    'grand larceny': {
+        win: [
+            'The vault door swung open at 3:47 AM. The guards were asleep. You weren\'t. +**{amount}** coins. 💰',
+            'Four years of planning. Two minutes of execution. Clean.',
+            'The laser grid was disabled, the alarm was spoofed, and you were already in the car.',
+            'They had no idea until Monday morning. You were in another city by then.',
+            'The score was everything they said it would be. +**{amount}** coins. No witnesses.',
+        ],
+        fail: [
+            'It was going perfectly until it wasn\'t. You\'re explaining this to your lawyer. 🚔',
+            'The inside man got cold feet. Thirty seconds in. Of all the moments.',
+            'Motion sensor. Brand new. Installed yesterday. Of course.',
+            'Your getaway driver misread the time zone. You waited eleven minutes in the open.',
+            'The building had a backup vault. And a backup alarm. And backup guards. Fine: **{fine}** coins.',
+        ],
+    },
+};
+
+// Returns per-crime narrative flavor text or falls back to generic lines.
+function getCrimeFlavorText(crimeName, outcome) {
+    const lines = CRIME_NARRATIVE[crimeName]?.[outcome];
+    if (!lines?.length) return randomFrom(outcome === 'win' ? CRIME_WIN_LINES : CRIME_BUST_LINES);
+    return randomFrom(lines);
+}
+
 const SLOTS_LOSE_LINES = [
     'The reels had other plans.',
     'So close. Or maybe not close at all.',
@@ -118,6 +225,8 @@ module.exports = {
     randomFrom,
     CRIME_WIN_LINES,
     CRIME_BUST_LINES,
+    CRIME_NARRATIVE,
+    getCrimeFlavorText,
     SLOTS_LOSE_LINES,
     SLOTS_WIN_LINES,
     WORK_ROUGH_LINES,
