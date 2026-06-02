@@ -11,7 +11,6 @@ const { generateWorkChallenge } = require('../../utils/workChallenge');
 const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, WORK_ROUGH_LINES, WORK_EXCEPTIONAL_LINES } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
-const { delay } = require('../../utils/delay');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 function resolveTiers(guildSettings) {
@@ -173,8 +172,8 @@ module.exports = {
                 finalEarned = Math.max(0, earned + specialEvent.coinDelta);
             }
 
-            // Challenge fires only when no special event is active (avoids embed conflicts)
-            const challengeFires = !specialEvent && Math.random() < 0.15;
+            // Challenge fires on every run
+            const challengeFires = true;
 
             // Atomic update — cooldown condition in query prevents double-credit on concurrent requests
             const updated = await User.findOneAndUpdate(
@@ -245,18 +244,32 @@ module.exports = {
 
             if (challengeFires) {
                 const challenge = generateWorkChallenge(job.name);
+                const isFirstWork = !updated.onboarding?.firstWorkDone;
+                const footerText = isFirstWork
+                    ? 'Tip: Higher job tiers unlock as you work more shifts. Keep grinding!'
+                    : 'Answer correctly for a bonus · Cooldown: 1h';
+
                 const challengeEmbed = new EmbedBuilder()
                     .setColor(performance.color)
                     .setTitle(challenge.title)
                     .setDescription(`*${scenario}*\n\n${challenge.description}`)
-                    .addFields({ name: '💡 Bonus', value: 'Answer correctly for a **+40% bonus** on this shift!' })
-                    .setFooter({ text: 'You have 20 seconds to answer' })
+                    .addFields({ name: '💡 Bonus', value: 'Fast correct answer: **+55%** · Correct answer: **+40%**' })
+                    .setFooter({ text: footerText })
                     .setTimestamp();
 
                 const reply = await interaction.reply({ embeds: [challengeEmbed], components: [challenge.row], fetchReply: true });
 
+                // Mark first work done (non-blocking)
+                if (isFirstWork) {
+                    User.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { $set: { 'onboarding.firstWorkDone': true } }
+                    ).catch(() => {});
+                }
+
                 let bonusEarned = 0;
                 let responseRef = null;
+                let exceptionalChallenge = false;
 
                 try {
                     const response = await reply.awaitMessageComponent({
@@ -267,7 +280,10 @@ module.exports = {
                     await responseRef.deferUpdate();
 
                     if (response.customId === challenge.correctId) {
-                        bonusEarned = Math.round(earned * 0.4);
+                        const elapsed = Date.now() - challenge.startedAt;
+                        exceptionalChallenge = elapsed <= 5000;
+                        const bonusRate = exceptionalChallenge ? 0.55 : 0.40;
+                        bonusEarned = Math.round(earned * bonusRate);
                         await User.findOneAndUpdate(
                             { userId: interaction.user.id, guildId: interaction.guild.id },
                             { $inc: { balance: bonusEarned } }
@@ -278,7 +294,7 @@ module.exports = {
                             type: 'work_challenge_bonus',
                             amount: bonusEarned,
                             balance: updated.balance + bonusEarned,
-                            note: `work challenge bonus (${challenge.type}) for ${job.name}`,
+                            note: `work challenge bonus (${challenge.type}${exceptionalChallenge ? ', fast' : ''}) for ${job.name}`,
                         });
                     }
                 } catch {
@@ -307,9 +323,16 @@ module.exports = {
                 }
 
                 if (bonusEarned > 0) {
-                    workEmbed.addFields({ name: '🎯 Challenge Bonus!', value: `✅ Correct! You earned an extra **+${bonusEarned.toLocaleString()}** coins!` });
+                    const bonusLabel = exceptionalChallenge
+                        ? `⚡ Lightning fast! You earned an extra **+${bonusEarned.toLocaleString()}** coins! (+55%)`
+                        : `✅ Correct! You earned an extra **+${bonusEarned.toLocaleString()}** coins! (+40%)`;
+                    workEmbed.addFields({ name: exceptionalChallenge ? '🎯 Exceptional Challenge!' : '🎯 Challenge Bonus!', value: bonusLabel });
                 } else {
                     workEmbed.addFields({ name: '🎯 Challenge Result', value: responseRef ? '❌ Wrong answer — no bonus this time.' : '⏱️ Time\'s up — no bonus this time.' });
+                }
+
+                if (specialEvent) {
+                    workEmbed.addFields(specialEvent.embedField);
                 }
 
                 if (promotedTo && promotedTo.minShifts > 0) {
@@ -322,49 +345,6 @@ module.exports = {
                     await interaction.editReply({ embeds: [workEmbed], components: [] }).catch(() => {});
                 }
                 return;
-            }
-
-            // Normal (no challenge) path
-            const normalDescription = performance.exceptional
-                ? `${scenario}\n\n────────────────────\n  ${currency} **${finalEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n────────────────────\n${careerValueIndented}\n────────────────────\n  Balance: ${currency} ${updated.balance.toLocaleString()} coins`
-                : `${scenario}\n\n────────────────────\n  💰 **${finalEarned.toLocaleString()} coins**${bonusStr}\n  Balance: ${currency} ${updated.balance.toLocaleString()} coins\n────────────────────`;
-
-            const embed = new EmbedBuilder()
-                .setColor(performance.color)
-                .setTitle(performance.title)
-                .setDescription(normalDescription)
-                .setFooter({ text: 'Cooldown: 1h' })
-                .setTimestamp();
-
-            if (!performance.exceptional) {
-                embed.addFields(
-                    { name: '📊 Performance', value: performance.label, inline: false },
-                    { name: '📈 Career',      value: careerValue,       inline: false }
-                );
-            }
-
-            if (specialEvent) {
-                embed.addFields(specialEvent.embedField);
-            }
-
-            if (promotedTo && promotedTo.minShifts > 0) {
-                embed.addFields({
-                    name: '🎉 Promotion!',
-                    value: `You've been promoted to **${promotedTo.name}** — new jobs and higher pay are now available!`
-                });
-            }
-
-            if (specialEvent) {
-                // Suspense reveal for special work events
-                const suspenseEmbed = new EmbedBuilder()
-                    .setColor(performance.color)
-                    .setTitle('💼 Shift Update…')
-                    .setDescription(`*${scenario}*`);
-                await interaction.reply({ embeds: [suspenseEmbed] });
-                await delay(900);
-                await interaction.editReply({ embeds: [embed] });
-            } else {
-                await interaction.reply({ embeds: [embed] });
             }
         } catch (error) {
             console.error('Work error:', error);
