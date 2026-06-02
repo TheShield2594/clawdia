@@ -267,6 +267,47 @@ module.exports = {
     }
 };
 
+// ─── Staged loot reveal for rare+ drops ──────────────────────────────────────
+async function stagedLootReveal(interaction, tier, finalEmbed) {
+    const tierNum = TIER_NUM[tier] ?? 0;
+    if (tierNum < 3) {
+        await interaction.editReply({ embeds: [finalEmbed] });
+        return;
+    }
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+
+    const fogEmbed = new EmbedBuilder()
+        .setColor('#4a4a4a')
+        .setTitle('🌫️ Something stirs beneath the surface...')
+        .setDescription('━━━━━━━━━━━━━━━\n*The water shimmers. Something extraordinary is here.*\n━━━━━━━━━━━━━━━');
+
+    if (tierNum === 3) {
+        await interaction.editReply({ embeds: [fogEmbed] });
+        await wait(1500);
+    } else {
+        await interaction.editReply({ embeds: [fogEmbed] });
+        await wait(1500);
+        const midColor = tierNum === 4 ? '#9c27b0' : '#ff9800';
+        const midTitle = tierNum === 4 ? '🔮 Something exceptional breaks the surface...' : '⚡ The line pulls taut with impossible force...';
+        const midTierLabel = tierNum === 4 ? 'EPIC' : 'LEGENDARY';
+        const midEmbed = new EmbedBuilder()
+            .setColor(midColor)
+            .setTitle(midTitle)
+            .setDescription(`━━━━━━━━━━━━━━━\n❓❓❓  **${midTierLabel}**  ❓❓❓\n━━━━━━━━━━━━━━━`);
+        await interaction.editReply({ embeds: [midEmbed] });
+        await wait(1500);
+        if (tierNum === 5) {
+            const fanfareEmbed = new EmbedBuilder()
+                .setColor('#ff9800')
+                .setTitle('⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
+                .setDescription('━━━━━━━━━━━━━━━\n*The ocean holds its breath. This catch defies all odds.*\n━━━━━━━━━━━━━━━');
+            await interaction.editReply({ embeds: [fanfareEmbed] });
+            await wait(1500);
+        }
+    }
+    await interaction.editReply({ embeds: [finalEmbed] });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // CAST
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -508,7 +549,7 @@ async function handleCast(interaction) {
     }
 
     // Fish/Shark pet: +5%/+15% yield (only if hunger >= 30)
-    const { getTotalBonus } = require('../../services/petService');
+    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, STARVING_THRESHOLD: PET_STARVE, TRAIT_FLAVOR } = require('../../services/petService');
     const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
 
     const result = executeCast(user, locationId, { reactionFactor });
@@ -712,19 +753,35 @@ async function handleCast(interaction) {
         }
     }
 
-    await interaction.editReply({ embeds: [embed] });
+    // Pet narrative: show active pet's personality flavor in description
+    if (result.success && result.catchType !== 'junk') {
+        const activePet = (user.pets || []).find(p => p.hunger >= PET_STARVE);
+        if (activePet) {
+            const petDef = PET_DEFS[activePet.petId];
+            const petName = activePet.name || petDef?.name || activePet.petId;
+            const flavorFn = TRAIT_FLAVOR[activePet.personality]?.fish;
+            if (flavorFn && petDef) {
+                const desc = embed.data.description ?? '';
+                embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
+            }
+        }
+    }
 
-    if (result.success && result.tier === 'legendary' && guildSettings?.economy?.announceRareDrops !== false) {
+    // Staged loot reveal for rare+ drops
+    await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+
+    if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
         const announceChannelId = guildSettings?.economy?.announcementChannelId;
         const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
         const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
+        const isLeg = result.tier === 'legendary';
         const announcementEmbed = new EmbedBuilder()
-            .setColor('#ff9800')
-            .setTitle('✨ Legendary Catch! ✨')
+            .setColor(isLeg ? '#ff9800' : '#9c27b0')
+            .setTitle(isLeg ? '✨ Legendary Catch! ✨' : '🔮 Epic Catch!')
             .setDescription(
-                `<@${interaction.user.id}> just pulled a ${result.fish.emoji} **${result.fish.name}** [⭐⭐⭐⭐⭐]\n` +
+                `<@${interaction.user.id}> just pulled ${result.fish.emoji} **${result.fish.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
                 `while fishing in the **${location.name}**.\n\n` +
-                `That's incredibly rare.`
+                (isLeg ? `That's incredibly rare.` : `A remarkable catch.`)
             )
             .setTimestamp();
         announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);

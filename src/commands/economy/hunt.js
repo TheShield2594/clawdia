@@ -318,6 +318,51 @@ module.exports = {
     }
 };
 
+// ─── Staged loot reveal for rare+ drops ──────────────────────────────────────
+// tier: 'common'|'uncommon'|'rare'|'epic'|'legendary'|'event'|null
+async function stagedLootReveal(interaction, tier, finalEmbed) {
+    const tierNum = TIER_NUM[tier] ?? 0;
+    if (tierNum < 3) {
+        await interaction.editReply({ embeds: [finalEmbed] });
+        return;
+    }
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+
+    const fogEmbed = new EmbedBuilder()
+        .setColor('#4a4a4a')
+        .setTitle('🌫️ Something stirs in the shadows...')
+        .setDescription('━━━━━━━━━━━━━━━\n*The shadows shift. Something is here.*\n━━━━━━━━━━━━━━━');
+
+    if (tierNum === 3) {
+        await interaction.editReply({ embeds: [fogEmbed] });
+        await wait(1500);
+    } else {
+        // Epic or Legendary: stage 1 — fog
+        await interaction.editReply({ embeds: [fogEmbed] });
+        await wait(1500);
+        // Stage 2 — partial reveal
+        const midColor = tierNum === 4 ? '#9c27b0' : '#ff9800';
+        const midTitle = tierNum === 4 ? '🔮 Something exceptional emerges...' : '⚡ The air crackles with power...';
+        const midTierLabel = tierNum === 4 ? 'EPIC' : 'LEGENDARY';
+        const midEmbed = new EmbedBuilder()
+            .setColor(midColor)
+            .setTitle(midTitle)
+            .setDescription(`━━━━━━━━━━━━━━━\n❓❓❓  **${midTierLabel}**  ❓❓❓\n━━━━━━━━━━━━━━━`);
+        await interaction.editReply({ embeds: [midEmbed] });
+        await wait(1500);
+        if (tierNum === 5) {
+            // Stage 3 — legendary fanfare
+            const fanfareEmbed = new EmbedBuilder()
+                .setColor('#ff9800')
+                .setTitle('⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
+                .setDescription('━━━━━━━━━━━━━━━\n*The air crackles. This is once in a lifetime.*\n━━━━━━━━━━━━━━━');
+            await interaction.editReply({ embeds: [fanfareEmbed] });
+            await wait(1500);
+        }
+    }
+    await interaction.editReply({ embeds: [finalEmbed] });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // START (was /hunt)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -571,7 +616,7 @@ async function executeStart(interaction) {
     }
 
     // Wolf pet: +10% coin yield; Eagle pet: +15% XP (only if hunger >= 30)
-    const { getTotalBonus } = require('../../services/petService');
+    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, STARVING_THRESHOLD: PET_STARVE, TRAIT_FLAVOR } = require('../../services/petService');
     const petYieldPct = getTotalBonus(user.pets || [], 'hunt_yield');
     const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
 
@@ -680,19 +725,35 @@ async function executeStart(interaction) {
         embed.setDescription(desc + `\n> 🌟 *Featured Zone: ${zone.emoji} ${zone.name} — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout bonus active!*`);
     }
 
-    await interaction.editReply({ embeds: [embed] });
+    // Pet narrative: show active pet's personality flavor in description
+    if (result.success) {
+        const activePet = (user.pets || []).find(p => p.hunger >= PET_STARVE);
+        if (activePet) {
+            const petDef = PET_DEFS[activePet.petId];
+            const petName = activePet.name || petDef?.name || activePet.petId;
+            const flavorFn = TRAIT_FLAVOR[activePet.personality]?.hunt;
+            if (flavorFn && petDef) {
+                const desc = embed.data.description ?? '';
+                embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
+            }
+        }
+    }
 
-    if (result.success && result.tier === 'legendary' && guildSettings?.economy?.announceRareDrops !== false) {
+    // Staged loot reveal for rare+ drops
+    await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+
+    if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
         const announceChannelId = guildSettings?.economy?.announcementChannelId;
         const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
         const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
+        const isLeg = result.tier === 'legendary';
         const announcementEmbed = new EmbedBuilder()
-            .setColor('#ff9800')
-            .setTitle('✨ Legendary Trophy! ✨')
+            .setColor(isLeg ? '#ff9800' : '#9c27b0')
+            .setTitle(isLeg ? '✨ Legendary Trophy! ✨' : '🔮 Epic Find!')
             .setDescription(
-                `<@${interaction.user.id}> just brought down a ${result.animal.emoji} **${result.animal.name}** [⭐⭐⭐⭐⭐]\n` +
+                `<@${interaction.user.id}> just brought down ${result.animal.emoji} **${result.animal.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
                 `deep in the **${zone.name}**.\n\n` +
-                `Only a handful of hunters have ever managed that.`
+                (isLeg ? `Only a handful of hunters have ever managed that.` : `A rare moment in the wild.`)
             )
             .setTimestamp();
         announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
