@@ -445,6 +445,7 @@ const userSchema = new Schema({
         restUntil:          { type: Date,    default: null },
         potw:               { type: Boolean, default: false },
         weeklyInteractions: { type: Number,  default: 0    },
+        personality:        { type: String,  default: null },
     }],
 
     // Pet of the Week tracking
