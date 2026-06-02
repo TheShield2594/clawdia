@@ -46,16 +46,24 @@ async function handleDeposit(interaction) {
         note: `Deposited ${amount} to bank`
     });
 
-    const embed = new EmbedBuilder()
+    const isLarge = amount >= 10000;
+    const depositTitle = isLarge ? '💼 Vault Secured' : '🏦 Deposit Successful';
+    const depositDesc = isLarge
+        ? `💼 Safely secured. **${amount.toLocaleString()} coins** locked in your vault.`
+        : null;
+
+    const depositEmbed = new EmbedBuilder()
         .setColor('#00ff00')
-        .setTitle('Deposit Successful')
+        .setTitle(depositTitle)
         .addFields(
-            { name: 'Deposited', value: `${currency}${amount}`, inline: true },
-            { name: 'Wallet', value: `${currency}${userData.balance}`, inline: true },
-            { name: 'Bank', value: `${currency}${userData.bank}`, inline: true }
+            { name: 'Deposited', value: `${currency}${amount.toLocaleString()}`, inline: true },
+            { name: 'Wallet', value: `${currency}${userData.balance.toLocaleString()}`, inline: true },
+            { name: 'Bank', value: `${currency}${userData.bank.toLocaleString()}`, inline: true }
         );
 
-    await interaction.reply({ embeds: [embed] });
+    if (depositDesc) depositEmbed.setDescription(depositDesc);
+
+    await interaction.reply({ embeds: [depositEmbed] });
 }
 
 async function handleWithdraw(interaction) {
@@ -100,9 +108,9 @@ async function handleWithdraw(interaction) {
         .setColor('#00ff00')
         .setTitle('Withdrawal Successful')
         .addFields(
-            { name: 'Withdrawn', value: `${currency}${amount}`, inline: true },
-            { name: 'Wallet', value: `${currency}${userData.balance}`, inline: true },
-            { name: 'Bank', value: `${currency}${userData.bank}`, inline: true }
+            { name: 'Withdrawn', value: `${currency}${Number(amount).toLocaleString()}`, inline: true },
+            { name: 'Wallet', value: `${currency}${Number(userData.balance).toLocaleString()}`, inline: true },
+            { name: 'Bank', value: `${currency}${Number(userData.bank).toLocaleString()}`, inline: true }
         );
 
     await interaction.reply({ embeds: [embed] });
