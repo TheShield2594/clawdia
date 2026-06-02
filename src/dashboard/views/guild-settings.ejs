@@ -1838,10 +1838,16 @@
                             <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates</span></span>
                             <span class="switch"><input type="checkbox" id="ai-streaming" <%= settings.ai.streaming !== false ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
-                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
                             <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables</small></div>
+                            <div><label class="field-label" for="ai-rate-channel">Rate limit (requests / channel)</label><input type="number" id="ai-rate-channel" min="0" value="<%= settings.ai.rateLimitPerChannel ?? 0 %>"><small>0 disables</small></div>
                             <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
                         </div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable AI actions</strong><span>Let the AI create polls, set reminders, and suggest mod actions</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-actions-enabled" <%= settings.ai.actionsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
                         <div class="actions-row">
                             <button class="btn btn-primary" onclick="saveSettings('ai')">Save changes</button>
                         </div>
@@ -2162,8 +2168,8 @@
 
         const AI_MODEL_DEFAULTS = {
             openai: 'gpt-4o-mini',
-            anthropic: 'claude-haiku-4-5-20251001',
-            gemini: 'gemini-1.5-flash',
+            anthropic: 'claude-haiku-4-5',
+            gemini: 'gemini-2.0-flash',
             openrouter: 'openai/gpt-4o-mini',
             ollama: 'llama3.2'
         };
@@ -2654,7 +2660,9 @@
                     'ai.maxHistory': parseInt(document.getElementById('ai-max-history').value, 10),
                     'ai.streaming': document.getElementById('ai-streaming').checked,
                     'ai.rateLimitPerUser': parseInt(document.getElementById('ai-rate-limit').value, 10),
-                    'ai.rateLimitWindowMin': parseInt(document.getElementById('ai-rate-window').value, 10)
+                    'ai.rateLimitPerChannel': parseInt(document.getElementById('ai-rate-channel').value, 10),
+                    'ai.rateLimitWindowMin': parseInt(document.getElementById('ai-rate-window').value, 10),
+                    'ai.actionsEnabled': document.getElementById('ai-actions-enabled').checked
                 };
             } else if (section === 'tempvoice') {
                 data = {
