@@ -37,16 +37,19 @@ module.exports = {
                 ? `🔥 ${streakDays}-day streak · **${streakMult}x** coins & XP${freezeTag}`
                 : `❄️ ${streakDays}-day streak · 1.0x (7 days for bonus)${freezeTag}`;
 
+            const total = user.balance + user.bank;
+            const isSelf = targetUser.id === interaction.user.id;
+            const titleName = isSelf ? 'Your' : `${targetUser.username}'s`;
+
             const embed = new EmbedBuilder()
-                .setColor('#00ff00')
-                .setTitle(`${targetUser.username}'s Balance`)
-                .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
-                .addFields(
-                    { name: '💰 Wallet', value: `${user.balance.toLocaleString()} coins`, inline: true },
-                    { name: '🏦 Bank',   value: `${user.bank.toLocaleString()} coins`,    inline: true },
-                    { name: '💎 Total',  value: `${(user.balance + user.bank).toLocaleString()} coins`, inline: true },
-                    { name: '⚡ Streak Bonus', value: streakInfo, inline: false }
+                .setColor('#FFD700')
+                .setAuthor({ name: `${titleName} Dashboard`, iconURL: targetUser.displayAvatarURL({ dynamic: true }) })
+                .setDescription(
+                    `**💰 Wallet** · ${user.balance.toLocaleString()} coins\n` +
+                    `**🏦 Bank** · ${user.bank.toLocaleString()} coins\n` +
+                    `**💎 Net Worth** · ${total.toLocaleString()} coins`
                 )
+                .addFields({ name: '⚡ Streak', value: streakInfo, inline: false })
                 .setTimestamp();
 
             // Show server boost banner if active
