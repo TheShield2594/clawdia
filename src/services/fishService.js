@@ -573,7 +573,8 @@ function executeCast(user, locationId, options = {}) {
 
             Object.assign(result, {
                 junkItem: junk, finalPayout: adjustedPayout,
-                xpEarned: xpGain, levelUp: lvResult.leveledUp ? lvResult : null, cappedByHard
+                xpEarned: xpGain, levelUp: lvResult.leveledUp ? lvResult : null, cappedByHard,
+                streakMult
             });
             f.successfulCasts += 1;
             f.consecutiveFails = 0;
@@ -598,7 +599,8 @@ function executeCast(user, locationId, options = {}) {
 
             Object.assign(result, {
                 treasureItem: treasure, finalPayout: adjustedPayout,
-                xpEarned: xpGain, levelUp: lvResult.leveledUp ? lvResult : null, cappedByHard
+                xpEarned: xpGain, levelUp: lvResult.leveledUp ? lvResult : null, cappedByHard,
+                streakMult
             });
             f.successfulCasts += 1;
             f.consecutiveFails = 0;
@@ -735,7 +737,8 @@ function executeCast(user, locationId, options = {}) {
                 sizeLabel, sizeTierId, weightLbs, specialDrop, xpEarned: xpGain,
                 levelUp: lvResult.leveledUp ? lvResult : null, cappedByHard,
                 traitEffects: Object.keys(traits).filter(t => traits[t]),
-                isPersonalBest, newRecord
+                isPersonalBest, newRecord,
+                streakMult
             });
 
             // ── Boss encounter check (Issue #154) ──────────────────────────

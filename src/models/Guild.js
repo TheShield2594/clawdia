@@ -567,6 +567,8 @@ const guildSchema = new Schema({
     achievements: {
         enabled: { type: Boolean, default: false },
         announcementChannelId: { type: String, default: null },
+        // Minimum tier to broadcast server-wide: 'rare' | 'secret' | 'legendary'
+        achievementAnnounceThreshold: { type: String, enum: ['rare', 'secret', 'legendary'], default: 'rare' },
         disabledAchievements: [{ type: String }],
         customAchievements: [{
             id:          { type: String, required: true },
