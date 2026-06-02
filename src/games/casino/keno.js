@@ -21,6 +21,8 @@ const DRAW_COUNT = 10;
 // EV = 0.278×1 + 0.079×4 + 0.0096×15 + 0.00038×100 ≈ 0.778
 const PAYOUTS = { 2: 1, 3: 4, 4: 15, 5: 100 };
 
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
 function drawNumbers() {
     const pool = Array.from({ length: POOL_SIZE }, (_, i) => i + 1);
     for (let i = pool.length - 1; i > 0; i--) {
@@ -37,33 +39,44 @@ function embedAuthor(interaction) {
     };
 }
 
-function formatNumbers(picked, drawn, revealed) {
-    return drawn.slice(0, revealed).map(n => {
-        const hit = picked.includes(n);
-        return hit ? `**[${n}]**` : `${n}`;
-    }).join('  ');
-}
-
-// Renders all 40 numbers in a 4-row × 10-col monospace grid.
-// picked numbers are marked ●, drawn numbers are marked ■, matches are marked ★.
-function formatKenoGrid(picked, drawn) {
+// 4-row × 10-col emoji grid
+// ⬛ = unselected  🟦 = your pick (not drawn)  🟥 = drawn (not your pick)  🟨 = match!
+function formatKenoGrid(picked, drawn, revealedCount = DRAW_COUNT) {
+    const revealedDrawn = drawn.slice(0, revealedCount);
     const rows = [];
     for (let row = 0; row < 4; row++) {
         const cells = [];
         for (let col = 1; col <= 10; col++) {
             const n = row * 10 + col;
             const isPicked = picked.includes(n);
-            const isDrawn  = drawn.includes(n);
-            let cell;
-            if (isPicked && isDrawn) cell = `★${String(n).padStart(2)}`;
-            else if (isPicked)       cell = `●${String(n).padStart(2)}`;
-            else if (isDrawn)        cell = `■${String(n).padStart(2)}`;
-            else                     cell = ` ${String(n).padStart(2)}`;
-            cells.push(cell);
+            const isDrawn  = revealedDrawn.includes(n);
+            if (isPicked && isDrawn) cells.push('🟨');
+            else if (isPicked)       cells.push('🟦');
+            else if (isDrawn)        cells.push('🟥');
+            else                     cells.push('⬛');
         }
-        rows.push(cells.join(' '));
+        rows.push(cells.join(''));
     }
-    return `\`\`\`\n${rows.join('\n')}\n\n● picked  ■ drawn  ★ match\`\`\``;
+    return rows.join('\n') + '\n-# ⬛ blank  🟦 your pick  🟥 drawn  🟨 match';
+}
+
+function hitBar(hits) {
+    const filled = '🟨'.repeat(hits);
+    const empty  = '⬛'.repeat(PICK_COUNT - hits);
+    return filled + empty;
+}
+
+// Near-miss: how many picks were within 2 of any drawn number
+function nearMissCount(picked, drawn) {
+    return picked.filter(p => drawn.some(d => Math.abs(d - p) <= 2 && !drawn.includes(p))).length;
+}
+
+function phaseTitle(hits, total) {
+    if (hits === 0) return '🎱 Drawing… no hits yet';
+    if (hits === 1) return '🎱 One match!';
+    if (hits === 2) return '🎱 Two matches!';
+    if (hits >= 3)  return `🎱 ${hits} matches — keep going!`;
+    return '🎱 Drawing…';
 }
 
 async function playKeno(interaction, bet, picked) {
@@ -72,9 +85,7 @@ async function playKeno(interaction, bet, picked) {
     let settled = false;
 
     try {
-        const [guildSettings] = await Promise.all([
-            Guild.findOne({ guildId: interaction.guild.id }),
-        ]);
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
         debited = await User.findOneAndUpdate(
             { ...userFilter, balance: { $gte: bet } },
@@ -89,31 +100,71 @@ async function playKeno(interaction, bet, picked) {
             });
         }
 
-        const drawn = drawNumbers();
-        const delay = ms => new Promise(r => setTimeout(r, ms));
-
+        const drawn   = drawNumbers();
         const pickedStr = picked.map(n => `**${n}**`).join('  ');
 
-        // Reveal numbers one by one
-        for (let i = 1; i <= DRAW_COUNT; i++) {
+        // ── Phase 1: Draw numbers 1-5 one at a time ──────────────────────────
+        for (let i = 1; i <= 5; i++) {
             const hits = drawn.slice(0, i).filter(n => picked.includes(n)).length;
             const embed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
                 .setColor('#5865F2')
-                .setTitle('🎱 Keno — Drawing Numbers')
+                .setTitle(phaseTitle(hits, i))
+                .setDescription(formatKenoGrid(picked, drawn, i))
                 .addFields(
-                    { name: '🎯 Your Numbers', value: pickedStr, inline: false },
-                    { name: `🔵 Drawn (${i}/${DRAW_COUNT})`, value: formatNumbers(picked, drawn, i) || '…', inline: false },
-                    { name: '✅ Matches', value: `**${hits}** / ${PICK_COUNT}`, inline: true },
-                    { name: '💰 Bet', value: `**${bet.toLocaleString()}** coins`, inline: true },
+                    { name: '🎯 Your Picks', value: pickedStr, inline: true },
+                    { name: `🔵 Drawing (${i}/10)`, value: `${hitBar(hits)}  **${hits}** hit`, inline: true },
                 )
-                .setFooter({ text: `2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×` });
+                .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' });
             await interaction.editReply({ embeds: [embed] });
-            await delay(800);
+            await delay(650);
         }
 
-        const matches = drawn.filter(n => picked.includes(n)).length;
+        // ── Midpoint suspense break ───────────────────────────────────────────
+        const midHits = drawn.slice(0, 5).filter(n => picked.includes(n)).length;
+        const remaining = PICK_COUNT - midHits;
+        let suspenseText;
+        if (midHits === 5)     suspenseText = '🔥 **All 5 matched in the first draw!** Last 5 are gravy…';
+        else if (midHits >= 3) suspenseText = `✅ **${midHits} matched** so far — ${remaining} more to go for the jackpot!`;
+        else if (midHits === 2) suspenseText = `🎯 **2 matched** — one more for a profit…`;
+        else if (midHits === 1) suspenseText = `😬 **1 matched** — need ${remaining} of the next 5…`;
+        else                   suspenseText  = `💨 **Nothing yet** — all ${PICK_COUNT} need to come from the last 5…`;
+
+        const midEmbed = new EmbedBuilder()
+            .setAuthor(embedAuthor(interaction))
+            .setThumbnail(THUMB)
+            .setColor('#5865F2')
+            .setTitle('🎱 Halfway — Drawing 6 of 10…')
+            .setDescription(formatKenoGrid(picked, drawn, 5))
+            .addFields(
+                { name: '🎯 Your Picks', value: pickedStr, inline: true },
+                { name: '📊 Midpoint', value: suspenseText, inline: false },
+            )
+            .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' });
+        await interaction.editReply({ embeds: [midEmbed] });
+        await delay(1200);
+
+        // ── Phase 2: Draw numbers 6-10 one at a time ─────────────────────────
+        for (let i = 6; i <= 10; i++) {
+            const hits = drawn.slice(0, i).filter(n => picked.includes(n)).length;
+            const embed = new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#5865F2')
+                .setTitle(phaseTitle(hits, i))
+                .setDescription(formatKenoGrid(picked, drawn, i))
+                .addFields(
+                    { name: '🎯 Your Picks', value: pickedStr, inline: true },
+                    { name: `🔵 Drawing (${i}/10)`, value: `${hitBar(hits)}  **${hits}** hit`, inline: true },
+                )
+                .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' });
+            await interaction.editReply({ embeds: [embed] });
+            await delay(650);
+        }
+
+        // ── Calculate result ──────────────────────────────────────────────────
+        const matches    = drawn.filter(n => picked.includes(n)).length;
         const multiplier = PAYOUTS[matches] ?? 0;
 
         const luckyActive      = hasEffect(debited, 'lucky_charm');
@@ -124,21 +175,18 @@ async function playKeno(interaction, bet, picked) {
 
         let grossPayout = multiplier > 0 ? bet * multiplier : 0;
 
-        // Lucky Charm: on loss/no match, 20% chance to give bet back
         let charmTriggered = false;
         if (grossPayout === 0 && luckyActive && Math.random() < 0.20) {
             grossPayout = bet;
             charmTriggered = true;
         }
 
-        // Lucky Streak: convert remaining losses
         let streakTriggered = false;
         if (grossPayout === 0 && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
             grossPayout = bet;
             streakTriggered = true;
         }
 
-        // Apply coin multiplier to net profit only
         let adjustedPayout = grossPayout;
         if (grossPayout > bet && totalCoinMult > 1.0) {
             adjustedPayout = bet + Math.round((grossPayout - bet) * totalCoinMult);
@@ -157,34 +205,78 @@ async function playKeno(interaction, bet, picked) {
 
         const net    = credit - bet;
         const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
-
-        let color, title, desc;
-        if (matches === 5) {
-            color = '#FF00FF'; title = '🎱 ✨ PERFECT MATCH ✨';
-            desc  = '🎯🎯🎯🎯🎯 **All 5 numbers matched! Incredible!**';
-        } else if (matches === 4) {
-            color = '#00FF00'; title = '🎱 4 Matches — Big Win!';
-            desc  = '🎯🎯🎯🎯 **Four matches — massive payout!**';
-        } else if (matches === 3) {
-            color = '#FFAA00'; title = '🎱 3 Matches — Winner!';
-            desc  = '🎯🎯🎯 **Three matches — you won!**';
-        } else if (matches === 2) {
-            color = '#f39c12'; title = '🎱 2 Matches — Bet Returned!';
-            desc  = '🎯🎯 **Two matches — your bet is back!**';
-        } else if (charmTriggered || streakTriggered) {
-            color = '#f39c12'; title = '🎱 Lucky Save!';
-            desc  = charmTriggered ? '🍀 **Lucky Charm** returned your bet!' : '🎯 **Lucky Streak** returned your bet!';
-        } else {
-            color = '#e74c3c'; title = `🎱 ${matches} Match${matches !== 1 ? 'es' : ''} — No Win`;
-            desc  = matches > 0 ? `You matched ${matches} — need 3+ to win.` : '💨 No matches this time.';
-        }
-
-        const kenoGrid = formatKenoGrid(picked, drawn);
         let boostNote = '';
         if (totalCoinMult > 1.0 && adjustedPayout > bet) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
+        // ── Special celebration for big wins ──────────────────────────────────
+        if (matches === 5) {
+            await delay(400);
+            const stage1 = new EmbedBuilder()
+                .setColor('#FFD700')
+                .setTitle('🎱 Wait…')
+                .setDescription('> Counting your matches…')
+                .setAuthor(embedAuthor(interaction));
+            await interaction.editReply({ embeds: [stage1] });
+            await delay(900);
+
+            const stage2 = new EmbedBuilder()
+                .setColor('#FFD700')
+                .setTitle('🎱 1… 2… 3… 4…')
+                .setDescription('> 🟨🟨🟨🟨 — one more…')
+                .setAuthor(embedAuthor(interaction));
+            await interaction.editReply({ embeds: [stage2] });
+            await delay(1100);
+        } else if (matches === 4) {
+            await delay(400);
+            const stage1 = new EmbedBuilder()
+                .setColor('#00FF88')
+                .setTitle('🎱 4 Matches…')
+                .setDescription('> 🟨🟨🟨🟨 — **That\'s a massive hit!**')
+                .setAuthor(embedAuthor(interaction));
+            await interaction.editReply({ embeds: [stage1] });
+            await delay(900);
+        }
+
+        // ── Build final result embed ──────────────────────────────────────────
+        let color, title, desc;
+        if (matches === 5) {
+            color = '#FFD700';
+            title = '🎱 ★ PERFECT KENO ★  ALL FIVE MATCHED!';
+            desc  = '🟨🟨🟨🟨🟨\n# 💥 100× JACKPOT! 💥\nEvery single pick hit. This almost never happens.';
+        } else if (matches === 4) {
+            color = '#00FF88';
+            title = '🎱 Four Matches — 15× Win!';
+            desc  = '🟨🟨🟨🟨⬛\n**Four picks landed — huge payout!**';
+        } else if (matches === 3) {
+            color = '#FFAA00';
+            title = '🎱 Three Matches — 4× Win!';
+            desc  = '🟨🟨🟨⬛⬛\n**Three picks hit — you\'re up!**';
+        } else if (matches === 2) {
+            color = '#f39c12';
+            title = '🎱 Two Matches — Bet Returned';
+            desc  = '🟨🟨⬛⬛⬛\nBreak-even — your bet comes back.';
+        } else if (charmTriggered || streakTriggered) {
+            color = '#f39c12';
+            title = '🎱 Lucky Save!';
+            desc  = charmTriggered ? '🍀 **Lucky Charm** returned your bet!' : '🎯 **Lucky Streak** returned your bet!';
+        } else {
+            const nm = nearMissCount(picked, drawn);
+            color = '#e74c3c';
+            if (matches === 1) {
+                title = '🎱 One Match — So Close';
+                desc  = '🟨⬛⬛⬛⬛\nJust one away from breaking even. The next one could be it.';
+            } else if (nm >= 3) {
+                title = '🎱 No Matches — Near Miss';
+                desc  = `💨 Not this time — but **${nm} of your picks** were within 2 of a drawn number. The board was close.`;
+            } else {
+                title = '🎱 No Matches';
+                desc  = '💨 Cold board this round. The 🟦 and 🟥 didn\'t meet.';
+            }
+        }
+
         const payoutLabel = credit > 0 ? '🏆 Payout' : '💀 Lost';
         const payoutAmt   = credit > 0 ? adjustedPayout : bet;
+
         const resultEmbed = new EmbedBuilder()
             .setAuthor(embedAuthor(interaction))
             .setThumbnail(THUMB)
@@ -192,15 +284,13 @@ async function playKeno(interaction, bet, picked) {
             .setTitle(title)
             .setDescription(
                 `${desc}${boostNote}\n\n` +
-                `────────────────────\n` +
-                `💸 Bet: ${bet.toLocaleString()}  ·  ${payoutLabel}: ${payoutAmt.toLocaleString()}  ·  📊 Net: **${netStr}**\n` +
-                `────────────────────`
+                `> 💸 Bet **${bet.toLocaleString()}**  ·  ${payoutLabel} **${payoutAmt.toLocaleString()}**  ·  Net **${netStr}**`
             )
             .addFields(
-                { name: '🎯 Your Numbers',   value: pickedStr,                                                inline: false },
-                { name: '🔢 Number Grid',    value: kenoGrid,                                                 inline: false },
-                { name: '✅ Matches',         value: `**${matches}** / ${PICK_COUNT}`,                        inline: true  },
-                { name: '💰 Balance',         value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true  },
+                { name: '🎯 Your Picks', value: pickedStr,                                                 inline: false },
+                { name: '🗺️ Board',      value: formatKenoGrid(picked, drawn),                             inline: false },
+                { name: '✅ Matches',    value: `${hitBar(matches)}  **${matches} / ${PICK_COUNT}**`,      inline: true  },
+                { name: '💰 Balance',    value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`,   inline: true  },
             )
             .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' })
             .setTimestamp();
