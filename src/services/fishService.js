@@ -735,7 +735,8 @@ function executeCast(user, locationId, options = {}) {
                 sizeLabel, sizeTierId, weightLbs, specialDrop, xpEarned: xpGain,
                 levelUp: lvResult.leveledUp ? lvResult : null, cappedByHard,
                 traitEffects: Object.keys(traits).filter(t => traits[t]),
-                isPersonalBest, newRecord
+                isPersonalBest, newRecord,
+                streakMult
             });
 
             // ── Boss encounter check (Issue #154) ──────────────────────────

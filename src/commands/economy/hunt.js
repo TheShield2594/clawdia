@@ -41,6 +41,7 @@ const {
     applyXp
 } = require('../../services/huntService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { stackBar } = require('../../utils/rewardReveal');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../data/featuredRotation');
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
@@ -797,8 +798,13 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
                 { name: 'Stamina',  value: buildStaminaLine(user),                inline: true }
             );
 
-        if (isCrit) {
-            embed.addFields({ name: 'Crit Multiplier', value: `×${critMultiplier}`, inline: true });
+        const huntMultEntries = [];
+        if ((result.streakMult ?? 1) > 1.0) huntMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
+        if (isCrit)                          huntMultEntries.push({ emoji: '⚡', label: `${critMultiplier}x crit` });
+        if (trophyQuality && trophyQuality.multiplier > 1.0) huntMultEntries.push({ emoji: trophyQuality.emoji, label: `${trophyQuality.multiplier.toFixed(2)}x` });
+        if (huntMultEntries.length > 0) {
+            const combined = (result.streakMult ?? 1) * critMultiplier * (trophyQuality?.multiplier ?? 1);
+            embed.addFields({ name: '📈 Multipliers', value: stackBar(huntMultEntries, combined, finalPayout, currency), inline: false });
         }
 
         if (traits && traits.length > 0) {

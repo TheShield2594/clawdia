@@ -8,11 +8,12 @@ const { randomFrom, ROB_WIN_LINES, ROB_FAIL_LINES } = require('../../utils/copyL
 const { delay } = require('../../utils/delay');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
-const ROBBER_COOLDOWN_MS = 1 * 3_600_000; // 1 hour
-const VICTIM_IMMUNITY_MS = 30 * 60_000;   // 30 minutes
+const ROBBER_COOLDOWN_MS  = 1 * 3_600_000; // 1 hour
+const VICTIM_IMMUNITY_MS  = 30 * 60_000;   // 30 minutes
 const BASE_SUCCESS_CHANCE = 0.40;
-const ROB_STEAL_MIN = 0.10;
-const ROB_STEAL_MAX = 0.40;
+const ROB_STEAL_MIN       = 0.10;
+const ROB_STEAL_MAX       = 0.40;
+const TRAP_FINE_MULTIPLIER = 2;            // trap doubles the normal fine
 
 // Standalone MongoDB deployments don't support multi-doc transactions, so
 // persist both balances sequentially. If the victim save fails after the
@@ -184,6 +185,21 @@ module.exports = {
                 }
                 victim.lastRobbedAt = new Date();
                 if (padlockActive) consumeEffect(victim, 'padlock');
+
+                // ── Trap check ────────────────────────────────────────────────
+                const trapActive = victim.trap?.expiresAt && victim.trap.expiresAt > new Date();
+                let trapFine = 0;
+                if (trapActive) {
+                    // Compute doubled fine and apply it
+                    const normalFine = Math.floor(robber.balance * failFineRate);
+                    trapFine = Math.min(normalFine * TRAP_FINE_MULTIPLIER, robber.balance);
+                    robber.balance = Math.max(0, robber.balance - trapFine);
+                    victim.balance += trapFine;
+                    // Consume the trap
+                    victim.trap.setAt     = null;
+                    victim.trap.expiresAt = null;
+                }
+
                 const robAchievements = await checkAndAward(robber, guildSettings).catch(() => []);
                 await saveRobState(robber, victim, robberSnapshot);
                 if (robAchievements.length) {
@@ -191,19 +207,64 @@ module.exports = {
                 }
 
                 const bagNote = hasEffect(robber, 'robbery_bag') ? '\n> 💼 *Robbery Bag boosted your haul by 10%!*' : '';
-                embed = new EmbedBuilder()
-                    .setColor('#f39c12')
-                    .setTitle('🦹 Successful Heist!')
-                    .setDescription(`${randomFrom(ROB_WIN_LINES)} You took **${currency}${stolen.toLocaleString()}** from **${target.username}**.${bagNote}`)
-                    .addFields(
-                        { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true },
-                        { name: 'Their Balance', value: `${currency}${victim.balance.toLocaleString()}`, inline: true }
-                    )
-                    .setFooter({ text: 'Cooldown: 1h' })
-                    .setTimestamp();
 
-                if (padlockActive) {
-                    embed.addFields({ name: '🔒 Padlock Broken!', value: `${target.username}'s bank was protected, but their padlock is now gone!`, inline: false });
+                if (trapActive) {
+                    // Trap triggered: suspense then reveal the trap
+                    await interaction.editReply({
+                        embeds: [new EmbedBuilder()
+                            .setColor('#f39c12')
+                            .setTitle('🦹 Successful Heist!')
+                            .setDescription(`${randomFrom(ROB_WIN_LINES)} You took **${currency}${stolen.toLocaleString()}** from **${target.username}**.${bagNote}`)]
+                    });
+                    await delay(900);
+
+                    embed = new EmbedBuilder()
+                        .setColor('#e74c3c')
+                        .setTitle('💥 TRAP TRIGGERED!')
+                        .setDescription(
+                            `**${target.username}** set a **Tripwire**!\n\n` +
+                            `You stole **${currency}${stolen.toLocaleString()}** — but walked straight into their trap.\n` +
+                            `You paid a **2× fine** of **${currency}${trapFine.toLocaleString()}** back to them.`
+                        )
+                        .addFields(
+                            { name: 'Robber Balance', value: `${currency}${robber.balance.toLocaleString()}`,  inline: true },
+                            { name: 'Victim Balance', value: `${currency}${victim.balance.toLocaleString()}`, inline: true },
+                            { name: 'Fine Paid',      value: `${currency}${trapFine.toLocaleString()}`,       inline: true }
+                        )
+                        .setFooter({ text: 'Cooldown: 1h' })
+                        .setTimestamp();
+
+                    // Server-wide announcement
+                    const announceChannelId = guildSettings?.economy?.announcementChannelId;
+                    const announceChannel   = announceChannelId
+                        ? interaction.guild.channels.cache.get(announceChannelId)
+                        : null;
+                    if (announceChannel?.isTextBased()) {
+                        const trapAnnounce = new EmbedBuilder()
+                            .setColor('#e74c3c')
+                            .setTitle('🪤 Trap Sprung!')
+                            .setDescription(
+                                `<@${target.id}>'s trap just caught <@${interaction.user.id}> red-handed!\n\n` +
+                                `The robber paid **${currency}${trapFine.toLocaleString()}** for their trouble.`
+                            )
+                            .setTimestamp();
+                        announceChannel.send({ embeds: [trapAnnounce] }).catch(() => null);
+                    }
+                } else {
+                    embed = new EmbedBuilder()
+                        .setColor('#f39c12')
+                        .setTitle('🦹 Successful Heist!')
+                        .setDescription(`${randomFrom(ROB_WIN_LINES)} You took **${currency}${stolen.toLocaleString()}** from **${target.username}**.${bagNote}`)
+                        .addFields(
+                            { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true },
+                            { name: 'Their Balance', value: `${currency}${victim.balance.toLocaleString()}`, inline: true }
+                        )
+                        .setFooter({ text: 'Cooldown: 1h' })
+                        .setTimestamp();
+
+                    if (padlockActive) {
+                        embed.addFields({ name: '🔒 Padlock Broken!', value: `${target.username}'s bank was protected, but their padlock is now gone!`, inline: false });
+                    }
                 }
             } else {
                 const fine = Math.floor(robber.balance * failFineRate);

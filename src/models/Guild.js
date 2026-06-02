@@ -567,6 +567,10 @@ const guildSchema = new Schema({
     achievements: {
         enabled: { type: Boolean, default: false },
         announcementChannelId: { type: String, default: null },
+        // Channel for server-wide broadcasts (rare/legendary/secret unlocks)
+        achievementAnnounceChannelId: { type: String, default: null },
+        // Minimum tier to broadcast: 'rare' | 'secret' | 'legendary'
+        achievementAnnounceThreshold: { type: String, default: 'rare' },
         disabledAchievements: [{ type: String }],
         customAchievements: [{
             id:          { type: String, required: true },

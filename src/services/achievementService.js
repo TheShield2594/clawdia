@@ -54,6 +54,77 @@ function getTierColor(xpReward) {
     return 0xFFD700;                                    // legendary
 }
 
+// XP + secret flag → announcement tier
+// Returns 'none' | 'rare' | 'secret' | 'legendary'
+function getAnnounceTier(def) {
+    if (def.secret)                           return 'secret';
+    if (!def.xpReward || def.xpReward <= 200) return 'none';     // common/uncommon
+    if (def.xpReward <= 999)                  return 'rare';
+    return 'legendary';
+}
+
+// Minimum tier order (for threshold config)
+const ANNOUNCE_TIER_ORDER = { none: 0, rare: 1, secret: 2, legendary: 3 };
+
+function tierMeetsThreshold(tier, threshold) {
+    const min = ANNOUNCE_TIER_ORDER[threshold] ?? 1;
+    return ANNOUNCE_TIER_ORDER[tier] >= min;
+}
+
+/**
+ * Send a server-wide announcement for notable achievement unlocks.
+ * Tiers: rare = brief mention, secret = redacted, legendary = fancy bordered.
+ * Respects `achievementAnnounceChannel` and `achievementAnnounceThreshold` guild settings.
+ */
+async function broadcastAchievementUnlock(client, guildSettings, member, def) {
+    const channelId = guildSettings.achievements?.achievementAnnounceChannelId
+        ?? guildSettings.economy?.announcementChannelId;
+    if (!channelId) return;
+
+    const tier = getAnnounceTier(def);
+    const threshold = guildSettings.achievements?.achievementAnnounceThreshold ?? 'rare';
+    if (!tierMeetsThreshold(tier, threshold)) return;
+
+    const guild = client.guilds.cache.get(guildSettings.guildId);
+    if (!guild) return;
+    const channel = guild.channels.cache.get(channelId);
+    if (!channel?.isTextBased()) return;
+
+    const { EmbedBuilder } = require('discord.js');
+    const mention = `<@${member?.id ?? member?.user?.id}>`;
+
+    let embed;
+    if (tier === 'legendary') {
+        const bar = '⚡ ════════════════════════ ⚡';
+        embed = new EmbedBuilder()
+            .setColor(0xFFD700)
+            .setTitle(`${bar}`)
+            .setDescription(
+                `${bar}\n👑 ${mention} just achieved the legendary\n\n` +
+                `**${def.emoji || '🏆'} ${def.name.toUpperCase()}**\n\n` +
+                `${def.description}\n${bar}`
+            )
+            .setTimestamp();
+    } else if (tier === 'secret') {
+        embed = new EmbedBuilder()
+            .setColor(0x9c27b0)
+            .setTitle('✨ Secret Achievement Discovered!')
+            .setDescription(
+                `${mention} just discovered a **secret achievement**…\n\n🔒 *"[REDACTED]"*\n\nCan you find it too?`
+            )
+            .setTimestamp();
+    } else {
+        // rare
+        embed = new EmbedBuilder()
+            .setColor(getTierColor(def.xpReward))
+            .setTitle('🏆 Achievement Unlocked')
+            .setDescription(`${def.emoji || '🏆'} ${mention} just unlocked **${def.name}** — ${def.description}`)
+            .setTimestamp();
+    }
+
+    channel.send({ embeds: [embed] }).catch(() => null);
+}
+
 /**
  * Post achievement unlock announcements to the configured channel.
  * Each achievement is revealed in two steps (mystery → reveal) with an 800ms gap,
@@ -113,6 +184,9 @@ async function announceAchievements(client, guildSettings, user, member, achieve
         } catch { /* non-critical — send embed without card */ }
 
         await msg.edit({ embeds: [revealEmbed], files }).catch(() => null);
+
+        // Server-wide broadcast for notable unlocks (fire-and-forget)
+        broadcastAchievementUnlock(client, guildSettings, member, ach).catch(() => null);
     }
 }
 

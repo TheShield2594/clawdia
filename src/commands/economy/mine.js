@@ -40,6 +40,7 @@ const {
     activateMineLock
 } = require('../../services/mineService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { stackBar } = require('../../utils/rewardReveal');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
@@ -1430,8 +1431,12 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
                 { name: 'Stamina',  value: buildStaminaLine(user),                  inline: true }
             );
 
-        if (isCrit) {
-            embed.addFields({ name: 'Crit Multiplier', value: `×${critMultiplier}`, inline: true });
+        const mineMultEntries = [];
+        if ((result.streakMult ?? 1) > 1.0) mineMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
+        if (isCrit)                          mineMultEntries.push({ emoji: '⚡', label: `${critMultiplier}x crit` });
+        if (mineMultEntries.length > 0) {
+            const mineCombined = (result.streakMult ?? 1) * critMultiplier;
+            embed.addFields({ name: '📈 Multipliers', value: stackBar(mineMultEntries, mineCombined, finalPayout, currency), inline: false });
         }
 
         if (specialDrop) {
