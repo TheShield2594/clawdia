@@ -835,6 +835,10 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         const balanceLine = `${currency}${user.balance.toLocaleString()}`;
         const xpLine = buildXpLine(user);
         embed.addFields({ name: 'Balance', value: balanceLine, inline: true }, { name: 'Hunter XP', value: xpLine, inline: true });
+
+        const sinceRareNow = user.hunt.sinceRare ?? 0;
+        if (sinceRareNow >= 5) embed.addFields(buildPityField(user));
+
         embed.setFooter({ text: `Cooldown: 45s • ${buildActiveConsumablesLine(user)}` });
         embed.setTimestamp();
         return embed;
@@ -889,6 +893,9 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         embed.addFields({ name: '❌ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/hunt shop repair\` before hunting again.`, inline: false });
     }
 
+    const sinceRareNow = user.hunt.sinceRare ?? 0;
+    if (sinceRareNow >= 5) embed.addFields(buildPityField(user));
+
     embed.setFooter({ text: 'Tip: Use consumables from /hunt shop to boost your success chance' });
     embed.setTimestamp();
     return embed;
@@ -896,6 +903,32 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
 
 function buildFailureTitle(severityId) {
     return { clean_miss: '💨 Miss!', spooked: '😰 Spooked!', jammed: '🔧 Jammed!', injured: '🤕 Injured!' }[severityId] ?? '❌ Failed Hunt';
+}
+
+function buildPityField(user) {
+    const sinceRare  = user.hunt.sinceRare ?? 0;
+    const threshold  = LIMITS.RARE_PITY_GUARANTEE;
+    const filled     = Math.min(sinceRare, threshold);
+    const barLen     = 16;
+    const filledLen  = Math.round((filled / threshold) * barLen);
+    const bar        = '█'.repeat(filledLen) + '░'.repeat(barLen - filledLen);
+
+    let heat, label;
+    if (sinceRare >= threshold) {
+        heat  = '⚡';
+        label = `**GUARANTEED NEXT HUNT**`;
+    } else if (sinceRare >= 41) {
+        heat  = '🔥';
+        label = `Getting hot — ~${threshold - sinceRare} more`;
+    } else if (sinceRare >= 26) {
+        heat  = '🌡️';
+        label = `Warming up — ~${threshold - sinceRare} more`;
+    } else {
+        heat  = '❄️';
+        label = `~${threshold - sinceRare} more for guaranteed Rare+`;
+    }
+
+    return { name: `${heat} Rare Pity: ${sinceRare}/${threshold}`, value: `\`${bar}\`\n${label}`, inline: false };
 }
 
 function buildStaminaLine(user) {

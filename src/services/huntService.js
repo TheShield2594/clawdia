@@ -339,6 +339,15 @@ function rollTier(user, zone) {
         w.rare  += shift;
     }
 
+    // Pity guarantee: at sinceRare threshold, force rare+ by zeroing out common/uncommon
+    if ((user.hunt.sinceRare ?? 0) >= LIMITS.RARE_PITY_GUARANTEE) {
+        w.common   = 0;
+        w.uncommon = 0;
+        if ((w.rare ?? 0) + (w.epic ?? 0) + (w.legendary ?? 0) + (w.event ?? 0) === 0) {
+            w.rare = 1;
+        }
+    }
+
     const tiers = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'event'];
     const items = tiers.map(t => ({ tier: t, weight: w[t] ?? 0 })).filter(i => i.weight > 0);
     return weightedRoll(items).tier;
