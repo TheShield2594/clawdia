@@ -1433,7 +1433,7 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
 
         const mineMultEntries = [];
         if ((result.streakMult ?? 1) > 1.0) mineMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
-        if (isCrit)                          mineMultEntries.push({ emoji: '⚡', label: `${critMultiplier}x crit` });
+        if (isCrit)                          mineMultEntries.push({ emoji: '⚡', label: `${critMultiplier.toFixed(2)}x crit` });
         if (mineMultEntries.length > 0) {
             const mineCombined = (result.streakMult ?? 1) * critMultiplier;
             embed.addFields({ name: '📈 Multipliers', value: stackBar(mineMultEntries, mineCombined, finalPayout, currency), inline: false });
