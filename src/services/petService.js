@@ -1,3 +1,41 @@
+// Personality traits assigned randomly on adoption
+const PERSONALITY_TRAITS = {
+    lazy:        { label: 'Lazy',        emoji: '😴', desc: 'Perfectly content doing absolutely nothing.' },
+    energetic:   { label: 'Energetic',   emoji: '⚡', desc: 'Always ready for action, sometimes too ready.' },
+    mischievous: { label: 'Mischievous', emoji: '😈', desc: 'Has a talent for finding trouble.' },
+    loyal:       { label: 'Loyal',       emoji: '🛡️', desc: 'Would follow you to the ends of the earth.' },
+};
+
+const PERSONALITY_KEYS = Object.keys(PERSONALITY_TRAITS);
+
+function assignPersonality() {
+    return PERSONALITY_KEYS[Math.floor(Math.random() * PERSONALITY_KEYS.length)];
+}
+
+// Flavor lines used in hunt/fish/mine command descriptions
+const TRAIT_FLAVOR = {
+    lazy: {
+        hunt: (name, emoji) => `${emoji} **${name}** yawns and stretches before reluctantly helping out.`,
+        fish: (name, emoji) => `${emoji} **${name}** naps nearby while the line bobs lazily in the water.`,
+        mine: (name, emoji) => `${emoji} **${name}** watches from a safe distance, conserving energy.`,
+    },
+    energetic: {
+        hunt: (name, emoji) => `${emoji} **${name}** races ahead, picking up a trail before you even start!`,
+        fish: (name, emoji) => `${emoji} **${name}** splashes excitedly, nudging fish toward your hook!`,
+        mine: (name, emoji) => `${emoji} **${name}** digs alongside you with boundless enthusiasm!`,
+    },
+    mischievous: {
+        hunt: (name, emoji) => `${emoji} **${name}** keeps watch while you case the area... suspiciously well.`,
+        fish: (name, emoji) => `${emoji} **${name}** nudges your rod just enough to keep things interesting.`,
+        mine: (name, emoji) => `${emoji} **${name}** "accidentally" dislodges a promising-looking boulder.`,
+    },
+    loyal: {
+        hunt: (name, emoji) => `${emoji} **${name}** stays close, alert for any sign of danger.`,
+        fish: (name, emoji) => `${emoji} **${name}** watches the line intently, refusing to look away.`,
+        mine: (name, emoji) => `${emoji} **${name}** stands guard at the tunnel entrance, unwavering.`,
+    },
+};
+
 // Pet definitions: passive bonuses and feeding materials
 const PET_DEFINITIONS = {
     dog:          { petId: 'dog',         emoji: '🐶', name: 'Dog',         cost: 2000,  purchasable: true,  bonusType: 'work_earnings',    bonusPct: 5,  favoriteMaterial: 'rabbits_foot',  materialSource: 'hunt' },
@@ -191,6 +229,9 @@ function getTotalBonus(pets, bonusType) {
 
 module.exports = {
     PET_DEFINITIONS,
+    PERSONALITY_TRAITS,
+    PERSONALITY_KEYS,
+    TRAIT_FLAVOR,
     HUNGER_DECAY_PER_DAY,
     MS_PER_DAY,
     STARVING_THRESHOLD,
@@ -204,4 +245,5 @@ module.exports = {
     getMoodLine,
     getMoodColor,
     heartBar,
+    assignPersonality,
 };
