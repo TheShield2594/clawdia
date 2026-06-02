@@ -144,7 +144,7 @@ async function buildShopPages(guildSettings, currency) {
             id:       'prestige',
             label:    'Prestige',
             emoji:    '✨',
-            subtitle: `${prestigeItems.length} aspiration item${prestigeItems.length !== 1 ? 's' : ''}`,
+            subtitle: `${prestigeItems.length} aspirational item${prestigeItems.length !== 1 ? 's' : ''}`,
             items:    pageItems,
             listText,
         });

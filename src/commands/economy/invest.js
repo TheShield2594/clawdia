@@ -41,12 +41,7 @@ const DISTRICTS = [
     },
 ];
 
-const DISTRICT_NAMES = DISTRICTS.map(d => d.id);
 const ACTIVATE_DURATION_MS = 7 * 24 * 3_600_000; // 7 days
-
-function getDistrict(meta) {
-    return DISTRICTS.find(d => d.id === meta.districtId) ?? null;
-}
 
 function isActive(meta) {
     return meta.activeUntil && meta.activeUntil.getTime() > Date.now();
@@ -195,11 +190,19 @@ module.exports = {
 
         // Only allow contribution if district is not already active
         if (distEntry && isActive(distEntry)) {
-            // Refund the coins
-            await User.findOneAndUpdate(
+            const refunded = await User.findOneAndUpdate(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: amount } }
+                { $inc: { balance: amount } },
+                { new: true }
             );
+            logTransaction({
+                userId:  interaction.user.id,
+                guildId: interaction.guild.id,
+                type:    'invest_refund',
+                amount,
+                balance: refunded?.balance ?? 0,
+                note:    `district:${districtId} (already active — refunded)`,
+            });
             return interaction.reply({
                 content: `The **${distMeta.name}** district is already active! Coins refunded.`,
                 ephemeral: true,

@@ -1,14 +1,16 @@
 /**
  * District benefit checker — lets other commands query active district bonuses.
  *
- * Usage:
+ * Usage (synchronous — pass an already-loaded guild document):
+ *   const guildDoc = await Guild.findOne({ guildId });
  *   const { isDistrictActive } = require('../services/districtService');
- *   if (await isDistrictActive(guildId, 'wilderness')) { ... }
+ *   if (isDistrictActive(guildDoc, 'wilderness')) { ... }
  */
 
 /**
  * Returns true if the given district is currently active (fully funded and not expired).
- * Pass an already-loaded guildDoc to avoid an extra DB query.
+ * @param {object} guildDoc - Loaded Mongoose guild document (not a guildId string).
+ * @param {string} districtId - e.g. 'wilderness', 'arena', 'underground'.
  */
 function isDistrictActive(guildDoc, districtId) {
     if (!guildDoc?.districts) return false;
