@@ -8,6 +8,7 @@ const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const {
     PET_DEFINITIONS,
+    PERSONALITY_TRAITS,
     STARVING_THRESHOLD,
     RUNAWAY_DAYS,
     applyHungerDecay,
@@ -16,6 +17,7 @@ const {
     getMoodLine,
     getMoodColor,
     heartBar,
+    assignPersonality,
 } = require('../../services/petService');
 const { generatePetSprite } = require('../../utils/cardGenerator');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
@@ -71,8 +73,12 @@ async function syncHungerAndRunaway(user, interaction) {
             const def = PET_DEFINITIONS[p.petId];
             return `${def?.emoji ?? '🐾'} **${p.name || def?.name || p.petId}**`;
         });
+        const deathMsg = ranAwayPets.length === 1
+            ? `💀 **${interaction.user.username}**'s pet ${names[0]} passed away from starvation...`
+            : `💀 **${interaction.user.username}**'s pets ${names.join(', ')} passed away from starvation...`;
+        interaction.channel?.send({ content: deathMsg }).catch(() => {});
         await interaction.followUp({
-            content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} ran away from starvation: ${names.join(', ')}`,
+            content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` to get a new companion, or buy a Revive Scroll from the shop to bring them back.*`,
             ephemeral: true
         }).catch(() => {});
     }
@@ -102,10 +108,13 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL) {
     const potwLine   = pet.potw     ? '\n🌟 **Pet of the Week**'               : '';
     const restLine   = isResting    ? '\n🛏️ *Resting — hunger decays slower*' : '';
 
+    const personalityDef = pet.personality ? PERSONALITY_TRAITS[pet.personality] : null;
+    const personalityLine = personalityDef ? `\n${personalityDef.emoji} *${personalityDef.label}* — ${personalityDef.desc}` : '';
+
     return new EmbedBuilder()
         .setColor(moodColor)
         .setAuthor({ name: `${displayName} • ${def?.name ?? pet.petId}`, iconURL: ownerAvatarURL })
-        .setDescription(`*${moodLine}*${potwLine}${restLine}`)
+        .setDescription(`*${moodLine}*${personalityLine}${potwLine}${restLine}`)
         .addFields(
             { name: '❤️ Bond',              value: `${heartBar(bondDays)} ${bondDays}d`, inline: false },
             { name: '🍖 Hunger',            value: hungerBar(pet.hunger),                inline: false },
@@ -151,6 +160,7 @@ function buildNavComponents(userId, index, total) {
 
 async function executeAdopt(interaction) {
     const petId = interaction.options.getString('type');
+    const petName = interaction.options.getString('name')?.trim().slice(0, 32) ?? null;
     const def   = PET_DEFINITIONS[petId];
 
     if (!def) return interaction.reply({ content: 'Unknown pet type.', ephemeral: true });
@@ -174,8 +184,9 @@ async function executeAdopt(interaction) {
         });
     }
 
+    const personality = assignPersonality();
     user.balance -= def.cost;
-    user.pets.push({ petId, hunger: 100, lastFed: new Date(), adoptedAt: new Date() });
+    user.pets.push({ petId, name: petName, hunger: 100, lastFed: new Date(), adoptedAt: new Date(), personality });
     user.markModified('pets');
 
     try {
@@ -185,10 +196,15 @@ async function executeAdopt(interaction) {
         throw err;
     }
 
+    const personalityDef = PERSONALITY_TRAITS[personality];
+    const displayName = petName || def.name;
     const embed = new EmbedBuilder()
         .setColor('#4caf50')
         .setTitle(`${def.emoji} New Pet Adopted!`)
-        .setDescription(`Welcome your new **${def.name}**! Take good care of it.`)
+        .setDescription(
+            `Welcome **${displayName}** to your family! Take good care of them.\n\n` +
+            `${personalityDef.emoji} **Personality: ${personalityDef.label}** — *${personalityDef.desc}*`
+        )
         .addFields(
             { name: 'Passive Bonus',  value: `+${def.bonusPct}% ${def.bonusType.replace(/_/g, ' ')} (active when hunger ≥ 30%)`, inline: true },
             { name: 'Favorite Food',  value: `\`${def.favoriteMaterial}\` (restores 25 hunger)`,                                  inline: true },
@@ -550,6 +566,9 @@ module.exports = {
                             { name: '🦊 Fox (5,000)',    value: 'fox'  },
                             { name: '🐺 Wolf (8,000)',   value: 'wolf' },
                         )
+                )
+                .addStringOption(opt =>
+                    opt.setName('name').setDescription('Give your pet a name right away (optional, max 32 chars)').setRequired(false).setMaxLength(32)
                 )
         )
         .addSubcommand(sub => sub.setName('status').setDescription('View your pets and their mood.'))
