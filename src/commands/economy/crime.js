@@ -7,6 +7,7 @@ const { clampMultiplier } = require('../../config/economy');
 const { logTransaction } = require('../../utils/logTransaction');
 const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, CRIME_WIN_LINES, CRIME_BUST_LINES, getCrimeFlavorText } = require('../../utils/copyLines');
+const { stackBar } = require('../../utils/rewardReveal');
 const { delay } = require('../../utils/delay');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
@@ -186,8 +187,12 @@ module.exports = {
                 if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;
                 if (petCrimeBonus > 0) desc += `\n> 🐱 *Cat pet boosted your success chance!*`;
                 if (isFeaturedCrime) desc += `\n> 🌟 *Featured job — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout applied!*`;
-                desc += `\n\n────────────────────\n  ${currency} Earned: ${earned.toLocaleString()} coins`;
-                if (streakMult > 1.0) desc += `\n  🔥 Streak bonus: ${streakMult}x applied`;
+                const crimeMultEntries = [];
+                if (streakMult > 1.0) crimeMultEntries.push({ emoji: '🔥', label: `${streakMult.toFixed(2)}x` });
+                if (isFeaturedCrime)  crimeMultEntries.push({ emoji: '🌟', label: `+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%` });
+                const crimeBar = stackBar(crimeMultEntries, streakMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
+                desc += `\n\n────────────────────\n  ${currency} Earned: **${earned.toLocaleString()} coins**`;
+                if (crimeBar) desc += `\n  ${crimeBar}`;
                 desc += `\n────────────────────\n  Balance: ${updated.balance.toLocaleString()} coins`;
 
                 embed = new EmbedBuilder()

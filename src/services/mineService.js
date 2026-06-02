@@ -547,7 +547,8 @@ function executeMine(user, depthId, options = {}) {
             isCrit, critMultiplier: parseFloat(critMultiplier.toFixed(2)),
             specialDrop, xpEarned: xpGain,
             levelUp: lvResult.leveledUp ? lvResult : null,
-            cappedByHard
+            cappedByHard,
+            streakMult
         });
 
         if (pickaxe.currentDurability <= 0) result.pickaxeBroke = true;
