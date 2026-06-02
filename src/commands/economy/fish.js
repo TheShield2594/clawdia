@@ -16,7 +16,8 @@ const {
     ROD_UPGRADES, MATERIAL_NAMES, BAIT_PACKS, CONSUMABLES,
     ROD_TIERS, ROD_BY_SLUG,
     FISHER_LEVELS, PRESTIGE_BONUSES,
-    FISH_QUEST_TEMPLATES, FISH_CRAFT_RECIPES
+    FISH_QUEST_TEMPLATES, FISH_CRAFT_RECIPES,
+    BOSS_TYPES
 } = require('../../data/fishData');
 const { MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../data/huntData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
@@ -29,6 +30,7 @@ const {
     calculateSuccessChance,
     executeCast,
     resolveBossEncounter,
+    rollBossType,
     assignDailyFishQuests,
     updateFishQuestProgress,
     formatMs,
@@ -47,6 +49,7 @@ const { ensureHuntData } = require('../../services/huntService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
 const { randomFrom, FISH_MISS_POOL } = require('../../utils/copyLines');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { submitCatch: submitTournamentCatch, getActiveTournament, buildLeaderboardEmbed, endTournament, buildWinnersEmbed } = require('../../services/tournamentService');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../data/featuredRotation');
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
@@ -246,7 +249,32 @@ module.exports = {
                             o.setName('location')
                                 .setDescription('Location to fish at')
                                 .setRequired(true)
-                                .addChoices(...LOCATION_LIST.map(l => ({ name: `${l.emoji} ${l.name}`, value: l.id })))))),
+                                .addChoices(...LOCATION_LIST.map(l => ({ name: `${l.emoji} ${l.name}`, value: l.id }))))))
+        .addSubcommandGroup(group =>
+            group.setName('tournament')
+                .setDescription('Fishing tournament commands')
+                .addSubcommand(sub =>
+                    sub.setName('status')
+                        .setDescription('View the current tournament leaderboard'))
+                .addSubcommand(sub =>
+                    sub.setName('start')
+                        .setDescription('Start a fishing tournament (admin only)')
+                        .addIntegerOption(o =>
+                            o.setName('duration')
+                                .setDescription('Tournament duration in minutes (default 60)')
+                                .setMinValue(15)
+                                .setMaxValue(180)
+                                .setRequired(false))
+                        .addIntegerOption(o =>
+                            o.setName('prize_pool')
+                                .setDescription('Starting prize pool (coins to seed)')
+                                .setMinValue(0)
+                                .setRequired(false))
+                        .addIntegerOption(o =>
+                            o.setName('entry_fee')
+                                .setDescription('Entry fee per participant (0 = free)')
+                                .setMinValue(0)
+                                .setRequired(false)))),
 
     async execute(interaction) {
         const group = interaction.options.getSubcommandGroup(false);
@@ -259,11 +287,12 @@ module.exports = {
             return;
         }
 
-        if (group === 'inv')      return handleInv(interaction, sub);
-        if (group === 'quests')   return handleQuests(interaction, sub);
-        if (group === 'shop')     return handleShop(interaction, sub);
-        if (group === 'craft')    return handleCraft(interaction, sub);
-        if (group === 'location') return handleLocation(interaction, sub);
+        if (group === 'inv')         return handleInv(interaction, sub);
+        if (group === 'quests')      return handleQuests(interaction, sub);
+        if (group === 'shop')        return handleShop(interaction, sub);
+        if (group === 'craft')       return handleCraft(interaction, sub);
+        if (group === 'location')    return handleLocation(interaction, sub);
+        if (group === 'tournament')  return handleTournament(interaction, sub);
     }
 };
 
@@ -602,6 +631,18 @@ async function handleCast(interaction) {
         return interaction.editReply({ content: 'Something went wrong saving your catch. Please try again.' });
     }
 
+    // Submit to active tournament if fish catch (not junk/treasure)
+    if (result.success && result.catchType === 'fish' && result.fish && result.finalPayout > 0) {
+        submitTournamentCatch(interaction.guild.id, {
+            userId:    interaction.user.id,
+            username:  interaction.user.username,
+            fishName:  result.fish.name,
+            fishEmoji: result.fish.emoji ?? '🐟',
+            tier:      result.tier,
+            score:     result.finalPayout
+        }).catch(() => null);
+    }
+
     // Await hourly winner update then re-fetch for accurate footer
     if (result.success) {
         const tierScore = FISH_TIER_SCORE[result.tier] ?? 0;
@@ -647,101 +688,160 @@ async function handleCast(interaction) {
         }
     }
 
-    // Boss encounter — present choices if triggered
+    // Boss encounter — multi-phase fight
     if (result.bossEncounter) {
-        const bossRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('boss_fight').setLabel('⚔️ Fight').setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId('boss_loosen').setLabel('〰️ Loosen Line').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('boss_cut').setLabel('✂️ Cut Line').setStyle(ButtonStyle.Secondary)
-        );
-        const bossEmbed = new EmbedBuilder()
-            .setColor('#1C0A00')
-            .setTitle(`${result.bossEncounter.fish.emoji} Something monstrous grabs your line!`)
-            .setDescription(
-                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `  ${result.bossEncounter.fish.emoji}  **${result.bossEncounter.fish.name}**  [⭐⭐⭐⭐⭐]\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-                `*The rod bends nearly double. Your hands shake. This is no ordinary catch.*\n\n` +
-                `**Choose your response — NOW:**\n\n` +
-                `⚔️ **Fight** — hold on and reel hard. Maximum reward, maximum rod damage.\n` +
-                `〰️ **Loosen Line** — let it tire itself out. Safer, partial payout.\n` +
-                `✂️ **Cut Line** — retreat clean. No reward, no damage.`
-            )
-            .setFooter({ text: '⏱️ 30 seconds to decide — or the creature vanishes into the deep.' });
+        const bossType     = rollBossType();
+        const choicesMade  = [];
+        const phaseCount   = bossType.phases.length;
 
-        await interaction.editReply({ embeds: [embed, bossEmbed], components: [bossRow] });
+        const buildBossPhaseEmbed = (phaseIndex, prevResults) => {
+            const phase      = bossType.phases[phaseIndex];
+            const integrity  = 3 - prevResults.filter(p => !p.correct && p.chosen !== 'safe').length;
+            const intBar     = '❤️'.repeat(integrity) + '🖤'.repeat(3 - integrity);
+            const histLines  = prevResults.map((p, i) => {
+                const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
+                return `Phase ${i + 1}: ${icon}`;
+            }).join('  ');
 
-        const bossReply = await interaction.fetchReply();
-        const bossCollector = bossReply.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && ['boss_fight', 'boss_loosen', 'boss_cut'].includes(i.customId),
-            time: 30_000, max: 1
-        });
-
-        bossCollector.on('collect', async btn => {
-            const choiceMap = { boss_fight: 'fight', boss_loosen: 'loosen', boss_cut: 'cut' };
-            const choice    = choiceMap[btn.customId];
-
-            const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            ensureFishingData(freshUser);
-            const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choice);
-
-            if (bossResult.bonusPayout > 0) {
-                const bossLocation = LOCATIONS[freshUser.fishing.activeLocation] ?? location;
-                const { adjustedPayout } = applyPayoutModifiers(freshUser, bossResult.bonusPayout, bossLocation);
-                bossResult.bonusPayout = adjustedPayout;
-                freshUser.balance                 += adjustedPayout;
-                freshUser.fishing.totalEarned     += adjustedPayout;
-                freshUser.fishing.dailyCoins      += adjustedPayout;
-                if (adjustedPayout > freshUser.fishing.bestPayout) freshUser.fishing.bestPayout = adjustedPayout;
-            }
-            freshUser.markModified('fishing');
-            try {
-                await freshUser.save();
-            } catch (saveErr) {
-                console.error('[fish boss] save error:', saveErr);
-                return btn.update({ content: 'Something went wrong saving your boss result. Please try again.', embeds: [], components: [] });
-            }
-
-            // Log big win for boss payout
-            if (bossResult.bonusPayout > 0) {
-                const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-                if (bossResult.bonusPayout >= bigWinThreshold) {
-                    logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: bossResult.bonusPayout, source: 'fish', details: `${result.bossEncounter.fish.emoji ?? ''} ${result.bossEncounter.fish.name} [boss]`.trim() });
-                }
-            }
-
-            const freshCurrency = currency;
-            const bossResultEmbed = new EmbedBuilder()
-                .setColor(
-                    bossResult.outcome === 'win'    ? '#FFD700' :
-                    bossResult.outcome === 'loosen' ? '#3498db' :
-                    bossResult.outcome === 'loss'   ? '#1C0A00' : '#95a5a6'
-                )
-                .setTitle(
-                    bossResult.outcome === 'win'    ? `🏆 ${result.bossEncounter.fish.emoji} Defeated!` :
-                    bossResult.outcome === 'loss'   ? `💀 ${result.bossEncounter.fish.emoji} Escaped into the Deep…` :
-                    bossResult.outcome === 'loosen' ? `〰️ Partial Victory — ${result.bossEncounter.fish.emoji} Tired Out` :
-                    `✂️ Line Cut — Retreat`
-                )
+            return new EmbedBuilder()
+                .setColor('#1C0A00')
+                .setTitle(`${bossType.emoji} ${bossType.name} — Phase ${phaseIndex + 1}/${phaseCount}`)
                 .setDescription(
-                    bossResult.outcome === 'win'
-                        ? `**You landed the ${result.bossEncounter.fish.emoji} ${result.bossEncounter.fish.name}.**\n\n${bossResult.message}`
-                        : bossResult.message
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `  ${result.bossEncounter.fish.emoji}  **${result.bossEncounter.fish.name}**\n` +
+                    `  Line Integrity: ${intBar}\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                    `${phase.hint}\n\n` +
+                    (histLines ? `${histLines}\n\n` : '') +
+                    `**Choose your response — NOW:**`
                 )
-                .addFields(
-                    { name: 'Bonus Payout',   value: bossResult.bonusPayout > 0 ? `${freshCurrency}${bossResult.bonusPayout.toLocaleString()}` : 'None', inline: true },
-                    { name: 'Rod Damage',     value: `-${bossResult.durabilityLost} durability`, inline: true }
-                )
-                .setTimestamp();
+                .setFooter({ text: `⏱️ 30 seconds per phase • Outcomes: 3/3=Full legendary payout | 2/3=Rare | 1/3=Common | 0/3=Nothing` });
+        };
 
-            await btn.update({ embeds: [embed, bossResultEmbed], components: [] });
-        });
+        const buildPhaseRow = (phaseIndex) => {
+            const phase   = bossType.phases[phaseIndex];
+            const choices = phase.choices;
+            return new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('boss_match').setLabel(choices.match.label).setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId('boss_hold').setLabel(choices.hold.label).setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId('boss_safe').setLabel(choices.safe.label).setStyle(ButtonStyle.Secondary)
+            );
+        };
 
-        bossCollector.on('end', (collected, reason) => {
-            if (reason === 'time' && collected.size === 0) {
+        const validIds = ['boss_match', 'boss_hold', 'boss_safe'];
+        const idToKey  = { boss_match: 'match', boss_hold: 'hold', boss_safe: 'safe' };
+
+        // Phase 1
+        await interaction.editReply({ embeds: [embed, buildBossPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
+
+        const runPhase = async (phaseIndex, prevResults, prevBtn) => {
+            const responder  = prevBtn ?? interaction;
+            const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
+
+            return new Promise(resolve => {
+                const collector = fetchReply.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && validIds.includes(i.customId),
+                    time: 30_000, max: 1
+                });
+                collector.on('collect', async btn => {
+                    const chosen    = idToKey[btn.customId];
+                    const phase     = bossType.phases[phaseIndex];
+                    const correct   = chosen === phase.correct;
+                    const results   = [...prevResults, { correct, chosen, correctChoice: phase.correct }];
+                    choicesMade.push(chosen);
+
+                    if (phaseIndex < phaseCount - 1) {
+                        // More phases ahead
+                        await btn.update({ embeds: [embed, buildBossPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
+                        resolve({ btn, results });
+                    } else {
+                        resolve({ btn, results, done: true });
+                    }
+                });
+                collector.on('end', (collected, reason) => {
+                    if (reason === 'time' && collected.size === 0) {
+                        // Timeout — treat as safe choice for remaining phases
+                        resolve({ btn: null, results: prevResults, timedOut: true });
+                    }
+                });
+            });
+        };
+
+        // Run all 3 phases sequentially
+        let state = { btn: null, results: [], done: false, timedOut: false };
+        for (let i = 0; i < phaseCount; i++) {
+            state = await runPhase(i, state.results, state.btn);
+            if (state.timedOut) {
                 interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+                return;
             }
-        });
+        }
+
+        // Resolve outcome
+        const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        ensureFishingData(freshUser);
+        const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choicesMade, bossType);
+
+        if (bossResult.bonusPayout > 0) {
+            const bossLocation = LOCATIONS[freshUser.fishing.activeLocation] ?? location;
+            const { adjustedPayout } = applyPayoutModifiers(freshUser, bossResult.bonusPayout, bossLocation);
+            bossResult.bonusPayout = adjustedPayout;
+            freshUser.balance                 += adjustedPayout;
+            freshUser.fishing.totalEarned     += adjustedPayout;
+            freshUser.fishing.dailyCoins      += adjustedPayout;
+            if (adjustedPayout > freshUser.fishing.bestPayout) freshUser.fishing.bestPayout = adjustedPayout;
+        }
+        freshUser.markModified('fishing');
+        try {
+            await freshUser.save();
+        } catch (saveErr) {
+            console.error('[fish boss] save error:', saveErr);
+            return state.btn.update({ content: 'Something went wrong saving your boss result. Please try again.', embeds: [], components: [] });
+        }
+
+        if (bossResult.bonusPayout > 0) {
+            const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+            if (bossResult.bonusPayout >= bigWinThreshold) {
+                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: bossResult.bonusPayout, source: 'fish', details: `${result.bossEncounter.fish.emoji ?? ''} ${result.bossEncounter.fish.name} [boss]`.trim() });
+            }
+            // Submit boss win to active tournament with multiplier bonus
+            const tournamentScore = Math.round(bossResult.bonusPayout * (bossResult.tournamentMultiplier ?? 1));
+            submitTournamentCatch(interaction.guild.id, {
+                userId:    interaction.user.id,
+                username:  interaction.user.username,
+                fishName:  result.bossEncounter.fish.name,
+                fishEmoji: result.bossEncounter.fish.emoji ?? '🐉',
+                tier:      result.bossEncounter.tier,
+                score:     tournamentScore,
+                isBossKill: ['perfect', 'win'].includes(bossResult.outcome)
+            }).catch(() => null);
+        }
+
+        const phaseScoreLine = bossResult.phaseResults.map((p, i) => {
+            const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
+            return `Phase ${i + 1}: ${icon}`;
+        }).join('  ');
+
+        const outcomeColors = { perfect: '#FFD700', win: '#2ecc71', survived: '#3498db', escaped: '#1C0A00' };
+        const outcomeTitles = {
+            perfect:  `🏆 ${result.bossEncounter.fish.emoji} PERFECT — ${bossType.name} Mastered!`,
+            win:      `✅ ${result.bossEncounter.fish.emoji} ${bossType.name} Subdued`,
+            survived: `😓 ${result.bossEncounter.fish.emoji} Barely Survived`,
+            escaped:  `💀 ${result.bossEncounter.fish.emoji} ${bossType.name} Escaped!`
+        };
+
+        const bossResultEmbed = new EmbedBuilder()
+            .setColor(outcomeColors[bossResult.outcome] ?? '#95a5a6')
+            .setTitle(outcomeTitles[bossResult.outcome] ?? '❓ Boss Result')
+            .setDescription(`${phaseScoreLine}\n\n${bossResult.message}`)
+            .addFields(
+                { name: 'Score',        value: `${bossResult.correctCount}/3 correct`, inline: true },
+                { name: 'Bonus Payout', value: bossResult.bonusPayout > 0 ? `${currency}${bossResult.bonusPayout.toLocaleString()}` : 'None', inline: true },
+                { name: 'Rod Damage',   value: `-${bossResult.durabilityLost} durability`, inline: true }
+            )
+            .setTimestamp();
+
+        await state.btn.update({ embeds: [embed, bossResultEmbed], components: [] });
         return;
     }
 
@@ -2497,4 +2597,91 @@ function formatTierWeights(weights) {
         .filter(([, w]) => w > 0)
         .map(([tier, w]) => `${tier} ${Math.round((w / total) * 100)}%`)
         .join(', ');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TOURNAMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function handleTournament(interaction, sub) {
+    if (sub === 'status') return handleTournamentStatus(interaction);
+    if (sub === 'start')  return handleTournamentStart(interaction);
+}
+
+async function handleTournamentStatus(interaction) {
+    await interaction.deferReply();
+    const tournament = await getActiveTournament(interaction.guild.id);
+    if (!tournament) {
+        return interaction.editReply({
+            embeds: [
+                new EmbedBuilder()
+                    .setColor('#95a5a6')
+                    .setTitle('🎣 No Active Tournament')
+                    .setDescription('There is no fishing tournament running right now.\n\nAdmins can start one with `/fish tournament start`.')
+                    .setTimestamp()
+            ]
+        });
+    }
+
+    // Auto-end if expired
+    if (new Date() > tournament.endsAt) {
+        const ended = await endTournament(tournament._id);
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const currency = guildSettings?.economy?.currency ?? '💰';
+        return interaction.editReply({ embeds: [buildWinnersEmbed(ended, currency)] });
+    }
+
+    return interaction.editReply({ embeds: [buildLeaderboardEmbed(tournament)] });
+}
+
+async function handleTournamentStart(interaction) {
+    const member = interaction.guild.members.cache.get(interaction.user.id);
+    if (!member?.permissions.has('ManageGuild')) {
+        return interaction.reply({ content: '❌ You need the **Manage Server** permission to start a tournament.', ephemeral: true });
+    }
+
+    await interaction.deferReply();
+
+    const durationMins = interaction.options.getInteger('duration') ?? 60;
+    const seedAmount   = interaction.options.getInteger('prize_pool') ?? 0;
+    const entryFee     = interaction.options.getInteger('entry_fee') ?? 0;
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    const announceChannelId = guildSettings?.economy?.announcementChannelId ?? null;
+
+    let tournament;
+    try {
+        tournament = await startTournament(interaction.guild.id, {
+            durationMs: durationMins * 60_000,
+            seedAmount,
+            entryFee,
+            announceChannelId
+        });
+    } catch (err) {
+        return interaction.editReply({ content: `❌ ${err.message}` });
+    }
+
+    const currency = guildSettings?.economy?.currency ?? '💰';
+    const announceEmbed = new EmbedBuilder()
+        .setColor('#1e90ff')
+        .setTitle('🎣 A Fishing Tournament Has Begun!')
+        .setDescription(
+            `**Duration:** ${durationMins} minutes\n` +
+            `**Ends:** <t:${Math.floor(tournament.endsAt.getTime() / 1000)}:R>\n` +
+            `**Goal:** Catch the highest-value single fish!\n` +
+            (entryFee > 0 ? `**Entry Fee:** ${currency}${entryFee.toLocaleString()} (auto-deducted on first catch)\n` : `**Entry:** Free\n`) +
+            (seedAmount > 0 ? `**Prize Pool:** ${currency}${seedAmount.toLocaleString()} to start\n` : '') +
+            `\nUse \`/fish cast\` to participate. Use \`/fish tournament status\` to see the live leaderboard!\n\n` +
+            `🐉 **Tip:** Boss encounters during the tournament give a score multiplier!`
+        )
+        .setTimestamp();
+
+    // Announce in the announcement channel if configured
+    if (announceChannelId) {
+        const ch = interaction.guild.channels.cache.get(announceChannelId);
+        if (ch?.isTextBased()) {
+            ch.send({ embeds: [announceEmbed] }).catch(() => null);
+        }
+    }
+
+    return interaction.editReply({ embeds: [announceEmbed] });
 }

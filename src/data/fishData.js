@@ -1155,6 +1155,115 @@ const FAILURE_SEVERITIES = [
       msg: 'You slipped on the bank and fell in! You need a moment to dry off.' }
 ];
 
+// ─── BOSS TYPES ───────────────────────────────────────────────────────────────
+// Each boss type has 3 phases. Each phase has hint text and 3 choices.
+// correctChoice: which choice wins the phase ('match'|'hold'|'safe')
+// strategy: how to play it (exposed to players indirectly through hints)
+const BOSS_TYPES = {
+    leviathan: {
+        name: 'Abyssal Leviathan',
+        emoji: '🐉',
+        strategy: 'match', // correct: match direction, wrong: hold, neutral: safe
+        phases: [
+            {
+                hint: '**THE ABYSSAL LEVIATHAN** pulls hard to the right!',
+                choices: {
+                    match: { label: '🎯 Match its pull — reel RIGHT', risk: 'high' },
+                    hold:  { label: '⚡ Hold your ground',             risk: 'high' },
+                    safe:  { label: '🔄 Slack the line',              risk: 'none' }
+                },
+                correct: 'match'
+            },
+            {
+                hint: 'It surges LEFT with tremendous force!',
+                choices: {
+                    match: { label: '🎯 Match its pull — reel LEFT',  risk: 'high' },
+                    hold:  { label: '⚡ Brace and hold',              risk: 'high' },
+                    safe:  { label: '🔄 Give it line',                risk: 'none' }
+                },
+                correct: 'match'
+            },
+            {
+                hint: '**The creature is weakening** — one strong pull should do it.',
+                choices: {
+                    match: { label: '💪 Reel with everything you have', risk: 'high' },
+                    hold:  { label: '⚡ Steady, controlled reeling',    risk: 'high' },
+                    safe:  { label: '🔄 Wait for the right moment',    risk: 'none' }
+                },
+                correct: 'match'
+            }
+        ]
+    },
+    ghost_eel: {
+        name: 'Ghost Eel',
+        emoji: '👻',
+        strategy: 'safe', // correct: safe option, unpredictable
+        phases: [
+            {
+                hint: 'The **Ghost Eel** thrashes erratically — you can\'t predict it!',
+                choices: {
+                    match: { label: '🎯 Try to match its movements', risk: 'high' },
+                    hold:  { label: '⚡ Fight it directly',          risk: 'high' },
+                    safe:  { label: '🔄 Let it tire itself out',     risk: 'none' }
+                },
+                correct: 'safe'
+            },
+            {
+                hint: 'It goes still… then suddenly darts in an unknown direction.',
+                choices: {
+                    match: { label: '🎯 React to the movement',     risk: 'high' },
+                    hold:  { label: '⚡ Hold your position',        risk: 'high' },
+                    safe:  { label: '🔄 Maintain steady tension',   risk: 'none' }
+                },
+                correct: 'safe'
+            },
+            {
+                hint: 'The eel circles the boat — completely unpredictable.',
+                choices: {
+                    match: { label: '🎯 Chase its direction',       risk: 'high' },
+                    hold:  { label: '⚡ Lock the reel',             risk: 'high' },
+                    safe:  { label: '🔄 Patient tension — wait it out', risk: 'none' }
+                },
+                correct: 'safe'
+            }
+        ]
+    },
+    iron_marlin: {
+        name: 'Iron Marlin',
+        emoji: '⚔️',
+        strategy: 'hold', // correct: hold ground, methodical
+        phases: [
+            {
+                hint: 'The **Iron Marlin** runs in a straight line — methodical, powerful.',
+                choices: {
+                    match: { label: '🎯 Follow its run',            risk: 'high' },
+                    hold:  { label: '⚡ Lock the drag and hold',    risk: 'high' },
+                    safe:  { label: '🔄 Give it some slack',        risk: 'none' }
+                },
+                correct: 'hold'
+            },
+            {
+                hint: 'It turns back — a predictable arc. You can anticipate it.',
+                choices: {
+                    match: { label: '🎯 Mirror its arc',            risk: 'high' },
+                    hold:  { label: '⚡ Counter-reel on the turn',  risk: 'high' },
+                    safe:  { label: '🔄 Maintain even tension',     risk: 'none' }
+                },
+                correct: 'hold'
+            },
+            {
+                hint: 'The Marlin makes its final run — straight and predictable.',
+                choices: {
+                    match: { label: '🎯 Follow its path',           risk: 'high' },
+                    hold:  { label: '⚡ Full drag — reel it in!',   risk: 'high' },
+                    safe:  { label: '🔄 Careful steady pressure',   risk: 'none' }
+                },
+                correct: 'hold'
+            }
+        ]
+    }
+};
+
 module.exports = {
     ROD_TIERS,
     ROD_BY_SLUG,
@@ -1178,6 +1287,7 @@ module.exports = {
     FISH_QUEST_TEMPLATES,
     FAILURE_SEVERITIES,
     FISH_TRAITS,
+    BOSS_TYPES,
     SIZE_TIERS,
     FISH_BASE_WEIGHTS,
     WEATHER_TYPES,

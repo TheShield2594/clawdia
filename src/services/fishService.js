@@ -18,6 +18,7 @@ const {
     SIZE_TIERS,
     FISH_BASE_WEIGHTS,
     TIME_OF_DAY_BONUSES,
+    BOSS_TYPES,
     getTimeOfDay
 } = require('../data/fishData');
 const { getCurrentWeather } = require('./weatherService');
@@ -880,45 +881,79 @@ function updateFishQuestProgress(user, result, locationId) {
     user.markModified('quests');
 }
 
-// ─── BOSS ENCOUNTER RESOLUTION (Issue #154) ───────────────────────────────────
+// ─── BOSS ENCOUNTER RESOLUTION ────────────────────────────────────────────────
 
 /**
- * Resolves a boss encounter. choice: 'fight' | 'loosen' | 'cut'
- * Returns { outcome, bonusPayout, durabilityLost, message }
+ * Pick a random boss type for this encounter.
  */
-function resolveBossEncounter(user, fish, tier, choice) {
+function rollBossType() {
+    const keys = Object.keys(BOSS_TYPES);
+    return BOSS_TYPES[keys[Math.floor(Math.random() * keys.length)]];
+}
+
+/**
+ * Resolve a single phase of the multi-phase boss fight.
+ * choices: array of 'match'|'hold'|'safe' strings, one per phase played so far
+ * Returns { phaseResults: [{correct, chosen}], correct, lineIntegrity }
+ */
+function resolveBossPhases(bossType, choicesMade) {
+    let lineIntegrity = 3; // 3 strikes before line snaps
+    const phaseResults = [];
+    for (let i = 0; i < choicesMade.length; i++) {
+        const phase   = bossType.phases[i];
+        const chosen  = choicesMade[i];
+        const correct = chosen === phase.correct;
+        if (!correct && chosen !== 'safe') {
+            lineIntegrity = Math.max(0, lineIntegrity - 1);
+        }
+        phaseResults.push({ correct, chosen, correctChoice: phase.correct });
+    }
+    return { phaseResults, lineIntegrity };
+}
+
+/**
+ * Resolve the final boss outcome after all phases.
+ * Returns { outcome, bonusPayout, durabilityLost, correctCount, message, tournamentMultiplier }
+ */
+function resolveBossEncounter(user, fish, tier, choicesMade, bossType) {
     const rod = user.fishing?.rods[user.fishing.equippedRodIndex];
+    const bt  = bossType ?? rollBossType();
+    const { phaseResults, lineIntegrity } = resolveBossPhases(bt, choicesMade);
+
+    const correctCount = phaseResults.filter(p => p.correct).length;
+    const lineSnapped  = lineIntegrity <= 0;
+
     let bonusPayout = 0, durabilityLost = 0, outcome = '';
 
-    if (choice === 'fight') {
-        const winChance = tier === 'legendary' ? 0.40 : tier === 'epic' ? 0.60 : 0.75;
-        if (Math.random() < winChance) {
-            bonusPayout   = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 1.5);
-            outcome       = 'win';
-            if (rod) { applyDurabilityLoss(rod, 3); durabilityLost = 3; }
-        } else {
-            outcome       = 'loss';
-            if (rod) { applyDurabilityLoss(rod, 6); durabilityLost = 6; }
-        }
-    } else if (choice === 'loosen') {
-        bonusPayout   = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 0.5);
-        outcome       = 'loosen';
-        if (rod) { applyDurabilityLoss(rod, 1); durabilityLost = 1; }
+    if (lineSnapped || correctCount === 0) {
+        outcome = 'escaped';
+        if (rod) { applyDurabilityLoss(rod, 4); durabilityLost = 4; }
+    } else if (correctCount === 1) {
+        outcome = 'survived';
+        bonusPayout = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 0.4);
+        if (rod) { applyDurabilityLoss(rod, 3); durabilityLost = 3; }
+    } else if (correctCount === 2) {
+        outcome = 'win';
+        bonusPayout = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 1.0);
+        if (rod) { applyDurabilityLoss(rod, 2); durabilityLost = 2; }
     } else {
-        // Cut line — safe, no reward
-        outcome = 'cut';
+        // 3/3 correct
+        outcome = 'perfect';
+        bonusPayout = Math.round(randInt(fish.payoutMin, fish.payoutMax) * 1.5);
         if (rod) { applyDurabilityLoss(rod, 1); durabilityLost = 1; }
     }
 
+    const tournamentMultiplier = outcome === 'perfect' ? 1.5 : outcome === 'win' ? 1.2 : 1.0;
+
     const messages = {
-        win:    `⚔️ You fought hard and landed the ${fish.name}! Bonus payout earned!`,
-        loss:   `💥 The ${fish.name} snapped your line and escaped! Your rod took heavy damage.`,
-        loosen: `〰️ You loosened the drag — the ${fish.name} tired itself out. Partial reward.`,
-        cut:    `✂️ You cut the line to safety. No reward, but your gear is intact.`
+        perfect:  `🏆 **FLAWLESS** — You read the ${bt.name} perfectly. Maximum reward!`,
+        win:      `✅ You wrestled the ${bt.name} under control. Solid payout earned.`,
+        survived: `😓 Barely held on — the ${bt.name} nearly escaped. Partial reward.`,
+        escaped:  `💀 The ${bt.name} snapped your line and vanished into the deep!`
     };
 
     if (rod) user.markModified('fishing');
-    return { outcome, bonusPayout, durabilityLost, message: messages[outcome] };
+    return { outcome, bonusPayout, durabilityLost, correctCount, phaseResults, bossType: bt, tournamentMultiplier, message: messages[outcome] };
 }
 
 // ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
@@ -966,6 +1001,7 @@ module.exports = {
     tickConsumables,
     executeCast,
     resolveBossEncounter,
+    rollBossType,
     assignDailyFishQuests,
     updateFishQuestProgress,
     formatMs,
