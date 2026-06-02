@@ -108,9 +108,9 @@ async function handleWithdraw(interaction) {
         .setColor('#00ff00')
         .setTitle('Withdrawal Successful')
         .addFields(
-            { name: 'Withdrawn', value: `${currency}${amount}`, inline: true },
-            { name: 'Wallet', value: `${currency}${userData.balance}`, inline: true },
-            { name: 'Bank', value: `${currency}${userData.bank}`, inline: true }
+            { name: 'Withdrawn', value: `${currency}${Number(amount).toLocaleString()}`, inline: true },
+            { name: 'Wallet', value: `${currency}${Number(userData.balance).toLocaleString()}`, inline: true },
+            { name: 'Bank', value: `${currency}${Number(userData.bank).toLocaleString()}`, inline: true }
         );
 
     await interaction.reply({ embeds: [embed] });
