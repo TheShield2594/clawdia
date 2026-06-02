@@ -614,16 +614,19 @@ async function handleCast(interaction) {
             new ButtonBuilder().setCustomId('boss_cut').setLabel('✂️ Cut Line').setStyle(ButtonStyle.Secondary)
         );
         const bossEmbed = new EmbedBuilder()
-            .setColor('#e74c3c')
-            .setTitle('⚠️ Something enormous bites your line...')
+            .setColor('#1C0A00')
+            .setTitle(`${result.bossEncounter.fish.emoji} Something monstrous grabs your line!`)
             .setDescription(
-                `A **${result.bossEncounter.fish.emoji} ${result.bossEncounter.fish.name}** latches on with terrifying force!\n\n` +
-                `**What do you do?**\n` +
-                `⚔️ **Fight** — high risk, big reward. Your rod will take damage.\n` +
-                `〰️ **Loosen Line** — safer fight, partial payout.\n` +
-                `✂️ **Cut Line** — safe retreat, no reward.`
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `  ${result.bossEncounter.fish.emoji}  **${result.bossEncounter.fish.name}**  [⭐⭐⭐⭐⭐]\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                `*The rod bends nearly double. Your hands shake. This is no ordinary catch.*\n\n` +
+                `**Choose your response — NOW:**\n\n` +
+                `⚔️ **Fight** — hold on and reel hard. Maximum reward, maximum rod damage.\n` +
+                `〰️ **Loosen Line** — let it tire itself out. Safer, partial payout.\n` +
+                `✂️ **Cut Line** — retreat clean. No reward, no damage.`
             )
-            .setFooter({ text: 'You have 30 seconds to decide!' });
+            .setFooter({ text: '⏱️ 30 seconds to decide — or the creature vanishes into the deep.' });
 
         await interaction.editReply({ embeds: [embed, bossEmbed], components: [bossRow] });
 
@@ -668,9 +671,22 @@ async function handleCast(interaction) {
 
             const freshCurrency = currency;
             const bossResultEmbed = new EmbedBuilder()
-                .setColor(bossResult.outcome === 'win' ? '#2ecc71' : bossResult.outcome === 'loss' ? '#e74c3c' : '#95a5a6')
-                .setTitle(bossResult.outcome === 'win' ? '🎉 Boss Defeated!' : bossResult.outcome === 'loss' ? '💥 Got Away!' : bossResult.outcome === 'loosen' ? '〰️ Partial Victory' : '✂️ Line Cut')
-                .setDescription(bossResult.message)
+                .setColor(
+                    bossResult.outcome === 'win'    ? '#FFD700' :
+                    bossResult.outcome === 'loosen' ? '#3498db' :
+                    bossResult.outcome === 'loss'   ? '#1C0A00' : '#95a5a6'
+                )
+                .setTitle(
+                    bossResult.outcome === 'win'    ? `🏆 ${result.bossEncounter.fish.emoji} Defeated!` :
+                    bossResult.outcome === 'loss'   ? `💀 ${result.bossEncounter.fish.emoji} Escaped into the Deep…` :
+                    bossResult.outcome === 'loosen' ? `〰️ Partial Victory — ${result.bossEncounter.fish.emoji} Tired Out` :
+                    `✂️ Line Cut — Retreat`
+                )
+                .setDescription(
+                    bossResult.outcome === 'win'
+                        ? `**You landed the ${result.bossEncounter.fish.emoji} ${result.bossEncounter.fish.name}.**\n\n${bossResult.message}`
+                        : bossResult.message
+                )
                 .addFields(
                     { name: 'Bonus Payout',   value: bossResult.bonusPayout > 0 ? `${freshCurrency}${bossResult.bonusPayout.toLocaleString()}` : 'None', inline: true },
                     { name: 'Rod Damage',     value: `-${bossResult.durabilityLost} durability`, inline: true }
@@ -777,13 +793,34 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
             : `**${currency}${finalPayout.toLocaleString()}**`;
 
         const isLegendary = tier === 'legendary';
+        const isEvent     = tier === 'event';
+        const isEpic      = tier === 'epic';
         const ribbon = TIER_RIBBON(TIER_NUM[tier] ?? 1);
+
+        // Weather banner — surfaced only when active weather gives a bonus at this location
+        const weather      = getCurrentWeather();
+        const weatherNote  = buildWeatherNote(weather, location.id);
+        const weatherBanner = weatherNote ? `> ${weatherNote}\n\n` : '';
+
+        // Tier-specific title decoration — each rarity bracket has a distinct visual signature
         const embedTitle = isLegendary
             ? `🌊✨ LEGENDARY CATCH ✨🌊`
-            : `${fish.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${fish.name}${sizeStr}${isCrit ? ' ✨' : ''}`;
+            : isCrit
+            ? `${fish.emoji} ✨ CRITICAL! ${fish.name}${sizeStr} ✨`
+            : isEvent
+            ? `🌟 ${fish.emoji} ${fish.name}${sizeStr} 🌟`
+            : isEpic
+            ? `⚡ ${fish.emoji} ${fish.name}${sizeStr} ⚡`
+            : `${fish.emoji} ${fish.name}${sizeStr}`;
+
+        // Tier-specific description — escalates in drama with rarity
         const embedDesc = isLegendary
-            ? `${ribbon}\n\nYou pulled something impossible from the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${fish.emoji}  **${fish.name}**${sizeStr}  [⭐⭐⭐⭐⭐]\n  *${fish.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
-            : `${ribbon}\n\n*${fish.flavor}*`;
+            ? `${weatherBanner}${ribbon}\n\nYou pulled something impossible from the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${fish.emoji}  **${fish.name}**${sizeStr}  [⭐⭐⭐⭐⭐]\n  *${fish.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+            : isEvent
+            ? `${weatherBanner}${ribbon}\n\nSomething that shouldn't exist rises from below.\n\n*${fish.flavor}*`
+            : isEpic
+            ? `${weatherBanner}${ribbon}\n\nAn exceptional catch that tests every fibre of your rod.\n\n*${fish.flavor}*`
+            : `${weatherBanner}${ribbon}\n\n*${fish.flavor}*`;
 
         const embed = new EmbedBuilder()
             .setColor(color)
@@ -923,6 +960,19 @@ function buildFooter(user) {
     if (todData) parts.push(todData.description);
 
     return parts.join(' • ');
+}
+
+// Returns a one-line weather effect note when the weather grants a bonus at the given location.
+// Returns null when the current weather has no effect at this location.
+function buildWeatherNote(weather, locationId) {
+    const bonus = weather.locationBonus?.[locationId];
+    if (!bonus) return null;
+    if (bonus.rareChance)      return `${weather.emoji} **${weather.name}** — fish are biting harder *(+rare chance)*`;
+    if (bonus.legendaryChance) return `${weather.emoji} **${weather.name}** — something stirs beneath the surface *(+legendary chance)*`;
+    if (bonus.epicChance)      return `${weather.emoji} **${weather.name}** — ocean predators are active in this weather *(+epic chance)*`;
+    if (bonus.mythicalChance)  return `${weather.emoji} **${weather.name}** — ancient creatures are drawn upward by the light *(+event chance)*`;
+    if (bonus.junkMod)         return `${weather.emoji} **${weather.name}** — fish have retreated from the heat *(junk chance up)*`;
+    return `${weather.emoji} **${weather.name}**`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

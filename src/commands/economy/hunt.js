@@ -495,6 +495,7 @@ async function executeStart(interaction) {
 
         const isCorrect  = pickedId === approachData.correctId;
         const isTimeout  = pickedId === null;
+        const chosenLabel = chosen?.label ?? '';
         const stealthResultEmbed = new EmbedBuilder()
             .setColor(isCorrect ? '#00FF7F' : isTimeout ? '#888888' : stealthBonus < 0 ? '#FF6B6B' : '#FFA500')
             .setTitle(
@@ -504,10 +505,13 @@ async function executeStart(interaction) {
                 '🤔 Decent approach…'
             )
             .setDescription(
-                isTimeout  ? `You moved before thinking — hunting without a stealth bonus.` :
-                isCorrect  ? `You read the terrain perfectly. **+25% success chance** and chance of better prey.` :
-                stealthBonus < 0 ? `The animal heard you coming. **−10% success chance** this hunt.` :
-                `Not the ideal approach, but you stayed quiet enough. **+5% success chance.**`
+                isTimeout
+                    ? `You weighed your options too long — the window closed.\n\nNo stealth bonus this hunt.`
+                    : isCorrect
+                    ? `**${chosenLabel}**\n\n*You read the terrain perfectly. The animal froze for a moment — then relaxed. It never sensed you.*\n\n**+25% success chance** and a chance of better prey.`
+                    : stealthBonus < 0
+                    ? `**${chosenLabel}**\n\n*The animal heard you before you got within range. It fixed you with a stare — every advantage lost.*\n\n**−10% success chance** this hunt.`
+                    : `**${chosenLabel}**\n\n*Not the ideal approach, but you kept your noise down. The animal stirred — then settled.*\n\n**+5% success chance.**`
             );
 
         await interaction.editReply({ embeds: [stealthResultEmbed], components: [] });
