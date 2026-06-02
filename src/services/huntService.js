@@ -801,7 +801,8 @@ function executeHunt(user, zoneId, options = {}) {
             trophyQuality,
             specialDrop, xpEarned: xpGain,
             levelUp: lvResult.leveledUp ? lvResult : null,
-            cappedByHard
+            cappedByHard,
+            streakMult
         });
 
         if (weapon.currentDurability <= 0) result.weaponBroke = true;

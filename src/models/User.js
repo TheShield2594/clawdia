@@ -418,6 +418,12 @@ const userSchema = new Schema({
     },
     // ─────────────────────────────────────────────────────────────────────────
 
+    // Rob trap — set via /trap set; triggers on successful rob against this user
+    trap: {
+        setAt:     { type: Date, default: null },
+        expiresAt: { type: Date, default: null }
+    },
+
     // Active item effects (populated by /use; pruned on read)
     activeEffects: [{
         type:      { type: String, required: true },

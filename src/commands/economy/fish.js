@@ -49,6 +49,7 @@ const { ensureHuntData } = require('../../services/huntService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
 const { randomFrom, FISH_MISS_POOL } = require('../../utils/copyLines');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { stackBar } = require('../../utils/rewardReveal');
 const { submitCatch: submitTournamentCatch, getActiveTournament, buildLeaderboardEmbed, endTournament, buildWinnersEmbed } = require('../../services/tournamentService');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../data/featuredRotation');
 const { getTimeBand } = require('../../utils/timeBand');
@@ -992,7 +993,13 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
                 { name: 'Stamina',  value: buildStaminaLine(user),                   inline: true }
             );
 
-        if (isCrit) embed.addFields({ name: 'Crit Multiplier', value: `×${critMultiplier}`, inline: true });
+        const fishMultEntries = [];
+        if ((result.streakMult ?? 1) > 1.0) fishMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
+        if (isCrit)                          fishMultEntries.push({ emoji: '⚡', label: `${critMultiplier}x crit` });
+        if (fishMultEntries.length > 0) {
+            const fishCombined = (result.streakMult ?? 1) * critMultiplier;
+            embed.addFields({ name: '📈 Multipliers', value: stackBar(fishMultEntries, fishCombined, finalPayout, currency), inline: false });
+        }
 
         // Fish traits display
         if (result.traitEffects?.length) {
