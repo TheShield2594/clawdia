@@ -146,6 +146,12 @@ const CONSUMABLES = {
         effect: { xpMultiplier: 0.50 },
         description: '+50% XP on next mine',
         maxStack: 10
+    },
+    mine_lock: {
+        id: 'mine_lock', name: 'Mine Lock', emoji: '🔒',
+        cost: 400, type: 'defense',
+        description: 'Protects your mine from being raided for 24 hours',
+        maxStack: 3
     }
 };
 
@@ -550,6 +556,51 @@ const CRAFT_RECIPES = {
             { material: 'amethyst_chip', qty: 2 }
         ],
         output: { type: 'consumable', id: 'miners_instinct', qty: 3 }
+    },
+    repair_kit_from_iron: {
+        id: 'repair_kit_from_iron', name: 'Repair Kit (Small)', emoji: '🔧',
+        description: 'Forge a Repair Kit from Iron Ore filings',
+        ingredients: [
+            { material: 'iron_filing', qty: 3 },
+            { material: 'rock_fragment', qty: 2 }
+        ],
+        output: { type: 'consumable', id: 'repair_kit_small', qty: 1 }
+    },
+    lucky_charm_from_gold: {
+        id: 'lucky_charm_from_gold', name: 'Premium Magnet (Lucky Charm)', emoji: '🍀',
+        description: 'Craft a Premium Magnet from Gold Nuggets — a miner\'s lucky charm',
+        ingredients: [
+            { material: 'gold_nugget', qty: 3 },
+            { material: 'quartz_shard', qty: 2 }
+        ],
+        output: { type: 'consumable', id: 'premium_magnet', qty: 1 }
+    },
+    xp_booster_from_crystal: {
+        id: 'xp_booster_from_crystal', name: 'XP Booster (Scroll)', emoji: '🔮',
+        description: 'Infuse Crystal Slivers into an XP Scroll for double gains',
+        ingredients: [
+            { material: 'crystal_sliver', qty: 2 },
+            { material: 'raw_sapphire',   qty: 1 }
+        ],
+        output: { type: 'consumable', id: 'xp_scroll', qty: 2 }
+    },
+    void_charge_from_mythril: {
+        id: 'void_charge_from_mythril', name: 'Void Charge Pack (Mythril)', emoji: '🔷',
+        description: 'Forge exclusive Void Charges from rare Mythril Dust — not sold in shop',
+        ingredients: [
+            { material: 'mythril_dust',  qty: 2 },
+            { material: 'void_essence',  qty: 1 }
+        ],
+        output: { type: 'mine_charge', id: 'void_charge', qty: 5 }
+    },
+    mine_lock_from_obsidian: {
+        id: 'mine_lock_from_obsidian', name: 'Mine Lock', emoji: '🔒',
+        description: 'Craft a Mine Lock from Obsidian to protect your mine from raiders',
+        ingredients: [
+            { material: 'obsidian_chip', qty: 2 },
+            { material: 'iron_filing',   qty: 3 }
+        ],
+        output: { type: 'mine_consumable', id: 'mine_lock', qty: 1 }
     }
 };
 
@@ -671,5 +722,22 @@ module.exports = {
     PRESTIGE_BONUSES,
     MATERIAL_NAMES,
     CRAFT_RECIPES,
-    MINE_QUEST_TEMPLATES
+    MINE_QUEST_TEMPLATES,
+
+    // Map cell visual constants (exported for use in mine.js)
+    MAP_CELL: {
+        ROCK:    0,  // unexplored: 🪨
+        DUG:     1,  // excavated:  ⬛
+        ORE:     2,  // ore vein:   💎
+        CAVE_IN: 3,  // cave-in:    💥
+    },
+    MAP_EMOJI: ['🪨', '⬛', '💎', '💥'],
+    MAP_SIZE:  10,
+
+    // Raid constants
+    RAID_COOLDOWN_MS:       30 * 60_000,  // 30 min between raids sent
+    RAID_SHIELD_MS:         60 * 60_000,  // 1 hr immunity after being raided
+    RAID_STEAL_MIN:         0.05,
+    RAID_STEAL_MAX:         0.20,
+    MINE_LOCK_DURATION_MS:  24 * 3_600_000
 };
