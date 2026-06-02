@@ -63,23 +63,30 @@ function getAnnounceTier(def) {
     return 'legendary';
 }
 
-// Minimum tier order (for threshold config)
-const ANNOUNCE_TIER_ORDER = { none: 0, rare: 1, secret: 2, legendary: 3 };
+// Rank order for non-secret tiers only (secret is handled orthogonally)
+const ANNOUNCE_TIER_ORDER = { none: 0, rare: 1, legendary: 2 };
 
 function tierMeetsThreshold(tier, threshold) {
-    const min = ANNOUNCE_TIER_ORDER[threshold] ?? 1;
-    return ANNOUNCE_TIER_ORDER[tier] >= min;
+    // Secret achievements always broadcast regardless of threshold
+    if (tier === 'secret') return true;
+    const min = ANNOUNCE_TIER_ORDER[threshold] ?? ANNOUNCE_TIER_ORDER['rare'];
+    return (ANNOUNCE_TIER_ORDER[tier] ?? 0) >= min;
 }
 
 /**
  * Send a server-wide announcement for notable achievement unlocks.
  * Tiers: rare = brief mention, secret = redacted, legendary = fancy bordered.
- * Respects `achievementAnnounceChannel` and `achievementAnnounceThreshold` guild settings.
+ * Uses the same announcementChannelId as the per-user reveal to avoid needing
+ * a separate dashboard field; skips broadcast if both channels are identical
+ * (prevent duplicate when the reveal channel IS the announce channel).
+ * Respects `achievementAnnounceThreshold` guild setting ('rare'|'secret'|'legendary').
  */
-async function broadcastAchievementUnlock(client, guildSettings, member, def) {
-    const channelId = guildSettings.achievements?.achievementAnnounceChannelId
-        ?? guildSettings.economy?.announcementChannelId;
+async function broadcastAchievementUnlock(client, guildSettings, mention, def, revealChannelId) {
+    const channelId = guildSettings.achievements?.announcementChannelId;
     if (!channelId) return;
+
+    // Skip broadcast if it would post to the same channel as the per-user reveal
+    if (channelId === revealChannelId) return;
 
     const tier = getAnnounceTier(def);
     const threshold = guildSettings.achievements?.achievementAnnounceThreshold ?? 'rare';
@@ -91,7 +98,6 @@ async function broadcastAchievementUnlock(client, guildSettings, member, def) {
     if (!channel?.isTextBased()) return;
 
     const { EmbedBuilder } = require('discord.js');
-    const mention = `<@${member?.id ?? member?.user?.id}>`;
 
     let embed;
     if (tier === 'legendary') {
@@ -185,8 +191,8 @@ async function announceAchievements(client, guildSettings, user, member, achieve
 
         await msg.edit({ embeds: [revealEmbed], files }).catch(() => null);
 
-        // Server-wide broadcast for notable unlocks (fire-and-forget)
-        broadcastAchievementUnlock(client, guildSettings, member, ach).catch(() => null);
+        // Server-wide broadcast for notable unlocks (fire-and-forget, skips if same channel)
+        broadcastAchievementUnlock(client, guildSettings, mention, ach, channelId).catch(() => null);
     }
 }
 

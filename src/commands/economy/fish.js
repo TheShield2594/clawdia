@@ -995,10 +995,11 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
 
         const fishMultEntries = [];
         if ((result.streakMult ?? 1) > 1.0) fishMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
-        if (isCrit)                          fishMultEntries.push({ emoji: '⚡', label: `${critMultiplier}x crit` });
+        if (isCrit)                          fishMultEntries.push({ emoji: '⚡', label: `${critMultiplier.toFixed(2)}x crit` });
         if (fishMultEntries.length > 0) {
-            const fishCombined = (result.streakMult ?? 1) * critMultiplier;
-            embed.addFields({ name: '📈 Multipliers', value: stackBar(fishMultEntries, fishCombined, finalPayout, currency), inline: false });
+            const fishCombined  = (result.streakMult ?? 1) * critMultiplier;
+            const preBonusPayout = finalPayout - (result.petYieldBonus ?? 0) - (result.featuredSpotBonus ?? 0);
+            embed.addFields({ name: '📈 Multipliers', value: stackBar(fishMultEntries, fishCombined, Math.max(0, preBonusPayout), currency), inline: false });
         }
 
         // Fish traits display

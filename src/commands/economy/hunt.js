@@ -800,7 +800,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
 
         const huntMultEntries = [];
         if ((result.streakMult ?? 1) > 1.0) huntMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
-        if (isCrit)                          huntMultEntries.push({ emoji: '⚡', label: `${critMultiplier}x crit` });
+        if (isCrit)                          huntMultEntries.push({ emoji: '⚡', label: `${critMultiplier.toFixed(2)}x crit` });
         if (trophyQuality && trophyQuality.multiplier > 1.0) huntMultEntries.push({ emoji: trophyQuality.emoji, label: `${trophyQuality.multiplier.toFixed(2)}x` });
         if (huntMultEntries.length > 0) {
             const combined = (result.streakMult ?? 1) * critMultiplier * (trophyQuality?.multiplier ?? 1);
