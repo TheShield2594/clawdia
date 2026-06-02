@@ -150,7 +150,7 @@ const CONSUMABLES = {
     mine_lock: {
         id: 'mine_lock', name: 'Mine Lock', emoji: '🔒',
         cost: 400, type: 'defense',
-        description: 'Protects your mine from being raided for 24 hours',
+        description: 'Blocks the next raid attempt on your mine; consumed on first use',
         maxStack: 3
     }
 };
@@ -735,9 +735,8 @@ module.exports = {
     MAP_SIZE:  10,
 
     // Raid constants
-    RAID_COOLDOWN_MS:       30 * 60_000,  // 30 min between raids sent
-    RAID_SHIELD_MS:         60 * 60_000,  // 1 hr immunity after being raided
-    RAID_STEAL_MIN:         0.05,
-    RAID_STEAL_MAX:         0.20,
-    MINE_LOCK_DURATION_MS:  24 * 3_600_000
+    RAID_COOLDOWN_MS:  30 * 60_000,  // 30 min between raids sent
+    RAID_SHIELD_MS:    60 * 60_000,  // 1 hr immunity after being raided
+    RAID_STEAL_MIN:    0.05,
+    RAID_STEAL_MAX:    0.20
 };

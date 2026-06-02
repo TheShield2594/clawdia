@@ -10,8 +10,7 @@ const {
     MATERIAL_NAMES, CONSUMABLES, BLAST_PACKS,
     PICKAXE_TIERS, PICKAXE_BY_SLUG, PICKAXE_UPGRADES,
     MINER_LEVELS, PRESTIGE_BONUSES, MINE_QUEST_TEMPLATES,
-    RAID_COOLDOWN_MS, RAID_SHIELD_MS, RAID_STEAL_MIN, RAID_STEAL_MAX,
-    MINE_LOCK_DURATION_MS
+    RAID_COOLDOWN_MS, RAID_SHIELD_MS, RAID_STEAL_MIN, RAID_STEAL_MAX
 } = require('../../data/mineData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
@@ -1681,10 +1680,12 @@ async function handleRaid(interaction) {
 
     // Mine Lock: defender is protected
     if (defender.mining.mineLockActive) {
-        // Consume the lock on first raid attempt
+        // Consume the lock on first raid attempt; enforce cooldown on raider
         defender.mining.mineLockActive = false;
         defender.markModified('mining');
-        await defender.save().catch(() => null);
+        raider.mining.lastRaidSent = new Date();
+        raider.markModified('mining');
+        await Promise.all([defender.save(), raider.save()]).catch(() => null);
         return interaction.reply({
             embeds: [new EmbedBuilder()
                 .setColor('#e74c3c')
