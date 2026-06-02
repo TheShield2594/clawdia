@@ -211,9 +211,16 @@ module.exports = {
 
         if (!await confirmBet(interaction, bet, user.balance, 'Blackjack', guildSettings)) return;
 
-        user.balance -= bet;
-        user.lifetimeGambled = (user.lifetimeGambled || 0) + bet;
-        await user.save();
+        // Atomic debit — re-validates balance at write time to prevent race conditions
+        const debited = await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
+            { $inc: { balance: -bet, lifetimeGambled: bet } },
+            { new: true },
+        );
+        if (!debited) {
+            return interaction.reply({ content: `❌ Not enough ${currency}! Your balance may have changed.`, ephemeral: true });
+        }
+        user = debited;
 
         const deck       = buildDeck();
         const playerHand = [deck.pop(), deck.pop()];
@@ -223,17 +230,23 @@ module.exports = {
         // Natural blackjack check
         if (handTotal(playerHand) === 21) {
             if (handTotal(dealerHand) === 21) {
-                user.balance += bet;
-                await user.save();
+                const pushUser = await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    { $inc: { balance: bet } },
+                    { new: true },
+                );
                 const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, bet,
-                    '🃏 Blackjack — Push', 'Both got blackjack. Bet returned.', '#f39c12', user.balance);
+                    '🃏 Blackjack — Push', 'Both got blackjack. Bet returned.', '#f39c12', pushUser?.balance ?? user.balance);
                 return interaction.reply({ embeds: [embed], components: buildButtons(gameId, true) });
             }
             const bjCoinMult   = getCoinMultiplier(user);
             const bjServerMult = getServerCoinMultiplier(guildSettings);
             const payout = Math.round(Math.floor(bet * 1.5) * bjCoinMult * bjServerMult);
-            user.balance += bet + payout;
-            await user.save();
+            const bjWinUser = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: bet + payout } },
+                { new: true },
+            );
             const boostNote = (bjCoinMult * bjServerMult) > 1.0 ? ` *(🚀 ${(bjCoinMult * bjServerMult).toFixed(1)}x)*` : '';
             const embed = new EmbedBuilder()
                 .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
@@ -244,7 +257,7 @@ module.exports = {
                 .addFields(
                     { name: 'Your Hand', value: `${displayHand(playerHand)} ━━ Blackjack`, inline: false },
                     { name: `💰 Payout`, value: `${currency}${(bet + payout).toLocaleString()}  (+${currency}${payout.toLocaleString()} net)${boostNote}`, inline: false },
-                    { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: false },
+                    { name: 'Balance', value: `${currency}${(bjWinUser?.balance ?? user.balance).toLocaleString()}`, inline: false },
                 )
                 .setFooter({ text: 'Blackjack pays 3:2 · Dealer stands on 17' })
                 .setTimestamp();
