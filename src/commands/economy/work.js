@@ -173,8 +173,8 @@ module.exports = {
                 finalEarned = Math.max(0, earned + specialEvent.coinDelta);
             }
 
-            // Challenge fires only when no special event is active (avoids embed conflicts)
-            const challengeFires = !specialEvent && Math.random() < 0.15;
+            // Challenge fires on every run
+            const challengeFires = true;
 
             // Atomic update — cooldown condition in query prevents double-credit on concurrent requests
             const updated = await User.findOneAndUpdate(
@@ -245,18 +245,32 @@ module.exports = {
 
             if (challengeFires) {
                 const challenge = generateWorkChallenge(job.name);
+                const isFirstWork = !updated.onboarding?.firstWorkDone;
+                const footerText = isFirstWork
+                    ? 'Tip: Higher job tiers unlock as you work more shifts. Keep grinding!'
+                    : 'Answer correctly for a bonus · Cooldown: 1h';
+
                 const challengeEmbed = new EmbedBuilder()
                     .setColor(performance.color)
                     .setTitle(challenge.title)
                     .setDescription(`*${scenario}*\n\n${challenge.description}`)
-                    .addFields({ name: '💡 Bonus', value: 'Answer correctly for a **+40% bonus** on this shift!' })
-                    .setFooter({ text: 'You have 20 seconds to answer' })
+                    .addFields({ name: '💡 Bonus', value: 'Fast correct answer: **+55%** · Correct answer: **+40%**' })
+                    .setFooter({ text: footerText })
                     .setTimestamp();
 
                 const reply = await interaction.reply({ embeds: [challengeEmbed], components: [challenge.row], fetchReply: true });
 
+                // Mark first work done (non-blocking)
+                if (isFirstWork) {
+                    User.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { $set: { 'onboarding.firstWorkDone': true } }
+                    ).catch(() => {});
+                }
+
                 let bonusEarned = 0;
                 let responseRef = null;
+                let exceptionalChallenge = false;
 
                 try {
                     const response = await reply.awaitMessageComponent({
@@ -267,7 +281,10 @@ module.exports = {
                     await responseRef.deferUpdate();
 
                     if (response.customId === challenge.correctId) {
-                        bonusEarned = Math.round(earned * 0.4);
+                        const elapsed = Date.now() - challenge.startedAt;
+                        exceptionalChallenge = elapsed <= 5000;
+                        const bonusRate = exceptionalChallenge ? 0.55 : 0.40;
+                        bonusEarned = Math.round(earned * bonusRate);
                         await User.findOneAndUpdate(
                             { userId: interaction.user.id, guildId: interaction.guild.id },
                             { $inc: { balance: bonusEarned } }
@@ -278,7 +295,7 @@ module.exports = {
                             type: 'work_challenge_bonus',
                             amount: bonusEarned,
                             balance: updated.balance + bonusEarned,
-                            note: `work challenge bonus (${challenge.type}) for ${job.name}`,
+                            note: `work challenge bonus (${challenge.type}${exceptionalChallenge ? ', fast' : ''}) for ${job.name}`,
                         });
                     }
                 } catch {
@@ -307,9 +324,16 @@ module.exports = {
                 }
 
                 if (bonusEarned > 0) {
-                    workEmbed.addFields({ name: '🎯 Challenge Bonus!', value: `✅ Correct! You earned an extra **+${bonusEarned.toLocaleString()}** coins!` });
+                    const bonusLabel = exceptionalChallenge
+                        ? `⚡ Lightning fast! You earned an extra **+${bonusEarned.toLocaleString()}** coins! (+55%)`
+                        : `✅ Correct! You earned an extra **+${bonusEarned.toLocaleString()}** coins! (+40%)`;
+                    workEmbed.addFields({ name: exceptionalChallenge ? '🎯 Exceptional Challenge!' : '🎯 Challenge Bonus!', value: bonusLabel });
                 } else {
                     workEmbed.addFields({ name: '🎯 Challenge Result', value: responseRef ? '❌ Wrong answer — no bonus this time.' : '⏱️ Time\'s up — no bonus this time.' });
+                }
+
+                if (specialEvent) {
+                    workEmbed.addFields(specialEvent.embedField);
                 }
 
                 if (promotedTo && promotedTo.minShifts > 0) {
