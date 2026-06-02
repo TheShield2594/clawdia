@@ -68,7 +68,13 @@ async function getDailyVerse() {
 }
 
 function createVerseEmbed(verseData, title = '📖 Bible Verse') {
-    let text = (verseData.text || '').trim().replace(/\s+/g, ' ');
+    // Normalise whitespace within each line but preserve verse-break newlines.
+    let text = (verseData.text || '')
+        .trim()
+        .split('\n')
+        .map(line => line.trim().replace(/\s+/g, ' '))
+        .filter(Boolean)
+        .join('\n');
     const reference = verseData.reference || '';
     const translation = verseData.translation_name || verseData.translation_id?.toUpperCase() || 'KJV';
 
