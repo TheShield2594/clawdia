@@ -9,7 +9,8 @@ const {
     DEPTHS, DEPTH_LIST, TIER_COLORS, LIMITS, PICKAXE_BY_TIER,
     MATERIAL_NAMES, CONSUMABLES, BLAST_PACKS,
     PICKAXE_TIERS, PICKAXE_BY_SLUG, PICKAXE_UPGRADES,
-    MINER_LEVELS, PRESTIGE_BONUSES, MINE_QUEST_TEMPLATES
+    MINER_LEVELS, PRESTIGE_BONUSES, MINE_QUEST_TEMPLATES,
+    RAID_COOLDOWN_MS, RAID_SHIELD_MS, RAID_STEAL_MIN, RAID_STEAL_MAX
 } = require('../../data/mineData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
@@ -31,7 +32,12 @@ const {
     activateConsumable,
     applyRepair,
     updatePickaxeStatus,
-    applyXp
+    applyXp,
+    updateMineMap,
+    renderMineMap,
+    getOreStashSummary,
+    isOreStashEmpty,
+    activateMineLock
 } = require('../../services/mineService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
@@ -107,6 +113,16 @@ module.exports = {
                                 .setDescription('Quest to claim')
                                 .setRequired(true)
                                 .addChoices(...MINE_QUEST_TEMPLATES.map(t => ({ name: t.name, value: t.id }))))))
+        .addSubcommand(sub =>
+            sub.setName('map')
+                .setDescription('View your persistent mine map — see every cell you have excavated.'))
+        .addSubcommand(sub =>
+            sub.setName('raid')
+                .setDescription('Raid another miner\'s mine and steal unprocessed ore (requires pickaxe equipped)')
+                .addUserOption(o =>
+                    o.setName('target')
+                        .setDescription('The miner to raid')
+                        .setRequired(true)))
         .addSubcommandGroup(group =>
             group.setName('shop')
                 .setDescription('Browse and purchase all mining gear, charges, and supplies')
@@ -183,6 +199,8 @@ module.exports = {
         if (!group) {
             if (sub === 'dig')     return handleDig(interaction);
             if (sub === 'profile') return handleProfile(interaction);
+            if (sub === 'map')     return handleMap(interaction);
+            if (sub === 'raid')    return handleRaid(interaction);
         }
         if (group === 'inv')    return handleInv(interaction, sub);
         if (group === 'quests') return handleQuests(interaction, sub);
@@ -520,6 +538,9 @@ async function handleDig(interaction) {
 
     updateMineQuestProgress(user, result, depthId);
 
+    // Update the persistent mine map with this dig's result
+    updateMineMap(user, result);
+
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
     try {
@@ -598,6 +619,23 @@ async function handleDig(interaction) {
             )
             .setTimestamp();
         announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
+    }
+
+    // Catastrophic cave-in server announcement (Deep or Abyss intensity, pickaxe destroyed)
+    if (result.caveIn && result.pickaxeBroke && chosenIntensity.level >= 4 && guildSettings?.economy?.announceRareDrops !== false) {
+        const announceChannelId = guildSettings?.economy?.announcementChannelId;
+        const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
+        const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
+        const caveEmbed = new EmbedBuilder()
+            .setColor('#b5651d')
+            .setTitle('💥 Catastrophic Cave-in!')
+            .setDescription(
+                `<@${interaction.user.id}> just suffered a **catastrophic cave-in** at Depth **${chosenIntensity.name}** (${depth.name})!\n` +
+                `Their **${pickaxe.name}** has been destroyed.\n\n` +
+                `*Others are warned: the tunnel grows less stable the deeper you go.*`
+            )
+            .setTimestamp();
+        announceChannel.send({ embeds: [caveEmbed] }).catch(() => null);
     }
 }
 
@@ -1514,3 +1552,208 @@ function formatExpiry(ms) {
     if (hrs > 0) return `${hrs}h ${mins}m`;
     return `${mins}m`;
 }
+
+// ─── MAP ──────────────────────────────────────────────────────────────────────
+
+async function handleMap(interaction) {
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    if (guildSettings?.economy?.enabled === false) {
+        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+    }
+
+    const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+    if (!user) {
+        return interaction.reply({
+            content: "You haven't started mining yet! Use `/mine dig` to begin.",
+            ephemeral: true
+        });
+    }
+    ensureMineData(user);
+    const m = user.mining;
+
+    const grid     = renderMineMap(user);
+    const depth    = DEPTHS[m.activeDepth];
+    const mapSize  = 10;
+    const explored = (m.mineMap ?? []).filter(c => c !== 0).length;
+    const total    = mapSize * mapSize;
+
+    // Compute depth level proxy from miner level for the yield multiplier hint
+    const intensityHint = m.level >= 40 ? '2.0×–3.0×' : m.level >= 20 ? '1.4×–2.0×' : '1.0×–1.4×';
+
+    const stashLines = getOreStashSummary(user).map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
+
+    const embed = new EmbedBuilder()
+        .setColor('#8B4513')
+        .setTitle(`🗺️ ${interaction.user.username}'s Mine Map`)
+        .setDescription(`\`\`\`\n${grid}\n\`\`\`\n` +
+            `${depth ? `**Depth:** ${depth.emoji} ${depth.name}` : ''} | **Yield range:** ${intensityHint}`)
+        .addFields(
+            {
+                name: '📊 Excavation Progress',
+                value: `${explored}/${total} cells explored`,
+                inline: true
+            },
+            {
+                name: '📦 Unprocessed Ore Stash',
+                value: stashLines.length
+                    ? stashLines.join('\n') + '\n*Can be stolen by raiders!*'
+                    : 'Empty — ore stash fills as you mine veins.',
+                inline: true
+            },
+            {
+                name: '🔑 Legend',
+                value: '🪨 Unexplored  ⬛ Excavated  💎 Ore Vein  💥 Cave-in  ⛏️ You',
+                inline: false
+            }
+        )
+        .setFooter({ text: 'Mine more to expand your map • Use /mine raid to steal from others' })
+        .setTimestamp();
+
+    if (m.mineLockActive) {
+        embed.addFields({ name: '🔒 Mine Lock', value: 'Active — your mine is protected from raiders.', inline: true });
+    }
+
+    return interaction.reply({ embeds: [embed] });
+}
+
+// ─── RAID ─────────────────────────────────────────────────────────────────────
+
+async function handleRaid(interaction) {
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    if (guildSettings?.economy?.enabled === false) {
+        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+    }
+
+    const targetUser = interaction.options.getUser('target');
+    if (targetUser.id === interaction.user.id) {
+        return interaction.reply({ content: "You can't raid your own mine.", ephemeral: true });
+    }
+
+    const [raider, defender] = await Promise.all([
+        User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+            { upsert: true, new: true }
+        ),
+        User.findOne({ userId: targetUser.id, guildId: interaction.guild.id })
+    ]);
+
+    ensureMineData(raider);
+
+    if (!defender) {
+        return interaction.reply({
+            content: `${targetUser.username} hasn't started mining yet — nothing to raid.`,
+            ephemeral: true
+        });
+    }
+    ensureMineData(defender);
+
+    // Raider cooldown
+    const now = Date.now();
+    if (raider.mining.lastRaidSent && now - raider.mining.lastRaidSent.getTime() < RAID_COOLDOWN_MS) {
+        const nextAt = new Date(raider.mining.lastRaidSent.getTime() + RAID_COOLDOWN_MS);
+        const remaining = formatMs(nextAt.getTime() - now);
+        return interaction.reply({
+            content: `You need to wait **${remaining}** before raiding again.`,
+            ephemeral: true
+        });
+    }
+
+    // Defender shield (recently raided)
+    if (defender.mining.lastRaidReceived && now - defender.mining.lastRaidReceived.getTime() < RAID_SHIELD_MS) {
+        const shieldEnds = new Date(defender.mining.lastRaidReceived.getTime() + RAID_SHIELD_MS);
+        const remaining  = formatMs(shieldEnds.getTime() - now);
+        return interaction.reply({
+            content: `**${targetUser.username}**'s mine is still recovering from a recent raid. Wait **${remaining}**.`,
+            ephemeral: true
+        });
+    }
+
+    // Raider must have a pickaxe equipped
+    const rm = raider.mining;
+    if (rm.equippedPickaxeIndex < 0 || !rm.pickaxes[rm.equippedPickaxeIndex]) {
+        return interaction.reply({
+            content: "You need a pickaxe equipped to raid! Use `/mine inv equip`.",
+            ephemeral: true
+        });
+    }
+
+    // Mine Lock: defender is protected
+    if (defender.mining.mineLockActive) {
+        // Consume the lock on first raid attempt; enforce cooldown on raider
+        defender.mining.mineLockActive = false;
+        defender.markModified('mining');
+        raider.mining.lastRaidSent = new Date();
+        raider.markModified('mining');
+        await Promise.all([defender.save(), raider.save()]).catch(() => null);
+        return interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setColor('#e74c3c')
+                .setTitle('🔒 Mine Lock Triggered!')
+                .setDescription(
+                    `**${targetUser.username}**'s mine was protected by a **Mine Lock**.\n` +
+                    `The lock absorbed your raid attempt and has now been consumed.`
+                )
+                .setTimestamp()
+            ]
+        });
+    }
+
+    // Check if there's anything to steal
+    if (isOreStashEmpty(defender)) {
+        return interaction.reply({
+            content: `**${targetUser.username}**'s ore stash is empty — nothing worth raiding.`,
+            ephemeral: true
+        });
+    }
+
+    // Execute the raid: steal RAID_STEAL_MIN–RAID_STEAL_MAX of each stash material
+    const stealFraction = RAID_STEAL_MIN + Math.random() * (RAID_STEAL_MAX - RAID_STEAL_MIN);
+    const stolen = {};
+    const dm = defender.mining;
+
+    for (const [matId, qty] of Object.entries(dm.oreStash ?? {})) {
+        if (qty <= 0) continue;
+        const take = Math.max(1, Math.floor(qty * stealFraction));
+        stolen[matId] = take;
+        dm.oreStash[matId] = qty - take;
+        // Transfer to raider's materials
+        if (!rm.materials[matId]) rm.materials[matId] = 0;
+        rm.materials[matId] += take;
+    }
+    defender.markModified('mining');
+    raider.mining.lastRaidSent = new Date();
+    defender.mining.lastRaidReceived = new Date();
+    raider.markModified('mining');
+
+    await Promise.all([raider.save(), defender.save()]).catch(err => console.error('[mine raid] save error:', err));
+
+    const stolenLines = Object.entries(stolen).map(([id, qty]) => `• ${MATERIAL_NAMES[id] ?? id} ×${qty}`).join('\n');
+    const pct = Math.round(stealFraction * 100);
+
+    const embed = new EmbedBuilder()
+        .setColor('#e67e22')
+        .setTitle('⚔️ Mine Raided!')
+        .setDescription(
+            `You broke into **${targetUser.username}**'s mine and made off with **${pct}%** of their ore stash!\n\n` +
+            `**Stolen:**\n${stolenLines}`
+        )
+        .setFooter({ text: `${targetUser.username} now has a 1-hour raid shield • Use /mine map to see your stash` })
+        .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+
+    // Notify defender if possible
+    const dmEmbed = new EmbedBuilder()
+        .setColor('#e74c3c')
+        .setTitle('⚠️ Your Mine Was Raided!')
+        .setDescription(
+            `**${interaction.user.username}** broke into your mine on **${interaction.guild.name}** ` +
+            `and stole **${pct}%** of your ore stash!\n\n` +
+            `**Lost:**\n${stolenLines}\n\n` +
+            `Craft a **Mine Lock** (\`/craft make mine_lock_from_obsidian\`) to protect yourself next time.`
+        )
+        .setTimestamp();
+    targetUser.send({ embeds: [dmEmbed] }).catch(() => null);
+}
+
