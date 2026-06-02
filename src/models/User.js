@@ -401,7 +401,20 @@ const userSchema = new Schema({
 
         dailyCoins:       { type: Number, default: 0 },
         dailyMines:       { type: Number, default: 0 },
-        dailyWindowStart: { type: Date,   default: null }
+        dailyWindowStart: { type: Date,   default: null },
+
+        // Persistent mine map (10×10 grid stored as flat array of 100 cell codes)
+        // Cell codes: 0=unexplored, 1=excavated, 2=ore-vein, 3=cave-in
+        mineMap:          [{ type: Number, default: 0 }],
+        mineMapRow:       { type: Number, default: 5 },
+        mineMapCol:       { type: Number, default: 5 },
+        // Unprocessed ore stash — stolen during raids (material id → quantity map)
+        oreStash:         { type: Object, default: {} },
+        // Raid cooldowns
+        lastRaidSent:     { type: Date, default: null },
+        lastRaidReceived: { type: Date, default: null },
+        // Mine Lock consumable stock
+        mineLockActive:   { type: Boolean, default: false }
     },
     // ─────────────────────────────────────────────────────────────────────────
 

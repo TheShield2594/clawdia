@@ -61,6 +61,17 @@ function ensureMineData(user) {
     if (!m.unlockedDepths.includes('surface_quarry')) {
         m.unlockedDepths.push('surface_quarry');
     }
+
+    // Mine map: 10×10 flat array; initialise once then persist
+    const MAP_SIZE = 10;
+    if (!Array.isArray(m.mineMap) || m.mineMap.length !== MAP_SIZE * MAP_SIZE) {
+        m.mineMap = new Array(MAP_SIZE * MAP_SIZE).fill(0);
+    }
+    if (m.mineMapRow == null) m.mineMapRow = 5;
+    if (m.mineMapCol == null) m.mineMapCol = 5;
+    if (!m.oreStash)          m.oreStash = {};
+    if (m.mineLockActive == null) m.mineLockActive = false;
+
     user.markModified('mining');
 }
 
@@ -730,6 +741,90 @@ function durabilityBar(current, max, length = 10) {
     return '█'.repeat(filled) + '░'.repeat(length - filled);
 }
 
+// ─── MINE MAP ─────────────────────────────────────────────────────────────────
+
+const MAP_SIZE = 10;
+// Cell codes
+const CELL = { ROCK: 0, DUG: 1, ORE: 2, CAVE_IN: 3 };
+
+function updateMineMap(user, result) {
+    const m = user.mining;
+    if (!Array.isArray(m.mineMap) || m.mineMap.length !== MAP_SIZE * MAP_SIZE) {
+        m.mineMap = new Array(MAP_SIZE * MAP_SIZE).fill(0);
+    }
+
+    const row = m.mineMapRow ?? 5;
+    const col = m.mineMapCol ?? 5;
+    const idx = row * MAP_SIZE + col;
+
+    if (result.caveIn) {
+        m.mineMap[idx] = CELL.CAVE_IN;
+    } else if (result.success && result.ore) {
+        m.mineMap[idx] = CELL.ORE;
+        // Accumulate ore stash for raiding
+        const matId = result.specialDrop?.itemId;
+        if (matId) {
+            if (!m.oreStash) m.oreStash = {};
+            m.oreStash[matId] = (m.oreStash[matId] ?? 0) + 1;
+        }
+    } else {
+        m.mineMap[idx] = CELL.DUG;
+    }
+
+    // Move miner to an adjacent unexplored cell if possible; otherwise wander freely
+    const adjacent = [
+        { r: row - 1, c: col }, { r: row + 1, c: col },
+        { r: row, c: col - 1 }, { r: row, c: col + 1 }
+    ].filter(({ r, c }) => r >= 0 && r < MAP_SIZE && c >= 0 && c < MAP_SIZE);
+
+    const unexplored = adjacent.filter(({ r, c }) => m.mineMap[r * MAP_SIZE + c] === CELL.ROCK);
+    const candidates = unexplored.length ? unexplored : adjacent;
+    const next = candidates[Math.floor(Math.random() * candidates.length)];
+    m.mineMapRow = next.r;
+    m.mineMapCol = next.c;
+
+    user.markModified('mining');
+}
+
+function renderMineMap(user) {
+    const m = user.mining;
+    const EMOJI = ['🪨', '⬛', '💎', '💥'];
+    const rows = [];
+    const row = m.mineMapRow ?? 5;
+    const col = m.mineMapCol ?? 5;
+
+    for (let r = 0; r < MAP_SIZE; r++) {
+        let line = '';
+        for (let c = 0; c < MAP_SIZE; c++) {
+            if (r === row && c === col) {
+                line += '⛏️';
+            } else {
+                line += EMOJI[m.mineMap[r * MAP_SIZE + c] ?? 0];
+            }
+        }
+        rows.push(line);
+    }
+    return rows.join('\n');
+}
+
+// ─── ORE STASH ────────────────────────────────────────────────────────────────
+
+function getOreStashSummary(user) {
+    const stash = user.mining?.oreStash ?? {};
+    return Object.entries(stash).filter(([, qty]) => qty > 0);
+}
+
+function isOreStashEmpty(user) {
+    return getOreStashSummary(user).length === 0;
+}
+
+// ─── MINE LOCK ────────────────────────────────────────────────────────────────
+
+function activateMineLock(user) {
+    user.mining.mineLockActive = true;
+    user.markModified('mining');
+}
+
 module.exports = {
     ensureMineData,
     getMaxStamina,
@@ -756,5 +851,10 @@ module.exports = {
     updateMineQuestProgress,
     formatMs,
     pickaxeStatusEmoji,
-    durabilityBar
+    durabilityBar,
+    updateMineMap,
+    renderMineMap,
+    getOreStashSummary,
+    isOreStashEmpty,
+    activateMineLock
 };
