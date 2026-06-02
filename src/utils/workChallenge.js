@@ -163,10 +163,17 @@ function generateWorkChallenge(jobName = 'your job') {
     // math_problem
     const problem = MATH_PROBLEMS[Math.floor(Math.random() * MATH_PROBLEMS.length)];
     const wrongNums = new Set();
-    while (wrongNums.size < 2) {
+    let iterations = 0;
+    while (wrongNums.size < 2 && iterations < 50) {
+        iterations++;
         const delta = Math.floor(Math.random() * 6) + 1;
         const candidate = problem.answer + (Math.random() < 0.5 ? delta : -delta);
         if (candidate !== problem.answer && candidate > 0) wrongNums.add(candidate);
+    }
+    // Deterministic fallback if loop exhausted
+    for (let fallback = 1; wrongNums.size < 2; fallback++) {
+        const candidate = problem.answer + fallback;
+        if (candidate !== problem.answer) wrongNums.add(candidate);
     }
     const mathWrong = [...wrongNums];
     const mathButtons = shuffle([

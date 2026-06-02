@@ -11,7 +11,6 @@ const { generateWorkChallenge } = require('../../utils/workChallenge');
 const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, WORK_ROUGH_LINES, WORK_EXCEPTIONAL_LINES } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
-const { delay } = require('../../utils/delay');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 function resolveTiers(guildSettings) {
@@ -346,49 +345,6 @@ module.exports = {
                     await interaction.editReply({ embeds: [workEmbed], components: [] }).catch(() => {});
                 }
                 return;
-            }
-
-            // Normal (no challenge) path
-            const normalDescription = performance.exceptional
-                ? `${scenario}\n\n────────────────────\n  ${currency} **${finalEarned.toLocaleString()} coins**  ·  🔥 ${performance.multiplier}x performance\n────────────────────\n${careerValueIndented}\n────────────────────\n  Balance: ${currency} ${updated.balance.toLocaleString()} coins`
-                : `${scenario}\n\n────────────────────\n  💰 **${finalEarned.toLocaleString()} coins**${bonusStr}\n  Balance: ${currency} ${updated.balance.toLocaleString()} coins\n────────────────────`;
-
-            const embed = new EmbedBuilder()
-                .setColor(performance.color)
-                .setTitle(performance.title)
-                .setDescription(normalDescription)
-                .setFooter({ text: 'Cooldown: 1h' })
-                .setTimestamp();
-
-            if (!performance.exceptional) {
-                embed.addFields(
-                    { name: '📊 Performance', value: performance.label, inline: false },
-                    { name: '📈 Career',      value: careerValue,       inline: false }
-                );
-            }
-
-            if (specialEvent) {
-                embed.addFields(specialEvent.embedField);
-            }
-
-            if (promotedTo && promotedTo.minShifts > 0) {
-                embed.addFields({
-                    name: '🎉 Promotion!',
-                    value: `You've been promoted to **${promotedTo.name}** — new jobs and higher pay are now available!`
-                });
-            }
-
-            if (specialEvent) {
-                // Suspense reveal for special work events
-                const suspenseEmbed = new EmbedBuilder()
-                    .setColor(performance.color)
-                    .setTitle('💼 Shift Update…')
-                    .setDescription(`*${scenario}*`);
-                await interaction.reply({ embeds: [suspenseEmbed] });
-                await delay(900);
-                await interaction.editReply({ embeds: [embed] });
-            } else {
-                await interaction.reply({ embeds: [embed] });
             }
         } catch (error) {
             console.error('Work error:', error);
