@@ -508,6 +508,14 @@ const userSchema = new Schema({
         allTimeBest:  { type: Number, default: 0 },
     },
 
+    // New user onboarding state
+    onboarding: {
+        starterKitClaimed: { type: Boolean, default: false },
+        firstDailyClaimed: { type: Boolean, default: false },
+        firstWorkDone:     { type: Boolean, default: false },
+        firstHuntDone:     { type: Boolean, default: false },
+    },
+
     // Lifetime stats used for achievement checks
     lifetimeGambled: { type: Number, default: 0 },
     successfulRobs:  { type: Number, default: 0 },

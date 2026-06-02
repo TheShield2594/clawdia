@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
+const { claimStarterKit } = require('../../utils/starterKit');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -24,6 +25,16 @@ module.exports = {
             let user = user_raw;
             if (!user) {
                 user = await User.create({ userId: targetUser.id, guildId: interaction.guild.id });
+            }
+
+            // Grant starter kit to new users on first economy command use (self only)
+            const isSelfCheck = targetUser.id === interaction.user.id;
+            let starterKitResult = null;
+            if (isSelfCheck && !user.onboarding?.starterKitClaimed) {
+                starterKitResult = await claimStarterKit(interaction.user.id, interaction.guild.id);
+                if (starterKitResult) {
+                    user.balance = (user.balance || 0) + starterKitResult.coins;
+                }
             }
 
             // Prune expired effects before displaying
@@ -87,6 +98,30 @@ module.exports = {
                 if (protectors.length) {
                     embed.addFields({ name: '🔮 Active Effects', value: protectors.join('\n'), inline: false });
                 }
+            }
+
+            // Economy reference benchmarks for context
+            const walletCoins = user.balance || 0;
+            if (isSelf && walletCoins < 10000) {
+                const padlockCost = 5000;
+                const avgHuntEarn = 350;
+                const avgWorkEarn = 200;
+                const coinsNeeded = Math.max(0, padlockCost - walletCoins);
+                const workRunsNeeded = coinsNeeded > 0 ? Math.ceil(coinsNeeded / avgWorkEarn) : 0;
+                const referenceLines = [
+                    `🔒 Padlock costs **5,000** — you're **${walletCoins >= padlockCost ? 'there!' : `${coinsNeeded.toLocaleString()} away`}**${workRunsNeeded > 0 ? ` (~${workRunsNeeded} work runs)` : ''}`,
+                    `⛏️ Average \`/hunt\` earns ~**${avgHuntEarn}**/run`,
+                    `💼 Average \`/work\` earns ~**${avgWorkEarn}**/shift`,
+                ];
+                embed.addFields({ name: '📊 Economy Reference', value: referenceLines.join('\n'), inline: false });
+            }
+
+            if (starterKitResult) {
+                embed.addFields({
+                    name: '🎁 Welcome to Clawdia!',
+                    value: `You received a starter kit: **+${starterKitResult.coins.toLocaleString()} coins** · 🛟 Lifesaver · 🍀 Lucky Charm\nUse \`/daily\` every day to build your streak and multiply earnings!`,
+                    inline: false,
+                });
             }
 
             await interaction.reply({ embeds: [embed] });
