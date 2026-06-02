@@ -9,14 +9,16 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 
 const DEFAULT_MODELS = {
     openai: 'gpt-4o-mini',
-    gemini: 'gemini-1.5-flash',
-    anthropic: 'claude-haiku-4-5-20251001',
+    gemini: 'gemini-2.0-flash',
+    anthropic: 'claude-haiku-4-5',
     ollama: 'llama3.2',
     openrouter: 'openai/gpt-4o-mini'
 };
 
 const DISCORD_MAX_LEN = 2000;
-const STREAM_EDIT_INTERVAL_MS = 1200;
+const STREAM_EDIT_INTERVAL_MS = 800;
+// Discord typing indicator expires after 10s — refresh every 8s during long generations
+const TYPING_REFRESH_INTERVAL_MS = 8000;
 
 // userId -> [timestamps] and channelId -> [timestamps] for sliding-window rate limiting (in-memory)
 const rateLimits = new Map();
@@ -527,6 +529,9 @@ async function handleAIChat(message, aiSettings) {
             let currentBuf = '';
             const sentMessages = [placeholder]; // all Discord messages emitted during streaming
 
+            // Keep the typing indicator alive for long generations
+            const typingInterval = setInterval(() => message.channel.sendTyping().catch(() => {}), TYPING_REFRESH_INTERVAL_MS);
+
             await withRetry(async () => {
                 fullResponse = '';
                 currentBuf = '';
@@ -550,6 +555,7 @@ async function handleAIChat(message, aiSettings) {
                 }
                 if (currentBuf) await currentMsg.edit(currentBuf).catch(() => {});
             });
+            clearInterval(typingInterval);
 
             // Post-process: reconcile sentMessages against the canonical cleanText chunks
             if (aiSettings.actionsEnabled) {
@@ -600,7 +606,11 @@ async function handleAIChat(message, aiSettings) {
         }
     } catch (error) {
         console.error(`[AI:${provider}] error:`, error?.message || error);
-        const detail = error?.status ? ` (HTTP ${error.status})` : '';
+        const status = error?.status || error?.response?.status;
+        let detail = status ? ` (HTTP ${status})` : '';
+        if (status === 401) detail += ' — check your API key';
+        else if (status === 429) detail += ' — rate limit exceeded';
+        else if (status === 503) detail += ' — provider unavailable';
         await message.reply(`Sorry, I hit an error talking to ${providerLabel}${detail}.`).catch(() => {});
     }
 }
