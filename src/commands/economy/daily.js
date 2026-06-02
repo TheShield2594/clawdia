@@ -10,6 +10,7 @@ const { DROP_TABLE, RARE_DROP_TABLE, DROP_MILESTONES, DROP_BASE_CHANCE, weighted
 const { stackBar } = require('../../utils/rewardReveal');
 const { buildCooldownEmbed, getNextStreakMilestone } = require('../../utils/cooldownEmbed');
 const { getTimeBand } = require('../../utils/timeBand');
+const { claimStarterKit } = require('../../utils/starterKit');
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -254,6 +255,12 @@ module.exports = {
             }
             // ─────────────────────────────────────────────────────────────────────
 
+            // Grant starter kit on first economy command use
+            let starterKitResult = null;
+            if (!user.onboarding?.starterKitClaimed) {
+                starterKitResult = await claimStarterKit(interaction.user.id, interaction.guild.id);
+            }
+
             const dailyAmount  = guildSettings?.economy?.dailyAmount ?? 100;
             const streakMult   = getStreakMultiplier(user.streak?.current ?? 0);
             const coinMult     = getCoinMultiplier(user);
@@ -348,11 +355,22 @@ module.exports = {
             }
             // ─────────────────────────────────────────────────────────────────────
 
+            const isFirstDaily = !user.onboarding?.firstDailyClaimed;
+            if (isFirstDaily) {
+                User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    { $set: { 'onboarding.firstDailyClaimed': true } }
+                ).catch(() => {});
+            }
+
             const rankMedals = { 1: '🥇', 2: '🥈', 3: '🥉' };
             const rankMedal = streakRank && rankMedals[streakRank] ? `${rankMedals[streakRank]} ` : '';
-            const rankText = streakRank
+            const baseRankText = streakRank
                 ? `🔥 Your ${streakCurrent}-day streak · ${rankMedal}Ranked #${streakRank} on this server  •  Cooldown: 24h`
                 : 'Cooldown: 24h';
+            const rankText = isFirstDaily
+                ? 'Tip: Claim daily every day to build your streak — streaks multiply your earnings!'
+                : baseRankText;
 
             const rewardEmbed = new EmbedBuilder()
                 .setColor(streakColor)
@@ -372,6 +390,14 @@ module.exports = {
             const milestoneTeaser = getNextStreakMilestone(streakCurrent);
             if (milestoneTeaser) {
                 rewardEmbed.addFields({ name: '📊 Streak Progress', value: milestoneTeaser, inline: false });
+            }
+
+            if (starterKitResult) {
+                rewardEmbed.addFields({
+                    name: '🎁 Welcome to Clawdia!',
+                    value: `Starter kit claimed: **+${starterKitResult.coins.toLocaleString()} coins** · 🛟 Lifesaver · 🍀 Lucky Charm`,
+                    inline: false,
+                });
             }
 
             const challenge = generateDailyChallenge();
