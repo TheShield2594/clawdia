@@ -20,7 +20,7 @@ const TRAP_FINE_MULTIPLIER = 2;            // trap doubles the normal fine
 // robber has already been persisted, restore the robber's prior balance from
 // the snapshot before re-throwing, so partial heists don't leave the robber
 // with stolen coins the victim never lost.
-async function saveRobState(robber, victim, robberSnapshot) {
+async function saveRobState(robber, victim, robberSnapshot, trapSnapshot) {
     await robber.save();
     try {
         await victim.save();
@@ -37,6 +37,16 @@ async function saveRobState(robber, victim, robberSnapshot) {
             );
         } catch (rollbackErr) {
             console.error('[rob] rollback failed; balances may be inconsistent:', rollbackErr);
+        }
+        if (trapSnapshot) {
+            try {
+                await User.updateOne(
+                    { userId: victim.userId, guildId: victim.guildId },
+                    { $set: { 'trap.setAt': trapSnapshot.setAt, 'trap.expiresAt': trapSnapshot.expiresAt } }
+                );
+            } catch (trapRollbackErr) {
+                console.error('[rob] trap rollback failed; trap may be permanently consumed:', trapRollbackErr);
+            }
         }
         throw victimErr;
     }
@@ -194,18 +204,23 @@ module.exports = {
                     { new: false }
                 );
                 const trapActive = !!trapConsumed;
+                const trapSnapshot = trapActive
+                    ? { setAt: trapConsumed.trap?.setAt ?? null, expiresAt: trapConsumed.trap?.expiresAt ?? null }
+                    : null;
                 let trapFine = 0;
                 if (trapActive) {
                     const normalFine = Math.floor(preRobBalance * failFineRate);
                     trapFine = Math.min(normalFine * TRAP_FINE_MULTIPLIER, robber.balance);
                     robber.balance = Math.max(0, robber.balance - trapFine);
                     victim.balance += trapFine;
-                    victim.trap.setAt     = null;
-                    victim.trap.expiresAt = null;
+                    if (victim.trap) {
+                        victim.trap.setAt     = null;
+                        victim.trap.expiresAt = null;
+                    }
                 }
 
                 const robAchievements = await checkAndAward(robber, guildSettings).catch(() => []);
-                await saveRobState(robber, victim, robberSnapshot);
+                await saveRobState(robber, victim, robberSnapshot, trapSnapshot);
                 if (robAchievements.length) {
                     announceAchievements(interaction.client, guildSettings, robber, interaction.member, robAchievements).catch(() => null);
                 }
