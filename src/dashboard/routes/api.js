@@ -212,7 +212,8 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'suggestions', 'ai', 'tempVoice', 'bibleVerse',
     'dailyNews', 'dailyNewsProfiles', 'rssFeeds',
     'autoRoles', 'reactionRoles', 'analytics',
-    'giveaways', 'notifications'
+    'giveaways', 'notifications',
+    'newspaper', 'heist'
 ]);
 
 function isAllowedSettingKey(key) {
@@ -353,6 +354,45 @@ function validateBibleVerseUpdate(updates) {
     return null;
 }
 
+function validateSnowflakeOrNull(value, label) {
+    if (value === null || value === '' || value === undefined) return null;
+    if (typeof value !== 'string' || !/^\d{17,20}$/.test(value)) {
+        return `${label} must be a valid Discord snowflake or null`;
+    }
+    return null;
+}
+
+function validateNewspaperUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        if (!key.startsWith('newspaper.') && key !== 'newspaper') continue;
+        const field = key.split('.')[1];
+        if (field === 'channelId') {
+            const err = validateSnowflakeOrNull(value, 'newspaper.channelId');
+            if (err) return err;
+        }
+        if (field === 'quoteChannelIds') {
+            if (!Array.isArray(value)) return 'newspaper.quoteChannelIds must be an array';
+            for (const id of value) {
+                const err = validateSnowflakeOrNull(id, 'newspaper.quoteChannelIds entry');
+                if (err) return err;
+            }
+        }
+    }
+    return null;
+}
+
+function validateHeistUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        if (!key.startsWith('heist.') && key !== 'heist') continue;
+        const field = key.split('.')[1];
+        if (field === 'announceChannelId') {
+            const err = validateSnowflakeOrNull(value, 'heist.announceChannelId');
+            if (err) return err;
+        }
+    }
+    return null;
+}
+
 router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
@@ -380,6 +420,12 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
     const eventLogError = validateEventLogUpdate(updates);
     if (eventLogError) return res.status(400).json({ error: eventLogError });
+
+    const newspaperError = validateNewspaperUpdate(updates);
+    if (newspaperError) return res.status(400).json({ error: newspaperError });
+
+    const heistError = validateHeistUpdate(updates);
+    if (heistError) return res.status(400).json({ error: heistError });
 
     try {
         const guildSettings = await Guild.findOne({ guildId });
