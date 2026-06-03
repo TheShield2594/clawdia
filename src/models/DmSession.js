@@ -16,16 +16,9 @@ const dmSessionSchema = new Schema({
     players: { type: [dmCharacterSchema], default: [] },
     storyLog: { type: [String], default: [] },
     partyState: { type: Schema.Types.Mixed, default: {} },
-    active: { type: Boolean, default: true },
-    createdAt: { type: Date, default: Date.now },
-    updatedAt: { type: Date, default: Date.now }
-});
+    active: { type: Boolean, default: true }
+}, { timestamps: true });
 
 dmSessionSchema.index({ guildId: 1, channelId: 1, active: 1 });
-
-dmSessionSchema.pre('save', function (next) {
-    this.updatedAt = Date.now();
-    next();
-});
 
 module.exports = model('DmSession', dmSessionSchema);
