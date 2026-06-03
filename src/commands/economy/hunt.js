@@ -46,6 +46,7 @@ const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
+const { isDistrictActive } = require('../../services/districtService');
 
 // ─── STEALTH APPROACH OPTIONS (per zone) ─────────────────────────────────────
 // Each zone has a hint about the animal's behaviour + 3 approach strategies.
@@ -624,7 +625,8 @@ async function executeStart(interaction) {
     const featured       = getDailyFeatured(interaction.guild.id);
     const isFeaturedZone = zoneId === featured.huntZone.id;
 
-    const result = executeHunt(user, zoneId, { stealthBonus, aimBonus });
+    const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
+    const result = executeHunt(user, zoneId, { stealthBonus, aimBonus, marketplaceActive });
 
     // Pity counter: reset on rare+ success, increment otherwise
     if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
@@ -660,6 +662,18 @@ async function executeStart(interaction) {
             user.hunt.dailyCoins      += featBonus;
             result.finalPayout        += featBonus;
             result.featuredZoneBonus   = featBonus;
+        }
+    }
+    // Wilderness district: +10% hunt yield
+    const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
+    if (result.success && result.finalPayout > 0 && wildernessActive) {
+        const bonus = Math.round(result.finalPayout * 0.10);
+        if (bonus > 0) {
+            user.balance           += bonus;
+            user.hunt.totalEarned  += bonus;
+            user.hunt.dailyCoins   += bonus;
+            result.finalPayout     += bonus;
+            result.wildernessBonus  = bonus;
         }
     }
     if (result.success && result.finalPayout > user.hunt.bestPayout) user.hunt.bestPayout = result.finalPayout;
@@ -711,6 +725,9 @@ async function executeStart(interaction) {
     }
     if (result.featuredZoneBonus > 0) {
         embed.addFields({ name: '🌟 Featured Zone Bonus', value: `+${result.featuredZoneBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
+    }
+    if (result.wildernessBonus > 0) {
+        embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
     }
 
     // Hourly leader footer

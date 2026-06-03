@@ -678,8 +678,9 @@ function executeCast(user, locationId, options = {}) {
             // ── Special material drop ──────────────────────────────────────
             let specialDrop = null;
             let dropChance  = fish.specialDrop?.chance ?? 0;
-            if (isCrit)            dropChance *= 2;
-            if (traits.ancient)    dropChance *= 2; // ancient trait doubles mat chance
+            if (isCrit)                       dropChance *= 2;
+            if (traits.ancient)               dropChance *= 2; // ancient trait doubles mat chance
+            if (options.marketplaceActive)    dropChance *= 1.10;
             if (fish.specialDrop && Math.random() < dropChance) {
                 specialDrop = fish.specialDrop;
                 const matKey = fish.specialDrop.itemId;
