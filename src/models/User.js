@@ -500,6 +500,30 @@ const userSchema = new Schema({
     duelWins:   { type: Number, default: 0 },
     duelLosses: { type: Number, default: 0 },
 
+    // Ranked duel ladder (per-guild ELO + seasonal records)
+    ranked: {
+        elo:                  { type: Number, default: 1000 },
+        peakElo:              { type: Number, default: 1000 },
+        seasonPeakElo:        { type: Number, default: 1000 },
+        rankedWins:           { type: Number, default: 0 },
+        rankedLosses:         { type: Number, default: 0 },
+        seasonRankedWins:     { type: Number, default: 0 },
+        seasonRankedLosses:   { type: Number, default: 0 },
+        currentSeasonId:      { type: String, default: null },
+        peakSeasonTitle:      { type: String, default: null },  // best peak tier label across all seasons
+        seasonalTitles:       [{ type: String }],               // earned end-of-season titles (e.g. "S1 Champion")
+        lastSeasonId:         { type: String, default: null }
+    },
+
+    // Top-level (account) prestige — separate from per-skill hunt/fish/mine prestige
+    accountPrestige: {
+        rank:           { type: Number, default: 0, min: 0 },
+        prestigedAt:    { type: Date,   default: null },
+        unlocks:        [{ type: String }],   // ordered list of feature unlock ids
+        lifetimePrestigeXp: { type: Number, default: 0 },
+        announcedRank:  { type: Number, default: 0 }   // highest rank announced server-wide
+    },
+
     // Transient social badges (war victor, leaderboard #1, etc.) with optional expiry
     badges: [{
         id:        { type: String, required: true },
@@ -551,6 +575,8 @@ userSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 userSchema.index({ guildId: 1, 'streak.current': -1 });
 userSchema.index({ guildId: 1, 'streak.longest': -1 });
 userSchema.index({ guildId: 1, duelWins: -1 });
+userSchema.index({ guildId: 1, 'ranked.elo': -1 });
+userSchema.index({ guildId: 1, 'accountPrestige.rank': -1 });
 userSchema.index({ guildId: 1, achievementsCount: -1 });
 userSchema.index({ guildId: 1, seasonCoins: -1 }); // used by executeLeaderboard / executeSeasonMe
 

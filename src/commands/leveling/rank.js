@@ -3,6 +3,8 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { createRankCard } = require('../../utils/cardGenerator');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
+const { badgeFor, titleForExactRank: prestigeTitle } = require('../../utils/prestige');
+const { tierFor: eloTierFor, START_ELO } = require('../../utils/duelElo');
 
 const BOOSTER_TYPES  = new Set(['coin_booster_2x', 'xp_booster_2x', 'lucky_streak', 'salary_raise']);
 const BOOST_TYPES    = new Set(['coin_booster_2x', 'xp_booster_2x']);
@@ -74,6 +76,23 @@ module.exports = {
                 ? '💡 Some channels or roles may not earn XP. Use /xpinfo to see details.'
                 : null;
 
+            // Prestige + ranked summary lines (appended to whichever embed we send)
+            const prestigeRank = user.accountPrestige?.rank ?? 0;
+            const eloVal       = user.ranked?.elo ?? START_ELO;
+            const eloTier      = eloTierFor(eloVal);
+            const showRanked   = (user.ranked?.rankedWins ?? 0) + (user.ranked?.rankedLosses ?? 0) > 0;
+            const identityField = (() => {
+                const parts = [];
+                if (prestigeRank > 0) {
+                    parts.push(`${badgeFor(prestigeRank)} **${prestigeTitle(prestigeRank)}**`);
+                }
+                if (showRanked) {
+                    parts.push(`${eloTier.icon} **${eloTier.label}** (${eloVal} ELO)`);
+                }
+                if (!parts.length) return null;
+                return { name: '🪪 Identity', value: parts.join('\n'), inline: false };
+            })();
+
             if (activeBoosters.length || hasServerBoost) {
                 const lines = [];
                 if (hasServerBoost) {
@@ -88,8 +107,13 @@ module.exports = {
                 const boosterEmbed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .addFields({ name: '🚀 Active Boosters', value: lines.join('\n'), inline: false });
+                if (identityField) boosterEmbed.addFields(identityField);
                 if (xpHint) boosterEmbed.setFooter({ text: xpHint });
                 await interaction.reply({ files: [attachment], embeds: [boosterEmbed] });
+            } else if (identityField) {
+                const idEmbed = new EmbedBuilder().setColor('#9b59b6').addFields(identityField);
+                if (xpHint) idEmbed.setFooter({ text: xpHint });
+                await interaction.reply({ files: [attachment], embeds: [idEmbed] });
             } else if (xpHint) {
                 const hintEmbed = new EmbedBuilder()
                     .setColor('#95a5a6')
