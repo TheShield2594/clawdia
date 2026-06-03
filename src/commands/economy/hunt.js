@@ -48,6 +48,8 @@ const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
 
+const WILDERNESS_YIELD_BONUS = 0.10;
+
 // ─── STEALTH APPROACH OPTIONS (per zone) ─────────────────────────────────────
 // Each zone has a hint about the animal's behaviour + 3 approach strategies.
 // One approach is correct; correct = stealthBonus, wrong = noise penalty.
@@ -664,10 +666,12 @@ async function executeStart(interaction) {
             result.featuredZoneBonus   = featBonus;
         }
     }
-    // Wilderness district: +10% hunt yield
+    // Wilderness district: +10% hunt yield (clamped to daily hard cap)
     const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
     if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const bonus = Math.round(result.finalPayout * 0.10);
+        const remaining = LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins;
+        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
         if (bonus > 0) {
             user.balance           += bonus;
             user.hunt.totalEarned  += bonus;

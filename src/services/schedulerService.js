@@ -790,14 +790,29 @@ async function applyBankInterest(client) {
     const { isDistrictActive } = require('./districtService');
     const { logTransaction } = require('../utils/logTransaction');
 
-    const now = new Date();
-    const guilds = await Guild.find({
+    const now     = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const guilds  = await Guild.find({
         'districts': { $elemMatch: { districtId: 'bank', activeUntil: { $gt: now } } }
     }).lean();
 
     for (const guildDoc of guilds) {
         const guildId = guildDoc.guildId;
         try {
+            // Atomic weekly claim — skip if already run within the last 7 days
+            const claimed = await Guild.findOneAndUpdate(
+                {
+                    guildId,
+                    $or: [
+                        { bankInterestLastRunAt: null },
+                        { bankInterestLastRunAt: { $lte: weekAgo } },
+                    ],
+                },
+                { $set: { bankInterestLastRunAt: now } },
+                { new: false }
+            );
+            if (!claimed) continue;
+
             if (!isDistrictActive(guildDoc, 'bank')) continue;
 
             const users = await User.find({ guildId, bank: { $gt: 0 } });

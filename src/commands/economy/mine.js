@@ -47,6 +47,8 @@ const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
 
+const WILDERNESS_YIELD_BONUS = 0.10;
+
 const DEPTH_CHOICES    = DEPTH_LIST.map(d => ({ name: d.name, value: d.id }));
 const PICKAXE_CHOICES  = PICKAXE_TIERS.map(p => ({ name: `${p.emoji} ${p.name} — ${p.cost.toLocaleString()} coins`, value: p.slug }));
 const ALL_ITEMS        = [...Object.values(CONSUMABLES), ...BLAST_PACKS];
@@ -539,10 +541,12 @@ async function handleDig(interaction) {
         }
     }
 
-    // Wilderness district: +10% mine yield
+    // Wilderness district: +10% mine yield (clamped to daily hard cap)
     const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
     if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const bonus = Math.round(result.finalPayout * 0.10);
+        const remaining = LIMITS.DAILY_HARD_CAP - user.mining.dailyCoins;
+        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
         if (bonus > 0) {
             user.balance               += bonus;
             user.mining.totalEarned    += bonus;
