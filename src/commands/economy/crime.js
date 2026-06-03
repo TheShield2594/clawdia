@@ -299,6 +299,8 @@ module.exports = {
             console.error('Crime command error:', error);
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: 'Something went wrong.', ephemeral: true });
+            } else {
+                await interaction.editReply({ content: 'Something went wrong. Try again.' }).catch(() => {});
             }
         }
     }
