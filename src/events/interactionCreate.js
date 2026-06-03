@@ -1,6 +1,7 @@
 const Guild = require('../models/Guild');
 const User = require('../models/User');
 const { handlePollVote } = require('../commands/utility/poll');
+const { handleHeistButton } = require('../commands/economy/heist');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 async function logCommandMetric(interaction, success, reason = null) {
     try {
@@ -123,6 +124,14 @@ module.exports = {
     name: 'interactionCreate',
     async execute(interaction, client) {
         if (interaction.isButton()) {
+            // Heist lobby join and skill check buttons (may come from DMs where guild is null)
+            if (interaction.customId.startsWith('heist_join_') || interaction.customId.startsWith('heist_skill_')) {
+                await handleHeistButton(interaction, client).catch(err => {
+                    console.error('[heist] button handler error:', err);
+                });
+                return;
+            }
+
             if (interaction.customId === 'giveaway_enter') {
                 const msg = interaction.message;
                 if (!msg.giveawayEntrants) msg.giveawayEntrants = [];

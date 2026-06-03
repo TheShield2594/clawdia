@@ -668,6 +668,36 @@ const guildSchema = new Schema({
         endsAt:    { type: Date, default: null }
     },
 
+    // Server Newspaper (issue #356)
+    newspaper: {
+        enabled:          { type: Boolean, default: false },
+        channelId:        { type: String,  default: null },
+        deliveryDay:      { type: Number,  default: 1, min: 0, max: 6 }, // 0=Sun … 6=Sat
+        deliveryHourUtc:  { type: Number,  default: 9, min: 0, max: 23 },
+        sections: {
+            topEarners:        { type: Boolean, default: true },
+            levelUps:          { type: Boolean, default: true },
+            casinoHighlights:  { type: Boolean, default: true },
+            moderationDigest:  { type: Boolean, default: true },
+            gameStandouts:     { type: Boolean, default: true },
+            quoteOfTheWeek:    { type: Boolean, default: true },
+            newMembers:        { type: Boolean, default: true },
+        },
+        quoteChannelIds: [{ type: String }],
+        lastRunAt:        { type: Date, default: null }
+    },
+
+    // Strategic Heist System (issue #358)
+    heist: {
+        enabled:               { type: Boolean, default: false },
+        cooldownHours:         { type: Number,  default: 6,     min: 1, max: 168 },
+        minPlayers:            { type: Number,  default: 2,     min: 2, max: 4 },
+        lobbyDurationSeconds:  { type: Number,  default: 60,    min: 30, max: 300 },
+        jailDurationMinutes:   { type: Number,  default: 30,    min: 5, max: 1440 },
+        maxPayout:             { type: Number,  default: 10000, min: 100 },
+        announceChannelId:     { type: String,  default: null }
+    },
+
     // Scheduler claim timestamps — prevent duplicate runs across cron restarts
     potwLastRunAt:          { type: Date, default: null },
     bankInterestLastRunAt:  { type: Date, default: null },
