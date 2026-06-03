@@ -75,6 +75,7 @@
             <li class="nav-item" data-tab="hunt"><span class="nav-emoji">🏹</span><span>Hunting</span></li>
             <li class="nav-item" data-tab="fish"><span class="nav-emoji">🎣</span><span>Fishing</span></li>
             <li class="nav-item" data-tab="mine"><span class="nav-emoji">⛏️</span><span>Mining</span></li>
+            <li class="nav-item" data-tab="heist"><span class="nav-emoji">🎭</span><span>Heist</span></li>
         </ul>
 
         <!-- Moderation -->
@@ -95,6 +96,7 @@
         <!-- Engagement -->
         <div class="dash-nav-label">// Engagement</div>
         <ul class="dash-nav">
+            <li class="nav-item" data-tab="newspaper"><span class="nav-emoji">📰</span><span>Newspaper</span></li>
             <li class="nav-item" data-tab="achievements"><span class="nav-emoji">🏅</span><span>Achievements</span></li>
             <li class="nav-item" data-tab="quests"><span class="nav-emoji">🗺️</span><span>Quests</span></li>
             <li class="nav-item" data-tab="season"><span class="nav-emoji">🏆</span><span>Season Pass</span></li>
@@ -1040,6 +1042,53 @@
                     </div>
                 </section>
 
+                <!-- Heist -->
+                <section id="heist" class="panel">
+                    <div class="panel-head">
+                        <h2>🎭 Strategic Heist</h2>
+                        <p>A group economy event where players plan and execute a heist together. Each role carries a unique skill check — strategy and team composition matter. Use <code>/heist start</code> to open a lobby.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable heist system</strong></span>
+                        <span class="switch"><input type="checkbox" id="heist-enabled" <%= settings.heist?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Timing &amp; Limits</h3></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="heist-cooldown">Cooldown between heists <small>(hours, 1–168)</small></label>
+                            <input type="number" id="heist-cooldown" value="<%= settings.heist?.cooldownHours ?? 6 %>" min="1" max="168">
+                            <small>How long a user must wait before starting another heist.</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="heist-lobby">Lobby duration <small>(seconds, 30–300)</small></label>
+                            <input type="number" id="heist-lobby" value="<%= settings.heist?.lobbyDurationSeconds ?? 60 %>" min="30" max="300">
+                            <small>How long the join window stays open.</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="heist-min-players">Minimum players <small>(2–4)</small></label>
+                            <input type="number" id="heist-min-players" value="<%= settings.heist?.minPlayers ?? 2 %>" min="2" max="4">
+                            <small>Minimum crew size required for the heist to proceed.</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="heist-jail">Jail duration <small>(minutes, 5–1440)</small></label>
+                            <input type="number" id="heist-jail" value="<%= settings.heist?.jailDurationMinutes ?? 30 %>" min="5" max="1440">
+                            <small>How long caught players are locked out of economy commands.</small>
+                        </div>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Rewards</h3></div>
+                    <div class="field">
+                        <label class="field-label" for="heist-max-payout">Max payout per full-success heist <small>(split among successful players)</small></label>
+                        <input type="number" id="heist-max-payout" value="<%= settings.heist?.maxPayout ?? 10000 %>" min="100">
+                        <small>The server bank / vault / casino has this much available. Vault rewards 1.5×, casino 1.25×, bank 1×.</small>
+                    </div>
+
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('heist')">Save changes</button>
+                    </div>
+                </section>
+
                 <!-- Achievements -->
                 <section id="achievements" class="panel">
                     <div class="panel-head">
@@ -1381,6 +1430,55 @@
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('quests')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Server Newspaper -->
+                <section id="newspaper" class="panel">
+                    <div class="panel-head">
+                        <h2>📰 Server Newspaper</h2>
+                        <p>A weekly AI-generated recap of what happened in your server — top earners, level-ups, casino highlights, moderation digest, and more. Use <code>/newspaper preview</code> to see a draft before the scheduled delivery.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable server newspaper</strong></span>
+                        <span class="switch"><input type="checkbox" id="newspaper-enabled" <%= settings.newspaper?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Delivery schedule</h3></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="newspaper-channel">Delivery channel</label>
+                            <select id="newspaper-channel">
+                                <option value="">— Select a channel —</option>
+                                <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.newspaper?.channelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="field-label" for="newspaper-day">Delivery day</label>
+                            <select id="newspaper-day">
+                                <% ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].forEach((d, i) => { %>
+                                <option value="<%= i %>" <%= (settings.newspaper?.deliveryDay ?? 1) == i ? 'selected' : '' %>><%= d %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="field-label" for="newspaper-hour">Delivery hour <small>(UTC, 0–23)</small></label>
+                            <input type="number" id="newspaper-hour" value="<%= settings.newspaper?.deliveryHourUtc ?? 9 %>" min="0" max="23">
+                        </div>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Sections</h3></div>
+                    <p style="color:var(--ink-400);font-size:.85rem;margin:.25rem 0 .75rem;">Choose which sections appear in each edition. Disabled sections are silently skipped.</p>
+                    <label class="toggle"><span class="toggle-text">💰 Top Earners</span><span class="switch"><input type="checkbox" id="np-top-earners" <%= settings.newspaper?.sections?.topEarners !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">📈 Level Ups</span><span class="switch"><input type="checkbox" id="np-level-ups" <%= settings.newspaper?.sections?.levelUps !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">🎰 Casino Highlights</span><span class="switch"><input type="checkbox" id="np-casino" <%= settings.newspaper?.sections?.casinoHighlights !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">🛡️ Moderation Digest <small>(action count only, no names)</small></span><span class="switch"><input type="checkbox" id="np-mod" <%= settings.newspaper?.sections?.moderationDigest !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">🎮 Game Standouts</span><span class="switch"><input type="checkbox" id="np-games" <%= settings.newspaper?.sections?.gameStandouts !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">✨ Quote of the Week <small>(AI-invented if no channel opted in)</small></span><span class="switch"><input type="checkbox" id="np-quote" <%= settings.newspaper?.sections?.quoteOfTheWeek !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">👋 New Members</span><span class="switch"><input type="checkbox" id="np-new-members" <%= settings.newspaper?.sections?.newMembers !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('newspaper')">Save changes</button>
                     </div>
                 </section>
 
@@ -2707,6 +2805,33 @@
                     'dailyNews.maxItemsPerFeed': parseInt(document.getElementById('dailynews-max-items').value),
                     'dailyNews.feeds': feeds,
                     dailyNewsProfiles: profiles
+                };
+            } else if (section === 'newspaper') {
+                const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
+                data = {
+                    'newspaper.enabled':         document.getElementById('newspaper-enabled').checked,
+                    'newspaper.channelId':        document.getElementById('newspaper-channel').value || null,
+                    'newspaper.deliveryDay':      safeInt('newspaper-day', 1),
+                    'newspaper.deliveryHourUtc':  safeInt('newspaper-hour', 9),
+                    'newspaper.sections': {
+                        topEarners:       document.getElementById('np-top-earners').checked,
+                        levelUps:         document.getElementById('np-level-ups').checked,
+                        casinoHighlights: document.getElementById('np-casino').checked,
+                        moderationDigest: document.getElementById('np-mod').checked,
+                        gameStandouts:    document.getElementById('np-games').checked,
+                        quoteOfTheWeek:   document.getElementById('np-quote').checked,
+                        newMembers:       document.getElementById('np-new-members').checked,
+                    }
+                };
+            } else if (section === 'heist') {
+                const safeInt = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
+                data = {
+                    'heist.enabled':              document.getElementById('heist-enabled').checked,
+                    'heist.cooldownHours':         safeInt('heist-cooldown', 6),
+                    'heist.lobbyDurationSeconds':  safeInt('heist-lobby', 60),
+                    'heist.minPlayers':            safeInt('heist-min-players', 2),
+                    'heist.jailDurationMinutes':   safeInt('heist-jail', 30),
+                    'heist.maxPayout':             safeInt('heist-max-payout', 10000),
                 };
             }
 

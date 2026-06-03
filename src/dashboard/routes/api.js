@@ -212,7 +212,8 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'suggestions', 'ai', 'tempVoice', 'bibleVerse',
     'dailyNews', 'dailyNewsProfiles', 'rssFeeds',
     'autoRoles', 'reactionRoles', 'analytics',
-    'giveaways', 'notifications'
+    'giveaways', 'notifications',
+    'newspaper', 'heist'
 ]);
 
 function isAllowedSettingKey(key) {
