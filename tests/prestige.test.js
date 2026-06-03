@@ -1,4 +1,4 @@
-const { tierFor, nextTierAfter, getBonusMultipliers, hasUnlock, badgeFor, roman, PRESTIGE_TIERS } = require('../src/utils/prestige');
+const { tierFor, titleForExactRank, nextTierAfter, getBonusMultipliers, hasUnlock, badgeFor, roman, PRESTIGE_TIERS } = require('../src/utils/prestige');
 
 describe('prestige', () => {
     test('tierFor returns floor of requested rank', () => {
@@ -63,5 +63,14 @@ describe('prestige', () => {
     test('PRESTIGE_TIERS includes the required milestones from the issue', () => {
         const ranks = PRESTIGE_TIERS.map(t => t.rank);
         expect(ranks).toEqual(expect.arrayContaining([0, 1, 2, 3, 4, 5, 10]));
+    });
+
+    test('titleForExactRank renders explicit tiers verbatim and synthesizes P6-P9', () => {
+        expect(titleForExactRank(0)).toBeNull();
+        expect(titleForExactRank(1)).toBe('Prestige I');
+        expect(titleForExactRank(5)).toBe('Prestige V ⭐');
+        expect(titleForExactRank(6)).toBe('Prestige VI');   // synthesized, NOT "Prestige V ⭐"
+        expect(titleForExactRank(9)).toBe('Prestige IX');
+        expect(titleForExactRank(10)).toBe('The Ascended ✨');
     });
 });

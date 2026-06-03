@@ -83,9 +83,13 @@ function ensureDefaultShopItems(guildSettings) {
 
     if (!guildSettings.shopDefaultsSeeded) {
         for (const item of DEFAULT_SHOP_ITEMS) {
-            if (existingNames.has(item.name.toLowerCase())) continue;
+            // Match either canonical itemId or display name — an admin-created
+            // item that shares the canonical id must not be duplicated even
+            // when its display name differs.
+            const id = (item.itemId || '').toLowerCase();
+            if (existingIds.has(id) || existingNames.has(item.name.toLowerCase())) continue;
             guildSettings.shop.push({ ...item, roleId: null, stock: -1, imageUrl: '' });
-            existingIds.add(item.itemId.toLowerCase());
+            existingIds.add(id);
             existingNames.add(item.name.toLowerCase());
             changed = true;
         }

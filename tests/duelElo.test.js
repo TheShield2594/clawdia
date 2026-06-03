@@ -34,6 +34,17 @@ describe('duelElo', () => {
         expect(loserNewElo).toBeGreaterThanOrEqual(0);
     });
 
+    test('applyElo: deltas stay zero-sum even when loser would clamp at 0', () => {
+        // 100 vs 5 — close enough that the loser's "expected loss" would
+        // push them below zero. Winner gain should match loser's actual drop.
+        const { winnerNewElo, loserNewElo, winnerDelta, loserDelta } = applyElo(100, 5, 32);
+        expect(loserNewElo).toBe(0);
+        expect(loserDelta).toBe(-5);
+        expect(winnerDelta).toBe(5);
+        expect(winnerNewElo - 100).toBe(winnerDelta);
+        expect(winnerDelta + loserDelta).toBe(0);
+    });
+
     test('softResetElo pulls toward 1200', () => {
         expect(softResetElo(1800)).toBe(1500);
         expect(softResetElo(800)).toBe(1000);

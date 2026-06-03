@@ -375,10 +375,16 @@ module.exports = {
                     return reply({ content: `You no longer have enough ${currency} for this purchase.`, embeds: [], components: [] });
                 }
 
-                // Atomically decrement stock if limited; refund on sell-out race
+                // Atomically decrement stock if limited; refund on sell-out race.
+                // $elemMatch binds both predicates to the SAME array element so
+                // the positional update can't accidentally decrement a different
+                // item just because some other item happens to have stock > 0.
                 if (freshItem.stock > 0) {
                     const stockResult = await Guild.findOneAndUpdate(
-                        { guildId: interaction.guild.id, 'shop._id': freshItem._id, 'shop.stock': { $gt: 0 } },
+                        {
+                            guildId: interaction.guild.id,
+                            shop: { $elemMatch: { _id: freshItem._id, stock: { $gt: 0 } } },
+                        },
                         { $inc: { 'shop.$.stock': -1 } }
                     );
                     if (!stockResult) {
@@ -406,19 +412,41 @@ module.exports = {
                 // Use the item's canonical itemId if set, otherwise fall back to its name
                 const inventoryId = freshItem.itemId || freshItem.name;
 
-                // Update inventory atomically: increment if entry exists, otherwise push
-                const incResult = await User.updateOne(
-                    { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': inventoryId },
-                    { $inc: { 'inventory.$.quantity': 1 } }
+                // Inventory upsert in a single atomic aggregation-pipeline update:
+                // when the itemId exists, bump its quantity by 1; otherwise append
+                // a new entry. Done in one call so concurrent buys can't race
+                // between an unsuccessful $inc and a guarded $push and lose a unit.
+                await User.updateOne(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    [{
+                        $set: {
+                            inventory: {
+                                $cond: {
+                                    if: { $in: [inventoryId, { $ifNull: ['$inventory.itemId', []] }] },
+                                    then: {
+                                        $map: {
+                                            input: '$inventory',
+                                            as: 'slot',
+                                            in: {
+                                                $cond: [
+                                                    { $eq: ['$$slot.itemId', inventoryId] },
+                                                    { itemId: '$$slot.itemId', quantity: { $add: ['$$slot.quantity', 1] } },
+                                                    '$$slot'
+                                                ]
+                                            }
+                                        }
+                                    },
+                                    else: {
+                                        $concatArrays: [
+                                            { $ifNull: ['$inventory', []] },
+                                            [{ itemId: inventoryId, quantity: 1 }]
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }]
                 );
-                if (incResult.modifiedCount === 0) {
-                    // No existing entry — push a new one; $ne guard makes this a no-op if a
-                    // concurrent request already inserted the entry between these two operations
-                    await User.updateOne(
-                        { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': { $ne: inventoryId } },
-                        { $push: { inventory: { itemId: inventoryId, quantity: 1 } } }
-                    );
-                }
 
                 if (freshItem.roleId) {
                     await interaction.member.roles.add(freshItem.roleId).catch(console.error);

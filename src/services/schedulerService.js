@@ -577,19 +577,34 @@ async function recalcShopPrices(client) {
     const { EmbedBuilder } = require('discord.js');
     const guilds = await Guild.find({ 'dynamicPricing.enabled': true });
 
-    for (const guildDoc of guilds) {
+    for (const guildSummary of guilds) {
         try {
-            const recalcMs = (guildDoc.dynamicPricing?.recalcMinutes ?? 60) * 60_000;
-            const last = guildDoc.dynamicPricing?.lastRecalcAt
-                ? new Date(guildDoc.dynamicPricing.lastRecalcAt).getTime()
-                : 0;
-            if (Date.now() - last < recalcMs) continue;
+            const recalcMs = (guildSummary.dynamicPricing?.recalcMinutes ?? 60) * 60_000;
+            const now      = new Date();
+            const leaseCutoff = new Date(now.getTime() - recalcMs);
+
+            // Atomically claim this guild's recalc window. The update only
+            // succeeds when lastRecalcAt is null or older than the lease window,
+            // ensuring concurrent workers (multi-instance deployments) don't
+            // both run the recalc for the same guild.
+            const guildDoc = await Guild.findOneAndUpdate(
+                {
+                    guildId: guildSummary.guildId,
+                    'dynamicPricing.enabled': true,
+                    $or: [
+                        { 'dynamicPricing.lastRecalcAt': null },
+                        { 'dynamicPricing.lastRecalcAt': { $lte: leaseCutoff } },
+                    ],
+                },
+                { $set: { 'dynamicPricing.lastRecalcAt': now } },
+                { new: true }
+            );
+            if (!guildDoc) continue; // another worker already claimed this window
 
             ensurePricingFields(guildDoc.shop);
 
             const band       = guildDoc.dynamicPricing.priceBand ?? 0.5;
             const volatility = guildDoc.dynamicPricing.volatility ?? 'medium';
-            const now        = new Date();
             const changedMovers = [];
 
             for (const item of guildDoc.shop) {
@@ -601,9 +616,7 @@ async function recalcShopPrices(client) {
                     changedMovers.push({ name: item.name, prev, next: item.currentPrice, item });
                 }
             }
-            guildDoc.dynamicPricing.lastRecalcAt = now;
             guildDoc.markModified('shop');
-            guildDoc.markModified('dynamicPricing');
             await guildDoc.save();
 
             const channelId = guildDoc.economy?.announcementChannelId;
@@ -625,7 +638,7 @@ async function recalcShopPrices(client) {
                 await postAnnouncement(client, guildDoc.guildId, channelId, embed);
             }
         } catch (err) {
-            console.error(`[scheduler] recalcShopPrices failed for guild ${guildDoc.guildId}:`, err);
+            console.error(`[scheduler] recalcShopPrices failed for guild ${guildSummary.guildId}:`, err);
         }
     }
 }
@@ -685,7 +698,17 @@ async function resolveRankedSeasons(client) {
             );
             if (!claimed) continue;
 
-            const top = await User.find({ guildId, 'ranked.rankedWins': { $gt: 0 } })
+            // Only count users active *this* season so that prior-season
+            // winners (whose seasonPeakElo lingers until the next soft-reset
+            // ticks them) don't reclaim a top-3 slot without playing.
+            const top = await User.find({
+                guildId,
+                $or: [
+                    { 'ranked.seasonRankedWins':   { $gt: 0 } },
+                    { 'ranked.seasonRankedLosses': { $gt: 0 } },
+                ],
+                'ranked.currentSeasonId': seasonId,
+            })
                 .sort({ 'ranked.seasonPeakElo': -1 })
                 .limit(3)
                 .select('userId ranked')
