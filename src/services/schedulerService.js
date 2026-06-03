@@ -344,10 +344,24 @@ async function awardWeeklyLeaderboardBadges(client) {
     const { EmbedBuilder } = require('discord.js');
 
     const guilds = await Guild.find({}, 'guildId name economy').lean();
+    const weekAgo = new Date(Date.now() - LEADERBOARD_BADGE_DURATION_MS);
 
     for (const guildDoc of guilds) {
         const guildId = guildDoc.guildId;
         try {
+            // Atomically acquire a short-lived lease; badgesLastAwardedAt is only written on success
+            const leaseUntil = new Date(Date.now() + 5 * 60 * 1000); // 5-minute lease window
+            const leased = await Guild.findOneAndUpdate(
+                {
+                    guildId,
+                    $or: [{ badgesLastAwardedAt: null }, { badgesLastAwardedAt: { $lte: weekAgo } }],
+                    $or: [{ badgesAwardLeaseAt: null }, { badgesAwardLeaseAt: { $lte: new Date() } }],
+                },
+                { $set: { badgesAwardLeaseAt: leaseUntil } },
+                { new: false }
+            );
+            if (!leased) continue;
+
             const categories = [
                 { key: 'levels',       sort: { level: -1, xp: -1 },            label: '📈 Top Level' },
                 { key: 'economy',      sort: { balance: -1 },                   label: '💰 Wealthiest' },
@@ -386,14 +400,20 @@ async function awardWeeklyLeaderboardBadges(client) {
                 champLines.push(`${cat.label}: ${username}`);
             }
 
-            if (!champLines.length) continue;
+            if (!champLines.length) {
+                await Guild.updateOne({ guildId }, { $set: { badgesLastAwardedAt: new Date(), badgesAwardLeaseAt: null } });
+                continue;
+            }
 
             // Find announcement channel: economy.announcementChannelId or systemChannel
             let announceChannelId = guildDoc.economy?.announcementChannelId ?? null;
             if (!announceChannelId && discordGuild) {
                 announceChannelId = discordGuild.systemChannelId ?? null;
             }
-            if (!announceChannelId) continue;
+            if (!announceChannelId) {
+                await Guild.updateOne({ guildId }, { $set: { badgesLastAwardedAt: new Date(), badgesAwardLeaseAt: null } });
+                continue;
+            }
 
             const embed = new EmbedBuilder()
                 .setColor('#ffd700')
@@ -406,8 +426,12 @@ async function awardWeeklyLeaderboardBadges(client) {
                 .setTimestamp();
 
             await postAnnouncement(client, guildId, announceChannelId, embed);
+            // All work succeeded — commit the run timestamp and release lease
+            await Guild.updateOne({ guildId }, { $set: { badgesLastAwardedAt: new Date(), badgesAwardLeaseAt: null } });
         } catch (err) {
             console.error(`[scheduler] weeklyLeaderboardBadges failed for guild ${guildId}:`, err.message);
+            // Release lease so this guild is eligible for retry on the next cron tick
+            await Guild.updateOne({ guildId }, { $set: { badgesAwardLeaseAt: null } }).catch(() => {});
         }
     }
 }

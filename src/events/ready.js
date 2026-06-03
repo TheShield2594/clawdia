@@ -6,7 +6,7 @@ const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
 const { checkBirthdays } = require('../services/birthdayService');
 const { checkSeasonalEvents } = require('../services/seasonalEventService');
-const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest } = require('../services/schedulerService');
+const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest } = require('../services/schedulerService');
 const { runJob } = require('../utils/jobRunner');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
@@ -71,6 +71,12 @@ module.exports = {
             { timezone: 'Etc/UTC' }
         );
 
+        // Select Pet of the Week every Monday at midnight UTC
+        cron.schedule('0 0 * * 1', () =>
+            runJob('schedulerService', 'selectPetOfTheWeek', () => selectPetOfTheWeek(client)),
+            { timezone: 'Etc/UTC' }
+        );
+
         // Apply Bank district weekly interest every Monday at 00:01 UTC
         cron.schedule('1 0 * * 1', () =>
             runJob('schedulerService', 'applyBankInterest', () => applyBankInterest(client)),
@@ -91,6 +97,68 @@ module.exports = {
         cron.schedule('*/10 * * * *', () =>
             runJob('schedulerService', 'resolveRankedSeasons', () => resolveRankedSeasons(client))
         );
+
+        // Reconcile any jackpot wins where pool was reset but winner was never credited
+        try {
+            const Guild = require('../models/Guild');
+            const Transaction = require('../models/Transaction');
+            const claimToken = `${process.pid}-${Date.now()}`;
+            let candidateGuild;
+            // Process one guild at a time; re-query each iteration to avoid stale data
+            while ((candidateGuild = await Guild.findOneAndUpdate(
+                {
+                    'casinoJackpot.lastWinnerId':  { $ne: null },
+                    'casinoJackpot.lastWonAmount': { $gt: 0 },
+                    'casinoJackpot.claimToken':    { $in: [null, claimToken] },
+                },
+                { $set: { 'casinoJackpot.claimToken': claimToken } },
+                { new: true }
+            )) !== null) {
+                const { lastWinnerId, lastWonAmount, lastWonAt } = candidateGuild.casinoJackpot;
+                const guildId = candidateGuild.guildId;
+                let creditSucceeded = false;
+                try {
+                    const credited = await Transaction.findOne({
+                        userId:  lastWinnerId,
+                        guildId,
+                        type:    'casino_jackpot',
+                        amount:  lastWonAmount,
+                        ...(lastWonAt ? { createdAt: { $gte: lastWonAt } } : {}),
+                    }).lean();
+                    if (!credited) {
+                        const updatedUser = await User.findOneAndUpdate(
+                            { userId: lastWinnerId, guildId },
+                            { $inc: { balance: lastWonAmount } },
+                            { new: true }
+                        );
+                        if (updatedUser) {
+                            logTransaction({ userId: lastWinnerId, guildId, type: 'casino_jackpot', amount: lastWonAmount, balance: updatedUser.balance, note: 'jackpot reconciliation on restart' });
+                            console.log(`[READY] Reconciled jackpot payout of ${lastWonAmount} to ${lastWinnerId} in guild ${guildId}`);
+                            creditSucceeded = true;
+                        }
+                    } else {
+                        creditSucceeded = true; // already paid, just clear
+                    }
+                } catch (innerErr) {
+                    console.error(`[READY] Jackpot credit failed for guild ${guildId}:`, innerErr);
+                }
+                if (creditSucceeded) {
+                    await Guild.updateOne(
+                        { _id: candidateGuild._id },
+                        { $set: { 'casinoJackpot.lastWinnerId': null, 'casinoJackpot.lastWonAmount': null, 'casinoJackpot.claimToken': null } }
+                    );
+                } else {
+                    // Release lock without clearing recovery fields so next restart can retry
+                    await Guild.updateOne(
+                        { _id: candidateGuild._id },
+                        { $set: { 'casinoJackpot.claimToken': null } }
+                    );
+                    break; // avoid spinning on a persistently failing guild
+                }
+            }
+        } catch (err) {
+            console.error('[READY] Jackpot reconciliation failed:', err);
+        }
 
         // Refund any bets that were deducted during a crash game that was interrupted by a restart
         try {
