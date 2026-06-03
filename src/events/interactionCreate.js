@@ -123,6 +123,15 @@ module.exports = {
     name: 'interactionCreate',
     async execute(interaction, client) {
         if (interaction.isButton()) {
+            // Heist lobby join and skill check buttons (may come from DMs where guild is null)
+            if (interaction.customId.startsWith('heist_join_') || interaction.customId.startsWith('heist_skill_')) {
+                const { handleHeistButton } = require('../commands/economy/heist');
+                await handleHeistButton(interaction, client).catch(err => {
+                    console.error('[heist] button handler error:', err);
+                });
+                return;
+            }
+
             if (interaction.customId === 'giveaway_enter') {
                 const msg = interaction.message;
                 if (!msg.giveawayEntrants) msg.giveawayEntrants = [];

@@ -6,7 +6,7 @@ const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
 const { checkBirthdays } = require('../services/birthdayService');
 const { checkSeasonalEvents } = require('../services/seasonalEventService');
-const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest } = require('../services/schedulerService');
+const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest, postScheduledNewspapers } = require('../services/schedulerService');
 const { runJob } = require('../utils/jobRunner');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
@@ -96,6 +96,12 @@ module.exports = {
         // Ranked duel season rollover — check every 10 minutes for expired seasons
         cron.schedule('*/10 * * * *', () =>
             runJob('schedulerService', 'resolveRankedSeasons', () => resolveRankedSeasons(client))
+        );
+
+        // Server Newspaper delivery — check every hour for guilds scheduled to receive their edition
+        cron.schedule('0 * * * *', () =>
+            runJob('schedulerService', 'postScheduledNewspapers', () => postScheduledNewspapers(client)),
+            { timezone: 'Etc/UTC' }
         );
 
         // Reconcile any jackpot wins where pool was reset but winner was never credited
