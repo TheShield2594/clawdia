@@ -107,6 +107,9 @@ module.exports = {
         }
 
         ensureDistricts(guildSettings);
+        if (guildSettings.isModified('districts')) {
+            await guildSettings.save();
+        }
 
         const currency = guildSettings.economy.currency || '💰';
         const sub = interaction.options.getSubcommand();
@@ -153,6 +156,15 @@ module.exports = {
         const distMeta   = DISTRICTS.find(d => d.id === districtId);
         if (!distMeta) {
             return interaction.reply({ content: 'Unknown district.', ephemeral: true });
+        }
+
+        // Check district is not already active before touching the user's balance
+        const distEntryCheck = guildSettings.districts.find(x => x.districtId === districtId);
+        if (distEntryCheck && isActive(distEntryCheck)) {
+            return interaction.reply({
+                content: `The **${distMeta.name}** district is already active!`,
+                ephemeral: true,
+            });
         }
 
         const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
