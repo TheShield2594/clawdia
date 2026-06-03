@@ -670,6 +670,7 @@ const guildSchema = new Schema({
     // Scheduler claim timestamps — prevent duplicate runs across cron restarts
     potwLastRunAt:          { type: Date, default: null },
     bankInterestLastRunAt:  { type: Date, default: null },
+    badgesLastAwardedAt:    { type: Date, default: null },
 
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }

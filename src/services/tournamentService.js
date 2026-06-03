@@ -1,6 +1,8 @@
 'use strict';
 
 const FishingTournament = require('../models/FishingTournament');
+const User = require('../models/User');
+const { logTransaction } = require('../utils/logTransaction');
 const { EmbedBuilder } = require('discord.js');
 
 const PRIZE_SPLITS = [0.60, 0.25, 0.15];
@@ -100,6 +102,26 @@ async function endTournament(tournamentId) {
     }
 
     await tournament.save();
+
+    // Pay out each winner and mark paidOut
+    for (const prize of tournament.prizes) {
+        const updatedUser = await User.findOneAndUpdate(
+            { userId: prize.userId, guildId: tournament.guildId },
+            { $inc: { balance: prize.amount } },
+            { new: true }
+        );
+        prize.paidOut = true;
+        logTransaction({
+            userId:  prize.userId,
+            guildId: tournament.guildId,
+            type:    'tournament_prize',
+            amount:  prize.amount,
+            balance: updatedUser?.balance ?? 0,
+            note:    `Tournament place #${prize.place}`,
+        });
+    }
+    await tournament.save();
+
     return tournament;
 }
 
