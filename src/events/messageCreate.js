@@ -58,10 +58,11 @@ module.exports = {
 
             if (guildSettings?.ai?.enabled) {
                 const ai = guildSettings.ai;
-                const isDefaultChannel = message.channel.id === ai.channelId;
+                const hasChannelRestriction = !!ai.channelId;
+                const isDefaultChannel = hasChannelRestriction && message.channel.id === ai.channelId;
                 const persona = ai.channelPersonas?.find(p => p.channelId === message.channel.id);
 
-                if (isDefaultChannel || persona) {
+                if (!hasChannelRestriction || isDefaultChannel || persona) {
                     const isBotMentioned = message.mentions.has(client.user.id, { ignoreEveryone: true, ignoreRoles: true });
                     let isReplyToBot = false;
                     if (message.reference?.messageId) {
