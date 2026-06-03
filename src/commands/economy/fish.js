@@ -55,6 +55,7 @@ const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
+const { isDistrictActive } = require('../../services/districtService');
 
 // Rarity score for hourly fish competition (rarest catch wins)
 const FISH_TIER_SCORE = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5, event: 6 };
@@ -582,7 +583,8 @@ async function handleCast(interaction) {
     const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, STARVING_THRESHOLD: PET_STARVE, TRAIT_FLAVOR } = require('../../services/petService');
     const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
 
-    const result = executeCast(user, locationId, { reactionFactor });
+    const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
+    const result = executeCast(user, locationId, { reactionFactor, marketplaceActive });
 
     // Pity counter: reset on rare+ success, increment otherwise
     if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
@@ -611,6 +613,18 @@ async function handleCast(interaction) {
             user.fishing.dailyCoins     += featBonus;
             result.finalPayout          += featBonus;
             result.featuredSpotBonus     = featBonus;
+        }
+    }
+    // Wilderness district: +10% fish yield
+    const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
+    if (result.success && result.finalPayout > 0 && wildernessActive) {
+        const bonus = Math.round(result.finalPayout * 0.10);
+        if (bonus > 0) {
+            user.balance               += bonus;
+            user.fishing.totalEarned   += bonus;
+            user.fishing.dailyCoins    += bonus;
+            result.finalPayout         += bonus;
+            result.wildernessBonus      = bonus;
         }
     }
     if (result.success && result.finalPayout > user.fishing.bestPayout) user.fishing.bestPayout = result.finalPayout;
@@ -660,6 +674,9 @@ async function handleCast(interaction) {
     }
     if (result.featuredSpotBonus > 0) {
         embed.addFields({ name: '🌟 Featured Spot Bonus', value: `+${result.featuredSpotBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
+    }
+    if (result.wildernessBonus > 0) {
+        embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
     }
 
     // Hourly leader footer

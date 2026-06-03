@@ -6,7 +6,7 @@ const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
 const { checkBirthdays } = require('../services/birthdayService');
 const { checkSeasonalEvents } = require('../services/seasonalEventService');
-const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons } = require('../services/schedulerService');
+const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest } = require('../services/schedulerService');
 const { runJob } = require('../utils/jobRunner');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
@@ -68,6 +68,12 @@ module.exports = {
         // Award weekly leaderboard badges every Sunday at 23:59 UTC
         cron.schedule('59 23 * * 0', () =>
             runJob('schedulerService', 'awardWeeklyLeaderboardBadges', () => awardWeeklyLeaderboardBadges(client)),
+            { timezone: 'Etc/UTC' }
+        );
+
+        // Apply Bank district weekly interest every Monday at 00:01 UTC
+        cron.schedule('1 0 * * 1', () =>
+            runJob('schedulerService', 'applyBankInterest', () => applyBankInterest(client)),
             { timezone: 'Etc/UTC' }
         );
 
