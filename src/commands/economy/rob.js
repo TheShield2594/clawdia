@@ -173,6 +173,7 @@ module.exports = {
                 // Robbery Bag: +10% stolen
                 if (hasEffect(robber, 'robbery_bag')) stolen = Math.floor(stolen * 1.10);
 
+                const preRobBalance = robber.balance;
                 robber.balance += stolen;
                 robber.successfulRobs = (robber.successfulRobs || 0) + 1;
 
@@ -186,16 +187,19 @@ module.exports = {
                 victim.lastRobbedAt = new Date();
                 if (padlockActive) consumeEffect(victim, 'padlock');
 
-                // ── Trap check ────────────────────────────────────────────────
-                const trapActive = victim.trap?.expiresAt && victim.trap.expiresAt > new Date();
+                // ── Trap check (atomic consume to prevent double-trigger) ─────
+                const trapConsumed = await User.findOneAndUpdate(
+                    { userId: victim.userId, guildId: interaction.guild.id, 'trap.expiresAt': { $gt: new Date() } },
+                    { $unset: { 'trap.expiresAt': '', 'trap.setAt': '' } },
+                    { new: false }
+                );
+                const trapActive = !!trapConsumed;
                 let trapFine = 0;
                 if (trapActive) {
-                    // Compute doubled fine and apply it
-                    const normalFine = Math.floor(robber.balance * failFineRate);
+                    const normalFine = Math.floor(preRobBalance * failFineRate);
                     trapFine = Math.min(normalFine * TRAP_FINE_MULTIPLIER, robber.balance);
                     robber.balance = Math.max(0, robber.balance - trapFine);
                     victim.balance += trapFine;
-                    // Consume the trap
                     victim.trap.setAt     = null;
                     victim.trap.expiresAt = null;
                 }
