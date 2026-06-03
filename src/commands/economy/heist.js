@@ -102,6 +102,10 @@ function buildLobbyRows(heistId, heist) {
 // ── Heist resolution ───────────────────────────────────────────────────────
 
 async function resolveHeist(client, heist) {
+    // Atomic guard: prevent concurrent resolution from multiple timeout handlers
+    // or simultaneous allDone checks.
+    if (heist.resolving) return;
+    heist.resolving = true;
     const guildId  = heist.guildId;
     const { outcome, passedCount, totalCount, ratio } = calculateOutcome(heist);
     const { share, total } = computePayouts(heist, passedCount, totalCount, ratio);
@@ -128,12 +132,15 @@ async function resolveHeist(client, heist) {
                 logTransaction({ userId, guildId, type: 'heist_payout', amount: share, balance: u?.balance ?? share, note: `Heist: ${TARGETS[heist.target]?.label}` });
             }
         } else if (outcome === 'failure' || (outcome === 'partial_success' && !passed)) {
-            // Jail the caught players: lock economy commands
+            // Jail the caught players: lock economy commands and apply a fine
+            // clamped to their current balance so it can't go negative.
             const jailUntil = new Date(Date.now() + jailMins * 60_000);
-            const fine      = Math.floor(Math.random() * 200) + 50;
+            const rawFine   = Math.floor(Math.random() * 200) + 50;
+            const userDoc   = await User.findOne({ userId, guildId }, 'balance').lean();
+            const fine      = Math.min(rawFine, userDoc?.balance ?? 0);
             await User.findOneAndUpdate(
                 { userId, guildId },
-                { $set: { heistJailedUntil: jailUntil }, $inc: { balance: -fine } }
+                { $set: { heistJailedUntil: jailUntil }, ...(fine > 0 ? { $inc: { balance: -fine } } : {}) }
             ).catch(() => {});
         }
     }
@@ -177,23 +184,26 @@ async function handleHeistButton(interaction, client) {
     const id = interaction.customId;
 
     // heist_join_{heistId}_{role}
+    // heistId = <guildId (digits)>-<timestamp (digits)>, no underscores
+    // role is one of: hacker, lookout, muscle, driver — no underscores
     if (id.startsWith('heist_join_')) {
-        const parts = id.split('_');
-        // parts: ['heist','join',guildId+timestamp, role]
-        // heistId = parts[2] (may contain underscores? No — heistId is guildId-timestamp with dash)
-        // Actually customId format: heist_join_{heistId}_{role}
-        // heistId contains guildId (all digits) + '-' + timestamp
-        // role is last part
-        const role    = parts[parts.length - 1];
-        const heistId = parts.slice(2, parts.length - 1).join('_');
-        const guildId = interaction.guildId;
+        const prefix     = 'heist_join_';
+        const afterPrefix = id.slice(prefix.length);           // "{heistId}_{role}"
+        const lastSep    = afterPrefix.lastIndexOf('_');
+        if (lastSep === -1) return interaction.reply({ content: 'Malformed button ID.', ephemeral: true });
+        const heistId = afterPrefix.slice(0, lastSep);
+        const role    = afterPrefix.slice(lastSep + 1);
 
+        if (!/^\d+-\d+$/.test(heistId) || !ROLES[role]) {
+            return interaction.reply({ content: 'Invalid heist button.', ephemeral: true });
+        }
+
+        const guildId = interaction.guildId;
         const heist = getHeist(guildId);
         if (!heist || heist.heistId !== heistId || heist.phase !== 'lobby') {
             return interaction.reply({ content: 'This heist lobby is no longer active.', ephemeral: true });
         }
 
-        const member = interaction.member;
         const result = joinLobby(guildId, interaction.user.id, interaction.user.username, role);
         if (!result.ok) {
             return interaction.reply({ content: result.reason, ephemeral: true });
@@ -208,15 +218,18 @@ async function handleHeistButton(interaction, client) {
     }
 
     // heist_skill_{heistId}_{userId}_{answer}
+    // heistId = <guildId>-<timestamp>, userId = Discord snowflake (digits), answer has no underscores
     if (id.startsWith('heist_skill_')) {
-        const parts  = id.split('_');
-        // heist_skill_{heistId}_{userId}_{answer}
-        // answer may be multi-word like "higher" — but we use underscores in ID encoding
-        // Format: heist_skill_<heistId>_<userId>_<answer>
-        // heistId format: <guildId>-<timestamp> (no underscore) — safe to split
-        const answer  = parts[parts.length - 1];
-        const userId  = parts[parts.length - 2];
-        const heistId = parts.slice(2, parts.length - 2).join('_');
+        const prefix      = 'heist_skill_';
+        const afterPrefix = id.slice(prefix.length);          // "{heistId}_{userId}_{answer}"
+        const lastSep     = afterPrefix.lastIndexOf('_');
+        const beforeLast  = afterPrefix.lastIndexOf('_', lastSep - 1);
+        if (lastSep === -1 || beforeLast === -1) {
+            return interaction.reply({ content: 'Malformed skill-check button.', ephemeral: true }).catch(() => {});
+        }
+        const answer  = afterPrefix.slice(lastSep + 1);
+        const userId  = afterPrefix.slice(beforeLast + 1, lastSep);
+        const heistId = afterPrefix.slice(0, beforeLast);
 
         // DM interactions don't carry guildId, so extract it from heistId (format: guildId-timestamp)
         let heist = null;

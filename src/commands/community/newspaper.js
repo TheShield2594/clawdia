@@ -6,6 +6,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('newspaper')
         .setDescription('Server newspaper commands.')
+        .setDMPermission(false)
         .addSubcommand(sub =>
             sub.setName('preview')
                .setDescription('Generate a preview of this week\'s server newspaper (admin only).')
@@ -13,6 +14,9 @@ module.exports = {
     cooldownKey: () => 'newspaper',
     cooldownAmount: () => 30,
     async execute(interaction, client) {
+        if (!interaction.inGuild()) {
+            return interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+        }
         if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
             return interaction.reply({ content: 'You need the **Manage Server** permission to use this command.', ephemeral: true });
         }

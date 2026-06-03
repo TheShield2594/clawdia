@@ -25,6 +25,10 @@ function getHeist(guildId) {
 }
 
 function createLobby({ guildId, channelId, initiatorId, target, lobbyDurationSeconds, maxPayout }) {
+    const safeDuration = (Number.isFinite(lobbyDurationSeconds) && lobbyDurationSeconds > 0) ? lobbyDurationSeconds : 60;
+    const safePayout   = (Number.isFinite(maxPayout) && maxPayout > 0) ? maxPayout : 10000;
+    lobbyDurationSeconds = safeDuration;
+    maxPayout = safePayout;
     const heistId = generateHeistId(guildId);
     const state = {
         heistId,
@@ -122,7 +126,7 @@ function makeMuscleCheck() {
     const next = Math.floor(Math.random() * 10) + 1;    // 1–10
     const correct = next > current ? 'higher' : next < current ? 'lower' : 'equal';
     const correctLabel = correct === 'equal' ? 'higher' : correct; // treat equal as higher
-    const question = `The current number is **${current}**. Will the next number be **higher** or **lower**?\n*(The next number is ${next})*`;
+    const question = `The current number is **${current}**. Will the next number be **higher** or **lower**?`;
     return { question, correct: correctLabel, choices: ['higher', 'lower'] };
 }
 
@@ -190,6 +194,15 @@ function shuffle(arr) {
     return a;
 }
 
+// Active heist state lives only in memory. On process restart all entries are
+// gone; any in-flight lobby messages will have orphaned buttons. There is no
+// persistence layer to restore from, so we simply export this no-op to make
+// the intent explicit and allow callers to call it without branching.
+function initActiveHeists() {
+    // No-op: Map is always empty at startup. Orphaned lobby buttons will return
+    // "no active lobby" when clicked, which is the correct safe fallback.
+}
+
 module.exports = {
     ROLES,
     TARGETS,
@@ -202,4 +215,5 @@ module.exports = {
     buildSkillCheck,
     calculateOutcome,
     computePayouts,
+    initActiveHeists,
 };
