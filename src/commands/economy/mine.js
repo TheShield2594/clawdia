@@ -45,6 +45,9 @@ const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featured
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
+const { isDistrictActive } = require('../../services/districtService');
+
+const WILDERNESS_YIELD_BONUS = 0.10;
 
 const DEPTH_CHOICES    = DEPTH_LIST.map(d => ({ name: d.name, value: d.id }));
 const PICKAXE_CHOICES  = PICKAXE_TIERS.map(p => ({ name: `${p.emoji} ${p.name} — ${p.cost.toLocaleString()} coins`, value: p.slug }));
@@ -505,7 +508,8 @@ async function handleDig(interaction) {
     const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, STARVING_THRESHOLD: PET_STARVE, TRAIT_FLAVOR } = require('../../services/petService');
     const petMineYieldPct = getTotalBonus(user.pets || [], 'mine_yield');
 
-    const result = executeMine(user, depthId, { intensity: chosenIntensity });
+    const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
+    const result = executeMine(user, depthId, { intensity: chosenIntensity, marketplaceActive });
 
     // Pity counter: reset on rare+ success, increment otherwise
     if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
@@ -534,6 +538,21 @@ async function handleDig(interaction) {
             user.mining.dailyCoins    += bonus;
             result.finalPayout        += bonus;
             result.petYieldBonus       = bonus;
+        }
+    }
+
+    // Wilderness district: +10% mine yield (clamped to daily hard cap)
+    const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
+    if (result.success && result.finalPayout > 0 && wildernessActive) {
+        const remaining = LIMITS.DAILY_HARD_CAP - user.mining.dailyCoins;
+        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+        if (bonus > 0) {
+            user.balance               += bonus;
+            user.mining.totalEarned    += bonus;
+            user.mining.dailyCoins     += bonus;
+            result.finalPayout         += bonus;
+            result.wildernessBonus      = bonus;
         }
     }
 
@@ -579,6 +598,9 @@ async function handleDig(interaction) {
     }
     if (result.petYieldBonus > 0) {
         embed.addFields({ name: '💎 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petMineYieldPct}% yield)`, inline: true });
+    }
+    if (result.wildernessBonus > 0) {
+        embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
     }
 
     // Hourly leader footer

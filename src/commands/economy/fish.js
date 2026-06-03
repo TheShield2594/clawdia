@@ -55,8 +55,11 @@ const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
+const { isDistrictActive } = require('../../services/districtService');
 
 // Rarity score for hourly fish competition (rarest catch wins)
+const WILDERNESS_YIELD_BONUS = 0.10;
+
 const FISH_TIER_SCORE = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5, event: 6 };
 
 const LOCATION_CHOICES = LOCATION_LIST.map(l => ({ name: l.name, value: l.id }));
@@ -582,7 +585,8 @@ async function handleCast(interaction) {
     const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, STARVING_THRESHOLD: PET_STARVE, TRAIT_FLAVOR } = require('../../services/petService');
     const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
 
-    const result = executeCast(user, locationId, { reactionFactor });
+    const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
+    const result = executeCast(user, locationId, { reactionFactor, marketplaceActive });
 
     // Pity counter: reset on rare+ success, increment otherwise
     if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
@@ -611,6 +615,20 @@ async function handleCast(interaction) {
             user.fishing.dailyCoins     += featBonus;
             result.finalPayout          += featBonus;
             result.featuredSpotBonus     = featBonus;
+        }
+    }
+    // Wilderness district: +10% fish yield (clamped to daily hard cap)
+    const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
+    if (result.success && result.finalPayout > 0 && wildernessActive) {
+        const remaining = LIMITS.DAILY_HARD_CAP - user.fishing.dailyCoins;
+        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+        if (bonus > 0) {
+            user.balance               += bonus;
+            user.fishing.totalEarned   += bonus;
+            user.fishing.dailyCoins    += bonus;
+            result.finalPayout         += bonus;
+            result.wildernessBonus      = bonus;
         }
     }
     if (result.success && result.finalPayout > user.fishing.bestPayout) user.fishing.bestPayout = result.finalPayout;
@@ -660,6 +678,9 @@ async function handleCast(interaction) {
     }
     if (result.featuredSpotBonus > 0) {
         embed.addFields({ name: '🌟 Featured Spot Bonus', value: `+${result.featuredSpotBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
+    }
+    if (result.wildernessBonus > 0) {
+        embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
     }
 
     // Hourly leader footer
@@ -998,7 +1019,7 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
         if (isCrit)                          fishMultEntries.push({ emoji: '⚡', label: `${critMultiplier.toFixed(2)}x crit` });
         if (fishMultEntries.length > 0) {
             const fishCombined  = (result.streakMult ?? 1) * critMultiplier;
-            const preBonusPayout = finalPayout - (result.petYieldBonus ?? 0) - (result.featuredSpotBonus ?? 0);
+            const preBonusPayout = finalPayout - (result.petYieldBonus ?? 0) - (result.featuredSpotBonus ?? 0) - (result.wildernessBonus ?? 0);
             embed.addFields({ name: '📈 Multipliers', value: stackBar(fishMultEntries, fishCombined, Math.max(0, preBonusPayout), currency), inline: false });
         }
 
