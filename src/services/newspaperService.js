@@ -66,15 +66,14 @@ async function collectStats(guildId, sections) {
     return data;
 }
 
-async function resolveUsernames(client, guildId, userIds) {
+async function resolveUsernames(discordGuild, userIds) {
     const map = {};
+    if (!discordGuild || !userIds.length) return map;
     try {
-        const dg = await client.guilds.fetch(guildId).catch(() => null);
-        if (!dg) return map;
+        const members = await discordGuild.members.fetch({ user: userIds }).catch(() => null);
         for (const uid of userIds) {
             if (!uid) continue;
-            const member = await dg.members.fetch(uid).catch(() => null);
-            map[uid] = member?.user?.username ?? `User ${uid.slice(-4)}`;
+            map[uid] = members?.get(uid)?.user?.username ?? `User ${uid.slice(-4)}`;
         }
     } catch {}
     return map;
@@ -84,7 +83,7 @@ function buildDataSummary(stats, usernameMap, currency, sections) {
     const lines = [];
 
     if (stats.topEarners?.length && sections.topEarners !== false) {
-        lines.push('TOP EARNERS THIS WEEK:');
+        lines.push('TOP EARNERS (ALL-TIME BALANCE):');
         stats.topEarners.forEach((u, i) =>
             lines.push(`  ${i + 1}. ${usernameMap[u.userId] || 'Unknown'} — ${(u.balance || 0).toLocaleString()} ${currency}`)
         );
@@ -126,12 +125,16 @@ function buildDataSummary(stats, usernameMap, currency, sections) {
     return lines.join('\n');
 }
 
-async function generateNewspaper(client, guildDoc) {
+async function generateNewspaper(client, guildDoc, preloadedGuild) {
     const { guildId } = guildDoc;
     const sections = guildDoc.newspaper?.sections ?? {};
     const currency = guildDoc.economy?.currency ?? '💰';
+    const includeQuote = sections.quoteOfTheWeek !== false;
 
     const stats = await collectStats(guildId, sections);
+
+    // Use pre-fetched guild when available (avoids a duplicate guilds.fetch)
+    const discordGuild = preloadedGuild ?? await client.guilds.fetch(guildId).catch(() => null);
 
     // Gather user IDs to resolve
     const userIds = new Set();
@@ -142,7 +145,7 @@ async function generateNewspaper(client, guildDoc) {
     if (stats.gameStandouts?.topFisher) userIds.add(stats.gameStandouts.topFisher.userId);
     if (stats.gameStandouts?.topMiner)  userIds.add(stats.gameStandouts.topMiner.userId);
 
-    const usernameMap = await resolveUsernames(client, guildId, [...userIds]);
+    const usernameMap = await resolveUsernames(discordGuild, [...userIds]);
     const dataSummary = buildDataSummary(stats, usernameMap, currency, sections);
 
     const now = new Date();
@@ -155,6 +158,9 @@ async function generateNewspaper(client, guildDoc) {
         try {
             const { provider, model, temperature, maxTokens, apiKey, baseUrl } = resolveProviderConfig(guildDoc.ai);
             if (apiKey || provider === 'ollama') {
+                const quoteInstruction = includeQuote
+                    ? 'End with a witty "Quote of the Week" that you invent yourself based on the server activity.'
+                    : '';
                 narrativeText = await getCompletion({
                     provider, model, apiKey, baseUrl,
                     temperature: 0.85,
@@ -167,7 +173,7 @@ async function generateNewspaper(client, guildDoc) {
                         `Write this week's server newspaper for "${guildDoc.name || 'our server'}".\n\n` +
                         `Date: ${dateStr}\n\nServer stats this week:\n${dataSummary}\n\n` +
                         `Include a fun headline, a brief intro paragraph, and highlight the sections above. ` +
-                        `End with a witty "Quote of the Week" that you invent yourself based on the server activity.`
+                        quoteInstruction
                 });
             }
         } catch (err) {
@@ -261,7 +267,14 @@ async function postScheduledNewspapers(client) {
     for (const guildDoc of guilds) {
         const { guildId } = guildDoc;
         try {
-            // Atomic claim
+            // Validate channel before consuming the weekly slot — misconfigured
+            // channels must not burn lastRunAt.
+            const dg = await client.guilds.fetch(guildId).catch(() => null);
+            if (!dg) continue;
+            const channel = await dg.channels.fetch(guildDoc.newspaper.channelId).catch(() => null);
+            if (!channel?.isTextBased?.()) continue;
+
+            // Atomic claim — only proceeds if another worker hasn't already run this hour.
             const claimed = await Guild.findOneAndUpdate(
                 {
                     guildId,
@@ -276,13 +289,7 @@ async function postScheduledNewspapers(client) {
             );
             if (!claimed) continue;
 
-            const embed = await generateNewspaper(client, guildDoc);
-
-            const dg = await client.guilds.fetch(guildId).catch(() => null);
-            if (!dg) continue;
-            const channel = await dg.channels.fetch(guildDoc.newspaper.channelId).catch(() => null);
-            if (!channel?.isTextBased?.()) continue;
-
+            const embed = await generateNewspaper(client, guildDoc, dg);
             await channel.send({ embeds: [embed] });
         } catch (err) {
             console.error(`[newspaper] postScheduledNewspapers failed for guild ${guildId}:`, err.message);
