@@ -26,6 +26,11 @@ const DEFAULT_SHOP_ITEMS = [
     { name: 'Pet Slot Expansion',     itemId: 'pet_slot_expansion',      rarity: 'Epic',   price: 60000,  category: 'prestige', description: '🐾 Allows owning one additional pet simultaneously (stackable ×3).', lore: "More companions. More chaos. Entirely worth it." },
     { name: 'Permanent Stamina +1',   itemId: 'permanent_stamina',       rarity: 'Mythic', price: 100000, category: 'prestige', description: '⚡ Permanently increases your max hunt/fish/mine stamina by 1.',     lore: "The grind never ends. At least now you last a little longer." },
     { name: 'Prestige Accelerator',   itemId: 'prestige_accelerator',    rarity: 'Mythic', price: 200000, category: 'prestige', description: '🚀 -20% XP required for your next prestige (one-time use).',         lore: "The shortcut nobody talks about. Until they use it." },
+
+    // ── Black Market (Prestige I+ only) ──────────────────────────────────────
+    { name: 'Phantom Token',          itemId: 'phantom_token',           rarity: 'Mythic', price: 120000, category: 'black_market', description: '👻 Skip the next /rob fine you would owe — undetectable.',         lore: "It wasn't you. It was never you." },
+    { name: 'Silvered Talisman',      itemId: 'silvered_talisman',       rarity: 'Mythic', price: 180000, category: 'black_market', description: '🪙 Doubles coin yield from your next 5 hunts, fishes, or mines.',   lore: "Pawned by a stranger. Repurchased by you. The cycle continues." },
+    { name: 'Black Market Contract',  itemId: 'black_market_contract',   rarity: 'Mythic', price: 350000, category: 'black_market', description: '📜 Grants +1 permanent crime success roll bonus (stackable ×3).',    lore: "Don't ask who signed the other side." },
 ];
 
 const ITEM_LORE_BY_ID = Object.fromEntries(
@@ -55,22 +60,47 @@ function isPrestigeItem(itemId) {
     return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'prestige';
 }
 
+// Returns true if the item lives in the Black Market tab (unlocked at account prestige 1+).
+function isBlackMarketItem(itemId) {
+    return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'black_market';
+}
+
 // Idempotent: appends any default items missing from the guild's shop and flips
 // the seeded flag so an admin can permanently remove items without them
 // reappearing. Returns true if the shop was modified (caller should save).
+//
+// New top-level item categories (e.g. 'black_market' added with the prestige
+// system) are backfilled even on already-seeded guilds so existing servers pick
+// them up without a manual reseed.
 function ensureDefaultShopItems(guildSettings) {
-    if (!guildSettings || guildSettings.shopDefaultsSeeded) return false;
-
+    if (!guildSettings) return false;
     if (!Array.isArray(guildSettings.shop)) guildSettings.shop = [];
+
+    const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
-    let added = false;
-    for (const item of DEFAULT_SHOP_ITEMS) {
-        if (existingNames.has(item.name.toLowerCase())) continue;
-        guildSettings.shop.push({ ...item, roleId: null, stock: -1, imageUrl: '' });
-        added = true;
+    const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market']);
+    let changed = false;
+
+    if (!guildSettings.shopDefaultsSeeded) {
+        for (const item of DEFAULT_SHOP_ITEMS) {
+            if (existingNames.has(item.name.toLowerCase())) continue;
+            guildSettings.shop.push({ ...item, roleId: null, stock: -1, imageUrl: '' });
+            existingIds.add(item.itemId.toLowerCase());
+            existingNames.add(item.name.toLowerCase());
+            changed = true;
+        }
+        guildSettings.shopDefaultsSeeded = true;
+        return true;
     }
-    guildSettings.shopDefaultsSeeded = true;
-    return added || true;
+
+    // For seeded guilds, only top up categories that are new to the schema.
+    for (const item of DEFAULT_SHOP_ITEMS) {
+        if (!ALWAYS_BACKFILL_CATEGORIES.has(item.category)) continue;
+        if (existingIds.has(item.itemId.toLowerCase()) || existingNames.has(item.name.toLowerCase())) continue;
+        guildSettings.shop.push({ ...item, roleId: null, stock: -1, imageUrl: '' });
+        changed = true;
+    }
+    return changed;
 }
 
-module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, RARITY_ORDER };
+module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, RARITY_ORDER };
