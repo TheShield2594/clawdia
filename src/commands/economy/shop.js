@@ -9,10 +9,12 @@ const {
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const Transaction = require('../../models/Transaction');
-const { ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, RARITY_ORDER } = require('../../data/defaultShopItems');
+const { ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, RARITY_ORDER } = require('../../data/defaultShopItems');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse } = require('../../utils/shopBrowse');
 const { logTransaction } = require('../../utils/logTransaction');
+const { ensurePricingFields, trendBucket } = require('../../utils/dynamicPricing');
+const { hasUnlock } = require('../../utils/prestige');
 
 const CONFIRM_THRESHOLD = 500;
 const NEW_ITEM_TTL_MS   = 48 * 3_600_000; // 48 hours
@@ -43,27 +45,42 @@ async function getTrendingItemIds(guildId) {
     return new Set(rows.map(r => r._id));
 }
 
+// Returns effective price for an item — currentPrice if dynamic pricing is enabled and set,
+// otherwise the static price.
+function effectivePrice(item, dynamicEnabled) {
+    if (dynamicEnabled && item.currentPrice != null) return item.currentPrice;
+    return item.price;
+}
+
 // Build the runShopBrowse page descriptors from the guild's shop items
-async function buildShopPages(guildSettings, currency) {
+async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
     const trending = await getTrendingItemIds(guildSettings.guildId);
     const now = Date.now();
+    const dynamicEnabled = !!guildSettings.dynamicPricing?.enabled;
+    const showBlackMarket = hasUnlock(viewerPrestigeRank, 'black_market');
 
     // Group items by rarity
     const byRarity = {};
     for (const item of guildSettings.shop) {
-        const rarity = getItemRarity(item.itemId, item.price);
+        // Hide black-market items from users who haven't unlocked them yet
+        if (isBlackMarketItem(item.itemId) && !showBlackMarket) continue;
+        const ep = effectivePrice(item, dynamicEnabled);
+        const rarity = getItemRarity(item.itemId, ep);
         if (!byRarity[rarity]) byRarity[rarity] = [];
         byRarity[rarity].push(item);
     }
 
-    // Separate prestige items into their own page
+    // Separate prestige + black-market items into their own pages
     const prestigeItems = [];
+    const blackMarketItems = [];
     const standardByRarity = {};
     for (const rarity of RARITY_ORDER) {
         const items = byRarity[rarity];
         if (!items) continue;
         for (const item of items) {
-            if (isPrestigeItem(item.itemId)) {
+            if (isBlackMarketItem(item.itemId)) {
+                blackMarketItems.push(item);
+            } else if (isPrestigeItem(item.itemId)) {
                 prestigeItems.push(item);
             } else {
                 if (!standardByRarity[rarity]) standardByRarity[rarity] = [];
@@ -88,18 +105,22 @@ async function buildShopPages(guildSettings, currency) {
                 badge = 'TRENDING';
             }
             const stock = item.stock === -1 ? '∞' : String(item.stock);
+            const ep = effectivePrice(item, dynamicEnabled);
+            const trendStr = dynamicEnabled ? ` ${trendBucket(item).arrow}` : '';
             return {
                 name:    item.name,
                 emoji:   extractEmoji(item.description),
-                price:   item.price,
+                price:   ep,
                 badge,
-                subline: `Stock: ${stock}${item.roleId ? ' · Role reward' : ''}`,
+                subline: `Stock: ${stock}${item.roleId ? ' · Role reward' : ''}${trendStr}`,
             };
         });
 
         const listText = items.map((item, i) => {
             const stock = item.stock === -1 ? '∞' : item.stock;
-            return `**${i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})`;
+            const ep = effectivePrice(item, dynamicEnabled);
+            const trendStr = dynamicEnabled ? ` ${trendBucket(item).arrow}` : '';
+            return `**${i + 1}. ${item.name}** — ${currency}${ep.toLocaleString()}${trendStr} (Stock: ${stock})`;
         }).join('\n') + `\n\n*Use /shop buy <item name> to purchase*`;
 
         pages.push({
@@ -123,10 +144,11 @@ async function buildShopPages(guildSettings, currency) {
                 badge = 'TRENDING';
             }
             const stock = item.stock === -1 ? '∞' : String(item.stock);
+            const ep = effectivePrice(item, dynamicEnabled);
             return {
                 name:    item.name,
                 emoji:   extractEmoji(item.description),
-                price:   item.price,
+                price:   ep,
                 badge,
                 subline: `Stock: ${stock} · Prestige`,
             };
@@ -136,7 +158,8 @@ async function buildShopPages(guildSettings, currency) {
             `*Save up and make a statement.*\n\n` +
             prestigeItems.map((item, i) => {
                 const stock = item.stock === -1 ? '∞' : item.stock;
-                return `**${i + 1}. ${item.name}** — ${currency}${item.price.toLocaleString()} (Stock: ${stock})`;
+                const ep = effectivePrice(item, dynamicEnabled);
+                return `**${i + 1}. ${item.name}** — ${currency}${ep.toLocaleString()} (Stock: ${stock})`;
             }).join('\n') +
             `\n\n*Use /shop buy <item name> to purchase*`;
 
@@ -145,6 +168,39 @@ async function buildShopPages(guildSettings, currency) {
             label:    'Prestige',
             emoji:    '✨',
             subtitle: `${prestigeItems.length} aspirational item${prestigeItems.length !== 1 ? 's' : ''}`,
+            items:    pageItems,
+            listText,
+        });
+    }
+
+    // Black market — only visible to viewers with the unlock
+    if (blackMarketItems.length > 0) {
+        const pageItems = blackMarketItems.map(item => {
+            const stock = item.stock === -1 ? '∞' : String(item.stock);
+            const ep = effectivePrice(item, dynamicEnabled);
+            return {
+                name:    item.name,
+                emoji:   extractEmoji(item.description),
+                price:   ep,
+                badge:   'BLACK MARKET',
+                subline: `Stock: ${stock} · Prestige I+ only`,
+            };
+        });
+        const listText =
+            `**🏴 Black Market** — exclusive contraband only available to prestige holders.\n` +
+            `*No questions asked. No receipts given.*\n\n` +
+            blackMarketItems.map((item, i) => {
+                const stock = item.stock === -1 ? '∞' : item.stock;
+                const ep = effectivePrice(item, dynamicEnabled);
+                return `**${i + 1}. ${item.name}** — ${currency}${ep.toLocaleString()} (Stock: ${stock})`;
+            }).join('\n') +
+            `\n\n*Use /shop buy <item name> to purchase*`;
+
+        pages.push({
+            id:       'black_market',
+            label:    'Black Market',
+            emoji:    '🏴',
+            subtitle: `${blackMarketItems.length} contraband item${blackMarketItems.length !== 1 ? 's' : ''}`,
             items:    pageItems,
             listText,
         });
@@ -164,6 +220,9 @@ module.exports = {
             sub.setName('buy')
                 .setDescription('Purchase an item from the shop')
                 .addStringOption(o => o.setName('item').setDescription('Exact name of the item to buy (see /shop view for the full list)').setRequired(true)))
+        .addSubcommand(sub =>
+            sub.setName('trends')
+                .setDescription('Show price movement on shop items (dynamic pricing must be enabled).'))
         .setDefaultMemberPermissions(null),
 
     async execute(interaction) {
@@ -175,11 +234,20 @@ module.exports = {
             { upsert: true, new: true }
         );
 
-        if (ensureDefaultShopItems(guildSettings)) {
+        const seededDefaults = ensureDefaultShopItems(guildSettings);
+        const seededPrices   = ensurePricingFields(guildSettings.shop);
+        if (seededDefaults || seededPrices) {
             await guildSettings.save();
         }
 
         const currency = guildSettings.economy.currency;
+
+        // Viewer's prestige rank (used to gate Black Market and other unlock-tabs)
+        const viewer = await User.findOne(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            'accountPrestige'
+        ).lean();
+        const viewerPrestigeRank = viewer?.accountPrestige?.rank ?? 0;
 
         // ── VIEW ──────────────────────────────────────────────────────────────
         if (sub === 'view') {
@@ -187,7 +255,7 @@ module.exports = {
                 return interaction.reply({ content: 'The shop is empty. Admins can add items via the dashboard.', ephemeral: true });
             }
 
-            const pages = await buildShopPages(guildSettings, currency);
+            const pages = await buildShopPages(guildSettings, currency, viewerPrestigeRank);
             if (!pages.length) {
                 return interaction.reply({ content: 'The shop is empty.', ephemeral: true });
             }
@@ -205,6 +273,42 @@ module.exports = {
             });
         }
 
+        // ── TRENDS ────────────────────────────────────────────────────────────
+        if (sub === 'trends') {
+            if (!guildSettings.dynamicPricing?.enabled) {
+                return interaction.reply({ content: 'Dynamic pricing is disabled on this server.', ephemeral: true });
+            }
+            const movers = guildSettings.shop
+                .filter(item => !isBlackMarketItem(item.itemId) || hasUnlock(viewerPrestigeRank, 'black_market'))
+                .map(item => {
+                    const tb = trendBucket(item);
+                    return { item, pct: tb.pct, arrow: tb.arrow };
+                })
+                .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct))
+                .slice(0, 12);
+
+            const lines = movers.map(({ item, pct, arrow }) => {
+                const base = item.basePrice ?? item.price;
+                const cur  = item.currentPrice ?? base;
+                const sign = pct >= 0 ? '+' : '';
+                return `${arrow} **${item.name}** — ${currency}${cur.toLocaleString()} (base ${currency}${base.toLocaleString()}, ${sign}${pct.toFixed(1)}%)`;
+            });
+
+            const lastRecalc = guildSettings.dynamicPricing.lastRecalcAt;
+            const recalcStr = lastRecalc
+                ? `Last recalc <t:${Math.floor(new Date(lastRecalc).getTime() / 1000)}:R>`
+                : 'No recalcs yet — pricing will adjust on the next scheduled run.';
+
+            const embed = new EmbedBuilder()
+                .setColor('#3498db')
+                .setTitle('📊 Market Trends')
+                .setDescription(lines.length ? lines.join('\n') : 'No price movement yet.')
+                .setFooter({ text: `${recalcStr} · Volatility: ${guildSettings.dynamicPricing.volatility}` })
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
         // ── BUY ───────────────────────────────────────────────────────────────
         if (sub === 'buy') {
             const itemName = interaction.options.getString('item').toLowerCase();
@@ -214,9 +318,20 @@ module.exports = {
                 return interaction.reply({ content: `Item \`${itemName}\` not found. Use \`/shop view\` to see available items.`, ephemeral: true });
             }
 
+            // Gate Black Market behind prestige unlock
+            if (isBlackMarketItem(item.itemId) && !hasUnlock(viewerPrestigeRank, 'black_market')) {
+                return interaction.reply({
+                    content: 'That item is sold on the Black Market — reach **Prestige I** to unlock it.',
+                    ephemeral: true,
+                });
+            }
+
             if (item.stock === 0) {
                 return interaction.reply({ content: 'That item is out of stock!', ephemeral: true });
             }
+
+            const dynamicEnabled = !!guildSettings.dynamicPricing?.enabled;
+            const itemPrice = effectivePrice(item, dynamicEnabled);
 
             const userData = await User.findOneAndUpdate(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
@@ -224,9 +339,9 @@ module.exports = {
                 { upsert: true, new: true }
             );
 
-            if (userData.balance < item.price) {
+            if (userData.balance < itemPrice) {
                 return interaction.reply({
-                    content: `You need ${currency}${item.price.toLocaleString()} but only have ${currency}${userData.balance.toLocaleString()}.`,
+                    content: `You need ${currency}${itemPrice.toLocaleString()} but only have ${currency}${userData.balance.toLocaleString()}.`,
                     ephemeral: true
                 });
             }
@@ -242,17 +357,18 @@ module.exports = {
                 if (!freshItem || freshItem.stock === 0) {
                     return reply({ content: 'That item is no longer available.', embeds: [], components: [] });
                 }
-                if (!freshUser || freshUser.balance < freshItem.price) {
+                const freshPrice = effectivePrice(freshItem, !!freshGuild.dynamicPricing?.enabled);
+                if (!freshUser || freshUser.balance < freshPrice) {
                     return reply({
-                        content: `You need ${currency}${freshItem.price.toLocaleString()} but only have ${currency}${(freshUser?.balance ?? 0).toLocaleString()}.`,
+                        content: `You need ${currency}${freshPrice.toLocaleString()} but only have ${currency}${(freshUser?.balance ?? 0).toLocaleString()}.`,
                         embeds: [], components: []
                     });
                 }
 
                 // Atomically deduct balance — prevents double-spend if balance changed between checks
                 const chargedUser = await User.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: freshItem.price } },
-                    { $inc: { balance: -freshItem.price } },
+                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: freshPrice } },
+                    { $inc: { balance: -freshPrice } },
                     { new: true }
                 );
                 if (!chargedUser) {
@@ -269,7 +385,7 @@ module.exports = {
                         try {
                             await User.findOneAndUpdate(
                                 { userId: interaction.user.id, guildId: interaction.guild.id },
-                                { $inc: { balance: freshItem.price } }
+                                { $inc: { balance: freshPrice } }
                             );
                             return reply({ content: 'That item just sold out. Your coins have been refunded.', embeds: [], components: [] });
                         } catch (refundErr) {
@@ -277,6 +393,14 @@ module.exports = {
                             return reply({ content: 'That item just sold out and the automatic refund failed — please contact support.', embeds: [], components: [] });
                         }
                     }
+                }
+
+                // Bump demand score so the next price recalc moves this item's price up.
+                if (freshGuild.dynamicPricing?.enabled) {
+                    await Guild.updateOne(
+                        { guildId: interaction.guild.id, 'shop._id': freshItem._id },
+                        { $inc: { 'shop.$.demandScore': 1 } }
+                    ).catch(err => console.error('[shop] demand bump failed:', err));
                 }
 
                 // Use the item's canonical itemId if set, otherwise fall back to its name
@@ -304,15 +428,15 @@ module.exports = {
                     userId:  interaction.user.id,
                     guildId: interaction.guild.id,
                     type:    'shop_buy',
-                    amount:  -freshItem.price,
+                    amount:  -freshPrice,
                     balance: chargedUser.balance,
                     note:    inventoryId,
                 });
 
                 const successLore = getItemLore(freshItem.itemId);
                 const successDesc = successLore
-                    ? `You bought **${freshItem.name}** for ${currency}${freshItem.price.toLocaleString()}.\n\n*${successLore}*`
-                    : `You bought **${freshItem.name}** for ${currency}${freshItem.price.toLocaleString()}.`;
+                    ? `You bought **${freshItem.name}** for ${currency}${freshPrice.toLocaleString()}.\n\n*${successLore}*`
+                    : `You bought **${freshItem.name}** for ${currency}${freshPrice.toLocaleString()}.`;
                 const successEmbed = new EmbedBuilder()
                     .setColor('#00ff00')
                     .setTitle('Purchase Successful')
@@ -330,7 +454,7 @@ module.exports = {
                 return reply(successPayload);
             };
 
-            if (item.price >= CONFIRM_THRESHOLD) {
+            if (itemPrice >= CONFIRM_THRESHOLD) {
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId('shop_confirm').setLabel('Confirm Purchase').setStyle(ButtonStyle.Success),
                     new ButtonBuilder().setCustomId('shop_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
@@ -338,15 +462,15 @@ module.exports = {
 
                 const confirmLore = getItemLore(item.itemId);
                 const confirmDesc = confirmLore
-                    ? `Buy **${item.name}** for **${currency}${item.price.toLocaleString()}**?\n\n*${confirmLore}*`
-                    : `Buy **${item.name}** for **${currency}${item.price.toLocaleString()}**?`;
+                    ? `Buy **${item.name}** for **${currency}${itemPrice.toLocaleString()}**?\n\n*${confirmLore}*`
+                    : `Buy **${item.name}** for **${currency}${itemPrice.toLocaleString()}**?`;
                 const confirmEmbed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .setTitle('Confirm Purchase')
                     .setDescription(confirmDesc)
                     .addFields(
                         { name: 'Your Balance', value: `${currency}${userData.balance.toLocaleString()}`, inline: true },
-                        { name: 'After Purchase', value: `${currency}${(userData.balance - item.price).toLocaleString()}`, inline: true }
+                        { name: 'After Purchase', value: `${currency}${(userData.balance - itemPrice).toLocaleString()}`, inline: true }
                     )
                     .setFooter({ text: 'This confirmation expires in 30 seconds' });
 
