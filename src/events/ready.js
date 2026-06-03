@@ -6,7 +6,7 @@ const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
 const { checkBirthdays } = require('../services/birthdayService');
 const { checkSeasonalEvents } = require('../services/seasonalEventService');
-const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, announceHourlyWinners } = require('../services/schedulerService');
+const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons } = require('../services/schedulerService');
 const { runJob } = require('../utils/jobRunner');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
@@ -74,6 +74,16 @@ module.exports = {
         // Announce last hour's micro-competition winners and reset at the top of every hour
         cron.schedule('0 * * * *', () =>
             runJob('schedulerService', 'announceHourlyWinners', () => announceHourlyWinners(client))
+        );
+
+        // Dynamic shop pricing recalculation — per-guild gated by lastRecalcAt + recalcMinutes
+        cron.schedule('*/15 * * * *', () =>
+            runJob('schedulerService', 'recalcShopPrices', () => recalcShopPrices(client))
+        );
+
+        // Ranked duel season rollover — check every 10 minutes for expired seasons
+        cron.schedule('*/10 * * * *', () =>
+            runJob('schedulerService', 'resolveRankedSeasons', () => resolveRankedSeasons(client))
         );
 
         // Refund any bets that were deducted during a crash game that was interrupted by a restart

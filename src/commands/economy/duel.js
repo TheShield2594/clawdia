@@ -9,6 +9,7 @@ const { randomInt } = require('crypto');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { isDistrictActive } = require('../../services/districtService');
+const { RANK_TIERS, START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duelElo');
 
 const DUEL_COOLDOWN_MS = 5 * 60_000;
 const ACCEPT_TIMEOUT_MS = 60_000;
@@ -88,7 +89,56 @@ function buildRpsRow(role, duelId) {
     );
 }
 
-async function finalizeDuel({ interaction, targetUser, challengerId, opponentId, amount, currency, houseCut, challengerWins, tie, game, gameResult }) {
+// Atomically re-check and claim cooldown for both players at duel-accept time.
+// Returns { ok, reason } — reason ∈ { 'challenger' | 'opponent' } on failure.
+// Both player updates are performed only if both pass the cooldown check; if
+// the second claim fails the first is reverted.
+async function claimDuelCooldown(challengerId, opponentId, guildId, lastDuelBefore) {
+    const claimedChallenger = await User.findOneAndUpdate(
+        {
+            userId: challengerId,
+            guildId,
+            $or: [
+                { lastDuel: null },
+                { lastDuel: { $lt: lastDuelBefore } },
+            ],
+        },
+        { $set: { lastDuel: new Date() } },
+        { new: false }
+    );
+    if (!claimedChallenger) return { ok: false, reason: 'challenger' };
+
+    const claimedOpponent = await User.findOneAndUpdate(
+        {
+            userId: opponentId,
+            guildId,
+            $or: [
+                { lastDuel: null },
+                { lastDuel: { $lt: lastDuelBefore } },
+            ],
+        },
+        { $set: { lastDuel: new Date() } },
+        { new: false }
+    );
+    if (!claimedOpponent) {
+        // Revert challenger's claim to its previous value
+        await User.updateOne(
+            { userId: challengerId, guildId },
+            { $set: { lastDuel: claimedChallenger.lastDuel } }
+        ).catch(console.error);
+        return { ok: false, reason: 'opponent' };
+    }
+    return { ok: true, prevChallengerLastDuel: claimedChallenger.lastDuel, prevOpponentLastDuel: claimedOpponent.lastDuel };
+}
+
+async function revertDuelCooldown(challengerId, opponentId, guildId, prevChallenger, prevOpponent) {
+    await Promise.all([
+        User.updateOne({ userId: challengerId, guildId }, { $set: { lastDuel: prevChallenger ?? null } }),
+        User.updateOne({ userId: opponentId,   guildId }, { $set: { lastDuel: prevOpponent   ?? null } }),
+    ]).catch(console.error);
+}
+
+async function finalizeDuel({ interaction, targetUser, challengerId, opponentId, amount, currency, houseCut, challengerWins, tie, game, gameResult, isRanked = false }) {
     const guildId = interaction.guild.id;
     // Escrow already deducted both stakes; compute payout from pot
     const guildDoc = await Guild.findOne({ guildId }).lean();
@@ -101,6 +151,7 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
     const netGain      = winnerPayout - amount; // winner's profit above their own stake
 
     let description;
+    let eloLine = '';
     if (tie) {
         // Refund both stakes and record cooldown
         await Promise.all([
@@ -112,12 +163,72 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
         const winnerId   = challengerWins ? challengerId : opponentId;
         const loserId    = challengerWins ? opponentId   : challengerId;
         const winnerName = challengerWins ? interaction.user.username : targetUser.username;
+
+        const baseWinnerInc = { $inc: { balance: winnerPayout, duelWins: 1 }, $set: { lastDuel: new Date() } };
+        const baseLoserInc  = { $inc: { duelLosses: 1 }, $set: { lastDuel: new Date() } };
+
+        if (isRanked) {
+            // Apply ELO changes — read current ratings, compute deltas, persist atomically.
+            const [winnerDoc, loserDoc] = await Promise.all([
+                User.findOne({ userId: winnerId, guildId }).select('ranked').lean(),
+                User.findOne({ userId: loserId,  guildId }).select('ranked').lean(),
+            ]);
+            const kFactor = guildDoc?.rankedDuels?.kFactor ?? 32;
+            // Detect if the stored season is already past its end date. When that
+            // happens (the scheduler hasn't yet rolled the season over) we tag this
+            // match against the *next* season id and initialize the season-scoped
+            // counters with $set rather than $inc, so an in-flight match never
+            // bumps a counter from the prior season.
+            const storedSeasonId = guildDoc?.rankedDuels?.currentSeasonId
+                ?? makeSeasonId(guildDoc?.rankedDuels?.seasonNumber ?? 1);
+            const seasonExpired  = guildDoc?.rankedDuels?.seasonEndsAt
+                && new Date(guildDoc.rankedDuels.seasonEndsAt).getTime() <= Date.now();
+            const seasonId       = seasonExpired
+                ? makeSeasonId((guildDoc?.rankedDuels?.seasonNumber ?? 1) + 1)
+                : storedSeasonId;
+            const wElo = winnerDoc?.ranked?.elo ?? START_ELO;
+            const lElo = loserDoc?.ranked?.elo  ?? START_ELO;
+            const { winnerNewElo, loserNewElo, winnerDelta, loserDelta } = applyElo(wElo, lElo, kFactor);
+
+            baseWinnerInc.$inc['ranked.rankedWins']  = 1;
+            baseWinnerInc.$set['ranked.elo']         = winnerNewElo;
+            baseWinnerInc.$set['ranked.peakElo']     = Math.max(winnerDoc?.ranked?.peakElo ?? START_ELO, winnerNewElo);
+            baseWinnerInc.$set['ranked.currentSeasonId'] = seasonId;
+
+            baseLoserInc.$inc['ranked.rankedLosses'] = 1;
+            baseLoserInc.$set['ranked.elo']          = loserNewElo;
+            baseLoserInc.$set['ranked.currentSeasonId'] = seasonId;
+
+            if (seasonExpired) {
+                // First match of a new season — initialize seasonal counters rather
+                // than carrying over the prior season's totals via $inc.
+                baseWinnerInc.$set['ranked.seasonRankedWins']   = 1;
+                baseWinnerInc.$set['ranked.seasonRankedLosses'] = 0;
+                baseWinnerInc.$set['ranked.seasonPeakElo']      = winnerNewElo;
+
+                baseLoserInc.$set['ranked.seasonRankedWins']    = 0;
+                baseLoserInc.$set['ranked.seasonRankedLosses']  = 1;
+                baseLoserInc.$set['ranked.seasonPeakElo']       = loserNewElo;
+            } else {
+                baseWinnerInc.$inc['ranked.seasonRankedWins']   = 1;
+                baseWinnerInc.$set['ranked.seasonPeakElo']      = Math.max(winnerDoc?.ranked?.seasonPeakElo ?? START_ELO, winnerNewElo);
+
+                baseLoserInc.$inc['ranked.seasonRankedLosses']  = 1;
+            }
+
+            const winnerTier = tierFor(winnerNewElo);
+            const loserTier  = tierFor(loserNewElo);
+            eloLine = `\n\n📊 **Ranked update** · ${seasonId}\n` +
+                `Winner: ${winnerTier.icon} ${winnerNewElo} (+${winnerDelta})\n` +
+                `Loser:  ${loserTier.icon} ${loserNewElo} (${loserDelta})`;
+        }
+
         await Promise.all([
-            User.updateOne({ userId: winnerId, guildId }, { $inc: { balance: winnerPayout, duelWins: 1 }, $set: { lastDuel: new Date() } }),
-            User.updateOne({ userId: loserId,  guildId }, { $inc: { duelLosses: 1 }, $set: { lastDuel: new Date() } }),
+            User.updateOne({ userId: winnerId, guildId }, baseWinnerInc),
+            User.updateOne({ userId: loserId,  guildId }, baseLoserInc),
         ]);
         const arenaStr = arenaActive ? ` + ⚔️ Arena bonus: ${currency}${arenaBonus.toLocaleString()}` : '';
-        description = `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (${Math.round(houseCut * 100)}% house cut${arenaStr})!`;
+        description = `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (${Math.round(houseCut * 100)}% house cut${arenaStr})!${eloLine}`;
     }
 
     const [challenger, opponent] = await Promise.all([
@@ -177,7 +288,7 @@ function errorEmbed(title, description) {
     return new EmbedBuilder().setColor('#e74c3c').setTitle(title).setDescription(description).setTimestamp();
 }
 
-async function runInstantGame(interaction, targetUser, amount, currency, houseCut, game) {
+async function runInstantGame(interaction, targetUser, amount, currency, houseCut, game, isRanked = false) {
     let challengerWins = false;
     let tie = false;
     let gameResult = '';
@@ -201,7 +312,7 @@ async function runInstantGame(interaction, targetUser, amount, currency, houseCu
     }
 
     try {
-        await finalizeDuel({ interaction, targetUser, challengerId: interaction.user.id, opponentId: targetUser.id, amount, currency, houseCut, challengerWins, tie, game, gameResult });
+        await finalizeDuel({ interaction, targetUser, challengerId: interaction.user.id, opponentId: targetUser.id, amount, currency, houseCut, challengerWins, tie, game, gameResult, isRanked });
     } catch (err) {
         console.error('Duel finalizeDuel error:', err);
         await refundEscrow(interaction.user.id, targetUser.id, interaction.guild.id, amount).catch(console.error);
@@ -209,7 +320,7 @@ async function runInstantGame(interaction, targetUser, amount, currency, houseCu
     }
 }
 
-async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, duelId) {
+async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, duelId, isRanked = false) {
     // settled prevents double-refund if both a collect error and a timeout fire
     let settled = false;
     const guildId = interaction.guild.id;
@@ -276,7 +387,7 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
 
                     await settle(async () => {
                         try {
-                            await finalizeDuel({ interaction, targetUser, challengerId: interaction.user.id, opponentId: targetUser.id, amount, currency, houseCut, challengerWins, tie, game: 'rps', gameResult });
+                            await finalizeDuel({ interaction, targetUser, challengerId: interaction.user.id, opponentId: targetUser.id, amount, currency, houseCut, challengerWins, tie, game: 'rps', gameResult, isRanked });
                         } catch (err) {
                             console.error('Duel RPS finalizeDuel error:', err);
                             await refundEscrow(interaction.user.id, targetUser.id, guildId, amount).catch(console.error);
@@ -325,159 +436,297 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
     });
 }
 
+async function runChallenge(interaction, isRanked) {
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+
+    if (guildSettings?.economy?.enabled === false) {
+        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+    }
+    if (guildSettings?.economy?.duelEnabled === false) {
+        return interaction.reply({ content: 'Duels are disabled on this server.', ephemeral: true });
+    }
+    if (isRanked && guildSettings?.rankedDuels?.enabled === false) {
+        return interaction.reply({ content: 'Ranked duels are disabled on this server.', ephemeral: true });
+    }
+
+    const currency = guildSettings?.economy?.currency    || '💰';
+    const maxBet   = guildSettings?.economy?.duelMaxBet  ?? 10000;
+    const houseCut = guildSettings?.economy?.duelHouseCut ?? 0.05;
+    const minBet   = isRanked ? (guildSettings?.rankedDuels?.minBet ?? 100) : 1;
+
+    const target    = interaction.options.getUser('user');
+    const amount    = interaction.options.getInteger('amount');
+    const gameChoice = interaction.options.getString('game') ?? 'random';
+
+    if (target.id === interaction.user.id) {
+        return interaction.reply({ content: "You can't duel yourself.", ephemeral: true });
+    }
+    if (target.bot) {
+        return interaction.reply({ content: "You can't duel a bot.", ephemeral: true });
+    }
+    if (amount > maxBet) {
+        return interaction.reply({ content: `The maximum bet on this server is **${currency}${maxBet.toLocaleString()}**.`, ephemeral: true });
+    }
+    if (amount < minBet) {
+        return interaction.reply({ content: `Ranked duels require a minimum bet of **${currency}${minBet.toLocaleString()}**.`, ephemeral: true });
+    }
+
+    const [challenger, opponent] = await Promise.all([
+        User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
+        User.findOneAndUpdate({ userId: target.id,           guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
+    ]);
+
+    if (challenger.lastDuel && Date.now() - new Date(challenger.lastDuel).getTime() < DUEL_COOLDOWN_MS) {
+        const mins = Math.ceil((DUEL_COOLDOWN_MS - (Date.now() - new Date(challenger.lastDuel).getTime())) / 60_000);
+        return interaction.reply({ content: `You're cooling down from your last duel. Try again in **${mins} min**.`, ephemeral: true });
+    }
+    if (opponent.lastDuel && Date.now() - new Date(opponent.lastDuel).getTime() < DUEL_COOLDOWN_MS) {
+        const mins = Math.ceil((DUEL_COOLDOWN_MS - (Date.now() - new Date(opponent.lastDuel).getTime())) / 60_000);
+        return interaction.reply({ content: `**${target.username}** is still on duel cooldown. Try again in **${mins} min**.`, ephemeral: true });
+    }
+
+    if (challenger.balance < amount) {
+        return interaction.reply({ content: `You don't have enough ${currency}. Wallet: **${currency}${challenger.balance.toLocaleString()}**`, ephemeral: true });
+    }
+
+    const duelId = `${interaction.user.id}_${Date.now()}`;
+    const modeLabel = isRanked ? '🏆 Ranked Duel' : '⚔️ Duel Challenge!';
+    let rankedFooter = '';
+    if (isRanked) {
+        const cTier = tierFor(challenger.ranked?.elo ?? START_ELO);
+        const oTier = tierFor(opponent.ranked?.elo  ?? START_ELO);
+        rankedFooter = `\n\nELO: ${cTier.icon} ${challenger.ranked?.elo ?? START_ELO}  vs  ${oTier.icon} ${opponent.ranked?.elo ?? START_ELO}`;
+    }
+
+    const challengeEmbed = new EmbedBuilder()
+        .setColor(isRanked ? '#9b59b6' : '#f39c12')
+        .setTitle(modeLabel)
+        .setDescription(
+            `**${interaction.user.username}** challenges <@${target.id}> to a${isRanked ? ' **ranked**' : ''} duel!\n\n` +
+            `Bet: **${currency}${amount.toLocaleString()}** each\n` +
+            `House cut: **${Math.round(houseCut * 100)}%**\n` +
+            `Game: **${gameChoice === 'random' ? '🎲 Random' : GAME_NAMES[gameChoice]}**${rankedFooter}\n\n` +
+            `<@${target.id}>, do you accept?`
+        )
+        .setFooter({ text: 'Challenge expires in 60 seconds' })
+        .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`duel_accept_${duelId}`).setLabel('Accept').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`duel_decline_${duelId}`).setLabel('Decline').setStyle(ButtonStyle.Danger),
+    );
+
+    await interaction.reply({ embeds: [challengeEmbed], components: [row] });
+    const msg = await interaction.fetchReply();
+
+    const acceptCollector = msg.createMessageComponentCollector({
+        filter: i => i.user.id === target.id && (i.customId === `duel_accept_${duelId}` || i.customId === `duel_decline_${duelId}`),
+        time: ACCEPT_TIMEOUT_MS,
+        max: 1,
+    });
+
+    acceptCollector.on('collect', async i => {
+        let escrowTaken = false;
+        let cooldownClaim = null;
+        try {
+            await i.deferUpdate();
+
+            if (i.customId === `duel_decline_${duelId}`) {
+                return interaction.editReply({
+                    embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Declined').setDescription(`**${target.username}** declined the challenge.`).setTimestamp()],
+                    components: [],
+                });
+            }
+
+            // Re-check + atomically claim the cooldown for both players at accept time.
+            // Each player must either have no recorded lastDuel or one older than
+            // (now - DUEL_COOLDOWN_MS). Both claims must succeed or both are reverted.
+            const cooldownBefore = new Date(Date.now() - DUEL_COOLDOWN_MS);
+            cooldownClaim = await claimDuelCooldown(interaction.user.id, target.id, interaction.guild.id, cooldownBefore);
+            if (!cooldownClaim.ok) {
+                const who = cooldownClaim.reason === 'challenger' ? interaction.user.username : target.username;
+                return interaction.editReply({
+                    embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** is on duel cooldown.`).setTimestamp()],
+                    components: [],
+                });
+            }
+
+            const escrow = await takeEscrow(interaction.user.id, target.id, interaction.guild.id, amount);
+            if (!escrow.success) {
+                // Cooldown was claimed but escrow failed — revert the claim
+                await revertDuelCooldown(interaction.user.id, target.id, interaction.guild.id, cooldownClaim.prevChallengerLastDuel, cooldownClaim.prevOpponentLastDuel);
+                cooldownClaim = null;
+                const who = escrow.reason === 'challenger' ? interaction.user.username : target.username;
+                return interaction.editReply({
+                    embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** no longer has enough ${currency}.`).setTimestamp()],
+                    components: [],
+                });
+            }
+            escrowTaken = true;
+
+            const game = (gameChoice === 'random')
+                ? MINI_GAMES[randomInt(MINI_GAMES.length)]
+                : gameChoice;
+            if (game === 'rps') {
+                await runRPS(interaction, msg, target, amount, currency, houseCut, duelId, isRanked);
+            } else {
+                await runInstantGame(interaction, target, amount, currency, houseCut, game, isRanked);
+            }
+        } catch (err) {
+            console.error('Duel accept collect error:', err);
+            if (escrowTaken) {
+                await refundEscrow(interaction.user.id, target.id, interaction.guild.id, amount).catch(console.error);
+            }
+            if (cooldownClaim?.ok) {
+                await revertDuelCooldown(interaction.user.id, target.id, interaction.guild.id, cooldownClaim.prevChallengerLastDuel, cooldownClaim.prevOpponentLastDuel);
+            }
+            await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', 'Something went wrong. Any escrowed bets have been refunded.')], components: [] }).catch(() => {});
+        }
+    });
+
+    acceptCollector.on('end', async (collected, reason) => {
+        if (reason === 'time' && collected.size === 0) {
+            await interaction.editReply({
+                embeds: [new EmbedBuilder().setColor('#95a5a6').setTitle('⚔️ Duel Expired').setDescription(`The duel challenge to **${target.username}** expired.`).setTimestamp()],
+                components: [],
+            }).catch(() => {});
+        }
+    });
+}
+
+async function runRankView(interaction) {
+    const target  = interaction.options.getUser('user') ?? interaction.user;
+    const guildId = interaction.guild.id;
+    const userDoc = await User.findOne({ userId: target.id, guildId }).select('ranked duelWins duelLosses').lean();
+    const elo     = userDoc?.ranked?.elo ?? START_ELO;
+    const tier    = tierFor(elo);
+    const peak    = userDoc?.ranked?.peakElo ?? elo;
+    const peakTier= tierFor(peak);
+    const rW = userDoc?.ranked?.rankedWins ?? 0;
+    const rL = userDoc?.ranked?.rankedLosses ?? 0;
+    const sW = userDoc?.ranked?.seasonRankedWins ?? 0;
+    const sL = userDoc?.ranked?.seasonRankedLosses ?? 0;
+    const titles = userDoc?.ranked?.seasonalTitles ?? [];
+
+    // Server rank (1-indexed) based on current ELO
+    const higher = await User.countDocuments({ guildId, 'ranked.elo': { $gt: elo } });
+    const rankPosition = higher + 1;
+
+    const guildSettings = await Guild.findOne({ guildId }, 'rankedDuels').lean();
+    const seasonId = guildSettings?.rankedDuels?.currentSeasonId
+        ?? makeSeasonId(guildSettings?.rankedDuels?.seasonNumber ?? 1);
+
+    const embed = new EmbedBuilder()
+        .setColor('#9b59b6')
+        .setTitle(`${tier.icon} ${target.username} — ${tier.label}`)
+        .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+        .setDescription(`Current **${elo}** ELO · Server rank **#${rankPosition}**`)
+        .addFields(
+            { name: 'Peak Rating',  value: `${peakTier.icon} ${peak} (${peakTier.label})`, inline: true },
+            { name: 'Season',       value: `${seasonId} · ${sW}W / ${sL}L`,                inline: true },
+            { name: 'All-Time',     value: `${rW}W / ${rL}L (Ranked)`,                     inline: true },
+        );
+    if (titles.length) {
+        embed.addFields({ name: 'Earned Titles', value: titles.map(t => `🏷️ ${t}`).join('\n'), inline: false });
+    }
+    embed.setTimestamp();
+    return interaction.reply({ embeds: [embed], ephemeral: false });
+}
+
+async function runLeaderboard(interaction) {
+    const guildId = interaction.guild.id;
+    // Include anyone who has touched the ladder (wins OR losses), not just winners.
+    const top = await User.find({
+        guildId,
+        $or: [
+            { 'ranked.rankedWins':   { $gt: 0 } },
+            { 'ranked.rankedLosses': { $gt: 0 } },
+        ],
+    })
+        .sort({ 'ranked.elo': -1 })
+        .limit(10)
+        .select('userId ranked')
+        .lean();
+
+    if (!top.length) {
+        return interaction.reply({ content: 'No one has played a ranked duel yet on this server.', ephemeral: true });
+    }
+
+    const lines = await Promise.all(top.map(async (row, idx) => {
+        const elo = row.ranked?.elo ?? START_ELO;
+        const tier = tierFor(elo);
+        const u = await interaction.client.users.fetch(row.userId).catch(() => null);
+        const name = u?.username ?? row.userId;
+        const wl = `${row.ranked?.rankedWins ?? 0}W/${row.ranked?.rankedLosses ?? 0}L`;
+        const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `\`#${String(idx + 1).padStart(2, ' ')}\``;
+        return `${medal}  ${tier.icon} **${name}** — ${elo} ELO · ${wl}`;
+    }));
+
+    const guildSettings = await Guild.findOne({ guildId }, 'rankedDuels').lean();
+    const seasonId = guildSettings?.rankedDuels?.currentSeasonId
+        ?? makeSeasonId(guildSettings?.rankedDuels?.seasonNumber ?? 1);
+    const seasonEnds = guildSettings?.rankedDuels?.seasonEndsAt
+        ? `\n\nSeason ends <t:${Math.floor(new Date(guildSettings.rankedDuels.seasonEndsAt).getTime() / 1000)}:R>`
+        : '';
+
+    const embed = new EmbedBuilder()
+        .setColor('#9b59b6')
+        .setTitle(`🏆 Ranked Duel Ladder — ${seasonId}`)
+        .setDescription(lines.join('\n') + seasonEnds)
+        .setFooter({ text: 'Top 3 at season end earn coins, a title, and bragging rights.' })
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
 module.exports = {
     cooldown: 5,
     data: new SlashCommandBuilder()
         .setName('duel')
         .setDescription('Challenge another user to a coin-bet duel')
         .setDMPermission(false)
-        .addUserOption(opt =>
-            opt.setName('user')
-                .setDescription('The user to challenge')
-                .setRequired(true))
-        .addIntegerOption(opt =>
-            opt.setName('amount')
-                .setDescription('Amount to bet from your wallet')
-                .setRequired(true)
-                .setMinValue(1))
-        .addStringOption(opt =>
-            opt.setName('game')
-                .setDescription('Minigame to play (default: random)')
-                .setRequired(false)
-                .addChoices(
-                    { name: '🪙 Coin Flip',           value: 'coinflip'   },
-                    { name: '🎲 Dice Roll',            value: 'dice'       },
-                    { name: '🃏 Higher Card',          value: 'highercard' },
-                    { name: '✊ Rock Paper Scissors',  value: 'rps'        },
-                    { name: '🎲 Random',               value: 'random'     }
-                )),
+        .addSubcommand(sub =>
+            sub.setName('casual')
+                .setDescription('Unranked duel — wager coins without affecting your ELO.')
+                .addUserOption(o => o.setName('user').setDescription('The user to challenge').setRequired(true))
+                .addIntegerOption(o => o.setName('amount').setDescription('Amount to bet from your wallet').setRequired(true).setMinValue(1))
+                .addStringOption(o => o.setName('game').setDescription('Minigame to play (default: random)').setRequired(false)
+                    .addChoices(
+                        { name: '🪙 Coin Flip',           value: 'coinflip'   },
+                        { name: '🎲 Dice Roll',            value: 'dice'       },
+                        { name: '🃏 Higher Card',          value: 'highercard' },
+                        { name: '✊ Rock Paper Scissors',  value: 'rps'        },
+                        { name: '🎲 Random',               value: 'random'     }
+                    )))
+        .addSubcommand(sub =>
+            sub.setName('ranked')
+                .setDescription('Rated duel — updates your ELO and seasonal record.')
+                .addUserOption(o => o.setName('user').setDescription('The user to challenge').setRequired(true))
+                .addIntegerOption(o => o.setName('amount').setDescription('Amount to bet (server-configured minimum)').setRequired(true).setMinValue(1))
+                .addStringOption(o => o.setName('game').setDescription('Minigame to play (default: random)').setRequired(false)
+                    .addChoices(
+                        { name: '🪙 Coin Flip',           value: 'coinflip'   },
+                        { name: '🎲 Dice Roll',            value: 'dice'       },
+                        { name: '🃏 Higher Card',          value: 'highercard' },
+                        { name: '✊ Rock Paper Scissors',  value: 'rps'        },
+                        { name: '🎲 Random',               value: 'random'     }
+                    )))
+        .addSubcommand(sub =>
+            sub.setName('rank')
+                .setDescription('Show your (or another user\'s) ranked duel rating and tier.')
+                .addUserOption(o => o.setName('user').setDescription('User to inspect (defaults to yourself).').setRequired(false)))
+        .addSubcommand(sub =>
+            sub.setName('leaderboard')
+                .setDescription('Show the top 10 ranked duelists on this server.')),
 
     async execute(interaction) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
         }
-
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-
-        if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
-        }
-        if (guildSettings?.economy?.duelEnabled === false) {
-            return interaction.reply({ content: 'Duels are disabled on this server.', ephemeral: true });
-        }
-
-        const currency = guildSettings?.economy?.currency    || '💰';
-        const maxBet   = guildSettings?.economy?.duelMaxBet  ?? 10000;
-        const houseCut = guildSettings?.economy?.duelHouseCut ?? 0.05;
-
-        const target    = interaction.options.getUser('user');
-        const amount    = interaction.options.getInteger('amount');
-        const gameChoice = interaction.options.getString('game') ?? 'random';
-
-        if (target.id === interaction.user.id) {
-            return interaction.reply({ content: "You can't duel yourself.", ephemeral: true });
-        }
-        if (target.bot) {
-            return interaction.reply({ content: "You can't duel a bot.", ephemeral: true });
-        }
-        if (amount > maxBet) {
-            return interaction.reply({ content: `The maximum bet on this server is **${currency}${maxBet.toLocaleString()}**.`, ephemeral: true });
-        }
-
-        const [challenger, opponent] = await Promise.all([
-            User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
-            User.findOneAndUpdate({ userId: target.id,           guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
-        ]);
-
-        if (challenger.lastDuel && Date.now() - new Date(challenger.lastDuel).getTime() < DUEL_COOLDOWN_MS) {
-            const mins = Math.ceil((DUEL_COOLDOWN_MS - (Date.now() - new Date(challenger.lastDuel).getTime())) / 60_000);
-            return interaction.reply({ content: `You're cooling down from your last duel. Try again in **${mins} min**.`, ephemeral: true });
-        }
-        if (opponent.lastDuel && Date.now() - new Date(opponent.lastDuel).getTime() < DUEL_COOLDOWN_MS) {
-            const mins = Math.ceil((DUEL_COOLDOWN_MS - (Date.now() - new Date(opponent.lastDuel).getTime())) / 60_000);
-            return interaction.reply({ content: `**${target.username}** is still on duel cooldown. Try again in **${mins} min**.`, ephemeral: true });
-        }
-
-        if (challenger.balance < amount) {
-            return interaction.reply({ content: `You don't have enough ${currency}. Wallet: **${currency}${challenger.balance.toLocaleString()}**`, ephemeral: true });
-        }
-
-        const duelId = `${interaction.user.id}_${Date.now()}`;
-
-        const challengeEmbed = new EmbedBuilder()
-            .setColor('#f39c12')
-            .setTitle('⚔️ Duel Challenge!')
-            .setDescription(
-                `**${interaction.user.username}** challenges <@${target.id}> to a duel!\n\n` +
-                `Bet: **${currency}${amount.toLocaleString()}** each\n` +
-                `House cut: **${Math.round(houseCut * 100)}%**\n` +
-                `Game: **${gameChoice === 'random' ? '🎲 Random' : GAME_NAMES[gameChoice]}**\n\n` +
-                `<@${target.id}>, do you accept?`
-            )
-            .setFooter({ text: 'Challenge expires in 60 seconds' })
-            .setTimestamp();
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`duel_accept_${duelId}`).setLabel('Accept').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`duel_decline_${duelId}`).setLabel('Decline').setStyle(ButtonStyle.Danger),
-        );
-
-        await interaction.reply({ embeds: [challengeEmbed], components: [row] });
-        const msg = await interaction.fetchReply();
-
-        const acceptCollector = msg.createMessageComponentCollector({
-            filter: i => i.user.id === target.id && (i.customId === `duel_accept_${duelId}` || i.customId === `duel_decline_${duelId}`),
-            time: ACCEPT_TIMEOUT_MS,
-            max: 1,
-        });
-
-        acceptCollector.on('collect', async i => {
-            let escrowTaken = false;
-            try {
-                await i.deferUpdate();
-
-                if (i.customId === `duel_decline_${duelId}`) {
-                    return interaction.editReply({
-                        embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Declined').setDescription(`**${target.username}** declined the challenge.`).setTimestamp()],
-                        components: [],
-                    });
-                }
-
-                // Atomically escrow wagers; re-validates live balances at deduction time
-                const escrow = await takeEscrow(interaction.user.id, target.id, interaction.guild.id, amount);
-                if (!escrow.success) {
-                    const who = escrow.reason === 'challenger' ? interaction.user.username : target.username;
-                    return interaction.editReply({
-                        embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** no longer has enough ${currency}.`).setTimestamp()],
-                        components: [],
-                    });
-                }
-                escrowTaken = true;
-
-                const game = (gameChoice === 'random')
-                    ? MINI_GAMES[randomInt(MINI_GAMES.length)]
-                    : gameChoice;
-                if (game === 'rps') {
-                    await runRPS(interaction, msg, target, amount, currency, houseCut, duelId);
-                } else {
-                    await runInstantGame(interaction, target, amount, currency, houseCut, game);
-                }
-            } catch (err) {
-                console.error('Duel accept collect error:', err);
-                if (escrowTaken) {
-                    await refundEscrow(interaction.user.id, target.id, interaction.guild.id, amount).catch(console.error);
-                }
-                await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', 'Something went wrong. Any escrowed bets have been refunded.')], components: [] }).catch(() => {});
-            }
-        });
-
-        acceptCollector.on('end', async (collected, reason) => {
-            if (reason === 'time' && collected.size === 0) {
-                await interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor('#95a5a6').setTitle('⚔️ Duel Expired').setDescription(`The duel challenge to **${target.username}** expired.`).setTimestamp()],
-                    components: [],
-                }).catch(() => {});
-            }
-        });
+        const sub = interaction.options.getSubcommand();
+        if (sub === 'casual')      return runChallenge(interaction, false);
+        if (sub === 'ranked')      return runChallenge(interaction, true);
+        if (sub === 'rank')        return runRankView(interaction);
+        if (sub === 'leaderboard') return runLeaderboard(interaction);
     },
 };

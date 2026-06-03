@@ -301,10 +301,58 @@ const guildSchema = new Schema({
         stock:     { type: Number, default: -1 },
         imageData: { type: Buffer, default: null },
         imageType: { type: String, default: 'image/png' },
-        createdAt: { type: Date, default: null }
+        createdAt: { type: Date, default: null },
+        // ── Dynamic pricing (issue #354) ──
+        // basePrice is the canonical anchor; currentPrice is what buyers actually pay.
+        // demandScore drifts up on buys and down on idle ticks / market listings.
+        basePrice:     { type: Number, default: null },
+        currentPrice:  { type: Number, default: null },
+        demandScore:   { type: Number, default: 0 },
+        priceHistory:  [{
+            at:    { type: Date,   required: true },
+            price: { type: Number, required: true },
+            demandScore: { type: Number, default: 0 }
+        }]
     }],
 
     shopDefaultsSeeded: { type: Boolean, default: false },
+
+    // Dynamic pricing config for shop items
+    dynamicPricing: {
+        enabled:         { type: Boolean, default: false },
+        volatility:      { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+        // ±band as a fraction of basePrice; capped here at recalc time
+        priceBand:       { type: Number, default: 0.5, min: 0.05, max: 0.9 },
+        // How often the scheduled job recalculates prices (minutes)
+        recalcMinutes:   { type: Number, default: 60, min: 15, max: 1440 },
+        lastRecalcAt:    { type: Date, default: null }
+    },
+
+    // Ranked duel ladder (issue #339)
+    rankedDuels: {
+        enabled:           { type: Boolean, default: true },
+        minBet:            { type: Number, default: 100, min: 1 },
+        kFactor:           { type: Number, default: 32, min: 8, max: 64 },
+        seasonDurationDays:{ type: Number, default: 60, min: 7, max: 365 },
+        currentSeasonId:   { type: String, default: null },
+        seasonStartedAt:   { type: Date,   default: null },
+        seasonEndsAt:      { type: Date,   default: null },
+        seasonNumber:      { type: Number, default: 1, min: 1 },
+        // Top-3 reward at season end
+        topReward:         { type: Number, default: 50_000, min: 0 },
+        announceChannelId: { type: String, default: null }
+    },
+
+    // Account prestige settings (issue #342)
+    accountPrestige: {
+        enabled:              { type: Boolean, default: true },
+        minLevelToPrestige:   { type: Number, default: 50, min: 5 },
+        softPrestigeAt:       { type: Number, default: 25, min: 5 },  // optional soft prestige threshold
+        announceChannelId:    { type: String, default: null },
+        // Server role granted to high-prestige users (optional)
+        eliteRoleId:          { type: String, default: null },
+        eliteRoleMinRank:     { type: Number, default: 5, min: 1 }
+    },
 
     // Server investment districts — cooperative money sink
     districts: {
