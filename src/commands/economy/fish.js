@@ -58,6 +58,8 @@ const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/h
 const { isDistrictActive } = require('../../services/districtService');
 
 // Rarity score for hourly fish competition (rarest catch wins)
+const WILDERNESS_YIELD_BONUS = 0.10;
+
 const FISH_TIER_SCORE = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5, event: 6 };
 
 const LOCATION_CHOICES = LOCATION_LIST.map(l => ({ name: l.name, value: l.id }));
@@ -615,10 +617,12 @@ async function handleCast(interaction) {
             result.featuredSpotBonus     = featBonus;
         }
     }
-    // Wilderness district: +10% fish yield
+    // Wilderness district: +10% fish yield (clamped to daily hard cap)
     const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
     if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const bonus = Math.round(result.finalPayout * 0.10);
+        const remaining = LIMITS.DAILY_HARD_CAP - user.fishing.dailyCoins;
+        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
         if (bonus > 0) {
             user.balance               += bonus;
             user.fishing.totalEarned   += bonus;
@@ -1015,7 +1019,7 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
         if (isCrit)                          fishMultEntries.push({ emoji: '⚡', label: `${critMultiplier.toFixed(2)}x crit` });
         if (fishMultEntries.length > 0) {
             const fishCombined  = (result.streakMult ?? 1) * critMultiplier;
-            const preBonusPayout = finalPayout - (result.petYieldBonus ?? 0) - (result.featuredSpotBonus ?? 0);
+            const preBonusPayout = finalPayout - (result.petYieldBonus ?? 0) - (result.featuredSpotBonus ?? 0) - (result.wildernessBonus ?? 0);
             embed.addFields({ name: '📈 Multipliers', value: stackBar(fishMultEntries, fishCombined, Math.max(0, preBonusPayout), currency), inline: false });
         }
 

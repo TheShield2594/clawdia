@@ -742,6 +742,8 @@ function executeHunt(user, zoneId, options = {}) {
             const matKey = animal.specialDrop.itemId;
             if (h.materials[matKey] != null) {
                 h.materials[matKey] += 1;
+            } else {
+                h.materials[matKey] = 1;
             }
         }
 
