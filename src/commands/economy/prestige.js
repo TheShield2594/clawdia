@@ -5,7 +5,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const {
-    PRESTIGE_TIERS, UNLOCK_LABELS, tierFor, nextTierAfter, badgeFor, roman,
+    PRESTIGE_TIERS, UNLOCK_LABELS, tierFor, titleForExactRank, nextTierAfter, badgeFor, roman,
 } = require('../../utils/prestige');
 
 const CONFIRM_TIMEOUT_MS = 30_000;
@@ -58,9 +58,10 @@ async function handleStatus(interaction) {
         ? tier.unlocks.map(u => `• ${UNLOCK_LABELS[u] || u}`).join('\n')
         : '_None yet — reach Prestige I to unlock the Black Market._';
 
+    const exactTitle = titleForExactRank(rank);
     const embed = new EmbedBuilder()
         .setColor(rank >= 5 ? '#f1c40f' : '#9b59b6')
-        .setTitle(`${badgeFor(rank) || '⟦P0⟧'} ${target.username} — ${tier.title || 'No prestige yet'}`)
+        .setTitle(`${badgeFor(rank) || '⟦P0⟧'} ${target.username} — ${exactTitle || 'No prestige yet'}`)
         .setThumbnail(target.displayAvatarURL({ dynamic: true }))
         .setDescription(
             `Current level: **${userDoc?.level ?? 0}** · Prestige rank: **${rank}**\n` +
@@ -152,8 +153,16 @@ async function handleUp(interaction) {
 
         // Atomically apply prestige: increment rank, reset level/xp, set unlocks, stamp prestigedAt.
         // Guard with rank match so concurrent runs only succeed once.
+        // Treat a missing accountPrestige.rank field as 0 so legacy users (created
+        // before the schema introduced this subdoc) can prestige without a
+        // pre-migration. $expr + $ifNull normalizes the comparison at the DB.
         const updated = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId, 'accountPrestige.rank': oldRank, level: { $gte: minLevel } },
+            {
+                userId: interaction.user.id,
+                guildId,
+                level: { $gte: minLevel },
+                $expr: { $eq: [{ $ifNull: ['$accountPrestige.rank', 0] }, oldRank] },
+            },
             {
                 $inc: { 'accountPrestige.rank': 1, 'accountPrestige.lifetimePrestigeXp': userDoc.xp ?? 0 },
                 $set: {

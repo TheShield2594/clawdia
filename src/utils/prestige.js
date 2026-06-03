@@ -32,6 +32,17 @@ function tierFor(rank) {
     return best;
 }
 
+// Returns the exact display title for a rank — uses the explicit PRESTIGE_TIERS
+// entry when one exists, otherwise synthesizes `Prestige <roman>` so P6–P9
+// don't render as the floored "Prestige V" label.
+function titleForExactRank(rank) {
+    const r = Math.max(0, Number(rank) || 0);
+    if (r === 0) return null;
+    const explicit = PRESTIGE_TIERS.find(t => t.rank === r);
+    if (explicit?.title) return explicit.title;
+    return `Prestige ${roman(r)}`;
+}
+
 // Returns the explicit definition for the upcoming rank (used in /prestige confirmation).
 function nextTierAfter(rank) {
     const r = Math.max(0, Number(rank) || 0);
@@ -84,6 +95,7 @@ module.exports = {
     UNLOCK_LABELS,
     SOFT_PRESTIGE_BONUS,
     tierFor,
+    titleForExactRank,
     nextTierAfter,
     getBonusMultipliers,
     hasUnlock,

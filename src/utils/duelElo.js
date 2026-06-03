@@ -24,14 +24,19 @@ function expectedScore(rA, rB) {
 }
 
 // Returns { winnerNewElo, loserNewElo, winnerDelta, loserDelta }
+// Deltas remain zero-sum even when the loser would dip below 0 — we clamp
+// loserNewElo at 0 and reduce the reported winnerDelta to match the actual
+// loser change so the embed reads correctly.
 function applyElo(winnerElo, loserElo, kFactor = 32) {
     const eW = expectedScore(winnerElo, loserElo);
     const eL = 1 - eW;
-    const winnerDelta = Math.round(kFactor * (1 - eW));
-    const loserDelta  = Math.round(kFactor * (0 - eL));
+    const tentativeLoserDelta = Math.round(kFactor * (0 - eL));
+    const loserNewElo  = Math.max(0, loserElo + tentativeLoserDelta);
+    const loserDelta   = loserNewElo - loserElo;
+    const winnerDelta  = -loserDelta;
     return {
         winnerNewElo: winnerElo + winnerDelta,
-        loserNewElo:  Math.max(0, loserElo + loserDelta),
+        loserNewElo,
         winnerDelta,
         loserDelta,
     };

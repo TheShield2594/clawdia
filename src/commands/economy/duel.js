@@ -89,6 +89,55 @@ function buildRpsRow(role, duelId) {
     );
 }
 
+// Atomically re-check and claim cooldown for both players at duel-accept time.
+// Returns { ok, reason } — reason ∈ { 'challenger' | 'opponent' } on failure.
+// Both player updates are performed only if both pass the cooldown check; if
+// the second claim fails the first is reverted.
+async function claimDuelCooldown(challengerId, opponentId, guildId, lastDuelBefore) {
+    const claimedChallenger = await User.findOneAndUpdate(
+        {
+            userId: challengerId,
+            guildId,
+            $or: [
+                { lastDuel: null },
+                { lastDuel: { $lt: lastDuelBefore } },
+            ],
+        },
+        { $set: { lastDuel: new Date() } },
+        { new: false }
+    );
+    if (!claimedChallenger) return { ok: false, reason: 'challenger' };
+
+    const claimedOpponent = await User.findOneAndUpdate(
+        {
+            userId: opponentId,
+            guildId,
+            $or: [
+                { lastDuel: null },
+                { lastDuel: { $lt: lastDuelBefore } },
+            ],
+        },
+        { $set: { lastDuel: new Date() } },
+        { new: false }
+    );
+    if (!claimedOpponent) {
+        // Revert challenger's claim to its previous value
+        await User.updateOne(
+            { userId: challengerId, guildId },
+            { $set: { lastDuel: claimedChallenger.lastDuel } }
+        ).catch(console.error);
+        return { ok: false, reason: 'opponent' };
+    }
+    return { ok: true, prevChallengerLastDuel: claimedChallenger.lastDuel, prevOpponentLastDuel: claimedOpponent.lastDuel };
+}
+
+async function revertDuelCooldown(challengerId, opponentId, guildId, prevChallenger, prevOpponent) {
+    await Promise.all([
+        User.updateOne({ userId: challengerId, guildId }, { $set: { lastDuel: prevChallenger ?? null } }),
+        User.updateOne({ userId: opponentId,   guildId }, { $set: { lastDuel: prevOpponent   ?? null } }),
+    ]).catch(console.error);
+}
+
 async function finalizeDuel({ interaction, targetUser, challengerId, opponentId, amount, currency, houseCut, challengerWins, tie, game, gameResult, isRanked = false }) {
     const guildId = interaction.guild.id;
     // Escrow already deducted both stakes; compute payout from pot
@@ -125,23 +174,47 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
                 User.findOne({ userId: loserId,  guildId }).select('ranked').lean(),
             ]);
             const kFactor = guildDoc?.rankedDuels?.kFactor ?? 32;
-            const seasonId = guildDoc?.rankedDuels?.currentSeasonId
+            // Detect if the stored season is already past its end date. When that
+            // happens (the scheduler hasn't yet rolled the season over) we tag this
+            // match against the *next* season id and initialize the season-scoped
+            // counters with $set rather than $inc, so an in-flight match never
+            // bumps a counter from the prior season.
+            const storedSeasonId = guildDoc?.rankedDuels?.currentSeasonId
                 ?? makeSeasonId(guildDoc?.rankedDuels?.seasonNumber ?? 1);
+            const seasonExpired  = guildDoc?.rankedDuels?.seasonEndsAt
+                && new Date(guildDoc.rankedDuels.seasonEndsAt).getTime() <= Date.now();
+            const seasonId       = seasonExpired
+                ? makeSeasonId((guildDoc?.rankedDuels?.seasonNumber ?? 1) + 1)
+                : storedSeasonId;
             const wElo = winnerDoc?.ranked?.elo ?? START_ELO;
             const lElo = loserDoc?.ranked?.elo  ?? START_ELO;
             const { winnerNewElo, loserNewElo, winnerDelta, loserDelta } = applyElo(wElo, lElo, kFactor);
 
-            baseWinnerInc.$inc['ranked.rankedWins']       = 1;
-            baseWinnerInc.$inc['ranked.seasonRankedWins'] = 1;
-            baseWinnerInc.$set['ranked.elo']              = winnerNewElo;
-            baseWinnerInc.$set['ranked.peakElo']         = Math.max(winnerDoc?.ranked?.peakElo ?? START_ELO, winnerNewElo);
-            baseWinnerInc.$set['ranked.seasonPeakElo']   = Math.max(winnerDoc?.ranked?.seasonPeakElo ?? START_ELO, winnerNewElo);
+            baseWinnerInc.$inc['ranked.rankedWins']  = 1;
+            baseWinnerInc.$set['ranked.elo']         = winnerNewElo;
+            baseWinnerInc.$set['ranked.peakElo']     = Math.max(winnerDoc?.ranked?.peakElo ?? START_ELO, winnerNewElo);
             baseWinnerInc.$set['ranked.currentSeasonId'] = seasonId;
 
-            baseLoserInc.$inc['ranked.rankedLosses']       = 1;
-            baseLoserInc.$inc['ranked.seasonRankedLosses'] = 1;
-            baseLoserInc.$set['ranked.elo']                = loserNewElo;
-            baseLoserInc.$set['ranked.currentSeasonId']    = seasonId;
+            baseLoserInc.$inc['ranked.rankedLosses'] = 1;
+            baseLoserInc.$set['ranked.elo']          = loserNewElo;
+            baseLoserInc.$set['ranked.currentSeasonId'] = seasonId;
+
+            if (seasonExpired) {
+                // First match of a new season — initialize seasonal counters rather
+                // than carrying over the prior season's totals via $inc.
+                baseWinnerInc.$set['ranked.seasonRankedWins']   = 1;
+                baseWinnerInc.$set['ranked.seasonRankedLosses'] = 0;
+                baseWinnerInc.$set['ranked.seasonPeakElo']      = winnerNewElo;
+
+                baseLoserInc.$set['ranked.seasonRankedWins']    = 0;
+                baseLoserInc.$set['ranked.seasonRankedLosses']  = 1;
+                baseLoserInc.$set['ranked.seasonPeakElo']       = loserNewElo;
+            } else {
+                baseWinnerInc.$inc['ranked.seasonRankedWins']   = 1;
+                baseWinnerInc.$set['ranked.seasonPeakElo']      = Math.max(winnerDoc?.ranked?.seasonPeakElo ?? START_ELO, winnerNewElo);
+
+                baseLoserInc.$inc['ranked.seasonRankedLosses']  = 1;
+            }
 
             const winnerTier = tierFor(winnerNewElo);
             const loserTier  = tierFor(loserNewElo);
@@ -454,6 +527,7 @@ async function runChallenge(interaction, isRanked) {
 
     acceptCollector.on('collect', async i => {
         let escrowTaken = false;
+        let cooldownClaim = null;
         try {
             await i.deferUpdate();
 
@@ -464,8 +538,24 @@ async function runChallenge(interaction, isRanked) {
                 });
             }
 
+            // Re-check + atomically claim the cooldown for both players at accept time.
+            // Each player must either have no recorded lastDuel or one older than
+            // (now - DUEL_COOLDOWN_MS). Both claims must succeed or both are reverted.
+            const cooldownBefore = new Date(Date.now() - DUEL_COOLDOWN_MS);
+            cooldownClaim = await claimDuelCooldown(interaction.user.id, target.id, interaction.guild.id, cooldownBefore);
+            if (!cooldownClaim.ok) {
+                const who = cooldownClaim.reason === 'challenger' ? interaction.user.username : target.username;
+                return interaction.editReply({
+                    embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** is on duel cooldown.`).setTimestamp()],
+                    components: [],
+                });
+            }
+
             const escrow = await takeEscrow(interaction.user.id, target.id, interaction.guild.id, amount);
             if (!escrow.success) {
+                // Cooldown was claimed but escrow failed — revert the claim
+                await revertDuelCooldown(interaction.user.id, target.id, interaction.guild.id, cooldownClaim.prevChallengerLastDuel, cooldownClaim.prevOpponentLastDuel);
+                cooldownClaim = null;
                 const who = escrow.reason === 'challenger' ? interaction.user.username : target.username;
                 return interaction.editReply({
                     embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** no longer has enough ${currency}.`).setTimestamp()],
@@ -486,6 +576,9 @@ async function runChallenge(interaction, isRanked) {
             console.error('Duel accept collect error:', err);
             if (escrowTaken) {
                 await refundEscrow(interaction.user.id, target.id, interaction.guild.id, amount).catch(console.error);
+            }
+            if (cooldownClaim?.ok) {
+                await revertDuelCooldown(interaction.user.id, target.id, interaction.guild.id, cooldownClaim.prevChallengerLastDuel, cooldownClaim.prevOpponentLastDuel);
             }
             await interaction.editReply({ embeds: [errorEmbed('⚔️ Duel Error', 'Something went wrong. Any escrowed bets have been refunded.')], components: [] }).catch(() => {});
         }
@@ -542,7 +635,14 @@ async function runRankView(interaction) {
 
 async function runLeaderboard(interaction) {
     const guildId = interaction.guild.id;
-    const top = await User.find({ guildId, 'ranked.rankedWins': { $gt: 0 } })
+    // Include anyone who has touched the ladder (wins OR losses), not just winners.
+    const top = await User.find({
+        guildId,
+        $or: [
+            { 'ranked.rankedWins':   { $gt: 0 } },
+            { 'ranked.rankedLosses': { $gt: 0 } },
+        ],
+    })
         .sort({ 'ranked.elo': -1 })
         .limit(10)
         .select('userId ranked')

@@ -3,7 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { createRankCard } = require('../../utils/cardGenerator');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
-const { badgeFor, tierFor: prestigeTierFor } = require('../../utils/prestige');
+const { badgeFor, titleForExactRank: prestigeTitle } = require('../../utils/prestige');
 const { tierFor: eloTierFor, START_ELO } = require('../../utils/duelElo');
 
 const BOOSTER_TYPES  = new Set(['coin_booster_2x', 'xp_booster_2x', 'lucky_streak', 'salary_raise']);
@@ -78,14 +78,13 @@ module.exports = {
 
             // Prestige + ranked summary lines (appended to whichever embed we send)
             const prestigeRank = user.accountPrestige?.rank ?? 0;
-            const prestigeTier = prestigeTierFor(prestigeRank);
             const eloVal       = user.ranked?.elo ?? START_ELO;
             const eloTier      = eloTierFor(eloVal);
             const showRanked   = (user.ranked?.rankedWins ?? 0) + (user.ranked?.rankedLosses ?? 0) > 0;
             const identityField = (() => {
                 const parts = [];
                 if (prestigeRank > 0) {
-                    parts.push(`${badgeFor(prestigeRank)} **${prestigeTier.title}**`);
+                    parts.push(`${badgeFor(prestigeRank)} **${prestigeTitle(prestigeRank)}**`);
                 }
                 if (showRanked) {
                     parts.push(`${eloTier.icon} **${eloTier.label}** (${eloVal} ELO)`);
