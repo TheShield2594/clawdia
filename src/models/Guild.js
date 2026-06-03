@@ -197,6 +197,7 @@ const guildSchema = new Schema({
         lastWinnerName:       { type: String,  default: null },
         lastWonAmount:        { type: Number,  default: null },
         lastWonAt:            { type: Date,    default: null },
+        claimToken:           { type: String,  default: null },
     },
 
     rssFeeds: [{
@@ -671,6 +672,7 @@ const guildSchema = new Schema({
     potwLastRunAt:          { type: Date, default: null },
     bankInterestLastRunAt:  { type: Date, default: null },
     badgesLastAwardedAt:    { type: Date, default: null },
+    badgesAwardLeaseAt:     { type: Date, default: null },
 
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
