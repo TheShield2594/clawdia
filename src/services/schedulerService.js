@@ -344,10 +344,18 @@ async function awardWeeklyLeaderboardBadges(client) {
     const { EmbedBuilder } = require('discord.js');
 
     const guilds = await Guild.find({}, 'guildId name economy').lean();
+    const weekAgo = new Date(Date.now() - LEADERBOARD_BADGE_DURATION_MS);
 
     for (const guildDoc of guilds) {
         const guildId = guildDoc.guildId;
         try {
+            const claimed = await Guild.findOneAndUpdate(
+                { guildId, $or: [{ badgesLastAwardedAt: null }, { badgesLastAwardedAt: { $lte: weekAgo } }] },
+                { $set: { badgesLastAwardedAt: new Date() } },
+                { new: false }
+            );
+            if (!claimed) continue;
+
             const categories = [
                 { key: 'levels',       sort: { level: -1, xp: -1 },            label: '📈 Top Level' },
                 { key: 'economy',      sort: { balance: -1 },                   label: '💰 Wealthiest' },
