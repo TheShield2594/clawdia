@@ -782,4 +782,74 @@ async function resolveRankedSeasons(client) {
     }
 }
 
-module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons };
+// ─── Bank district interest (issue #370) ─────────────────────────────────────
+// Credits 5% of each user's banked coins in guilds where the Bank district is active.
+// Intended to run once per week.
+async function applyBankInterest(client) {
+    const { EmbedBuilder } = require('discord.js');
+    const { isDistrictActive } = require('./districtService');
+    const { logTransaction } = require('../utils/logTransaction');
+
+    const now     = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const guilds  = await Guild.find({
+        'districts': { $elemMatch: { districtId: 'bank', activeUntil: { $gt: now } } }
+    }).lean();
+
+    for (const guildDoc of guilds) {
+        const guildId = guildDoc.guildId;
+        try {
+            // Atomic weekly claim — skip if already run within the last 7 days
+            const claimed = await Guild.findOneAndUpdate(
+                {
+                    guildId,
+                    $or: [
+                        { bankInterestLastRunAt: null },
+                        { bankInterestLastRunAt: { $lte: weekAgo } },
+                    ],
+                },
+                { $set: { bankInterestLastRunAt: now } },
+                { new: false }
+            );
+            if (!claimed) continue;
+
+            if (!isDistrictActive(guildDoc, 'bank')) continue;
+
+            const users = await User.find({ guildId, bank: { $gt: 0 } });
+            let totalInterestPaid = 0;
+
+            for (const user of users) {
+                const interest = Math.floor(user.bank * 0.05);
+                if (interest <= 0) continue;
+                await User.findOneAndUpdate(
+                    { _id: user._id },
+                    { $inc: { bank: interest } }
+                );
+                logTransaction({ userId: user.userId, guildId, type: 'bank_interest', amount: interest, balance: user.balance, note: '5% weekly bank interest (Bank district active)' });
+                totalInterestPaid += interest;
+            }
+
+            if (totalInterestPaid <= 0) continue;
+
+            const channelId = guildDoc.economy?.announcementChannelId ?? null;
+            if (!channelId) continue;
+
+            const currency = guildDoc.economy?.currency ?? '💰';
+            const embed = new EmbedBuilder()
+                .setColor('#f1c40f')
+                .setTitle('🏦 Weekly Bank Interest Paid')
+                .setDescription(
+                    `The **Bank district** is active — all members with banked coins earned **5% weekly interest**.\n\n` +
+                    `Total interest distributed: **${currency}${totalInterestPaid.toLocaleString()}**`
+                )
+                .setFooter({ text: 'Deposit coins with /bank deposit to earn interest each week.' })
+                .setTimestamp();
+
+            await postAnnouncement(client, guildId, channelId, embed);
+        } catch (err) {
+            console.error(`[scheduler] applyBankInterest failed for guild ${guildId}:`, err.message);
+        }
+    }
+}
+
+module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest };

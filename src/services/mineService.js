@@ -512,7 +512,8 @@ function executeMine(user, depthId, options = {}) {
         const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payoutBeforeMods, depth);
 
         let specialDrop = null;
-        if (ore.specialDrop && Math.random() < (isCrit ? ore.specialDrop.chance * 2 : ore.specialDrop.chance)) {
+        const mineDropChance = (isCrit ? ore.specialDrop?.chance * 2 : ore.specialDrop?.chance ?? 0) * (options.marketplaceActive ? 1.10 : 1.0);
+        if (ore.specialDrop && Math.random() < mineDropChance) {
             specialDrop = ore.specialDrop;
             const matKey = ore.specialDrop.itemId;
             if (m.materials[matKey] != null) {

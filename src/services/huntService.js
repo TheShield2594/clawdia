@@ -736,11 +736,14 @@ function executeHunt(user, zoneId, options = {}) {
 
         // Special drop
         let specialDrop = null;
-        if (animal.specialDrop && Math.random() < (isCrit ? animal.specialDrop.chance * 2 : animal.specialDrop.chance)) {
+        const huntDropChance = (isCrit ? animal.specialDrop?.chance * 2 : animal.specialDrop?.chance ?? 0) * (options.marketplaceActive ? 1.10 : 1.0);
+        if (animal.specialDrop && Math.random() < huntDropChance) {
             specialDrop = animal.specialDrop;
             const matKey = animal.specialDrop.itemId;
             if (h.materials[matKey] != null) {
                 h.materials[matKey] += 1;
+            } else {
+                h.materials[matKey] = 1;
             }
         }
 
