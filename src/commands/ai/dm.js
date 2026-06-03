@@ -5,6 +5,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('dm')
         .setDescription('AI Dungeon Master — run a collaborative text RPG')
+        .setDMPermission(false)
         .addSubcommand(sub =>
             sub.setName('start')
                 .setDescription('Start a new DM session in this channel')
@@ -49,12 +50,23 @@ module.exports = {
         ),
 
     async execute(interaction) {
-        const sub = interaction.options.getSubcommand();
-        if (sub === 'start') return startSession(interaction);
-        if (sub === 'join') return joinSession(interaction);
-        if (sub === 'begin') return beginSession(interaction);
-        if (sub === 'action') return takeAction(interaction);
-        if (sub === 'status') return partyStatus(interaction);
-        if (sub === 'stop') return stopSession(interaction);
+        try {
+            const sub = interaction.options.getSubcommand();
+            if (sub === 'start') return await startSession(interaction);
+            if (sub === 'join') return await joinSession(interaction);
+            if (sub === 'begin') return await beginSession(interaction);
+            if (sub === 'action') return await takeAction(interaction);
+            if (sub === 'status') return await partyStatus(interaction);
+            if (sub === 'stop') return await stopSession(interaction);
+            console.warn(`[DM] Unknown subcommand: ${sub}`);
+            return interaction.reply({ content: 'Unknown subcommand.', ephemeral: true });
+        } catch (err) {
+            console.error('[DM] execute error:', err);
+            const msg = { content: 'An unexpected error occurred. Please try again.', ephemeral: true };
+            if (interaction.deferred || interaction.replied) {
+                return interaction.followUp(msg);
+            }
+            return interaction.reply(msg);
+        }
     }
 };

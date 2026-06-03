@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder } = require('discord.js');
 const DmSession = require('../models/DmSession');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 const Guild = require('../models/Guild');
@@ -23,6 +23,10 @@ function makeSessionId(guildId, channelId) {
 
 async function getActiveSession(guildId, channelId) {
     return DmSession.findOne({ guildId, channelId, active: true });
+}
+
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function startSession(interaction) {
@@ -68,24 +72,39 @@ async function joinSession(interaction) {
     const characterName = interaction.options.getString('name');
     const characterClass = interaction.options.getString('class');
 
+    // Verify session exists first to give a useful error message
     const session = await getActiveSession(guild.id, channel.id);
     if (!session) {
         return interaction.reply({ content: 'No active DM session in this channel. Use `/dm start` to begin one.', ephemeral: true });
     }
 
-    if (session.players.length >= MAX_PLAYERS) {
-        return interaction.reply({ content: `The party is full (${MAX_PLAYERS} players max).`, ephemeral: true });
-    }
-
-    if (session.players.some(p => p.userId === user.id)) {
-        return interaction.reply({ content: 'You have already joined this session.', ephemeral: true });
-    }
-
     const hp = CLASS_HP[characterClass] || 100;
     const inventory = [...(CLASS_INVENTORY[characterClass] || [])];
+    const newPlayer = { userId: user.id, name: characterName, characterClass, hp, inventory };
 
-    session.players.push({ userId: user.id, name: characterName, characterClass, hp, inventory });
-    await session.save();
+    // Atomic: only push if user not already in players AND party not full
+    const updated = await DmSession.findOneAndUpdate(
+        {
+            sessionId: session.sessionId,
+            active: true,
+            'players.userId': { $ne: user.id },
+            [`players.${MAX_PLAYERS - 1}`]: { $exists: false }
+        },
+        { $push: { players: newPlayer } },
+        { new: true }
+    );
+
+    if (!updated) {
+        // Re-read to give a precise error
+        const current = await getActiveSession(guild.id, channel.id);
+        if (!current) {
+            return interaction.reply({ content: 'The session has ended.', ephemeral: true });
+        }
+        if (current.players.some(p => p.userId === user.id)) {
+            return interaction.reply({ content: 'You have already joined this session.', ephemeral: true });
+        }
+        return interaction.reply({ content: `The party is full (${MAX_PLAYERS} players max).`, ephemeral: true });
+    }
 
     const embed = new EmbedBuilder()
         .setTitle('🧙 New Adventurer Joined!')
@@ -93,7 +112,7 @@ async function joinSession(interaction) {
         .setDescription(
             `**${characterName}** (${characterClass}) has joined the party!\n` +
             `HP: **${hp}** | Inventory: ${inventory.join(', ')}\n\n` +
-            `Party size: **${session.players.length}/${MAX_PLAYERS}**`
+            `Party size: **${updated.players.length}/${MAX_PLAYERS}**`
         );
 
     return interaction.reply({ embeds: [embed] });
@@ -125,22 +144,24 @@ async function beginSession(interaction) {
         .map(p => `- **${p.name}** the ${p.characterClass} (HP: ${p.hp}, Items: ${p.inventory.join(', ')})`)
         .join('\n');
 
-    const systemPrompt = buildDMSystemPrompt(session);
+    const systemPrompt = buildDMSystemPrompt();
     const openingPrompt = `The party consists of:\n${partyDesc}\n\nSet the opening scene for this adventure. Introduce the setting, hint at the first challenge or mystery, and end with a clear situation requiring the party to make a decision or take action. Keep it to 2-3 paragraphs.`;
 
-    const gs = await Guild.findOne({ guildId: guild.id });
-    const aiSettings = gs?.ai || {};
-    const { provider, model, apiKey, baseUrl } = resolveProviderConfig(aiSettings);
-
-    if (provider !== 'ollama' && !apiKey) {
-        return interaction.editReply('AI is not configured for this server. An admin must add an API key.');
-    }
-
     try {
+        const gs = await Guild.findOne({ guildId: guild.id });
+        const aiSettings = gs?.ai || {};
+        const { provider, model, apiKey, baseUrl } = resolveProviderConfig(aiSettings);
+
+        if (provider !== 'ollama' && !apiKey) {
+            return interaction.editReply('AI is not configured for this server. An admin must add an API key.');
+        }
+
         const story = await getCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history: [], prompt: openingPrompt, temperature: 0.9, maxTokens: 600 });
 
-        session.storyLog.push(story);
-        await session.save();
+        await DmSession.findOneAndUpdate(
+            { sessionId: session.sessionId },
+            { $push: { storyLog: story } }
+        );
 
         const embed = new EmbedBuilder()
             .setTitle('📖 The Adventure Begins...')
@@ -175,61 +196,79 @@ async function takeAction(interaction) {
 
     await interaction.deferReply();
 
+    // Anchor history roles to global storyLog parity so slicing doesn't flip them
     const recentLog = session.storyLog.slice(-8);
+    const startIndex = session.storyLog.length - recentLog.length;
     const history = recentLog.map((entry, i) => ({
-        role: i % 2 === 0 ? 'assistant' : 'user',
+        role: (startIndex + i) % 2 === 0 ? 'assistant' : 'user',
         content: entry
     }));
 
-    const systemPrompt = buildDMSystemPrompt(session);
-    const partyStatus = session.players
+    const systemPrompt = buildDMSystemPrompt();
+    const partyStatusLine = session.players
         .map(p => `${p.name} (${p.characterClass}, HP: ${p.hp})`)
         .join(', ');
 
-    const prompt = `Party status: ${partyStatus}\n\n**${player.name}** (${player.characterClass}) performs the following action: ${actionText}\n\nNarrate what happens next, including any consequences, NPC reactions, or changes to the environment. End with the current situation and what the party might do next. Keep it focused and 1-2 paragraphs.`;
-
-    const gs = await Guild.findOne({ guildId: guild.id });
-    const aiSettings = gs?.ai || {};
-    const { provider, model, apiKey, baseUrl } = resolveProviderConfig(aiSettings);
-
-    if (provider !== 'ollama' && !apiKey) {
-        return interaction.editReply('AI is not configured for this server.');
-    }
+    const prompt = `Party status: ${partyStatusLine}\n\n**${player.name}** (${player.characterClass}) performs the following action: ${actionText}\n\nNarrate what happens next, including any consequences, NPC reactions, or changes to the environment. End with the current situation and what the party might do next. Keep it focused and 1-2 paragraphs.`;
 
     try {
+        const gs = await Guild.findOne({ guildId: guild.id });
+        const aiSettings = gs?.ai || {};
+        const { provider, model, apiKey, baseUrl } = resolveProviderConfig(aiSettings);
+
+        if (provider !== 'ollama' && !apiKey) {
+            return interaction.editReply('AI is not configured for this server.');
+        }
+
         const narrative = await getCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature: 0.9, maxTokens: 500 });
 
-        session.storyLog.push(`${player.name}: ${actionText}`);
-        session.storyLog.push(narrative);
-        if (session.storyLog.length > MAX_STORY_LOG) {
-            session.storyLog = session.storyLog.slice(-MAX_STORY_LOG);
+        // Scope damage/heal detection to this player by name or "you/your"
+        const namePattern = escapeRegex(player.name);
+        const scopePattern = `(?:${namePattern}|you|your)`;
+        const dmgMatch = narrative.match(new RegExp(`${scopePattern}[^.]*?takes?\\s+(\\d+)\\s+damage`, 'i'));
+        const healMatch = narrative.match(new RegExp(`${scopePattern}[^.]*?heals?\\s+(\\d+)\\s+hp`, 'i'));
+
+        let newHp = player.hp;
+        if (dmgMatch) newHp = Math.max(0, newHp - parseInt(dmgMatch[1]));
+        if (healMatch) newHp = Math.min(CLASS_HP[player.characterClass] || 100, newHp + parseInt(healMatch[1]));
+
+        const playerEntry = `${player.name}: ${actionText}`;
+
+        // Atomic write: push both log entries (with trim) and update HP if changed
+        const updateOps = {
+            $push: { storyLog: { $each: [playerEntry, narrative], $slice: -MAX_STORY_LOG } }
+        };
+        const updateOptions = {};
+        if (newHp !== player.hp) {
+            updateOps.$set = { 'players.$[elem].hp': newHp };
+            updateOptions.arrayFilters = [{ 'elem.userId': player.userId }];
         }
 
-        // Simple damage/heal detection for immersion
-        const dmgMatch = narrative.match(/takes?\s+(\d+)\s+damage/i);
-        const healMatch = narrative.match(/heals?\s+(\d+)\s+hp/i);
-        if (dmgMatch) {
-            player.hp = Math.max(0, player.hp - parseInt(dmgMatch[1]));
-        }
-        if (healMatch) {
-            player.hp = Math.min(CLASS_HP[player.characterClass] || 100, player.hp + parseInt(healMatch[1]));
-        }
+        await DmSession.findOneAndUpdate(
+            { sessionId: session.sessionId, active: true },
+            updateOps,
+            updateOptions
+        );
 
-        session.markModified('players');
-        await session.save();
+        // Compute wipe using updated HP for this player
+        const wiped = session.players.every(p =>
+            p.userId === player.userId ? newHp <= 0 : p.hp <= 0
+        );
 
-        // Check for party wipe
-        const wiped = session.players.every(p => p.hp <= 0);
+        if (wiped) {
+            await DmSession.findOneAndUpdate(
+                { sessionId: session.sessionId },
+                { $set: { active: false } }
+            );
+        }
 
         const embed = new EmbedBuilder()
             .setTitle(`⚔️ ${player.name} acts!`)
             .setColor(wiped ? '#ff0000' : '#4169e1')
             .setDescription(narrative)
-            .setFooter({ text: wiped ? 'The party has fallen...' : `Use /dm action to respond | /dm status to check party` });
+            .setFooter({ text: wiped ? 'The party has fallen...' : 'Use /dm action to respond | /dm status to check party' });
 
         if (wiped) {
-            session.active = false;
-            await session.save();
             embed.addFields({ name: '💀 Session Ended', value: 'The entire party has fallen. The adventure is over.' });
         }
 
@@ -275,16 +314,17 @@ async function stopSession(interaction) {
         return interaction.reply({ content: 'No active DM session in this channel.', ephemeral: true });
     }
 
-    const member = interaction.member;
     const isHost = session.hostId === user.id;
-    const hasPerms = member.permissions.has('ManageGuild');
+    const hasPerms = interaction.member?.permissions?.has('ManageGuild') ?? false;
 
     if (!isHost && !hasPerms) {
         return interaction.reply({ content: 'Only the session host or a server admin can stop the session.', ephemeral: true });
     }
 
-    session.active = false;
-    await session.save();
+    await DmSession.findOneAndUpdate(
+        { sessionId: session.sessionId },
+        { $set: { active: false } }
+    );
 
     const embed = new EmbedBuilder()
         .setTitle('🏁 Session Ended')
@@ -295,7 +335,7 @@ async function stopSession(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
-function buildDMSystemPrompt(session) {
+function buildDMSystemPrompt() {
     return `You are an experienced, creative Dungeon Master running a text-based RPG on Discord. Your role is to:
 - Narrate vivid, engaging story scenes
 - React meaningfully to player actions
@@ -304,7 +344,7 @@ function buildDMSystemPrompt(session) {
 - Track and reference party members by their character names
 - Create tension, atmosphere, and opportunities for heroism
 - Be fair but unpredictable — success is not guaranteed
-- When characters take damage or heal, mention the amount explicitly (e.g., "takes 15 damage", "heals 20 HP")
+- When a character takes damage or heals, mention the amount explicitly with their name (e.g., "Aric takes 15 damage", "Lyra heals 20 HP")
 The party is playing in a classic fantasy setting. Be creative, dramatic, and fun!`;
 }
 
