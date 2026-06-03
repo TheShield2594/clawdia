@@ -1912,9 +1912,9 @@
                             <small>Point this at the host running <code>ollama serve</code>. Set the model field above to a tag you've pulled (e.g. <code>llama3.2</code>).</small>
                         </div>
                         <div class="field">
-                            <label class="field-label" for="ai-channel">AI chat channel</label>
+                            <label class="field-label" for="ai-channel">Restrict to channel <span style="font-weight:400;color:var(--muted,#888)">(optional — leave blank to respond in all channels)</span></label>
                             <select id="ai-channel">
-                                <option value="">Select a channel</option>
+                                <option value="">All channels</option>
                                 <% channels.forEach(channel => { %>
                                     <option value="<%= channel.id %>" <%= settings.ai.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
                                 <% }); %>
@@ -2027,6 +2027,9 @@
                     <!-- Personas -->
                     <div id="ai-personas" class="ai-inner-panel">
                         <p class="ai-inner-desc">Assign a custom AI persona to specific channels. When the bot is active in a channel with a persona, it uses that persona's system prompt instead of the server-wide default.</p>
+                        <div id="persona-channel-warning" style="display:none;margin-bottom:1rem;padding:.75rem 1rem;background:var(--warn-bg,#fffbe6);border:1px solid var(--warn-border,#ffe58f);border-radius:6px;color:var(--warn-text,#7a5f00);font-size:.9rem;">
+                            ⚠️ The bot is currently restricted to a single channel in the <strong>Chat</strong> tab. Personas configured for other channels won't be active until you clear that restriction or select "All channels."
+                        </div>
                         <div id="personas-list" style="margin-bottom:1.5rem;"></div>
                         <div class="panel-head" style="margin-top:1rem"><h3>Add / update persona</h3></div>
                         <div class="field">
@@ -3838,7 +3841,20 @@
         // ── AI Personas ───────────────────────────────────────────────────────────
         var _personas = <%- JSON.stringify((settings.ai && settings.ai.channelPersonas) || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
 
+        function updatePersonaChannelWarning() {
+            var aiChannel = document.getElementById('ai-channel');
+            var warning = document.getElementById('persona-channel-warning');
+            if (!aiChannel || !warning) return;
+            warning.style.display = aiChannel.value ? '' : 'none';
+        }
+
+        (function() {
+            var aiChannel = document.getElementById('ai-channel');
+            if (aiChannel) aiChannel.addEventListener('change', updatePersonaChannelWarning);
+        })();
+
         function renderPersonas() {
+            updatePersonaChannelWarning();
             var container = document.getElementById('personas-list');
             if (!container) return;
             if (!_personas.length) {
