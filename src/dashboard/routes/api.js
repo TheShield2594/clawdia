@@ -434,6 +434,25 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
             return res.status(404).json({ error: 'Guild not found' });
         }
 
+        // Shop item images live inline at guild.shop[].imageData. The dashboard
+        // never round-trips those Buffers, so a naive replace of the shop array
+        // would wipe every saved image. Preserve imageData/imageType from the
+        // existing items, matched by itemId.
+        if (Array.isArray(updates.shop)) {
+            const existingImages = new Map();
+            for (const item of guildSettings.shop || []) {
+                if (item && item.itemId && item.imageData) {
+                    existingImages.set(item.itemId, { imageData: item.imageData, imageType: item.imageType });
+                }
+            }
+            updates.shop = updates.shop.map(item => {
+                if (!item || !item.itemId) return item;
+                const preserved = existingImages.get(item.itemId);
+                if (!preserved) return item;
+                return { ...item, imageData: preserved.imageData, imageType: preserved.imageType };
+            });
+        }
+
         Object.keys(updates).forEach(key => {
             guildSettings.set(key, updates[key]);
         });

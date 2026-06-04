@@ -117,6 +117,9 @@ async function renderGuildSettings(req, res) {
         }));
 
         const safeSettings = guildSettings.toObject();
+        if (Array.isArray(safeSettings.shop)) {
+            safeSettings.shop = safeSettings.shop.map(({ imageData, imageType, ...rest }) => rest);
+        }
 
         // Pre-load the set of activity item images that actually exist so the
         // template can skip rendering <img> tags that would otherwise 404.
