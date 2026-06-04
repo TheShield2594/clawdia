@@ -4,6 +4,7 @@ const syndicateSchema = new Schema({
     syndicateId:      { type: String, required: true },
     guildId:          { type: String, required: true },
     name:             { type: String, required: true, maxlength: 32 },
+    nameLower:        { type: String, required: true },  // lowercase of name; used for unique index
     tag:              { type: String, default: null, maxlength: 5 },
     leaderId:         { type: String, required: true },
     memberIds:        [{ type: String }],
@@ -17,11 +18,13 @@ const syndicateSchema = new Schema({
     updatedAt:        { type: Date, default: Date.now },
 });
 
+// Case-insensitive unique name enforcement via normalized field
 syndicateSchema.index({ syndicateId: 1 }, { unique: true });
-syndicateSchema.index({ guildId: 1, name: 1 }, { unique: true });
+syndicateSchema.index({ guildId: 1, nameLower: 1 }, { unique: true });
 syndicateSchema.index({ guildId: 1, lifetimeEarnings: -1 });
 
 syndicateSchema.pre('save', function(next) {
+    this.nameLower = this.name.toLowerCase();
     this.updatedAt = Date.now();
     next();
 });
