@@ -109,6 +109,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             const trendStr = dynamicEnabled ? ` ${trendBucket(item).arrow}` : '';
             return {
                 name:    item.name,
+                imageId: item.itemId,
                 emoji:   extractEmoji(item.description),
                 price:   ep,
                 badge,
@@ -147,6 +148,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             const ep = effectivePrice(item, dynamicEnabled);
             return {
                 name:    item.name,
+                imageId: item.itemId,
                 emoji:   extractEmoji(item.description),
                 price:   ep,
                 badge,
@@ -180,6 +182,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             const ep = effectivePrice(item, dynamicEnabled);
             return {
                 name:    item.name,
+                imageId: item.itemId,
                 emoji:   extractEmoji(item.description),
                 price:   ep,
                 badge:   'BLACK MARKET',
@@ -269,6 +272,7 @@ module.exports = {
                 title:    `${interaction.guild.name} Shop`,
                 currency,
                 footer:   balanceFooter,
+                guildId:  interaction.guild.id,
                 pages,
             });
         }
