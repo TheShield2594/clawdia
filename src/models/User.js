@@ -584,6 +584,7 @@ userSchema.index({ guildId: 1, 'ranked.elo': -1 });
 userSchema.index({ guildId: 1, 'accountPrestige.rank': -1 });
 userSchema.index({ guildId: 1, achievementsCount: -1 });
 userSchema.index({ guildId: 1, seasonCoins: -1 }); // used by executeLeaderboard / executeSeasonMe
+userSchema.index({ guildId: 1, syndicateId: 1 });  // used by syndicate member lookups
 
 userSchema.pre('save', function(next) {
     this.updatedAt = Date.now();

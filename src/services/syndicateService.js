@@ -49,6 +49,14 @@ function generateSyndicateHeistId(guildId) {
 }
 
 function createSyndicateLobby({ guildId, channelId, syndicateId, leaderId, target, lobbyDurationSeconds, currentHeat }) {
+    // Clear any orphaned lobby so timers don't double-fire if the caller somehow
+    // calls this without first checking getSyndicateHeist.
+    const existing = activeSyndicateHeists.get(guildId);
+    if (existing) {
+        for (const timer of Object.values(existing.skillTimers || {})) clearTimeout(timer);
+        activeSyndicateHeists.delete(guildId);
+    }
+
     const heistId = generateSyndicateHeistId(guildId);
     const state = {
         heistId,
@@ -114,6 +122,11 @@ function getEffectiveHeat(syndicateDoc) {
 // Each sabotage reduces success chance by an additional 15%.
 function computeSyndicateOutcome(heist) {
     const target = SYNDICATE_TARGETS[heist.target];
+    if (!target) {
+        console.error(`[syndicateService] computeSyndicateOutcome: unknown target "${heist.target}"`);
+        return { outcome: 'bust', payout: 0, perPlayer: 0, passedCount: 0, totalCount: 0 };
+    }
+
     const players = [...heist.players.values()];
     const total = players.length;
     if (!total) return { outcome: 'bust', payout: 0, perPlayer: 0, passedCount: 0, totalCount: 0 };

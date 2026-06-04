@@ -5,6 +5,7 @@ const {
     ButtonBuilder,
     ButtonStyle,
 } = require('discord.js');
+const mongoose = require('mongoose');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const Syndicate = require('../../models/Syndicate');
@@ -364,21 +365,40 @@ async function executeCreate(interaction, guildDoc) {
     const tag         = rawTag ? rawTag.toUpperCase() : null;
     const syndicateId = `${interaction.guild.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-    await User.findOneAndUpdate(
-        { userId: interaction.user.id, guildId: interaction.guild.id },
-        { $inc: { balance: -CREATION_COST }, $set: { syndicateId } },
-        { upsert: true }
-    );
-
-    await Syndicate.create({
-        syndicateId,
-        guildId: interaction.guild.id,
-        name,
-        tag,
-        leaderId:  interaction.user.id,
-        memberIds: [interaction.user.id],
-        openToJoin,
-    });
+    // Atomic: debit coins + enroll user + create syndicate in one transaction
+    const session = await mongoose.startSession();
+    try {
+        await session.withTransaction(async () => {
+            const updated = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: CREATION_COST }, syndicateId: null },
+                { $inc: { balance: -CREATION_COST }, $set: { syndicateId } },
+                { upsert: false, session, new: true }
+            );
+            if (!updated) {
+                throw new Error('PRECONDITION_FAILED');
+            }
+            await Syndicate.create([{
+                syndicateId,
+                guildId: interaction.guild.id,
+                name,
+                nameLower: name.toLowerCase(),
+                tag,
+                leaderId:  interaction.user.id,
+                memberIds: [interaction.user.id],
+                openToJoin,
+            }], { session });
+        });
+    } catch (err) {
+        await session.endSession();
+        if (err.message === 'PRECONDITION_FAILED') {
+            return interaction.reply({
+                content: 'Could not create the syndicate — your balance or membership status changed. Please try again.',
+                ephemeral: true,
+            });
+        }
+        throw err;
+    }
+    await session.endSession();
 
     logTransaction({
         userId:  interaction.user.id,
@@ -464,7 +484,7 @@ async function executeLeave(interaction) {
     if (synDoc.leaderId === interaction.user.id) {
         if (synDoc.memberIds.length > 1) {
             return interaction.reply({
-                content: `You are the leader of **${synDoc.name}**. Kick all other members first, or use \`/syndicate disband\`.`,
+                content: `You are the leader of **${synDoc.name}**. Kick all other members first with \`/syndicate kick\`, then \`/syndicate leave\` to disband.`,
                 ephemeral: true,
             });
         }
@@ -773,12 +793,19 @@ async function executeSabotage(interaction, guildDoc) {
     const synDoc = await Syndicate.findOne({ syndicateId: userDoc.syndicateId, guildId: interaction.guild.id });
     if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', ephemeral: true });
 
+    if (synDoc.leaderId !== interaction.user.id) {
+        return interaction.reply({ content: 'Only the syndicate leader can perform a sabotage.', ephemeral: true });
+    }
+
     const activeHeist = getSyndicateHeist(interaction.guild.id);
     if (!activeHeist) {
         return interaction.reply({ content: 'There is no active syndicate heist on this server to sabotage.', ephemeral: true });
     }
     if (activeHeist.syndicateId === synDoc.syndicateId) {
         return interaction.reply({ content: "You can't sabotage your own heist.", ephemeral: true });
+    }
+    if (activeHeist.phase === 'lobby') {
+        return interaction.reply({ content: 'The rival heist is still in the lobby phase. Sabotage can only be used once it has started.', ephemeral: true });
     }
 
     const effectiveHeat = getEffectiveHeat(synDoc);
