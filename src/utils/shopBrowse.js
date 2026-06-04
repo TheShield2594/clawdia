@@ -6,6 +6,7 @@ const {
 } = require('discord.js');
 
 const ItemImage = require('../models/ItemImage');
+const Guild = require('../models/Guild');
 const { renderCategoryBanner, getTheme } = require('./shopBanner');
 
 const COLOR_HEX = {
@@ -19,16 +20,37 @@ const COLOR_HEX = {
     shop_mythic:   '#e67e22',
 };
 
-async function loadImagesByItemIds(itemIds) {
+function toBuffer(raw) {
+    if (!raw) return null;
+    const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw.buffer || raw);
+    return buf.length ? buf : null;
+}
+
+async function loadImagesByItemIds(itemIds, guildId = null) {
     const out = {};
     const ids = [...new Set(itemIds.filter(Boolean))];
     if (!ids.length) return out;
-    const docs = await ItemImage.find({ itemId: { $in: ids } });
-    for (const d of docs) {
-        const raw = d.imageData;
-        if (!raw) continue;
-        const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw.buffer || raw);
-        if (buf.length) out[d.itemId] = buf;
+
+    // Guild shop items store their image on the shop sub-document itself.
+    // Check there first so dashboard-uploaded icons appear in /shop view.
+    if (guildId) {
+        const guild = await Guild.findOne({ guildId }, { shop: 1 }).lean();
+        if (guild?.shop) {
+            for (const item of guild.shop) {
+                if (!ids.includes(item.itemId)) continue;
+                const buf = toBuffer(item.imageData);
+                if (buf) out[item.itemId] = buf;
+            }
+        }
+    }
+
+    const missing = ids.filter(id => !out[id]);
+    if (missing.length) {
+        const docs = await ItemImage.find({ itemId: { $in: missing } });
+        for (const d of docs) {
+            const buf = toBuffer(d.imageData);
+            if (buf) out[d.itemId] = buf;
+        }
     }
     return out;
 }
@@ -55,7 +77,7 @@ async function loadImagesByItemIds(itemIds) {
  * }
  */
 async function runShopBrowse(interaction, config) {
-    const { activity, title, currency, pages, footer } = config;
+    const { activity, title, currency, pages, footer, guildId } = config;
     const colorHex = COLOR_HEX[activity] || '#f39c12';
 
     const imageCache = new Map();
@@ -63,7 +85,7 @@ async function runShopBrowse(interaction, config) {
         const wanted = page.items.map(it => it.imageId).filter(Boolean);
         const missing = wanted.filter(id => !imageCache.has(id));
         if (missing.length) {
-            const fetched = await loadImagesByItemIds(missing);
+            const fetched = await loadImagesByItemIds(missing, guildId);
             for (const id of missing) imageCache.set(id, fetched[id] || null);
         }
         return page.items.map(it => ({
