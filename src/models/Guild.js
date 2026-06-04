@@ -687,6 +687,12 @@ const guildSchema = new Schema({
         lastRunAt:        { type: Date, default: null }
     },
 
+    // Crime Syndicate System (issue #341)
+    syndicates: {
+        enabled:            { type: Boolean, default: false },
+        heistCooldownHours: { type: Number,  default: 4, min: 1, max: 48 },
+    },
+
     // Strategic Heist System (issue #358)
     heist: {
         enabled:               { type: Boolean, default: false },

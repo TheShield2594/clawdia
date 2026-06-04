@@ -2,6 +2,7 @@ const Guild = require('../models/Guild');
 const User = require('../models/User');
 const { handlePollVote } = require('../commands/utility/poll');
 const { handleHeistButton } = require('../commands/economy/heist');
+const { handleSyndicateButton } = require('../commands/economy/syndicate');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 async function logCommandMetric(interaction, success, reason = null) {
     try {
@@ -128,6 +129,13 @@ module.exports = {
             if (interaction.customId.startsWith('heist_join_') || interaction.customId.startsWith('heist_skill_')) {
                 await handleHeistButton(interaction, client).catch(err => {
                     console.error('[heist] button handler error:', err);
+                });
+                return;
+            }
+
+            if (interaction.customId.startsWith('syn_join_') || interaction.customId.startsWith('syn_skill_')) {
+                await handleSyndicateButton(interaction, client).catch(err => {
+                    console.error('[syndicate] button handler error:', err);
                 });
                 return;
             }
