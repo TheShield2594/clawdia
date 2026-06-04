@@ -543,6 +543,9 @@ const userSchema = new Schema({
     dailyGiftSent:  { type: Number, default: 0 },
     dailyGiftReset: { type: Date,   default: null },
 
+    // Crime syndicate membership
+    syndicateId: { type: String, default: null },
+
     // Crash game: bet amount deducted but not yet resolved (cleared on cash out or crash end)
     pendingCrashRefund: { type: Number, default: 0 },
 
@@ -581,6 +584,7 @@ userSchema.index({ guildId: 1, 'ranked.elo': -1 });
 userSchema.index({ guildId: 1, 'accountPrestige.rank': -1 });
 userSchema.index({ guildId: 1, achievementsCount: -1 });
 userSchema.index({ guildId: 1, seasonCoins: -1 }); // used by executeLeaderboard / executeSeasonMe
+userSchema.index({ guildId: 1, syndicateId: 1 });  // used by syndicate member lookups
 
 userSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
