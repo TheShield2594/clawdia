@@ -147,19 +147,33 @@ async function resolveHeist(client, heist) {
 
         const wins = (outcome === 'full_success') || (outcome === 'partial_success' && passed);
         if (wins && perPlayer > 0) {
-            await User.findOneAndUpdate(
-                { userId, guildId: heist.guildId },
-                { $inc: { balance: perPlayer } }
-            ).catch(() => {});
-            const u = await User.findOne({ userId, guildId: heist.guildId }, 'balance').lean();
-            logTransaction({
-                userId,
-                guildId: heist.guildId,
-                type:    'syndicate_heist',
-                amount:  perPlayer,
-                balance: u?.balance ?? perPlayer,
-                note:    `Syndicate heist: ${target.label}`,
-            });
+            let credited = false;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    await User.findOneAndUpdate(
+                        { userId, guildId: heist.guildId },
+                        { $inc: { balance: perPlayer } }
+                    );
+                    credited = true;
+                    break;
+                } catch (err) {
+                    console.error(`[syndicate] Credit attempt ${attempt}/3 failed for userId=${userId} guildId=${heist.guildId} amount=${perPlayer}:`, err.message);
+                    if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 200));
+                }
+            }
+            if (!credited) {
+                console.error(`[syndicate] CRITICAL: all credit attempts failed — userId=${userId} guildId=${heist.guildId} amount=${perPlayer} heistId=${heist.heistId}`);
+            } else {
+                const u = await User.findOne({ userId, guildId: heist.guildId }, 'balance').lean();
+                logTransaction({
+                    userId,
+                    guildId: heist.guildId,
+                    type:    'syndicate_heist',
+                    amount:  perPlayer,
+                    balance: u?.balance ?? perPlayer,
+                    note:    `Syndicate heist: ${target.label}`,
+                });
+            }
         }
     }
 
