@@ -62,7 +62,11 @@ module.exports = {
             return (h.materials[matId] ?? 0) + (m.materials[matId] ?? 0) + (f.materials[matId] ?? 0);
         }
 
-        // Consume materials from the correct pool
+        // Consume materials from the correct pool.
+        // When `source` is provided (all cross-system recipes), materials are drawn
+        // exclusively from that pool.  When absent (legacy hunt/mine recipes that
+        // predate source annotations), we drain hunt first, then mine, then fish so
+        // the behaviour stays compatible with those existing recipes.
         function consumeMat(matId, qty, source) {
             if (source === 'hunt') {
                 h.materials[matId] = Math.max(0, (h.materials[matId] ?? 0) - qty);
