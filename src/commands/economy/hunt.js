@@ -47,6 +47,8 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
+const { ensureQuests, onHunt, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { getActiveSynergies } = require('../../services/synergyService');
 
 const WILDERNESS_YIELD_BONUS = 0.10;
 
@@ -683,6 +685,8 @@ async function executeStart(interaction) {
     if (result.success && result.finalPayout > user.hunt.bestPayout) user.hunt.bestPayout = result.finalPayout;
 
     updateHuntQuestProgress(user, result, zoneId);
+    await ensureQuests(user, guildSettings);
+    const { completed: questsDone, nearComplete: questsNear } = await onHunt(user, guildSettings);
 
     const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
@@ -691,6 +695,8 @@ async function executeStart(interaction) {
         if (huntAchievements.length) {
             announceAchievements(interaction.client, guildSettings, user, interaction.member, huntAchievements).catch(() => null);
         }
+        notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+        notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
     } catch (err) {
         if (err.name === 'VersionError') {
             return interaction.editReply({ content: 'A simultaneous request conflicted with your hunt. Please try `/hunt start` again.' });
@@ -1104,6 +1110,22 @@ async function executeProfile(interaction) {
 
     if (h.trophies?.length) {
         embed.addFields({ name: '🏆 Trophies', value: h.trophies.join(', '), inline: true });
+    }
+
+    // Cross-system synergies
+    const activeSynergies = getActiveSynergies(userData);
+    if (activeSynergies.length > 0) {
+        embed.addFields({
+            name: '🔗 Active Synergies',
+            value: activeSynergies.map(s => `${s.emoji} **${s.name}** — ${s.description}`).join('\n'),
+            inline: false
+        });
+    } else if (h.level >= 25) {
+        embed.addFields({
+            name: '🔗 Synergies',
+            value: 'Reach combined level milestones across Hunt, Fish & Mine to unlock cross-system bonuses!',
+            inline: false
+        });
     }
 
     if (prestige === 0 && h.level >= 50) {

@@ -24,6 +24,7 @@ const {
 const { getCurrentWeather } = require('./weatherService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { ensureHuntData, getMaxStamina: getHuntMaxStamina } = require('./huntService');
+const { getFishSynergyStaminaBonus } = require('./synergyService');
 
 const DAILY_QUEST_COUNT = 3;
 
@@ -54,6 +55,9 @@ function ensureFishingData(user) {
     if (f.activeLuck           == null) f.activeLuck           = false;
     if (f.activeXpScroll       == null) f.activeXpScroll       = false;
     if (f.luckyHook            == null) f.luckyHook            = false;
+    if (f.consumables.hunters_brew  == null) f.consumables.hunters_brew  = 0;
+    if (f.consumables.predators_eye == null) f.consumables.predators_eye = 0;
+    if (f.consumables.abyssal_lure  == null) f.consumables.abyssal_lure  = 0;
     if (f.totalCasts           == null) f.totalCasts           = 0;
     if (f.successfulCasts      == null) f.successfulCasts      = 0;
     if (f.totalEarned          == null) f.totalEarned          = 0;
@@ -78,7 +82,8 @@ function ensureFishingData(user) {
 function getMaxStamina(user) {
     const prestige = user.fishing?.prestige ?? 0;
     const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
-    return LIMITS.MAX_STAMINA_BASE + bonus;
+    const synergyBonus = getFishSynergyStaminaBonus(user);
+    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus;
 }
 
 function applyStaminaRegen(user) {
@@ -228,6 +233,18 @@ function rollTier(user, location, rod) {
         w.common = Math.max(0, w.common - shiftRare - shiftEpic);
         w.rare  += shiftRare;
         w.epic  += shiftEpic;
+    } else if (f.activeBait === 'predators_eye') {
+        // Cross-system: +30% rare shift
+        const shift = w.common * 0.30;
+        w.common = Math.max(0, w.common - shift);
+        w.rare  += shift;
+    } else if (f.activeBait === 'abyssal_lure') {
+        // Cross-system: +15% legendary, +10% epic shift
+        const shiftLeg  = w.common * 0.15;
+        const shiftEpic = w.common * 0.10;
+        w.common    = Math.max(0, w.common - shiftLeg - shiftEpic);
+        w.legendary += shiftLeg;
+        w.epic      += shiftEpic;
     }
 
     // Rod rarity boost
@@ -416,13 +433,14 @@ function applyXp(user, xpGain) {
 function activateConsumable(user, consumableId) {
     const f = user.fishing;
     const { CONSUMABLES } = require('../data/fishData');
-    const def = CONSUMABLES[consumableId];
+    const { CROSS_CONSUMABLES } = require('../data/crossSystemData');
+    const def = CONSUMABLES[consumableId] ?? CROSS_CONSUMABLES[consumableId];
     if (!def) return { success: false, error: 'Unknown consumable.' };
 
     const stock = f.consumables[consumableId] ?? 0;
     if (stock <= 0) return { success: false, error: `You don't have any **${def.name}**.` };
 
-    if (def.type === 'bait') {
+    if (def.type === 'bait' || def.type === 'fish_bait') {
         if (f.activeBait) return { success: false, error: `You already have **${f.activeBait.replace(/_/g, ' ')}** active.` };
         f.consumables[consumableId] -= 1;
         f.activeBait          = consumableId;
