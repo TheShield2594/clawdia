@@ -180,23 +180,76 @@
                 </div>
             </div>
 
+            <!-- Getting started checklist -->
+            <%
+            var setupDone = !!(
+                (settings.welcome && settings.welcome.enabled && settings.welcome.channelId) &&
+                (settings.moderation && settings.moderation.enabled && settings.moderation.logChannelId) &&
+                (settings.leveling && settings.leveling.enabled) &&
+                (settings.ai && settings.ai.enabled)
+            );
+            %>
+            <div id="getting-started-wrap" style="margin-bottom:1.5rem;<%= setupDone ? 'display:none' : '' %>">
+                <div class="dash-card" id="getting-started-card">
+                    <div class="dash-card-header" style="cursor:pointer" onclick="toggleGettingStarted()">
+                        <div>
+                            <h2 class="dash-card-title">Getting started</h2>
+                            <div class="dash-card-sub" id="gs-subtitle">Complete these steps to finish setting up Clawdia</div>
+                        </div>
+                        <span id="gs-toggle-icon" style="font-size:1.2rem;line-height:1">▾</span>
+                    </div>
+                    <div id="getting-started-body">
+                        <div class="dash-module-list" style="display:flex;flex-direction:column;gap:.35rem;padding-top:.25rem">
+                            <button type="button" class="dash-module gs-step <%= (settings.welcome && settings.welcome.enabled && settings.welcome.channelId) ? 'on' : '' %>" data-gs-step="welcome" onclick="document.querySelector('.nav-item[data-tab=welcome]').click()">
+                                <div class="dash-module-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/><path d="M3 11c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/></svg></div>
+                                <div class="dash-module-body"><h4>Set up a welcome message</h4><p>Greet new members automatically</p></div>
+                                <div class="dash-module-toggle"></div>
+                            </button>
+                            <button type="button" class="dash-module gs-step <%= (settings.moderation && settings.moderation.enabled && settings.moderation.logChannelId) ? 'on' : '' %>" data-gs-step="moderation" onclick="document.querySelector('.nav-item[data-tab=moderation]').click()">
+                                <div class="dash-module-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6l8-3z"/></svg></div>
+                                <div class="dash-module-body"><h4>Configure a moderation log channel</h4><p>Track all mod actions in one place</p></div>
+                                <div class="dash-module-toggle"></div>
+                            </button>
+                            <button type="button" class="dash-module gs-step <%= (settings.leveling && settings.leveling.enabled) ? 'on' : '' %>" data-gs-step="leveling" onclick="document.querySelector('.nav-item[data-tab=leveling]').click()">
+                                <div class="dash-module-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8v4a4 4 0 0 1-8 0V4z"/><path d="M5 6H3v2a3 3 0 0 0 3 3M19 6h2v2a3 3 0 0 1-3 3"/><path d="M9 14h6l1 6H8z"/></svg></div>
+                                <div class="dash-module-body"><h4>Enable leveling</h4><p>Reward active members with XP</p></div>
+                                <div class="dash-module-toggle"></div>
+                            </button>
+                            <button type="button" class="dash-module gs-step <%= (settings.economy && settings.economy.enabled) ? 'on' : '' %>" data-gs-step="economy" onclick="document.querySelector('.nav-item[data-tab=economy]').click()">
+                                <div class="dash-module-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M10 9h3a2 2 0 0 1 0 4h-3v-4zM10 13v3"/></svg></div>
+                                <div class="dash-module-body"><h4>Add your first shop item</h4><p>Start your server economy</p></div>
+                                <div class="dash-module-toggle"></div>
+                            </button>
+                            <button type="button" class="dash-module gs-step <%= (settings.ai && settings.ai.enabled) ? 'on' : '' %>" data-gs-step="ai" onclick="document.querySelector('.nav-item[data-tab=ai]').click()">
+                                <div class="dash-module-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4z"/></svg></div>
+                                <div class="dash-module-body"><h4>Connect an AI provider</h4><p>Enable conversational AI for your server</p></div>
+                                <div class="dash-module-toggle"></div>
+                            </button>
+                        </div>
+                        <div style="text-align:right;margin-top:.75rem">
+                            <button class="btn" type="button" onclick="dismissGettingStarted()" style="font-size:.8rem;opacity:.6">Dismiss checklist</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- KPIs -->
             <div class="dash-kpis">
-                <div class="dash-kpi">
-                    <div class="dash-kpi-label">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
-                        Channels
-                    </div>
-                    <div class="dash-kpi-value"><%= channels.length + voiceChannels.length %></div>
-                    <div class="dash-kpi-meta"><span class="dash-kpi-foot">text + voice</span></div>
-                </div>
-                <div class="dash-kpi">
+                <div class="dash-kpi" id="kpi-members">
                     <div class="dash-kpi-label">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><circle cx="17" cy="9" r="2.5"/><path d="M22 19c0-2.5-2-4.5-5-4.5"/></svg>
-                        Roles
+                        Members
                     </div>
-                    <div class="dash-kpi-value"><%= roles.length %></div>
-                    <div class="dash-kpi-meta"><span class="dash-kpi-foot">configured</span></div>
+                    <div class="dash-kpi-value" id="kpi-members-value">—</div>
+                    <div class="dash-kpi-meta"><span class="dash-kpi-foot" id="kpi-members-foot">loading…</span></div>
+                </div>
+                <div class="dash-kpi" id="kpi-moderation">
+                    <div class="dash-kpi-label">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6l8-3z"/></svg>
+                        Moderation
+                    </div>
+                    <div class="dash-kpi-value" id="kpi-mod-value">—</div>
+                    <div class="dash-kpi-meta"><span class="dash-kpi-foot" id="kpi-mod-foot">loading…</span></div>
                 </div>
                 <div class="dash-kpi">
                     <div class="dash-kpi-label">
@@ -306,27 +359,26 @@
                     </div>
                     <div class="dash-bot-content">
                         <div class="dash-bot-avatar">🐱</div>
-                        <div class="dash-bot-text">
-                            <b>Everything looks good on <%= guild.name %>.</b><br>
-                            Open a module to configure it, or head to Analytics to see server activity trends.
+                        <div class="dash-bot-text" id="clawdia-msg">
+                            <span style="opacity:.5;font-size:.85em">Checking server health…</span>
                         </div>
                     </div>
-                    <button class="dash-bot-btn" onclick="document.querySelector('.nav-item[data-tab=analytics]').click()">Open Analytics →</button>
-                    <button class="dash-bot-btn" onclick="document.querySelector('.nav-item[data-tab=moderation]').click()" style="margin-left:8px;background:transparent;">Configure Moderation</button>
+                    <div id="clawdia-actions" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem"></div>
                 </div>
             </div>
 
-            <!-- Bot status bar -->
-            <div class="dash-status">
-                <div><span style="width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block;"></span> Bot online</div>
-                <i class="sep"></i>
-                <div>Server · <span class="v"><%= guild.name %></span></div>
-                <i class="sep"></i>
-                <div>Channels · <span class="v"><%= channels.length %> text, <%= voiceChannels.length %> voice</span></div>
-                <i class="sep"></i>
-                <div>Roles · <span class="v"><%= roles.length %></span></div>
-                <i class="sep"></i>
-                <div>Modules · <span class="v"><%= moduleCount %> active</span></div>
+            <!-- Recent Activity feed -->
+            <div class="dash-card" style="margin-top:1.25rem" id="overview-activity-card">
+                <div class="dash-card-header">
+                    <div>
+                        <h2 class="dash-card-title">Recent Activity</h2>
+                        <div class="dash-card-sub">Latest signals from your server</div>
+                    </div>
+                    <span class="dash-pill" style="font-size:10px;opacity:.6" id="overview-last-updated"></span>
+                </div>
+                <div id="overview-activity-feed" style="display:flex;flex-direction:column;gap:.5rem;min-height:60px">
+                    <span style="opacity:.4;font-size:.85em;padding:.5rem 0">Loading…</span>
+                </div>
             </div>
 
         </section><!-- /#overview -->
@@ -614,9 +666,56 @@
                         <small>Variables: <code>{user}</code> · <code>{level}</code></small>
                     </div>
                     <div class="field"><label class="field-label" for="level-reward-channel">Reward announcement channel</label><select id="level-reward-channel"><option value="">Use current channel</option><% channels.forEach(channel => { %><option value="<%= channel.id %>" <%= settings.leveling.rewardChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option><% }); %></select></div>
-                    <div class="field"><label class="field-label" for="level-no-xp-roles">No-XP roles (one role ID per line)</label><textarea id="level-no-xp-roles" rows="3" placeholder="One role ID per line"><%= (settings.leveling.noXpRoleIds || []).join('\n') %></textarea></div>
-                    <div class="field"><label class="field-label" for="level-no-xp-channels">No-XP channels (one channel ID per line)</label><textarea id="level-no-xp-channels" rows="3" placeholder="One channel ID per line"><%= (settings.leveling.noXpChannelIds || []).join('\n') %></textarea></div>
-                    <div class="field"><label class="field-label" for="level-role-rewards">Level role rewards</label><textarea id="level-role-rewards" rows="4" placeholder="level|roleId (e.g. 5|123456789)"><%= (settings.levelRoles || []).map(r => `${r.level}|${r.roleId}`).join('\n') %></textarea><small>Format: <code>level|roleId</code> — one per line</small></div>
+                    <div class="field">
+                        <label class="field-label">No-XP roles</label>
+                        <div id="level-no-xp-roles-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.leveling.noXpRoleIds || []).forEach(function(rId) {
+                               var role = roles.find(function(r){ return r.id === rId; });
+                               if (role) { %>
+                                <span class="role-tag" data-role-id="<%= rId %>">@<%= role.name %> <button type="button" onclick="removeLevelNoXpRole('<%= rId %>')" title="Remove">&times;</button></span>
+                            <% } }); %>
+                        </div>
+                        <div style="display:flex;gap:.5rem;align-items:center">
+                            <select id="level-no-xp-roles-select">
+                                <option value="">Select a role</option>
+                                <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
+                            </select>
+                            <button class="btn btn-primary" type="button" onclick="addLevelNoXpRole()">Add role</button>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">No-XP channels</label>
+                        <div id="level-no-xp-channels-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.leveling.noXpChannelIds || []).forEach(function(cId) {
+                               var ch = channels.find(function(c){ return c.id === cId; });
+                               if (ch) { %>
+                                <span class="role-tag" data-channel-id="<%= cId %>">#<%= ch.name %> <button type="button" onclick="removeLevelNoXpChannel('<%= cId %>')" title="Remove">&times;</button></span>
+                            <% } }); %>
+                        </div>
+                        <div style="display:flex;gap:.5rem;align-items:center">
+                            <select id="level-no-xp-channels-select">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(function(ch){ %><option value="<%= ch.id %>">#<%= ch.name %></option><% }); %>
+                            </select>
+                            <button class="btn btn-primary" type="button" onclick="addLevelNoXpChannel()">Add channel</button>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Level role rewards</label>
+                        <div id="level-role-rewards-list" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.levelRoles || []).forEach(function(r) { %>
+                                <div class="level-reward-row" style="display:flex;gap:.5rem;align-items:center">
+                                    <input type="number" class="level-reward-level" value="<%= r.level %>" min="1" max="999" style="width:80px" placeholder="Level">
+                                    <select class="level-reward-role">
+                                        <option value="">Select a role</option>
+                                        <% roles.forEach(function(role){ %><option value="<%= role.id %>" <%= r.roleId === role.id ? 'selected' : '' %>>@<%= role.name %></option><% }); %>
+                                    </select>
+                                    <button class="btn btn-danger" type="button" onclick="removeLevelRoleReward(this)" title="Remove">&times;</button>
+                                </div>
+                            <% }); %>
+                        </div>
+                        <button class="btn" type="button" onclick="addLevelRoleReward()">+ Add reward</button>
+                    </div>
 
                     <div class="panel-head" style="margin-top:1.5rem"><h3>Voice XP</h3><p>Award XP for time spent in voice channels (3 XP/minute × rate).</p></div>
                     <label class="toggle">
@@ -2581,12 +2680,12 @@
                     'moderation.escalation.ladder': serializeEscalationLadder()
                 };
             } else if (section === 'leveling') {
-                const noXpRoleIds = document.getElementById('level-no-xp-roles').value.split('\n').map(v => v.trim()).filter(Boolean);
-                const noXpChannelIds = document.getElementById('level-no-xp-channels').value.split('\n').map(v => v.trim()).filter(Boolean);
-                const levelRoles = document.getElementById('level-role-rewards').value.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
-                    const [level, roleId] = line.split('|');
-                    return { level: parseInt(level, 10), roleId: (roleId || '').trim() };
-                }).filter(item => item.level > 0 && item.roleId);
+                const noXpRoleIds = Array.from(document.querySelectorAll('#level-no-xp-roles-list [data-role-id]')).map(el => el.dataset.roleId);
+                const noXpChannelIds = Array.from(document.querySelectorAll('#level-no-xp-channels-list [data-channel-id]')).map(el => el.dataset.channelId);
+                const levelRoles = Array.from(document.querySelectorAll('#level-role-rewards-list .level-reward-row')).map(row => ({
+                    level: parseInt(row.querySelector('.level-reward-level').value, 10),
+                    roleId: row.querySelector('.level-reward-role').value
+                })).filter(r => r.level > 0 && r.roleId);
                 data = {
                     'leveling.enabled': document.getElementById('level-enabled').checked,
                     'leveling.xpRate': parseFloat(document.getElementById('level-xp-rate').value) || 1.0,
@@ -3926,6 +4025,225 @@
 
         // Initialize personas on page load (data already available from template)
         renderPersonas();
+
+        // ── Leveling: No-XP role tag-input ──────────────────────────────────
+        function addLevelNoXpRole() {
+            const sel = document.getElementById('level-no-xp-roles-select');
+            const roleId = sel.value;
+            const roleName = sel.options[sel.selectedIndex]?.text || roleId;
+            if (!roleId) { toast('Please select a role', 'error'); return; }
+            if (document.querySelector(`#level-no-xp-roles-list [data-role-id="${CSS.escape(roleId)}"]`)) {
+                toast('Role already added', 'error'); return;
+            }
+            const list = document.getElementById('level-no-xp-roles-list');
+            const tag = document.createElement('span');
+            tag.className = 'role-tag';
+            tag.dataset.roleId = roleId;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.title = 'Remove';
+            btn.textContent = '×';
+            btn.onclick = () => tag.remove();
+            tag.textContent = roleName + ' ';
+            tag.appendChild(btn);
+            list.appendChild(tag);
+            sel.value = '';
+        }
+        function removeLevelNoXpRole(roleId) {
+            const el = document.querySelector(`#level-no-xp-roles-list [data-role-id="${CSS.escape(roleId)}"]`);
+            if (el) el.remove();
+        }
+
+        // ── Leveling: No-XP channel tag-input ───────────────────────────────
+        function addLevelNoXpChannel() {
+            const sel = document.getElementById('level-no-xp-channels-select');
+            const channelId = sel.value;
+            const channelName = sel.options[sel.selectedIndex]?.text || channelId;
+            if (!channelId) { toast('Please select a channel', 'error'); return; }
+            if (document.querySelector(`#level-no-xp-channels-list [data-channel-id="${CSS.escape(channelId)}"]`)) {
+                toast('Channel already added', 'error'); return;
+            }
+            const list = document.getElementById('level-no-xp-channels-list');
+            const tag = document.createElement('span');
+            tag.className = 'role-tag';
+            tag.dataset.channelId = channelId;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.title = 'Remove';
+            btn.textContent = '×';
+            btn.onclick = () => tag.remove();
+            tag.textContent = channelName + ' ';
+            tag.appendChild(btn);
+            list.appendChild(tag);
+            sel.value = '';
+        }
+        function removeLevelNoXpChannel(channelId) {
+            const el = document.querySelector(`#level-no-xp-channels-list [data-channel-id="${CSS.escape(channelId)}"]`);
+            if (el) el.remove();
+        }
+
+        // ── Leveling: role reward table ──────────────────────────────────────
+        function addLevelRoleReward() {
+            const list = document.getElementById('level-role-rewards-list');
+            const row = document.createElement('div');
+            row.className = 'level-reward-row';
+            row.style.cssText = 'display:flex;gap:.5rem;align-items:center';
+            const sourceSelect = document.getElementById('level-no-xp-roles-select');
+            const newSelect = sourceSelect.cloneNode(true);
+            newSelect.removeAttribute('id');
+            newSelect.className = 'level-reward-role';
+            newSelect.value = '';
+            const levelInput = document.createElement('input');
+            levelInput.type = 'number';
+            levelInput.className = 'level-reward-level';
+            levelInput.min = 1;
+            levelInput.max = 999;
+            levelInput.style.width = '80px';
+            levelInput.placeholder = 'Level';
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-danger';
+            delBtn.type = 'button';
+            delBtn.title = 'Remove';
+            delBtn.textContent = '×';
+            delBtn.onclick = () => row.remove();
+            row.appendChild(levelInput);
+            row.appendChild(newSelect);
+            row.appendChild(delBtn);
+            list.appendChild(row);
+        }
+        function removeLevelRoleReward(btn) {
+            btn.closest('.level-reward-row').remove();
+        }
+
+        // ── Getting Started checklist ────────────────────────────────────────
+        (function initGettingStarted() {
+            const guildId = '<%= guild.id %>';
+            const key = `gs_dismissed_${guildId}`;
+            if (localStorage.getItem(key) === '1') {
+                const wrap = document.getElementById('getting-started-wrap');
+                if (wrap) wrap.style.display = 'none';
+                return;
+            }
+            const steps = document.querySelectorAll('.gs-step');
+            const total = steps.length;
+            const done = Array.from(steps).filter(s => s.classList.contains('on')).length;
+            const sub = document.getElementById('gs-subtitle');
+            if (sub) sub.textContent = `${done} of ${total} steps complete`;
+            if (done >= total) {
+                const wrap = document.getElementById('getting-started-wrap');
+                if (wrap) wrap.style.display = 'none';
+            }
+        })();
+        function toggleGettingStarted() {
+            const body = document.getElementById('getting-started-body');
+            const icon = document.getElementById('gs-toggle-icon');
+            if (!body) return;
+            const isHidden = body.style.display === 'none';
+            body.style.display = isHidden ? '' : 'none';
+            if (icon) icon.textContent = isHidden ? '▾' : '▸';
+        }
+        function dismissGettingStarted() {
+            const guildId = '<%= guild.id %>';
+            localStorage.setItem(`gs_dismissed_${guildId}`, '1');
+            const wrap = document.getElementById('getting-started-wrap');
+            if (wrap) wrap.style.display = 'none';
+        }
+
+        // ── Overview live stats ──────────────────────────────────────────────
+        async function loadOverviewStats() {
+            const guildId = '<%= guild.id %>';
+            try {
+                const [statsResp, insightsResp] = await Promise.all([
+                    fetch(`/api/guild/${guildId}/stats`),
+                    fetch(`/api/guild/${guildId}/insights`)
+                ]);
+                if (!statsResp.ok || !insightsResp.ok) throw new Error('stats fetch failed');
+                const stats = await statsResp.json();
+                const insights = await insightsResp.json();
+                const a = stats.analytics || {};
+                const ret = insights.retention || {};
+
+                // Members KPI
+                const joins7 = ret.joins7 ?? 0;
+                const leaves7 = ret.leaves7 ?? 0;
+                const net7 = joins7 - leaves7;
+                const memberVal = document.getElementById('kpi-members-value');
+                const memberFoot = document.getElementById('kpi-members-foot');
+                if (memberVal) memberVal.textContent = net7 >= 0 ? `+${net7}` : `${net7}`;
+                if (memberFoot) memberFoot.textContent = `${joins7} joined · ${leaves7} left (7d)`;
+                if (memberVal) memberVal.style.color = net7 >= 0 ? 'var(--good)' : 'var(--danger, #e05)';
+
+                // Moderation KPI
+                const modCmds = ['warn','mute','kick','ban','timeout','unmute','unban'];
+                const modTotal = modCmds.reduce((sum, cmd) => sum + (a.commandUsage?.[cmd]?.total || 0), 0);
+                const modVal = document.getElementById('kpi-mod-value');
+                const modFoot = document.getElementById('kpi-mod-foot');
+                if (modVal) modVal.textContent = modTotal;
+                if (modFoot) modFoot.textContent = modTotal === 1 ? 'action this week' : 'actions this week';
+
+                // Ask Clawdia recommendations
+                const recs = a.recommendations || [];
+                const msgEl = document.getElementById('clawdia-msg');
+                const actionsEl = document.getElementById('clawdia-actions');
+                if (msgEl) {
+                    if (recs.length > 0) {
+                        msgEl.innerHTML = recs.slice(0, 3).map(r =>
+                            `<div style="display:flex;gap:.5rem;align-items:flex-start;margin-bottom:.4rem"><span style="color:var(--accent,#f90);flex-shrink:0">💡</span><span>${r}</span></div>`
+                        ).join('');
+                    } else {
+                        msgEl.innerHTML = `<b>Everything looks good on <%= guild.name %>.</b><br><span style="opacity:.7">No active recommendations right now.</span>`;
+                    }
+                }
+                if (actionsEl) {
+                    actionsEl.innerHTML = `
+                        <button class="dash-bot-btn" onclick="document.querySelector('.nav-item[data-tab=analytics]').click()">Open Analytics →</button>
+                        <button class="dash-bot-btn" onclick="document.querySelector('.nav-item[data-tab=moderation]').click()" style="background:transparent;">Configure Moderation</button>
+                    `;
+                }
+
+                // Recent Activity feed
+                const feed = document.getElementById('overview-activity-feed');
+                const lastUpdated = document.getElementById('overview-last-updated');
+                if (lastUpdated) lastUpdated.textContent = 'updated just now';
+                if (feed) {
+                    const items = [];
+                    if (joins7 > 0 || leaves7 > 0) {
+                        items.push({ icon: '👥', text: `${joins7} joined, ${leaves7} left in the last 7 days`, color: net7 >= 0 ? 'var(--good)' : 'inherit' });
+                    }
+                    if (modTotal > 0) {
+                        items.push({ icon: '🛡️', text: `${modTotal} moderation action${modTotal === 1 ? '' : 's'} recorded recently` });
+                    }
+                    const churnAlerts = a.churnAlerts || [];
+                    for (const alert of churnAlerts.slice(0, 2)) {
+                        items.push({ icon: '⚠️', text: alert, color: 'var(--warn, #f90)' });
+                    }
+                    if (recs.length > 0) {
+                        items.push({ icon: '💡', text: `${recs.length} recommendation${recs.length === 1 ? '' : 's'} available — see Ask Clawdia above` });
+                    }
+                    if (items.length === 0) {
+                        items.push({ icon: '✓', text: 'No notable activity signals right now. Check Analytics for deeper insights.' });
+                    }
+                    feed.innerHTML = items.map(it =>
+                        `<div style="display:flex;gap:.6rem;align-items:flex-start;padding:.4rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
+                            <span style="flex-shrink:0;font-size:1rem">${it.icon}</span>
+                            <span style="font-size:.875rem;color:${it.color || 'inherit'}">${it.text}</span>
+                        </div>`
+                    ).join('');
+                }
+            } catch (err) {
+                const msgEl = document.getElementById('clawdia-msg');
+                if (msgEl) msgEl.innerHTML = `Open <a href="#" onclick="document.querySelector('.nav-item[data-tab=analytics]').click();return false">Analytics</a> to review server health.`;
+                const actionsEl = document.getElementById('clawdia-actions');
+                if (actionsEl) actionsEl.innerHTML = `<button class="dash-bot-btn" onclick="document.querySelector('.nav-item[data-tab=analytics]').click()">Open Analytics →</button>`;
+                const memberVal = document.getElementById('kpi-members-value');
+                const modVal = document.getElementById('kpi-mod-value');
+                if (memberVal) memberVal.textContent = '—';
+                if (modVal) modVal.textContent = '—';
+                const feed = document.getElementById('overview-activity-feed');
+                if (feed) feed.innerHTML = '<span style="opacity:.4;font-size:.85em">Could not load activity data.</span>';
+            }
+        }
+        loadOverviewStats();
 
         async function loadAnalytics() {
             const guildId = '<%= guild.id %>';
