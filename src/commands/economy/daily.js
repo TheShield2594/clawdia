@@ -165,12 +165,46 @@ module.exports = {
                 });
             }
 
-            // ── Streak Freeze Restore Prompt ─────────────────────────────────────
+            // ── Streak Revival Token (auto-apply, highest priority) ───────────────
             const pendingRestore = user.streak?.pendingRestore ?? 0;
-            const freezesAvailable = user.streak?.freezes ?? 0;
             let usedFollowUp = false;
 
-            if (pendingRestore > 0 && freezesAvailable > 0) {
+            if (pendingRestore > 0 && user.streak?.revivalToken) {
+                await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    {
+                        $set: {
+                            'streak.current': pendingRestore,
+                            'streak.pendingRestore': 0,
+                            'streak.revivalToken': false,
+                        }
+                    }
+                );
+                user.streak.current       = pendingRestore;
+                user.streak.pendingRestore = 0;
+                user.streak.revivalToken  = false;
+
+                const revivalEmbed = new EmbedBuilder()
+                    .setColor('#9b59b6')
+                    .setTitle('💫 Streak Revival Token Activated!')
+                    .setDescription(
+                        `Your **Streak Revival Token** automatically restored your streak!\n\n` +
+                        `Your **${pendingRestore}-day streak** continues — the token has been consumed.`
+                    )
+                    .setTimestamp();
+
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ embeds: [revivalEmbed] });
+                    usedFollowUp = true;
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────────
+
+            // ── Streak Freeze Restore Prompt ─────────────────────────────────────
+            const freezesAvailable = user.streak?.freezes ?? 0;
+
+            const currentPendingRestore = user.streak?.pendingRestore ?? 0;
+            if (currentPendingRestore > 0 && freezesAvailable > 0) {
                 const restoreRow = new ActionRowBuilder().addComponents(
                     new ButtonBuilder()
                         .setCustomId('freeze_restore')
@@ -186,7 +220,7 @@ module.exports = {
                     .setColor('#ff4444')
                     .setTitle('💔 Your streak was broken!')
                     .setDescription(
-                        `Your **${pendingRestore}-day streak** was broken!\n\n` +
+                        `Your **${currentPendingRestore}-day streak** was broken!\n\n` +
                         `You have **${freezesAvailable}** Streak Freeze${freezesAvailable !== 1 ? 's' : ''} available.\n` +
                         `Would you like to use one to restore your streak?`
                     )
@@ -206,11 +240,11 @@ module.exports = {
                         await User.findOneAndUpdate(
                             { userId: interaction.user.id, guildId: interaction.guild.id },
                             {
-                                $set: { 'streak.current': pendingRestore, 'streak.pendingRestore': 0 },
+                                $set: { 'streak.current': currentPendingRestore, 'streak.pendingRestore': 0 },
                                 $inc: { 'streak.freezes': -1 }
                             }
                         );
-                        user.streak.current = pendingRestore;
+                        user.streak.current = currentPendingRestore;
                         user.streak.freezes = freezesAvailable - 1;
                         user.streak.pendingRestore = 0;
 
@@ -219,7 +253,7 @@ module.exports = {
                                 EmbedBuilder.from(freezeEmbed)
                                     .setColor('#00ff00')
                                     .setDescription(
-                                        `✅ Streak restored! Your **${pendingRestore}-day streak** continues!\n\n` +
+                                        `✅ Streak restored! Your **${currentPendingRestore}-day streak** continues!\n\n` +
                                         `1 Streak Freeze consumed. **${user.streak.freezes}** remaining.`
                                     )
                                     .setFields({ name: '❄️ Streak Freezes', value: `${user.streak.freezes} remaining`, inline: true })
@@ -320,9 +354,10 @@ module.exports = {
             if (rollDrop) {
                 droppedItem = weightedRandom(isMilestone ? RARE_DROP_TABLE : DROP_TABLE);
 
-                const dropUpdate = {
-                    $push: { inventory: { itemId: droppedItem.itemId, quantity: 1 } }
-                };
+                const dropUpdate = droppedItem.streakFlag
+                    ? { $set: { 'streak.revivalToken': true } }
+                    : { $push: { inventory: { itemId: droppedItem.itemId, quantity: 1 } } };
+
                 if (isMilestone) {
                     dropUpdate.$addToSet = { 'streak.claimedDropMilestones': streakCurrent };
                 }

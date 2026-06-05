@@ -8,11 +8,12 @@ const DROP_TABLE = [
 
 // Milestone drops — tiered by streak milestone (7 / 30 / 100)
 const RARE_DROP_TABLE = [
-    { itemId: 'lifesaver',     weight: 50, emoji: '🛟', name: 'Lifesaver',            milestone: 7  },
-    { itemId: 'streak_shield', weight: 30, emoji: '🛡️', name: 'Streak Shield',         milestone: 7  },
-    { itemId: 'coin_booster',  weight: 20, emoji: '💰', name: 'Coin Booster (2hr)',    milestone: 30 },
-    { itemId: 'xp_booster',    weight: 20, emoji: '⭐', name: 'XP Booster (2hr)',      milestone: 30 },
-    { itemId: 'lifesaver',     weight: 60, emoji: '🛟', name: 'Lifesaver',             milestone: 100 },
+    { itemId: 'lifesaver',      weight: 50, emoji: '🛟', name: 'Lifesaver',            milestone: 7   },
+    { itemId: 'streak_shield',  weight: 30, emoji: '🛡️', name: 'Streak Shield',         milestone: 7   },
+    { itemId: 'coin_booster',   weight: 20, emoji: '💰', name: 'Coin Booster (2hr)',    milestone: 30  },
+    { itemId: 'xp_booster',     weight: 20, emoji: '⭐', name: 'XP Booster (2hr)',      milestone: 30  },
+    { itemId: 'lifesaver',      weight: 55, emoji: '🛟', name: 'Lifesaver',             milestone: 100 },
+    { itemId: 'revival_token',  weight: 5,  emoji: '💫', name: 'Streak Revival Token',  milestone: 100, streakFlag: true },
 ];
 
 const DROP_MILESTONES = [7, 30, 100];
