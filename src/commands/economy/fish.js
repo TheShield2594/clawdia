@@ -476,19 +476,13 @@ async function handleCast(interaction) {
 
     await interaction.deferReply();
 
-    // ── Rhythm Reel-In Mechanic ────────────────────────────────────────────────
-    // 3 rounds: each waits a random beat, then shows a PULL! button with a 2.5s window.
-    // Perfect (<1s): full score | Good (<2.5s): partial | Timeout: slack/miss
-    // 0/3 hits → line snapped (0×) | 1/3 → 0.85× | 2+/3 → 1.1× | 2+ perfect → 1.3× | 3 perfect → 1.5×
-    const delay         = ms => new Promise(r => setTimeout(r, ms));
-    const REEL_ROUNDS   = 3;
-    const REEL_WINDOW   = 2500;
-    const PERFECT_MS    = 1000;
-
+    // ── Cast & Wait for Bite ──────────────────────────────────────────────────
+    // Common/Uncommon: passive (no button). Rare: optional single button (3s) — miss
+    // downgrades to Uncommon payout. Epic: required (3s). Legendary: required (2s).
+    const delay      = ms => new Promise(r => setTimeout(r, ms));
     const authorOpts = { name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) };
     const featuredNote = isFeaturedSpot ? `\n\n🌟 **Featured Spot!** +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout & +${Math.round(FEATURED_RARE_BONUS * 100)}% rare chance active.` : '';
 
-    // Show cast embed then wait for the initial bite (2–5s)
     const luringEmbed = new EmbedBuilder()
         .setColor(isFeaturedSpot ? '#FFD700' : '#4169E1')
         .setTitle('🎣 Cast!')
@@ -496,97 +490,125 @@ async function handleCast(interaction) {
         .setAuthor(authorOpts);
     await interaction.editReply({ embeds: [luringEmbed], components: [] });
     const reelMsg = await interaction.fetchReply();
-
     await delay(2000 + Math.floor(Math.random() * 3001));
-
-    let hits = 0;
-    let perfects = 0;
-    const roundResults = [];
-
-    for (let round = 0; round < REEL_ROUNDS; round++) {
-        const prevIcons = roundResults.map(r => r === 'perfect' ? '⚡' : r === 'good' ? '✅' : '❌').join(' ');
-        const tensionWord = ['building', 'high', 'maxed'][round];
-
-        // Tension pause between rounds (skip on round 0 — bite already shown above)
-        if (round > 0) {
-            const pauseEmbed = new EmbedBuilder()
-                .setColor('#FFA500')
-                .setTitle(`🎣 Keep reeling… Round ${round + 1}/${REEL_ROUNDS}`)
-                .setDescription(`${prevIcons}\n\n*The fish dives again — line tension: **${tensionWord}***`)
-                .setAuthor(authorOpts);
-            await interaction.editReply({ embeds: [pauseEmbed], components: [] });
-            await delay(1500 + Math.floor(Math.random() * 1500));
-        }
-
-        // Random beat before the pull prompt (0.8–2s)
-        await delay(800 + Math.floor(Math.random() * 1201));
-
-        const reelId  = `reel_${interaction.id}_r${round}`;
-        const pullEmbed = new EmbedBuilder()
-            .setColor('#FF0000')
-            .setTitle(`⚡ PULL! Round ${round + 1}/${REEL_ROUNDS}`)
-            .setDescription(`${prevIcons ? prevIcons + '\n\n' : ''}**NOW — reel it in!**`)
-            .setAuthor(authorOpts);
-        const pullRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(reelId).setLabel('🎣 PULL!').setStyle(ButtonStyle.Danger)
-        );
-        await interaction.editReply({ embeds: [pullEmbed], components: [pullRow] });
-        const pullTime = Date.now();
-
-        const ms = await new Promise(resolve => {
-            const col = reelMsg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId === reelId,
-                time: REEL_WINDOW,
-                max: 1,
-            });
-            col.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - pullTime); });
-            col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
-        });
-
-        if (ms === null)          roundResults.push('miss');
-        else if (ms < PERFECT_MS) { roundResults.push('perfect'); hits++; perfects++; }
-        else                      { roundResults.push('good');    hits++; }
-    }
-
-    // Score: 0=snapped, 1=barely, 2+=solid, 2+perfect=great, 3perfect=flawless
-    let reactionFactor;
-    if (hits === 0)        reactionFactor = 0;
-    else if (perfects >= 3) reactionFactor = 1.5;
-    else if (perfects >= 2) reactionFactor = 1.3;
-    else if (hits >= 2)     reactionFactor = 1.1;
-    else                    reactionFactor = 0.85;
-
-    const finalIcons = roundResults.map(r => r === 'perfect' ? '⚡' : r === 'good' ? '✅' : '❌').join(' ');
-
-    if (reactionFactor === 0) {
-        await interaction.editReply({
-            embeds: [new EmbedBuilder()
-                .setColor('#888888')
-                .setTitle('💔 Line Snapped!')
-                .setDescription(`${finalIcons}\n\n*${randomFrom(FISH_MISS_POOL)}*\n\nYou missed every pull — the fish snapped the line.\nStamina spent, no reward.`)
-                .setAuthor(authorOpts)],
-            components: [],
-        });
-        await delay(1200);
-    } else {
-        const reelLabel = perfects >= 3 ? 'Flawless Reel! 🔥' : hits >= 2 ? 'Solid Reel!' : 'Barely Held On…';
-        await interaction.editReply({
-            embeds: [new EmbedBuilder()
-                .setColor(perfects >= 3 ? '#FFD700' : hits >= 2 ? '#00FF7F' : '#FFA500')
-                .setTitle(`🎣 ${reelLabel}`)
-                .setDescription(`${finalIcons}\n\n*Reeling it in…*`)
-                .setAuthor(authorOpts)],
-            components: [],
-        });
-        await delay(600);
-    }
 
     // Fish/Shark pet: +5%/+15% yield (only if hunger >= 30)
     const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, STARVING_THRESHOLD: PET_STARVE, TRAIT_FLAVOR } = require('../../services/petService');
     const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
 
     const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
-    const result = executeCast(user, locationId, { reactionFactor, marketplaceActive });
+
+    // Snapshot pre-cast reward state so we can reverse it if the fish escapes
+    const preCastBalance      = user.balance;
+    const preCastTotalEarned  = user.fishing.totalEarned;
+    const preCastDailyCoins   = user.fishing.dailyCoins;
+    const preCastSuccessful   = user.fishing.successfulCasts;
+    const preCastPersonalBest = user.fishing.personalBest
+        ? JSON.parse(JSON.stringify(user.fishing.personalBest))
+        : null;
+
+    let reelResult = null; // { caught: bool, label: string, icon: string }
+
+    const result = executeCast(user, locationId, { reactionFactor: 1.0, marketplaceActive });
+
+    // ── Rarity-Gated Reel-In ──────────────────────────────────────────────────
+    if (result.success && result.catchType === 'fish' && ['rare', 'epic', 'legendary'].includes(result.tier)) {
+        const REEL_TIERS = {
+            legendary: { window: 2000, required: true,  color: '#FFD700', emoji: '⚡', label: 'LEGENDARY CATCH — REEL IT IN!',  tagline: 'Once-in-a-lifetime — don\'t let it go!' },
+            epic:      { window: 3000, required: true,  color: '#9b59b6', emoji: '🔥', label: 'EPIC CATCH — HOLD THE LINE!',    tagline: 'A rare fighter — keep the tension!' },
+            rare:      { window: 3000, required: false, color: '#3498db', emoji: '🎣', label: 'You feel a bite! Reel In?',      tagline: 'Hit the button to land it, or it slips to Uncommon.' },
+        };
+        const cfg   = REEL_TIERS[result.tier];
+        const reelId = `reel_${interaction.id}`;
+
+        const biteEmbed = new EmbedBuilder()
+            .setColor(cfg.color)
+            .setTitle(`${cfg.emoji} ${cfg.label}`)
+            .setDescription(
+                `*A **${result.fish.name}** is on the line!*\n\n` +
+                `${cfg.tagline}\n\n` +
+                (cfg.required
+                    ? `⚠️ **Press within ${cfg.window / 1000}s or it escapes!**`
+                    : `💡 **Optional** — miss it and you still get an Uncommon catch.`)
+            )
+            .setAuthor(authorOpts);
+        const reelRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(reelId)
+                .setLabel(`🎣 Reel In! (${cfg.window / 1000}s)`)
+                .setStyle(cfg.required ? ButtonStyle.Danger : ButtonStyle.Primary)
+        );
+        await interaction.editReply({ embeds: [biteEmbed], components: [reelRow] });
+
+        const reelPressed = await new Promise(resolve => {
+            const col = reelMsg.createMessageComponentCollector({
+                filter: i => i.user.id === interaction.user.id && i.customId === reelId,
+                time: cfg.window,
+                max: 1,
+            });
+            col.on('collect', async i => { await i.deferUpdate(); resolve(true); });
+            col.on('end', (_, reason) => { if (reason !== 'limit') resolve(false); });
+        });
+
+        if (!reelPressed) {
+            if (cfg.required) {
+                // Reverse all reward mutations — fish escapes, only stamina is spent
+                user.balance                  = preCastBalance;
+                user.fishing.totalEarned      = preCastTotalEarned;
+                user.fishing.dailyCoins       = preCastDailyCoins;
+                user.fishing.successfulCasts  = preCastSuccessful;
+                if (preCastPersonalBest !== null) user.fishing.personalBest = preCastPersonalBest;
+                result.success      = false;
+                result.finalPayout  = 0;
+                result.rawPayout    = 0;
+                result.escaped      = true;
+                reelResult = { caught: false, icon: '💨', label: `${result.tier} fish escaped!` };
+
+                await interaction.editReply({
+                    embeds: [new EmbedBuilder()
+                        .setColor('#888888')
+                        .setTitle('💨 It Got Away!')
+                        .setDescription(`*The ${result.fish.name} snapped the line and vanished into the depths.*\n\nStamina spent — nothing to show for it.`)
+                        .setAuthor(authorOpts)],
+                    components: [],
+                });
+                await delay(1200);
+            } else {
+                // Rare optional miss — downgrade payout by ~65% to simulate Uncommon yield
+                const reduction = Math.round(result.finalPayout * 0.65);
+                result.finalPayout              -= reduction;
+                result.rawPayout                -= reduction;
+                user.balance                    -= reduction;
+                user.fishing.totalEarned        -= reduction;
+                user.fishing.dailyCoins         -= reduction;
+                result.tier = 'uncommon';
+                reelResult = { caught: true, icon: '😬', label: 'Rare slipped — Uncommon catch instead' };
+
+                await interaction.editReply({
+                    embeds: [new EmbedBuilder()
+                        .setColor('#aaaaaa')
+                        .setTitle('😬 Slipped Away Partially…')
+                        .setDescription(`*The ${result.fish.name} struggled free but you still pulled something in.*\n\nCatch downgraded to Uncommon.`)
+                        .setAuthor(authorOpts)],
+                    components: [],
+                });
+                await delay(800);
+            }
+        } else {
+            const tierLabel = result.tier.charAt(0).toUpperCase() + result.tier.slice(1);
+            reelResult = { caught: true, icon: cfg.required ? '🏆' : '✅', label: `${tierLabel} catch secured!` };
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setColor(cfg.color)
+                    .setTitle(`${reelResult.icon} ${reelResult.label}`)
+                    .setDescription('*Reeling it in…*')
+                    .setAuthor(authorOpts)],
+                components: [],
+            });
+            await delay(600);
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Pity counter: reset on rare+ success, increment otherwise
     if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
@@ -671,6 +693,12 @@ async function handleCast(interaction) {
     }
     const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'fish').catch(() => null);
 
+    // Fish escaped — already showed escape embed; just save stamina/cooldown and return
+    if (result.escaped) {
+        await user.save().catch(err => console.error('[fish] escape save error:', err));
+        return;
+    }
+
     const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
 
     if (result.petYieldBonus > 0) {
@@ -693,21 +721,10 @@ async function handleCast(interaction) {
     const existingFooter = embed.data.footer?.text ?? '';
     embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
 
-    // Annotate embed with rhythm reel result
-    if (result.reactionFactor !== undefined) {
+    // Annotate embed with rarity reel-in result
+    if (reelResult) {
         const desc = embed.data.description ?? '';
-        const rf   = result.reactionFactor;
-        if (rf === 0) {
-            embed.setDescription(desc + `\n> 💔 *${finalIcons} — All pulls missed, line snapped (no payout)*`);
-        } else if (rf >= 1.5) {
-            embed.setDescription(desc + `\n> 🔥 *${finalIcons} — Flawless reel! +50% payout*`);
-        } else if (rf >= 1.3) {
-            embed.setDescription(desc + `\n> ⚡ *${finalIcons} — Great technique! +30% payout*`);
-        } else if (rf >= 1.1) {
-            embed.setDescription(desc + `\n> ✅ *${finalIcons} — Solid reel! +10% payout*`);
-        } else if (rf < 1.0) {
-            embed.setDescription(desc + `\n> 😬 *${finalIcons} — Barely held on… −15% payout*`);
-        }
+        embed.setDescription(desc + `\n> ${reelResult.icon} *${reelResult.label}*`);
     }
 
     // Boss encounter — multi-phase fight
