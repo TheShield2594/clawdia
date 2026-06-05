@@ -13,6 +13,7 @@ const {
     MINE_QUEST_TEMPLATES
 } = require('../data/mineData');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
+const { hasIronWill } = require('./synergyService');
 
 const DANGEROUS_DEPTH_IDS = new Set(['crystal_caves', 'the_abyss']);
 const MINE_DEATH_RATE = 0.08;
@@ -40,13 +41,15 @@ function ensureMineData(user) {
     if (!m.charges)       m.charges      = {};
     if (!m.consumables)   m.consumables  = {};
     if (!m.materials)     m.materials    = {};
-    if (m.activeMagnet         == null) m.activeMagnet         = null;
-    if (m.activeMagnetMinesLeft == null) m.activeMagnetMinesLeft = 0;
-    if (m.activeLamp           == null) m.activeLamp           = null;
-    if (m.activeLampMinesLeft  == null) m.activeLampMinesLeft  = 0;
-    if (m.activeInstinct       == null) m.activeInstinct       = false;
-    if (m.activeXpScroll       == null) m.activeXpScroll       = false;
-    if (m.sharpPick            == null) m.sharpPick            = false;
+    if (m.activeMagnet               == null) m.activeMagnet               = null;
+    if (m.activeMagnetMinesLeft      == null) m.activeMagnetMinesLeft      = 0;
+    if (m.activeLamp                 == null) m.activeLamp                 = null;
+    if (m.activeLampMinesLeft        == null) m.activeLampMinesLeft        = 0;
+    if (m.activeInstinct             == null) m.activeInstinct             = false;
+    if (m.activeXpScroll             == null) m.activeXpScroll             = false;
+    if (m.activeReinforcedTrapMinesLeft == null) m.activeReinforcedTrapMinesLeft = 0;
+    if (m.sharpPick                  == null) m.sharpPick                  = false;
+    if (m.consumables.reinforced_trap == null) m.consumables.reinforced_trap = 0;
     if (m.totalMines           == null) m.totalMines           = 0;
     if (m.successfulMines      == null) m.successfulMines      = 0;
     if (m.totalEarned          == null) m.totalEarned          = 0;
@@ -406,7 +409,8 @@ function applyXp(user, xpGain) {
 function activateConsumable(user, consumableId) {
     const m = user.mining;
     const { CONSUMABLES } = require('../data/mineData');
-    const def = CONSUMABLES[consumableId];
+    const { CROSS_CONSUMABLES } = require('../data/crossSystemData');
+    const def = CONSUMABLES[consumableId] ?? CROSS_CONSUMABLES[consumableId];
     if (!def) return { success: false, error: 'Unknown consumable.' };
 
     const stock = m.consumables[consumableId] ?? 0;
@@ -445,6 +449,12 @@ function activateConsumable(user, consumableId) {
         m.consumables[consumableId] -= 1;
         m.stamina = Math.min(max, m.stamina + def.staminaRestore);
         m.energyTonicsToday += 1;
+    } else if (def.type === 'mine_immunity') {
+        if ((m.activeReinforcedTrapMinesLeft ?? 0) > 0) {
+            return { success: false, error: `A Reinforced Trap is already active (${m.activeReinforcedTrapMinesLeft} mines left).` };
+        }
+        m.consumables[consumableId] -= 1;
+        m.activeReinforcedTrapMinesLeft = def.minesLeft;
     } else if (def.type === 'repair') {
         return { success: false, error: `Use repair kits with \`/mine shop repair\`.` };
     } else {
@@ -470,6 +480,9 @@ function tickConsumables(user) {
             m.activeLamp          = null;
             m.activeLampMinesLeft = 0;
         }
+    }
+    if ((m.activeReinforcedTrapMinesLeft ?? 0) > 0) {
+        m.activeReinforcedTrapMinesLeft -= 1;
     }
     m.activeInstinct = false;
     m.activeXpScroll = false;
@@ -590,7 +603,13 @@ function executeMine(user, depthId, options = {}) {
         const { multiplier, caveInRisk, durLoss: intensityDurLoss } = options.intensity;
         result.intensityLevel = options.intensity;
 
-        if (caveInRisk > 0 && Math.random() < caveInRisk) {
+        // Check for cave-in immunity (Reinforced Trap consumable or Iron Will synergy)
+        const trapActive = (m.activeReinforcedTrapMinesLeft ?? 0) > 0;
+        const ironWillBlocks = hasIronWill(user) &&
+            pickaxe.currentDurability / pickaxe.maxDurability < 0.50;
+        const caveInBlocked = trapActive || ironWillBlocks;
+
+        if (caveInRisk > 0 && Math.random() < caveInRisk && !caveInBlocked) {
             // Cave-in: reverse payout, apply double durability loss, mark cave-in
             if (result.finalPayout) {
                 user.balance      -= result.finalPayout;

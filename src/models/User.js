@@ -192,7 +192,8 @@ const userSchema = new Schema({
         },
 
         // Permanent account upgrades
-        luckyPaw: { type: Boolean, default: false },
+        luckyPaw:       { type: Boolean, default: false },
+        precisionScope: { type: Boolean, default: false },
 
         // Trophy collection (displayed on /hunt profile; awarded on legendary/event kills)
         trophies: [{ type: String }],
@@ -260,7 +261,10 @@ const userSchema = new Schema({
             fish_xp_scroll:   { type: Number, default: 0 },
             repair_kit_small: { type: Number, default: 0 },
             repair_kit_large: { type: Number, default: 0 },
-            energy_drink:     { type: Number, default: 0 }
+            energy_drink:     { type: Number, default: 0 },
+            hunters_brew:     { type: Number, default: 0 },
+            predators_eye:    { type: Number, default: 0 },
+            abyssal_lure:     { type: Number, default: 0 }
         },
 
         activeBait:          { type: String,  default: null },
@@ -360,15 +364,17 @@ const userSchema = new Schema({
             repair_kit_small:  { type: Number, default: 0 },
             repair_kit_large:  { type: Number, default: 0 },
             energy_tonic:      { type: Number, default: 0 },
-            xp_scroll:         { type: Number, default: 0 }
+            xp_scroll:         { type: Number, default: 0 },
+            reinforced_trap:   { type: Number, default: 0 }
         },
 
-        activeMagnet:          { type: String,  default: null },
-        activeMagnetMinesLeft: { type: Number,  default: 0 },
-        activeLamp:            { type: String,  default: null },
-        activeLampMinesLeft:   { type: Number,  default: 0 },
-        activeInstinct:        { type: Boolean, default: false },
-        activeXpScroll:        { type: Boolean, default: false },
+        activeMagnet:               { type: String,  default: null },
+        activeMagnetMinesLeft:      { type: Number,  default: 0 },
+        activeLamp:                 { type: String,  default: null },
+        activeLampMinesLeft:        { type: Number,  default: 0 },
+        activeInstinct:             { type: Boolean, default: false },
+        activeXpScroll:             { type: Boolean, default: false },
+        activeReinforcedTrapMinesLeft: { type: Number, default: 0 },
 
         materials: {
             rock_fragment:  { type: Number, default: 0 },

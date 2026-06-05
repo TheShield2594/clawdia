@@ -28,6 +28,12 @@ const DAILY_QUEST_POOL = [
     { questId: 'daily_hunt_5',          name: 'Hunt Frenzy',       description: 'Complete 5 hunts',                  target: 5,   difficulty: 'hard',   category: 'hunt'     },
     { questId: 'daily_fish_5',          name: 'Cast Away',         description: 'Make 5 fishing casts',              target: 5,   difficulty: 'hard',   category: 'fishing'  },
     { questId: 'daily_reactions_20',    name: 'Reaction God',      description: 'React to 20 messages',              target: 20,  difficulty: 'hard',   category: 'social'   },
+
+    // Joint (cross-system) quests — progress increments from hunt AND fish
+    { questId: 'daily_joint_hunt_fish', name: 'Jack of All Trades', description: 'Complete 3 hunts AND 3 fishing casts (6 total)',
+      target: 6, difficulty: 'hard', category: 'joint' },
+    { questId: 'daily_mine_3',          name: 'Rock Solid',         description: 'Mine 3 times',
+      target: 3, difficulty: 'medium', category: 'mining' },
 ];
 
 const WEEKLY_QUEST_POOL = [
@@ -49,6 +55,12 @@ const WEEKLY_QUEST_POOL = [
     { questId: 'weekly_economy_1500',   name: 'High Roller',          description: 'Earn 1500 coins this week',             target: 1500,difficulty: 'hard',   category: 'economy'  },
     { questId: 'weekly_hunt_25',        name: 'Trophy Collector',     description: 'Complete 25 hunts this week',           target: 25,  difficulty: 'hard',   category: 'hunt'     },
     { questId: 'weekly_fish_25',        name: 'Master Angler',        description: 'Make 25 fishing casts this week',       target: 25,  difficulty: 'hard',   category: 'fishing'  },
+
+    // Joint (cross-system) weekly quests
+    { questId: 'weekly_joint_hunt_fish_mine', name: 'Triple Threat',  description: 'Complete 10 hunts, 10 fishing casts, and 5 mines (25 total activities)',
+      target: 25, difficulty: 'hard', category: 'joint' },
+    { questId: 'weekly_mine_15',              name: 'Deep Dive',      description: 'Mine 15 times this week',
+      target: 15, difficulty: 'medium', category: 'mining' },
 ];
 
 const CATEGORY_EMOJIS = {
@@ -57,6 +69,8 @@ const CATEGORY_EMOJIS = {
     economy: '💰',
     hunt:    '🏹',
     fishing: '🎣',
+    mining:  '⛏️',
+    joint:   '🔗',
     streak:  '🔥',
 };
 
@@ -284,7 +298,8 @@ async function onEconomyEarn(user, guildSettings, amount) {
 async function onHunt(user, guildSettings) {
     if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
     const completed = [], nearComplete = [];
-    for (const questId of ['daily_hunt_1', 'daily_hunt_5', 'weekly_hunt_10', 'weekly_hunt_25']) {
+    for (const questId of ['daily_hunt_1', 'daily_hunt_5', 'weekly_hunt_10', 'weekly_hunt_25',
+                           'daily_joint_hunt_fish', 'weekly_joint_hunt_fish_mine']) {
         const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
@@ -295,7 +310,19 @@ async function onHunt(user, guildSettings) {
 async function onFish(user, guildSettings) {
     if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
     const completed = [], nearComplete = [];
-    for (const questId of ['daily_fish_1', 'daily_fish_5', 'weekly_fish_10', 'weekly_fish_25']) {
+    for (const questId of ['daily_fish_1', 'daily_fish_5', 'weekly_fish_10', 'weekly_fish_25',
+                           'daily_joint_hunt_fish', 'weekly_joint_hunt_fish_mine']) {
+        const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
+        if (def)     completed.push(await awardQuest(user, def, guildSettings));
+        if (nearDef) nearComplete.push(nearDef);
+    }
+    return { completed, nearComplete };
+}
+
+async function onMine(user, guildSettings) {
+    if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
+    const completed = [], nearComplete = [];
+    for (const questId of ['daily_mine_3', 'weekly_mine_15', 'weekly_joint_hunt_fish_mine']) {
         const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
@@ -446,7 +473,7 @@ function startQuestService() {
 module.exports = {
     ensureQuests, getQuestDefs, getDailyPool, getWeeklyPool,
     getCategoryEmojis, getDifficultyColors,
-    onMessage, onReaction, onCommandUse, onEconomyEarn, onHunt, onFish, onStreakUpdate,
+    onMessage, onReaction, onCommandUse, onEconomyEarn, onHunt, onFish, onMine, onStreakUpdate,
     awardSeasonXp, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset,
     startQuestService,
 };
