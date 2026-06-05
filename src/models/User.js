@@ -26,6 +26,10 @@ const userSchema = new Schema({
     lastHeist:        { type: Date, default: null },
     heistJailedUntil: { type: Date, default: null },
     wantedUntil: { type: Date, default: null },
+    crimeRecord: {
+        totalCrimes:      { type: Number, default: 0 },
+        successfulCrimes: { type: Number, default: 0 },
+    },
     shiftsWorked: { type: Number, default: 0 },
 
     // Daily hard quiz attempt counter (resets midnight UTC)
