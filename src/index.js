@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Collection, Partials } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Partials, ActivityType } = require('discord.js');
 const { connect, connection } = require('mongoose');
 const fs = require('fs');
 const path = require('path');
@@ -95,9 +95,12 @@ async function startDashboard() {
     dashboard.start(client);
 }
 
+let presenceInterval = null;
+
 // Graceful shutdown: close DB and destroy Discord client before exiting
 async function shutdown(signal) {
     console.log(`[SHUTDOWN] Received ${signal}. Shutting down gracefully...`);
+    if (presenceInterval) clearInterval(presenceInterval);
     try {
         client.destroy();
         await connection.close();
@@ -144,6 +147,29 @@ async function startBot() {
 
         const { startRaidMonitor } = require('./services/raidService');
         startRaidMonitor(client);
+
+        // Rotating rich presence — Clawdia's ancient, mysterious personality
+        const presenceActivities = [
+            { type: ActivityType.Watching, name: 'over the server' },
+            { type: ActivityType.Playing,  name: 'with ancient secrets' },
+            { type: ActivityType.Listening, name: 'to the void' },
+            { type: ActivityType.Watching, name: 'mortals struggle' },
+            { type: ActivityType.Watching, name: 'for worthy souls' },
+            { type: ActivityType.Playing,  name: 'a very long game' },
+        ];
+
+        const setPresence = () => {
+            const activity = presenceActivities[Math.floor(Math.random() * presenceActivities.length)];
+            Promise.resolve(client.user.setPresence({
+                status: 'online',
+                activities: [{ type: activity.type, name: activity.name }],
+            })).catch(err => {
+                console.error(`[PRESENCE] Failed to set presence (${activity.type} ${activity.name}):`, err);
+            });
+        };
+
+        setPresence();
+        presenceInterval = setInterval(setPresence, 5 * 60_000);
     });
 
     client.login(process.env.DISCORD_TOKEN);
