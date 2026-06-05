@@ -29,6 +29,62 @@ const CRIMES = [
     { name: 'grand larceny',      displayName: 'The Score',     emoji: '💎', riskEmoji: '🔴', riskLabel: 'High risk · Big money',       riskTag: 'Dangerous', successRate: 0.25, minPayout: 600,  maxPayout: 1500, minFine: 300, maxFine: 600 },
 ];
 
+// Per-crime execution method choices presented in Step 2.
+// successRate: absolute rate (null = wildcard, resolved at runtime)
+// payoutMult:  multiplier applied to base payout on success
+// fineMult:    multiplier applied to fine on regular bust
+// wantedMs:    if > 0, sets wantedUntil = crimeTime + wantedMs on bust (must exceed COOLDOWN_MS to add extra penalty)
+const EXECUTION_METHODS = {
+    'pickpocketing': {
+        situation: "You've spotted a mark in the crowd. How do you play it?",
+        methods: [
+            { id: 'feather_touch', label: '🤏 Feather touch', desc: 'Patient, near-invisible grab', successRate: 0.72, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
+            { id: 'quick_snatch',  label: '🏃 Quick snatch',  desc: 'Fast and practiced',           successRate: 0.60, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
+            { id: 'bold_grab',     label: '🎰 Bold grab',     desc: 'Loud exit, big cut',            successRate: 0.40, payoutMult: 1.60, fineMult: 1.35, wantedMs: 2 * 3_600_000 },
+        ],
+    },
+    'selling fake merch': {
+        situation: "You've got the goods. How do you move them?",
+        methods: [
+            { id: 'tourist_trap',    label: '🏪 Tourist trap',    desc: 'Steady foot traffic, lower cut', successRate: 0.65, payoutMult: 0.85, fineMult: 0.80, wantedMs: 0 },
+            { id: 'hard_sell',       label: '🎤 Hard sell',       desc: 'The usual pitch',                successRate: 0.55, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
+            { id: 'wholesale_blitz', label: '📦 Wholesale blitz', desc: 'Bulk push, heat follows',        successRate: 0.38, payoutMult: 1.55, fineMult: 1.40, wantedMs: 2 * 3_600_000 },
+        ],
+    },
+    'hacking ATMs': {
+        situation: "You're connected to the network. How do you drain it?",
+        methods: [
+            { id: 'skimmer',     label: '💳 Skimmer',     desc: 'Install quietly, harvest slowly', successRate: 0.55, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
+            { id: 'remote_hack', label: '💻 Remote hack', desc: 'Standard operation',              successRate: 0.45, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
+            { id: 'zero_day',    label: '⚡ Zero-day',     desc: 'All-or-nothing exploit',          successRate: 0.28, payoutMult: 1.70, fineMult: 1.50, wantedMs: 2.5 * 3_600_000 },
+        ],
+    },
+    'art forgery': {
+        situation: "The studio is set. What's your approach?",
+        methods: [
+            { id: 'minor_piece',  label: '🖌️ Minor piece',  desc: 'Low stakes, clean sale',       successRate: 0.52, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
+            { id: 'classic_swap', label: '🖼️ Classic swap', desc: 'A reliable forgery',           successRate: 0.40, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
+            { id: 'masterpiece',  label: '💎 Masterpiece',  desc: 'High-stakes, all eyes on you', successRate: 0.24, payoutMult: 1.75, fineMult: 1.60, wantedMs: 2.5 * 3_600_000 },
+        ],
+    },
+    'casino cheating': {
+        situation: "You're at the table. How do you tip the odds?",
+        methods: [
+            { id: 'count_cards',  label: '🧮 Count cards',  desc: 'Subtle mathematical edge', successRate: 0.48, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
+            { id: 'marked_deck',  label: '🃏 Marked deck',  desc: 'Practiced, balanced risk', successRate: 0.35, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
+            { id: 'dealer_bribe', label: '💵 Dealer bribe', desc: 'All in — or all busted',   successRate: 0.20, payoutMult: 1.80, fineMult: 1.70, wantedMs: 3 * 3_600_000 },
+        ],
+    },
+    'grand larceny': {
+        situation: "You're outside the vault. How do you proceed?",
+        methods: [
+            { id: 'pick_lock', label: '🔑 Pick the lock',  desc: 'Safer, slower',                successRate: 0.35, payoutMult: 0.80, fineMult: 0.75, wantedMs: 0 },
+            { id: 'cut_power', label: '💥 Cut the power',  desc: 'Riskier, faster',              successRate: 0.25, payoutMult: 1.00, fineMult: 1.00, wantedMs: 0 },
+            { id: 'bluff_in',  label: '🚨 Bluff your way', desc: 'Wildcard — 15–75% luck-based', successRate: null, payoutMult: 1.90, fineMult: 1.80, wantedMs: 3 * 3_600_000, wildcard: true },
+        ],
+    },
+};
+
 const FINES = [
     'You were caught by an undercover officer.',
     'A bystander called the police on you.',
@@ -87,11 +143,10 @@ module.exports = {
             });
         }
 
-        // Sample 3 random crimes and present them as buttons
+        // ── Step 1: Choose the crime ────────────────────────────────────────────
         const featured = getDailyFeatured(interaction.guild.id);
         const timeBand = getTimeBand();
 
-        // Ensure the featured crime appears in the choices at least once
         const shuffled = [...CRIMES].sort(() => Math.random() - 0.5);
         let choices = shuffled.slice(0, 3);
         if (!choices.some(c => c.name === featured.crime.name)) {
@@ -129,28 +184,82 @@ module.exports = {
         const response = await interaction.reply({ embeds: [selectionEmbed], components: [row], fetchReply: true });
 
         let crime;
-        let buttonInteraction = null;
+        let crimeButtonInteraction = null;
         try {
-            buttonInteraction = await response.awaitMessageComponent({
+            crimeButtonInteraction = await response.awaitMessageComponent({
                 filter: i => i.user.id === interaction.user.id,
                 time: 15_000,
             });
-            crime = CRIMES.find(c => c.name === buttonInteraction.customId);
-            // Acknowledge the button immediately so Discord doesn't time it out
-            await buttonInteraction.deferUpdate();
+            crime = CRIMES.find(c => c.name === crimeButtonInteraction.customId);
+            await crimeButtonInteraction.deferUpdate();
         } catch {
-            // Timeout — auto-select from the presented choices
             crime = choices[Math.floor(Math.random() * choices.length)];
         }
 
-        // Lucky Charm: +20% success rate on crime
-        let successChance = crime.successRate;
+        // ── Step 2: Choose the execution method ────────────────────────────────
+        const crimeXp = user.crimeRecord?.totalCrimes ?? 0;
+        const masteryBonus = Math.min(0.15, crimeXp * 0.001);
+
+        const execData = EXECUTION_METHODS[crime.name];
+
+        const execMethodLines = execData.methods.map(m => {
+            const effectiveRate = m.wildcard ? null : Math.min(0.95, m.successRate + masteryBonus);
+            const rateStr = m.wildcard ? '15–75% wildcard' : `${Math.round(effectiveRate * 100)}%`;
+            const payoutStr = m.payoutMult !== 1.0 ? ` · ×${m.payoutMult} payout` : '';
+            const wantedHours = m.wantedMs / 3_600_000;
+            const wantedStr = m.wantedMs > 0
+                ? ` · 🔥 ${wantedHours % 1 === 0 ? wantedHours : wantedHours.toFixed(1)}h heat on fail`
+                : '';
+            return `**${m.label}** — ${m.desc}\n🎯 ${rateStr} success${payoutStr}${wantedStr}`;
+        }).join('\n\n');
+
+        const masteryStr = masteryBonus > 0
+            ? `\n\n> 🏆 *Criminal mastery: +${Math.round(masteryBonus * 100)}% applied to success rates*`
+            : '';
+
+        const execEmbed = new EmbedBuilder()
+            .setColor('#e67e22')
+            .setTitle(`${crime.emoji} ${crime.displayName} — Choose Your Approach`)
+            .setDescription(`🎯 ${execData.situation}\n\n${execMethodLines}${masteryStr}`)
+            .setFooter({ text: '15 seconds to decide. No pick and one is chosen for you.' })
+            .setTimestamp();
+
+        const execRow = new ActionRowBuilder().addComponents(
+            execData.methods.map(m => {
+                const effectiveRate = m.wildcard ? null : Math.min(0.95, m.successRate + masteryBonus);
+                const rateStr = m.wildcard ? '15–75%' : `${Math.round(effectiveRate * 100)}%`;
+                return new ButtonBuilder()
+                    .setCustomId(`exec_${m.id}`)
+                    .setLabel(`${m.label}  ·  ${rateStr}`)
+                    .setStyle(ButtonStyle.Secondary);
+            })
+        );
+
+        await interaction.editReply({ embeds: [execEmbed], components: [execRow] });
+
+        let execMethod;
+        try {
+            const execButtonInteraction = await response.awaitMessageComponent({
+                filter: i => i.user.id === interaction.user.id,
+                time: 15_000,
+            });
+            execMethod = execData.methods.find(m => `exec_${m.id}` === execButtonInteraction.customId);
+            await execButtonInteraction.deferUpdate();
+        } catch {
+            execMethod = execData.methods[Math.floor(Math.random() * execData.methods.length)];
+        }
+
+        // ── Resolve the crime ───────────────────────────────────────────────────
+        let successChance = execMethod.wildcard
+            ? 0.15 + Math.random() * 0.60   // 15–75% random
+            : execMethod.successRate + masteryBonus;
+
         const luckyActive = hasEffect(user, 'lucky_charm');
         if (luckyActive) successChance = Math.min(0.95, successChance + 0.20);
 
-        // Cat pet: +5% crime success chance (only if hunger >= 30)
         const petCrimeBonus = getTotalBonus(user.pets || [], 'crime_success') / 100;
         if (petCrimeBonus > 0) successChance = Math.min(0.95, successChance + petCrimeBonus);
+        successChance = Math.min(0.95, successChance);
 
         const success = Math.random() < successChance;
         const crimeTime = new Date();
@@ -164,18 +273,20 @@ module.exports = {
             if (success) {
                 const isFeaturedCrime = crime.name === featured.crime.name;
                 const baseEarned = Math.floor(crime.minPayout + Math.random() * (crime.maxPayout - crime.minPayout));
-                let earned = Math.round(baseEarned * streakMult);
+                let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult);
                 if (isFeaturedCrime) earned = Math.round(earned * (1 + FEATURED_PAYOUT_BONUS));
 
                 const updated = await User.findOneAndUpdate(
                     userFilter,
-                    { $inc: { balance: earned }, $set: { lastCrime: crimeTime } },
+                    {
+                        $inc: { balance: earned, 'crimeRecord.totalCrimes': 1, 'crimeRecord.successfulCrimes': 1 },
+                        $set: { lastCrime: crimeTime },
+                    },
                     { new: true }
                 );
 
-                logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success)${isFeaturedCrime ? ' [featured]' : ''}` });
+                logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success, ${execMethod.id})${isFeaturedCrime ? ' [featured]' : ''}` });
 
-                // Log big win if payout is large enough
                 const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
                 if (earned >= bigWinThreshold) {
                     logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: earned, source: 'crime', details: crime.displayName });
@@ -186,11 +297,15 @@ module.exports = {
                 let desc = flavorWin;
                 if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;
                 if (petCrimeBonus > 0) desc += `\n> 🐱 *Cat pet boosted your success chance!*`;
+                if (masteryBonus > 0) desc += `\n> 🏆 *Criminal mastery: +${Math.round(masteryBonus * 100)}% applied*`;
                 if (isFeaturedCrime) desc += `\n> 🌟 *Featured job — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout applied!*`;
+
                 const crimeMultEntries = [];
                 if (streakMult > 1.0) crimeMultEntries.push({ emoji: '🔥', label: `${streakMult.toFixed(2)}x` });
-                if (isFeaturedCrime)  crimeMultEntries.push({ emoji: '🌟', label: `+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%` });
-                const crimeBar = stackBar(crimeMultEntries, streakMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
+                if (execMethod.payoutMult !== 1.0) crimeMultEntries.push({ emoji: '⚡', label: `×${execMethod.payoutMult}` });
+                if (isFeaturedCrime) crimeMultEntries.push({ emoji: '🌟', label: `+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%` });
+                const crimeBar = stackBar(crimeMultEntries, streakMult * execMethod.payoutMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
+
                 desc += `\n\n────────────────────\n  ${currency} Earned: **${earned.toLocaleString()} coins**`;
                 if (crimeBar) desc += `\n  ${crimeBar}`;
                 desc += `\n────────────────────\n  Balance: ${updated.balance.toLocaleString()} coins`;
@@ -199,7 +314,7 @@ module.exports = {
                     .setColor(isFeaturedCrime ? '#FFD700' : '#2ecc71')
                     .setTitle(`${isFeaturedCrime ? '🌟 ' : ''}${crime.emoji} ${crime.displayName} — Clean Getaway`)
                     .setDescription(desc)
-                    .setFooter({ text: 'Cooldown: 1.5h' })
+                    .setFooter({ text: `${execMethod.label} · Cooldown: 1.5h` })
                     .setTimestamp();
             } else {
                 const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
@@ -210,10 +325,13 @@ module.exports = {
                     consumeEffect(user, 'lifesaver');
                     const wouldHaveLost = isCriticalFailure
                         ? Math.floor(user.balance * (DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN)))
-                        : Math.floor(crime.minFine + Math.random() * (crime.maxFine - crime.minFine));
+                        : Math.floor((crime.minFine + Math.random() * (crime.maxFine - crime.minFine)) * execMethod.fineMult);
                     await User.findOneAndUpdate(
                         userFilter,
-                        { $set: { lastCrime: crimeTime, activeEffects: user.activeEffects } }
+                        {
+                            $inc: { 'crimeRecord.totalCrimes': 1 },
+                            $set: { lastCrime: crimeTime, activeEffects: user.activeEffects },
+                        }
                     );
 
                     logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_lifesaver', amount: 0, balance: user.balance, note: `${crime.name} (lifesaver, would have lost ${wouldHaveLost})` });
@@ -226,18 +344,21 @@ module.exports = {
                             { name: isCriticalFailure ? 'Death Loss Absorbed' : 'Fine Absorbed', value: `${currency}${Math.min(wouldHaveLost, user.balance).toLocaleString()}`, inline: true },
                             { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
                         )
-                        .setFooter({ text: 'Cooldown: 1.5h' })
+                        .setFooter({ text: `${execMethod.label} · Cooldown: 1.5h` })
                         .setTimestamp();
                 } else if (isCriticalFailure) {
                     const lossRate = DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
                     const lost = Math.floor(user.balance * lossRate);
                     const updated = await User.findOneAndUpdate(
                         userFilter,
-                        { $inc: { balance: -lost }, $set: { lastCrime: crimeTime } },
+                        {
+                            $inc: { balance: -lost, 'crimeRecord.totalCrimes': 1 },
+                            $set: { lastCrime: crimeTime },
+                        },
                         { new: true }
                     );
 
-                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: updated.balance, note: `${crime.name} (critical failure, ${Math.round(lossRate * 100)}% seized)` });
+                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: updated.balance, note: `${crime.name} (critical failure, ${Math.round(lossRate * 100)}% seized, ${execMethod.id})` });
 
                     const critNarrative = getCrimeFlavorText(crime.name, 'fail')
                         .replace('{fine}', lost.toLocaleString())
@@ -253,41 +374,57 @@ module.exports = {
                         .setColor('#8B0000')
                         .setTitle(`💀 ${crime.displayName} — Everything Went Wrong`)
                         .setDescription(critDesc)
-                        .setFooter({ text: 'Cooldown: 1.5h • Purchase a Lifesaver from /shop to protect against critical failures' })
+                        .setFooter({ text: `${execMethod.label} · Cooldown: 1.5h · Purchase a Lifesaver from /shop to protect against critical failures` })
                         .setTimestamp();
                 } else {
                     const undergroundActive = isDistrictActive(guildSettings, 'underground');
                     const rawFine = Math.floor(crime.minFine + Math.random() * (crime.maxFine - crime.minFine));
                     const maxFine = Math.max(crime.minFine, Math.floor(user.balance * 0.20));
                     let fine = Math.min(rawFine, maxFine);
+                    fine = Math.round(fine * execMethod.fineMult);
                     if (undergroundActive) fine = Math.floor(fine * 0.85);
                     const paid = Math.min(fine, user.balance);
+
+                    const wantedUntil = execMethod.wantedMs > 0
+                        ? new Date(crimeTime.getTime() + execMethod.wantedMs)
+                        : null;
+                    const setFields = { lastCrime: crimeTime };
+                    if (wantedUntil) setFields.wantedUntil = wantedUntil;
+
                     const updated = await User.findOneAndUpdate(
                         userFilter,
-                        { $inc: { balance: -paid }, $set: { lastCrime: crimeTime } },
+                        {
+                            $inc: { balance: -paid, 'crimeRecord.totalCrimes': 1 },
+                            $set: setFields,
+                        },
                         { new: true }
                     );
 
-                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_fine', amount: -paid, balance: updated.balance, note: `${crime.name} (busted)` });
+                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_fine', amount: -paid, balance: updated.balance, note: `${crime.name} (busted, ${execMethod.id})` });
 
                     const bustNarrative = getCrimeFlavorText(crime.name, 'fail')
                         .replace('{fine}', paid.toLocaleString())
                         .replace('{amount}', paid.toLocaleString());
                     const undergroundStr = undergroundActive ? '\n> 🌑 *Underground district active — fine reduced by 15%!*' : '';
+                    const wantedHours = execMethod.wantedMs / 3_600_000;
+                    const wantedStr = wantedUntil
+                        ? `\n> 🔥 *${wantedHours % 1 === 0 ? wantedHours : wantedHours.toFixed(1)}h heat from ${execMethod.label} — wanted until <t:${Math.floor(wantedUntil.getTime() / 1000)}:R>*`
+                        : '';
+
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')
                         .setTitle(`${crime.emoji} ${crime.displayName} — Busted`)
-                        .setDescription(`${bustNarrative}\n\n> *${flavorText}*${undergroundStr}`)
+                        .setDescription(`${bustNarrative}\n\n> *${flavorText}*${undergroundStr}${wantedStr}`)
                         .addFields(
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
                             { name: 'Balance',   value: `${currency}${updated.balance.toLocaleString()}`, inline: true }
                         )
-                        .setFooter({ text: 'Cooldown: 1.5h' })
+                        .setFooter({ text: `${execMethod.label} · Cooldown: 1.5h` })
                         .setTimestamp();
                 }
             }
 
-            // Suspense delay between selection and result reveal
+            // Suspense delay between execution method selection and result reveal
             const suspenseEmbed = new EmbedBuilder()
                 .setColor('#f39c12')
                 .setTitle(`${crime.emoji} Running the Job…`)
