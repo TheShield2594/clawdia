@@ -3,21 +3,24 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
-const { CRAFT_RECIPES: HUNT_RECIPES, CONSUMABLES: HUNT_CONSUMABLES, MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../data/huntData');
-const { CRAFT_RECIPES: MINE_RECIPES, CONSUMABLES: MINE_CONSUMABLES, MATERIAL_NAMES: MINE_MATERIAL_NAMES } = require('../../data/mineData');
+const { CRAFT_RECIPES: HUNT_RECIPES, CONSUMABLES: HUNT_CONSUMABLES, MATERIAL_NAMES: HUNT_MAT_NAMES } = require('../../data/huntData');
+const { CRAFT_RECIPES: MINE_RECIPES, CONSUMABLES: MINE_CONSUMABLES, MATERIAL_NAMES: MINE_MAT_NAMES } = require('../../data/mineData');
+const { FISH_CRAFT_RECIPES, CONSUMABLES: FISH_CONSUMABLES, MATERIAL_NAMES: FISH_MAT_NAMES } = require('../../data/fishData');
+const { CROSS_CRAFT_RECIPES, CROSS_CONSUMABLES } = require('../../data/crossSystemData');
 const { ensureHuntData } = require('../../services/huntService');
 const { ensureMineData } = require('../../services/mineService');
+const { ensureFishingData } = require('../../services/fishService');
 
-const ALL_RECIPES     = { ...HUNT_RECIPES, ...MINE_RECIPES };
-const ALL_MAT_NAMES   = { ...HUNT_MATERIAL_NAMES, ...MINE_MATERIAL_NAMES };
-const RECIPE_CHOICES  = Object.values(ALL_RECIPES).map(r => ({ name: r.name, value: r.id }));
+const ALL_RECIPES   = { ...HUNT_RECIPES, ...MINE_RECIPES, ...FISH_CRAFT_RECIPES, ...CROSS_CRAFT_RECIPES };
+const ALL_MAT_NAMES = { ...HUNT_MAT_NAMES, ...MINE_MAT_NAMES, ...FISH_MAT_NAMES };
+const RECIPE_CHOICES = Object.values(ALL_RECIPES).map(r => ({ name: r.name, value: r.id }));
 
 module.exports = {
     cooldown: 3,
 
     data: new SlashCommandBuilder()
         .setName('craft')
-        .setDescription('Craft items from hunting or mining materials')
+        .setDescription('Craft items from hunting, fishing, or mining materials')
         .addSubcommand(sub =>
             sub.setName('list')
                 .setDescription('Browse all available crafting recipes'))
@@ -45,56 +48,87 @@ module.exports = {
         );
         ensureHuntData(user);
         ensureMineData(user);
+        ensureFishingData(user);
         const h = user.hunt;
         const m = user.mining;
+        const f = user.fishing;
 
-        // Helper: get material qty from either skill
-        function getMat(matId) {
-            return (h.materials[matId] ?? 0) + (m.materials[matId] ?? 0);
-        }
-        // Helper: consume material from hunt first, then mine
-        function consumeMat(matId, qty) {
-            const huntHas = h.materials[matId] ?? 0;
-            const fromHunt = Math.min(huntHas, qty);
-            h.materials[matId] = huntHas - fromHunt;
-            const fromMine = qty - fromHunt;
-            if (fromMine > 0) m.materials[matId] = (m.materials[matId] ?? 0) - fromMine;
+        // Get material quantity from the correct pool (source-aware)
+        function getMat(matId, source) {
+            if (source === 'hunt')  return h.materials[matId] ?? 0;
+            if (source === 'mine')  return m.materials[matId] ?? 0;
+            if (source === 'fish')  return f.materials[matId] ?? 0;
+            // No source: check hunt then mine then fish
+            return (h.materials[matId] ?? 0) + (m.materials[matId] ?? 0) + (f.materials[matId] ?? 0);
         }
 
-        // ── LIST ───────────────────────────────────────────────────────────
+        // Consume materials from the correct pool
+        function consumeMat(matId, qty, source) {
+            if (source === 'hunt') {
+                h.materials[matId] = Math.max(0, (h.materials[matId] ?? 0) - qty);
+                return;
+            }
+            if (source === 'mine') {
+                m.materials[matId] = Math.max(0, (m.materials[matId] ?? 0) - qty);
+                return;
+            }
+            if (source === 'fish') {
+                f.materials[matId] = Math.max(0, (f.materials[matId] ?? 0) - qty);
+                return;
+            }
+            // No source: drain hunt first, then mine, then fish
+            const fromHunt = Math.min(h.materials[matId] ?? 0, qty);
+            h.materials[matId] = (h.materials[matId] ?? 0) - fromHunt;
+            qty -= fromHunt;
+            if (qty > 0) {
+                const fromMine = Math.min(m.materials[matId] ?? 0, qty);
+                m.materials[matId] = (m.materials[matId] ?? 0) - fromMine;
+                qty -= fromMine;
+            }
+            if (qty > 0) {
+                f.materials[matId] = Math.max(0, (f.materials[matId] ?? 0) - qty);
+            }
+        }
+
+        function matLabel(ing) {
+            return ALL_MAT_NAMES[ing.material] ?? ing.material;
+        }
+
+        // ── LIST ────────────────────────────────────────────────────────────
         if (sub === 'list') {
-            const huntLines = Object.values(HUNT_RECIPES).map(r => {
-                const ingredientStr = r.ingredients
-                    .map(ing => `${ALL_MAT_NAMES[ing.material] ?? ing.material} ×${ing.qty}`)
-                    .join(', ');
-                const canCraft  = r.ingredients.every(ing => getMat(ing.material) >= ing.qty);
-                const uniqueDone = r.unique && r.output.id === 'luckyPaw' && h.luckyPaw;
-                const status = uniqueDone ? '✅ **[OWNED]**' : canCraft ? '✅' : '❌';
-                return `${status} **${r.emoji} ${r.name}**\n> ${r.description}\n> Requires: ${ingredientStr}`;
-            });
+            function recipeLines(recipes, ownedChecks = {}) {
+                return Object.values(recipes).map(r => {
+                    const ingredientStr = r.ingredients
+                        .map(ing => `${matLabel(ing)} ×${ing.qty}${ing.source ? ` *(${ing.source})*` : ''}`)
+                        .join(', ');
+                    const canCraft = r.ingredients.every(ing => getMat(ing.material, ing.source) >= ing.qty);
+                    const ownedId  = r.output?.id;
+                    const isOwned  = r.unique && ownedChecks[ownedId];
+                    const status   = isOwned ? '✅ **[OWNED]**' : canCraft ? '✅' : '❌';
+                    return `${status} **${r.emoji} ${r.name}**\n> ${r.description}\n> Requires: ${ingredientStr}`;
+                });
+            }
 
-            const mineLines = Object.values(MINE_RECIPES).map(r => {
-                const ingredientStr = r.ingredients
-                    .map(ing => `${ALL_MAT_NAMES[ing.material] ?? ing.material} ×${ing.qty}`)
-                    .join(', ');
-                const canCraft = r.ingredients.every(ing => getMat(ing.material) >= ing.qty);
-                const status = canCraft ? '✅' : '❌';
-                return `${status} **${r.emoji} ${r.name}**\n> ${r.description}\n> Requires: ${ingredientStr}`;
-            });
+            const huntLines  = recipeLines(HUNT_RECIPES,  { luckyPaw: h.luckyPaw });
+            const mineLines  = recipeLines(MINE_RECIPES);
+            const fishLines  = recipeLines(FISH_CRAFT_RECIPES, { luckyHook: f.luckyHook });
+            const crossLines = recipeLines(CROSS_CRAFT_RECIPES, { precisionScope: h.precisionScope });
 
             const embed = new EmbedBuilder()
                 .setColor('#1abc9c')
                 .setTitle('🔨 Crafting Recipes')
                 .addFields(
-                    { name: '🏹 Hunting Recipes', value: huntLines.join('\n\n') || 'None', inline: false },
-                    { name: '⛏️ Mining Recipes',  value: mineLines.join('\n\n') || 'None', inline: false }
+                    { name: '🏹 Hunting Recipes',        value: huntLines.join('\n\n')  || 'None', inline: false },
+                    { name: '⛏️ Mining Recipes',          value: mineLines.join('\n\n')  || 'None', inline: false },
+                    { name: '🎣 Fishing Recipes',         value: fishLines.join('\n\n')  || 'None', inline: false },
+                    { name: '🔗 Cross-System Recipes',    value: crossLines.join('\n\n') || 'None', inline: false }
                 )
-                .setFooter({ text: '✅ = you can craft now  •  Use /craft make <recipe> to craft' });
+                .setFooter({ text: '✅ = can craft now  •  /craft make <recipe>' });
 
             return interaction.reply({ embeds: [embed] });
         }
 
-        // ── MAKE ───────────────────────────────────────────────────────────
+        // ── MAKE ────────────────────────────────────────────────────────────
         if (sub === 'make') {
             const recipeId = interaction.options.getString('recipe');
             const recipe   = ALL_RECIPES[recipeId];
@@ -106,45 +140,47 @@ module.exports = {
                 });
             }
 
-            // Unique upgrade guard (hunt)
-            if (recipe.unique && recipe.output.id === 'luckyPaw' && h.luckyPaw) {
-                return interaction.reply({
-                    content: 'You already have the **🐾 Lucky Paw** upgrade!',
-                    ephemeral: true
-                });
+            // Unique guard
+            if (recipe.unique) {
+                if (recipe.output.id === 'luckyPaw'       && h.luckyPaw)       return interaction.reply({ content: 'You already have the **🐾 Lucky Paw** upgrade!',       ephemeral: true });
+                if (recipe.output.id === 'luckyHook'      && f.luckyHook)      return interaction.reply({ content: 'You already have the **🎣 Lucky Hook** upgrade!',      ephemeral: true });
+                if (recipe.output.id === 'precisionScope' && h.precisionScope) return interaction.reply({ content: 'You already have the **🔭 Precision Scope** upgrade!', ephemeral: true });
             }
 
-            // Stack limit guard for hunt consumables
+            // Stack limit guards
             if (recipe.output.type === 'consumable') {
-                const def          = HUNT_CONSUMABLES[recipe.output.id];
-                const currentStock = h.consumables[recipe.output.id] ?? 0;
-                if (def && currentStock + recipe.output.qty > def.maxStack) {
-                    return interaction.reply({
-                        content: `You can only hold **${def.maxStack}× ${def.name}** (you have ${currentStock}). ` +
-                                 `Free up space before crafting more.`,
-                        ephemeral: true
-                    });
+                const def = HUNT_CONSUMABLES[recipe.output.id];
+                const cur = h.consumables[recipe.output.id] ?? 0;
+                if (def && cur + recipe.output.qty > def.maxStack) {
+                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, ephemeral: true });
                 }
             }
-
-            // Stack limit guard for mine consumables
             if (recipe.output.type === 'mine_consumable') {
-                const def          = MINE_CONSUMABLES[recipe.output.id];
-                const currentStock = m.consumables[recipe.output.id] ?? 0;
-                if (def && currentStock + recipe.output.qty > def.maxStack) {
-                    return interaction.reply({
-                        content: `You can only hold **${def.maxStack}× ${def.name}** (you have ${currentStock}). ` +
-                                 `Free up space before crafting more.`,
-                        ephemeral: true
-                    });
+                const def = MINE_CONSUMABLES[recipe.output.id];
+                const cur = m.consumables[recipe.output.id] ?? 0;
+                if (def && cur + recipe.output.qty > def.maxStack) {
+                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, ephemeral: true });
+                }
+            }
+            if (recipe.output.type === 'fish_consumable' || recipe.output.type === 'dual_stamina') {
+                const def = FISH_CONSUMABLES[recipe.output.id] ?? CROSS_CONSUMABLES[recipe.output.id];
+                const cur = f.consumables[recipe.output.id] ?? 0;
+                if (def?.maxStack && cur + recipe.output.qty > def.maxStack) {
+                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, ephemeral: true });
+                }
+            }
+            if (recipe.output.type === 'mine_immunity') {
+                const def = CROSS_CONSUMABLES[recipe.output.id];
+                const cur = m.consumables[recipe.output.id] ?? 0;
+                if (def?.maxStack && cur + recipe.output.qty > def.maxStack) {
+                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, ephemeral: true });
                 }
             }
 
-            // Check ingredients across both material pools
+            // Check ingredients
             const missing = recipe.ingredients
-                .filter(ing => getMat(ing.material) < ing.qty)
-                .map(ing => `**${ALL_MAT_NAMES[ing.material] ?? ing.material}** (need ${ing.qty}, have ${getMat(ing.material)})`);
-
+                .filter(ing => getMat(ing.material, ing.source) < ing.qty)
+                .map(ing => `**${matLabel(ing)}** (need ${ing.qty}, have ${getMat(ing.material, ing.source)})`);
             if (missing.length) {
                 return interaction.reply({
                     content: `You are missing the following materials:\n${missing.join('\n')}`,
@@ -154,55 +190,93 @@ module.exports = {
 
             // Consume materials
             for (const ing of recipe.ingredients) {
-                consumeMat(ing.material, ing.qty);
+                consumeMat(ing.material, ing.qty, ing.source);
             }
 
             // Apply output
             let outputDesc = '';
-            if (recipe.output.type === 'consumable') {
-                h.consumables[recipe.output.id] = (h.consumables[recipe.output.id] ?? 0) + recipe.output.qty;
-                const def = HUNT_CONSUMABLES[recipe.output.id];
-                outputDesc = `${def?.emoji ?? '📦'} **${recipe.output.qty}× ${def?.name ?? recipe.output.id}**`;
-            } else if (recipe.output.type === 'ammo') {
-                h.ammo[recipe.output.id] = (h.ammo[recipe.output.id] ?? 0) + recipe.output.qty;
-                outputDesc = `🔶 **${recipe.output.qty}× ${recipe.output.id.replace(/_/g, ' ')}** rounds`;
-            } else if (recipe.output.type === 'permanent') {
-                if (recipe.output.id === 'luckyPaw') {
+            const out = recipe.output;
+
+            if (out.type === 'consumable') {
+                h.consumables[out.id] = (h.consumables[out.id] ?? 0) + out.qty;
+                const def = HUNT_CONSUMABLES[out.id];
+                outputDesc = `${def?.emoji ?? '📦'} **${out.qty}× ${def?.name ?? out.id}**`;
+
+            } else if (out.type === 'ammo') {
+                h.ammo[out.id] = (h.ammo[out.id] ?? 0) + out.qty;
+                outputDesc = `🔶 **${out.qty}× ${out.id.replace(/_/g, ' ')}** rounds`;
+
+            } else if (out.type === 'permanent') {
+                if (out.id === 'luckyPaw') {
                     h.luckyPaw = true;
                     outputDesc = '🐾 **Lucky Paw** — permanently +1% critical hit chance!';
                 }
-            } else if (recipe.output.type === 'mine_consumable') {
-                // Guard: can't craft a mine_lock while one is already active
-                if (recipe.output.id === 'mine_lock' && m.mineLockActive) {
-                    return interaction.reply({
-                        content: 'Your mine already has an active **Mine Lock**. Use it up before crafting another.',
-                        ephemeral: true
-                    });
+
+            } else if (out.type === 'hunt_permanent') {
+                if (out.id === 'precisionScope') {
+                    h.precisionScope = true;
+                    outputDesc = '🔭 **Precision Scope** — permanently +2% rarity boost on all hunts!';
                 }
-                m.consumables[recipe.output.id] = (m.consumables[recipe.output.id] ?? 0) + recipe.output.qty;
-                const def = MINE_CONSUMABLES[recipe.output.id];
-                outputDesc = `${def?.emoji ?? '📦'} **${recipe.output.qty}× ${def?.name ?? recipe.output.id}**`;
-            } else if (recipe.output.type === 'mine_charge') {
-                m.charges[recipe.output.id] = (m.charges[recipe.output.id] ?? 0) + recipe.output.qty;
-                outputDesc = `💥 **${recipe.output.qty}× ${recipe.output.id.replace(/_/g, ' ')}** (mine charge)`;
+
+            } else if (out.type === 'mine_consumable') {
+                if (out.id === 'mine_lock' && m.mineLockActive) {
+                    return interaction.reply({ content: 'Your mine already has an active **Mine Lock**.', ephemeral: true });
+                }
+                m.consumables[out.id] = (m.consumables[out.id] ?? 0) + out.qty;
+                const def = MINE_CONSUMABLES[out.id];
+                outputDesc = `${def?.emoji ?? '📦'} **${out.qty}× ${def?.name ?? out.id}**`;
+
+            } else if (out.type === 'mine_charge') {
+                m.charges[out.id] = (m.charges[out.id] ?? 0) + out.qty;
+                outputDesc = `💥 **${out.qty}× ${out.id.replace(/_/g, ' ')}** (mine charge)`;
+
+            } else if (out.type === 'mine_immunity') {
+                m.consumables[out.id] = (m.consumables[out.id] ?? 0) + out.qty;
+                const def = CROSS_CONSUMABLES[out.id];
+                outputDesc = `${def?.emoji ?? '🪤'} **${out.qty}× ${def?.name ?? out.id}**`;
+
+            } else if (out.type === 'fish_consumable') {
+                f.consumables[out.id] = (f.consumables[out.id] ?? 0) + out.qty;
+                const def = FISH_CONSUMABLES[out.id] ?? CROSS_CONSUMABLES[out.id];
+                outputDesc = `${def?.emoji ?? '📦'} **${out.qty}× ${def?.name ?? out.id}**`;
+
+            } else if (out.type === 'dual_stamina') {
+                f.consumables[out.id] = (f.consumables[out.id] ?? 0) + out.qty;
+                const def = FISH_CONSUMABLES[out.id];
+                outputDesc = `${def?.emoji ?? '⚗️'} **${out.qty}× ${def?.name ?? out.id}** (restores stamina in fishing AND hunting)`;
+
+            } else if (out.type === 'fish_permanent') {
+                if (out.id === 'luckyHook') {
+                    f.luckyHook = true;
+                    outputDesc = '🎣 **Lucky Hook** — permanently +1% critical catch chance!';
+                }
             }
 
             user.markModified('hunt');
             user.markModified('mining');
+            user.markModified('fishing');
             await user.save();
 
             const usedLines = recipe.ingredients.map(ing => {
-                const remaining = getMat(ing.material);
-                return `• ${ALL_MAT_NAMES[ing.material] ?? ing.material} ×${ing.qty}  (remaining: ${remaining})`;
+                const remaining = getMat(ing.material, ing.source);
+                const srcLabel  = ing.source ? ` *(${ing.source})*` : '';
+                return `• ${matLabel(ing)}${srcLabel} ×${ing.qty}  (remaining: ${remaining})`;
             }).join('\n');
 
-            const isMineRecipe = Object.hasOwn(MINE_RECIPES, recipeId);
+            const isCross = Object.hasOwn(CROSS_CRAFT_RECIPES, recipeId);
+            const isFish  = Object.hasOwn(FISH_CRAFT_RECIPES, recipeId);
+            const isMine  = Object.hasOwn(MINE_RECIPES, recipeId);
+            const footer  = isCross ? 'Cross-system item — check /fish inv or /mine inv to use it'
+                          : isFish  ? 'Use /fish inv to view your fishing stock'
+                          : isMine  ? 'Use /mine inv view to check mining stock'
+                          : 'Use /hunt inv materials to check your remaining stock';
+
             const embed = new EmbedBuilder()
                 .setColor('#2ecc71')
                 .setTitle(`${recipe.emoji} Crafted: ${recipe.name}`)
                 .setDescription(`You crafted ${outputDesc}!`)
                 .addFields({ name: 'Materials Consumed', value: usedLines, inline: false })
-                .setFooter({ text: isMineRecipe ? 'Use /mine inv view to check mining stock' : 'Use /hunt inv materials to check your remaining stock' })
+                .setFooter({ text: footer })
                 .setTimestamp();
 
             return interaction.reply({ embeds: [embed] });

@@ -46,6 +46,8 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
+const { ensureQuests, onMine, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { getActiveSynergies } = require('../../services/synergyService');
 
 const WILDERNESS_YIELD_BONUS = 0.10;
 
@@ -561,6 +563,9 @@ async function handleDig(interaction) {
     // Update the persistent mine map with this dig's result
     updateMineMap(user, result);
 
+    await ensureQuests(user, guildSettings);
+    const { completed: questsDone, nearComplete: questsNear } = await onMine(user, guildSettings);
+
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
     try {
@@ -568,6 +573,8 @@ async function handleDig(interaction) {
         if (mineAchievements.length) {
             announceAchievements(interaction.client, guildSettings, user, interaction.member, mineAchievements).catch(() => null);
         }
+        notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+        notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
     } catch (err) {
         if (err.name === 'VersionError') {
             return interaction.editReply({ content: 'A simultaneous request conflicted with your mine. Please try `/mine dig` again.' });
@@ -780,6 +787,22 @@ async function handleProfile(interaction) {
         return d ? `${d.emoji} ${d.name}` : id;
     }).join('\n');
     embed.addFields({ name: '🗺️ Unlocked Depths', value: depthList || 'Surface Quarry only', inline: true });
+
+    // Cross-system synergies
+    const activeSynergies = getActiveSynergies(userData);
+    if (activeSynergies.length > 0) {
+        embed.addFields({
+            name: '🔗 Active Synergies',
+            value: activeSynergies.map(s => `${s.emoji} **${s.name}** — ${s.description}`).join('\n'),
+            inline: false
+        });
+    } else if (m.level >= 25) {
+        embed.addFields({
+            name: '🔗 Synergies',
+            value: 'Reach combined level milestones across Hunt, Fish & Mine to unlock cross-system bonuses!',
+            inline: false
+        });
+    }
 
     if (prestige === 0 && m.level >= 50) {
         embed.setFooter({ text: 'Max level reached!' });

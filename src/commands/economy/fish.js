@@ -56,6 +56,7 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
+const { ensureQuests, onFish, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 
 // Rarity score for hourly fish competition (rarest catch wins)
 const WILDERNESS_YIELD_BONUS = 0.10;
@@ -656,6 +657,8 @@ async function handleCast(interaction) {
     if (result.success && result.finalPayout > user.fishing.bestPayout) user.fishing.bestPayout = result.finalPayout;
 
     updateFishQuestProgress(user, result, locationId);
+    await ensureQuests(user, guildSettings);
+    const { completed: questsDone, nearComplete: questsNear } = await onFish(user, guildSettings);
 
     const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
@@ -664,6 +667,8 @@ async function handleCast(interaction) {
         if (fishAchievements.length) {
             announceAchievements(interaction.client, guildSettings, user, interaction.member, fishAchievements).catch(() => null);
         }
+        notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+        notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
     } catch (err) {
         if (err.name === 'VersionError') {
             return interaction.editReply({ content: 'A simultaneous request conflicted. Please try `/fish cast` again.' });
