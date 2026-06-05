@@ -53,7 +53,8 @@ const userSchema = new Schema({
         claimedMilestones: [{ type: Number }],
         freezes: { type: Number, default: 0, min: 0, max: 2 },
         pendingRestore: { type: Number, default: 0 },  // broken streak count awaiting freeze decision
-        claimedDropMilestones: [{ type: Number }]       // streak days where guaranteed drop was given
+        claimedDropMilestones: [{ type: Number }],      // streak days where guaranteed drop was given
+        revivalToken: { type: Boolean, default: false } // ultra-rare item that restores a broken streak
     },
 
     // Quest progress: each entry tracks one quest instance
