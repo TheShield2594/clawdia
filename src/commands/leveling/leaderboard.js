@@ -31,12 +31,12 @@ module.exports = {
                 const sortField = type === 'streaks'
                     ? { 'streak.current': -1 }
                     : { 'streak.longest': -1 };
-                users = await User.find({ guildId: interaction.guild.id }).sort(sortField).limit(10);
+                users = await User.find({ guildId: interaction.guild.id, ...(type === 'streaks' ? { 'streak.current': { $gt: 0 } } : {}) }).sort(sortField).limit(10);
                 title = type === 'streaks'
-                    ? '🔥 Streak Leaderboard'
+                    ? '🔥 Daily Streak Leaderboard'
                     : '🏆 All-Time Streak Records';
                 descriptionHeader = type === 'streaks'
-                    ? 'Top 10 by Current Active Streak'
+                    ? 'Top 10 Active Streaks'
                     : 'Top 10 by Longest Streak Ever';
             } else if (type === 'duels') {
                 users = await User.find({
@@ -89,8 +89,11 @@ module.exports = {
                     const topVal = type === 'streaks'
                         ? (topEntry?.streak?.current ?? 0)
                         : (topEntry?.streak?.longest ?? 0);
+                    const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━━';
                     if (callerRank > 10 && topVal > 0) {
-                        callerRankLine = `\n\nYour rank: **#${callerRank}** — ${callerVal} day${callerVal !== 1 ? 's' : ''} 🔥`;
+                        callerRankLine = `\n${div}\n📍 You: **#${callerRank}** — 🔥 ${callerVal} day${callerVal !== 1 ? 's' : ''}`;
+                    } else if (callerRank <= 10) {
+                        callerRankLine = `\n${div}\n📍 You: **#${callerRank}** — 🔥 ${callerVal} day${callerVal !== 1 ? 's' : ''}`;
                     }
                 }
             }
@@ -109,8 +112,16 @@ module.exports = {
                     const total = user.balance + user.bank;
                     description += `${medal} ${discordUser.tag} — ${total.toLocaleString()} coins\n`;
                 } else if (type === 'streaks') {
-                    const days = user.streak?.current ?? 0;
-                    description += `${medal} ${discordUser.tag} — 🔥 ${days} day${days !== 1 ? 's' : ''}\n`;
+                    const days    = user.streak?.current ?? 0;
+                    const freezes = user.streak?.freezes ?? 0;
+                    const milestones = [100, 30, 7];
+                    const topMilestone = milestones.find(m => days >= m);
+                    const badges = [
+                        topMilestone === 100 ? '⭐ 100-day milestone achieved' : topMilestone === 30 ? '⭐ 30-day milestone achieved' : topMilestone === 7 ? '⭐ 7-day milestone achieved' : null,
+                        freezes > 0 ? `🧊 ${freezes} freeze${freezes !== 1 ? 's' : ''} banked` : null,
+                        (user.streak?.revivalToken) ? '💫 Revival Token' : null,
+                    ].filter(Boolean).join('  ');
+                    description += `${medal} ${discordUser.tag} — 🔥 ${days} day${days !== 1 ? 's' : ''}${badges ? `  ${badges}` : ''}\n`;
                 } else if (type === 'streaks_longest') {
                     const days = user.streak?.longest ?? 0;
                     description += `${medal} ${discordUser.tag} — 🔥 ${days} day${days !== 1 ? 's' : ''}\n`;
