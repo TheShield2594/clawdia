@@ -15,6 +15,7 @@ const {
 } = require('../data/huntData');
 const { hasEffect, consumeEffect } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
+const { getHuntSynergyStaminaBonus } = require('./synergyService');
 
 // Zones where a critical failure can destroy your weapon (death event)
 const DANGEROUS_ZONE_IDS = new Set(['desert_wastes', 'arctic_tundra', 'murky_swamp', 'legendary_peaks']);
@@ -56,6 +57,7 @@ function ensureHuntData(user) {
     if (h.activeFocus          == null) h.activeFocus          = false;
     if (h.activeXpScroll       == null) h.activeXpScroll       = false;
     if (h.luckyPaw             == null) h.luckyPaw             = false;
+    if (h.precisionScope       == null) h.precisionScope       = false;
     if (h.totalHunts           == null) h.totalHunts           = 0;
     if (h.successfulHunts      == null) h.successfulHunts      = 0;
     if (h.totalEarned          == null) h.totalEarned          = 0;
@@ -80,7 +82,8 @@ function ensureHuntData(user) {
 function getMaxStamina(user) {
     const prestige = user.hunt?.prestige ?? 0;
     const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
-    return LIMITS.MAX_STAMINA_BASE + bonus;
+    const synergyBonus = getHuntSynergyStaminaBonus(user);
+    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus;
 }
 
 /**
@@ -337,6 +340,15 @@ function rollTier(user, zone) {
         const shift = w.common * presBoost;
         w.common = Math.max(0, w.common - shift);
         w.rare  += shift;
+    }
+
+    // Precision Scope permanent upgrade (+2% rarity boost)
+    if (h.precisionScope) {
+        const scopeShift = w.common * 0.02;
+        w.common = Math.max(0, w.common - scopeShift);
+        w.rare  += scopeShift * 0.6;
+        w.epic  += scopeShift * 0.3;
+        w.legendary += scopeShift * 0.1;
     }
 
     // Pity guarantee: at sinceRare threshold, force rare+ by zeroing out common/uncommon

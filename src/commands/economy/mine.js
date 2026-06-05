@@ -46,14 +46,22 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
+const { ensureQuests, onMine, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { getActiveSynergies } = require('../../services/synergyService');
+const { CROSS_CONSUMABLES } = require('../../data/crossSystemData');
 
 const WILDERNESS_YIELD_BONUS = 0.10;
+
+// Resolve a consumable's display metadata from the mine shop or cross-system registry.
+function resolveConsumableDef(id) {
+    return CONSUMABLES[id] ?? CROSS_CONSUMABLES[id] ?? null;
+}
 
 const DEPTH_CHOICES    = DEPTH_LIST.map(d => ({ name: d.name, value: d.id }));
 const PICKAXE_CHOICES  = PICKAXE_TIERS.map(p => ({ name: `${p.emoji} ${p.name} — ${p.cost.toLocaleString()} coins`, value: p.slug }));
 const ALL_ITEMS        = [...Object.values(CONSUMABLES), ...BLAST_PACKS];
 const ITEM_CHOICES     = ALL_ITEMS.map(i => ({ name: `${i.emoji ?? ''} ${i.name} — ${i.cost} coins`.trim(), value: i.id }));
-const ACTIVATABLE      = ['ore_magnet', 'premium_magnet', 'miners_lamp', 'miners_instinct', 'xp_scroll', 'energy_tonic'];
+const ACTIVATABLE      = ['ore_magnet', 'premium_magnet', 'miners_lamp', 'miners_instinct', 'xp_scroll', 'energy_tonic', 'reinforced_trap'];
 const UPGRADE_CHOICES  = Object.values(PICKAXE_UPGRADES).map(u => ({ name: `${u.emoji} ${u.name} — ${u.description}`, value: u.id }));
 const UNLOCK_CHOICES   = DEPTH_LIST.filter(d => !d.defaultUnlocked).map(d => ({ name: `${d.emoji} ${d.name}`, value: d.id }));
 
@@ -174,7 +182,7 @@ module.exports = {
                             o.setName('item')
                                 .setDescription('Consumable to activate')
                                 .setRequired(true)
-                                .addChoices(...ACTIVATABLE.map(id => ({ name: CONSUMABLES[id].name, value: id })))))
+                                .addChoices(...ACTIVATABLE.map(id => ({ name: resolveConsumableDef(id)?.name ?? id, value: id })))))
                 .addSubcommand(sub =>
                     sub.setName('repair')
                         .setDescription('Repair your equipped pickaxe at the shop or use a repair kit')
@@ -561,6 +569,9 @@ async function handleDig(interaction) {
     // Update the persistent mine map with this dig's result
     updateMineMap(user, result);
 
+    await ensureQuests(user, guildSettings);
+    const { completed: questsDone, nearComplete: questsNear } = await onMine(user, guildSettings);
+
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
     try {
@@ -568,6 +579,8 @@ async function handleDig(interaction) {
         if (mineAchievements.length) {
             announceAchievements(interaction.client, guildSettings, user, interaction.member, mineAchievements).catch(() => null);
         }
+        notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+        notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
     } catch (err) {
         if (err.name === 'VersionError') {
             return interaction.editReply({ content: 'A simultaneous request conflicted with your mine. Please try `/mine dig` again.' });
@@ -780,6 +793,22 @@ async function handleProfile(interaction) {
         return d ? `${d.emoji} ${d.name}` : id;
     }).join('\n');
     embed.addFields({ name: '🗺️ Unlocked Depths', value: depthList || 'Surface Quarry only', inline: true });
+
+    // Cross-system synergies
+    const activeSynergies = getActiveSynergies(userData);
+    if (activeSynergies.length > 0) {
+        embed.addFields({
+            name: '🔗 Active Synergies',
+            value: activeSynergies.map(s => `${s.emoji} **${s.name}** — ${s.description}`).join('\n'),
+            inline: false
+        });
+    } else if (m.level >= 25) {
+        embed.addFields({
+            name: '🔗 Synergies',
+            value: 'Reach combined level milestones across Hunt, Fish & Mine to unlock cross-system bonuses!',
+            inline: false
+        });
+    }
 
     if (prestige === 0 && m.level >= 50) {
         embed.setFooter({ text: 'Max level reached!' });
@@ -1297,13 +1326,13 @@ async function handleShop(interaction, sub) {
 
         await user.save();
 
-        const def = CONSUMABLES[itemId];
+        const def = resolveConsumableDef(itemId);
         return interaction.reply({
             embeds: [
                 new EmbedBuilder()
                     .setColor('#2ecc71')
-                    .setTitle(`${def.emoji} ${def.name} Activated!`)
-                    .setDescription(def.description)
+                    .setTitle(`${def?.emoji ?? '✅'} ${def?.name ?? itemId} Activated!`)
+                    .setDescription(def?.description ?? 'Consumable activated.')
                     .setTimestamp()
             ]
         });
