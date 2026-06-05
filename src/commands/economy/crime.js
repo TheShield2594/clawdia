@@ -203,8 +203,12 @@ module.exports = {
         const execData = EXECUTION_METHODS[crime.name];
 
         const execMethodLines = execData.methods.map(m => {
-            const effectiveRate = m.wildcard ? null : Math.min(0.95, m.successRate + masteryBonus);
-            const rateStr = m.wildcard ? '15–75% wildcard' : `${Math.round(effectiveRate * 100)}%`;
+            const effectiveRate = m.wildcard
+                ? { min: Math.min(0.95, 0.15 + masteryBonus), max: Math.min(0.95, 0.75 + masteryBonus) }
+                : Math.min(0.95, m.successRate + masteryBonus);
+            const rateStr = m.wildcard
+                ? `${Math.round(effectiveRate.min * 100)}–${Math.round(effectiveRate.max * 100)}% wildcard`
+                : `${Math.round(effectiveRate * 100)}%`;
             const payoutStr = m.payoutMult !== 1.0 ? ` · ×${m.payoutMult} payout` : '';
             const wantedHours = m.wantedMs / 3_600_000;
             const wantedStr = m.wantedMs > 0
@@ -226,8 +230,12 @@ module.exports = {
 
         const execRow = new ActionRowBuilder().addComponents(
             execData.methods.map(m => {
-                const effectiveRate = m.wildcard ? null : Math.min(0.95, m.successRate + masteryBonus);
-                const rateStr = m.wildcard ? '15–75%' : `${Math.round(effectiveRate * 100)}%`;
+                const effectiveRate = m.wildcard
+                    ? { min: Math.min(0.95, 0.15 + masteryBonus), max: Math.min(0.95, 0.75 + masteryBonus) }
+                    : Math.min(0.95, m.successRate + masteryBonus);
+                const rateStr = m.wildcard
+                    ? `${Math.round(effectiveRate.min * 100)}–${Math.round(effectiveRate.max * 100)}%`
+                    : `${Math.round(effectiveRate * 100)}%`;
                 return new ButtonBuilder()
                     .setCustomId(`exec_${m.id}`)
                     .setLabel(`${m.label}  ·  ${rateStr}`)
@@ -251,7 +259,7 @@ module.exports = {
 
         // ── Resolve the crime ───────────────────────────────────────────────────
         let successChance = execMethod.wildcard
-            ? 0.15 + Math.random() * 0.60   // 15–75% random
+            ? Math.min(0.95, 0.15 + Math.random() * 0.60 + masteryBonus)
             : execMethod.successRate + masteryBonus;
 
         const luckyActive = hasEffect(user, 'lucky_charm');
@@ -320,17 +328,28 @@ module.exports = {
                 const flavorText = FINES[Math.floor(Math.random() * FINES.length)];
                 const isCriticalFailure = Math.random() < DEATH_RATE;
 
+                // Compute heat penalty once so all failure branches apply it consistently.
+                const wantedUntil = execMethod.wantedMs > 0
+                    ? new Date(crimeTime.getTime() + execMethod.wantedMs)
+                    : null;
+                const wantedHours = execMethod.wantedMs / 3_600_000;
+                const wantedStr = wantedUntil
+                    ? `\n> 🔥 *${wantedHours % 1 === 0 ? wantedHours : wantedHours.toFixed(1)}h heat from ${execMethod.label} — wanted until <t:${Math.floor(wantedUntil.getTime() / 1000)}:R>*`
+                    : '';
+
                 const lifesaverActive = hasEffect(user, 'lifesaver');
                 if (lifesaverActive) {
                     consumeEffect(user, 'lifesaver');
                     const wouldHaveLost = isCriticalFailure
                         ? Math.floor(user.balance * (DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN)))
                         : Math.floor((crime.minFine + Math.random() * (crime.maxFine - crime.minFine)) * execMethod.fineMult);
+                    const lifesaverSet = { lastCrime: crimeTime, activeEffects: user.activeEffects };
+                    if (wantedUntil) lifesaverSet.wantedUntil = wantedUntil;
                     await User.findOneAndUpdate(
                         userFilter,
                         {
                             $inc: { 'crimeRecord.totalCrimes': 1 },
-                            $set: { lastCrime: crimeTime, activeEffects: user.activeEffects },
+                            $set: lifesaverSet,
                         }
                     );
 
@@ -339,7 +358,7 @@ module.exports = {
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
                         .setTitle(`${crime.emoji} Saved by the Lifesaver!`)
-                        .setDescription(`Your attempt at **${crime.displayName}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver activated and saved you! No coins lost! (consumed)*`)
+                        .setDescription(`Your attempt at **${crime.displayName}** went sideways. ${flavorText}\n> 🛟 *Your Lifesaver activated and saved you! No coins lost! (consumed)*${wantedStr}`)
                         .addFields(
                             { name: isCriticalFailure ? 'Death Loss Absorbed' : 'Fine Absorbed', value: `${currency}${Math.min(wouldHaveLost, user.balance).toLocaleString()}`, inline: true },
                             { name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true }
@@ -349,11 +368,13 @@ module.exports = {
                 } else if (isCriticalFailure) {
                     const lossRate = DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
                     const lost = Math.floor(user.balance * lossRate);
+                    const critSet = { lastCrime: crimeTime };
+                    if (wantedUntil) critSet.wantedUntil = wantedUntil;
                     const updated = await User.findOneAndUpdate(
                         userFilter,
                         {
                             $inc: { balance: -lost, 'crimeRecord.totalCrimes': 1 },
-                            $set: { lastCrime: crimeTime },
+                            $set: critSet,
                         },
                         { new: true }
                     );
@@ -368,7 +389,8 @@ module.exports = {
                         `────────────────────\n` +
                         `  💸 Seized: ${currency}${lost.toLocaleString()} coins  (${Math.round(lossRate * 100)}% of wallet)\n` +
                         `  💰 Remaining: ${updated.balance.toLocaleString()} coins\n` +
-                        `────────────────────`;
+                        `────────────────────` +
+                        wantedStr;
 
                     embed = new EmbedBuilder()
                         .setColor('#8B0000')
@@ -385,9 +407,6 @@ module.exports = {
                     if (undergroundActive) fine = Math.floor(fine * 0.85);
                     const paid = Math.min(fine, user.balance);
 
-                    const wantedUntil = execMethod.wantedMs > 0
-                        ? new Date(crimeTime.getTime() + execMethod.wantedMs)
-                        : null;
                     const setFields = { lastCrime: crimeTime };
                     if (wantedUntil) setFields.wantedUntil = wantedUntil;
 
@@ -406,10 +425,6 @@ module.exports = {
                         .replace('{fine}', paid.toLocaleString())
                         .replace('{amount}', paid.toLocaleString());
                     const undergroundStr = undergroundActive ? '\n> 🌑 *Underground district active — fine reduced by 15%!*' : '';
-                    const wantedHours = execMethod.wantedMs / 3_600_000;
-                    const wantedStr = wantedUntil
-                        ? `\n> 🔥 *${wantedHours % 1 === 0 ? wantedHours : wantedHours.toFixed(1)}h heat from ${execMethod.label} — wanted until <t:${Math.floor(wantedUntil.getTime() / 1000)}:R>*`
-                        : '';
 
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')
