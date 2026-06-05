@@ -22,13 +22,13 @@ function hasSynergy(user, synergyId) {
 
 function getHuntSynergyStaminaBonus(user) {
     return hasSynergy(user, 'outdoorsman')
-        ? SYNERGIES.outdoorsman.bonuses.huntStamina
+        ? (SYNERGIES.outdoorsman?.bonuses?.huntStamina ?? 0)
         : 0;
 }
 
 function getFishSynergyStaminaBonus(user) {
     return hasSynergy(user, 'outdoorsman')
-        ? SYNERGIES.outdoorsman.bonuses.fishingStamina
+        ? (SYNERGIES.outdoorsman?.bonuses?.fishingStamina ?? 0)
         : 0;
 }
 
