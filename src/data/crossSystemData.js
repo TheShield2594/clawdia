@@ -91,6 +91,15 @@ const SYNERGIES = {
         flavor: 'The hunter\'s survival instinct prevents the worst underground disasters.',
         requirements: { mining: 50, hunt: 50 },
         bonuses: { mineIronWill: true }
+    },
+    deep_prospector: {
+        id: 'deep_prospector',
+        name: 'Deep Prospector',
+        emoji: '🪝',
+        description: '+1 max stamina in both Fishing and Mining',
+        flavor: 'Patience in the depths, whether water or stone, trains the same muscle.',
+        requirements: { fishing: 30, mining: 30 },
+        bonuses: { fishingStamina: 1, miningStamina: 1 }
     }
 };
 

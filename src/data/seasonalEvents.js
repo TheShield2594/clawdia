@@ -156,7 +156,48 @@ const SEASONAL_EVENTS = {
             { itemId: 'coin_booster_2x',     name: '2x Coin Booster',     emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour' },
         ],
     },
+
+    winter_hunt: {
+        id: 'winter_hunt',
+        name: 'The Winter Hunt',
+        emoji: '🏔️',
+        description: 'Hunt and fish in frozen waters! Arctic Tundra hunters may find rare materials while fishing at Misty Lake.',
+        color: '#6ab4f5',
+        currency: { id: 'frost_tokens', name: 'Frost Tokens', emoji: '🧊' },
+        xpMultiplier: 1.25,
+        coinMultiplier: 1.25,
+        crossSystem: { huntMaterialsFromFishing: 'lake' },
+        // Month range: January 1-14 (new year cross-system event)
+        autoStart: { month: 1, dayStart: 1, dayEnd: 14 },
+        milestones: [
+            { threshold: 50,   label: 'Common Loot Box',    emoji: '📦' },
+            { threshold: 150,  label: 'Uncommon Loot Box',  emoji: '📦' },
+            { threshold: 300,  label: 'Rare Loot Box',      emoji: '🎁' },
+            { threshold: 600,  label: 'Legendary Loot Box', emoji: '🎁' },
+            { threshold: 1000, label: 'Frost Crown',        emoji: '👑' },
+        ],
+        lootBox: {
+            itemId: 'winter_hunt_loot_box',
+            name: 'Winter Hunt Loot Box',
+            emoji: '🎁',
+            items: [
+                { itemId: 'frost_crown',      name: 'Frost Crown',      emoji: '👑', rarity: 'legendary', currencyValue: 60 },
+                { itemId: 'hunters_cloak',    name: "Hunter's Cloak",   emoji: '🧥', rarity: 'rare',      currencyValue: 25 },
+                { itemId: 'icicle_charm',     name: 'Icicle Charm',     emoji: '🔷', rarity: 'uncommon',  currencyValue: 12 },
+                { itemId: 'frozen_bait',      name: 'Frozen Bait',      emoji: '🧊', rarity: 'uncommon',  currencyValue: 10 },
+                { itemId: 'arctic_trophy',    name: 'Arctic Trophy',    emoji: '🏔️', rarity: 'rare',      currencyValue: 30 },
+                { itemId: 'snowflake_lure',   name: 'Snowflake Lure',   emoji: '❄️', rarity: 'common',    currencyValue: 5  },
+            ],
+        },
+        shop: [
+            { itemId: 'winter_hunt_loot_box', name: 'Winter Hunt Loot Box', emoji: '🎁',  cost: 60,  description: 'Contains exclusive Winter Hunt items' },
+            { itemId: 'frost_crown',          name: 'Frost Crown',          emoji: '👑',  cost: 400, description: 'Legendary cross-system collectible' },
+            { itemId: 'coin_booster_2x',      name: '2x Coin Booster',      emoji: '💰🚀', cost: 80,  description: '2x coins for 1 hour' },
+            { itemId: 'xp_booster_2x',        name: '2x XP Booster',        emoji: '⭐🚀', cost: 80,  description: '2x XP for 1 hour' },
+        ],
+    },
 };
+// end SEASONAL_EVENTS
 
 const RARITY_WEIGHTS = {
     common:    60,
