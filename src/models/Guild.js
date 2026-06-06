@@ -484,7 +484,7 @@ const guildSchema = new Schema({
     },
 
     activeEvent: {
-        type:           { type: String, enum: ['winter_wonderland', 'spooky_season', 'summer_festival', 'valentines_day', 'custom', null], default: null },
+        type:           { type: String, enum: ['winter_wonderland', 'spooky_season', 'summer_festival', 'valentines_day', 'winter_hunt', 'custom', null], default: null },
         name:           { type: String, default: null },
         emoji:          { type: String, default: null },
         color:          { type: String, default: null },

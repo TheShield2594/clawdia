@@ -84,7 +84,9 @@ module.exports = {
 };
 
 function progressBar(have, need) {
-    const pct    = Math.min(1, have / need);
-    const filled = Math.round(pct * 10);
+    if (need <= 0) return have > 0 ? '[██████████] 100%' : '[░░░░░░░░░░] 0%';
+    const safeHave = Math.max(0, have);
+    const pct      = Math.min(1, safeHave / need);
+    const filled   = Math.round(pct * 10);
     return `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}] ${Math.round(pct * 100)}%`;
 }
