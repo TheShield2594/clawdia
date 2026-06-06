@@ -4,11 +4,12 @@ const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { buildClearedEvent } = require('../../services/seasonalEventService');
 
 const EVENT_TYPE_CHOICES = [
-    { name: '❄️ Winter Wonderland', value: 'winter_wonderland' },
-    { name: '🎃 Spooky Season',     value: 'spooky_season' },
-    { name: '☀️ Summer Festival',   value: 'summer_festival' },
-    { name: "💝 Valentine's Day",   value: 'valentines_day' },
-    { name: '✨ Custom',            value: 'custom' },
+    { name: '❄️ Winter Wonderland',   value: 'winter_wonderland' },
+    { name: '🎃 Spooky Season',       value: 'spooky_season' },
+    { name: '☀️ Summer Festival',     value: 'summer_festival' },
+    { name: "💝 Valentine's Day",     value: 'valentines_day' },
+    { name: '🏔️ The Winter Hunt',    value: 'winter_hunt' },
+    { name: '✨ Custom',              value: 'custom' },
 ];
 
 module.exports = {
