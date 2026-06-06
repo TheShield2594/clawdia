@@ -638,14 +638,23 @@ async function recordUsage(guildId, provider, model, usage) {
     const outputTokens = Math.max(0, Math.floor(usage.outputTokens || 0));
     if (inputTokens === 0 && outputTokens === 0) return;
     const day = utcDayString();
-    await AIUsage.updateOne(
-        { guildId, day, provider, model: model || 'unknown' },
-        {
-            $inc: { inputTokens, outputTokens, requestCount: 1 },
-            $set: { updatedAt: new Date() }
-        },
-        { upsert: true }
-    );
+    const filter = { guildId, day, provider, model: model || 'unknown' };
+    const update = {
+        $inc: { inputTokens, outputTokens, requestCount: 1 },
+        $set: { updatedAt: new Date() }
+    };
+    try {
+        await AIUsage.updateOne(filter, update, { upsert: true });
+    } catch (err) {
+        // Concurrent upserts on the same key can race: one succeeds, the other
+        // throws E11000. Retry without upsert — the row exists now, so $inc
+        // will hit it and we don't drop the token count.
+        if (err && (err.code === 11000 || err.codeName === 'DuplicateKey')) {
+            await AIUsage.updateOne(filter, update, { upsert: false });
+        } else {
+            throw err;
+        }
+    }
 }
 
 async function getUsageStats(guildId, days = 14) {
@@ -654,9 +663,19 @@ async function getUsageStats(guildId, days = 14) {
     start.setUTCDate(start.getUTCDate() - (days - 1));
     const startDay = utcDayString(start);
 
-    const rows = await AIUsage.find({ guildId, day: { $gte: startDay } }).lean();
+    const monthStart = todayDay.slice(0, 7) + '-01';
+    const weekStart = (() => {
+        const d = new Date();
+        d.setUTCDate(d.getUTCDate() - 6);
+        return utcDayString(d);
+    })();
 
-    // Aggregate per-day totals across providers/models
+    // Fetch enough to cover both the sparkline window AND the current calendar
+    // month so the "this month" KPI is accurate when `days` < day-of-month.
+    const queryStart = monthStart < startDay ? monthStart : startDay;
+    const rows = await AIUsage.find({ guildId, day: { $gte: queryStart } }).lean();
+
+    // Aggregate per-day totals across providers/models for the sparkline window
     const byDay = new Map();
     for (let i = 0; i < days; i++) {
         const d = new Date();
@@ -664,13 +683,6 @@ async function getUsageStats(guildId, days = 14) {
         const key = utcDayString(d);
         byDay.set(key, { day: key, inputTokens: 0, outputTokens: 0, requestCount: 0, cost: 0 });
     }
-
-    const monthStart = todayDay.slice(0, 7) + '-01';
-    const weekStart = (() => {
-        const d = new Date();
-        d.setUTCDate(d.getUTCDate() - 6);
-        return utcDayString(d);
-    })();
 
     let todayTokens = 0, weekTokens = 0, monthTokens = 0;
     let todayCost = 0, weekCost = 0, monthCost = 0;
