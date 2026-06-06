@@ -36,10 +36,24 @@ function hasIronWill(user) {
     return hasSynergy(user, 'iron_will');
 }
 
+function getFishDeepProspectorStaminaBonus(user) {
+    return hasSynergy(user, 'deep_prospector')
+        ? (SYNERGIES.deep_prospector?.bonuses?.fishingStamina ?? 0)
+        : 0;
+}
+
+function getMineDeepProspectorStaminaBonus(user) {
+    return hasSynergy(user, 'deep_prospector')
+        ? (SYNERGIES.deep_prospector?.bonuses?.miningStamina ?? 0)
+        : 0;
+}
+
 module.exports = {
     getActiveSynergies,
     hasSynergy,
     getHuntSynergyStaminaBonus,
     getFishSynergyStaminaBonus,
-    hasIronWill
+    hasIronWill,
+    getFishDeepProspectorStaminaBonus,
+    getMineDeepProspectorStaminaBonus,
 };

@@ -57,6 +57,8 @@ const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
 const { ensureQuests, onFish, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { getActiveSynergies } = require('../../services/synergyService');
+const { hasActiveEvent, getEventCrossSystemType } = require('../../services/seasonalEventService');
 
 // Rarity score for hourly fish competition (rarest catch wins)
 const WILDERNESS_YIELD_BONUS = 0.10;
@@ -360,6 +362,7 @@ async function handleCast(interaction) {
     );
 
     ensureFishingData(user);
+    ensureHuntData(user);
     applyStaminaRegen(user);
     applyDailyReset(user);
     assignDailyFishQuests(user);
@@ -656,6 +659,19 @@ async function handleCast(interaction) {
     }
     if (result.success && result.finalPayout > user.fishing.bestPayout) user.fishing.bestPayout = result.finalPayout;
 
+    // Winter Hunt cross-system bonus: fishing at Misty Lake drops arctic hunt materials
+    let winterHuntMaterial = null;
+    if (result.success && getEventCrossSystemType(guildSettings) === 'winter_hunt' && locationId === 'lake') {
+        const ARCTIC_MATERIALS = ['arctic_fox_pelt', 'snowy_feather', 'thick_hide', 'polar_claw', 'mammoth_tusk'];
+        const roll = Math.random();
+        if (roll < 0.40) {
+            const matId = ARCTIC_MATERIALS[Math.floor(Math.random() * ARCTIC_MATERIALS.length)];
+            user.hunt.materials[matId] = (user.hunt.materials[matId] ?? 0) + 1;
+            user.markModified('hunt');
+            winterHuntMaterial = matId;
+        }
+    }
+
     updateFishQuestProgress(user, result, locationId);
     await ensureQuests(user, guildSettings);
     const { completed: questsDone, nearComplete: questsNear } = await onFish(user, guildSettings);
@@ -714,6 +730,11 @@ async function handleCast(interaction) {
     }
     if (result.wildernessBonus > 0) {
         embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
+    }
+    if (winterHuntMaterial) {
+        const { MATERIAL_NAMES: HUNT_MAT_NAMES } = require('../../data/huntData');
+        const matName = HUNT_MAT_NAMES[winterHuntMaterial] ?? winterHuntMaterial;
+        embed.addFields({ name: '❄️ Winter Hunt Event', value: `+1 ${matName} (hunt material found in icy waters!)`, inline: true });
     }
 
     // Hourly leader footer
@@ -1305,6 +1326,22 @@ async function handleProfile(interaction) {
 
     if (f.trophies?.length) {
         embed.addFields({ name: '🏆 Trophies', value: f.trophies.join(', '), inline: true });
+    }
+
+    // Cross-system synergies
+    const activeSynergies = getActiveSynergies(userData);
+    if (activeSynergies.length > 0) {
+        embed.addFields({
+            name: '🔗 Active Synergies',
+            value: activeSynergies.map(s => `${s.emoji} **${s.name}** — ${s.description}`).join('\n'),
+            inline: false
+        });
+    } else if (f.level >= 25) {
+        embed.addFields({
+            name: '🔗 Synergies',
+            value: 'Reach combined level milestones across Hunt, Fish & Mine to unlock cross-system bonuses! Use `/synergies` to see details.',
+            inline: false
+        });
     }
 
     if (prestige === 0 && f.level >= 50) {
