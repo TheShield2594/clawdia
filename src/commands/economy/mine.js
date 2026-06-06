@@ -1764,9 +1764,9 @@ async function handleRaid(interaction) {
     }
 
     // Execute the raid: steal RAID_STEAL_MIN–RAID_STEAL_MAX of each stash material.
-    // Use atomic $inc on both sides so concurrent raids on the same defender each
-    // deduct their own amount rather than overwriting one another. $gte conditions
-    // on the defender update abort if the stash was depleted by a concurrent raid.
+    // Defender is updated first; the shield CAS ($or on lastRaidReceived) and
+    // per-material $gte guards ensure only one raid commits atomically. Raider
+    // update follows sequentially with a cooldown CAS to block duplicate commands.
     const stealFraction = RAID_STEAL_MIN + Math.random() * (RAID_STEAL_MAX - RAID_STEAL_MIN);
     const stolen      = {};
     const defenderInc = {};
@@ -1780,22 +1780,20 @@ async function handleRaid(interaction) {
         raiderInc[`mining.materials.${matId}`]  = take;
     }
 
-    // Condition: each stolen material still exists in the stash at the read amount.
+    // Condition: each stolen material still exists; defender not under active shield.
     const defenderCond = { userId: defender.userId, guildId: interaction.guild.id };
     for (const [matId, take] of Object.entries(stolen)) {
         defenderCond[`mining.oreStash.${matId}`] = { $gte: take };
     }
+    defenderCond.$or = [
+        { 'mining.lastRaidReceived': null },
+        { 'mining.lastRaidReceived': { $lte: new Date(Date.now() - RAID_SHIELD_MS) } },
+    ];
 
-    const [defenderResult] = await Promise.all([
-        User.findOneAndUpdate(
-            defenderCond,
-            { $inc: defenderInc, $set: { 'mining.lastRaidReceived': new Date() } }
-        ),
-        User.findOneAndUpdate(
-            { userId: raider.userId, guildId: interaction.guild.id },
-            { $inc: raiderInc, $set: { 'mining.lastRaidSent': new Date() } }
-        ),
-    ]).catch(err => { console.error('[mine raid] save error:', err); return [null]; });
+    const defenderResult = await User.findOneAndUpdate(
+        defenderCond,
+        { $inc: defenderInc, $set: { 'mining.lastRaidReceived': new Date() } }
+    ).catch(err => { console.error('[mine raid] defender save error:', err); return null; });
 
     if (!defenderResult) {
         return interaction.reply({
@@ -1803,6 +1801,18 @@ async function handleRaid(interaction) {
             ephemeral: true
         });
     }
+
+    await User.findOneAndUpdate(
+        {
+            userId: raider.userId,
+            guildId: interaction.guild.id,
+            $or: [
+                { 'mining.lastRaidSent': null },
+                { 'mining.lastRaidSent': { $lte: new Date(Date.now() - RAID_COOLDOWN_MS) } },
+            ],
+        },
+        { $inc: raiderInc, $set: { 'mining.lastRaidSent': new Date() } }
+    ).catch(err => console.error('[mine raid] raider save error:', err));
 
     const stolenLines = Object.entries(stolen).map(([id, qty]) => `• ${MATERIAL_NAMES[id] ?? id} ×${qty}`).join('\n');
     const pct = Math.round(stealFraction * 100);
