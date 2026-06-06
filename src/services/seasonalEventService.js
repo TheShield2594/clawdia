@@ -113,6 +113,18 @@ function getEventCurrencyId(guildSettings) {
 }
 
 /**
+ * Returns the cross-system event type string for the active event, or null.
+ * Used by commands to gate cross-system bonus behaviour (e.g. 'winter_hunt').
+ */
+function getEventCrossSystemType(guildSettings) {
+    const ev = guildSettings?.activeEvent;
+    if (!ev?.type) return null;
+    if (ev.endsAt && new Date(ev.endsAt) <= new Date()) return null;
+    const def = SEASONAL_EVENTS[ev.type];
+    return def?.crossSystem ? ev.type : null;
+}
+
+/**
  * Adds event currency to a user document (must call user.save() after).
  */
 function addEventCurrency(user, currencyId, amount) {
@@ -211,6 +223,7 @@ module.exports = {
     getEventCoinMultiplier,
     hasActiveEvent,
     getEventCurrencyId,
+    getEventCrossSystemType,
     addEventCurrency,
     getEventCurrencyBalance,
     spendEventCurrency,
