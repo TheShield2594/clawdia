@@ -889,7 +889,7 @@ textarea.auto-resize {
 }
 .ai-usage-stat {
     padding: .75rem .9rem;
-    background: var(--bg);
+    background: var(--bg-1);
     border: 1px solid var(--border);
     border-radius: 8px;
 }
@@ -902,7 +902,7 @@ textarea.auto-resize {
 .ai-usage-stat-sub { font-size: .78rem; color: var(--text-mute); margin-top: .15rem; }
 .ai-usage-sparkline {
     width: 100%; height: 60px;
-    background: var(--bg);
+    background: var(--bg-1);
     border: 1px solid var(--border);
     border-radius: 6px;
     display: block;

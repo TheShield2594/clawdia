@@ -2907,6 +2907,15 @@
                     'commandPolicies.cooldownOverrides': _cpCooldowns
                 };
             } else if (section === 'ai') {
+                // EJS renders the saved systemPrompt verbatim, so pre-existing values
+                // can exceed the textarea's maxlength (e.g. set via the API).
+                // Validate here so we never POST an oversized prompt.
+                var aiPromptVal = document.getElementById('ai-prompt').value;
+                if (aiPromptVal.length > 4000) {
+                    updatePromptCount('ai-prompt');
+                    toast('System prompt is ' + aiPromptVal.length + ' chars — maximum is 4000.', 'error');
+                    return;
+                }
                 data = {
                     'ai.enabled': document.getElementById('ai-enabled').checked,
                     'ai.provider': document.getElementById('ai-provider').value,
@@ -2917,7 +2926,7 @@
                     ...(document.getElementById('ai-openrouter-key').value ? {'ai.openrouterKey': document.getElementById('ai-openrouter-key').value} : {}),
                     'ai.ollamaBaseUrl': document.getElementById('ai-ollama-url').value.trim(),
                     'ai.channelId': document.getElementById('ai-channel').value,
-                    'ai.systemPrompt': document.getElementById('ai-prompt').value,
+                    'ai.systemPrompt': aiPromptVal,
                     'ai.temperature': parseFloat(document.getElementById('ai-temperature').value),
                     'ai.maxTokens': parseInt(document.getElementById('ai-max-tokens').value, 10),
                     'ai.maxHistory': parseInt(document.getElementById('ai-max-history').value, 10),
@@ -4101,6 +4110,15 @@
         }
 
         var _promptEditorTarget = null;
+        function _promptEditorKeydown(e) {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                closePromptEditor(true);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closePromptEditor(false);
+            }
+        }
         function openPromptEditor(textareaId, title) {
             var ta = document.getElementById(textareaId);
             if (!ta) return;
@@ -4111,6 +4129,7 @@
             editor.setAttribute('maxlength', ta.getAttribute('maxlength') || 4000);
             document.getElementById('prompt-editor-modal').style.display = 'flex';
             updatePromptEditorCount();
+            document.addEventListener('keydown', _promptEditorKeydown);
             setTimeout(function() { editor.focus(); }, 50);
         }
         function updatePromptEditorCount() {
@@ -4131,18 +4150,9 @@
                 }
             }
             modal.style.display = 'none';
+            document.removeEventListener('keydown', _promptEditorKeydown);
             _promptEditorTarget = null;
         }
-        // Cmd/Ctrl+Enter inside the full-screen editor commits changes
-        document.getElementById('prompt-editor-textarea').addEventListener('keydown', function(e) {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                e.preventDefault();
-                closePromptEditor(true);
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                closePromptEditor(false);
-            }
-        });
         // Initialize counters on load
         updatePromptCount('ai-prompt');
         updatePromptCount('persona-prompt');
@@ -4239,21 +4249,25 @@
             } catch (e) {
                 console.error('Failed to load AI usage:', e);
                 statusEl.textContent = 'Failed to load usage';
+                throw e;
             }
         }
         // Lazy-load AI usage stats the first time the AI panel becomes visible.
-        // Polls the AI panel's `.active` class — works for nav clicks, hash routing,
-        // and initial page load without coupling to the nav implementation.
+        // Watches the AI panel's `.active` class so it works for nav clicks, hash
+        // routing, and initial page load without coupling to the nav implementation.
         (function() {
             var aiPanel = document.getElementById('ai');
             if (!aiPanel) return;
             var loaded = false;
+            var inFlight = false;
             function check() {
-                if (loaded) return;
-                if (aiPanel.classList.contains('active')) {
-                    loaded = true;
-                    loadAiUsage();
-                }
+                if (loaded || inFlight) return;
+                if (!aiPanel.classList.contains('active')) return;
+                inFlight = true;
+                loadAiUsage()
+                    .then(function() { loaded = true; })
+                    .catch(function() { /* leave `loaded` false so a later view retries */ })
+                    .finally(function() { inFlight = false; });
             }
             check();
             var obs = new MutationObserver(check);
