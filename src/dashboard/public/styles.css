@@ -832,6 +832,93 @@ textarea { resize: vertical; min-height: 80px; }
     padding: 1rem 1.5rem; border-top: 1px solid var(--border);
 }
 
+/* Prompt editor with header (label + char counter + fullscreen button) */
+.prompt-field-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 1rem; margin-bottom: .35rem;
+}
+.prompt-field-meta {
+    display: flex; align-items: center; gap: .75rem;
+    font-size: .78rem; color: var(--text-mute);
+}
+.prompt-char-count.over { color: var(--danger, #e05a5a); font-weight: 600; }
+.prompt-expand-btn {
+    background: none; border: 1px solid var(--border);
+    color: var(--text-mute); cursor: pointer;
+    font-size: .75rem; padding: .15rem .55rem; border-radius: 4px;
+    transition: all .12s ease;
+}
+.prompt-expand-btn:hover { color: var(--text); border-color: var(--border-strong); }
+
+/* Auto-resizing textareas — modern browsers grow with content; older ones
+   fall back to the rows attribute set on the element. */
+textarea.auto-resize {
+    field-sizing: content;
+    min-height: 9rem;
+    max-height: 30rem;
+}
+
+/* Full-screen prompt editor modal */
+.modal-box.modal-box-wide { max-width: 900px; }
+.prompt-editor-modal textarea {
+    width: 100%;
+    min-height: 60vh;
+    font-family: ui-monospace, 'JetBrains Mono', monospace;
+    font-size: .92rem;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+/* AI Usage stats card */
+.ai-usage-card {
+    margin-top: 1.5rem;
+    padding: 1.25rem 1.5rem;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.ai-usage-card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1rem;
+}
+.ai-usage-card-head h3 { font-size: 1rem; font-weight: 700; margin: 0; }
+.ai-usage-card-head .muted { font-size: .8rem; color: var(--text-mute); }
+.ai-usage-stats {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem;
+    margin-bottom: 1rem;
+}
+.ai-usage-stat {
+    padding: .75rem .9rem;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.ai-usage-stat-label {
+    font-size: .72rem; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--text-mute);
+    margin-bottom: .3rem;
+}
+.ai-usage-stat-value { font-size: 1.15rem; font-weight: 700; }
+.ai-usage-stat-sub { font-size: .78rem; color: var(--text-mute); margin-top: .15rem; }
+.ai-usage-sparkline {
+    width: 100%; height: 60px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    display: block;
+}
+.ai-usage-breakdown {
+    margin-top: 1rem;
+    font-size: .82rem;
+    color: var(--text-mute);
+}
+.ai-usage-breakdown table { width: 100%; border-collapse: collapse; }
+.ai-usage-breakdown th, .ai-usage-breakdown td {
+    text-align: left; padding: .35rem .5rem;
+    border-bottom: 1px solid var(--border);
+}
+.ai-usage-breakdown th { font-weight: 600; color: var(--text); }
+.ai-usage-breakdown td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ================================================================
    NEW HOME PAGE — cream/ink palette

@@ -1116,6 +1116,32 @@ router.delete('/guild/:guildId/persona/:channelId', checkAuth, checkGuildAccess,
     }
 });
 
+// ── AI Usage ───────────────────────────────────────────────────────────────
+
+router.get('/guild/:guildId/ai/usage', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 14));
+
+    try {
+        const { getUsageStats } = require('../../services/aiService');
+        const guildSettings = await Guild.findOne({ guildId }).lean();
+        const stats = await getUsageStats(guildId, days);
+
+        const ai = guildSettings?.ai || {};
+        res.json({
+            ...stats,
+            rateLimit: {
+                perUser: ai.rateLimitPerUser ?? 0,
+                perChannel: ai.rateLimitPerChannel ?? 0,
+                windowMin: ai.rateLimitWindowMin ?? 10
+            }
+        });
+    } catch (error) {
+        console.error('AI usage stats error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // ── Achievements ────────────────────────────────────────────────────────────
 
 router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
