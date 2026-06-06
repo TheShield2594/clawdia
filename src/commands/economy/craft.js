@@ -13,7 +13,7 @@ const { ensureFishingData } = require('../../services/fishService');
 
 const ALL_RECIPES   = { ...HUNT_RECIPES, ...MINE_RECIPES, ...FISH_CRAFT_RECIPES, ...CROSS_CRAFT_RECIPES };
 const ALL_MAT_NAMES = { ...HUNT_MAT_NAMES, ...MINE_MAT_NAMES, ...FISH_MAT_NAMES };
-const RECIPE_CHOICES = Object.values(ALL_RECIPES).map(r => ({ name: r.name, value: r.id }));
+const RECIPE_LIST = Object.values(ALL_RECIPES).map(r => ({ name: r.name, value: r.id }));
 
 module.exports = {
     cooldown: 3,
@@ -31,7 +31,17 @@ module.exports = {
                     o.setName('recipe')
                         .setDescription('Recipe to craft')
                         .setRequired(true)
-                        .addChoices(...RECIPE_CHOICES))),
+                        .setAutocomplete(true))),
+
+    async autocomplete(interaction) {
+        const focused = interaction.options.getFocused()?.toLowerCase() ?? '';
+        const matches = focused
+            ? RECIPE_LIST.filter(r =>
+                r.name.toLowerCase().includes(focused) ||
+                r.value.toLowerCase().includes(focused))
+            : RECIPE_LIST;
+        await interaction.respond(matches.slice(0, 25));
+    },
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
