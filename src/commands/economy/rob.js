@@ -15,14 +15,30 @@ const ROB_STEAL_MIN       = 0.10;
 const ROB_STEAL_MAX       = 0.40;
 const TRAP_FINE_MULTIPLIER = 2;            // trap doubles the normal fine
 
-// Persist robber with a full save (only one robber per user due to cooldown), then
-// atomically apply victim balance changes via $inc so concurrent robs on the same
-// victim each deduct their own amount rather than overwriting one another. A $gte
-// condition on the deduction prevents the victim going negative if two robs fire
-// simultaneously and the second would over-drain. If the atomic victim update
-// fails, roll back the robber snapshot so no coins are created from nothing.
+// CAS the robber on lastRob to block duplicate parallel robs from the same user,
+// then atomically apply victim balance changes via $inc with $gte guards. Victim
+// immunity is re-checked atomically to catch races between pre-flight and commit.
+// If the victim update fails, roll back the robber.
 async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victimOrigBalance, victimOrigBank) {
-    await robber.save();
+    const robberCond = { userId: robber.userId, guildId: robber.guildId };
+    if (robberSnapshot.lastRob) {
+        robberCond.lastRob = robberSnapshot.lastRob;
+    } else {
+        robberCond.$or = [{ lastRob: null }, { lastRob: { $exists: false } }];
+    }
+    const robberRes = await User.findOneAndUpdate(robberCond, {
+        $set: {
+            balance:        robber.balance,
+            lastRob:        robber.lastRob,
+            successfulRobs: robber.successfulRobs ?? 0,
+        },
+    });
+    if (!robberRes) {
+        throw Object.assign(
+            new Error('[rob] duplicate rob attempt — cooldown already applied'),
+            { robberCooldownConflict: true }
+        );
+    }
     try {
         const balDelta  = victim.balance - victimOrigBalance;
         const bankDelta = (victim.bank ?? 0) - victimOrigBank;
@@ -30,6 +46,10 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
         const cond = { userId: victim.userId, guildId: victim.guildId };
         if (balDelta  < 0) cond.balance = { $gte: -balDelta };
         if (bankDelta < 0) cond.bank    = { $gte: -bankDelta };
+        cond.$or = [
+            { lastRobbedAt: null },
+            { lastRobbedAt: { $lte: new Date(Date.now() - VICTIM_IMMUNITY_MS) } },
+        ];
 
         const update = {
             $set: {
@@ -326,9 +346,11 @@ module.exports = {
                     consumeEffect(robber, 'lifesaver');
                     victim.lastRobbedAt = new Date();
                     await robber.save();
+                    // Only persist lastRobbedAt — victim.activeEffects was not modified
+                    // in this path, so writing it would silently clobber concurrent changes.
                     await User.updateOne(
                         { userId: victim.userId, guildId: victim.guildId },
-                        { $set: { lastRobbedAt: victim.lastRobbedAt, activeEffects: victim.activeEffects } }
+                        { $set: { lastRobbedAt: victim.lastRobbedAt } }
                     );
 
                     embed = new EmbedBuilder()
@@ -362,6 +384,9 @@ module.exports = {
 
             await interaction.editReply({ embeds: [embed] });
         } catch (error) {
+            if (error.robberCooldownConflict) {
+                return interaction.editReply({ content: '⚡ Duplicate rob attempt detected — please try again.' }).catch(() => {});
+            }
             if (error.victimBalanceChanged) {
                 return interaction.editReply({ content: "⚡ The target's balance shifted mid-heist — you couldn't complete the rob." }).catch(() => {});
             }
