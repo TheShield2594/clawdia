@@ -173,7 +173,8 @@ async function generateNewspaper(client, guildDoc, preloadedGuild) {
                         `Write this week's server newspaper for "${guildDoc.name || 'our server'}".\n\n` +
                         `Date: ${dateStr}\n\nServer stats this week:\n${dataSummary}\n\n` +
                         `Include a fun headline, a brief intro paragraph, and highlight the sections above. ` +
-                        quoteInstruction
+                        quoteInstruction,
+                    guildId: guildDoc.guildId
                 });
             }
         } catch (err) {

@@ -5,6 +5,7 @@ const axios = require('axios');
 const Conversation = require('../models/Conversation');
 const KnowledgeBase = require('../models/KnowledgeBase');
 const Reminder = require('../models/Reminder');
+const AIUsage = require('../models/AIUsage');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const DEFAULT_MODELS = {
@@ -281,8 +282,13 @@ async function executeAction(action, message) {
 }
 
 // ---------- Provider implementations ----------
+//
+// Streaming functions yield text deltas (strings). If a `usageOut` ref object
+// is passed, the function will set `usageOut.usage = { inputTokens, outputTokens }`
+// when the provider reports usage (typically at end-of-stream).
+// Non-streaming functions return { text, usage|null }.
 
-async function* streamOpenAI({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders }) {
+async function* streamOpenAI({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, usageOut }) {
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = [
         { role: 'system', content: systemPrompt },
@@ -290,11 +296,18 @@ async function* streamOpenAI({ apiKey, model, systemPrompt, history, prompt, tem
         { role: 'user', content: prompt }
     ];
     const stream = await client.chat.completions.create({
-        model, messages, temperature, max_tokens: maxTokens, stream: true
+        model, messages, temperature, max_tokens: maxTokens, stream: true,
+        stream_options: { include_usage: true }
     });
     for await (const chunk of stream) {
         const delta = chunk.choices?.[0]?.delta?.content;
         if (delta) yield delta;
+        if (usageOut && chunk.usage) {
+            usageOut.usage = {
+                inputTokens: chunk.usage.prompt_tokens || 0,
+                outputTokens: chunk.usage.completion_tokens || 0
+            };
+        }
     }
 }
 
@@ -308,10 +321,15 @@ async function callOpenAINonStream({ apiKey, model, systemPrompt, history, promp
     const completion = await client.chat.completions.create({
         model, messages, temperature, max_tokens: maxTokens
     });
-    return completion.choices[0].message.content || '';
+    const text = completion.choices[0].message.content || '';
+    const usage = completion.usage ? {
+        inputTokens: completion.usage.prompt_tokens || 0,
+        outputTokens: completion.usage.completion_tokens || 0
+    } : null;
+    return { text, usage };
 }
 
-async function* streamGemini({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens }) {
+async function* streamGemini({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut }) {
     const client = new GoogleGenerativeAI(apiKey);
     const generative = client.getGenerativeModel({
         model,
@@ -329,15 +347,44 @@ async function* streamGemini({ apiKey, model, systemPrompt, history, prompt, tem
         const text = chunk.text();
         if (text) yield text;
     }
+    if (usageOut) {
+        try {
+            const final = await result.response;
+            const meta = final?.usageMetadata;
+            if (meta) {
+                usageOut.usage = {
+                    inputTokens: meta.promptTokenCount || 0,
+                    outputTokens: meta.candidatesTokenCount || 0
+                };
+            }
+        } catch { /* usage metadata unavailable — leave unset */ }
+    }
 }
 
-async function callGeminiNonStream(args) {
-    let out = '';
-    for await (const piece of streamGemini(args)) out += piece;
-    return out;
+async function callGeminiNonStream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens }) {
+    const client = new GoogleGenerativeAI(apiKey);
+    const generative = client.getGenerativeModel({
+        model,
+        systemInstruction: systemPrompt,
+        generationConfig: { temperature, maxOutputTokens: maxTokens }
+    });
+    const chat = generative.startChat({
+        history: history.map(h => ({
+            role: h.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: h.content }]
+        }))
+    });
+    const result = await chat.sendMessage(prompt);
+    const text = result.response.text();
+    const meta = result.response.usageMetadata;
+    const usage = meta ? {
+        inputTokens: meta.promptTokenCount || 0,
+        outputTokens: meta.candidatesTokenCount || 0
+    } : null;
+    return { text, usage };
 }
 
-async function* streamAnthropic({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens }) {
+async function* streamAnthropic({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut }) {
     const client = new Anthropic({ apiKey });
     const messages = [
         ...history.map(h => ({ role: h.role, content: h.content })),
@@ -352,20 +399,49 @@ async function* streamAnthropic({ apiKey, model, systemPrompt, history, prompt, 
         ],
         messages
     });
+    let inputTokens = 0;
+    let outputTokens = 0;
     for await (const event of stream) {
         if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
             yield event.delta.text;
+        } else if (event.type === 'message_start' && event.message?.usage) {
+            inputTokens = event.message.usage.input_tokens || 0;
+            outputTokens = event.message.usage.output_tokens || 0;
+        } else if (event.type === 'message_delta' && event.usage) {
+            // Final cumulative output_tokens arrive in message_delta
+            outputTokens = event.usage.output_tokens || outputTokens;
         }
     }
+    if (usageOut) usageOut.usage = { inputTokens, outputTokens };
 }
 
-async function callAnthropicNonStream(args) {
-    let out = '';
-    for await (const piece of streamAnthropic(args)) out += piece;
-    return out;
+async function callAnthropicNonStream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens }) {
+    const client = new Anthropic({ apiKey });
+    const messages = [
+        ...history.map(h => ({ role: h.role, content: h.content })),
+        { role: 'user', content: prompt }
+    ];
+    const response = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        system: [
+            { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+        ],
+        messages
+    });
+    const text = response.content
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('');
+    const usage = response.usage ? {
+        inputTokens: response.usage.input_tokens || 0,
+        outputTokens: response.usage.output_tokens || 0
+    } : null;
+    return { text, usage };
 }
 
-async function* streamOllama({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens }) {
+async function* streamOllama({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut }) {
     const url = `${(baseUrl || 'http://localhost:11434').replace(/\/$/, '')}/api/chat`;
     const messages = [
         { role: 'system', content: systemPrompt },
@@ -390,16 +466,39 @@ async function* streamOllama({ baseUrl, model, systemPrompt, history, prompt, te
             try {
                 const json = JSON.parse(line);
                 if (json.message?.content) yield json.message.content;
-                if (json.done) return;
+                if (json.done) {
+                    if (usageOut) {
+                        usageOut.usage = {
+                            inputTokens: json.prompt_eval_count || 0,
+                            outputTokens: json.eval_count || 0
+                        };
+                    }
+                    return;
+                }
             } catch { /* skip malformed line */ }
         }
     }
 }
 
-async function callOllamaNonStream(args) {
-    let out = '';
-    for await (const piece of streamOllama(args)) out += piece;
-    return out;
+async function callOllamaNonStream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens }) {
+    const url = `${(baseUrl || 'http://localhost:11434').replace(/\/$/, '')}/api/chat`;
+    const messages = [
+        { role: 'system', content: systemPrompt },
+        ...history,
+        { role: 'user', content: prompt }
+    ];
+    const response = await axios.post(url, {
+        model,
+        messages,
+        stream: false,
+        options: { temperature, num_predict: maxTokens }
+    }, { timeout: 120000 });
+    const text = response.data?.message?.content || '';
+    const usage = (response.data?.prompt_eval_count != null || response.data?.eval_count != null) ? {
+        inputTokens: response.data.prompt_eval_count || 0,
+        outputTokens: response.data.eval_count || 0
+    } : null;
+    return { text, usage };
 }
 
 // OpenRouter is OpenAI-compatible
@@ -446,8 +545,8 @@ function resolveProviderConfig(aiSettings) {
     return { provider, model, temperature, maxTokens, apiKey, baseUrl };
 }
 
-async function* streamCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature, maxTokens }) {
-    const common = { model, systemPrompt, history, prompt, temperature, maxTokens };
+async function* streamCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature, maxTokens, usageOut, guildId }) {
+    const common = { model, systemPrompt, history, prompt, temperature, maxTokens, usageOut };
     if (provider === 'openai') {
         yield* streamOpenAI({ apiKey, ...common });
     } else if (provider === 'gemini') {
@@ -461,17 +560,179 @@ async function* streamCompletion({ provider, model, apiKey, baseUrl, systemPromp
     } else {
         throw new Error(`Unknown provider: ${provider}`);
     }
+    if (guildId && usageOut?.usage) {
+        recordUsage(guildId, provider, model, usageOut.usage).catch(err =>
+            console.error('[AI usage] record error:', err.message));
+    }
 }
 
-async function getCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature, maxTokens }) {
+async function getCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature, maxTokens, guildId }) {
     const common = { model, systemPrompt, history, prompt, temperature, maxTokens };
-    if (provider === 'openai') return callOpenAINonStream({ apiKey, ...common });
-    if (provider === 'gemini') return callGeminiNonStream({ apiKey, ...common });
-    if (provider === 'anthropic') return callAnthropicNonStream({ apiKey, ...common });
-    if (provider === 'ollama') return callOllamaNonStream({ baseUrl, ...common });
-    if (provider === 'openrouter') return callOpenAINonStream(openRouterArgs({ apiKey, ...common }));
-    throw new Error(`Unknown provider: ${provider}`);
+    let result;
+    if (provider === 'openai') result = await callOpenAINonStream({ apiKey, ...common });
+    else if (provider === 'gemini') result = await callGeminiNonStream({ apiKey, ...common });
+    else if (provider === 'anthropic') result = await callAnthropicNonStream({ apiKey, ...common });
+    else if (provider === 'ollama') result = await callOllamaNonStream({ baseUrl, ...common });
+    else if (provider === 'openrouter') result = await callOpenAINonStream(openRouterArgs({ apiKey, ...common }));
+    else throw new Error(`Unknown provider: ${provider}`);
+
+    if (guildId && result.usage) {
+        recordUsage(guildId, provider, model, result.usage).catch(err =>
+            console.error('[AI usage] record error:', err.message));
+    }
+    return result.text;
 }
+
+// ---------- Usage tracking ----------
+
+// USD per 1M tokens for common models (input, output). Prefix-matched.
+// Unknown models report null cost.
+const PRICING = {
+    openai: [
+        { match: /^gpt-4o-mini/i,   in: 0.15,  out: 0.60 },
+        { match: /^gpt-4o/i,        in: 2.50,  out: 10.00 },
+        { match: /^gpt-4\.1-mini/i, in: 0.40,  out: 1.60 },
+        { match: /^gpt-4\.1-nano/i, in: 0.10,  out: 0.40 },
+        { match: /^gpt-4\.1/i,      in: 2.00,  out: 8.00 },
+        { match: /^o3-mini/i,       in: 1.10,  out: 4.40 },
+        { match: /^o3/i,            in: 2.00,  out: 8.00 },
+        { match: /^o1-mini/i,       in: 1.10,  out: 4.40 },
+        { match: /^o1/i,            in: 15.00, out: 60.00 }
+    ],
+    anthropic: [
+        { match: /haiku-4/i,    in: 1.00,  out: 5.00 },
+        { match: /sonnet-4/i,   in: 3.00,  out: 15.00 },
+        { match: /opus-4/i,     in: 15.00, out: 75.00 },
+        { match: /haiku-3-5/i,  in: 0.80,  out: 4.00 },
+        { match: /sonnet-3-5/i, in: 3.00,  out: 15.00 },
+        { match: /haiku/i,      in: 0.25,  out: 1.25 },
+        { match: /sonnet/i,     in: 3.00,  out: 15.00 },
+        { match: /opus/i,       in: 15.00, out: 75.00 }
+    ],
+    gemini: [
+        { match: /flash-lite/i, in: 0.075, out: 0.30 },
+        { match: /2\.0-flash/i, in: 0.10,  out: 0.40 },
+        { match: /1\.5-flash/i, in: 0.075, out: 0.30 },
+        { match: /1\.5-pro/i,   in: 1.25,  out: 5.00 },
+        { match: /pro/i,        in: 1.25,  out: 5.00 },
+        { match: /flash/i,      in: 0.10,  out: 0.40 }
+    ],
+    openrouter: [], // variable per-model; we don't know without an API call
+    ollama: [{ match: /.*/, in: 0, out: 0 }]
+};
+
+function estimateCost(provider, model, inputTokens, outputTokens) {
+    const table = PRICING[provider] || [];
+    const row = table.find(r => r.match.test(model || ''));
+    if (!row) return null;
+    return (inputTokens * row.in + outputTokens * row.out) / 1_000_000;
+}
+
+function utcDayString(date = new Date()) {
+    return date.toISOString().slice(0, 10);
+}
+
+async function recordUsage(guildId, provider, model, usage) {
+    if (!guildId || !usage) return;
+    const inputTokens = Math.max(0, Math.floor(usage.inputTokens || 0));
+    const outputTokens = Math.max(0, Math.floor(usage.outputTokens || 0));
+    if (inputTokens === 0 && outputTokens === 0) return;
+    const day = utcDayString();
+    await AIUsage.updateOne(
+        { guildId, day, provider, model: model || 'unknown' },
+        {
+            $inc: { inputTokens, outputTokens, requestCount: 1 },
+            $set: { updatedAt: new Date() }
+        },
+        { upsert: true }
+    );
+}
+
+async function getUsageStats(guildId, days = 14) {
+    const todayDay = utcDayString();
+    const start = new Date();
+    start.setUTCDate(start.getUTCDate() - (days - 1));
+    const startDay = utcDayString(start);
+
+    const rows = await AIUsage.find({ guildId, day: { $gte: startDay } }).lean();
+
+    // Aggregate per-day totals across providers/models
+    const byDay = new Map();
+    for (let i = 0; i < days; i++) {
+        const d = new Date();
+        d.setUTCDate(d.getUTCDate() - (days - 1 - i));
+        const key = utcDayString(d);
+        byDay.set(key, { day: key, inputTokens: 0, outputTokens: 0, requestCount: 0, cost: 0 });
+    }
+
+    const monthStart = todayDay.slice(0, 7) + '-01';
+    const weekStart = (() => {
+        const d = new Date();
+        d.setUTCDate(d.getUTCDate() - 6);
+        return utcDayString(d);
+    })();
+
+    let todayTokens = 0, weekTokens = 0, monthTokens = 0;
+    let todayCost = 0, weekCost = 0, monthCost = 0;
+    let costKnown = true;
+
+    for (const row of rows) {
+        const cost = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens);
+        if (cost == null) costKnown = false;
+        const totalTokens = row.inputTokens + row.outputTokens;
+
+        const bucket = byDay.get(row.day);
+        if (bucket) {
+            bucket.inputTokens += row.inputTokens;
+            bucket.outputTokens += row.outputTokens;
+            bucket.requestCount += row.requestCount;
+            bucket.cost += cost || 0;
+        }
+
+        if (row.day === todayDay) {
+            todayTokens += totalTokens;
+            todayCost += cost || 0;
+        }
+        if (row.day >= weekStart) {
+            weekTokens += totalTokens;
+            weekCost += cost || 0;
+        }
+        if (row.day >= monthStart) {
+            monthTokens += totalTokens;
+            monthCost += cost || 0;
+        }
+    }
+
+    // Per-model breakdown for the current month
+    const byModel = {};
+    for (const row of rows.filter(r => r.day >= monthStart)) {
+        const key = `${row.provider}/${row.model}`;
+        if (!byModel[key]) {
+            byModel[key] = {
+                provider: row.provider, model: row.model,
+                inputTokens: 0, outputTokens: 0, requestCount: 0, cost: 0, costKnown: true
+            };
+        }
+        const m = byModel[key];
+        m.inputTokens += row.inputTokens;
+        m.outputTokens += row.outputTokens;
+        m.requestCount += row.requestCount;
+        const c = estimateCost(row.provider, row.model, row.inputTokens, row.outputTokens);
+        if (c == null) m.costKnown = false;
+        else m.cost += c;
+    }
+
+    return {
+        today:  { tokens: todayTokens, cost: round4(todayCost) },
+        week:   { tokens: weekTokens,  cost: round4(weekCost) },
+        month:  { tokens: monthTokens, cost: round4(monthCost) },
+        costKnown,
+        daily: Array.from(byDay.values()).map(d => ({ ...d, cost: round4(d.cost) })),
+        byModel: Object.values(byModel).map(m => ({ ...m, cost: round4(m.cost) }))
+    };
+}
+
+function round4(n) { return Math.round(n * 10000) / 10000; }
 
 async function handleAIChat(message, aiSettings) {
     const { provider, model, temperature, maxTokens, apiKey, baseUrl } = resolveProviderConfig(aiSettings);
@@ -518,7 +779,12 @@ async function handleAIChat(message, aiSettings) {
             message.guild.id, message.channel.id, message.author.id, maxHistory
         );
 
-        const callArgs = { provider, model, apiKey, baseUrl, systemPrompt, history, prompt: content, temperature, maxTokens };
+        const usageOut = {};
+        const callArgs = {
+            provider, model, apiKey, baseUrl, systemPrompt, history,
+            prompt: content, temperature, maxTokens,
+            guildId: message.guild.id, usageOut
+        };
 
         let fullResponse = '';
 
@@ -624,5 +890,8 @@ module.exports = {
     retrieveKnowledge,
     checkRateLimit,
     checkChannelRateLimit,
+    recordUsage,
+    getUsageStats,
+    estimateCost,
     DEFAULT_MODELS
 };
