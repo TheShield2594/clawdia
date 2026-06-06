@@ -160,6 +160,25 @@ module.exports = {
             return;
         }
 
+        if (interaction.isAutocomplete()) {
+            const command = client.commands.get(interaction.commandName);
+            const safeRespondEmpty = async () => {
+                if (interaction.responded) return;
+                try { await interaction.respond([]); } catch (_) { /* interaction expired */ }
+            };
+            if (!command?.autocomplete) {
+                await safeRespondEmpty();
+                return;
+            }
+            try {
+                await command.autocomplete(interaction, client);
+            } catch (error) {
+                console.error(`Autocomplete error in ${interaction.commandName}:`, error);
+                await safeRespondEmpty();
+            }
+            return;
+        }
+
         if (!interaction.isChatInputCommand()) return;
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
