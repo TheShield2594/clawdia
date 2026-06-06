@@ -106,7 +106,15 @@ async function updateCrashStats(userId, guildId, multiplier, username) {
                 },
                 $max: { 'crashStats.allTimeBest': multiplier },
             }
-        ).catch(() => {});
+        ).catch(err => console.error('[crash] weekRollover update failed:', err));
+
+        // A concurrent request that also hit the rollover path may have won the
+        // conditional $or race and set weekStart already, causing the update above
+        // to match nothing. Run an unconditional $max so allTimeBest is never missed.
+        await User.updateOne(
+            { userId, guildId },
+            { $max: { 'crashStats.allTimeBest': multiplier } }
+        ).catch(err => console.error('[crash] allTimeBest fallback failed:', err));
     }
 }
 
@@ -335,7 +343,7 @@ async function openLobby(interaction, bet, hostAutoCashout) {
         if (!joined) {
             await User.findOneAndUpdate(
                 { userId: i.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: bet } }
+                { $inc: { balance: bet, pendingCrashRefund: -bet } }
             ).catch(err => console.error('[crash] join refund failed:', err));
             return i.reply({ content: 'Could not join the lobby (it may have just filled up). Your coins have been refunded.', ephemeral: true });
         }
@@ -407,19 +415,23 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         return lines;
     }
 
-    // Shared cash-out function used by both manual and auto triggers
+    // Shared cash-out function used by both manual and auto triggers.
+    // State is only marked cashed-out after the DB write succeeds so the
+    // emergency-refund path still sees an unresolved player on DB failure.
     async function cashOutPlayer(uid, mult, autoTriggered = false) {
         const state = lobby.players.get(uid);
         if (!state || state.cashedOutAt !== null) return false;
 
-        state.cashedOutAt    = mult;
-        state.autoTriggered  = autoTriggered;
-
-        const payout = Math.floor(bet * mult);
-        await User.findOneAndUpdate(
+        const payout    = Math.floor(bet * mult);
+        const credited  = await User.findOneAndUpdate(
             { userId: uid, guildId },
             { $inc: { balance: payout }, $set: { pendingCrashRefund: 0 } }
-        );
+        ).catch(err => { console.error('[crash] cashOut DB write failed:', err); return null; });
+
+        if (!credited) return false;
+
+        state.cashedOutAt   = mult;
+        state.autoTriggered = autoTriggered;
 
         // Update weekly leaderboard stats (store username to avoid N+1 fetches in leaderboard)
         await updateCrashStats(uid, guildId, mult, state.username);
