@@ -76,13 +76,16 @@ function getCurrentWeekStart() {
     return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), diff));
 }
 
-async function updateCrashStats(userId, guildId, multiplier) {
+async function updateCrashStats(userId, guildId, multiplier, username) {
     const weekStart = getCurrentWeekStart();
 
     // Same-week path: atomically raise weekBest and allTimeBest without reading first.
     const sameWeek = await User.updateOne(
         { userId, guildId, 'crashStats.weekStart': { $gte: weekStart } },
-        { $max: { 'crashStats.weekBest': multiplier, 'crashStats.allTimeBest': multiplier } }
+        {
+            $max: { 'crashStats.weekBest': multiplier, 'crashStats.allTimeBest': multiplier },
+            ...(username && { $set: { 'crashStats.username': username } }),
+        }
     ).catch(() => null);
 
     if (sameWeek?.matchedCount === 0) {
@@ -96,10 +99,22 @@ async function updateCrashStats(userId, guildId, multiplier) {
                 ],
             },
             {
-                $set: { 'crashStats.weekBest': multiplier, 'crashStats.weekStart': weekStart },
+                $set: {
+                    'crashStats.weekBest':  multiplier,
+                    'crashStats.weekStart': weekStart,
+                    ...(username && { 'crashStats.username': username }),
+                },
                 $max: { 'crashStats.allTimeBest': multiplier },
             }
-        ).catch(() => {});
+        ).catch(err => console.error('[crash] weekRollover update failed:', err));
+
+        // A concurrent request that also hit the rollover path may have won the
+        // conditional $or race and set weekStart already, causing the update above
+        // to match nothing. Run an unconditional $max so allTimeBest is never missed.
+        await User.updateOne(
+            { userId, guildId },
+            { $max: { 'crashStats.allTimeBest': multiplier } }
+        ).catch(err => console.error('[crash] allTimeBest fallback failed:', err));
     }
 }
 
@@ -126,13 +141,9 @@ async function buildWeeklyLeaderboard(guildId, client) {
 
     const lines = [];
     for (let i = 0; i < topUsers.length; i++) {
-        const u = topUsers[i];
-        const medal = ['🥇','🥈','🥉'][i] ?? `**${i + 1}.**`;
-        let username = u.userId;
-        if (client) {
-            const fetched = await client.users.fetch(u.userId).catch(() => null);
-            if (fetched) username = fetched.username;
-        }
+        const u        = topUsers[i];
+        const medal    = ['🥇','🥈','🥉'][i] ?? `**${i + 1}.**`;
+        const username = u.crashStats.username ?? u.userId;
         lines.push(`${medal} **${username}** — ${multLabel(u.crashStats.weekBest)}`);
     }
 
@@ -276,7 +287,7 @@ async function openLobby(interaction, bet, hostAutoCashout) {
     }
 
     // Add host with their auto cash-out preference
-    addPlayer(channelId, interaction.user.id, hostAutoCashout);
+    addPlayer(channelId, interaction.user.id, hostAutoCashout, interaction.user.username);
 
     const msg = await interaction.editReply({
         embeds:     [lobbyEmbed(lobby, [interaction.user.username], hostAutoCashout)],
@@ -328,11 +339,11 @@ async function openLobby(interaction, bet, hostAutoCashout) {
             return i.reply({ content: `You need **${bet.toLocaleString()}** coins to join.`, ephemeral: true });
         }
 
-        const joined = addPlayer(channelId, i.user.id); // no auto cash-out for non-host joiners
+        const joined = addPlayer(channelId, i.user.id, null, i.user.username); // no auto cash-out for non-host joiners
         if (!joined) {
             await User.findOneAndUpdate(
                 { userId: i.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: bet } }
+                { $inc: { balance: bet, pendingCrashRefund: -bet } }
             ).catch(err => console.error('[crash] join refund failed:', err));
             return i.reply({ content: 'Could not join the lobby (it may have just filled up). Your coins have been refunded.', ephemeral: true });
         }
@@ -404,22 +415,26 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         return lines;
     }
 
-    // Shared cash-out function used by both manual and auto triggers
+    // Shared cash-out function used by both manual and auto triggers.
+    // State is only marked cashed-out after the DB write succeeds so the
+    // emergency-refund path still sees an unresolved player on DB failure.
     async function cashOutPlayer(uid, mult, autoTriggered = false) {
         const state = lobby.players.get(uid);
         if (!state || state.cashedOutAt !== null) return false;
 
-        state.cashedOutAt    = mult;
-        state.autoTriggered  = autoTriggered;
-
-        const payout = Math.floor(bet * mult);
-        await User.findOneAndUpdate(
+        const payout    = Math.floor(bet * mult);
+        const credited  = await User.findOneAndUpdate(
             { userId: uid, guildId },
             { $inc: { balance: payout }, $set: { pendingCrashRefund: 0 } }
-        );
+        ).catch(err => { console.error('[crash] cashOut DB write failed:', err); return null; });
 
-        // Update weekly leaderboard stats
-        await updateCrashStats(uid, guildId, mult);
+        if (!credited) return false;
+
+        state.cashedOutAt   = mult;
+        state.autoTriggered = autoTriggered;
+
+        // Update weekly leaderboard stats (store username to avoid N+1 fetches in leaderboard)
+        await updateCrashStats(uid, guildId, mult, state.username);
         return true;
     }
 
@@ -465,6 +480,7 @@ async function startCrashGame(interaction, lobby, lobbyId) {
 
     lobby.interval = setInterval(async () => {
         if (gameOver) return;
+        try {
 
         tick++;
         currentMult = multiplierAt(tick);
@@ -532,6 +548,25 @@ async function startCrashGame(interaction, lobby, lobbyId) {
                     .setStyle(ButtonStyle.Success),
             )],
         }).catch(() => {});
+
+        } catch (tickErr) {
+            if (!gameOver) {
+                console.error('[crash] tick error, refunding all bets:', tickErr);
+                gameOver = true;
+                clearInterval(lobby.interval);
+                const unresolvedIds = [...lobby.players.entries()]
+                    .filter(([, s]) => s.cashedOutAt === null)
+                    .map(([uid]) => uid);
+                if (unresolvedIds.length > 0) {
+                    await User.updateMany(
+                        { userId: { $in: unresolvedIds }, guildId, pendingCrashRefund: { $gt: 0 } },
+                        { $inc: { balance: bet }, $set: { pendingCrashRefund: 0 } }
+                    ).catch(e => console.error('[crash] emergency refund failed:', e));
+                }
+                deleteLobby(channelId);
+                interaction.editReply({ content: '❌ Game error — all bets refunded.', components: [] }).catch(() => {});
+            }
+        }
     }, TICK_MS);
 
     collector.on('end', (_, reason) => {
