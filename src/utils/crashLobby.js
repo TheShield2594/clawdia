@@ -35,11 +35,11 @@ function deleteLobby(channelId) {
     lobbies.delete(channelId);
 }
 
-function addPlayer(channelId, userId, autoCashout = null) {
+function addPlayer(channelId, userId, autoCashout = null, username = null) {
     const lobby = lobbies.get(channelId);
     if (!lobby || lobby.locked || lobby.players.size >= MAX_PLAYERS) return false;
     if (lobby.players.has(userId)) return false;
-    lobby.players.set(userId, { cashedOutAt: null, autoCashout });
+    lobby.players.set(userId, { cashedOutAt: null, autoCashout, username });
     return true;
 }
 
