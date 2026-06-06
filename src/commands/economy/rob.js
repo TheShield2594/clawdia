@@ -15,15 +15,42 @@ const ROB_STEAL_MIN       = 0.10;
 const ROB_STEAL_MAX       = 0.40;
 const TRAP_FINE_MULTIPLIER = 2;            // trap doubles the normal fine
 
-// Standalone MongoDB deployments don't support multi-doc transactions, so
-// persist both balances sequentially. If the victim save fails after the
-// robber has already been persisted, restore the robber's prior balance from
-// the snapshot before re-throwing, so partial heists don't leave the robber
-// with stolen coins the victim never lost.
-async function saveRobState(robber, victim, robberSnapshot, trapSnapshot) {
+// Persist robber with a full save (only one robber per user due to cooldown), then
+// atomically apply victim balance changes via $inc so concurrent robs on the same
+// victim each deduct their own amount rather than overwriting one another. A $gte
+// condition on the deduction prevents the victim going negative if two robs fire
+// simultaneously and the second would over-drain. If the atomic victim update
+// fails, roll back the robber snapshot so no coins are created from nothing.
+async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victimOrigBalance, victimOrigBank) {
     await robber.save();
     try {
-        await victim.save();
+        const balDelta  = victim.balance - victimOrigBalance;
+        const bankDelta = (victim.bank ?? 0) - victimOrigBank;
+
+        const cond = { userId: victim.userId, guildId: victim.guildId };
+        if (balDelta  < 0) cond.balance = { $gte: -balDelta };
+        if (bankDelta < 0) cond.bank    = { $gte: -bankDelta };
+
+        const update = {
+            $set: {
+                lastRobbedAt:       victim.lastRobbedAt ?? new Date(),
+                activeEffects:      victim.activeEffects,
+                'trap.setAt':       victim.trap?.setAt       ?? null,
+                'trap.expiresAt':   victim.trap?.expiresAt   ?? null,
+            },
+        };
+        const incFields = {};
+        if (balDelta  !== 0) incFields.balance = balDelta;
+        if (bankDelta !== 0) incFields.bank    = bankDelta;
+        if (Object.keys(incFields).length) update.$inc = incFields;
+
+        const res = await User.findOneAndUpdate(cond, update);
+        if (!res) {
+            throw Object.assign(
+                new Error('[rob] victim balance changed between read and write'),
+                { victimBalanceChanged: true }
+            );
+        }
     } catch (victimErr) {
         try {
             await User.updateOne(
@@ -113,6 +140,11 @@ module.exports = {
         }
 
         try {
+            // Snapshot victim balances before any modifications so saveRobState
+            // can compute $inc deltas for atomic, non-overwriting victim updates.
+            const victimOrigBalance = victim.balance ?? 0;
+            const victimOrigBank    = victim.bank    ?? 0;
+
             const robberSnapshot = {
                 balance:        robber.balance,
                 bank:           robber.bank,
@@ -220,7 +252,7 @@ module.exports = {
                 }
 
                 const robAchievements = await checkAndAward(robber, guildSettings).catch(() => []);
-                await saveRobState(robber, victim, robberSnapshot, trapSnapshot);
+                await saveRobState(robber, victim, robberSnapshot, trapSnapshot, victimOrigBalance, victimOrigBank);
                 if (robAchievements.length) {
                     announceAchievements(interaction.client, guildSettings, robber, interaction.member, robAchievements).catch(() => null);
                 }
@@ -293,7 +325,11 @@ module.exports = {
                 if (hasEffect(robber, 'lifesaver')) {
                     consumeEffect(robber, 'lifesaver');
                     victim.lastRobbedAt = new Date();
-                    await Promise.all([robber.save(), victim.save()]);
+                    await robber.save();
+                    await User.updateOne(
+                        { userId: victim.userId, guildId: victim.guildId },
+                        { $set: { lastRobbedAt: victim.lastRobbedAt, activeEffects: victim.activeEffects } }
+                    );
 
                     embed = new EmbedBuilder()
                         .setColor('#e67e22')
@@ -309,7 +345,7 @@ module.exports = {
                     robber.balance = Math.max(0, robber.balance - paid);
                     victim.balance += paid;
                     victim.lastRobbedAt = new Date();
-                    await saveRobState(robber, victim, robberSnapshot);
+                    await saveRobState(robber, victim, robberSnapshot, null, victimOrigBalance, victimOrigBank);
 
                     embed = new EmbedBuilder()
                         .setColor('#e74c3c')
@@ -326,6 +362,9 @@ module.exports = {
 
             await interaction.editReply({ embeds: [embed] });
         } catch (error) {
+            if (error.victimBalanceChanged) {
+                return interaction.editReply({ content: "⚡ The target's balance shifted mid-heist — you couldn't complete the rob." }).catch(() => {});
+            }
             console.error('Rob command error:', error);
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: 'Something went wrong.', ephemeral: true });

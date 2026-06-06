@@ -565,6 +565,7 @@ const userSchema = new Schema({
         weekBest:     { type: Number, default: 0 },
         weekStart:    { type: Date,   default: null },
         allTimeBest:  { type: Number, default: 0 },
+        username:     { type: String, default: null },
     },
 
     // New user onboarding state

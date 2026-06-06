@@ -1763,26 +1763,46 @@ async function handleRaid(interaction) {
         });
     }
 
-    // Execute the raid: steal RAID_STEAL_MIN–RAID_STEAL_MAX of each stash material
+    // Execute the raid: steal RAID_STEAL_MIN–RAID_STEAL_MAX of each stash material.
+    // Use atomic $inc on both sides so concurrent raids on the same defender each
+    // deduct their own amount rather than overwriting one another. $gte conditions
+    // on the defender update abort if the stash was depleted by a concurrent raid.
     const stealFraction = RAID_STEAL_MIN + Math.random() * (RAID_STEAL_MAX - RAID_STEAL_MIN);
-    const stolen = {};
-    const dm = defender.mining;
+    const stolen      = {};
+    const defenderInc = {};
+    const raiderInc   = {};
 
-    for (const [matId, qty] of Object.entries(dm.oreStash ?? {})) {
+    for (const [matId, qty] of Object.entries(defender.mining.oreStash ?? {})) {
         if (qty <= 0) continue;
         const take = Math.max(1, Math.floor(qty * stealFraction));
         stolen[matId] = take;
-        dm.oreStash[matId] = qty - take;
-        // Transfer to raider's materials
-        if (!rm.materials[matId]) rm.materials[matId] = 0;
-        rm.materials[matId] += take;
+        defenderInc[`mining.oreStash.${matId}`] = -take;
+        raiderInc[`mining.materials.${matId}`]  = take;
     }
-    defender.markModified('mining');
-    raider.mining.lastRaidSent = new Date();
-    defender.mining.lastRaidReceived = new Date();
-    raider.markModified('mining');
 
-    await Promise.all([raider.save(), defender.save()]).catch(err => console.error('[mine raid] save error:', err));
+    // Condition: each stolen material still exists in the stash at the read amount.
+    const defenderCond = { userId: defender.userId, guildId: interaction.guild.id };
+    for (const [matId, take] of Object.entries(stolen)) {
+        defenderCond[`mining.oreStash.${matId}`] = { $gte: take };
+    }
+
+    const [defenderResult] = await Promise.all([
+        User.findOneAndUpdate(
+            defenderCond,
+            { $inc: defenderInc, $set: { 'mining.lastRaidReceived': new Date() } }
+        ),
+        User.findOneAndUpdate(
+            { userId: raider.userId, guildId: interaction.guild.id },
+            { $inc: raiderInc, $set: { 'mining.lastRaidSent': new Date() } }
+        ),
+    ]).catch(err => { console.error('[mine raid] save error:', err); return [null]; });
+
+    if (!defenderResult) {
+        return interaction.reply({
+            content: `**${targetUser.username}**'s ore stash was already raided — nothing left to take.`,
+            ephemeral: true
+        });
+    }
 
     const stolenLines = Object.entries(stolen).map(([id, qty]) => `• ${MATERIAL_NAMES[id] ?? id} ×${qty}`).join('\n');
     const pct = Math.round(stealFraction * 100);
