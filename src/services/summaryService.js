@@ -32,7 +32,8 @@ async function runSummaryJob(job, client) {
         ...config,
         systemPrompt: 'You are a helpful assistant that creates concise summaries of Discord channel activity.',
         history: [],
-        prompt: `Summarize the key topics, decisions, and highlights from these Discord messages as bullet points:\n\n${transcript}`
+        prompt: `Summarize the key topics, decisions, and highlights from these Discord messages as bullet points:\n\n${transcript}`,
+        guildId: job.guildId
     });
 
     const dstChannel = guild.channels.cache.get(job.targetChannelId)
