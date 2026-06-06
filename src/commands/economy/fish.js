@@ -732,8 +732,7 @@ async function handleCast(interaction) {
         embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
     }
     if (winterHuntMaterial) {
-        const { MATERIAL_NAMES: HUNT_MAT_NAMES } = require('../../data/huntData');
-        const matName = HUNT_MAT_NAMES[winterHuntMaterial] ?? winterHuntMaterial;
+        const matName = HUNT_MATERIAL_NAMES[winterHuntMaterial] ?? winterHuntMaterial;
         embed.addFields({ name: '❄️ Winter Hunt Event', value: `+1 ${matName} (hunt material found in icy waters!)`, inline: true });
     }
 
