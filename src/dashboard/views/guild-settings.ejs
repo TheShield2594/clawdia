@@ -2020,8 +2020,14 @@
                             </select>
                         </div>
                         <div class="field">
-                            <label class="field-label" for="ai-prompt">System prompt</label>
-                            <textarea id="ai-prompt" rows="3"><%= settings.ai.systemPrompt %></textarea>
+                            <div class="prompt-field-head">
+                                <label class="field-label" for="ai-prompt" style="margin:0;">System prompt</label>
+                                <div class="prompt-field-meta">
+                                    <span class="prompt-char-count" id="ai-prompt-count">0 / 4000</span>
+                                    <button type="button" class="prompt-expand-btn" onclick="openPromptEditor('ai-prompt', 'System prompt')">⛶ Full-screen</button>
+                                </div>
+                            </div>
+                            <textarea id="ai-prompt" class="auto-resize" rows="8" maxlength="4000" oninput="updatePromptCount('ai-prompt')"><%= settings.ai.systemPrompt %></textarea>
                         </div>
                         <div class="field">
                             <label class="field-label" for="ai-temperature">Temperature (<span id="ai-temp-display"><%= settings.ai.temperature ?? 0.7 %></span>)</label>
@@ -2047,6 +2053,37 @@
                         <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
                         <div class="actions-row">
                             <button class="btn btn-primary" onclick="saveSettings('ai')">Save changes</button>
+                        </div>
+
+                        <!-- Token Usage Stats -->
+                        <div class="ai-usage-card" id="ai-usage-card">
+                            <div class="ai-usage-card-head">
+                                <h3>📊 Token usage</h3>
+                                <span class="muted" id="ai-usage-status">Loading…</span>
+                            </div>
+                            <div class="ai-usage-stats">
+                                <div class="ai-usage-stat">
+                                    <div class="ai-usage-stat-label">Today</div>
+                                    <div class="ai-usage-stat-value" id="ai-usage-today-tokens">—</div>
+                                    <div class="ai-usage-stat-sub" id="ai-usage-today-cost"></div>
+                                </div>
+                                <div class="ai-usage-stat">
+                                    <div class="ai-usage-stat-label">This week</div>
+                                    <div class="ai-usage-stat-value" id="ai-usage-week-tokens">—</div>
+                                    <div class="ai-usage-stat-sub" id="ai-usage-week-cost"></div>
+                                </div>
+                                <div class="ai-usage-stat">
+                                    <div class="ai-usage-stat-label">This month</div>
+                                    <div class="ai-usage-stat-value" id="ai-usage-month-tokens">—</div>
+                                    <div class="ai-usage-stat-sub" id="ai-usage-month-cost"></div>
+                                </div>
+                            </div>
+                            <div style="font-size:.78rem;color:var(--text-mute);margin-bottom:.35rem;">Tokens per day — last 14 days</div>
+                            <svg class="ai-usage-sparkline" id="ai-usage-sparkline" viewBox="0 0 280 60" preserveAspectRatio="none"></svg>
+                            <div class="ai-usage-breakdown" id="ai-usage-breakdown"></div>
+                            <p style="font-size:.74rem;color:var(--text-mute);margin:.75rem 0 0;">
+                                Costs are estimates based on published per-token pricing for known models; OpenRouter and unknown models show no cost. Self-hosted Ollama is always $0.
+                            </p>
                         </div>
                     </div>
 
@@ -2145,11 +2182,37 @@
                             <input type="text" id="persona-name" placeholder="e.g. Support Bot">
                         </div>
                         <div class="field">
-                            <label class="field-label" for="persona-prompt">System prompt</label>
-                            <textarea id="persona-prompt" rows="4" placeholder="You are a helpful support assistant…"></textarea>
+                            <div class="prompt-field-head">
+                                <label class="field-label" for="persona-prompt" style="margin:0;">System prompt</label>
+                                <div class="prompt-field-meta">
+                                    <span class="prompt-char-count" id="persona-prompt-count">0 / 4000</span>
+                                    <button type="button" class="prompt-expand-btn" onclick="openPromptEditor('persona-prompt', 'Persona system prompt')">⛶ Full-screen</button>
+                                </div>
+                            </div>
+                            <textarea id="persona-prompt" class="auto-resize" rows="8" maxlength="4000" placeholder="You are a helpful support assistant…" oninput="updatePromptCount('persona-prompt')"></textarea>
                         </div>
                         <div class="actions-row">
                             <button class="btn btn-primary" onclick="addPersona()">Save persona</button>
+                        </div>
+                    </div>
+
+                    <!-- Full-screen prompt editor (shared by ai-prompt and persona-prompt) -->
+                    <div id="prompt-editor-modal" class="modal-overlay prompt-editor-modal" style="display:none;" onclick="if(event.target===this)closePromptEditor(false)">
+                        <div class="modal-box modal-box-wide">
+                            <div class="modal-head">
+                                <h3 id="prompt-editor-title">Edit prompt</h3>
+                                <button class="modal-close" onclick="closePromptEditor(false)">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <textarea id="prompt-editor-textarea" maxlength="4000" oninput="updatePromptEditorCount()"></textarea>
+                                <div style="display:flex;justify-content:flex-end;margin-top:.5rem;font-size:.78rem;color:var(--text-mute);">
+                                    <span id="prompt-editor-count">0 / 4000</span>
+                                </div>
+                            </div>
+                            <div class="modal-actions">
+                                <button class="btn" onclick="closePromptEditor(false)">Cancel</button>
+                                <button class="btn btn-primary" onclick="closePromptEditor(true)">Done</button>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -2844,6 +2907,15 @@
                     'commandPolicies.cooldownOverrides': _cpCooldowns
                 };
             } else if (section === 'ai') {
+                // EJS renders the saved systemPrompt verbatim, so pre-existing values
+                // can exceed the textarea's maxlength (e.g. set via the API).
+                // Validate here so we never POST an oversized prompt.
+                var aiPromptVal = document.getElementById('ai-prompt').value;
+                if (aiPromptVal.length > 4000) {
+                    updatePromptCount('ai-prompt');
+                    toast('System prompt is ' + aiPromptVal.length + ' chars — maximum is 4000.', 'error');
+                    return;
+                }
                 data = {
                     'ai.enabled': document.getElementById('ai-enabled').checked,
                     'ai.provider': document.getElementById('ai-provider').value,
@@ -2854,7 +2926,7 @@
                     ...(document.getElementById('ai-openrouter-key').value ? {'ai.openrouterKey': document.getElementById('ai-openrouter-key').value} : {}),
                     'ai.ollamaBaseUrl': document.getElementById('ai-ollama-url').value.trim(),
                     'ai.channelId': document.getElementById('ai-channel').value,
-                    'ai.systemPrompt': document.getElementById('ai-prompt').value,
+                    'ai.systemPrompt': aiPromptVal,
                     'ai.temperature': parseFloat(document.getElementById('ai-temperature').value),
                     'ai.maxTokens': parseInt(document.getElementById('ai-max-tokens').value, 10),
                     'ai.maxHistory': parseInt(document.getElementById('ai-max-history').value, 10),
@@ -4025,6 +4097,182 @@
 
         // Initialize personas on page load (data already available from template)
         renderPersonas();
+
+        // ── Prompt editor: char counter + full-screen modal ─────────────────
+        function updatePromptCount(textareaId) {
+            var ta = document.getElementById(textareaId);
+            var counter = document.getElementById(textareaId + '-count');
+            if (!ta || !counter) return;
+            var max = parseInt(ta.getAttribute('maxlength'), 10) || 4000;
+            var len = ta.value.length;
+            counter.textContent = len + ' / ' + max;
+            counter.classList.toggle('over', len >= max);
+        }
+
+        var _promptEditorTarget = null;
+        function _promptEditorKeydown(e) {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                closePromptEditor(true);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closePromptEditor(false);
+            }
+        }
+        function openPromptEditor(textareaId, title) {
+            var ta = document.getElementById(textareaId);
+            if (!ta) return;
+            _promptEditorTarget = textareaId;
+            document.getElementById('prompt-editor-title').textContent = title || 'Edit prompt';
+            var editor = document.getElementById('prompt-editor-textarea');
+            editor.value = ta.value;
+            editor.setAttribute('maxlength', ta.getAttribute('maxlength') || 4000);
+            document.getElementById('prompt-editor-modal').style.display = 'flex';
+            updatePromptEditorCount();
+            document.addEventListener('keydown', _promptEditorKeydown);
+            setTimeout(function() { editor.focus(); }, 50);
+        }
+        function updatePromptEditorCount() {
+            var editor = document.getElementById('prompt-editor-textarea');
+            var counter = document.getElementById('prompt-editor-count');
+            var max = parseInt(editor.getAttribute('maxlength'), 10) || 4000;
+            var len = editor.value.length;
+            counter.textContent = len + ' / ' + max;
+            counter.classList.toggle('over', len >= max);
+        }
+        function closePromptEditor(commit) {
+            var modal = document.getElementById('prompt-editor-modal');
+            if (commit && _promptEditorTarget) {
+                var ta = document.getElementById(_promptEditorTarget);
+                if (ta) {
+                    ta.value = document.getElementById('prompt-editor-textarea').value;
+                    updatePromptCount(_promptEditorTarget);
+                }
+            }
+            modal.style.display = 'none';
+            document.removeEventListener('keydown', _promptEditorKeydown);
+            _promptEditorTarget = null;
+        }
+        // Initialize counters on load
+        updatePromptCount('ai-prompt');
+        updatePromptCount('persona-prompt');
+
+        // ── AI Token Usage ──────────────────────────────────────────────────
+        function formatTokens(n) {
+            if (n == null) return '—';
+            if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+            if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
+            return String(n);
+        }
+        function formatCost(n, costKnown) {
+            if (n == null) return '';
+            if (!costKnown && n === 0) return 'cost unavailable';
+            var prefix = costKnown ? '' : '≥ ';
+            if (n < 0.01 && n > 0) return prefix + '< $0.01';
+            return prefix + '$' + n.toFixed(2);
+        }
+        function renderSparkline(daily) {
+            var svg = document.getElementById('ai-usage-sparkline');
+            if (!svg) return;
+            var W = 280, H = 60, pad = 4;
+            var values = daily.map(function(d) { return d.inputTokens + d.outputTokens; });
+            var max = Math.max.apply(null, values.concat([1]));
+            if (max <= 0) max = 1;
+            var n = values.length;
+            var stepX = (W - pad * 2) / Math.max(1, n - 1);
+            // Build bars instead of a line — easier to read for small token counts
+            var barW = Math.max(2, (W - pad * 2) / n - 2);
+            var bars = '';
+            for (var i = 0; i < n; i++) {
+                var v = values[i];
+                var h = max > 0 ? (v / max) * (H - pad * 2) : 0;
+                var x = pad + i * ((W - pad * 2) / n);
+                var y = H - pad - h;
+                bars += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) +
+                        '" width="' + barW.toFixed(1) + '" height="' + h.toFixed(1) +
+                        '" fill="currentColor" opacity="' + (v > 0 ? 0.7 : 0.2) + '">' +
+                        '<title>' + daily[i].day + ': ' + formatTokens(v) + ' tokens</title></rect>';
+            }
+            svg.innerHTML = bars;
+            svg.style.color = 'var(--accent, #7aa7ff)';
+        }
+        function renderUsageBreakdown(byModel) {
+            var el = document.getElementById('ai-usage-breakdown');
+            if (!el) return;
+            if (!byModel.length) { el.innerHTML = ''; return; }
+            var rows = byModel
+                .sort(function(a, b) { return (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens); })
+                .map(function(m) {
+                    var total = m.inputTokens + m.outputTokens;
+                    var costStr = m.costKnown ? '$' + (m.cost || 0).toFixed(4) : '—';
+                    return '<tr>' +
+                        '<td>' + escHtml(m.provider) + '</td>' +
+                        '<td>' + escHtml(m.model) + '</td>' +
+                        '<td class="num">' + m.requestCount + '</td>' +
+                        '<td class="num">' + formatTokens(total) + '</td>' +
+                        '<td class="num">' + costStr + '</td>' +
+                    '</tr>';
+                }).join('');
+            el.innerHTML =
+                '<div style="margin-bottom:.4rem;color:var(--text);font-weight:600;">This month, by model</div>' +
+                '<table><thead><tr>' +
+                    '<th>Provider</th><th>Model</th>' +
+                    '<th style="text-align:right;">Reqs</th>' +
+                    '<th style="text-align:right;">Tokens</th>' +
+                    '<th style="text-align:right;">Est. cost</th>' +
+                '</tr></thead><tbody>' + rows + '</tbody></table>';
+        }
+        async function loadAiUsage() {
+            var guildId = '<%= guild.id %>';
+            var statusEl = document.getElementById('ai-usage-status');
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/ai/usage?days=14');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                var data = await resp.json();
+                document.getElementById('ai-usage-today-tokens').textContent = formatTokens(data.today.tokens);
+                document.getElementById('ai-usage-week-tokens').textContent  = formatTokens(data.week.tokens);
+                document.getElementById('ai-usage-month-tokens').textContent = formatTokens(data.month.tokens);
+                document.getElementById('ai-usage-today-cost').textContent = formatCost(data.today.cost, data.costKnown);
+                document.getElementById('ai-usage-week-cost').textContent  = formatCost(data.week.cost, data.costKnown);
+                document.getElementById('ai-usage-month-cost').textContent = formatCost(data.month.cost, data.costKnown);
+                renderSparkline(data.daily || []);
+                renderUsageBreakdown(data.byModel || []);
+
+                var rl = data.rateLimit || {};
+                var rlParts = [];
+                if (rl.perUser)    rlParts.push(rl.perUser + '/user');
+                if (rl.perChannel) rlParts.push(rl.perChannel + '/channel');
+                var rlStr = rlParts.length
+                    ? 'Limit: ' + rlParts.join(', ') + ' per ' + (rl.windowMin || 10) + 'm'
+                    : 'No rate limit set';
+                statusEl.textContent = rlStr;
+            } catch (e) {
+                console.error('Failed to load AI usage:', e);
+                statusEl.textContent = 'Failed to load usage';
+                throw e;
+            }
+        }
+        // Lazy-load AI usage stats the first time the AI panel becomes visible.
+        // Watches the AI panel's `.active` class so it works for nav clicks, hash
+        // routing, and initial page load without coupling to the nav implementation.
+        (function() {
+            var aiPanel = document.getElementById('ai');
+            if (!aiPanel) return;
+            var loaded = false;
+            var inFlight = false;
+            function check() {
+                if (loaded || inFlight) return;
+                if (!aiPanel.classList.contains('active')) return;
+                inFlight = true;
+                loadAiUsage()
+                    .then(function() { loaded = true; })
+                    .catch(function() { /* leave `loaded` false so a later view retries */ })
+                    .finally(function() { inFlight = false; });
+            }
+            check();
+            var obs = new MutationObserver(check);
+            obs.observe(aiPanel, { attributes: true, attributeFilter: ['class'] });
+        })();
 
         // ── Leveling: No-XP role tag-input ──────────────────────────────────
         function addLevelNoXpRole() {
