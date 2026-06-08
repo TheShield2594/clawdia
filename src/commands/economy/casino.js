@@ -16,7 +16,15 @@ const games = [
 const builder = new SlashCommandBuilder()
     .setName('casino')
     .setDescription('Play casino games: blackjack, crash, cupgame, higher/lower, keno, poker, roulette, and slots.')
-    .addSubcommand(sub => sub.setName('jackpot').setDescription('View the current progressive jackpot pool.'));
+    .addSubcommand(sub => sub.setName('jackpot').setDescription('View the current progressive jackpot pool.'))
+    .addSubcommand(sub => sub
+        .setName('setlimit')
+        .setDescription('(Admin) Set or clear the maximum bet allowed in casino games.')
+        .addIntegerOption(opt => opt
+            .setName('limit')
+            .setDescription('Max bet in coins. Set to 0 for no limit.')
+            .setMinValue(0)
+            .setRequired(true)));
 
 for (const game of games) {
     builder.addSubcommand(sub => {
@@ -45,6 +53,22 @@ module.exports = {
             return interaction.reply({ content: 'Casino games are disabled on this server.', ephemeral: true });
         }
         const sub = interaction.options.getSubcommand();
+
+        if (sub === 'setlimit') {
+            if (!interaction.memberPermissions?.has('ManageGuild')) {
+                return interaction.reply({ content: '❌ You need the **Manage Server** permission to set the casino bet limit.', ephemeral: true });
+            }
+            const limit = interaction.options.getInteger('limit');
+            await Guild.findOneAndUpdate(
+                { guildId: interaction.guild.id },
+                { $set: { 'economy.casinoMaxBet': limit } },
+                { upsert: true }
+            );
+            const msg = limit === 0
+                ? '✅ Casino bet limit **removed** — players can bet any amount up to their wallet balance.'
+                : `✅ Casino bet limit set to **${limit.toLocaleString()}** coins.`;
+            return interaction.reply({ content: msg, ephemeral: true });
+        }
 
         if (sub === 'jackpot') {
             const { pool, hot, display } = await getJackpotDisplay(interaction.guild.id);

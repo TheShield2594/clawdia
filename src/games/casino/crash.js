@@ -4,7 +4,8 @@ const {
     ButtonBuilder,
     ButtonStyle,
 } = require('discord.js');
-const User = require('../../models/User');
+const User  = require('../../models/User');
+const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect } = require('../../services/effectsService');
 const {
@@ -19,7 +20,6 @@ const {
 const GROWTH  = 1.12;
 const TICK_MS = 1200;
 const MIN_BET = 10;
-const MAX_BET = 5000;
 
 function generateCrashPoint() {
     const r = Math.random();
@@ -241,9 +241,9 @@ module.exports = {
     configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
-                .setDescription(`Coins to bet (${MIN_BET.toLocaleString()}–${MAX_BET.toLocaleString()})`)
+                .setDescription(`Coins to bet (min ${MIN_BET.toLocaleString()})`)
                 .setMinValue(MIN_BET)
-                .setMaxValue(MAX_BET)
+                .setMaxValue(1_000_000_000)
                 .setRequired(true))
         .addNumberOption(opt =>
             opt.setName('auto_cashout')
@@ -255,6 +255,11 @@ module.exports = {
     async execute(interaction) {
         const bet         = interaction.options.getInteger('bet');
         const autoCashout = interaction.options.getNumber('auto_cashout') ?? null;
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
+        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+        }
         const user        = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash');
         if (!shouldProceed) return;
