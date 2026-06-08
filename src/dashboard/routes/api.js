@@ -1206,6 +1206,24 @@ router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, async 
     }
 });
 
+router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, async (req, res) => {
+    const ids = (req.query.ids || '').split(',').map(s => s.trim()).filter(s => /^\d{17,20}$/.test(s)).slice(0, 50);
+    if (!ids.length) return res.json({});
+    try {
+        const result = {};
+        await Promise.all(ids.map(async id => {
+            try {
+                const user = await req.client.users.fetch(id, { force: false });
+                result[id] = { id, username: user.username, displayName: user.globalName || user.username, avatarURL: user.displayAvatarURL({ size: 32, extension: 'webp' }) };
+            } catch { result[id] = null; }
+        }));
+        res.json(result);
+    } catch (err) {
+        console.error('Member resolve error:', err);
+        res.status(500).json({ error: 'Resolve failed' });
+    }
+});
+
 // ── Achievements ────────────────────────────────────────────────────────────
 
 router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
@@ -1382,7 +1400,25 @@ router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res
             Case.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
             Case.countDocuments(query)
         ]);
-        res.json({ cases, total, page, pages: Math.ceil(total / limit) });
+
+        const uniqueIds = [...new Set(cases.flatMap(c => [c.targetUserId, c.moderatorId].filter(Boolean)))];
+        const userMap = {};
+        await Promise.all(uniqueIds.map(async id => {
+            try {
+                const u = await req.client.users.fetch(id, { force: false });
+                userMap[id] = { tag: u.tag, avatarUrl: u.displayAvatarURL({ size: 32, extension: 'webp' }) };
+            } catch { /* user not resolvable */ }
+        }));
+
+        res.json({
+            cases: cases.map(c => ({
+                ...c,
+                targetUserTag: userMap[c.targetUserId]?.tag || null,
+                targetAvatarUrl: userMap[c.targetUserId]?.avatarUrl || null,
+                moderatorTag: userMap[c.moderatorId]?.tag || null,
+            })),
+            total, page, pages: Math.ceil(total / limit)
+        });
     } catch (error) {
         console.error('Cases list error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -1535,10 +1571,24 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
             }
         }
 
+        const ecoUserMap = {};
+        await Promise.all(topEarners.map(async u => {
+            try {
+                const user = await req.client.users.fetch(u.userId, { force: false });
+                ecoUserMap[u.userId] = { tag: user.tag, avatarUrl: user.displayAvatarURL({ size: 32, extension: 'webp' }) };
+            } catch { /* user not resolvable */ }
+        }));
+
         res.json({
             totalCoins: totalCoinsAgg[0]?.total || 0,
             activeUsers: activeUsersCount,
-            topEarners: topEarners.map(u => ({ userId: u.userId, balance: u.balance, bank: u.bank, total: (u.balance || 0) + (u.bank || 0) })),
+            topEarners: topEarners.map(u => ({
+                userId: u.userId,
+                userTag: ecoUserMap[u.userId]?.tag || null,
+                avatarUrl: ecoUserMap[u.userId]?.avatarUrl || null,
+                balance: u.balance, bank: u.bank,
+                total: (u.balance || 0) + (u.bank || 0)
+            })),
             commandFrequency: Object.entries(commandFrequency).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([cmd, count]) => ({ cmd, count }))
         });
     } catch (error) {

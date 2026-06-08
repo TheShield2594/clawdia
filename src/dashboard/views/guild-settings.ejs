@@ -220,24 +220,67 @@
                         Modules on
                     </div>
                     <%
-                    var moduleCount = 0;
-                    if (settings.welcome && settings.welcome.enabled) moduleCount++;
-                    if (settings.leveling && settings.leveling.enabled) moduleCount++;
-                    if (settings.economy && settings.economy.enabled) moduleCount++;
-                    if (settings.moderation && settings.moderation.enabled) moduleCount++;
-                    if (settings.ai && settings.ai.enabled) moduleCount++;
-                    if (settings.rss?.enabled || settings.rssFeeds?.length > 0 || settings.dailyNews?.enabled || settings.dailyNewsProfiles?.length > 0) moduleCount++;
+                    var _moduleChecks = [
+                        !!(settings.welcome?.enabled),
+                        !!(settings.farewell?.enabled),
+                        !!(settings.birthdays?.enabled),
+                        !!(settings.moderation?.enabled),
+                        !!(settings.leveling?.enabled),
+                        !!(settings.economy?.enabled),
+                        !!(settings.heist?.enabled),
+                        !!(settings.achievements?.enabled),
+                        !!(settings.raidDetection?.enabled),
+                        !!(settings.antiNuke?.enabled),
+                        !!(settings.starboard?.enabled),
+                        !!(settings.eventLog?.enabled),
+                        !!(settings.quests?.enabled),
+                        !!(settings.newspaper?.enabled),
+                        !!(settings.season?.enabled),
+                        !!(settings.progressionTracks?.enabled),
+                        !!(settings.suggestions?.enabled),
+                        !!(settings.dailyNews?.enabled || settings.rss?.enabled || settings.rssFeeds?.length > 0 || settings.dailyNewsProfiles?.length > 0),
+                        !!(settings.tempVoice?.enabled),
+                        !!(settings.commandPolicies?.enabled),
+                        !!(settings.ai?.enabled),
+                        !!(settings.bibleVerse?.enabled),
+                    ];
+                    var moduleCount = _moduleChecks.filter(Boolean).length;
+                    var totalModules = _moduleChecks.length;
                     %>
                     <div class="dash-kpi-value"><%= moduleCount %></div>
-                    <div class="dash-kpi-meta"><span class="dash-kpi-foot">of 7 modules</span></div>
+                    <div class="dash-kpi-meta"><span class="dash-kpi-foot">of <%= totalModules %> features on</span></div>
                 </div>
                 <div class="dash-kpi feature">
                     <div class="dash-kpi-label">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>
                         Bot Status
                     </div>
-                    <div class="dash-kpi-value" style="font-size:34px;">Online</div>
-                    <div class="dash-kpi-meta"><span style="color:var(--good);font-size:12px;font-family:'JetBrains Mono',monospace;">● Active</span></div>
+                    <div class="dash-kpi-value" style="font-size:34px;" id="kpi-bot-value">—</div>
+                    <div class="dash-kpi-meta"><span id="kpi-bot-foot" style="font-size:12px;font-family:'JetBrains Mono',monospace;">checking…</span></div>
+                </div>
+                <div class="dash-kpi" id="kpi-economy-overview">
+                    <div class="dash-kpi-label">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M10 9h3a2 2 0 0 1 0 4h-3v-4zM10 13v3"/></svg>
+                        Economy
+                    </div>
+                    <div class="dash-kpi-value" id="kpi-eco-value">—</div>
+                    <div class="dash-kpi-meta"><span class="dash-kpi-foot" id="kpi-eco-foot">active users (7d)</span></div>
+                </div>
+                <div class="dash-kpi" id="kpi-leveling-overview">
+                    <div class="dash-kpi-label">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18l5-5 4 4 5-7 4 3"/></svg>
+                        Leveling
+                    </div>
+                    <div class="dash-kpi-value" id="kpi-level-value">—</div>
+                    <div class="dash-kpi-meta"><span class="dash-kpi-foot" id="kpi-level-foot">top level</span></div>
+                </div>
+                <div class="dash-kpi" id="kpi-ai-overview">
+                    <div class="dash-kpi-label">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4z"/></svg>
+                        AI
+                    </div>
+                    <div class="dash-kpi-value" id="kpi-ai-value">—</div>
+                    <div class="dash-kpi-meta"><span class="dash-kpi-foot" id="kpi-ai-foot">requests (total)</span></div>
                 </div>
             </div>
 
@@ -1057,7 +1100,7 @@
                             <button class="btn btn-sm" onclick="loadEcoHealth()">Retry</button>
                         </div>
                         <table id="eco-top-earners-table" class="cases-table" style="display:none">
-                            <thead><tr><th>Rank</th><th>User ID</th><th>Wallet</th><th>Bank</th><th>Total</th></tr></thead>
+                            <thead><tr><th>Rank</th><th>User</th><th>Wallet</th><th>Bank</th><th>Total</th></tr></thead>
                             <tbody id="eco-top-earners-tbody"></tbody>
                         </table>
 
@@ -1587,7 +1630,17 @@
                     </div>
                     <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Whitelist <small style="font-weight:400;color:var(--text-dim)">— one ID per line</small></div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                        <div><label class="field-label" for="an-whitelist-users">User IDs</label><textarea id="an-whitelist-users" rows="3" placeholder="One user ID per line"><%= (settings.antiNuke?.whitelistUserIds||[]).join('\n') %></textarea></div>
+                        <div>
+                            <label class="field-label">Whitelisted users</label>
+                            <div class="user-search-widget">
+                                <div class="user-tag-list" id="an-whitelist-users-tags"></div>
+                                <div style="position:relative">
+                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" data-widget="an-whitelist-users">
+                                    <div class="user-search-dropdown" id="an-whitelist-users-dropdown" style="display:none"></div>
+                                </div>
+                                <textarea id="an-whitelist-users" style="display:none"><%= (settings.antiNuke?.whitelistUserIds||[]).join('\n') %></textarea>
+                            </div>
+                        </div>
                         <div><label class="field-label" for="an-whitelist-roles">Role IDs</label><textarea id="an-whitelist-roles" rows="3" placeholder="One role ID per line"><%= (settings.antiNuke?.whitelistRoleIds||[]).join('\n') %></textarea></div>
                     </div>
                     <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('antinuke')">Save changes</button></div>
@@ -2107,8 +2160,15 @@
                             </div>
                         </div>
                         <div>
-                            <label class="field-label">Exempt user IDs <small>(one per line)</small></label>
-                            <textarea id="cp-exc-users" rows="3" placeholder="One user ID per line"><%= (settings.commandPolicies?.exceptions?.userIds||[]).join('\n') %></textarea>
+                            <label class="field-label">Exempt users</label>
+                            <div class="user-search-widget">
+                                <div class="user-tag-list" id="cp-exc-users-tags"></div>
+                                <div style="position:relative">
+                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" data-widget="cp-exc-users">
+                                    <div class="user-search-dropdown" id="cp-exc-users-dropdown" style="display:none"></div>
+                                </div>
+                                <textarea id="cp-exc-users" style="display:none"><%= (settings.commandPolicies?.exceptions?.userIds||[]).join('\n') %></textarea>
+                            </div>
                         </div>
                     </div>
                     <div class="eco-section-head" style="margin-top:1.25rem;">
@@ -5147,6 +5207,12 @@
                 if (memberFoot) memberFoot.textContent = `${joins7} joined · ${leaves7} left (7d)`;
                 if (memberVal) memberVal.style.color = net7 >= 0 ? 'var(--good)' : 'var(--danger, #e05)';
 
+                // Bot Status KPI
+                const botVal = document.getElementById('kpi-bot-value');
+                const botFoot = document.getElementById('kpi-bot-foot');
+                if (botVal) { botVal.textContent = 'Online'; botVal.style.fontSize = '34px'; }
+                if (botFoot) { botFoot.textContent = '● Active'; botFoot.style.color = 'var(--good)'; }
+
                 // Moderation KPI
                 const modCmds = ['warn','mute','kick','ban','timeout','unmute','unban'];
                 const modTotal = modCmds.reduce((sum, cmd) => sum + (a.commandUsage?.[cmd]?.total || 0), 0);
@@ -5154,6 +5220,26 @@
                 const modFoot = document.getElementById('kpi-mod-foot');
                 if (modVal) modVal.textContent = modTotal;
                 if (modFoot) modFoot.textContent = modTotal === 1 ? 'action this week' : 'actions this week';
+
+                // Economy KPI
+                const ecoActive = a.economyStats?.activeUsers ?? 0;
+                const ecoVal = document.getElementById('kpi-eco-value');
+                if (ecoVal) ecoVal.textContent = ecoActive.toLocaleString();
+
+                // Leveling KPI
+                const topLevel = stats.topLevels?.[0]?.level ?? 0;
+                const levelVal = document.getElementById('kpi-level-value');
+                const levelFoot = document.getElementById('kpi-level-foot');
+                if (levelVal) levelVal.textContent = topLevel;
+                if (levelFoot) levelFoot.textContent = topLevel ? 'highest member level' : 'no levels yet';
+
+                // AI KPI
+                const aiCmds = ['ask', 'ai', 'chat', 'aiask', 'clawdia'];
+                const aiTotal = aiCmds.reduce((sum, cmd) => sum + (a.commandUsage?.[cmd]?.total || 0), 0);
+                const aiVal = document.getElementById('kpi-ai-value');
+                const aiFoot = document.getElementById('kpi-ai-foot');
+                if (aiVal) aiVal.textContent = aiTotal.toLocaleString();
+                if (aiFoot) aiFoot.textContent = aiTotal === 1 ? 'AI request' : 'AI requests';
 
                 // Ask Clawdia recommendations
                 const recs = a.recommendations || [];
@@ -5211,8 +5297,12 @@
                 if (actionsEl) actionsEl.innerHTML = `<button class="dash-bot-btn" onclick="document.querySelector('.nav-item[data-tab=analytics]').click()">Open Analytics →</button>`;
                 const memberVal = document.getElementById('kpi-members-value');
                 const modVal = document.getElementById('kpi-mod-value');
+                const botVal2 = document.getElementById('kpi-bot-value');
+                const botFoot2 = document.getElementById('kpi-bot-foot');
                 if (memberVal) memberVal.textContent = '—';
                 if (modVal) modVal.textContent = '—';
+                if (botVal2) { botVal2.textContent = 'Online'; botVal2.style.fontSize = '34px'; }
+                if (botFoot2) { botFoot2.textContent = '● Active'; botFoot2.style.color = 'var(--good)'; }
                 const feed = document.getElementById('overview-activity-feed');
                 if (feed) feed.innerHTML = '<span style="opacity:.4;font-size:.85em">Could not load activity data.</span>';
             }
@@ -5631,11 +5721,17 @@
                 tbody.innerHTML = '';
                 for (const c of cases) {
                     const date = new Date(c.createdAt).toLocaleDateString();
+                    const targetCell = c.targetUserTag
+                        ? `<span title="${escHtml(c.targetUserId)}">${c.targetAvatarUrl ? `<img src="${escHtml(c.targetAvatarUrl)}" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(c.targetUserTag)}</span>`
+                        : `<span style="font-size:.8em">${escHtml(c.targetUserId)}</span>`;
+                    const modCell = c.moderatorTag
+                        ? `<span title="${escHtml(c.moderatorId)}">${escHtml(c.moderatorTag)}</span>`
+                        : `<span style="font-size:.8em">${escHtml(c.moderatorId)}</span>`;
                     tbody.insertAdjacentHTML('beforeend', `<tr>
                         <td>#${c.caseId}</td>
-                        <td style="font-size:.8em">${c.targetUserId}</td>
+                        <td>${targetCell}</td>
                         <td><span class="case-type-badge type-${c.type}">${c.type}</span></td>
-                        <td style="font-size:.8em">${c.moderatorId}</td>
+                        <td>${modCell}</td>
                         <td>${date}</td>
                         <td><span class="case-status-badge status-${c.status}">${c.status}</span></td>
                         <td style="display:flex;gap:.35rem;flex-wrap:wrap">
@@ -5723,7 +5819,10 @@
                 tbody.innerHTML = '';
                 for (let i = 0; i < (stats.topEarners || []).length; i++) {
                     const u = stats.topEarners[i];
-                    tbody.insertAdjacentHTML('beforeend', `<tr><td>#${i+1}</td><td style="font-size:.8em">${u.userId}</td><td>${(u.balance||0).toLocaleString()}</td><td>${(u.bank||0).toLocaleString()}</td><td>${(u.total||0).toLocaleString()}</td></tr>`);
+                    const userCell = u.userTag
+                        ? `<span title="${escHtml(u.userId)}">${u.avatarUrl ? `<img src="${escHtml(u.avatarUrl)}" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(u.userTag)}</span>`
+                        : `<span style="font-size:.8em">${escHtml(u.userId)}</span>`;
+                    tbody.insertAdjacentHTML('beforeend', `<tr><td>#${i+1}</td><td>${userCell}</td><td>${(u.balance||0).toLocaleString()}</td><td>${(u.bank||0).toLocaleString()}</td><td>${(u.total||0).toLocaleString()}</td></tr>`);
                 }
                 document.getElementById('eco-top-earners-table').style.display = '';
                 // Command frequency chart
@@ -5793,6 +5892,95 @@
                 document.querySelectorAll('#eco-tab-health .btn').forEach(b => b.disabled = false);
             }
         }
+
+        // ── User search widget ────────────────────────────────────────────────
+        (function() {
+            const _gId = '<%= guild.id %>';
+
+            function initUserSearchWidget(widgetId) {
+                const textarea = document.getElementById(widgetId);
+                const tagsEl   = document.getElementById(widgetId + '-tags');
+                const dropdown = document.getElementById(widgetId + '-dropdown');
+                const input    = document.querySelector(`.user-search-input[data-widget="${widgetId}"]`);
+                if (!textarea || !tagsEl || !input || !dropdown) return;
+
+                const existingIds = textarea.value.split('\n').map(s => s.trim()).filter(Boolean);
+                if (existingIds.length) {
+                    fetch(`/api/guild/${_gId}/members/resolve?ids=${existingIds.join(',')}`)
+                        .then(r => r.json())
+                        .then(map => {
+                            for (const id of existingIds) {
+                                const info = map[id];
+                                _addUserTag(widgetId, id, info?.displayName || info?.username || id, info?.avatarURL || null);
+                            }
+                        })
+                        .catch(() => { for (const id of existingIds) _addUserTag(widgetId, id, id, null); });
+                }
+
+                let _debounce;
+                input.addEventListener('input', function() {
+                    clearTimeout(_debounce);
+                    const q = this.value.trim();
+                    if (q.length < 2) { dropdown.style.display = 'none'; return; }
+                    _debounce = setTimeout(async () => {
+                        try {
+                            const results = await fetch(`/api/guild/${_gId}/members/search?q=${encodeURIComponent(q)}`).then(r => r.json());
+                            if (!Array.isArray(results) || !results.length) { dropdown.style.display = 'none'; return; }
+                            dropdown.innerHTML = results.map(u => {
+                                const name = escHtml(u.displayName || u.username);
+                                const id   = escHtml(u.id);
+                                const av   = u.avatarURL ? escHtml(u.avatarURL) : '';
+                                return `<div class="user-search-item" data-id="${id}" data-name="${name}" data-avatar="${av}">
+                                    ${av ? `<img src="${av}" style="width:20px;height:20px;border-radius:50%" onerror="this.style.display='none'">` : ''}
+                                    <span>${name}</span>
+                                    <span style="opacity:.5;font-size:.75em;margin-left:auto">${escHtml(u.username)}</span>
+                                </div>`;
+                            }).join('');
+                            dropdown.style.display = '';
+                            dropdown.querySelectorAll('.user-search-item').forEach(el => {
+                                el.addEventListener('mousedown', function(e) {
+                                    e.preventDefault();
+                                    _addUserTag(widgetId, this.dataset.id, this.dataset.name, this.dataset.avatar || null);
+                                    input.value = '';
+                                    dropdown.style.display = 'none';
+                                });
+                            });
+                        } catch { dropdown.style.display = 'none'; }
+                    }, 280);
+                });
+
+                input.addEventListener('blur', () => setTimeout(() => { dropdown.style.display = 'none'; }, 150));
+            }
+
+            function _addUserTag(widgetId, id, name, avatarUrl) {
+                const textarea = document.getElementById(widgetId);
+                const tagsEl   = document.getElementById(widgetId + '-tags');
+                if (!textarea || !tagsEl) return;
+                const existing = textarea.value.split('\n').map(s => s.trim()).filter(Boolean);
+                if (existing.includes(id)) return;
+                const tag = document.createElement('span');
+                tag.className = 'user-id-tag';
+                tag.dataset.userId = id;
+                const safeId   = escHtml(id);
+                const safeName = escHtml(name);
+                const safeAv   = avatarUrl ? escHtml(avatarUrl) : '';
+                tag.innerHTML  = `${safeAv ? `<img src="${safeAv}" style="width:16px;height:16px;border-radius:50%" onerror="this.style.display='none'">` : ''}<span title="${safeId}">${safeName}</span><button type="button" title="Remove">&times;</button>`;
+                tag.querySelector('button').addEventListener('click', function() {
+                    const ta = document.getElementById(widgetId);
+                    if (ta) ta.value = ta.value.split('\n').map(s => s.trim()).filter(s => s && s !== id).join('\n');
+                    tag.remove();
+                });
+                tagsEl.appendChild(tag);
+                textarea.value = [...existing, id].join('\n');
+            }
+
+            window._initUserSearchWidgets = function() {
+                initUserSearchWidget('an-whitelist-users');
+                initUserSearchWidget('cp-exc-users');
+            };
+            // Init when DOM is ready (script runs at end of body)
+            _initUserSearchWidgets();
+        })();
 
     </script>
 </body>
