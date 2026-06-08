@@ -45,7 +45,14 @@ function handTotal(hand) {
 }
 
 function displayHand(hand, hideSecond = false) {
-    return hand.map((c, i) => (hideSecond && i === 1) ? '🂠' : `${c.value}${c.suit}`).join('  ');
+    // Render cards as ASCII art boxes inside a monospace code block
+    const cards = hand.map((c, i) => {
+        if (hideSecond && i === 1) return ['┌───┐', '│ ? │', '│ ? │', '└───┘'];
+        const v = String(c.value).padEnd(2);
+        return ['┌───┐', `│${v} │`, `│ ${c.suit} │`, '└───┘'];
+    });
+    const rows = [0, 1, 2, 3].map(r => cards.map(c => c[r]).join(' ')).join('\n');
+    return `\`\`\`\n${rows}\n\`\`\``;
 }
 
 function canDoubleDown(hand) {

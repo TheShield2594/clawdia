@@ -564,6 +564,73 @@ async function handleDig(interaction) {
         }
     }
 
+    // ── Cave-in Interactive Event ─────────────────────────────────────────────
+    // If a cave-in triggered, show escape options before saving.
+    if (result.caveIn) {
+        const m = user.mining;
+        const equippedPickaxe = m.pickaxes?.[m.equippedPickaxeIndex];
+        const pickaxeStaticData = equippedPickaxe ? PICKAXE_BY_TIER[equippedPickaxe.tier] : null;
+        const chargeType = pickaxeStaticData?.chargeType;
+        const chargesAvailable = chargeType ? (m.charges?.[chargeType] ?? 0) : 0;
+
+        const caveInEmbed = new EmbedBuilder()
+            .setColor('#8B0000')
+            .setTitle('🌑 CAVE-IN!')
+            .setDescription(
+                `━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `The tunnel is collapsing around you. Dust fills the air.\n` +
+                `You have seconds to decide.\n\n` +
+                `⚡ **Ore at stake:** ${(result.caveInPayout ?? 0).toLocaleString()} coins\n\n` +
+                (chargesAvailable > 0
+                    ? `💥 You have **${chargesAvailable}** blast charge${chargesAvailable !== 1 ? 's' : ''} — enough to blow an escape route.`
+                    : `⚠️ You have no blast charges — you'll have to run.`)
+            )
+            .setFooter({ text: 'You have 20 seconds to decide.' });
+
+        const caveInId = `cavein_${interaction.id}`;
+        const blastBtn = new ButtonBuilder()
+            .setCustomId(`${caveInId}_blast`)
+            .setLabel('💥 Use a Blast Charge — save your ore')
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(chargesAvailable <= 0);
+        const abandonBtn = new ButtonBuilder()
+            .setCustomId(`${caveInId}_abandon`)
+            .setLabel('🏃 Abandon the Dig — flee empty-handed')
+            .setStyle(ButtonStyle.Danger);
+        const caveInRow = new ActionRowBuilder().addComponents(blastBtn, abandonBtn);
+
+        await interaction.editReply({ embeds: [caveInEmbed], components: [caveInRow] });
+        const caveInMsg = await interaction.fetchReply();
+
+        const caveInChoice = await new Promise(resolve => {
+            const col = caveInMsg.createMessageComponentCollector({
+                filter: i => i.user.id === interaction.user.id && i.customId.startsWith(caveInId),
+                time: 20_000,
+                max: 1,
+            });
+            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.endsWith('_blast') ? 'blast' : 'abandon'); });
+            col.on('end', (_, reason) => { if (reason !== 'limit') resolve('abandon'); });
+        });
+
+        if (caveInChoice === 'blast' && chargesAvailable > 0) {
+            // Deduct one blast charge and keep the payout
+            if (chargeType) {
+                m.charges[chargeType] = chargesAvailable - 1;
+                user.markModified('mining');
+            }
+            result.caveInEscaped = true;
+        } else {
+            // Abandon: reverse the payout
+            if (result.caveInPayout) {
+                user.balance       -= result.caveInPayout;
+                m.totalEarned      -= result.caveInPayout;
+                m.dailyCoins       -= result.caveInPayout;
+                result.finalPayout  = 0;
+            }
+            result.caveInAbandoned = true;
+        }
+    }
+
     updateMineQuestProgress(user, result, depthId);
 
     // Update the persistent mine map with this dig's result
@@ -603,7 +670,8 @@ async function handleDig(interaction) {
     {
         const desc = embed.data.description ?? '';
         const lines = [`> ⛏️ *${finalIcons} — Vein depth ${veinDepth}/3 → ${chosenIntensity.emoji} ${chosenIntensity.name} (${chosenIntensity.multiplier}×)*`];
-        if (result.caveIn) lines.push(`> 💥 *${randomFrom(MINE_CAVE_LINES)}*`);
+        if (result.caveIn && result.caveInEscaped) lines.push(`> 💥 *Cave-in! You used a blast charge — ore saved.*`);
+        else if (result.caveIn) lines.push(`> 💥 *${randomFrom(MINE_CAVE_LINES)}*`);
         embed.setDescription(desc + '\n' + lines.join('\n'));
     }
     if (result.featuredDepthBonus > 0) {

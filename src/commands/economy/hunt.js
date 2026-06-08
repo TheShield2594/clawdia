@@ -541,28 +541,48 @@ async function executeStart(interaction) {
 
         const chosen = shuffled.find(o => o.id === pickedId);
         if (chosen) {
-            stealthBonus = chosen.stealthBonus;
+            const isCorrectChoice = pickedId === approachData.correctId;
+            const isNeutralChoice = !isCorrectChoice && chosen.stealthBonus >= 0;
+            // Probabilistic outcome: correct=80% success, neutral=50%, wrong=20%
+            const successChance = isCorrectChoice ? 0.80 : isNeutralChoice ? 0.50 : 0.20;
+            const approachSucceeded = Math.random() < successChance;
+            if (approachSucceeded) {
+                stealthBonus = chosen.stealthBonus;
+            } else {
+                // Correct/neutral failed: animal startled; wrong: already bad, just slightly worse
+                stealthBonus = isNeutralChoice ? 0 : -0.10;
+            }
         }
 
         const isCorrect  = pickedId === approachData.correctId;
         const isTimeout  = pickedId === null;
         const chosenLabel = chosen?.label ?? '';
         const stealthResultEmbed = new EmbedBuilder()
-            .setColor(isCorrect ? '#00FF7F' : isTimeout ? '#888888' : stealthBonus < 0 ? '#FF6B6B' : '#FFA500')
+            .setColor(
+                isTimeout ? '#888888' :
+                stealthBonus > 0 ? '#00FF7F' :
+                stealthBonus < 0 ? '#FF6B6B' : '#FFA500'
+            )
             .setTitle(
                 isTimeout  ? '⏰ Hesitated too long…' :
-                isCorrect  ? '🤫 Perfect approach!' :
+                isCorrect && stealthBonus > 0 ? '🤫 Perfect approach!' :
+                isCorrect && stealthBonus <= 0 ? '🐾 So close — it sensed you anyway…' :
+                stealthBonus > 0 ? '🤔 Decent approach…' :
                 stealthBonus < 0 ? '🔊 You spooked the animal!' :
-                '🤔 Decent approach…'
+                '🤔 No harm done…'
             )
             .setDescription(
                 isTimeout
                     ? `You weighed your options too long — the window closed.\n\nNo stealth bonus this hunt.`
-                    : isCorrect
+                    : isCorrect && stealthBonus > 0
                     ? `**${chosenLabel}**\n\n*You read the terrain perfectly. The animal froze for a moment — then relaxed. It never sensed you.*\n\n**+25% success chance** and a chance of better prey.`
+                    : isCorrect && stealthBonus <= 0
+                    ? `**${chosenLabel}**\n\n*The right call — but the animal picked up something off. A twig snapped, the wind shifted. No bonus this time.*\n\n**No stealth bonus.**`
+                    : stealthBonus > 0
+                    ? `**${chosenLabel}**\n\n*Not the ideal approach, but you kept your noise down. The animal stirred — then settled.*\n\n**+5% success chance.**`
                     : stealthBonus < 0
                     ? `**${chosenLabel}**\n\n*The animal heard you before you got within range. It fixed you with a stare — every advantage lost.*\n\n**−10% success chance** this hunt.`
-                    : `**${chosenLabel}**\n\n*Not the ideal approach, but you kept your noise down. The animal stirred — then settled.*\n\n**+5% success chance.**`
+                    : `**${chosenLabel}**\n\n*Could've gone worse. The animal wasn't alarmed, but you didn't gain any ground either.*\n\n**No stealth bonus.**`
             );
 
         await interaction.editReply({ embeds: [stealthResultEmbed], components: [] });
