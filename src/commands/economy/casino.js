@@ -61,8 +61,7 @@ module.exports = {
             const limit = interaction.options.getInteger('limit');
             await Guild.findOneAndUpdate(
                 { guildId: interaction.guild.id },
-                { $set: { 'economy.casinoMaxBet': limit } },
-                { upsert: true }
+                { $set: { 'economy.casinoMaxBet': limit } }
             );
             const msg = limit === 0
                 ? '✅ Casino bet limit **removed** — players can bet any amount up to their wallet balance.'
