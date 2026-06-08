@@ -23,6 +23,23 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('claim')
                 .setDescription('Claim rewards for earned achievements')
+        )
+        .addSubcommand(sub =>
+            sub.setName('top')
+                .setDescription('Show the rarest achievements in this server')
+        )
+        .addSubcommand(sub =>
+            sub.setName('leaderboard')
+                .setDescription('Show who has the most achievements in this server')
+        )
+        .addSubcommand(sub =>
+            sub.setName('pin')
+                .setDescription('Pin a featured achievement to display on your profile')
+                .addStringOption(opt =>
+                    opt.setName('achievement_id')
+                        .setDescription('The ID of the achievement to pin (from /achievements view)')
+                        .setRequired(true)
+                )
         ),
 
     async execute(interaction) {
@@ -34,6 +51,10 @@ module.exports = {
             }
 
             const sub = interaction.options.getSubcommand();
+
+            if (sub === 'top')         return handleTop(interaction, guildSettings);
+            if (sub === 'leaderboard') return handleLeaderboard(interaction, guildSettings);
+            if (sub === 'pin')         return handlePin(interaction, guildSettings);
 
             if (sub === 'view') {
                 const target = interaction.options.getUser('user') || interaction.user;
@@ -207,3 +228,102 @@ module.exports = {
         }
     }
 };
+
+async function handleTop(interaction, guildSettings) {
+    const disabled = new Set(guildSettings.achievements?.disabledAchievements || []);
+    const allDefs  = ACHIEVEMENTS.filter(d => !disabled.has(d.id) && !d.secret);
+
+    // Count holders for each achievement in this guild
+    const holderCounts = await Promise.all(
+        allDefs.map(async def => {
+            const count = await User.countDocuments({ guildId: interaction.guild.id, 'achievements.id': def.id });
+            return { def, count };
+        })
+    );
+
+    const sorted = holderCounts
+        .filter(({ count }) => count > 0)
+        .sort((a, b) => a.count - b.count)
+        .slice(0, 10);
+
+    if (!sorted.length) {
+        return interaction.reply({ content: 'No achievements have been earned yet in this server.', ephemeral: true });
+    }
+
+    const lines = sorted.map(({ def, count }) => {
+        return `${def.emoji} **${def.name}** — **${count}** holder${count !== 1 ? 's' : ''}`;
+    });
+
+    const embed = new EmbedBuilder()
+        .setColor(0xF1C40F)
+        .setTitle('🏆 Rarest Achievements in This Server')
+        .setDescription('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' + lines.join('\n'))
+        .setFooter({ text: 'Sorted by fewest holders' })
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
+async function handleLeaderboard(interaction, guildSettings) {
+    const topUsers = await User.find(
+        { guildId: interaction.guild.id, achievementsCount: { $gt: 0 } },
+        'userId achievementsCount'
+    ).sort({ achievementsCount: -1 }).limit(10).lean();
+
+    if (!topUsers.length) {
+        return interaction.reply({ content: 'No achievements have been earned yet in this server.', ephemeral: true });
+    }
+
+    const medals = ['🥇', '🥈', '🥉'];
+    const lines  = topUsers.map((u, i) => {
+        const medal = medals[i] ?? `**${i + 1}.**`;
+        return `${medal} <@${u.userId}> — **${u.achievementsCount}** achievements`;
+    });
+
+    const embed = new EmbedBuilder()
+        .setColor(0xF1C40F)
+        .setTitle('🏅 Achievement Leaderboard')
+        .setDescription(lines.join('\n'))
+        .setFooter({ text: 'Most achievements earned in this server' })
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
+async function handlePin(interaction, guildSettings) {
+    const achievementId = interaction.options.getString('achievement_id');
+    const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+
+    if (!user) {
+        return interaction.reply({ content: 'You have no achievements yet.', ephemeral: true });
+    }
+
+    const earned = (user.achievements || []).find(a => a.id === achievementId);
+    if (!earned) {
+        return interaction.reply({ content: `You haven't earned achievement \`${achievementId}\` yet.`, ephemeral: true });
+    }
+
+    const disabled = new Set(guildSettings.achievements?.disabledAchievements || []);
+    if (disabled.has(achievementId)) {
+        return interaction.reply({ content: 'That achievement is disabled on this server.', ephemeral: true });
+    }
+
+    const def = ACHIEVEMENTS.find(d => d.id === achievementId);
+    if (!def) {
+        return interaction.reply({ content: `Achievement \`${achievementId}\` not found.`, ephemeral: true });
+    }
+
+    await User.updateOne(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        { $set: { pinnedAchievement: achievementId } }
+    );
+
+    return interaction.reply({
+        embeds: [new EmbedBuilder()
+            .setColor(0x2ECC71)
+            .setTitle('📌 Featured Achievement Set!')
+            .setDescription(`${def.emoji} **${def.name}** — ${def.description}\n\nThis achievement will now be displayed prominently on your profile.`)
+        ],
+        ephemeral: true,
+    });
+}
