@@ -104,10 +104,26 @@ async function runDailyDigest(guildSettings, client) {
         const channel = guild.channels.cache.get(channelId)
             || await guild.channels.fetch(channelId).catch(() => null);
         if (!channel || !channel.isTextBased()) continue;
-        const fetched = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-        if (!fetched) continue;
-        const recent = [...fetched.values()]
-            .filter(m => !m.author.bot && m.content?.trim() && m.createdAt >= cutoff)
+
+        // Paginate until all messages within the lookback window are collected.
+        const channelMessages = [];
+        let before;
+        let done = false;
+        while (!done) {
+            const fetchOpts = { limit: 100 };
+            if (before) fetchOpts.before = before;
+            const batch = await channel.messages.fetch(fetchOpts).catch(() => null);
+            if (!batch || !batch.size) break;
+            for (const msg of batch.values()) {
+                if (msg.createdAt < cutoff) { done = true; break; }
+                channelMessages.push(msg);
+            }
+            if (!done && batch.size < 100) break;
+            before = batch.last()?.id;
+        }
+
+        const recent = channelMessages
+            .filter(m => !m.author.bot && m.content?.trim())
             .reverse()
             .map(m => `[#${channel.name}] ${m.author.displayName || m.author.username}: ${m.content}`);
         lines.push(...recent);

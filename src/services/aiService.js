@@ -882,8 +882,20 @@ async function handleAIChat(message, aiSettings) {
                 content, fullResponse, maxHistory
             );
             if (kbEntries.length) {
-                const citationsFooter = `📚 Sources: ${kbEntries.map(e => e.title).join(', ')}`;
-                await message.channel.send(citationsFooter).catch(() => {});
+                const prefix = '📚 Sources: ';
+                const limit = DISCORD_MAX_LEN - prefix.length - 10;
+                let body = '';
+                let omitted = 0;
+                for (const entry of kbEntries) {
+                    const title = entry.title.length > 80 ? entry.title.slice(0, 77) + '…' : entry.title;
+                    const part = body ? `, ${title}` : title;
+                    if (body.length + part.length > limit) { omitted++; continue; }
+                    body += part;
+                }
+                if (omitted) body += ` (+${omitted} more)`;
+                await message.channel.send(prefix + body).catch(err =>
+                    console.error('[AI] citations footer send failed:', err?.message || err)
+                );
             }
         }
     } catch (error) {

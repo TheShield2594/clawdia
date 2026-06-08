@@ -627,7 +627,7 @@
                     </div>
 
                     <div class="panel-head" style="margin-top:1.5rem"><h3>Behavior Score Escalation</h3><p>Separate score system that decays over time. Each automod violation adds to the score.</p></div>
-                    <div class="field mod-score-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.75rem;">
+                    <div class="field mod-score-grid">
                         <div><label class="field-label" for="mod-score-mute">Mute at score</label><input type="number" id="mod-score-mute" value="<%= settings.moderation.behaviorScoreMuteAt ?? 10 %>" min="0"><small>0 = disabled</small></div>
                         <div><label class="field-label" for="mod-score-kick">Kick at score</label><input type="number" id="mod-score-kick" value="<%= settings.moderation.behaviorScoreKickAt ?? 20 %>" min="0"><small>0 = disabled</small></div>
                         <div><label class="field-label" for="mod-score-ban">Ban at score</label><input type="number" id="mod-score-ban" value="<%= settings.moderation.behaviorScoreBanAt ?? 30 %>" min="0"><small>0 = disabled</small></div>
@@ -2440,7 +2440,8 @@
                             </div>
                             <div>
                                 <label class="field-label" for="digest-timezone">Timezone</label>
-                                <input type="text" id="digest-timezone" placeholder="UTC" value="<%= settings.ai?.dailyDigest?.timezone ?? 'UTC' %>">
+                                <input type="text" id="digest-timezone" list="tz-datalist" placeholder="UTC" value="<%= settings.ai?.dailyDigest?.timezone ?? 'UTC' %>" autocomplete="off" onblur="validateTimezoneInput(this)">
+                                <small id="digest-timezone-err" class="field-error" style="display:none"></small>
                             </div>
                         </div>
                         <div class="actions-row" style="margin-bottom:1.5rem;">
@@ -4770,10 +4771,18 @@
             var enabled = document.getElementById('digest-enabled').checked;
             var channelId = document.getElementById('digest-channel').value;
             var sourceOpts = Array.from(document.getElementById('digest-sources').selectedOptions).map(o => o.value);
-            var hour = parseInt(document.getElementById('digest-hour').value, 10);
-            var minute = parseInt(document.getElementById('digest-minute').value, 10);
-            var timezone = document.getElementById('digest-timezone').value.trim() || 'UTC';
+            var hourRaw = document.getElementById('digest-hour').value.trim();
+            var minuteRaw = document.getElementById('digest-minute').value.trim();
+            var tzInput = document.getElementById('digest-timezone');
+            var timezone = tzInput.value.trim() || 'UTC';
+
             if (enabled && !channelId) { toast('Please select a digest channel', 'error'); return; }
+            var hour = parseInt(hourRaw, 10);
+            var minute = parseInt(minuteRaw, 10);
+            if (!/^\d+$/.test(hourRaw) || hour < 0 || hour > 23) { toast('Hour must be a number between 0 and 23', 'error'); return; }
+            if (!/^\d+$/.test(minuteRaw) || minute < 0 || minute > 59) { toast('Minute must be a number between 0 and 59', 'error'); return; }
+            if (!validateTimezoneInput(tzInput)) { toast('Please enter a valid IANA timezone (e.g. UTC, America/New_York)', 'error'); return; }
+
             try {
                 var resp = await fetch('/api/guild/' + guildId + '/daily-digest', {
                     method: 'PUT',
