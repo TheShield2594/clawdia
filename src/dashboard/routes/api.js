@@ -1105,14 +1105,19 @@ router.get('/guild/:guildId/daily-digest', checkAuth, checkGuildAccess, async (r
     }
 });
 
+const SNOWFLAKE_RE = /^\d{17,19}$/;
+function isSnowflake(id) { return typeof id === 'string' && SNOWFLAKE_RE.test(id); }
+
 router.put('/guild/:guildId/daily-digest', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { enabled, channelId, sourceChannelIds, hour, minute, timezone } = req.body;
 
-    const h = parseInt(hour, 10);
-    const m = parseInt(minute, 10);
-    if (Number.isFinite(h) && (h < 0 || h > 23)) return res.status(400).json({ error: 'hour must be 0–23' });
-    if (Number.isFinite(m) && (m < 0 || m > 59)) return res.status(400).json({ error: 'minute must be 0–59' });
+    if (hour !== undefined && !/^\d+$/.test(String(hour))) return res.status(400).json({ error: 'hour must be a non-negative integer' });
+    if (minute !== undefined && !/^\d+$/.test(String(minute))) return res.status(400).json({ error: 'minute must be a non-negative integer' });
+    const h = hour !== undefined ? parseInt(hour, 10) : undefined;
+    const m = minute !== undefined ? parseInt(minute, 10) : undefined;
+    if (h !== undefined && (h < 0 || h > 23)) return res.status(400).json({ error: 'hour must be 0–23' });
+    if (m !== undefined && (m < 0 || m > 59)) return res.status(400).json({ error: 'minute must be 0–59' });
 
     try {
         const settings = await Guild.findOne({ guildId });
@@ -1122,10 +1127,12 @@ router.put('/guild/:guildId/daily-digest', checkAuth, checkGuildAccess, checkWri
         if (!settings.ai.dailyDigest) settings.ai.dailyDigest = {};
 
         if (typeof enabled === 'boolean') settings.ai.dailyDigest.enabled = enabled;
-        if (channelId !== undefined) settings.ai.dailyDigest.channelId = channelId || null;
-        if (Array.isArray(sourceChannelIds)) settings.ai.dailyDigest.sourceChannelIds = sourceChannelIds;
-        if (Number.isFinite(h)) settings.ai.dailyDigest.hour = h;
-        if (Number.isFinite(m)) settings.ai.dailyDigest.minute = m;
+        if (channelId !== undefined) settings.ai.dailyDigest.channelId = isSnowflake(channelId) ? channelId : null;
+        if (Array.isArray(sourceChannelIds)) {
+            settings.ai.dailyDigest.sourceChannelIds = [...new Set(sourceChannelIds.filter(isSnowflake))];
+        }
+        if (h !== undefined) settings.ai.dailyDigest.hour = h;
+        if (m !== undefined) settings.ai.dailyDigest.minute = m;
         if (typeof timezone === 'string' && timezone.trim()) {
             try {
                 Intl.DateTimeFormat(undefined, { timeZone: timezone.trim() });
