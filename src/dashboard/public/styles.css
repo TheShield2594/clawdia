@@ -1396,6 +1396,7 @@ textarea.auto-resize {
 .analytics-chart-card { background: var(--surface-2, #1a1510); border: 1px solid var(--border); border-radius: 8px; padding: .85rem 1rem; }
 .analytics-chart-title { font-size: .8rem; font-weight: 600; color: var(--text-dim); margin-bottom: .5rem; text-transform: uppercase; letter-spacing: .04em; }
 .analytics-range { opacity: .6; }
+.grant-member-option:hover { background: var(--surface-2, #1a1510); }
 .analytics-range.active { opacity: 1; border-color: var(--claw-500); }
 
 /* ── Economy health KPI tiles ─────────────────────────────────── */
