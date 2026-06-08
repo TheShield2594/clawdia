@@ -285,9 +285,18 @@ const guildSchema = new Schema({
             }
         },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
-        actionsEnabled: { type: Boolean, default: false }
+        actionsEnabled: { type: Boolean, default: false },
+        dailyDigest: {
+            enabled:          { type: Boolean, default: false },
+            channelId:        { type: String, default: null },
+            sourceChannelIds: [{ type: String }],
+            hour:             { type: Number, default: 9, min: 0, max: 23 },
+            minute:           { type: Number, default: 0, min: 0, max: 59 },
+            timezone:         { type: String, default: 'UTC' },
+            lastRun:          { type: Date, default: null }
+        }
     },
-    
+
     customCommands: [{
         name: { type: String, required: true },
         response: { type: String, required: true }

@@ -627,7 +627,7 @@
                     </div>
 
                     <div class="panel-head" style="margin-top:1.5rem"><h3>Behavior Score Escalation</h3><p>Separate score system that decays over time. Each automod violation adds to the score.</p></div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.75rem;">
+                    <div class="field mod-score-grid">
                         <div><label class="field-label" for="mod-score-mute">Mute at score</label><input type="number" id="mod-score-mute" value="<%= settings.moderation.behaviorScoreMuteAt ?? 10 %>" min="0"><small>0 = disabled</small></div>
                         <div><label class="field-label" for="mod-score-kick">Kick at score</label><input type="number" id="mod-score-kick" value="<%= settings.moderation.behaviorScoreKickAt ?? 20 %>" min="0"><small>0 = disabled</small></div>
                         <div><label class="field-label" for="mod-score-ban">Ban at score</label><input type="number" id="mod-score-ban" value="<%= settings.moderation.behaviorScoreBanAt ?? 30 %>" min="0"><small>0 = disabled</small></div>
@@ -2404,6 +2404,53 @@
                     <!-- Summaries -->
                     <div id="ai-summaries" class="ai-inner-panel">
                         <p class="ai-inner-desc">Schedule automatic AI-generated summaries of channel activity. The bot fetches recent messages and posts a digest to a target channel at the specified UTC time each day.</p>
+
+                        <!-- Daily Server Digest -->
+                        <div class="panel-head" style="margin-bottom:.75rem"><h3>Daily Server Digest</h3></div>
+                        <p style="opacity:.75;font-size:.875rem;margin-bottom:1rem;">A scheduled embed posted once per day summarizing server activity in the bot's persona voice. Collects the last 24 hours of messages from selected channels.</p>
+                        <label class="toggle" style="margin-bottom:1rem;">
+                            <span class="toggle-text"><strong>Enable daily digest</strong></span>
+                            <span class="switch"><input type="checkbox" id="digest-enabled" <%= settings.ai?.dailyDigest?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field">
+                            <label class="field-label" for="digest-channel">Digest channel (where the embed is posted)</label>
+                            <select id="digest-channel">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>" <%= settings.ai?.dailyDigest?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="digest-sources">Source channels <small style="font-weight:normal;opacity:.7;">(leave empty to include all text channels)</small></label>
+                            <select id="digest-sources" multiple style="min-height:80px;">
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>" <%= (settings.ai?.dailyDigest?.sourceChannelIds || []).includes(channel.id) ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                            <div>
+                                <label class="field-label" for="digest-hour">Hour (0–23)</label>
+                                <input type="number" id="digest-hour" min="0" max="23" value="<%= settings.ai?.dailyDigest?.hour ?? 9 %>">
+                            </div>
+                            <div>
+                                <label class="field-label" for="digest-minute">Minute (0–59)</label>
+                                <input type="number" id="digest-minute" min="0" max="59" value="<%= settings.ai?.dailyDigest?.minute ?? 0 %>">
+                            </div>
+                            <div>
+                                <label class="field-label" for="digest-timezone">Timezone</label>
+                                <input type="text" id="digest-timezone" list="tz-datalist" placeholder="UTC" value="<%= settings.ai?.dailyDigest?.timezone ?? 'UTC' %>" autocomplete="off" onblur="validateTimezoneInput(this)">
+                                <small id="digest-timezone-err" class="field-error" style="display:none"></small>
+                            </div>
+                        </div>
+                        <div class="actions-row" style="margin-bottom:1.5rem;">
+                            <button class="btn btn-primary" onclick="saveDailyDigest()">Save digest settings</button>
+                        </div>
+                        <hr style="border:none;border-top:1px solid var(--border);margin:1.5rem 0;">
+
+                        <!-- Per-channel summary jobs -->
+                        <div class="panel-head"><h3>Per-channel summary jobs</h3></div>
                         <div id="summary-jobs-list" style="margin-bottom:1.5rem;">
                             <div id="summary-jobs-skeleton">
                                 <div class="skel-bar" style="width:70%"></div>
@@ -2967,7 +3014,7 @@
             host.innerHTML = sorted.map((step, idx) => {
                 const needsDuration = step.action === 'mute' || step.action === 'tempban';
                 return `
-                <div class="field" style="display:grid;grid-template-columns:90px 130px 110px 60px 1fr auto;gap:.5rem;align-items:end;margin-bottom:.4rem;border:1px solid var(--border,#2a2a2a);border-radius:6px;padding:.5rem;">
+                <div class="field esc-ladder-row">
                     <div><label class="field-label" style="font-size:.75rem;">Warnings</label><input type="number" min="1" value="${step.threshold || 1}" data-esc-idx="${idx}" data-esc-key="threshold"></div>
                     <div><label class="field-label" style="font-size:.75rem;">Action</label>
                         <select data-esc-idx="${idx}" data-esc-key="action">
@@ -4717,6 +4764,41 @@
                     '<button class="btn btn-danger btn-sm" onclick="deleteSummaryJob(\'' + escHtml(job._id) + '\')">Remove</button>';
                 container.appendChild(div);
             });
+        }
+
+        async function saveDailyDigest() {
+            var guildId = '<%= guild.id %>';
+            var enabled = document.getElementById('digest-enabled').checked;
+            var channelId = document.getElementById('digest-channel').value;
+            var sourceOpts = Array.from(document.getElementById('digest-sources').selectedOptions).map(o => o.value);
+            var hourRaw = document.getElementById('digest-hour').value.trim();
+            var minuteRaw = document.getElementById('digest-minute').value.trim();
+            var tzInput = document.getElementById('digest-timezone');
+            var timezone = tzInput.value.trim() || 'UTC';
+
+            if (enabled && !channelId) { toast('Please select a digest channel', 'error'); return; }
+            var hour = parseInt(hourRaw, 10);
+            var minute = parseInt(minuteRaw, 10);
+            if (!/^\d+$/.test(hourRaw) || hour < 0 || hour > 23) { toast('Hour must be a number between 0 and 23', 'error'); return; }
+            if (!/^\d+$/.test(minuteRaw) || minute < 0 || minute > 59) { toast('Minute must be a number between 0 and 59', 'error'); return; }
+            if (!validateTimezoneInput(tzInput)) { toast('Please enter a valid IANA timezone (e.g. UTC, America/New_York)', 'error'); return; }
+
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/daily-digest', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled, channelId, sourceChannelIds: sourceOpts, hour, minute, timezone })
+                });
+                var data = await resp.json();
+                if (resp.ok) {
+                    toast('Daily digest settings saved ✓', 'success');
+                } else {
+                    toast(data.error || 'Failed to save digest settings', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                toast('An error occurred', 'error');
+            }
         }
 
         async function addSummaryJob() {
