@@ -98,7 +98,12 @@ function spinningEmbed(currentIndex, betKey, target, bet, interaction) {
         .setFooter({ text: 'European Roulette  •  Single zero  •  2.7% house edge' });
 }
 
-function resultEmbed({ result, won, betKey, target, bet, profit, balance, interaction }) {
+function historyLine(history) {
+    if (!history || history.length === 0) return '';
+    return history.map(n => pocketEmoji(n)).join(' ') + '\n\n';
+}
+
+function resultEmbed({ result, won, betKey, target, bet, profit, balance, interaction, history }) {
     const color    = won ? '#2ecc71' : '#e74c3c';
     const netStr   = profit >= 0 ? `+${profit.toLocaleString()}` : `${profit.toLocaleString()}`;
     const headline = won
@@ -111,6 +116,9 @@ function resultEmbed({ result, won, betKey, target, bet, profit, balance, intera
         ? '🔴 Red number'
         : '⚫ Black number';
 
+    const historyStr = history?.length
+        ? `📊 Last ${history.length} result${history.length > 1 ? 's' : ''}: ${historyLine(history)}`
+        : '';
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
@@ -118,6 +126,7 @@ function resultEmbed({ result, won, betKey, target, bet, profit, balance, intera
         .setTitle(`🎡 Roulette — ${won ? 'Winner!' : 'No Luck'}`)
         .setDescription(
             `${pocketStrip(result)}\n\n${headline}\n*${colorDesc}*\n\n` +
+            (historyStr ? `${historyStr}\n` : '') +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
             `  📊 Net: **${netStr}**  ·  💰 Balance: **${balance.toLocaleString()}** coins\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━`
@@ -269,12 +278,22 @@ async function playRoulette(interaction, betKey, bet, target) {
         }
         settled = true;
 
+        // Save result to guild roulette history (last 15)
+        await Guild.updateOne(
+            { guildId: interaction.guild.id },
+            { $push: { 'casinoStats.rouletteHistory': { $each: [result], $slice: -15 } } }
+        ).catch(() => {});
+
+        // Fetch updated history to display
+        const updatedGuild = await Guild.findOne({ guildId: interaction.guild.id }, 'casinoStats').lean().catch(() => null);
+        const rouletteHistory = updatedGuild?.casinoStats?.rouletteHistory ?? [];
+
         const replayId = `roulette_replay_${interaction.id}_${Date.now()}`;
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(replayId).setLabel('🎡 Spin Again').setStyle(ButtonStyle.Primary),
         );
 
-        const rouletteResultEmbed = resultEmbed({ result, won, betKey, target, bet, profit, balance: updated.balance, interaction });
+        const rouletteResultEmbed = resultEmbed({ result, won, betKey, target, bet, profit, balance: updated.balance, interaction, history: rouletteHistory });
         if (charmTriggered) {
             const desc = rouletteResultEmbed.data.description ?? '';
             rouletteResultEmbed.setDescription(desc + (won ? '\n> 🍀 *Lucky Charm re-spun the wheel for you!*' : ''));

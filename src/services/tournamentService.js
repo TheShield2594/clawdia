@@ -184,6 +184,54 @@ function buildWinnersEmbed(tournament, currency = '💰') {
         .setTimestamp();
 }
 
+/**
+ * Post a tournament start announcement to the configured channel.
+ */
+async function announceTournamentStart(client, tournament, guildId, announcementChannelId) {
+    if (!announcementChannelId) return;
+    try {
+        const guild = await client.guilds.fetch(guildId).catch(() => null);
+        if (!guild) return;
+        const channel = await guild.channels.fetch(announcementChannelId).catch(() => null);
+        if (!channel?.isTextBased?.()) return;
+
+        const minsLeft = Math.round((tournament.endsAt - new Date()) / 60_000);
+        const embed = new EmbedBuilder()
+            .setColor('#1e90ff')
+            .setTitle('🎣 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+            .setDescription(
+                `**FISHING TOURNAMENT STARTING NOW!**\n` +
+                `⏱️ Duration: **${minsLeft} minutes**\n` +
+                (tournament.prizePool > 0 ? `🏆 Prize Pool: **${tournament.prizePool.toLocaleString()} coins**\n` : '') +
+                `🎣 Rarest catch wins! Use \`/fish cast\` to compete!\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+            )
+            .setTimestamp();
+
+        await channel.send({ embeds: [embed] }).catch(() => {});
+    } catch (err) {
+        console.error('[tournament] start announcement failed:', err.message);
+    }
+}
+
+/**
+ * Post a tournament end announcement to the configured channel.
+ */
+async function announceTournamentEnd(client, tournament, guildId, announcementChannelId) {
+    if (!announcementChannelId) return;
+    try {
+        const guild = await client.guilds.fetch(guildId).catch(() => null);
+        if (!guild) return;
+        const channel = await guild.channels.fetch(announcementChannelId).catch(() => null);
+        if (!channel?.isTextBased?.()) return;
+
+        const winnersEmbed = buildWinnersEmbed(tournament);
+        await channel.send({ embeds: [winnersEmbed] }).catch(() => {});
+    } catch (err) {
+        console.error('[tournament] end announcement failed:', err.message);
+    }
+}
+
 module.exports = {
     getActiveTournament,
     startTournament,
@@ -191,5 +239,7 @@ module.exports = {
     getSortedEntries,
     endTournament,
     buildLeaderboardEmbed,
-    buildWinnersEmbed
+    buildWinnersEmbed,
+    announceTournamentStart,
+    announceTournamentEnd,
 };

@@ -21,7 +21,11 @@ const SYMBOLS = [
     { emoji: '🌟', name: 'Star',     type: 'regular',    weight: 5,  payout: 25 },
     { emoji: '🃏', name: 'Wild',     type: 'wild',       weight: 4              },
     { emoji: '⚡', name: '2x Boost', type: 'multiplier', weight: 3, multiplier: 2 },
+    { emoji: '🌸', name: 'Scatter',  type: 'scatter',    weight: 2              },
 ];
+
+const HIGH_VALUE_SYMBOLS = ['Bell', 'Diamond', 'Star'];
+const WIN_ANNOUNCE_MULT  = 50;
 
 const TOTAL_WEIGHT      = SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
 const SPIN_POOL         = SYMBOLS.filter(s => s.type === 'regular' || s.type === 'wild');
@@ -50,13 +54,18 @@ function evaluate(reels, bet) {
     const regulars   = reels.filter(s => s.type === 'regular');
     const wilds      = reels.filter(s => s.type === 'wild');
     const mults      = reels.filter(s => s.type === 'multiplier');
+    const scatters   = reels.filter(s => s.type === 'scatter');
     const wildCount  = wilds.length;
     const multFactor = mults.reduce((acc, m) => acc * m.multiplier, 1);
 
     if (wildCount === 3)
-        return { payout: 0, outcome: 'jackpot', symbol: null, wildCount, multFactor }; // payout filled in by caller
+        return { payout: 0, outcome: 'jackpot', symbol: null, wildCount, multFactor, scatterCount: 0 }; // payout filled in by caller
     if (mults.length === 3)
-        return { payout: bet * 4, outcome: 'mult3', symbol: null, wildCount, multFactor };
+        return { payout: bet * 4, outcome: 'mult3', symbol: null, wildCount, multFactor, scatterCount: 0 };
+
+    // Scatter: 2+ triggers free spins (resolved in caller)
+    if (scatters.length >= 2)
+        return { payout: 0, outcome: 'scatter', symbol: null, wildCount, multFactor, scatterCount: scatters.length };
 
     if (regulars.length > 0) {
         const freq = {};
@@ -66,12 +75,12 @@ function evaluate(reels, bet) {
         const sym = SYMBOLS.find(s => s.name === topName);
 
         if (effective >= 3)
-            return { payout: bet * sym.payout * multFactor, outcome: 'three', symbol: sym, wildCount, multFactor };
+            return { payout: bet * sym.payout * multFactor, outcome: 'three', symbol: sym, wildCount, multFactor, scatterCount: 0 };
         if (effective === 2)
-            return { payout: Math.floor(bet * sym.payout * 0.5 * multFactor), outcome: 'two', symbol: sym, wildCount, multFactor };
+            return { payout: Math.floor(bet * sym.payout * 0.5 * multFactor), outcome: 'two', symbol: sym, wildCount, multFactor, scatterCount: 0 };
     }
 
-    return { payout: 0, outcome: 'lose', symbol: null, wildCount, multFactor };
+    return { payout: 0, outcome: 'lose', symbol: null, wildCount, multFactor, scatterCount: 0 };
 }
 
 function embedAuthor(interaction) {
@@ -111,7 +120,8 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
         mult3:   { color: '#00FFFF', title: '🎰 ⚡ Triple Boost! ⚡',     line: `⚡⚡⚡ **TRIPLE MULTIPLIER BONUS!**\n*${randomFrom(SLOTS_WIN_LINES)}*` },
         three:   { color: '#00FF00', title: `🎰 🏆 Three ${symbol?.name ?? ''}s!`, line: `${symbol?.emoji.repeat(3)} **THREE OF A KIND!**\n*${randomFrom(SLOTS_WIN_LINES)}*` },
         two:     { color: '#FFAA00', title: '🎰 Two of a Kind',           line: `${symbol?.emoji.repeat(2)} **Two ${symbol?.name ?? ''}s** — partial win!\n*${randomFrom(SLOTS_WIN_LINES)}*` },
-        push:    { color: '#f39c12', title: '🎰 🎯 Lucky Push!',          line: '🎯 **Lucky Streak** saved you — bet returned!' },
+        push:    { color: '#f39c12', title: '🎰 🎯 Lucky Streak Fired!',   line: '🎯 **Your Lucky Streak fired!** Bet returned — spin again!' },
+        scatter: { color: '#ff69b4', title: '🌸 Scatter — Free Spins!',   line: '🌸 **Scatter symbols triggered!** Free spins incoming…' },
         lose:    { color: '#FF4444', title: '🎰 No Match',                line: `💨 *${randomFrom(SLOTS_LOSE_LINES)}*` },
     };
     const { color, title, line } = cfg[outcome] ?? cfg.lose;
@@ -177,6 +187,9 @@ function paytableEmbed() {
             { name: '🃏🃏🃏 Triple Wild', value: '🏆 **JACKPOT — wins the pool** (seeds at 5,000)', inline: true },
             { name: '⚡⚡⚡ Triple Boost', value: '**4× bet**', inline: true },
             { name: 'Two of a Kind', value: 'Half of the 3-of-a-kind payout', inline: false },
+            { name: '🌸🌸 Two Scatters', value: '**3 free spins** (no bet deducted)', inline: true },
+            { name: '🌸🌸🌸 Three Scatters', value: '**5 free spins** with **1.5× multiplier**', inline: true },
+            { name: '🔥 Hot Reel', value: 'After 3 losses in a row, reel 1 locks to a high-value symbol', inline: false },
         )
         .setFooter({ text: 'Two-of-a-kind pays 50% of the three-of-a-kind rate for that symbol' });
 }
@@ -249,7 +262,16 @@ async function playSlots(interaction, bet) {
         // Read current jackpot pool snapshot (after guaranteed initialization above)
         const jackpotPool = guildSettings?.slots?.jackpotPool ?? JACKPOT_SEED;
 
-        let reels  = [spinReel(), spinReel(), spinReel()];
+        // ── Hot Reel mechanic: after 3 consecutive losses, lock reel 1 ────────
+        const lossStreak = userDoc.casinoStats?.slotsLossStreak ?? 0;
+        const hotReelTriggered = lossStreak >= 3;
+
+        let reels = [spinReel(), spinReel(), spinReel()];
+        if (hotReelTriggered) {
+            const hotPool = SYMBOLS.filter(s => HIGH_VALUE_SYMBOLS.includes(s.name));
+            reels[0] = hotPool[Math.floor(Math.random() * hotPool.length)];
+        }
+
         let result = evaluate(reels, bet);
         let charmTriggered = false;
 
@@ -296,6 +318,19 @@ async function playSlots(interaction, bet) {
             finalJackpotPool = jackpotPool + JACKPOT_CONTRIB;
         }
 
+        // ── Handle scatter free spins ───────────────────────────────────────────
+        let freeSpinCount = 0;
+        let freeSpinMult  = 1;
+        if (result.outcome === 'scatter') {
+            freeSpinCount = result.scatterCount >= 3 ? 5 : 3;
+            freeSpinMult  = result.scatterCount >= 3 ? 1.5 : 1;
+        }
+
+        // ── Update loss streak ──────────────────────────────────────────────────
+        const isWin = result.outcome !== 'lose';
+        const newStreak = isWin || hotReelTriggered ? 0 : lossStreak + 1;
+        await User.updateOne(userFilter, { $set: { 'casinoStats.slotsLossStreak': newStreak } }).catch(() => {});
+
         // Apply coin booster to payout (net profit portion only)
         let adjustedPayout = result.payout;
         if (result.payout > 0 && totalCoinMult > 1.0) {
@@ -303,7 +338,7 @@ async function playSlots(interaction, bet) {
         }
 
         // Credit the payout (bet already debited above)
-        const user = await User.findOneAndUpdate(
+        let user = await User.findOneAndUpdate(
             userFilter,
             { $inc: { balance: adjustedPayout } },
             { new: true }
@@ -331,6 +366,56 @@ async function playSlots(interaction, bet) {
             }).catch(err => console.error(`[Slots] jackpot broadcast failed — channel:${targetChannel?.id} interaction:${interaction.id}`, err));
         }
 
+        // ── Scatter: play free spins automatically ──────────────────────────────
+        if (freeSpinCount > 0) {
+            let freeTotalPayout = 0;
+            const freeResults = [];
+            for (let fs = 0; fs < freeSpinCount; fs++) {
+                const freeReels = [spinReel(), spinReel(), spinReel()];
+                const freeResult = evaluate(freeReels, bet);
+                const freePayout = Math.round(freeResult.payout * freeSpinMult);
+                freeTotalPayout += freePayout;
+                freeResults.push({ reels: freeReels, payout: freePayout, outcome: freeResult.outcome });
+            }
+            if (freeTotalPayout > 0) {
+                user = await User.findOneAndUpdate(
+                    userFilter,
+                    { $inc: { balance: freeTotalPayout } },
+                    { new: true }
+                );
+            }
+            const freeResultLines = freeResults.map((fr, i) =>
+                `Spin ${i + 1}: ${fr.reels.map(r => r.emoji).join(' ')} → **+${fr.payout.toLocaleString()}**`
+            ).join('\n');
+            const scatterEmbed = new EmbedBuilder()
+                .setColor('#ff69b4')
+                .setTitle(`🌸 Free Spins Complete! (${freeSpinCount} spins${freeSpinMult > 1 ? ` · ${freeSpinMult}×` : ''})`)
+                .setDescription(freeResultLines)
+                .addFields(
+                    { name: '🎁 Free Spin Total', value: `**+${freeTotalPayout.toLocaleString()}** coins`, inline: true },
+                    { name: '💰 Balance',          value: `**${(user?.balance ?? 0).toLocaleString()}** coins`, inline: true },
+                )
+                .setTimestamp();
+            await interaction.editReply({ embeds: [scatterEmbed], components: [] });
+            await delay(2000);
+        }
+
+        // ── Big win announcement ────────────────────────────────────────────────
+        const winMult = adjustedPayout > 0 ? adjustedPayout / bet : 0;
+        if (winMult >= WIN_ANNOUNCE_MULT && !jackpotWon) {
+            const announceChannelId = guildSettings?.economy?.announcementChannelId ?? null;
+            if (announceChannelId) {
+                const bigWinEmbed = new EmbedBuilder()
+                    .setColor('#FFD700')
+                    .setDescription(
+                        `🎰 ${interaction.user} just hit a **${winMult.toFixed(0)}× ${result.symbol?.name ?? 'win'}** on slots for **${adjustedPayout.toLocaleString()} coins**!`
+                    )
+                    .setTimestamp();
+                const ch = interaction.guild?.channels?.cache?.get(announceChannelId);
+                if (ch?.isTextBased?.()) ch.send({ embeds: [bigWinEmbed] }).catch(() => {});
+            }
+        }
+
         const replayId   = `slots_replay_${interaction.id}_${Date.now()}`;
         const paytableId = `slots_pay_${interaction.id}_${Date.now()}`;
 
@@ -339,7 +424,11 @@ async function playSlots(interaction, bet) {
             new ButtonBuilder().setCustomId(paytableId).setLabel('📊 Paytable').setStyle(ButtonStyle.Secondary),
         );
 
-        const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, user.balance, interaction, finalJackpotPool);
+        const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, user?.balance ?? 0, interaction, finalJackpotPool);
+        if (hotReelTriggered) {
+            const desc = finalEmbed.data.description ?? '';
+            finalEmbed.setDescription(desc + '\n> 🔥 *Hot Reel activated — first reel was locked to a high-value symbol!*');
+        }
         if (charmTriggered) {
             const desc = finalEmbed.data.description ?? '';
             finalEmbed.setDescription(desc + '\n> 🍀 *Lucky Charm gave you a second chance!*');

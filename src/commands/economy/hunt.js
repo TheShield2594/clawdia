@@ -1280,6 +1280,9 @@ async function executePrestige(interaction) {
         freshUser.markModified('hunt');
         await freshUser.save();
 
+        // Check grand prestige after successful hunt prestige
+        checkGrandPrestige(i.client, freshUser, interaction.guild, interaction.guildId).catch(() => null);
+
         const resultEmbed = new EmbedBuilder()
             .setColor('#f39c12')
             .setTitle(`✨ Prestige ${fh.prestige} Achieved!`)
@@ -2307,5 +2310,49 @@ async function executeZone(interaction, sub) {
                     .setFooter({ text: 'Your next /hunt start will use this zone' })
             ]
         });
+    }
+}
+
+// ─── Grand Prestige Check ─────────────────────────────────────────────────────
+const GRAND_PRESTIGE_DIAMOND = 5;
+
+async function checkGrandPrestige(client, user, guild, guildId) {
+    const huntDiamond  = (user.hunt?.prestige ?? 0)    >= GRAND_PRESTIGE_DIAMOND;
+    const fishDiamond  = (user.fishing?.prestige ?? 0) >= GRAND_PRESTIGE_DIAMOND;
+    const mineDiamond  = (user.mining?.prestige ?? 0)  >= GRAND_PRESTIGE_DIAMOND;
+    const allDiamond   = huntDiamond && fishDiamond && mineDiamond;
+
+    if (!allDiamond) return;
+
+    const currentLevel = user.grandPrestige?.level ?? 0;
+    if (currentLevel >= 1) return;
+
+    await User.updateOne(
+        { userId: user.userId, guildId },
+        { $set: { 'grandPrestige.level': 1, 'grandPrestige.awardedAt': new Date() } }
+    ).catch(() => {});
+
+    const guildSettings = await Guild.findOne({ guildId }, 'economy accountPrestige').lean().catch(() => null);
+    const announceChannelId = guildSettings?.accountPrestige?.announceChannelId
+        ?? guildSettings?.economy?.announcementChannelId
+        ?? null;
+
+    if (announceChannelId && client) {
+        const { EmbedBuilder } = require('discord.js');
+        const broadcastEmbed = new EmbedBuilder()
+            .setColor('#FFD700')
+            .setTitle('⚜️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜️')
+            .setDescription(
+                `**GRAND MASTER ACHIEVED!**\n\n` +
+                `<@${user.userId}> has reached **Diamond Prestige** in all three skill tracks!\n\n` +
+                `🏹 Diamond Hunter · 🎣 Diamond Angler · ⛏️ Diamond Miner\n\n` +
+                `*The rarest achievement in this server.*`
+            )
+            .setTimestamp();
+        try {
+            const g  = guild ?? await client.guilds.fetch(guildId).catch(() => null);
+            const ch = g?.channels?.cache?.get(announceChannelId);
+            if (ch?.isTextBased?.()) ch.send({ embeds: [broadcastEmbed] }).catch(() => {});
+        } catch { /* non-critical */ }
     }
 }
