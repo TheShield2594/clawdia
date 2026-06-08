@@ -44,7 +44,7 @@ function buildReveal(queenPos) {
     return [0, 1, 2].map(i => i === queenPos ? QUEEN : DECOYS[di++]);
 }
 
-async function playMonte(interaction, bet, round = 1, roundMult = 1) {
+async function playMonte(interaction, bet, round = 1) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -189,14 +189,18 @@ async function playMonte(interaction, bet, round = 1, roundMult = 1) {
             guess = parseInt(resp.customId.split('_')[1], 10) - 1;
         } catch {
             settled = true;
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } });
-            return interaction.editReply({ content: '⏱️ Time\'s up! Your bet was refunded.', embeds: [], components: [] }).catch(() => {});
+            const timeoutRefund = round > 1 ? payoutForRound(bet, round - 1) : bet;
+            await User.findOneAndUpdate(userFilter, { $inc: { balance: timeoutRefund } });
+            const timeoutMsg = round > 1
+                ? `⏱️ Time's up! Paid out **${timeoutRefund.toLocaleString()}** coins (your Round ${round - 1} winnings).`
+                : '⏱️ Time\'s up! Your bet was refunded.';
+            return interaction.editReply({ content: timeoutMsg, embeds: [], components: [] }).catch(() => {});
         }
 
         const won = guess === queenPos;
 
-        const luckyActive      = hasEffect(round === 1 ? debited : await User.findOne(userFilter), 'lucky_charm');
         const userDoc          = round === 1 ? debited : await User.findOne(userFilter);
+        const luckyActive      = hasEffect(userDoc, 'lucky_charm');
         const luckyStreakBonus = getLuckyStreakBonus(userDoc);
         const coinMult         = getCoinMultiplier(userDoc);
         const serverMult       = getServerCoinMultiplier(guildSettings);
@@ -372,7 +376,7 @@ async function playMonte(interaction, bet, round = 1, roundMult = 1) {
 
                 } else {
                     // Double or Nothing — recurse with next round (no payout yet)
-                    await playMonte(interaction, bet, round + 1, roundMult * 2);
+                    await playMonte(interaction, bet, round + 1);
                 }
 
             } catch {
@@ -394,7 +398,8 @@ async function playMonte(interaction, bet, round = 1, roundMult = 1) {
     } catch (err) {
         console.error('[Monte] error:', err);
         if (!settled) {
-            await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } })
+            const rollbackAmount = round > 1 ? payoutForRound(bet, round - 1) : bet;
+            await User.findOneAndUpdate(userFilter, { $inc: { balance: rollbackAmount } })
                 .catch(e => console.error('[Monte] rollback failed:', e));
         }
         await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', components: [] }).catch(() => {});

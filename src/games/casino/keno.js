@@ -78,7 +78,7 @@ function phaseTitle(hits, total) {
     return '🎱 Drawing…';
 }
 
-async function playKeno(interaction, bet, picked) {
+async function playKeno(interaction, bet, picked, alreadyDebited = false) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -86,17 +86,21 @@ async function playKeno(interaction, bet, picked) {
     try {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
-        debited = await User.findOneAndUpdate(
-            { ...userFilter, balance: { $gte: bet } },
-            { $inc: { balance: -bet } },
-            { new: true }
-        );
+        if (alreadyDebited) {
+            debited = await User.findOne(userFilter);
+        } else {
+            debited = await User.findOneAndUpdate(
+                { ...userFilter, balance: { $gte: bet } },
+                { $inc: { balance: -bet } },
+                { new: true }
+            );
 
-        if (!debited) {
-            const fresh = await User.findOne(userFilter);
-            return interaction.editReply({
-                content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
-            });
+            if (!debited) {
+                const fresh = await User.findOne(userFilter);
+                return interaction.editReply({
+                    content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
+                });
+            }
         }
 
         const drawn   = drawNumbers();
@@ -301,7 +305,7 @@ async function playKeno(interaction, bet, picked) {
         if (showNearMiss) {
             resultEmbed.addFields({
                 name: '😬 So Close!',
-                value: `**${nearMisses}** of your numbers were within 1 of a drawn number.\n*One digit off from a bigger win...*`,
+                value: `**${nearMisses}** of your numbers were within 2 of a drawn number.\n*Just off from a bigger win...*`,
                 inline: false,
             });
         }
@@ -344,7 +348,7 @@ async function playKeno(interaction, bet, picked) {
                     return i.update({ content: `❌ Not enough coins for the quick reroll (need **${rerollCost.toLocaleString()}** coins).`, embeds: [], components: [] });
                 }
                 await i.deferUpdate();
-                await playKeno(interaction, rerollCost, picked);
+                await playKeno(interaction, rerollCost, picked, true);
             } else {
                 await i.deferUpdate();
                 await playKeno(interaction, bet, picked);

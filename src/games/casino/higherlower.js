@@ -345,7 +345,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
             if (!won) {
                 // Loss — bet already deducted, credit nothing
-                const updated = await User.findOneAndUpdate(userFilter, {}, { new: true });
+                const updated = await User.findOne(userFilter);
                 const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                 await i.update({
                     embeds:     [lossEmbed(interaction, current, next, pickedHigher, bet, updated?.balance ?? 0)],
@@ -394,10 +394,12 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
             });
 
             riskCollector.on('collect', async r => {
+                let payoutCredited = false;
                 try {
                     if (r.customId === cashId) {
                         // Cash out — credit the accumulated payout
                         const updated  = await User.findOneAndUpdate(userFilter, { $inc: { balance: rawPayout } }, { new: true });
+                        payoutCredited = true;
                         const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                         await r.update({
                             embeds:     [cashOutEmbed(interaction, bet, rawPayout, updated?.balance ?? 0, newStreak)],
@@ -412,7 +414,9 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                 } catch (riskErr) {
                     console.error('[HigherLower] risk collect error:', riskErr);
                     await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', embeds: [], components: [] }).catch(() => {});
-                    await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(() => {});
+                    if (!payoutCredited) {
+                        await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(() => {});
+                    }
                 }
             });
 
