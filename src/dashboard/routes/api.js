@@ -491,7 +491,7 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
 
         const topLevels = await User.find({ guildId })
             .sort({ level: -1, xp: -1 })
-            .limit(5);
+            .limit(10);
         const guildSettings = await Guild.findOne({ guildId });
         const memberEvents = guildSettings?.analytics?.memberEvents || [];
         const commandUsage = guildSettings?.analytics?.commandUsage || [];
@@ -1181,6 +1181,28 @@ router.get('/guild/:guildId/ai/usage', checkAuth, checkGuildAccess, async (req, 
     } catch (error) {
         console.error('AI usage stats error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ── Member Search ────────────────────────────────────────────────────────────
+
+router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const q = (req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+    try {
+        const guild = req.client.guilds.cache.get(guildId);
+        if (!guild) return res.status(404).json({ error: 'Guild not found' });
+        const results = await guild.members.search({ query: q, limit: 10 });
+        res.json(results.map(m => ({
+            id: m.user.id,
+            username: m.user.username,
+            displayName: m.displayName,
+            avatarURL: m.user.displayAvatarURL({ size: 32, extension: 'webp' })
+        })));
+    } catch (err) {
+        console.error('Member search error:', err);
+        res.status(500).json({ error: 'Search failed' });
     }
 });
 

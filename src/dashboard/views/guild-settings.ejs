@@ -63,14 +63,18 @@
             <li class="nav-item" data-tab="antinuke"><span class="nav-emoji" aria-hidden="true">🔒</span><span>Anti-Nuke</span></li>
         </ul>
 
-        <!-- Engagement -->
-        <div class="dash-nav-label">// Engagement</div>
+        <!-- Progression -->
+        <div class="dash-nav-label">// Progression</div>
         <ul class="dash-nav">
-            <li class="nav-item" data-tab="newspaper"><span class="nav-emoji">📰</span><span>Newspaper</span></li>
             <li class="nav-item" data-tab="achievements"><span class="nav-emoji">🏅</span><span>Achievements</span></li>
             <li class="nav-item" data-tab="quests"><span class="nav-emoji">🗺️</span><span>Quests</span></li>
             <li class="nav-item" data-tab="season"><span class="nav-emoji">🏆</span><span>Season Pass</span></li>
             <li class="nav-item" data-tab="progressiontracks"><span class="nav-emoji">🧭</span><span>Progression Tracks</span></li>
+        </ul>
+
+        <!-- Community -->
+        <div class="dash-nav-label">// Community</div>
+        <ul class="dash-nav">
             <li class="nav-item" data-tab="starboard"><span class="nav-emoji">⭐</span><span>Starboard</span></li>
             <li class="nav-item" data-tab="suggestions"><span class="nav-emoji">💡</span><span>Suggestions</span></li>
             <li class="nav-item" data-tab="reactionroles"><span class="nav-emoji">🎭</span><span>Reaction Roles</span></li>
@@ -87,6 +91,7 @@
         <!-- Feeds & Automation -->
         <div class="dash-nav-label">// Feeds &amp; Automation</div>
         <ul class="dash-nav">
+            <li class="nav-item" data-tab="newspaper"><span class="nav-emoji">📰</span><span>Newspaper</span></li>
             <li class="nav-item" data-tab="bibleverses"><span class="nav-emoji">📖</span><span>Bible Verses</span></li>
             <li class="nav-item" data-tab="rss"><span class="nav-emoji" aria-hidden="true">📡</span><span>RSS Feeds</span></li>
         </ul>
@@ -491,38 +496,16 @@
                     </div>
 
                     <div class="ai-inner-tabs">
-                        <button class="ai-inner-tab mod-inner-tab active" data-mod-tab="mod-tab-settings">⚙️ Settings</button>
+                        <button class="ai-inner-tab mod-inner-tab active" data-mod-tab="mod-tab-automod">🛡️ Auto-Mod</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-escalation">⚖️ Escalation</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-logging">📋 Logging</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-appeals">🔔 Appeals</button>
                         <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-sanctions">🔨 Active Sanctions</button>
-                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-cases">📋 Case History</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-cases">📚 Case History</button>
                     </div>
 
-                    <!-- Settings tab -->
-                    <div id="mod-tab-settings" class="ai-inner-panel active">
-                    <label class="toggle">
-                        <span class="toggle-text"><strong>Enable moderation</strong><span>Master switch for all moderation features</span></span>
-                        <span class="switch"><input type="checkbox" id="mod-enabled" <%= settings.moderation.enabled ? 'checked' : '' %>><span class="slider"></span></span>
-                    </label>
-                    <div class="field">
-                        <label class="field-label" for="mod-log-channel">Audit log channel</label>
-                        <select id="mod-log-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.moderation.logChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
-                    </div>
-                    <div class="field">
-                        <label class="field-label" for="mod-mute-role">Mute role</label>
-                        <select id="mod-mute-role">
-                            <option value="">Select a role (or use Discord timeout)</option>
-                            <% roles.forEach(role => { %>
-                                <option value="<%= role.id %>" <%= settings.moderation.muteRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
-                            <% }); %>
-                        </select>
-                        <small>Assigned when a member is muted. Leave empty to use Discord's native timeout.</small>
-                    </div>
-
-                    <div class="panel-head" style="margin-top:1.5rem"><h3>Auto-Moderation</h3></div>
+                    <!-- Auto-Mod tab -->
+                    <div id="mod-tab-automod" class="ai-inner-panel active">
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable auto-moderation</strong><span>Automatically delete or warn on rule violations</span></span>
                         <span class="switch"><input type="checkbox" id="mod-automod" <%= settings.moderation.autoModEnabled ? 'checked' : '' %>><span class="slider"></span></span>
@@ -575,8 +558,14 @@
                     <label class="toggle"><span class="toggle-text"><strong>Filter Zalgo text</strong></span><span class="switch"><input type="checkbox" id="mod-zalgo" <%= settings.moderation.zalgoFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text"><strong>Filter excessive mentions</strong></span><span class="switch"><input type="checkbox" id="mod-mentions" <%= settings.moderation.excessiveMentionsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <div class="field"><label class="field-label" for="mod-mention-threshold">Mention threshold</label><input type="number" id="mod-mention-threshold" value="<%= settings.moderation.mentionThreshold || 5 %>" min="1" max="25"></div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                    </div>
+                    </div><!-- end mod-tab-automod -->
 
-                    <div class="panel-head" style="margin-top:1.5rem"><h3>Escalation Thresholds</h3><p>Auto-actions taken as warning count rises. Set 0 to disable an action.</p></div>
+                    <!-- Escalation tab -->
+                    <div id="mod-tab-escalation" class="ai-inner-panel">
+                    <div class="panel-head"><h3>Escalation Thresholds</h3><p>Auto-actions taken as warning count rises. Set 0 to disable an action.</p></div>
                     <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
                         <div><label class="field-label" for="mod-warn-threshold">Warn count</label><input type="number" id="mod-warn-threshold" value="<%= settings.moderation.warnThreshold || 3 %>" min="1" max="50"><small>DM user at this many warnings</small></div>
                         <div><label class="field-label" for="mod-kick-threshold">Kick at (warnings)</label><input type="number" id="mod-kick-threshold" value="<%= settings.moderation.kickThreshold || 5 %>" min="0" max="50"><small>0 = disabled</small></div>
@@ -601,20 +590,35 @@
                         <div><label class="field-label" for="mod-score-ban">Ban at score</label><input type="number" id="mod-score-ban" value="<%= settings.moderation.behaviorScoreBanAt ?? 30 %>" min="0"><small>0 = disabled</small></div>
                         <div><label class="field-label" for="mod-score-decay">Decay (days)</label><input type="number" id="mod-score-decay" value="<%= settings.moderation.behaviorScoreDecayDays ?? 7 %>" min="1"><small>Score halves every N days</small></div>
                     </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                    </div>
+                    </div><!-- end mod-tab-escalation -->
 
-                    <div class="panel-head" style="margin-top:1.5rem"><h3>Appeals</h3></div>
+                    <!-- Logging tab -->
+                    <div id="mod-tab-logging" class="ai-inner-panel">
                     <label class="toggle">
-                        <span class="toggle-text"><strong>Enable ban/mute appeals</strong><span>Allow users to submit appeals via <code>/appeal</code></span></span>
-                        <span class="switch"><input type="checkbox" id="mod-appeals-enabled" <%= settings.moderation.appealsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        <span class="toggle-text"><strong>Enable moderation</strong><span>Master switch for all moderation features</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-enabled" <%= settings.moderation.enabled ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
                     <div class="field">
-                        <label class="field-label" for="mod-appeal-channel">Appeals channel</label>
-                        <select id="mod-appeal-channel">
+                        <label class="field-label" for="mod-log-channel">Audit log channel</label>
+                        <select id="mod-log-channel">
                             <option value="">Select a channel</option>
                             <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.moderation.appealChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <option value="<%= channel.id %>" <%= settings.moderation.logChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
                             <% }); %>
                         </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="mod-mute-role">Mute role</label>
+                        <select id="mod-mute-role">
+                            <option value="">Select a role (or use Discord timeout)</option>
+                            <% roles.forEach(role => { %>
+                                <option value="<%= role.id %>" <%= settings.moderation.muteRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Assigned when a member is muted. Leave empty to use Discord's native timeout.</small>
                     </div>
                     <div class="panel-head" style="margin-top:1.5rem"><h3>Case Management</h3><p>Configure SLA monitoring for open moderation cases.</p></div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
@@ -635,7 +639,27 @@
                         <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
                         <button class="btn btn-primary" onclick="saveSettings('casesettings')" style="margin-left:.5rem">Save case settings</button>
                     </div>
-                    </div><!-- end mod-tab-settings -->
+                    </div><!-- end mod-tab-logging -->
+
+                    <!-- Appeals tab -->
+                    <div id="mod-tab-appeals" class="ai-inner-panel">
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable ban/mute appeals</strong><span>Allow users to submit appeals via <code>/appeal</code></span></span>
+                        <span class="switch"><input type="checkbox" id="mod-appeals-enabled" <%= settings.moderation.appealsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="mod-appeal-channel">Appeals channel</label>
+                        <select id="mod-appeal-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.moderation.appealChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                    </div>
+                    </div><!-- end mod-tab-appeals -->
 
                     <!-- Active Sanctions tab -->
                     <div id="mod-tab-sanctions" class="ai-inner-panel">
@@ -810,6 +834,29 @@
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('leveling')">Save changes</button>
                     </div>
+
+                    <div class="panel-head" style="margin-top:1.75rem">
+                        <h3>Current Leaderboard</h3>
+                        <button class="btn btn-sm" onclick="loadLevelLeaderboard(true)">↻ Refresh</button>
+                    </div>
+                    <div id="level-leaderboard-skeleton" style="display:none">
+                        <div class="skel-bar" style="width:90%"></div>
+                        <div class="skel-bar" style="width:80%"></div>
+                        <div class="skel-bar" style="width:85%"></div>
+                        <div class="skel-bar" style="width:70%"></div>
+                        <div class="skel-bar" style="width:75%"></div>
+                    </div>
+                    <div id="level-leaderboard-error" style="display:none" class="analytics-error-card">
+                        <span>⚠ Couldn't load leaderboard</span>
+                        <button class="btn btn-sm" onclick="loadLevelLeaderboard(true)">Retry</button>
+                    </div>
+                    <div id="level-leaderboard-content" style="display:none">
+                        <table class="cases-table" style="width:100%">
+                            <thead><tr><th>#</th><th>User ID</th><th>Level</th><th>Total XP</th></tr></thead>
+                            <tbody id="level-leaderboard-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div id="level-leaderboard-empty" style="display:none;padding:1.5rem 0;text-align:center;color:var(--text-dim);font-size:.9rem">No members with XP yet.</div>
                 </section>
 
                 <!-- Economy -->
@@ -1402,6 +1449,31 @@
                         <div class="modal-actions">
                             <button class="btn" onclick="closeAchModal()">Cancel</button>
                             <button class="btn btn-primary" onclick="saveAchModal()">Save achievement</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Achievement Grant Modal -->
+                <div id="ach-grant-modal" class="modal-overlay" style="display:none">
+                    <div class="modal-box" style="max-width:420px">
+                        <div class="modal-head">
+                            <h3>Grant Achievement</h3>
+                            <button class="modal-close" onclick="closeAchGrantModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="grant-ach-id">
+                            <p id="grant-ach-name" style="font-weight:600;margin-bottom:.75rem"></p>
+                            <div class="field">
+                                <label class="field-label" for="grant-member-search">Search member</label>
+                                <input type="text" id="grant-member-search" placeholder="Type a username…" autocomplete="off" oninput="debouncedMemberSearch()">
+                                <div id="grant-member-results" style="display:none;border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;max-height:180px;overflow-y:auto;background:var(--surface-1)"></div>
+                                <input type="hidden" id="grant-member-id">
+                                <div id="grant-selected-member" style="display:none;margin-top:.5rem;font-size:.88rem;color:var(--text-mute)"></div>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn" onclick="closeAchGrantModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="submitAchGrant()">Grant</button>
                         </div>
                     </div>
                 </div>
@@ -2195,8 +2267,14 @@
                     <div id="ai-knowledgebase" class="ai-inner-panel">
                         <p class="ai-inner-desc">Add context entries that the AI references when answering in this server. Changes take effect immediately — no commands needed.</p>
                         <div id="kb-list" style="margin-bottom:1.5rem;">
-                            <div class="empty-state" style="padding:2rem 1.5rem;">
-                                <p>Loading entries…</p>
+                            <div id="kb-skeleton">
+                                <div class="skel-bar" style="width:75%"></div>
+                                <div class="skel-bar" style="width:60%"></div>
+                                <div class="skel-bar" style="width:80%"></div>
+                            </div>
+                            <div id="kb-error" style="display:none" class="analytics-error-card">
+                                <span>⚠ Couldn't load entries</span>
+                                <button class="btn btn-sm" onclick="retryLoadKnowledgeBase()">Retry</button>
                             </div>
                         </div>
                         <div class="panel-head" style="margin-top:1rem"><h3>Add entry</h3></div>
@@ -2221,8 +2299,14 @@
                     <div id="ai-summaries" class="ai-inner-panel">
                         <p class="ai-inner-desc">Schedule automatic AI-generated summaries of channel activity. The bot fetches recent messages and posts a digest to a target channel at the specified UTC time each day.</p>
                         <div id="summary-jobs-list" style="margin-bottom:1.5rem;">
-                            <div class="empty-state" style="padding:2rem 1.5rem;">
-                                <p>Loading summary jobs…</p>
+                            <div id="summary-jobs-skeleton">
+                                <div class="skel-bar" style="width:70%"></div>
+                                <div class="skel-bar" style="width:55%"></div>
+                                <div class="skel-bar" style="width:65%"></div>
+                            </div>
+                            <div id="summary-jobs-error" style="display:none" class="analytics-error-card">
+                                <span>⚠ Couldn't load summary jobs</span>
+                                <button class="btn btn-sm" onclick="retryLoadSummaryJobs()">Retry</button>
                             </div>
                         </div>
                         <div class="panel-head" style="margin-top:1rem"><h3>Add summary job</h3></div>
@@ -2555,6 +2639,7 @@
                 if (panel) { panel.classList.add('active'); panel.style.display = 'block'; }
                 if (topbarSection) topbarSection.textContent = item.querySelector('span:last-child')?.textContent || tab;
                 if (tab === 'analytics') loadAnalytics();
+                if (tab === 'leveling') loadLevelLeaderboard();
                 if (history.replaceState) {
                     const innerToParent = { knowledgebase: 'ai', aisummaries: 'ai', aipersonas: 'ai', dailynews: 'rss' };
                     const curInner = location.hash.slice(1);
@@ -3943,6 +4028,7 @@
                         '</div>' +
                     '</div>' +
                     '<div class="store-card-actions">' +
+                        '<button class="btn btn-sm" onclick="openAchGrantModal(\'' + escHtml(a.id) + '\',\'' + escHtml(a.name) + '\')">Grant</button>' +
                         '<button class="btn btn-sm" onclick="openAchModal(' + i + ')">Edit</button>' +
                         '<button class="btn btn-sm btn-danger" onclick="deleteCustomAch(' + i + ')">Remove</button>' +
                     '</div>' +
@@ -3989,6 +4075,119 @@
             if (!confirm('Remove "' + _customAchievements[idx].name + '"?')) return;
             _customAchievements.splice(idx, 1);
             renderCustomAchievements();
+        }
+
+        // ── Achievement Grant ───────────────────────────────────────────────────────
+        var _grantAchId = '';
+        var _memberSearchTimer = null;
+
+        function openAchGrantModal(achId, achName) {
+            _grantAchId = achId;
+            document.getElementById('grant-ach-id').value = achId;
+            document.getElementById('grant-ach-name').textContent = achName;
+            document.getElementById('grant-member-search').value = '';
+            document.getElementById('grant-member-results').style.display = 'none';
+            document.getElementById('grant-member-results').innerHTML = '';
+            document.getElementById('grant-member-id').value = '';
+            document.getElementById('grant-selected-member').style.display = 'none';
+            document.getElementById('grant-selected-member').textContent = '';
+            document.getElementById('ach-grant-modal').style.display = 'flex';
+        }
+
+        function closeAchGrantModal() { document.getElementById('ach-grant-modal').style.display = 'none'; }
+
+        function debouncedMemberSearch() {
+            clearTimeout(_memberSearchTimer);
+            _memberSearchTimer = setTimeout(runMemberSearch, 350);
+        }
+
+        async function runMemberSearch() {
+            var q = document.getElementById('grant-member-search').value.trim();
+            var resultsEl = document.getElementById('grant-member-results');
+            if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+            var guildId = '<%= guild.id %>';
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/members/search?q=' + encodeURIComponent(q));
+                if (!resp.ok) throw new Error('non-ok');
+                var members = await resp.json();
+                if (!members.length) {
+                    resultsEl.innerHTML = '<div style="padding:.5rem .75rem;font-size:.88rem;color:var(--text-dim)">No members found</div>';
+                } else {
+                    resultsEl.innerHTML = members.map(function(m) {
+                        return '<div class="grant-member-option" style="padding:.45rem .75rem;cursor:pointer;font-size:.88rem;display:flex;align-items:center;gap:.5rem;" ' +
+                            'onmousedown="selectGrantMember(\'' + escHtml(m.id) + '\',\'' + escHtml(m.displayName || m.username) + '\')">' +
+                            (m.avatarURL ? '<img src="' + escHtml(m.avatarURL) + '" style="width:22px;height:22px;border-radius:50%;">' : '') +
+                            '<span>' + escHtml(m.displayName || m.username) + '</span>' +
+                            '<span style="color:var(--text-dim);margin-left:auto;font-size:.8rem">' + escHtml(m.id) + '</span>' +
+                        '</div>';
+                    }).join('');
+                }
+                resultsEl.style.display = '';
+            } catch (e) {
+                resultsEl.innerHTML = '<div style="padding:.5rem .75rem;font-size:.88rem;color:var(--bad)">Search failed</div>';
+                resultsEl.style.display = '';
+            }
+        }
+
+        function selectGrantMember(userId, displayName) {
+            document.getElementById('grant-member-id').value = userId;
+            document.getElementById('grant-member-search').value = displayName;
+            document.getElementById('grant-member-results').style.display = 'none';
+            var sel = document.getElementById('grant-selected-member');
+            sel.textContent = 'Selected: ' + displayName + ' (' + userId + ')';
+            sel.style.display = '';
+        }
+
+        async function submitAchGrant() {
+            var userId = document.getElementById('grant-member-id').value.trim();
+            var achId  = document.getElementById('grant-ach-id').value.trim();
+            if (!userId) { toast('Select a member first', 'error'); return; }
+            var guildId = '<%= guild.id %>';
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/achievements/grant', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: userId, achievementId: achId })
+                });
+                var data = await resp.json();
+                if (!resp.ok) { toast(data.error || 'Grant failed', 'error'); return; }
+                toast(data.granted ? 'Achievement granted!' : 'Member already has this achievement', data.granted ? 'success' : 'info');
+                closeAchGrantModal();
+            } catch (e) {
+                toast('Grant failed', 'error');
+            }
+        }
+
+        // ── Leveling Leaderboard ────────────────────────────────────────────────────
+        var _levelLeaderboardLoaded = false;
+
+        function loadLevelLeaderboard(force) {
+            if (_levelLeaderboardLoaded && !force) return;
+            var skel    = document.getElementById('level-leaderboard-skeleton');
+            var err     = document.getElementById('level-leaderboard-error');
+            var content = document.getElementById('level-leaderboard-content');
+            var empty   = document.getElementById('level-leaderboard-empty');
+            skel.style.display = ''; err.style.display = 'none';
+            content.style.display = 'none'; empty.style.display = 'none';
+            var guildId = '<%= guild.id %>';
+            fetch('/api/guild/' + guildId + '/stats')
+                .then(function(r) { if (!r.ok) throw new Error('non-ok'); return r.json(); })
+                .then(function(data) {
+                    skel.style.display = 'none';
+                    var top = data.topLevels || [];
+                    if (!top.length) { empty.style.display = ''; return; }
+                    var tbody = document.getElementById('level-leaderboard-tbody');
+                    tbody.innerHTML = top.map(function(u, i) {
+                        return '<tr><td>' + (i + 1) + '</td><td style="font-family:monospace;font-size:.82rem">' + escHtml(u.userId) + '</td>' +
+                            '<td>' + escHtml(String(u.level)) + '</td><td>' + Number(u.xp).toLocaleString() + '</td></tr>';
+                    }).join('');
+                    content.style.display = '';
+                    _levelLeaderboardLoaded = true;
+                })
+                .catch(function() {
+                    skel.style.display = 'none';
+                    err.style.display = '';
+                });
         }
 
         // ── Reaction Roles ─────────────────────────────────────────────────────────
@@ -4069,16 +4268,24 @@
         async function loadKnowledgeBase() {
             if (kbLoaded) return;
             var guildId = '<%= guild.id %>';
-            var container = document.getElementById('kb-list');
+            var skel = document.getElementById('kb-skeleton');
+            var err  = document.getElementById('kb-error');
+            if (skel) skel.style.display = '';
+            if (err)  err.style.display  = 'none';
             try {
                 var resp = await fetch('/api/guild/' + guildId + '/knowledge-base');
+                if (!resp.ok) throw new Error('non-ok');
                 var entries = await resp.json();
                 kbLoaded = true;
+                if (skel) skel.style.display = 'none';
                 renderKbEntries(entries);
             } catch (e) {
-                container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><p>Failed to load entries.</p></div>';
+                if (skel) skel.style.display = 'none';
+                if (err)  err.style.display  = '';
             }
         }
+
+        function retryLoadKnowledgeBase() { kbLoaded = false; loadKnowledgeBase(); }
 
         function renderKbEntries(entries) {
             var container = document.getElementById('kb-list');
@@ -4218,20 +4425,24 @@
         async function loadSummaryJobs() {
             if (summaryJobsLoaded) return;
             var guildId = '<%= guild.id %>';
-            var container = document.getElementById('summary-jobs-list');
+            var skel = document.getElementById('summary-jobs-skeleton');
+            var err  = document.getElementById('summary-jobs-error');
+            if (skel) skel.style.display = '';
+            if (err)  err.style.display  = 'none';
             try {
                 var resp = await fetch('/api/guild/' + guildId + '/summary-jobs');
-                if (!resp.ok) {
-                    container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><p>Failed to load summary jobs.</p></div>';
-                    return;
-                }
+                if (!resp.ok) throw new Error('non-ok');
                 var jobs = await resp.json();
                 summaryJobsLoaded = true;
+                if (skel) skel.style.display = 'none';
                 renderSummaryJobs(jobs);
             } catch (e) {
-                container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><p>Failed to load summary jobs.</p></div>';
+                if (skel) skel.style.display = 'none';
+                if (err)  err.style.display  = '';
             }
         }
+
+        function retryLoadSummaryJobs() { summaryJobsLoaded = false; loadSummaryJobs(); }
 
         function renderSummaryJobs(jobs) {
             var container = document.getElementById('summary-jobs-list');
