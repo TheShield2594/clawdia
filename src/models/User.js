@@ -508,7 +508,18 @@ const userSchema = new Schema({
         earnedAt: { type: Date, default: Date.now },
         claimed:  { type: Boolean, default: false }
     }],
-    achievementsCount: { type: Number, default: 0 },
+    achievementsCount:  { type: Number, default: 0 },
+    pinnedAchievement: { type: String,  default: null },
+
+    casinoStats: {
+        slotsLossStreak: { type: Number, default: 0 },
+    },
+
+    grandPrestige: {
+        level:       { type: Number, default: 0 },
+        awardedAt:   { type: Date,   default: null },
+        announcedAt: { type: Date,   default: null },
+    },
 
     // Duel win/loss tracking
     duelWins:   { type: Number, default: 0 },

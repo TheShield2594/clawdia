@@ -157,19 +157,23 @@ async function buildWeeklyLeaderboard(guildId, client) {
 
 // ── Lobby embed ──────────────────────────────────────────────────────────────
 
-function lobbyEmbed(lobby, playerNames, autoCashout) {
+function lobbyEmbed(lobby, playerNames, autoCashout, crashHistory) {
     const secsLeft = Math.max(0, Math.ceil((lobby.joinDeadline - Date.now()) / 1000));
     const lines = playerNames.length
         ? playerNames.map(n => `• ${n}`).join('\n')
         : '*No players yet*';
     const acLine = autoCashout ? `\n🤖 Host auto cash-out: **${multLabel(autoCashout)}**` : '';
+    const historyLine = crashHistory?.length
+        ? `\n💥 Recent Crashes: ${crashHistory.slice(-5).map(c => `**${multLabel(c)}**`).join(' · ')}\n*Is a big one coming?* 🤔`
+        : '';
     return new EmbedBuilder()
         .setColor('#5865F2')
         .setTitle('💥 Crash — Lobby Open')
         .setDescription(
             `**Bet:** ${lobby.bet.toLocaleString()} coins each\n` +
             `**Joining:** ${lobby.players.size}/${MAX_PLAYERS} players\n` +
-            acLine + '\n\n' +
+            acLine +
+            historyLine + '\n\n' +
             `**Players:**\n${lines}\n\n` +
             `Lobby closes in **${secsLeft}s** or when host starts.`
         )
@@ -294,8 +298,11 @@ async function openLobby(interaction, bet, hostAutoCashout) {
     // Add host with their auto cash-out preference
     addPlayer(channelId, interaction.user.id, hostAutoCashout, interaction.user.username);
 
+    const guildDoc     = await Guild.findOne({ guildId: interaction.guild.id }, 'casinoStats').lean().catch(() => null);
+    const crashHistory = guildDoc?.casinoStats?.crashHistory ?? [];
+
     const msg = await interaction.editReply({
-        embeds:     [lobbyEmbed(lobby, [interaction.user.username], hostAutoCashout)],
+        embeds:     [lobbyEmbed(lobby, [interaction.user.username], hostAutoCashout, crashHistory)],
         components: [buildLobbyRow(lobbyId)],
     });
 
@@ -311,7 +318,7 @@ async function openLobby(interaction, bet, hostAutoCashout) {
             names.push(u.username);
         }
         await interaction.editReply({
-            embeds:     [lobbyEmbed(lobby, names, hostAutoCashout)],
+            embeds:     [lobbyEmbed(lobby, names, hostAutoCashout, crashHistory)],
             components: [buildLobbyRow(lobbyId)],
         }).catch(() => {});
     }
@@ -513,6 +520,12 @@ async function startCrashGame(interaction, lobby, lobbyId) {
             }
 
             const finalEmbed = await buildFinalEmbed(crash, bet, lobby.players, interaction.client, guildId);
+
+            // Save crash point to guild history (last 10)
+            Guild.updateOne(
+                { guildId },
+                { $push: { 'casinoStats.crashHistory': { $each: [crash], $slice: -10 } } }
+            ).catch(() => {});
 
             // Leaderboard button on result
             const lbId  = `crash_lb_${lobbyId}`;

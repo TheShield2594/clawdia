@@ -50,7 +50,7 @@ const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
 const { randomFrom, FISH_MISS_POOL } = require('../../utils/copyLines');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
-const { submitCatch: submitTournamentCatch, getActiveTournament, buildLeaderboardEmbed, endTournament, buildWinnersEmbed } = require('../../services/tournamentService');
+const { submitCatch: submitTournamentCatch, getActiveTournament, buildLeaderboardEmbed, endTournament, buildWinnersEmbed, announceTournamentEnd } = require('../../services/tournamentService');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../data/featuredRotation');
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
@@ -119,6 +119,9 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('prestige')
                 .setDescription('Reset your fisher level for permanent prestige bonuses (requires Level 50)'))
+        .addSubcommand(sub =>
+            sub.setName('records')
+                .setDescription('View the server\'s all-time fishing world records'))
         .addSubcommandGroup(group =>
             group.setName('inv')
                 .setDescription('View and manage your fishing inventory')
@@ -291,6 +294,7 @@ module.exports = {
             if (sub === 'cast')     return handleCast(interaction);
             if (sub === 'profile')  return handleProfile(interaction);
             if (sub === 'prestige') return handlePrestige(interaction);
+            if (sub === 'records')  return handleRecords(interaction);
             return;
         }
 
@@ -702,6 +706,16 @@ async function handleCast(interaction) {
             fishEmoji: result.fish.emoji ?? '🐟',
             tier:      result.tier,
             score:     result.finalPayout
+        }).catch(() => null);
+    }
+
+    // Track world records (heaviest catch per fish species in the server)
+    if (result.success && result.catchType === 'fish' && result.fish && result.weightLbs > 0) {
+        checkAndUpdateWorldRecord(interaction.guild.id, {
+            fish:     result.fish.name,
+            weight:   result.weightLbs,
+            userId:   interaction.user.id,
+            username: interaction.user.username,
         }).catch(() => null);
     }
 
@@ -1470,6 +1484,9 @@ async function handlePrestige(interaction) {
             await i.update({ content: 'Something went wrong saving your prestige. Please try again.', embeds: [], components: [] });
             return;
         }
+
+        // Check grand prestige after successful fish prestige
+        checkGrandPrestige(i.client, freshUser, interaction.guild, interaction.guildId).catch(() => null);
 
         const resultEmbed = new EmbedBuilder()
             .setColor('#f39c12')
@@ -2715,6 +2732,8 @@ async function handleTournamentStatus(interaction) {
         const ended = await endTournament(tournament._id);
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const currency = guildSettings?.economy?.currency ?? '💰';
+        const announceChannelId = ended.announceChannelId ?? guildSettings?.economy?.announcementChannelId ?? null;
+        announceTournamentEnd(interaction.client, ended, interaction.guild.id, announceChannelId).catch(() => null);
         return interaction.editReply({ embeds: [buildWinnersEmbed(ended, currency)] });
     }
 
@@ -2771,4 +2790,111 @@ async function handleTournamentStart(interaction) {
     }
 
     return interaction.editReply({ embeds: [announceEmbed] });
+}
+
+// ─── World Records ────────────────────────────────────────────────────────────
+async function checkAndUpdateWorldRecord(guildId, { fish, weight, userId, username }) {
+    const existing = await Guild.findOne(
+        { guildId, 'fishingWorldRecords.fish': fish },
+        { 'fishingWorldRecords.$': 1 }
+    ).lean().catch(() => null);
+
+    const existingRecord = existing?.fishingWorldRecords?.[0];
+    if (existingRecord && existingRecord.weight >= weight) return;
+
+    if (existingRecord) {
+        await Guild.updateOne(
+            { guildId, 'fishingWorldRecords.fish': fish },
+            { $set: { 'fishingWorldRecords.$.weight': weight, 'fishingWorldRecords.$.userId': userId, 'fishingWorldRecords.$.username': username, 'fishingWorldRecords.$.date': new Date() } }
+        ).catch(() => {});
+    } else {
+        await Guild.updateOne(
+            { guildId },
+            { $push: { fishingWorldRecords: { fish, weight, userId, username, date: new Date() } } }
+        ).catch(() => {});
+    }
+}
+
+async function handleRecords(interaction) {
+    await interaction.deferReply();
+
+    const guildDoc = await Guild.findOne({ guildId: interaction.guild.id }, 'fishingWorldRecords').lean().catch(() => null);
+    const records  = (guildDoc?.fishingWorldRecords ?? [])
+        .sort((a, b) => b.weight - a.weight)
+        .slice(0, 15);
+
+    if (!records.length) {
+        return interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setColor('#3498db')
+                .setTitle('🐟 Server Fishing Records')
+                .setDescription('No records yet — start fishing to claim the top spot!')
+                .setTimestamp()]
+        });
+    }
+
+    const medals = ['🥇', '🥈', '🥉'];
+    const lines  = records.map((r, i) => {
+        const medal = medals[i] ?? `**${i + 1}.**`;
+        const date  = r.date ? `<t:${Math.floor(new Date(r.date).getTime() / 1000)}:d>` : '';
+        return `${medal} **${r.fish}** — ${r.weight} lbs — <@${r.userId}>${date ? ` — ${date}` : ''}`;
+    });
+
+    return interaction.editReply({
+        embeds: [new EmbedBuilder()
+            .setColor('#1e90ff')
+            .setTitle('🐟 Server Fishing Records')
+            .setDescription(lines.join('\n'))
+            .setFooter({ text: 'Heaviest catch per species · Records never reset' })
+            .setTimestamp()]
+    });
+}
+
+// ─── Grand Prestige Check ─────────────────────────────────────────────────────
+const GRAND_PRESTIGE_DIAMOND = 5;
+const GRAND_PRESTIGE_LEVELS = [
+    { level: 1, title: '⚜️ Grand Master',  badge: '⚜️', description: 'Diamond Prestige in all three skill tracks' },
+    { level: 2, title: '🌌 Ascendant',     badge: '🌌', description: 'Grand Master + ultimate dedication' },
+    { level: 3, title: '👑 Sovereign',     badge: '👑', description: 'The pinnacle of mastery — server-first' },
+];
+
+async function checkGrandPrestige(client, user, guild, guildId) {
+    const huntDiamond  = (user.hunt?.prestige ?? 0)    >= GRAND_PRESTIGE_DIAMOND;
+    const fishDiamond  = (user.fishing?.prestige ?? 0) >= GRAND_PRESTIGE_DIAMOND;
+    const mineDiamond  = (user.mining?.prestige ?? 0)  >= GRAND_PRESTIGE_DIAMOND;
+    const allDiamond   = huntDiamond && fishDiamond && mineDiamond;
+
+    if (!allDiamond) return;
+
+    const currentLevel = user.grandPrestige?.level ?? 0;
+    if (currentLevel >= 1) return; // already achieved Grand Master or higher
+
+    await User.updateOne(
+        { userId: user.userId, guildId },
+        { $set: { 'grandPrestige.level': 1, 'grandPrestige.awardedAt': new Date() } }
+    ).catch(() => {});
+
+    // Broadcast to economy channel
+    const guildSettings = await Guild.findOne({ guildId }, 'economy accountPrestige').lean().catch(() => null);
+    const announceChannelId = guildSettings?.accountPrestige?.announceChannelId
+        ?? guildSettings?.economy?.announcementChannelId
+        ?? null;
+
+    if (announceChannelId && client) {
+        const broadcastEmbed = new EmbedBuilder()
+            .setColor('#FFD700')
+            .setTitle('⚜️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜️')
+            .setDescription(
+                `**GRAND MASTER ACHIEVED!**\n\n` +
+                `<@${user.userId}> has reached **Diamond Prestige** in all three skill tracks!\n\n` +
+                `🏹 Diamond Hunter · 🎣 Diamond Angler · ⛏️ Diamond Miner\n\n` +
+                `*The rarest achievement in this server.*`
+            )
+            .setTimestamp();
+        try {
+            const g  = guild ?? await client.guilds.fetch(guildId).catch(() => null);
+            const ch = g?.channels?.cache?.get(announceChannelId);
+            if (ch?.isTextBased?.()) ch.send({ embeds: [broadcastEmbed] }).catch(() => {});
+        } catch { /* non-critical */ }
+    }
 }
