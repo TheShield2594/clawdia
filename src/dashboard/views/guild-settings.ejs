@@ -408,8 +408,9 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="welcome-message">Welcome message</label>
-                        <textarea id="welcome-message" rows="3"><%= settings.welcome.message %></textarea>
+                        <textarea id="welcome-message" rows="3" oninput="updateMsgPreview('welcome-message','welcome-preview')"><%= settings.welcome.message %></textarea>
                         <small>Variables: <code>{user}</code> · <code>{username}</code> · <code>{tag}</code> · <code>{server}</code> · <code>{memberCount}</code></small>
+                        <div class="msg-preview" id="welcome-preview"></div>
                     </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable welcome card</strong><span>Generate a rich image card for new members</span></span>
@@ -473,8 +474,9 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="farewell-message">Farewell message</label>
-                        <textarea id="farewell-message" rows="3"><%= settings.farewell.message %></textarea>
+                        <textarea id="farewell-message" rows="3" oninput="updateMsgPreview('farewell-message','farewell-preview')"><%= settings.farewell.message %></textarea>
                         <small>Variables: <code>{user}</code> · <code>{username}</code> · <code>{tag}</code> · <code>{server}</code> · <code>{memberCount}</code></small>
+                        <div class="msg-preview" id="farewell-preview"></div>
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('farewell')">Save changes</button>
@@ -515,8 +517,9 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="birthday-message">Birthday message template</label>
-                        <textarea id="birthday-message" rows="2"><%= settings.birthdays?.message || "It's the birthday of {user} ({age}) ! 🎂" %></textarea>
+                        <textarea id="birthday-message" rows="2" oninput="updateMsgPreview('birthday-message','birthday-preview')"><%= settings.birthdays?.message || "It's the birthday of {user} ({age}) ! 🎂" %></textarea>
                         <small>Variables: <code>{user}</code> · <code>{age}</code></small>
+                        <div class="msg-preview" id="birthday-preview"></div>
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('birthdays')">Save changes</button>
@@ -588,10 +591,20 @@
                         <span class="toggle-text"><strong>Filter invite links</strong><span>Block other Discord server invites</span></span>
                         <span class="switch"><input type="checkbox" id="mod-invites" <%= settings.moderation.inviteFilter ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
+                    <div class="field" style="margin-left:1rem;">
+                        <label class="field-label" for="mod-invite-allowlist">Allowed server IDs (one per line)</label>
+                        <textarea id="mod-invite-allowlist" rows="3" placeholder="123456789012345678"><%= (settings.moderation.inviteAllowlist || []).join('\n') %></textarea>
+                        <small>Invites to these server IDs will not be blocked.</small>
+                    </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Filter links</strong><span>Block external URLs in messages</span></span>
                         <span class="switch"><input type="checkbox" id="mod-links" <%= settings.moderation.linkFilter ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
+                    <div class="field" style="margin-left:1rem;">
+                        <label class="field-label" for="mod-link-allowlist">Allowed domains (one per line)</label>
+                        <textarea id="mod-link-allowlist" rows="3" placeholder="youtube.com&#10;twitch.tv"><%= (settings.moderation.linkAllowlist || []).join('\n') %></textarea>
+                        <small>URLs matching these domains will not be blocked.</small>
+                    </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Filter profanity</strong><span>Delete messages containing blocked words (uses built-in + custom list)</span></span>
                         <span class="switch"><input type="checkbox" id="mod-profanity" <%= settings.moderation.profanityFilter ? 'checked' : '' %>><span class="slider"></span></span>
@@ -1944,8 +1957,9 @@
                             </div>
                             <div>
                                 <label class="field-label" for="dailynews-timezone">Timezone</label>
-                                <input type="text" id="dailynews-timezone" value="<%= settings.dailyNews?.timezone || 'UTC' %>" placeholder="America/New_York">
-                                <small>IANA timezone name — e.g. <code>UTC</code>, <code>America/New_York</code>, <code>Europe/London</code>. Delivery time is interpreted in this timezone. Leave blank or use <code>UTC</code> to follow the bot server's clock.</small>
+                                <input type="text" id="dailynews-timezone" list="tz-datalist" value="<%= settings.dailyNews?.timezone || 'UTC' %>" placeholder="America/New_York" autocomplete="off" onblur="validateTimezoneInput(this)">
+                                <small id="dailynews-timezone-err" class="field-error" style="display:none"></small>
+                                <small>IANA timezone — e.g. <code>UTC</code>, <code>America/New_York</code>, <code>Europe/London</code>.</small>
                             </div>
                         </div>
                         <div class="field">
@@ -2441,8 +2455,8 @@
                         </div>
                         <div>
                             <label class="field-label" for="bv-timezone">Timezone</label>
-                            <input type="text" id="bv-timezone" placeholder="UTC" value="<%= (settings.bibleVerse && settings.bibleVerse.timezone) || 'UTC' %>">
-                            <small>e.g. America/New_York, Europe/London, UTC</small>
+                            <input type="text" id="bv-timezone" list="tz-datalist" placeholder="UTC" value="<%= (settings.bibleVerse && settings.bibleVerse.timezone) || 'UTC' %>" autocomplete="off" onblur="validateTimezoneInput(this)">
+                            <small id="bv-timezone-err" class="field-error" style="display:none"></small>
                         </div>
                     </div>
 
@@ -2476,6 +2490,79 @@
 </div><!-- /.dash -->
 
     <div class="toast" id="toast"></div>
+    <datalist id="tz-datalist">
+        <option value="UTC">
+        <option value="America/New_York">
+        <option value="America/Chicago">
+        <option value="America/Denver">
+        <option value="America/Los_Angeles">
+        <option value="America/Phoenix">
+        <option value="America/Anchorage">
+        <option value="America/Honolulu">
+        <option value="America/Toronto">
+        <option value="America/Vancouver">
+        <option value="America/Mexico_City">
+        <option value="America/Bogota">
+        <option value="America/Lima">
+        <option value="America/Santiago">
+        <option value="America/Sao_Paulo">
+        <option value="America/Argentina/Buenos_Aires">
+        <option value="Europe/London">
+        <option value="Europe/Dublin">
+        <option value="Europe/Lisbon">
+        <option value="Europe/Paris">
+        <option value="Europe/Berlin">
+        <option value="Europe/Rome">
+        <option value="Europe/Madrid">
+        <option value="Europe/Amsterdam">
+        <option value="Europe/Brussels">
+        <option value="Europe/Vienna">
+        <option value="Europe/Warsaw">
+        <option value="Europe/Prague">
+        <option value="Europe/Stockholm">
+        <option value="Europe/Oslo">
+        <option value="Europe/Copenhagen">
+        <option value="Europe/Helsinki">
+        <option value="Europe/Athens">
+        <option value="Europe/Bucharest">
+        <option value="Europe/Istanbul">
+        <option value="Europe/Kiev">
+        <option value="Europe/Moscow">
+        <option value="Africa/Cairo">
+        <option value="Africa/Johannesburg">
+        <option value="Africa/Lagos">
+        <option value="Africa/Nairobi">
+        <option value="Asia/Dubai">
+        <option value="Asia/Riyadh">
+        <option value="Asia/Tehran">
+        <option value="Asia/Karachi">
+        <option value="Asia/Kolkata">
+        <option value="Asia/Colombo">
+        <option value="Asia/Dhaka">
+        <option value="Asia/Rangoon">
+        <option value="Asia/Bangkok">
+        <option value="Asia/Ho_Chi_Minh">
+        <option value="Asia/Jakarta">
+        <option value="Asia/Singapore">
+        <option value="Asia/Kuala_Lumpur">
+        <option value="Asia/Shanghai">
+        <option value="Asia/Hong_Kong">
+        <option value="Asia/Taipei">
+        <option value="Asia/Seoul">
+        <option value="Asia/Tokyo">
+        <option value="Asia/Manila">
+        <option value="Asia/Kolkata">
+        <option value="Australia/Perth">
+        <option value="Australia/Darwin">
+        <option value="Australia/Brisbane">
+        <option value="Australia/Adelaide">
+        <option value="Australia/Sydney">
+        <option value="Australia/Melbourne">
+        <option value="Pacific/Auckland">
+        <option value="Pacific/Fiji">
+        <option value="Pacific/Honolulu">
+        <option value="Pacific/Guam">
+    </datalist>
 
     <script>
         const DAILY_NEWS_INITIAL_PROFILES = <%- JSON.stringify(settings.dailyNewsProfiles || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
@@ -2614,6 +2701,50 @@
                 if (target) target.click();
             }
         }
+
+        // Timezone validation — checks against Intl.supportedValuesOf on blur
+        function validateTimezoneInput(input) {
+            const val = input.value.trim();
+            const errEl = document.getElementById(input.id + '-err');
+            if (!val || val === 'UTC') { if (errEl) errEl.style.display = 'none'; return true; }
+            try {
+                const supported = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : null;
+                if (supported && !supported.includes(val)) {
+                    if (errEl) { errEl.textContent = `"${val}" is not a valid IANA timezone.`; errEl.style.display = ''; }
+                    return false;
+                }
+                // Fallback: try constructing a formatter
+                Intl.DateTimeFormat(undefined, { timeZone: val });
+                if (errEl) errEl.style.display = 'none';
+                return true;
+            } catch (_) {
+                if (errEl) { errEl.textContent = `"${val}" is not a valid IANA timezone.`; errEl.style.display = ''; }
+                return false;
+            }
+        }
+
+        // Message preview helper — substitutes template variables with sample values
+        const PREVIEW_VARS = {
+            user: '@SampleUser',
+            username: 'SampleUser',
+            tag: 'SampleUser#0000',
+            server: '<%= guild.name.replace(/'/g, "\\'") %>',
+            memberCount: '1,234',
+            age: '25'
+        };
+        function updateMsgPreview(textareaId, previewId) {
+            const ta = document.getElementById(textareaId);
+            const box = document.getElementById(previewId);
+            if (!ta || !box) return;
+            const raw = ta.value;
+            if (!raw.trim()) { box.textContent = ''; return; }
+            const rendered = raw.replace(/\{(\w+)\}/g, (_, key) => PREVIEW_VARS[key] !== undefined ? PREVIEW_VARS[key] : `{${key}}`);
+            box.textContent = rendered;
+        }
+        // Initialise previews on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            [['welcome-message','welcome-preview'],['farewell-message','farewell-preview'],['birthday-message','birthday-preview']].forEach(([t,p]) => updateMsgPreview(t,p));
+        });
 
         // Toast helper
         const toastEl = document.getElementById('toast');
@@ -2796,7 +2927,7 @@
                         <label for="dn-${idx}-time">Time (24h)</label>
                         <input id="dn-${idx}-time" type="text" value="${escHtml(profile.time || '09:00')}" onchange="updateDailyNewsProfile(${idx}, 'time', this.value)">
                         <label for="dn-${idx}-timezone">Timezone <small style="font-weight:normal;opacity:.7;">(IANA, e.g. UTC, America/New_York, Europe/London)</small></label>
-                        <input id="dn-${idx}-timezone" type="text" value="${escHtml(profile.timezone || '')}" placeholder="UTC" onchange="updateDailyNewsProfile(${idx}, 'timezone', this.value)">
+                        <input id="dn-${idx}-timezone" type="text" list="tz-datalist" value="${escHtml(profile.timezone || '')}" placeholder="UTC" autocomplete="off" onblur="validateTimezoneInput(this)" onchange="updateDailyNewsProfile(${idx}, 'timezone', this.value)">
                         <label for="dn-${idx}-title">Digest title</label>
                         <input id="dn-${idx}-title" type="text" value="${escHtml(profile.title || '📰 Daily News Digest')}" onchange="updateDailyNewsProfile(${idx}, 'title', this.value)">
                         <label for="dn-${idx}-feeds">Feeds (one URL per line)</label>
@@ -2915,7 +3046,9 @@
                     'moderation.spamThreshold': parseInt(document.getElementById('mod-spam-threshold').value, 10) || 5,
                     'moderation.spamWindow': parseInt(document.getElementById('mod-spam-window').value, 10) || 5,
                     'moderation.inviteFilter': document.getElementById('mod-invites').checked,
+                    'moderation.inviteAllowlist': document.getElementById('mod-invite-allowlist').value.split('\n').map(s => s.trim()).filter(Boolean),
                     'moderation.linkFilter': document.getElementById('mod-links').checked,
+                    'moderation.linkAllowlist': document.getElementById('mod-link-allowlist').value.split('\n').map(s => s.trim()).filter(Boolean),
                     'moderation.profanityFilter': document.getElementById('mod-profanity').checked,
                     'moderation.customBadWords': document.getElementById('mod-bad-words').value.split('\n').map(w => w.trim()).filter(Boolean),
                     'moderation.repeatedTextFilter': document.getElementById('mod-repeated').checked,
@@ -3327,7 +3460,8 @@
 
         async function addAutoRole() {
             const guildId = '<%= guild.id %>';
-            const roleId = document.getElementById('autorole-select').value;
+            const select = document.getElementById('autorole-select');
+            const roleId = select.value;
             if (!roleId) { toast('Please select a role', 'error'); return; }
             if (document.querySelector(`#autorole-list [data-role-id="${roleId}"]`)) {
                 toast('Role already added', 'error'); return;
@@ -3338,8 +3472,16 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ roleId })
                 });
-                if (response.ok) { toast('Role added ✓', 'success'); setTimeout(() => location.reload(), 600); }
-                else toast('Failed to add role', 'error');
+                if (response.ok) {
+                    const roleName = select.options[select.selectedIndex].text.replace(/^@/, '');
+                    const chip = document.createElement('span');
+                    chip.className = 'role-tag';
+                    chip.dataset.roleId = roleId;
+                    chip.innerHTML = `@${roleName} <button onclick="removeAutoRole('${roleId}')" title="Remove">&times;</button>`;
+                    document.getElementById('autorole-list').appendChild(chip);
+                    select.value = '';
+                    toast('Role added ✓', 'success');
+                } else toast('Failed to add role', 'error');
             } catch (error) {
                 console.error(error);
                 toast('An error occurred', 'error');
@@ -3350,8 +3492,11 @@
             const guildId = '<%= guild.id %>';
             try {
                 const response = await fetch(`/api/guild/${guildId}/autorole/${roleId}`, { method: 'DELETE' });
-                if (response.ok) { toast('Role removed ✓', 'success'); setTimeout(() => location.reload(), 600); }
-                else toast('Failed to remove role', 'error');
+                if (response.ok) {
+                    const chip = document.querySelector(`#autorole-list [data-role-id="${roleId}"]`);
+                    if (chip) chip.remove();
+                    toast('Role removed ✓', 'success');
+                } else toast('Failed to remove role', 'error');
             } catch (error) {
                 console.error(error);
                 toast('An error occurred', 'error');
