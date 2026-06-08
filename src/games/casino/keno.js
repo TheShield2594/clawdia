@@ -11,7 +11,6 @@ const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultipli
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b1.png';
 const MIN_BET = 10;
-const MAX_BET = 5000;
 
 const POOL_SIZE  = 40;
 const PICK_COUNT = 5;
@@ -79,7 +78,7 @@ function phaseTitle(hits, total) {
     return '🎱 Drawing…';
 }
 
-async function playKeno(interaction, bet, picked) {
+async function playKeno(interaction, bet, picked, alreadyDebited = false) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -87,17 +86,21 @@ async function playKeno(interaction, bet, picked) {
     try {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
-        debited = await User.findOneAndUpdate(
-            { ...userFilter, balance: { $gte: bet } },
-            { $inc: { balance: -bet } },
-            { new: true }
-        );
+        if (alreadyDebited) {
+            debited = await User.findOne(userFilter);
+        } else {
+            debited = await User.findOneAndUpdate(
+                { ...userFilter, balance: { $gte: bet } },
+                { $inc: { balance: -bet } },
+                { new: true }
+            );
 
-        if (!debited) {
-            const fresh = await User.findOne(userFilter);
-            return interaction.editReply({
-                content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
-            });
+            if (!debited) {
+                const fresh = await User.findOne(userFilter);
+                return interaction.editReply({
+                    content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
+                });
+            }
         }
 
         const drawn   = drawNumbers();
@@ -277,6 +280,10 @@ async function playKeno(interaction, bet, picked) {
         const payoutLabel = credit > 0 ? '🏆 Payout' : '💀 Lost';
         const payoutAmt   = credit > 0 ? adjustedPayout : bet;
 
+        // Surface near-miss data
+        const nearMisses = nearMissCount(picked, drawn);
+        const showNearMiss = nearMisses > 0 && matches < 2;
+
         const resultEmbed = new EmbedBuilder()
             .setAuthor(embedAuthor(interaction))
             .setThumbnail(THUMB)
@@ -295,21 +302,57 @@ async function playKeno(interaction, bet, picked) {
             .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' })
             .setTimestamp();
 
-        const replayId = `keno_replay_${interaction.id}_${Date.now()}`;
-        const row = new ActionRowBuilder().addComponents(
+        if (showNearMiss) {
+            resultEmbed.addFields({
+                name: '😬 So Close!',
+                value: `**${nearMisses}** of your numbers were within 2 of a drawn number.\n*Just off from a bigger win...*`,
+                inline: false,
+            });
+        }
+
+        const replayId  = `keno_replay_${interaction.id}_${Date.now()}`;
+        const rerollId  = `keno_reroll_${interaction.id}_${Date.now()}`;
+        const rerollCost = Math.ceil(bet / 2);
+        const canReroll  = nearMisses >= 3 && matches <= 1 && (updated?.balance ?? 0) >= rerollCost;
+
+        const buttons = [
             new ButtonBuilder().setCustomId(replayId).setLabel('🎱 Play Again').setStyle(ButtonStyle.Primary),
-        );
+        ];
+        if (canReroll) {
+            buttons.push(
+                new ButtonBuilder()
+                    .setCustomId(rerollId)
+                    .setLabel(`🎰 Quick Reroll — ${rerollCost.toLocaleString()} coins (same picks)`)
+                    .setStyle(ButtonStyle.Secondary),
+            );
+        }
+
+        const row = new ActionRowBuilder().addComponents(...buttons);
 
         await interaction.editReply({ embeds: [resultEmbed], components: [row] });
 
         const msg = await interaction.fetchReply();
         msg.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && i.customId === replayId,
+            filter: i => i.user.id === interaction.user.id && [replayId, rerollId].includes(i.customId),
             max: 1,
             time: 60_000,
         }).on('collect', async i => {
-            await i.deferUpdate();
-            await playKeno(interaction, bet, picked);
+            if (i.customId === rerollId) {
+                // Quick reroll at 50% cost with same picks
+                const rerollDebited = await User.findOneAndUpdate(
+                    { ...userFilter, balance: { $gte: rerollCost } },
+                    { $inc: { balance: -rerollCost } },
+                    { new: true }
+                );
+                if (!rerollDebited) {
+                    return i.update({ content: `❌ Not enough coins for the quick reroll (need **${rerollCost.toLocaleString()}** coins).`, embeds: [], components: [] });
+                }
+                await i.deferUpdate();
+                await playKeno(interaction, rerollCost, picked, true);
+            } else {
+                await i.deferUpdate();
+                await playKeno(interaction, bet, picked);
+            }
         }).on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
         });
@@ -331,10 +374,10 @@ module.exports = {
     configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
-                .setDescription(`Amount to bet (${MIN_BET}–${MAX_BET})`)
+                .setDescription(`Amount to bet (min ${MIN_BET})`)
                 .setRequired(true)
                 .setMinValue(MIN_BET)
-                .setMaxValue(MAX_BET))
+                .setMaxValue(1_000_000_000))
         .addStringOption(opt =>
             opt.setName('numbers')
                 .setDescription('Your 5 numbers from 1–40, space-separated (e.g. 3 12 21 33 39)')
@@ -346,7 +389,11 @@ module.exports = {
             return interaction.reply({ content: 'Casino games are disabled on this server.', ephemeral: true });
         }
 
-        const bet        = interaction.options.getInteger('bet');
+        const bet          = interaction.options.getInteger('bet');
+        const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
+        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+        }
         const numbersRaw = interaction.options.getString('numbers');
 
         const parsed = numbersRaw.trim().split(/\s+/).map(Number);

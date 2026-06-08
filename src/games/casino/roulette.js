@@ -11,7 +11,6 @@ const { hasEffect } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a1.png';
 const MIN_BET = 10;
-const MAX_BET = 5000;
 
 const RED_NUMBERS = new Set([
     1, 3, 5, 7, 9, 12, 14, 16, 18,
@@ -157,9 +156,9 @@ module.exports = {
                 ))
         .addIntegerOption(opt =>
             opt.setName('amount')
-                .setDescription(`Coins to wager (${MIN_BET.toLocaleString()}–${MAX_BET.toLocaleString()})`)
+                .setDescription(`Coins to wager (min ${MIN_BET.toLocaleString()})`)
                 .setMinValue(MIN_BET)
-                .setMaxValue(MAX_BET)
+                .setMaxValue(1_000_000_000)
                 .setRequired(true))
         .addIntegerOption(opt =>
             opt.setName('number')
@@ -185,6 +184,10 @@ module.exports = {
         }
 
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
+        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+        }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
         const { shouldProceed: rProceed, alreadyReplied: rReplied } = await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings);
