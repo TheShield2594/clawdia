@@ -580,6 +580,7 @@ const userSchema = new Schema({
     // Lifetime stats used for achievement checks
     lifetimeGambled: { type: Number, default: 0 },
     successfulRobs:  { type: Number, default: 0 },
+    failedRobs:      { type: Number, default: 0 },
     questsCompleted: { type: Number, default: 0 },
     lastWarnedAt:    { type: Date, default: null },
 
