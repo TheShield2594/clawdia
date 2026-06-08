@@ -616,8 +616,24 @@
                             <% }); %>
                         </select>
                     </div>
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Case Management</h3><p>Configure SLA monitoring for open moderation cases.</p></div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="cs-sla-hours">SLA deadline (hours)</label>
+                            <input type="number" id="cs-sla-hours" value="<%= settings.caseSettings?.slaHours ?? 48 %>" min="1">
+                            <small>Cases open longer than this trigger an alert</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="cs-sla-channel">SLA alert channel</label>
+                            <select id="cs-sla-channel">
+                                <option value="">None</option>
+                                <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.caseSettings?.slaChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                            </select>
+                        </div>
+                    </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                        <button class="btn btn-primary" onclick="saveSettings('casesettings')" style="margin-left:.5rem">Save case settings</button>
                     </div>
                     </div><!-- end mod-tab-settings -->
 
@@ -1002,6 +1018,191 @@
                         <div class="panel-head" style="margin-top:1.5rem"><h3>Most-Used Economy Commands</h3></div>
                         <div style="max-width:540px;position:relative"><canvas id="eco-cmd-chart" height="200"></canvas></div>
                     </div>
+
+                    <!-- Hunting item images -->
+                    <div id="eco-tab-hunt" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>🏹 Hunting Item Images</h3>
+                            <p>Manage item images for the hunting mini-game. Images show as thumbnails when members browse and purchase items.</p>
+                        </div>
+                        <div class="ai-inner-tabs">
+                            <button class="hunt-inner-tab active" data-hunt-tab="hunt-weapons">🔫 Weapons</button>
+                            <button class="hunt-inner-tab" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
+                            <button class="hunt-inner-tab" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
+                            <button class="hunt-inner-tab" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
+                        </div>
+                        <div id="hunt-weapons" class="ai-inner-panel active">
+                            <p class="ai-inner-desc">Weapons used for hunting. Tier 1–12 progression.</p>
+                            <div class="game-items-grid">
+                                <% huntItems.weapons.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="hunt-upgrades" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Permanent module upgrades installed on weapons.</p>
+                            <div class="game-items-grid">
+                                <% huntItems.upgrades.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="hunt-ammo" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Ammunition packs consumed during hunts.</p>
+                            <div class="game-items-grid">
+                                <% huntItems.ammo.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="hunt-consumables" class="ai-inner-panel">
+                            <p class="ai-inner-desc">One-time use consumables for hunt boosts.</p>
+                            <div class="game-items-grid">
+                                <% huntItems.consumables.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fishing item images -->
+                    <div id="eco-tab-fish" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>🎣 Fishing Item Images</h3>
+                            <p>Manage item images for the fishing mini-game.</p>
+                        </div>
+                        <div class="ai-inner-tabs">
+                            <button class="fish-inner-tab active" data-fish-tab="fish-rods">🎣 Rods</button>
+                            <button class="fish-inner-tab" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
+                            <button class="fish-inner-tab" data-fish-tab="fish-bait">🪱 Bait</button>
+                            <button class="fish-inner-tab" data-fish-tab="fish-consumables">🧪 Consumables</button>
+                        </div>
+                        <div id="fish-rods" class="ai-inner-panel active">
+                            <p class="ai-inner-desc">Fishing rods used to catch fish. Tier 1–5 progression.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.rods.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="fish-upgrades" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Permanent module upgrades for rods.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.upgrades.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="fish-bait" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Bait packs used when fishing.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.bait.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="fish-consumables" class="ai-inner-panel">
+                            <p class="ai-inner-desc">One-time use consumables for fishing boosts.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.consumables.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Mining item images -->
+                    <div id="eco-tab-mine" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>⛏️ Mining Item Images</h3>
+                            <p>Manage item images for the mining mini-game.</p>
+                        </div>
+                        <div class="ai-inner-tabs">
+                            <button class="mine-inner-tab active" data-mine-tab="mine-pickaxes">⛏️ Pickaxes</button>
+                            <button class="mine-inner-tab" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
+                            <button class="mine-inner-tab" data-mine-tab="mine-blasts">💥 Blasts</button>
+                            <button class="mine-inner-tab" data-mine-tab="mine-consumables">🧪 Consumables</button>
+                        </div>
+                        <div id="mine-pickaxes" class="ai-inner-panel active">
+                            <p class="ai-inner-desc">Pickaxes used for mining. Tier 1–5 progression.</p>
+                            <div class="game-items-grid">
+                                <% mineItems.pickaxes.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="mine-upgrades" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Permanent module upgrades for pickaxes.</p>
+                            <div class="game-items-grid">
+                                <% mineItems.upgrades.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="mine-blasts" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Blast charge packs used when mining.</p>
+                            <div class="game-items-grid">
+                                <% mineItems.blasts.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="mine-consumables" class="ai-inner-panel">
+                            <p class="ai-inner-desc">One-time use consumables for mining boosts.</p>
+                            <div class="game-items-grid">
+                                <% mineItems.consumables.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Heist configuration -->
+                    <div id="eco-tab-heist" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>🎭 Strategic Heist</h3>
+                            <p>A group economy event where players plan and execute a heist together. Each role carries a unique skill check — strategy and team composition matter. Use <code>/heist start</code> to open a lobby.</p>
+                        </div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable heist system</strong></span>
+                            <span class="switch"><input type="checkbox" id="heist-enabled" <%= settings.heist?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+
+                        <div class="panel-head" style="margin-top:1.25rem"><h3>Timing &amp; Limits</h3></div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div>
+                                <label class="field-label" for="heist-cooldown">Cooldown between heists <small>(hours, 1–168)</small></label>
+                                <input type="number" id="heist-cooldown" value="<%= settings.heist?.cooldownHours ?? 6 %>" min="1" max="168">
+                                <small>How long a user must wait before starting another heist.</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="heist-lobby">Lobby duration <small>(seconds, 30–300)</small></label>
+                                <input type="number" id="heist-lobby" value="<%= settings.heist?.lobbyDurationSeconds ?? 60 %>" min="30" max="300">
+                                <small>How long the join window stays open.</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="heist-min-players">Minimum players <small>(2–4)</small></label>
+                                <input type="number" id="heist-min-players" value="<%= settings.heist?.minPlayers ?? 2 %>" min="2" max="4">
+                                <small>Minimum crew size required for the heist to proceed.</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="heist-jail">Jail duration <small>(minutes, 5–1440)</small></label>
+                                <input type="number" id="heist-jail" value="<%= settings.heist?.jailDurationMinutes ?? 30 %>" min="5" max="1440">
+                                <small>How long caught players are locked out of economy commands.</small>
+                            </div>
+                        </div>
+
+                        <div class="panel-head" style="margin-top:1.25rem"><h3>Rewards</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="heist-max-payout">Max payout per full-success heist <small>(split among successful players)</small></label>
+                            <input type="number" id="heist-max-payout" value="<%= settings.heist?.maxPayout ?? 10000 %>" min="100">
+                            <small>The server bank / vault / casino has this much available. Vault rewards 1.5×, casino 1.25×, bank 1×.</small>
+                        </div>
+
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('heist')">Save changes</button>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Store Item Modal -->
@@ -1035,8 +1236,11 @@
                             </div>
                             <div class="field">
                                 <label class="field-label">Stock</label>
-                                <input type="number" id="modal-item-stock" value="-1">
-                                <small>-1 = unlimited stock</small>
+                                <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;cursor:pointer">
+                                    <input type="checkbox" id="modal-item-unlimited" onchange="toggleStockInput(this)" checked>
+                                    <span>Unlimited stock</span>
+                                </label>
+                                <input type="number" id="modal-item-stock" placeholder="100" min="1" style="display:none">
                             </div>
                             <div class="field">
                                 <label class="field-label">Item Image</label>
@@ -1108,196 +1312,6 @@
                     </div>
                 </div>
 
-                <!-- Hunt -->
-                <section id="hunt" class="panel">
-                    <div class="panel-head">
-                        <h2>🏹 Hunting</h2>
-                        <p>Manage item images for the hunting mini-game. Images show as thumbnails when members browse and purchase items.</p>
-                    </div>
-
-                    <div class="ai-inner-tabs">
-                        <button class="hunt-inner-tab active" data-hunt-tab="hunt-weapons">🔫 Weapons</button>
-                        <button class="hunt-inner-tab" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
-                        <button class="hunt-inner-tab" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
-                        <button class="hunt-inner-tab" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
-                    </div>
-
-                    <div id="hunt-weapons" class="ai-inner-panel active">
-                        <p class="ai-inner-desc">Weapons used for hunting. Tier 1–12 progression.</p>
-                        <div class="game-items-grid">
-                            <% huntItems.weapons.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                    <div id="hunt-upgrades" class="ai-inner-panel">
-                        <p class="ai-inner-desc">Permanent module upgrades installed on weapons.</p>
-                        <div class="game-items-grid">
-                            <% huntItems.upgrades.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                    <div id="hunt-ammo" class="ai-inner-panel">
-                        <p class="ai-inner-desc">Ammunition packs consumed during hunts.</p>
-                        <div class="game-items-grid">
-                            <% huntItems.ammo.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                    <div id="hunt-consumables" class="ai-inner-panel">
-                        <p class="ai-inner-desc">One-time use consumables for hunt boosts.</p>
-                        <div class="game-items-grid">
-                            <% huntItems.consumables.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Fish -->
-                <section id="fish" class="panel">
-                    <div class="panel-head">
-                        <h2>🎣 Fishing</h2>
-                        <p>Manage item images for the fishing mini-game.</p>
-                    </div>
-
-                    <div class="ai-inner-tabs">
-                        <button class="fish-inner-tab active" data-fish-tab="fish-rods">🎣 Rods</button>
-                        <button class="fish-inner-tab" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
-                        <button class="fish-inner-tab" data-fish-tab="fish-bait">🪱 Bait</button>
-                        <button class="fish-inner-tab" data-fish-tab="fish-consumables">🧪 Consumables</button>
-                    </div>
-
-                    <div id="fish-rods" class="ai-inner-panel active">
-                        <p class="ai-inner-desc">Fishing rods used to catch fish. Tier 1–5 progression.</p>
-                        <div class="game-items-grid">
-                            <% fishItems.rods.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                    <div id="fish-upgrades" class="ai-inner-panel">
-                        <p class="ai-inner-desc">Permanent module upgrades for rods.</p>
-                        <div class="game-items-grid">
-                            <% fishItems.upgrades.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                    <div id="fish-bait" class="ai-inner-panel">
-                        <p class="ai-inner-desc">Bait packs used when fishing.</p>
-                        <div class="game-items-grid">
-                            <% fishItems.bait.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                    <div id="fish-consumables" class="ai-inner-panel">
-                        <p class="ai-inner-desc">One-time use consumables for fishing boosts.</p>
-                        <div class="game-items-grid">
-                            <% fishItems.consumables.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Mine -->
-                <section id="mine" class="panel">
-                    <div class="panel-head">
-                        <h2>⛏️ Mining</h2>
-                        <p>Manage item images for the mining mini-game.</p>
-                    </div>
-
-                    <div class="ai-inner-tabs">
-                        <button class="mine-inner-tab active" data-mine-tab="mine-pickaxes">⛏️ Pickaxes</button>
-                        <button class="mine-inner-tab" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
-                        <button class="mine-inner-tab" data-mine-tab="mine-blasts">💥 Blasts</button>
-                        <button class="mine-inner-tab" data-mine-tab="mine-consumables">🧪 Consumables</button>
-                    </div>
-
-                    <div id="mine-pickaxes" class="ai-inner-panel active">
-                        <p class="ai-inner-desc">Pickaxes used for mining. Tier 1–5 progression.</p>
-                        <div class="game-items-grid">
-                            <% mineItems.pickaxes.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                    <div id="mine-upgrades" class="ai-inner-panel">
-                        <p class="ai-inner-desc">Permanent module upgrades for pickaxes.</p>
-                        <div class="game-items-grid">
-                            <% mineItems.upgrades.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                    <div id="mine-blasts" class="ai-inner-panel">
-                        <p class="ai-inner-desc">Blast charge packs used when mining.</p>
-                        <div class="game-items-grid">
-                            <% mineItems.blasts.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                    <div id="mine-consumables" class="ai-inner-panel">
-                        <p class="ai-inner-desc">One-time use consumables for mining boosts.</p>
-                        <div class="game-items-grid">
-                            <% mineItems.consumables.forEach(function(item){ %>
-                            <%- include('partials/game-item-card', { item: item }) %>
-                            <% }); %>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Heist -->
-                <section id="heist" class="panel">
-                    <div class="panel-head">
-                        <h2>🎭 Strategic Heist</h2>
-                        <p>A group economy event where players plan and execute a heist together. Each role carries a unique skill check — strategy and team composition matter. Use <code>/heist start</code> to open a lobby.</p>
-                    </div>
-                    <label class="toggle">
-                        <span class="toggle-text"><strong>Enable heist system</strong></span>
-                        <span class="switch"><input type="checkbox" id="heist-enabled" <%= settings.heist?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
-                    </label>
-
-                    <div class="panel-head" style="margin-top:1.25rem"><h3>Timing &amp; Limits</h3></div>
-                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                        <div>
-                            <label class="field-label" for="heist-cooldown">Cooldown between heists <small>(hours, 1–168)</small></label>
-                            <input type="number" id="heist-cooldown" value="<%= settings.heist?.cooldownHours ?? 6 %>" min="1" max="168">
-                            <small>How long a user must wait before starting another heist.</small>
-                        </div>
-                        <div>
-                            <label class="field-label" for="heist-lobby">Lobby duration <small>(seconds, 30–300)</small></label>
-                            <input type="number" id="heist-lobby" value="<%= settings.heist?.lobbyDurationSeconds ?? 60 %>" min="30" max="300">
-                            <small>How long the join window stays open.</small>
-                        </div>
-                        <div>
-                            <label class="field-label" for="heist-min-players">Minimum players <small>(2–4)</small></label>
-                            <input type="number" id="heist-min-players" value="<%= settings.heist?.minPlayers ?? 2 %>" min="2" max="4">
-                            <small>Minimum crew size required for the heist to proceed.</small>
-                        </div>
-                        <div>
-                            <label class="field-label" for="heist-jail">Jail duration <small>(minutes, 5–1440)</small></label>
-                            <input type="number" id="heist-jail" value="<%= settings.heist?.jailDurationMinutes ?? 30 %>" min="5" max="1440">
-                            <small>How long caught players are locked out of economy commands.</small>
-                        </div>
-                    </div>
-
-                    <div class="panel-head" style="margin-top:1.25rem"><h3>Rewards</h3></div>
-                    <div class="field">
-                        <label class="field-label" for="heist-max-payout">Max payout per full-success heist <small>(split among successful players)</small></label>
-                        <input type="number" id="heist-max-payout" value="<%= settings.heist?.maxPayout ?? 10000 %>" min="100">
-                        <small>The server bank / vault / casino has this much available. Vault rewards 1.5×, casino 1.25×, bank 1×.</small>
-                    </div>
-
-                    <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('heist')">Save changes</button>
-                    </div>
-                </section>
 
                 <!-- Achievements -->
                 <section id="achievements" class="panel">
@@ -1507,28 +1521,6 @@
                     <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('antinuke')">Save changes</button></div>
                 </section>
 
-                <!-- Case Settings -->
-                <section id="casesettings" class="panel">
-                    <div class="panel-head">
-                        <h2>Case Settings</h2>
-                        <p>Configure SLA monitoring for open moderation cases.</p>
-                    </div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                        <div>
-                            <label class="field-label" for="cs-sla-hours">SLA deadline (hours)</label>
-                            <input type="number" id="cs-sla-hours" value="<%= settings.caseSettings?.slaHours ?? 48 %>" min="1">
-                            <small>Cases open longer than this trigger an alert</small>
-                        </div>
-                        <div>
-                            <label class="field-label" for="cs-sla-channel">SLA alert channel</label>
-                            <select id="cs-sla-channel">
-                                <option value="">None</option>
-                                <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.caseSettings?.slaChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('casesettings')">Save changes</button></div>
-                </section>
 
                 <!-- Starboard -->
                 <section id="starboard" class="panel">
@@ -2626,7 +2618,7 @@
                 if (panel) panel.classList.add('active');
             };
         }
-        const switchEcoTab = makeGameTabSwitcher('eco-inner-tab', '#economy .ai-inner-panel', 'eco-tab');
+        const switchEcoTab = makeGameTabSwitcher('eco-inner-tab', '#economy > .ai-inner-panel', 'eco-tab');
         document.querySelectorAll('.eco-inner-tab').forEach(tab => tab.addEventListener('click', () => {
             switchEcoTab(tab.dataset.ecoTab);
             if (tab.dataset.ecoTab === 'eco-tab-health') loadEcoHealth();
@@ -2638,9 +2630,9 @@
             if (tab.dataset.modTab === 'mod-tab-sanctions') loadActiveSanctions();
             if (tab.dataset.modTab === 'mod-tab-cases') loadCaseHistory(1);
         }));
-        const switchHuntTab = makeGameTabSwitcher('hunt-inner-tab', '#hunt .ai-inner-panel', 'hunt-tab');
-        const switchFishTab = makeGameTabSwitcher('fish-inner-tab', '#fish .ai-inner-panel', 'fish-tab');
-        const switchMineTab = makeGameTabSwitcher('mine-inner-tab', '#mine .ai-inner-panel', 'mine-tab');
+        const switchHuntTab = makeGameTabSwitcher('hunt-inner-tab', '#eco-tab-hunt .ai-inner-panel', 'hunt-tab');
+        const switchFishTab = makeGameTabSwitcher('fish-inner-tab', '#eco-tab-fish .ai-inner-panel', 'fish-tab');
+        const switchMineTab = makeGameTabSwitcher('mine-inner-tab', '#eco-tab-mine .ai-inner-panel', 'mine-tab');
         document.querySelectorAll('.hunt-inner-tab').forEach(tab => tab.addEventListener('click', () => switchHuntTab(tab.dataset.huntTab)));
         document.querySelectorAll('.fish-inner-tab').forEach(tab => tab.addEventListener('click', () => switchFishTab(tab.dataset.fishTab)));
         document.querySelectorAll('.mine-inner-tab').forEach(tab => tab.addEventListener('click', () => switchMineTab(tab.dataset.mineTab)));
@@ -3675,7 +3667,10 @@
             document.getElementById('modal-item-desc').value = item.description || '';
             document.getElementById('modal-item-price').value = item.price != null ? item.price : '';
             document.getElementById('modal-item-role').value = item.roleId || '';
-            document.getElementById('modal-item-stock').value = (item.stock == null) ? -1 : item.stock;
+            var isUnlimited = (item.stock == null || item.stock === -1);
+            document.getElementById('modal-item-unlimited').checked = isUnlimited;
+            document.getElementById('modal-item-stock').style.display = isUnlimited ? 'none' : '';
+            document.getElementById('modal-item-stock').value = isUnlimited ? '' : item.stock;
 
             // Reset image preview
             var fileInput = document.getElementById('modal-item-image-file');
@@ -3712,13 +3707,18 @@
         }
 
         function closeItemModal() { document.getElementById('item-modal').style.display = 'none'; }
+        function toggleStockInput(cb) {
+            document.getElementById('modal-item-stock').style.display = cb.checked ? 'none' : '';
+        }
 
         function saveItemModal() {
             var name = document.getElementById('modal-item-name').value.trim();
             var price = parseInt(document.getElementById('modal-item-price').value, 10);
             if (!name) { toast('Item name is required', 'error'); return; }
             if (!Number.isFinite(price) || price < 0) { toast('Enter a valid price', 'error'); return; }
-            var parsedStock = parseInt(document.getElementById('modal-item-stock').value, 10);
+            var isUnlimited = document.getElementById('modal-item-unlimited').checked;
+            var parsedStock = isUnlimited ? -1 : parseInt(document.getElementById('modal-item-stock').value, 10);
+            if (!isUnlimited && (!Number.isFinite(parsedStock) || parsedStock < 1)) { toast('Enter a valid stock quantity', 'error'); return; }
             var fileInput = document.getElementById('modal-item-image-file');
 
             var existingItem = editingItemIdx === -1 ? null : storeItems[editingItemIdx];
