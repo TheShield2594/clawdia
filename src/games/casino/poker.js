@@ -11,7 +11,6 @@ const { getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = requ
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
-const MAX_BET = 5000;
 
 const SUITS  = ['♠', '♥', '♦', '♣'];
 const VALUES = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -785,10 +784,10 @@ module.exports = {
     configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
-                .setDescription(`Amount to bet (${MIN_BET}–${MAX_BET})`)
+                .setDescription(`Amount to bet (min ${MIN_BET})`)
                 .setRequired(true)
                 .setMinValue(MIN_BET)
-                .setMaxValue(MAX_BET)),
+                .setMaxValue(1_000_000_000)),
 
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -796,7 +795,11 @@ module.exports = {
             return interaction.reply({ content: 'Casino games are disabled on this server.', ephemeral: true });
         }
 
-        const bet  = interaction.options.getInteger('bet');
+        const bet          = interaction.options.getInteger('bet');
+        const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
+        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+        }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
 
         if ((user?.balance ?? 0) < bet) {
