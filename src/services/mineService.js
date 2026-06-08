@@ -610,17 +610,13 @@ function executeMine(user, depthId, options = {}) {
         const caveInBlocked = trapActive || ironWillBlocks;
 
         if (caveInRisk > 0 && Math.random() < caveInRisk && !caveInBlocked) {
-            // Cave-in: reverse payout, apply double durability loss, mark cave-in
-            if (result.finalPayout) {
-                user.balance      -= result.finalPayout;
-                m.totalEarned     -= result.finalPayout;
-                m.dailyCoins      -= result.finalPayout;
-                result.finalPayout = 0;
-            }
-            applyDurabilityLoss(pickaxe, intensityDurLoss); // extra durLoss on cave-in
+            // Cave-in: flag it and store at-risk payout; mine.js resolves interactively
+            result.caveIn        = true;
+            result.caveInDur     = intensityDurLoss;
+            result.caveInPayout  = result.finalPayout ?? 0;
+            // Durability loss applied here regardless of player choice
+            applyDurabilityLoss(pickaxe, intensityDurLoss);
             if (pickaxe.currentDurability <= 0) { pickaxe.status = 'broken'; result.pickaxeBroke = true; }
-            result.caveIn    = true;
-            result.caveInDur = intensityDurLoss;
         } else if (multiplier !== 1.0 && result.finalPayout) {
             // Apply multiplier, clamped so it doesn't exceed the daily hard cap
             const rawBonus      = Math.round(result.finalPayout * (multiplier - 1.0));
