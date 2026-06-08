@@ -686,11 +686,15 @@
                                     <option value="unban">Unban</option>
                                     <option value="unmute">Unmute</option>
                                     <option value="note">Note</option>
+                                    <option value="appeal">Appeal</option>
                                 </select>
                                 <select id="cases-filter-status" class="cases-filter-select" onchange="loadCaseHistory(1)">
                                     <option value="">All statuses</option>
                                     <option value="open">Open</option>
                                     <option value="closed">Closed</option>
+                                    <option value="appealed">Appealed</option>
+                                    <option value="appeal_approved">Appeal approved</option>
+                                    <option value="appeal_denied">Appeal denied</option>
                                 </select>
                             </div>
                             <button class="btn btn-sm" onclick="loadCaseHistory(1)">↻ Refresh</button>
@@ -710,23 +714,24 @@
 
                 </section>
 
-                <!-- Case Note Modal -->
+                <!-- Case Note / Close Modal -->
                 <div id="case-note-modal" class="modal-overlay" style="display:none">
                     <div class="modal-box" style="max-width:440px">
                         <div class="modal-head">
-                            <h3>Add Note to Case</h3>
+                            <h3 id="case-note-modal-title">Add Note to Case</h3>
                             <button class="modal-close" onclick="closeCaseNoteModal()">&times;</button>
                         </div>
                         <div class="modal-body">
                             <input type="hidden" id="case-note-case-id">
+                            <input type="hidden" id="case-note-mode" value="add_note">
                             <div class="field">
-                                <label class="field-label">Note</label>
+                                <label class="field-label" id="case-note-label">Note</label>
                                 <textarea id="case-note-content" rows="4" placeholder="Add a moderator note..."></textarea>
                             </div>
                         </div>
                         <div class="modal-actions">
                             <button class="btn" onclick="closeCaseNoteModal()">Cancel</button>
-                            <button class="btn btn-primary" onclick="submitCaseNote()">Save note</button>
+                            <button class="btn btn-primary" id="case-note-submit-btn" onclick="submitCaseAction()">Save note</button>
                         </div>
                     </div>
                 </div>
@@ -4689,7 +4694,7 @@
         let _chartMemberGrowth = null;
         let _chartMessageVolume = null;
         let _chartRetention = null;
-        let _analyticsRange = 30;
+        let _analyticsRange = 7;
 
         function setAnalyticsRange(days, btn) {
             _analyticsRange = days;
@@ -4865,16 +4870,46 @@
             tbody.innerHTML = '';
             for (const item of items) {
                 const expires = item.expires ? new Date(item.expires).toLocaleString() : '—';
-                const actionBtn = item.type === 'ban'
-                    ? `<button class="btn btn-sm btn-danger" onclick="doUnban('${item.userId}')">Unban</button>`
-                    : `<button class="btn btn-sm" onclick="doRemoveTimeout('${item.userId}')">Remove timeout</button>`;
-                tbody.insertAdjacentHTML('beforeend', `<tr>
-                    <td><img src="${item.avatarUrl}" style="width:20px;height:20px;border-radius:50%;margin-right:.35rem;vertical-align:middle" onerror="this.style.display='none'">${item.userTag}</td>
-                    <td><span class="case-type-badge type-${item.type}">${item.type}</span></td>
-                    <td>${expires}</td>
-                    <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.reason || '—'}</td>
-                    <td>${actionBtn}</td>
-                </tr>`);
+                const tr = document.createElement('tr');
+
+                // User cell — avatar (src validated as CDN URL on server) + escaped tag
+                const tdUser = document.createElement('td');
+                const img = document.createElement('img');
+                img.src = item.avatarUrl;
+                img.style.cssText = 'width:20px;height:20px;border-radius:50%;margin-right:.35rem;vertical-align:middle';
+                img.onerror = function() { this.style.display = 'none'; };
+                tdUser.appendChild(img);
+                tdUser.appendChild(document.createTextNode(item.userTag));
+
+                // Type badge
+                const tdType = document.createElement('td');
+                tdType.innerHTML = `<span class="case-type-badge type-${item.type}">${item.type}</span>`;
+
+                // Expires
+                const tdExpires = document.createElement('td');
+                tdExpires.textContent = expires;
+
+                // Reason — user-controlled, must be text
+                const tdReason = document.createElement('td');
+                tdReason.style.cssText = 'max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+                tdReason.textContent = item.reason || '—';
+
+                // Action button — userId is a validated snowflake (digits only)
+                const tdAction = document.createElement('td');
+                const btn = document.createElement('button');
+                if (item.type === 'ban') {
+                    btn.className = 'btn btn-sm btn-danger';
+                    btn.textContent = 'Unban';
+                    btn.onclick = () => doUnban(item.userId);
+                } else {
+                    btn.className = 'btn btn-sm';
+                    btn.textContent = 'Remove timeout';
+                    btn.onclick = () => doRemoveTimeout(item.userId);
+                }
+                tdAction.appendChild(btn);
+
+                tr.append(tdUser, tdType, tdExpires, tdReason, tdAction);
+                tbody.appendChild(tr);
             }
         }
 
@@ -4972,23 +5007,40 @@
             }
         }
 
-        function openCaseNoteModal(caseId) {
+        function openCaseNoteModal(caseId, mode) {
+            mode = mode || 'add_note';
             document.getElementById('case-note-case-id').value = caseId;
+            document.getElementById('case-note-mode').value = mode;
             document.getElementById('case-note-content').value = '';
+            if (mode === 'close') {
+                document.getElementById('case-note-modal-title').textContent = `Close Case #${caseId}`;
+                document.getElementById('case-note-label').textContent = 'Resolution note (optional)';
+                document.getElementById('case-note-content').placeholder = 'Describe how the case was resolved...';
+                document.getElementById('case-note-submit-btn').textContent = 'Close case';
+            } else {
+                document.getElementById('case-note-modal-title').textContent = 'Add Note to Case';
+                document.getElementById('case-note-label').textContent = 'Note';
+                document.getElementById('case-note-content').placeholder = 'Add a moderator note...';
+                document.getElementById('case-note-submit-btn').textContent = 'Save note';
+            }
             document.getElementById('case-note-modal').style.display = '';
         }
         function closeCaseNoteModal() { document.getElementById('case-note-modal').style.display = 'none'; }
 
-        async function submitCaseNote() {
+        async function submitCaseAction() {
             const guildId = '<%= guild.id %>';
             const caseId = document.getElementById('case-note-case-id').value;
+            const mode = document.getElementById('case-note-mode').value;
             const note = document.getElementById('case-note-content').value.trim();
-            if (!note) return alert('Note cannot be empty');
+            const body = mode === 'close'
+                ? { action: 'close', ...(note && { resolution: note }) }
+                : { action: 'add_note', note };
+            if (mode === 'add_note' && !note) return alert('Note cannot be empty');
             try {
                 const resp = await fetch(`/api/guild/${guildId}/cases/${caseId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'add_note', note })
+                    body: JSON.stringify(body)
                 });
                 const data = await resp.json();
                 if (!resp.ok) return alert(data.error || 'Failed');
@@ -4997,19 +5049,8 @@
             } catch { alert('Request failed'); }
         }
 
-        async function closeCase(caseId) {
-            if (!confirm(`Close case #${caseId}?`)) return;
-            const guildId = '<%= guild.id %>';
-            try {
-                const resp = await fetch(`/api/guild/${guildId}/cases/${caseId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'close' })
-                });
-                const data = await resp.json();
-                if (!resp.ok) return alert(data.error || 'Failed');
-                loadCaseHistory(_casesCurrentPage);
-            } catch { alert('Request failed'); }
+        function closeCase(caseId) {
+            openCaseNoteModal(caseId, 'close');
         }
 
         // ── Economy Health ────────────────────────────────────────────────────
@@ -5054,7 +5095,9 @@
             }
         }
 
+        let _ecoActionInFlight = false;
         async function ecoAdminAction(action) {
+            if (_ecoActionInFlight) return;
             const guildId = '<%= guild.id %>';
             const userId = document.getElementById('eco-admin-user-id').value.trim();
             const amount = parseInt(document.getElementById('eco-admin-amount').value, 10);
@@ -5062,6 +5105,13 @@
             if (!userId) { msgEl.textContent = 'Enter a user ID.'; msgEl.style.color = 'var(--red)'; return; }
             if (['give', 'take'].includes(action) && (!amount || amount <= 0)) { msgEl.textContent = 'Enter a valid amount > 0.'; msgEl.style.color = 'var(--red)'; return; }
             if (action === 'reset' && !confirm(`Reset balance for user ${userId}? This cannot be undone.`)) return;
+
+            _ecoActionInFlight = true;
+            const controls = ['eco-admin-user-id', 'eco-admin-amount'];
+            controls.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = true; });
+            document.querySelectorAll('#eco-tab-health .btn').forEach(b => b.disabled = true);
+            msgEl.textContent = '';
+
             try {
                 const body = { userId, action };
                 if (['give', 'take'].includes(action)) body.amount = amount;
@@ -5071,14 +5121,23 @@
                     body: JSON.stringify(body)
                 });
                 const data = await resp.json();
-                if (!resp.ok) { msgEl.textContent = data.error || 'Failed'; msgEl.style.color = 'var(--red)'; return; }
-                msgEl.style.color = 'var(--green)';
-                if (action === 'freeze') msgEl.textContent = `Account frozen.`;
-                else if (action === 'unfreeze') msgEl.textContent = `Account unfrozen.`;
-                else if (action === 'reset') msgEl.textContent = `Balance reset. Wallet: 0, Bank: 0.`;
-                else msgEl.textContent = `Done. New wallet balance: ${(data.balance||0).toLocaleString()}`;
-                loadEcoHealth();
-            } catch { msgEl.textContent = 'Request failed'; msgEl.style.color = 'var(--red)'; }
+                if (!resp.ok) { msgEl.textContent = data.error || 'Failed'; msgEl.style.color = 'var(--red)'; }
+                else {
+                    msgEl.style.color = 'var(--green)';
+                    if (action === 'freeze') msgEl.textContent = 'Account frozen.';
+                    else if (action === 'unfreeze') msgEl.textContent = 'Account unfrozen.';
+                    else if (action === 'reset') msgEl.textContent = 'Balance reset. Wallet: 0, Bank: 0.';
+                    else msgEl.textContent = `Done. New wallet balance: ${(data.balance||0).toLocaleString()}`;
+                    loadEcoHealth();
+                }
+            } catch {
+                msgEl.textContent = 'Request failed';
+                msgEl.style.color = 'var(--red)';
+            } finally {
+                _ecoActionInFlight = false;
+                controls.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = false; });
+                document.querySelectorAll('#eco-tab-health .btn').forEach(b => b.disabled = false);
+            }
         }
 
     </script>

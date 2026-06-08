@@ -545,7 +545,15 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
         // Economy stats summary
         const [ecoTotalAgg, ecoActiveCount] = await Promise.all([
             User.aggregate([{ $match: { guildId } }, { $group: { _id: null, total: { $sum: { $add: ['$balance', '$bank'] } }, avgXp: { $avg: '$xp' } } }]),
-            User.countDocuments({ guildId, lastWork: { $gte: new Date(now30 - 7 * 864e5) } })
+            User.countDocuments({ guildId, $or: [
+                { lastWork:  { $gte: new Date(now30 - 7 * 864e5) } },
+                { lastDaily: { $gte: new Date(now30 - 7 * 864e5) } },
+                { lastFish:  { $gte: new Date(now30 - 7 * 864e5) } },
+                { lastMine:  { $gte: new Date(now30 - 7 * 864e5) } },
+                { lastCrime: { $gte: new Date(now30 - 7 * 864e5) } },
+                { lastHeist: { $gte: new Date(now30 - 7 * 864e5) } },
+                { lastRob:   { $gte: new Date(now30 - 7 * 864e5) } }
+            ] })
         ]);
 
         res.json({
@@ -1402,23 +1410,29 @@ router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, asyn
         const guild = req.client.guilds.cache.get(guildId);
         if (!guild) return res.status(404).json({ error: 'Guild not found or bot not in guild' });
 
-        const [bans, timeouts] = await Promise.all([
-            guild.bans.fetch().catch(() => null),
-            guild.members.fetch().then(members =>
-                [...members.values()].filter(m => m.communicationDisabledUntil && m.communicationDisabledUntil > new Date())
-            ).catch(() => [])
-        ]);
+        let bans;
+        try {
+            bans = await guild.bans.fetch({ limit: 200 });
+        } catch (banErr) {
+            console.error('Active sanctions: bans fetch failed:', banErr);
+            return res.status(503).json({ error: 'Could not fetch bans from Discord. Check bot permissions.' });
+        }
 
-        const banList = bans ? [...bans.values()].slice(0, 200).map(b => ({
+        const now = new Date();
+        const timeoutMembers = [...guild.members.cache.values()]
+            .filter(m => m.communicationDisabledUntil && m.communicationDisabledUntil > now)
+            .slice(0, 200);
+
+        const banList = [...bans.values()].map(b => ({
             type: 'ban',
             userId: b.user.id,
             userTag: b.user.tag,
             avatarUrl: b.user.displayAvatarURL({ size: 32 }),
             reason: b.reason || null,
             expires: null
-        })) : [];
+        }));
 
-        const timeoutList = timeouts.slice(0, 200).map(m => ({
+        const timeoutList = timeoutMembers.map(m => ({
             type: 'timeout',
             userId: m.user.id,
             userTag: m.user.tag,
@@ -1470,9 +1484,23 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
     const { guildId } = req.params;
     try {
         const [topEarners, totalCoinsAgg, activeUsersCount, guildSettings] = await Promise.all([
-            User.find({ guildId }).sort({ balance: -1, bank: -1 }).limit(10).lean(),
+            User.aggregate([
+                { $match: { guildId } },
+                { $addFields: { total: { $add: ['$balance', '$bank'] } } },
+                { $sort: { total: -1 } },
+                { $limit: 10 },
+                { $project: { _id: 0, userId: 1, balance: 1, bank: 1, total: 1 } }
+            ]),
             User.aggregate([{ $match: { guildId } }, { $group: { _id: null, total: { $sum: { $add: ['$balance', '$bank'] } } } }]),
-            User.countDocuments({ guildId, lastWork: { $gte: new Date(Date.now() - 7 * 864e5) } }),
+            User.countDocuments({ guildId, $or: [
+                { lastWork:  { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastDaily: { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastFish:  { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastMine:  { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastCrime: { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastHeist: { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastRob:   { $gte: new Date(Date.now() - 7 * 864e5) } }
+            ] }),
             Guild.findOne({ guildId }).lean()
         ]);
 
@@ -1513,23 +1541,22 @@ router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, check
     }
 
     try {
-        let user = await User.findOne({ userId: String(userId), guildId });
-        if (!user) user = await User.create({ userId: String(userId), guildId });
-
+        const filter = { userId: String(userId), guildId };
+        let update;
         if (action === 'give') {
-            user.balance = (user.balance || 0) + Number(amount);
+            update = { $inc: { balance: Number(amount) } };
         } else if (action === 'take') {
-            user.balance = Math.max(0, (user.balance || 0) - Number(amount));
+            // Use aggregation pipeline update to clamp balance at 0 atomically.
+            update = [{ $set: { balance: { $max: [0, { $subtract: ['$balance', Number(amount)] }] } } }];
         } else if (action === 'reset') {
-            user.balance = 0;
-            user.bank = 0;
+            update = { $set: { balance: 0, bank: 0 } };
         } else if (action === 'freeze') {
-            user.economyFrozen = true;
-        } else if (action === 'unfreeze') {
-            user.economyFrozen = false;
+            update = { $set: { economyFrozen: true } };
+        } else {
+            update = { $set: { economyFrozen: false } };
         }
 
-        await user.save();
+        const user = await User.findOneAndUpdate(filter, update, { upsert: true, new: true, setDefaultsOnInsert: true });
         res.json({ success: true, balance: user.balance, bank: user.bank, economyFrozen: user.economyFrozen });
     } catch (error) {
         console.error('Economy adjust error:', error);
