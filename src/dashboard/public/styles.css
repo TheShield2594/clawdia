@@ -1342,3 +1342,41 @@ textarea.auto-resize {
 .game-item-id { font-size: .75rem; color: var(--text-mute, #6c7086); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .game-item-actions { display: flex; gap: .4rem; flex-shrink: 0; }
 .game-item-upload-btn { cursor: pointer; }
+
+/* ── Cases / Sanctions tables ────────────────────────────────── */
+.cases-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.cases-table th { text-align: left; padding: .5rem .6rem; color: var(--text-dim); font-weight: 600; border-bottom: 1px solid var(--border); }
+.cases-table td { padding: .45rem .6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.cases-table tr:last-child td { border-bottom: none; }
+.case-type-badge { display: inline-block; padding: .15rem .45rem; border-radius: 4px; font-size: .75rem; font-weight: 600; text-transform: uppercase; background: var(--ink-700); color: var(--cream-200); }
+.type-ban { background: rgba(185,76,60,.25); color: #e89898; }
+.type-mute, .type-timeout { background: rgba(217,119,66,.2); color: #f0c080; }
+.type-warn { background: rgba(200,180,50,.2); color: #e8d880; }
+.type-kick { background: rgba(120,80,200,.2); color: #c0a8f0; }
+.type-unban, .type-unmute { background: rgba(93,138,90,.2); color: #90c890; }
+.case-status-badge { display: inline-block; padding: .15rem .45rem; border-radius: 4px; font-size: .75rem; font-weight: 600; text-transform: uppercase; }
+.status-open { background: rgba(93,138,90,.2); color: #90c890; }
+.status-closed { background: var(--ink-700); color: var(--text-dim); }
+.status-appealed, .status-appeal_approved, .status-appeal_denied { background: rgba(217,119,66,.2); color: #f0c080; }
+.cases-filter-select { background: var(--surface-2, #1a1510); border: 1px solid var(--border); border-radius: 6px; color: var(--cream-100); padding: .3rem .5rem; font-size: .85rem; }
+
+/* ── Analytics skeleton ──────────────────────────────────────── */
+@keyframes shimmer { 0%{opacity:.3} 50%{opacity:.7} 100%{opacity:.3} }
+.skel-tile { width: 120px; height: 56px; border-radius: 8px; background: var(--ink-700); animation: shimmer 1.4s ease-in-out infinite; }
+.skel-bar { height: 14px; border-radius: 4px; background: var(--ink-700); animation: shimmer 1.4s ease-in-out infinite; margin-bottom: .4rem; }
+.skel-chart { height: 160px; border-radius: 8px; background: var(--ink-700); animation: shimmer 1.4s ease-in-out infinite; margin-top: .75rem; }
+
+/* ── Analytics error / rec cards ─────────────────────────────── */
+.analytics-error-card { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; background: rgba(185,76,60,.12); border: 1px solid rgba(185,76,60,.3); border-radius: 8px; font-size: .9rem; }
+.analytics-rec-card { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .6rem .9rem; background: var(--surface-2, #1a1510); border: 1px solid var(--border); border-radius: 8px; font-size: .88rem; margin-bottom: .4rem; }
+.analytics-rec-link { flex-shrink: 0; font-size: .8rem; color: var(--claw-400, #e89163); text-decoration: none; }
+.analytics-rec-link:hover { text-decoration: underline; }
+.analytics-chart-card { background: var(--surface-2, #1a1510); border: 1px solid var(--border); border-radius: 8px; padding: .85rem 1rem; }
+.analytics-chart-title { font-size: .8rem; font-weight: 600; color: var(--text-dim); margin-bottom: .5rem; text-transform: uppercase; letter-spacing: .04em; }
+.analytics-range { opacity: .6; }
+.analytics-range.active { opacity: 1; border-color: var(--claw-500); }
+
+/* ── Economy health KPI tiles ─────────────────────────────────── */
+.eco-kpi-tile { background: var(--surface-2, #1a1510); border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1.1rem; min-width: 140px; }
+.eco-kpi-label { font-size: .75rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.eco-kpi-value { font-size: 1.4rem; font-weight: 700; color: var(--cream-50, #faf5f0); margin-top: .2rem; }

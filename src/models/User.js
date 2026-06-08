@@ -44,6 +44,7 @@ const userSchema = new Schema({
     warnings: { type: Number, default: 0 },
     kicks: { type: Number, default: 0 },
     bans: { type: Number, default: 0 },
+    economyFrozen: { type: Boolean, default: false },
 
     // Weighted automod behavior score (decays over time)
     behaviorScore: { type: Number, default: 0 },
