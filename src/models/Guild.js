@@ -189,6 +189,19 @@ const guildSchema = new Schema({
         jackpotChannelId:  { type: String,  default: null },
     },
 
+    casinoStats: {
+        rouletteHistory: [{ type: Number }],
+        crashHistory:    [{ type: Number }],
+    },
+
+    fishingWorldRecords: [{
+        fish:     { type: String },
+        weight:   { type: Number },
+        userId:   { type: String },
+        username: { type: String },
+        date:     { type: Date },
+    }],
+
     // Progressive jackpot pool fed by all casino bets
     casinoJackpot: {
         pool:                 { type: Number,  default: 10000 },
