@@ -881,6 +881,10 @@ async function handleAIChat(message, aiSettings) {
                 message.guild.id, message.channel.id, message.author.id,
                 content, fullResponse, maxHistory
             );
+            if (kbEntries.length) {
+                const citationsFooter = `📚 Sources: ${kbEntries.map(e => e.title).join(', ')}`;
+                await message.channel.send(citationsFooter).catch(() => {});
+            }
         }
     } catch (error) {
         console.error(`[AI:${provider}] error:`, error?.message || error);
