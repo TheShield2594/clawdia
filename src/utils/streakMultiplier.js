@@ -7,9 +7,9 @@ const MULTIPLIER_LADDER = [
 ];
 
 const MILESTONES = [
-    { days:   7, coins:    500, badge: 'Week Warrior'   },
-    { days:  30, coins:  2_000, badge: 'Monthly Master' },
-    { days: 100, coins: 10_000, badge: 'Centurion'      },
+    { days:   7, coins:  12_500, badge: 'Week Warrior'   },
+    { days:  30, coins:  37_500, badge: 'Monthly Master' },
+    { days: 100, coins: 125_000, badge: 'Centurion'      },
 ];
 
 function getStreakMultiplier(streakDays) {

@@ -31,6 +31,7 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
             balance:        robber.balance,
             lastRob:        robber.lastRob,
             successfulRobs: robber.successfulRobs ?? 0,
+            failedRobs:     robber.failedRobs     ?? 0,
         },
     });
     if (!robberRes) {
@@ -80,6 +81,7 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
                     bank:            robberSnapshot.bank,
                     lastRob:         robberSnapshot.lastRob,
                     successfulRobs:  robberSnapshot.successfulRobs,
+                    failedRobs:      robberSnapshot.failedRobs,
                 } }
             );
         } catch (rollbackErr) {
@@ -170,6 +172,7 @@ module.exports = {
                 bank:           robber.bank,
                 lastRob:        robber.lastRob ?? null,
                 successfulRobs: robber.successfulRobs ?? 0,
+                failedRobs:     robber.failedRobs     ?? 0,
             };
             robber.lastRob = new Date();
 
@@ -365,6 +368,7 @@ module.exports = {
                         .setTimestamp();
                 } else {
                     robber.balance = Math.max(0, robber.balance - paid);
+                    robber.failedRobs = (robber.failedRobs || 0) + 1;
                     victim.balance += paid;
                     victim.lastRobbedAt = new Date();
                     await saveRobState(robber, victim, robberSnapshot, null, victimOrigBalance, victimOrigBank);

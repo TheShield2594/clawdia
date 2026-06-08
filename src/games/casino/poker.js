@@ -442,11 +442,252 @@ async function playPoker(interaction, bet) {
             return interaction.editReply({ embeds: [foldEmbed], components: [] });
         }
 
-        // ── Turn + River → Showdown ───────────────────────────────────────────
+        // ── Turn ─────────────────────────────────────────────────────────────
         await delay(400);
 
         const turnCard  = community[3];
+        const turnStr   = cardStr(turnCard);
+        const turnBoard = [...flop, turnCard];
+
+        const turnEquity      = dealerPostFlopEquity(dealerHole, playerHole, turnBoard);
+        const dTurnAction     = dealerPostFlopAction(turnEquity, pot, bet);
+        const dealerTurnLine  = dTurnAction === 'fold'
+            ? '🤖 **Dealer folds!** (not getting the right price)'
+            : dTurnAction === 'raise'
+            ? `🤖 **Dealer bets** — they like the turn! (${(turnEquity * 100).toFixed(0)}% equity)`
+            : `🤖 Dealer checks. (${(turnEquity * 100).toFixed(0)}% equity)`;
+
+        if (dTurnAction === 'fold') {
+            settled = true;
+            const coinMult   = getCoinMultiplier(debited);
+            const serverMult = getServerCoinMultiplier(guildSettings);
+            const totalMult  = coinMult * serverMult;
+            let winPayout    = pot;
+            if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
+            await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            return interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setAuthor(embedAuthor(interaction))
+                    .setThumbnail(THUMB)
+                    .setColor('#2ecc71')
+                    .setTitle('♠ Poker — Dealer Folded on the Turn!')
+                    .setDescription(`**Turn:** ${turnStr}\n\nThe dealer couldn't justify calling. You win!\n\n**Dealer's hand:** ${handStr(dealerHole)} → *${bestHand([...dealerHole, ...turnBoard])?.name}*`)
+                    .addFields(
+                        { name: '🃏 Your Hand',  value: handStr(playerHole),           inline: true },
+                        { name: '🏆 Payout',     value: `**${winPayout.toLocaleString()}** coins`, inline: true },
+                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins`, inline: true },
+                    )
+                    .setFooter({ text: "Dealer's pot odds didn't justify calling the turn" })
+                    .setTimestamp()],
+                components: [],
+            });
+        }
+
+        if (dTurnAction === 'raise') pot += bet;
+
+        const turnRound = `turnround_${Date.now()}`;
+        const turnActions = dTurnAction === 'raise'
+            ? [
+                new ButtonBuilder().setCustomId(`pk_call_${turnRound}`).setLabel(`Call (${bet.toLocaleString()})`).setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`pk_fold_${turnRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
+              ]
+            : [
+                new ButtonBuilder().setCustomId(`pk_check_${turnRound}`).setLabel('Check').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId(`pk_raise_${turnRound}`).setLabel(`Raise (${Math.min(bet, debited.balance).toLocaleString()})`).setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`pk_fold_${turnRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
+              ];
+
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#5865F2')
+                .setTitle('♠ Poker — The Turn')
+                .addFields(
+                    { name: '🃏 Your Hand',  value: handStr(playerHole),                     inline: false },
+                    { name: '🤖 Dealer',     value: dealerTurnLine,                           inline: false },
+                    { name: '🎴 Community',  value: `${flopStr}  ${turnStr}  🂠`,             inline: false },
+                    { name: '💰 Pot',        value: `**${pot.toLocaleString()}** coins`,      inline: true },
+                )
+                .setFooter({ text: 'Check or Raise · Fold to surrender' })],
+            components: [new ActionRowBuilder().addComponents(...turnActions)],
+        });
+        await delay(200);
+
+        const msg3 = await interaction.fetchReply();
+        let turnAction;
+        try {
+            const r = await msg3.awaitMessageComponent({
+                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(turnRound),
+                time: 30_000,
+            });
+            await r.deferUpdate();
+            turnAction = r.customId.split('_')[1];
+        } catch {
+            settled = true;
+            await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
+        }
+
+        if (turnAction === 'fold') {
+            folded = true;
+        } else if (turnAction === 'call' || turnAction === 'raise') {
+            const raiseAmt = Math.min(bet, debited.balance);
+            if (raiseAmt > 0) {
+                const raised = await User.findOneAndUpdate(
+                    { ...userFilter, balance: { $gte: raiseAmt } },
+                    { $inc: { balance: -raiseAmt } },
+                    { new: true }
+                );
+                if (raised) {
+                    debited = raised;
+                    playerStake += raiseAmt;
+                    pot += raiseAmt * (turnAction === 'raise' ? 2 : 1);
+                } else if (turnAction === 'call') {
+                    folded = true;
+                }
+            } else if (turnAction === 'call') {
+                folded = true;
+            }
+        }
+
+        if (folded) {
+            settled = true;
+            const foldEmbed = new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#e74c3c')
+                .setTitle('♠ Poker — Folded')
+                .setDescription(`You folded. The dealer had: **${handStr(dealerHole)}**\nCommunity: **${flopStr}  ${turnStr} (+ 1 more)**`)
+                .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
+                .setTimestamp();
+            return interaction.editReply({ embeds: [foldEmbed], components: [] });
+        }
+
+        // ── River ─────────────────────────────────────────────────────────────
+        await delay(400);
+
         const riverCard = community[4];
+        const riverStr  = cardStr(riverCard);
+        const riverBoard = [...turnBoard, riverCard];
+
+        const riverEquity      = dealerPostFlopEquity(dealerHole, playerHole, riverBoard);
+        const dRiverAction     = dealerPostFlopAction(riverEquity, pot, bet);
+        const dealerRiverLine  = dRiverAction === 'fold'
+            ? '🤖 **Dealer folds!** (river missed them)'
+            : dRiverAction === 'raise'
+            ? `🤖 **Dealer bets** — they like the river! (${(riverEquity * 100).toFixed(0)}% equity)`
+            : `🤖 Dealer checks. (${(riverEquity * 100).toFixed(0)}% equity)`;
+
+        if (dRiverAction === 'fold') {
+            settled = true;
+            const coinMult   = getCoinMultiplier(debited);
+            const serverMult = getServerCoinMultiplier(guildSettings);
+            const totalMult  = coinMult * serverMult;
+            let winPayout    = pot;
+            if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
+            await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            return interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setAuthor(embedAuthor(interaction))
+                    .setThumbnail(THUMB)
+                    .setColor('#2ecc71')
+                    .setTitle('♠ Poker — Dealer Folded on the River!')
+                    .setDescription(`**River:** ${riverStr}\n\nThe dealer missed the river and folded. You win!\n\n**Dealer's hand:** ${handStr(dealerHole)} → *${bestHand([...dealerHole, ...riverBoard])?.name}*`)
+                    .addFields(
+                        { name: '🃏 Your Hand',  value: handStr(playerHole),           inline: true },
+                        { name: '🏆 Payout',     value: `**${winPayout.toLocaleString()}** coins`, inline: true },
+                        { name: '📊 Net',        value: `**+${(winPayout - playerStake).toLocaleString()}** coins`, inline: true },
+                    )
+                    .setFooter({ text: "Dealer missed the river — their loss, your gain" })
+                    .setTimestamp()],
+                components: [],
+            });
+        }
+
+        if (dRiverAction === 'raise') pot += bet;
+
+        const riverRound = `riverround_${Date.now()}`;
+        const riverActions = dRiverAction === 'raise'
+            ? [
+                new ButtonBuilder().setCustomId(`pk_call_${riverRound}`).setLabel(`Call (${bet.toLocaleString()})`).setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`pk_fold_${riverRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
+              ]
+            : [
+                new ButtonBuilder().setCustomId(`pk_check_${riverRound}`).setLabel('Check').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId(`pk_raise_${riverRound}`).setLabel(`Raise (${Math.min(bet, debited.balance).toLocaleString()})`).setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`pk_fold_${riverRound}`).setLabel('Fold').setStyle(ButtonStyle.Danger),
+              ];
+
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#5865F2')
+                .setTitle('♠ Poker — The River')
+                .addFields(
+                    { name: '🃏 Your Hand',  value: handStr(playerHole),                     inline: false },
+                    { name: '🤖 Dealer',     value: dealerRiverLine,                          inline: false },
+                    { name: '🎴 Community',  value: `${flopStr}  ${turnStr}  ${riverStr}`,   inline: false },
+                    { name: '💰 Pot',        value: `**${pot.toLocaleString()}** coins`,      inline: true },
+                )
+                .setFooter({ text: 'Last chance — Check, Raise, or Fold before showdown' })],
+            components: [new ActionRowBuilder().addComponents(...riverActions)],
+        });
+        await delay(200);
+
+        const msg4 = await interaction.fetchReply();
+        let riverAction;
+        try {
+            const r = await msg4.awaitMessageComponent({
+                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(riverRound),
+                time: 30_000,
+            });
+            await r.deferUpdate();
+            riverAction = r.customId.split('_')[1];
+        } catch {
+            settled = true;
+            await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
+        }
+
+        if (riverAction === 'fold') {
+            folded = true;
+        } else if (riverAction === 'call' || riverAction === 'raise') {
+            const raiseAmt = Math.min(bet, debited.balance);
+            if (raiseAmt > 0) {
+                const raised = await User.findOneAndUpdate(
+                    { ...userFilter, balance: { $gte: raiseAmt } },
+                    { $inc: { balance: -raiseAmt } },
+                    { new: true }
+                );
+                if (raised) {
+                    debited = raised;
+                    playerStake += raiseAmt;
+                    pot += raiseAmt * (riverAction === 'raise' ? 2 : 1);
+                } else if (riverAction === 'call') {
+                    folded = true;
+                }
+            } else if (riverAction === 'call') {
+                folded = true;
+            }
+        }
+
+        if (folded) {
+            settled = true;
+            const foldEmbed = new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#e74c3c')
+                .setTitle('♠ Poker — Folded')
+                .setDescription(`You folded on the river. The dealer had: **${handStr(dealerHole)}**\nCommunity: **${flopStr}  ${turnStr}  ${riverStr}**`)
+                .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
+                .setTimestamp();
+            return interaction.editReply({ embeds: [foldEmbed], components: [] });
+        }
+
+        // ── Showdown ──────────────────────────────────────────────────────────
+        await delay(400);
 
         const playerAll = [...playerHole, ...community];
         const dealerAll = [...dealerHole, ...community];
@@ -486,7 +727,7 @@ async function playPoker(interaction, bet) {
         else if (outcome === 'push') { color = '#f39c12'; title = '♠ Poker — Split Pot'; }
         else                         { color = '#e74c3c'; title = '♠ Poker — Dealer Wins'; }
 
-        const communityStr = `${flopStr}  ${cardStr(turnCard)}  ${cardStr(riverCard)}`;
+        const communityStr = `${flopStr}  ${turnStr}  ${riverStr}`;
         let boostNote = '';
         if (totalCoinMult > 1.0 && adjustedPayout > playerStake) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
