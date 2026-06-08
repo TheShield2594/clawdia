@@ -1403,3 +1403,14 @@ textarea.auto-resize {
 .eco-kpi-tile { background: var(--surface-2, #1a1510); border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1.1rem; min-width: 140px; }
 .eco-kpi-label { font-size: .75rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .eco-kpi-value { font-size: 1.4rem; font-weight: 700; color: var(--cream-50, #faf5f0); margin-top: .2rem; }
+
+/* ── User search widget ───────────────────────────────────────── */
+.user-search-widget { position: relative; }
+.user-tag-list { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .4rem; min-height: 0; }
+.user-id-tag { display: inline-flex; align-items: center; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); border-radius: 4px; padding: .15rem .45rem; font-size: .8em; gap: .25rem; }
+.user-id-tag button { background: none; border: none; color: inherit; opacity: .55; cursor: pointer; padding: 0 .1rem; font-size: 1.1em; line-height: 1; }
+.user-id-tag button:hover { opacity: 1; }
+.user-search-input { width: 100%; }
+.user-search-dropdown { position: absolute; left: 0; right: 0; top: calc(100% + 2px); background: var(--bg-card, #1e1a15); border: 1px solid var(--border); border-radius: 6px; z-index: 200; max-height: 200px; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+.user-search-item { display: flex; align-items: center; padding: .4rem .65rem; cursor: pointer; font-size: .875rem; gap: .5rem; }
+.user-search-item:hover { background: rgba(255,255,255,.06); }
