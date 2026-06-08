@@ -263,6 +263,28 @@ body {
 }
 .role-tag button:hover { opacity: 1; }
 
+.msg-preview {
+    margin-top: 0.6rem;
+    padding: 0.6rem 0.85rem;
+    background: #1e1f22;
+    border-radius: 6px;
+    border-left: 3px solid #5865f2;
+    font-size: 0.9rem;
+    color: #dcddde;
+    min-height: 2rem;
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+.msg-preview:empty { display: none; }
+.field-error { color: #f04747; font-size: 0.8rem; }
+.msg-preview-label {
+    font-size: 0.75rem;
+    color: #72767d;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 /* ── Layout (guild-settings) ───────────────────────── */
 .container {
     max-width: 1200px;
