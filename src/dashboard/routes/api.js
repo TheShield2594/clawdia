@@ -523,6 +523,31 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
         if ((failedByReason.execution_error || 0) > 10) recommendations.push('High command error volume detected. Audit recent command updates.');
         if ((guildSettings?.rssFeeds?.length || 0) === 0) recommendations.push('Add RSS or Daily News automation to keep channels active.');
 
+        // Member growth: derive from memberEvents (last 30 days)
+        const now30 = Date.now();
+        const memberGrowth = [];
+        for (let i = 29; i >= 0; i--) {
+            const d = new Date(now30 - i * 864e5).toISOString().slice(0, 10);
+            const ev = memberEvents.find(e => e.date === d);
+            memberGrowth.push({ date: d, joins: ev?.joins || 0, leaves: ev?.leaves || 0 });
+        }
+
+        // Message volume proxy: commandUsage events grouped by day (last 30 days)
+        const msgVolMap = {};
+        for (const ev of commandUsage) {
+            if (ev.createdAt) {
+                const d = new Date(ev.createdAt).toISOString().slice(0, 10);
+                msgVolMap[d] = (msgVolMap[d] || 0) + 1;
+            }
+        }
+        const messageVolume = memberGrowth.map(({ date }) => ({ date, count: msgVolMap[date] || 0 }));
+
+        // Economy stats summary
+        const [ecoTotalAgg, ecoActiveCount] = await Promise.all([
+            User.aggregate([{ $match: { guildId } }, { $group: { _id: null, total: { $sum: { $add: ['$balance', '$bank'] } }, avgXp: { $avg: '$xp' } } }]),
+            User.countDocuments({ guildId, lastWork: { $gte: new Date(now30 - 7 * 864e5) } })
+        ]);
+
         res.json({
             totalUsers,
             totalMessages: totalMessages[0]?.total || 0,
@@ -542,7 +567,16 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
                 bestPostingTimes,
                 commandUsage: commandSummary,
                 failedCommands: failedByReason,
-                recommendations
+                recommendations,
+                messageVolume,
+                memberGrowth,
+                economyStats: {
+                    totalCoins: ecoTotalAgg[0]?.total || 0,
+                    activeUsers: ecoActiveCount
+                },
+                xpStats: {
+                    avgXp: ecoTotalAgg[0]?.avgXp ? Math.round(ecoTotalAgg[0].avgXp) : 0
+                }
             }
         });
     } catch (error) {
@@ -1296,6 +1330,209 @@ router.delete('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, che
         res.json({ success: true });
     } catch (err) {
         console.error('Activity item image delete error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ── Moderation Cases ───────────────────────────────────────────────────────
+
+router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const type = req.query.type || null;
+    const status = req.query.status || null;
+
+    try {
+        const query = { guildId };
+        if (type && ['warn', 'mute', 'kick', 'ban', 'unban', 'unmute', 'note', 'appeal'].includes(type)) query.type = type;
+        if (status && ['open', 'closed', 'appealed', 'appeal_approved', 'appeal_denied'].includes(status)) query.status = status;
+
+        const [cases, total] = await Promise.all([
+            Case.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+            Case.countDocuments(query)
+        ]);
+        res.json({ cases, total, page, pages: Math.ceil(total / limit) });
+    } catch (error) {
+        console.error('Cases list error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId, caseId } = req.params;
+    const { action, note, resolution } = req.body;
+
+    if (!action || !['add_note', 'close'].includes(action)) {
+        return res.status(400).json({ error: 'action must be "add_note" or "close"' });
+    }
+
+    const parsedId = parseInt(caseId, 10);
+    if (!Number.isFinite(parsedId)) return res.status(400).json({ error: 'Invalid caseId' });
+
+    try {
+        const c = await Case.findOne({ guildId, caseId: parsedId });
+        if (!c) return res.status(404).json({ error: 'Case not found' });
+
+        if (action === 'add_note') {
+            if (!note || typeof note !== 'string' || !note.trim()) {
+                return res.status(400).json({ error: 'note is required for add_note' });
+            }
+            c.notes.push({ moderatorId: req.user.id, content: note.trim().slice(0, 1000) });
+        } else if (action === 'close') {
+            c.status = 'closed';
+            c.resolvedAt = new Date();
+            c.resolvedBy = req.user.id;
+            if (resolution && typeof resolution === 'string') {
+                c.resolution = resolution.trim().slice(0, 500);
+            }
+        }
+
+        await c.save();
+        res.json({ success: true, case: c });
+    } catch (error) {
+        console.error('Case update error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    try {
+        const guild = req.client.guilds.cache.get(guildId);
+        if (!guild) return res.status(404).json({ error: 'Guild not found or bot not in guild' });
+
+        const [bans, timeouts] = await Promise.all([
+            guild.bans.fetch().catch(() => null),
+            guild.members.fetch().then(members =>
+                [...members.values()].filter(m => m.communicationDisabledUntil && m.communicationDisabledUntil > new Date())
+            ).catch(() => [])
+        ]);
+
+        const banList = bans ? [...bans.values()].slice(0, 200).map(b => ({
+            type: 'ban',
+            userId: b.user.id,
+            userTag: b.user.tag,
+            avatarUrl: b.user.displayAvatarURL({ size: 32 }),
+            reason: b.reason || null,
+            expires: null
+        })) : [];
+
+        const timeoutList = timeouts.slice(0, 200).map(m => ({
+            type: 'timeout',
+            userId: m.user.id,
+            userTag: m.user.tag,
+            avatarUrl: m.user.displayAvatarURL({ size: 32 }),
+            reason: null,
+            expires: m.communicationDisabledUntil?.toISOString() || null
+        }));
+
+        res.json({ bans: banList, timeouts: timeoutList });
+    } catch (error) {
+        console.error('Active sanctions error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId, userId } = req.params;
+    if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
+    try {
+        const guild = req.client.guilds.cache.get(guildId);
+        if (!guild) return res.status(404).json({ error: 'Guild not found' });
+        await guild.members.unban(userId, `Unbanned via dashboard by ${req.user.username}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Unban error:', error);
+        res.status(500).json({ error: error.message || 'Internal server error' });
+    }
+});
+
+router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId, userId } = req.params;
+    if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
+    try {
+        const guild = req.client.guilds.cache.get(guildId);
+        if (!guild) return res.status(404).json({ error: 'Guild not found' });
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (!member) return res.status(404).json({ error: 'Member not found' });
+        await member.timeout(null, `Timeout removed via dashboard by ${req.user.username}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Remove timeout error:', error);
+        res.status(500).json({ error: error.message || 'Internal server error' });
+    }
+});
+
+// ── Economy Admin ──────────────────────────────────────────────────────────
+
+router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    try {
+        const [topEarners, totalCoinsAgg, activeUsersCount, guildSettings] = await Promise.all([
+            User.find({ guildId }).sort({ balance: -1, bank: -1 }).limit(10).lean(),
+            User.aggregate([{ $match: { guildId } }, { $group: { _id: null, total: { $sum: { $add: ['$balance', '$bank'] } } } }]),
+            User.countDocuments({ guildId, lastWork: { $gte: new Date(Date.now() - 7 * 864e5) } }),
+            Guild.findOne({ guildId }).lean()
+        ]);
+
+        const commandUsage = guildSettings?.analytics?.commandUsage || [];
+        const econCommands = ['balance', 'daily', 'work', 'shop', 'rob', 'crime', 'duel', 'mine', 'fish', 'hunt', 'bank', 'pay', 'coinflip', 'roll', 'blackjack', 'casino'];
+        const commandFrequency = {};
+        for (const ev of commandUsage) {
+            if (econCommands.includes(ev.command)) {
+                commandFrequency[ev.command] = (commandFrequency[ev.command] || 0) + 1;
+            }
+        }
+
+        res.json({
+            totalCoins: totalCoinsAgg[0]?.total || 0,
+            activeUsers: activeUsersCount,
+            topEarners: topEarners.map(u => ({ userId: u.userId, balance: u.balance, bank: u.bank, total: (u.balance || 0) + (u.bank || 0) })),
+            commandFrequency: Object.entries(commandFrequency).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([cmd, count]) => ({ cmd, count }))
+        });
+    } catch (error) {
+        console.error('Economy stats error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId } = req.params;
+    const { userId, action, amount } = req.body;
+
+    if (!userId || !isValidDiscordId(String(userId))) return res.status(400).json({ error: 'userId must be a valid Discord snowflake' });
+    if (!action || !['give', 'take', 'reset', 'freeze', 'unfreeze'].includes(action)) {
+        return res.status(400).json({ error: 'action must be give, take, reset, freeze, or unfreeze' });
+    }
+    if (['give', 'take'].includes(action)) {
+        const amt = Number(amount);
+        if (!Number.isFinite(amt) || amt <= 0 || !Number.isInteger(amt)) {
+            return res.status(400).json({ error: 'amount must be a positive integer for give/take' });
+        }
+    }
+
+    try {
+        let user = await User.findOne({ userId: String(userId), guildId });
+        if (!user) user = await User.create({ userId: String(userId), guildId });
+
+        if (action === 'give') {
+            user.balance = (user.balance || 0) + Number(amount);
+        } else if (action === 'take') {
+            user.balance = Math.max(0, (user.balance || 0) - Number(amount));
+        } else if (action === 'reset') {
+            user.balance = 0;
+            user.bank = 0;
+        } else if (action === 'freeze') {
+            user.economyFrozen = true;
+        } else if (action === 'unfreeze') {
+            user.economyFrozen = false;
+        }
+
+        await user.save();
+        res.json({ success: true, balance: user.balance, bank: user.bank, economyFrozen: user.economyFrozen });
+    } catch (error) {
+        console.error('Economy adjust error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
