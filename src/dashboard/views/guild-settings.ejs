@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
 </head>
 <body style="background:var(--ink-950);margin:0;">
 <div class="dash">
@@ -528,6 +529,15 @@
                         <h2>Moderation</h2>
                         <p>Auto-mod, spam protection, link &amp; invite filtering, escalation, and audit logging.</p>
                     </div>
+
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab mod-inner-tab active" data-mod-tab="mod-tab-settings">⚙️ Settings</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-sanctions">🔨 Active Sanctions</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-cases">📋 Case History</button>
+                    </div>
+
+                    <!-- Settings tab -->
+                    <div id="mod-tab-settings" class="ai-inner-panel active">
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable moderation</strong><span>Master switch for all moderation features</span></span>
                         <span class="switch"><input type="checkbox" id="mod-enabled" <%= settings.moderation.enabled ? 'checked' : '' %>><span class="slider"></span></span>
@@ -639,7 +649,92 @@
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
                     </div>
+                    </div><!-- end mod-tab-settings -->
+
+                    <!-- Active Sanctions tab -->
+                    <div id="mod-tab-sanctions" class="ai-inner-panel">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+                            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                                <button class="btn btn-sm sanctions-filter active" data-filter="all" onclick="setSanctionsFilter('all',this)">All</button>
+                                <button class="btn btn-sm sanctions-filter" data-filter="ban" onclick="setSanctionsFilter('ban',this)">Bans</button>
+                                <button class="btn btn-sm sanctions-filter" data-filter="timeout" onclick="setSanctionsFilter('timeout',this)">Timeouts</button>
+                            </div>
+                            <button class="btn btn-sm" onclick="loadActiveSanctions()">↻ Refresh</button>
+                        </div>
+                        <div id="sanctions-loading" style="opacity:.5;font-size:.9em">Loading sanctions...</div>
+                        <div id="sanctions-error" style="display:none" class="analytics-error-card">
+                            <span>⚠ Could not load sanctions</span>
+                            <button class="btn btn-sm" onclick="loadActiveSanctions()">Retry</button>
+                        </div>
+                        <div id="sanctions-empty" style="display:none;opacity:.5;font-size:.9em">No active bans or timeouts found.</div>
+                        <table id="sanctions-table" class="cases-table" style="display:none">
+                            <thead><tr><th>User</th><th>Type</th><th>Expires</th><th>Reason</th><th>Actions</th></tr></thead>
+                            <tbody id="sanctions-tbody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Case History tab -->
+                    <div id="mod-tab-cases" class="ai-inner-panel">
+                        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+                            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                                <select id="cases-filter-type" class="cases-filter-select" onchange="loadCaseHistory(1)">
+                                    <option value="">All types</option>
+                                    <option value="warn">Warn</option>
+                                    <option value="mute">Mute</option>
+                                    <option value="kick">Kick</option>
+                                    <option value="ban">Ban</option>
+                                    <option value="unban">Unban</option>
+                                    <option value="unmute">Unmute</option>
+                                    <option value="note">Note</option>
+                                    <option value="appeal">Appeal</option>
+                                </select>
+                                <select id="cases-filter-status" class="cases-filter-select" onchange="loadCaseHistory(1)">
+                                    <option value="">All statuses</option>
+                                    <option value="open">Open</option>
+                                    <option value="closed">Closed</option>
+                                    <option value="appealed">Appealed</option>
+                                    <option value="appeal_approved">Appeal approved</option>
+                                    <option value="appeal_denied">Appeal denied</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-sm" onclick="loadCaseHistory(1)">↻ Refresh</button>
+                        </div>
+                        <div id="cases-loading" style="opacity:.5;font-size:.9em">Loading cases...</div>
+                        <div id="cases-error" style="display:none" class="analytics-error-card">
+                            <span>⚠ Could not load cases</span>
+                            <button class="btn btn-sm" onclick="loadCaseHistory(1)">Retry</button>
+                        </div>
+                        <div id="cases-empty" style="display:none;opacity:.5;font-size:.9em">No cases found.</div>
+                        <table id="cases-table" class="cases-table" style="display:none">
+                            <thead><tr><th>Case #</th><th>User</th><th>Type</th><th>Mod</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="cases-tbody"></tbody>
+                        </table>
+                        <div id="cases-pagination" style="display:none;margin-top:.75rem;display:flex;gap:.5rem;align-items:center;justify-content:center"></div>
+                    </div>
+
                 </section>
+
+                <!-- Case Note / Close Modal -->
+                <div id="case-note-modal" class="modal-overlay" style="display:none">
+                    <div class="modal-box" style="max-width:440px">
+                        <div class="modal-head">
+                            <h3 id="case-note-modal-title">Add Note to Case</h3>
+                            <button class="modal-close" onclick="closeCaseNoteModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="case-note-case-id">
+                            <input type="hidden" id="case-note-mode" value="add_note">
+                            <div class="field">
+                                <label class="field-label" id="case-note-label">Note</label>
+                                <textarea id="case-note-content" rows="4" placeholder="Add a moderator note..."></textarea>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn" onclick="closeCaseNoteModal()">Cancel</button>
+                            <button class="btn btn-primary" id="case-note-submit-btn" onclick="submitCaseAction()">Save note</button>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Leveling -->
                 <section id="leveling" class="panel">
@@ -742,6 +837,7 @@
                         <button class="ai-inner-tab eco-inner-tab active" data-eco-tab="eco-tab-settings">⚙️ Settings &amp; Store</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-games">🎮 Games</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-careers">💼 Careers</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-health">📊 Economy Health</button>
                     </div>
 
                     <!-- Settings & Store -->
@@ -890,6 +986,47 @@
                         <div class="actions-row">
                             <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
                         </div>
+                    </div>
+
+                    <!-- Economy Health -->
+                    <div id="eco-tab-health" class="ai-inner-panel">
+                        <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
+                            <!-- KPI tiles -->
+                            <div class="eco-kpi-tile"><div class="eco-kpi-label">Total coins in circulation</div><div class="eco-kpi-value" id="eco-stat-total-coins">—</div></div>
+                            <div class="eco-kpi-tile"><div class="eco-kpi-label">Active economy users (7d)</div><div class="eco-kpi-value" id="eco-stat-active-users">—</div></div>
+                        </div>
+
+                        <!-- Admin Actions -->
+                        <div class="panel-head"><h3>Admin Actions</h3><p>Give, take, reset, or freeze a member's economy account.</p></div>
+                        <div class="field" style="max-width:360px">
+                            <label class="field-label">User ID</label>
+                            <input type="text" id="eco-admin-user-id" placeholder="Discord user ID (17–20 digits)">
+                        </div>
+                        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
+                            <input type="number" id="eco-admin-amount" placeholder="Amount" min="1" style="width:120px">
+                            <button class="btn btn-sm btn-primary" onclick="ecoAdminAction('give')">Give coins</button>
+                            <button class="btn btn-sm" onclick="ecoAdminAction('take')">Take coins</button>
+                            <button class="btn btn-sm btn-danger" onclick="ecoAdminAction('reset')">Reset balance</button>
+                            <button class="btn btn-sm" onclick="ecoAdminAction('freeze')">Freeze account</button>
+                            <button class="btn btn-sm" onclick="ecoAdminAction('unfreeze')">Unfreeze account</button>
+                        </div>
+                        <div id="eco-admin-msg" style="min-height:1.4em;font-size:.85em"></div>
+
+                        <!-- Top earners -->
+                        <div class="panel-head" style="margin-top:1.5rem"><h3>Top 10 Richest Users</h3></div>
+                        <div id="eco-top-earners-loading" style="opacity:.5;font-size:.9em">Loading...</div>
+                        <div id="eco-top-earners-error" style="display:none" class="analytics-error-card">
+                            <span>⚠ Could not load economy stats</span>
+                            <button class="btn btn-sm" onclick="loadEcoHealth()">Retry</button>
+                        </div>
+                        <table id="eco-top-earners-table" class="cases-table" style="display:none">
+                            <thead><tr><th>Rank</th><th>User ID</th><th>Wallet</th><th>Bank</th><th>Total</th></tr></thead>
+                            <tbody id="eco-top-earners-tbody"></tbody>
+                        </table>
+
+                        <!-- Command frequency chart -->
+                        <div class="panel-head" style="margin-top:1.5rem"><h3>Most-Used Economy Commands</h3></div>
+                        <div style="max-width:540px;position:relative"><canvas id="eco-cmd-chart" height="200"></canvas></div>
                     </div>
                 </section>
 
@@ -2219,11 +2356,60 @@
 
                 <section id="analytics" class="panel">
                     <div class="panel-head">
-                        <h2>Insights & Recommendations</h2>
+                        <h2>Insights &amp; Recommendations</h2>
                         <p>Track retention, active hours, toxic channels, mod SLA trends, and next-best actions.</p>
                     </div>
-                    <div id="analytics-content" class="empty-state" style="padding:1rem;">
-                        <p>Loading analytics...</p>
+
+                    <!-- Skeleton loader -->
+                    <div id="analytics-skeleton">
+                        <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+                            <div class="skel-tile"></div><div class="skel-tile"></div><div class="skel-tile"></div>
+                        </div>
+                        <div class="skel-bar" style="width:60%;margin-bottom:.5rem"></div>
+                        <div class="skel-bar" style="width:80%;margin-bottom:.5rem"></div>
+                        <div class="skel-bar" style="width:70%;margin-bottom:.5rem"></div>
+                        <div class="skel-chart"></div>
+                    </div>
+
+                    <!-- Error state -->
+                    <div id="analytics-error" style="display:none" class="analytics-error-card">
+                        <span>⚠ Couldn't load analytics. Check that the bot is online and retry.</span>
+                        <button class="btn btn-sm" onclick="loadAnalytics()">Retry</button>
+                    </div>
+
+                    <!-- Loaded content -->
+                    <div id="analytics-content" style="display:none">
+                        <!-- KPI tiles -->
+                        <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem" id="analytics-kpi-row"></div>
+
+                        <!-- Time-range toggles for charts -->
+                        <div style="display:flex;gap:.4rem;margin-bottom:.75rem" id="analytics-range-btns">
+                            <button class="btn btn-sm analytics-range active" data-days="7" onclick="setAnalyticsRange(7,this)">7d</button>
+                            <button class="btn btn-sm analytics-range" data-days="30" onclick="setAnalyticsRange(30,this)">30d</button>
+                        </div>
+
+                        <!-- Charts row -->
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-bottom:1.25rem">
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">Member Growth</div>
+                                <canvas id="chart-member-growth" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">Command Activity (message proxy)</div>
+                                <canvas id="chart-message-volume" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">Retention (%)</div>
+                                <canvas id="chart-retention" height="160"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Insights list -->
+                        <div id="analytics-insights-content"></div>
+
+                        <!-- Recommendations -->
+                        <div class="panel-head" style="margin-top:1rem"><h3>Recommendations</h3></div>
+                        <div id="analytics-recommendations"></div>
                     </div>
                 </section>
 
@@ -2393,7 +2579,17 @@
             };
         }
         const switchEcoTab = makeGameTabSwitcher('eco-inner-tab', '#economy .ai-inner-panel', 'eco-tab');
-        document.querySelectorAll('.eco-inner-tab').forEach(tab => tab.addEventListener('click', () => switchEcoTab(tab.dataset.ecoTab)));
+        document.querySelectorAll('.eco-inner-tab').forEach(tab => tab.addEventListener('click', () => {
+            switchEcoTab(tab.dataset.ecoTab);
+            if (tab.dataset.ecoTab === 'eco-tab-health') loadEcoHealth();
+        }));
+
+        const switchModTab = makeGameTabSwitcher('mod-inner-tab', '#moderation .ai-inner-panel', 'mod-tab');
+        document.querySelectorAll('.mod-inner-tab').forEach(tab => tab.addEventListener('click', () => {
+            switchModTab(tab.dataset.modTab);
+            if (tab.dataset.modTab === 'mod-tab-sanctions') loadActiveSanctions();
+            if (tab.dataset.modTab === 'mod-tab-cases') loadCaseHistory(1);
+        }));
         const switchHuntTab = makeGameTabSwitcher('hunt-inner-tab', '#hunt .ai-inner-panel', 'hunt-tab');
         const switchFishTab = makeGameTabSwitcher('fish-inner-tab', '#fish .ai-inner-panel', 'fish-tab');
         const switchMineTab = makeGameTabSwitcher('mine-inner-tab', '#mine .ai-inner-panel', 'mine-tab');
@@ -4493,73 +4689,454 @@
         }
         loadOverviewStats();
 
+        let _analyticsData = null;
+        let _analyticsInsights = null;
+        let _chartMemberGrowth = null;
+        let _chartMessageVolume = null;
+        let _chartRetention = null;
+        let _analyticsRange = 7;
+
+        function setAnalyticsRange(days, btn) {
+            _analyticsRange = days;
+            document.querySelectorAll('.analytics-range').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            if (_analyticsData) renderAnalyticsCharts(_analyticsData, _analyticsInsights);
+        }
+
+        function renderAnalyticsCharts(data, insights) {
+            const a = data.analytics || {};
+            const days = _analyticsRange;
+
+            // Member growth chart
+            const growthAll = a.memberGrowth || [];
+            const growthSlice = growthAll.slice(-days);
+            const growthLabels = growthSlice.map(d => d.date.slice(5));
+            if (_chartMemberGrowth) _chartMemberGrowth.destroy();
+            const ctxG = document.getElementById('chart-member-growth')?.getContext('2d');
+            if (ctxG) {
+                _chartMemberGrowth = new Chart(ctxG, {
+                    type: 'bar',
+                    data: {
+                        labels: growthLabels,
+                        datasets: [
+                            { label: 'Joins', data: growthSlice.map(d => d.joins), backgroundColor: 'rgba(93,138,90,0.7)', borderRadius: 3 },
+                            { label: 'Leaves', data: growthSlice.map(d => d.leaves), backgroundColor: 'rgba(185,76,60,0.6)', borderRadius: 3 }
+                        ]
+                    },
+                    options: { responsive: true, plugins: { legend: { labels: { color: '#ece4d2', font: { size: 11 } } } }, scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' } } } }
+                });
+            }
+
+            // Message volume (command activity proxy)
+            const volAll = a.messageVolume || [];
+            const volSlice = volAll.slice(-days);
+            if (_chartMessageVolume) _chartMessageVolume.destroy();
+            const ctxV = document.getElementById('chart-message-volume')?.getContext('2d');
+            if (ctxV) {
+                _chartMessageVolume = new Chart(ctxV, {
+                    type: 'bar',
+                    data: {
+                        labels: volSlice.map(d => d.date.slice(5)),
+                        datasets: [{ label: 'Commands', data: volSlice.map(d => d.count), backgroundColor: 'rgba(217,119,66,0.7)', borderRadius: 3 }]
+                    },
+                    options: { responsive: true, plugins: { legend: { labels: { color: '#ece4d2', font: { size: 11 } } } }, scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' } } } }
+                });
+            }
+
+            // Retention chart (single data-point line — or show as doughnut)
+            if (_chartRetention) _chartRetention.destroy();
+            const ctxR = document.getElementById('chart-retention')?.getContext('2d');
+            const ret7 = insights?.retention?.retained7Pct || 0;
+            const ret30 = insights?.retention?.retained30Pct || 0;
+            const conv7 = insights?.newcomerConversion?.days7?.pct || 0;
+            const conv30 = insights?.newcomerConversion?.days30?.pct || 0;
+            if (ctxR) {
+                _chartRetention = new Chart(ctxR, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Retention 7d', 'Retention 30d', 'Conversion 7d', 'Conversion 30d'],
+                        datasets: [{ label: '%', data: [ret7, ret30, conv7, conv30], backgroundColor: ['rgba(93,138,90,0.8)','rgba(93,138,90,0.5)','rgba(217,119,66,0.8)','rgba(217,119,66,0.5)'], borderRadius: 4 }]
+                    },
+                    options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#b8a898' }, max: 100 }, y: { ticks: { color: '#b8a898', font: { size: 11 } } } } }
+                });
+            }
+        }
+
         async function loadAnalytics() {
             const guildId = '<%= guild.id %>';
-            const container = document.getElementById('analytics-content');
-            const addListItem = (label, value) => {
-                const row = document.createElement('div');
-                row.className = 'list-item';
-                const strong = document.createElement('strong');
-                strong.textContent = label;
-                const span = document.createElement('span');
-                span.textContent = value;
-                row.appendChild(strong);
-                row.appendChild(span);
-                container.appendChild(row);
-            };
-            const addHeading = (title) => {
-                const head = document.createElement('div');
-                head.className = 'panel-head';
-                head.style.marginTop = '1rem';
-                const h3 = document.createElement('h3');
-                h3.textContent = title;
-                head.appendChild(h3);
-                container.appendChild(head);
-            };
-            const addParagraph = (text) => {
-                const p = document.createElement('p');
-                p.textContent = text;
-                container.appendChild(p);
-            };
+            document.getElementById('analytics-skeleton').style.display = '';
+            document.getElementById('analytics-error').style.display = 'none';
+            document.getElementById('analytics-content').style.display = 'none';
+
             try {
                 const [statsResp, insightsResp] = await Promise.all([
                     fetch(`/api/guild/${guildId}/stats`),
                     fetch(`/api/guild/${guildId}/insights`)
                 ]);
+                if (!statsResp.ok || !insightsResp.ok) throw new Error('Non-OK response');
                 const data = await statsResp.json();
                 const insights = await insightsResp.json();
+                _analyticsData = data;
+                _analyticsInsights = insights;
+
+                document.getElementById('analytics-skeleton').style.display = 'none';
+                document.getElementById('analytics-content').style.display = '';
+
                 const a = data.analytics || {};
-                const commandRows = Object.entries(a.commandUsage || {}).sort((x, y) => y[1].total - x[1].total).slice(0, 8);
-                const failedRows = Object.entries(a.failedCommands || {}).sort((x, y) => y[1] - x[1]).slice(0, 6);
-                container.textContent = '';
-                addListItem('Growth funnel', `${a.growthFunnel?.joins30 || 0} joins → ${a.growthFunnel?.retained7 || 0}% retained @7d → ${a.growthFunnel?.retained30 || 0}% @30d`);
-                addHeading('Insights layer');
-                addListItem('Retention', `${insights.retention?.retained7Pct || 0}% @ 7d · ${insights.retention?.retained30Pct || 0}% @ 30d`);
-                addListItem('Newcomer conversion', `${insights.newcomerConversion?.days7?.pct || 0}% @ 7d · ${insights.newcomerConversion?.days30?.pct || 0}% @ 30d`);
-                addListItem('Mod SLA (median)', insights.modSla?.medianResolutionHours == null ? 'Not enough resolved cases' : `${insights.modSla.medianResolutionHours}h`);
-                addListItem('Top active hours (UTC)', (insights.activeHours?.topHours || []).map(t => `${String(t.hourUtc).padStart(2, '0')}:00 (${t.count})`).join(' · ') || 'Not enough data yet');
-                const toxic = (insights.toxicChannels || []).slice(0, 5).map(c => `#${c.channelId} (score ${c.score})`).join(' · ');
-                addListItem('Toxic channel hotspots', toxic || 'No hotspots detected');
-                addHeading('Mod SLA trend (last 6 months)');
-                if (!(insights.modSla?.trends || []).length) addParagraph('No resolved-case trend data yet.');
-                for (const trend of (insights.modSla?.trends || [])) {
-                    addListItem(trend.month, `${trend.medianResolutionHours}h median (${trend.resolvedCases} resolved)`);
+
+                // KPI tiles
+                const kpiRow = document.getElementById('analytics-kpi-row');
+                kpiRow.innerHTML = '';
+                const kpis = [
+                    { label: 'Total members', value: data.totalUsers ?? '—' },
+                    { label: '30d joins', value: a.growthFunnel?.joins30 ?? '—' },
+                    { label: 'Retention 7d', value: `${a.growthFunnel?.retained7 ?? '—'}%` },
+                    { label: 'Retention 30d', value: `${a.growthFunnel?.retained30 ?? '—'}%` },
+                    { label: 'Mod SLA (median)', value: insights.modSla?.medianResolutionHours != null ? `${insights.modSla.medianResolutionHours}h` : '—' }
+                ];
+                for (const kpi of kpis) {
+                    kpiRow.insertAdjacentHTML('beforeend', `<div class="eco-kpi-tile"><div class="eco-kpi-label">${kpi.label}</div><div class="eco-kpi-value">${kpi.value}</div></div>`);
                 }
-                addListItem('Churn alerts', (a.churnAlerts || ['No active alerts']).join(' · '));
-                addListItem('Likely causes', (a.likelyCauses || ['No immediate causes detected']).join(' · '));
-                addListItem('Best posting times (UTC)', (a.bestPostingTimes || []).map(t => `#${t.channelId} @ ${String(t.hourUtc).padStart(2, '0')}:00`).join(' · ') || 'Not enough data yet');
-                addHeading('Command usage / failures');
-                if (!commandRows.length) addParagraph('No command data yet.');
-                for (const [cmd, m] of commandRows) addListItem(`/${cmd}`, `${m.total} runs · ${m.failed} failed`);
-                addHeading('Failed-command causes');
-                if (!failedRows.length) addParagraph('No failures recorded.');
-                for (const [reason, count] of failedRows) addListItem(reason, String(count));
-                addHeading('Auto-recommendations');
-                if (!(a.recommendations || []).length) addParagraph('No recommendations right now.');
-                for (const recommendation of (a.recommendations || [])) addListItem('💡', recommendation);
+
+                // Render charts
+                renderAnalyticsCharts(data, insights);
+
+                // Insights text
+                const insightsCont = document.getElementById('analytics-insights-content');
+                insightsCont.innerHTML = '';
+                const rows = [
+                    ['Newcomer conversion', `${insights.newcomerConversion?.days7?.pct || 0}% @ 7d · ${insights.newcomerConversion?.days30?.pct || 0}% @ 30d`],
+                    ['Top active hours (UTC)', (insights.activeHours?.topHours || []).map(t => `${String(t.hourUtc).padStart(2,'0')}:00 (${t.count})`).join(' · ') || 'Not enough data'],
+                    ['Toxic channel hotspots', (insights.toxicChannels || []).slice(0,5).map(c=>`<#${c.channelId}> score ${c.score}`).join(' · ') || 'None detected'],
+                    ['Churn alerts', (a.churnAlerts || ['No active alerts']).join(' · ')],
+                    ['Likely causes', (a.likelyCauses || ['None detected']).join(' · ')],
+                ];
+                for (const [label, val] of rows) {
+                    insightsCont.insertAdjacentHTML('beforeend', `<div class="list-item"><strong>${label}</strong><span>${val}</span></div>`);
+                }
+
+                // Command usage
+                const commandRows = Object.entries(a.commandUsage || {}).sort((x,y)=>y[1].total-x[1].total).slice(0,8);
+                if (commandRows.length) {
+                    insightsCont.insertAdjacentHTML('beforeend', `<div class="panel-head" style="margin-top:1rem"><h3>Command usage / failures</h3></div>`);
+                    for (const [cmd, m] of commandRows) {
+                        insightsCont.insertAdjacentHTML('beforeend', `<div class="list-item"><strong>/${cmd}</strong><span>${m.total} runs · ${m.failed} failed (${m.total ? Math.round(m.failed/m.total*100) : 0}%)</span></div>`);
+                    }
+                }
+
+                // Recommendations as actionable cards
+                const recCont = document.getElementById('analytics-recommendations');
+                recCont.innerHTML = '';
+                const navMap = {
+                    'welcome': 'welcome', 'moderation': 'moderation', 'auto-moderation': 'moderation',
+                    'rss': 'rss', 'economy': 'economy', 'leveling': 'leveling', 'command': 'commandpolicies'
+                };
+                if (!(a.recommendations || []).length) {
+                    recCont.innerHTML = '<p style="opacity:.5">No recommendations right now.</p>';
+                } else {
+                    for (const rec of a.recommendations) {
+                        const navTarget = Object.keys(navMap).find(k => rec.toLowerCase().includes(k));
+                        const linkHtml = navTarget ? `<a href="#" class="analytics-rec-link" onclick="document.querySelector('.nav-item[data-tab=${navMap[navTarget]}]')?.click();return false">Configure →</a>` : '';
+                        recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${rec}</span>${linkHtml}</div>`);
+                    }
+                }
             } catch (error) {
-                container.textContent = '';
-                addParagraph('Failed to load analytics.');
+                document.getElementById('analytics-skeleton').style.display = 'none';
+                document.getElementById('analytics-error').style.display = '';
+            }
+        }
+
+        // ── Moderation: Active Sanctions ──────────────────────────────────────
+        let _sanctionsData = null;
+        let _sanctionsFilter = 'all';
+
+        function setSanctionsFilter(filter, btn) {
+            _sanctionsFilter = filter;
+            document.querySelectorAll('.sanctions-filter').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            if (_sanctionsData) renderSanctions(_sanctionsData);
+        }
+
+        function renderSanctions(data) {
+            const items = [
+                ...(data.bans || []).map(b => ({ ...b, type: 'ban' })),
+                ...(data.timeouts || []).map(t => ({ ...t, type: 'timeout' }))
+            ].filter(i => _sanctionsFilter === 'all' || i.type === _sanctionsFilter);
+
+            document.getElementById('sanctions-empty').style.display = items.length ? 'none' : '';
+            const table = document.getElementById('sanctions-table');
+            table.style.display = items.length ? '' : 'none';
+            const tbody = document.getElementById('sanctions-tbody');
+            tbody.innerHTML = '';
+            for (const item of items) {
+                const expires = item.expires ? new Date(item.expires).toLocaleString() : '—';
+                const tr = document.createElement('tr');
+
+                // User cell — avatar (src validated as CDN URL on server) + escaped tag
+                const tdUser = document.createElement('td');
+                const img = document.createElement('img');
+                img.src = item.avatarUrl;
+                img.style.cssText = 'width:20px;height:20px;border-radius:50%;margin-right:.35rem;vertical-align:middle';
+                img.onerror = function() { this.style.display = 'none'; };
+                tdUser.appendChild(img);
+                tdUser.appendChild(document.createTextNode(item.userTag));
+
+                // Type badge
+                const tdType = document.createElement('td');
+                tdType.innerHTML = `<span class="case-type-badge type-${item.type}">${item.type}</span>`;
+
+                // Expires
+                const tdExpires = document.createElement('td');
+                tdExpires.textContent = expires;
+
+                // Reason — user-controlled, must be text
+                const tdReason = document.createElement('td');
+                tdReason.style.cssText = 'max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+                tdReason.textContent = item.reason || '—';
+
+                // Action button — userId is a validated snowflake (digits only)
+                const tdAction = document.createElement('td');
+                const btn = document.createElement('button');
+                if (item.type === 'ban') {
+                    btn.className = 'btn btn-sm btn-danger';
+                    btn.textContent = 'Unban';
+                    btn.onclick = () => doUnban(item.userId);
+                } else {
+                    btn.className = 'btn btn-sm';
+                    btn.textContent = 'Remove timeout';
+                    btn.onclick = () => doRemoveTimeout(item.userId);
+                }
+                tdAction.appendChild(btn);
+
+                tr.append(tdUser, tdType, tdExpires, tdReason, tdAction);
+                tbody.appendChild(tr);
+            }
+        }
+
+        async function loadActiveSanctions() {
+            const guildId = '<%= guild.id %>';
+            document.getElementById('sanctions-loading').style.display = '';
+            document.getElementById('sanctions-error').style.display = 'none';
+            document.getElementById('sanctions-empty').style.display = 'none';
+            document.getElementById('sanctions-table').style.display = 'none';
+            try {
+                const resp = await fetch(`/api/guild/${guildId}/sanctions/active`);
+                if (!resp.ok) throw new Error('Non-OK');
+                _sanctionsData = await resp.json();
+                document.getElementById('sanctions-loading').style.display = 'none';
+                renderSanctions(_sanctionsData);
+            } catch {
+                document.getElementById('sanctions-loading').style.display = 'none';
+                document.getElementById('sanctions-error').style.display = '';
+            }
+        }
+
+        async function doUnban(userId) {
+            if (!confirm(`Unban user ${userId}?`)) return;
+            const guildId = '<%= guild.id %>';
+            try {
+                const resp = await fetch(`/api/guild/${guildId}/sanctions/unban/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const data = await resp.json();
+                if (!resp.ok) return alert(data.error || 'Failed to unban');
+                await loadActiveSanctions();
+            } catch { alert('Request failed'); }
+        }
+
+        async function doRemoveTimeout(userId) {
+            if (!confirm(`Remove timeout for user ${userId}?`)) return;
+            const guildId = '<%= guild.id %>';
+            try {
+                const resp = await fetch(`/api/guild/${guildId}/sanctions/untimeout/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const data = await resp.json();
+                if (!resp.ok) return alert(data.error || 'Failed to remove timeout');
+                await loadActiveSanctions();
+            } catch { alert('Request failed'); }
+        }
+
+        // ── Moderation: Case History ──────────────────────────────────────────
+        let _casesCurrentPage = 1;
+
+        async function loadCaseHistory(page = 1) {
+            _casesCurrentPage = page;
+            const guildId = '<%= guild.id %>';
+            const type = document.getElementById('cases-filter-type')?.value || '';
+            const status = document.getElementById('cases-filter-status')?.value || '';
+            document.getElementById('cases-loading').style.display = '';
+            document.getElementById('cases-error').style.display = 'none';
+            document.getElementById('cases-empty').style.display = 'none';
+            document.getElementById('cases-table').style.display = 'none';
+            const paginEl = document.getElementById('cases-pagination');
+            paginEl.style.display = 'none';
+            try {
+                const params = new URLSearchParams({ page, limit: 20 });
+                if (type) params.set('type', type);
+                if (status) params.set('status', status);
+                const resp = await fetch(`/api/guild/${guildId}/cases?${params}`);
+                if (!resp.ok) throw new Error('Non-OK');
+                const { cases, total, pages } = await resp.json();
+                document.getElementById('cases-loading').style.display = 'none';
+                if (!cases.length) { document.getElementById('cases-empty').style.display = ''; return; }
+                const tbody = document.getElementById('cases-tbody');
+                tbody.innerHTML = '';
+                for (const c of cases) {
+                    const date = new Date(c.createdAt).toLocaleDateString();
+                    tbody.insertAdjacentHTML('beforeend', `<tr>
+                        <td>#${c.caseId}</td>
+                        <td style="font-size:.8em">${c.targetUserId}</td>
+                        <td><span class="case-type-badge type-${c.type}">${c.type}</span></td>
+                        <td style="font-size:.8em">${c.moderatorId}</td>
+                        <td>${date}</td>
+                        <td><span class="case-status-badge status-${c.status}">${c.status}</span></td>
+                        <td style="display:flex;gap:.35rem;flex-wrap:wrap">
+                            <button class="btn btn-sm" onclick="openCaseNoteModal(${c.caseId})">Add note</button>
+                            ${c.status === 'open' ? `<button class="btn btn-sm btn-danger" onclick="closeCase(${c.caseId})">Close</button>` : ''}
+                        </td>
+                    </tr>`);
+                }
+                document.getElementById('cases-table').style.display = '';
+                if (pages > 1) {
+                    paginEl.style.display = 'flex';
+                    paginEl.innerHTML = '';
+                    if (page > 1) paginEl.insertAdjacentHTML('beforeend', `<button class="btn btn-sm" onclick="loadCaseHistory(${page-1})">‹ Prev</button>`);
+                    paginEl.insertAdjacentHTML('beforeend', `<span style="font-size:.85em;opacity:.7">Page ${page} of ${pages} (${total} total)</span>`);
+                    if (page < pages) paginEl.insertAdjacentHTML('beforeend', `<button class="btn btn-sm" onclick="loadCaseHistory(${page+1})">Next ›</button>`);
+                }
+            } catch {
+                document.getElementById('cases-loading').style.display = 'none';
+                document.getElementById('cases-error').style.display = '';
+            }
+        }
+
+        function openCaseNoteModal(caseId, mode) {
+            mode = mode || 'add_note';
+            document.getElementById('case-note-case-id').value = caseId;
+            document.getElementById('case-note-mode').value = mode;
+            document.getElementById('case-note-content').value = '';
+            if (mode === 'close') {
+                document.getElementById('case-note-modal-title').textContent = `Close Case #${caseId}`;
+                document.getElementById('case-note-label').textContent = 'Resolution note (optional)';
+                document.getElementById('case-note-content').placeholder = 'Describe how the case was resolved...';
+                document.getElementById('case-note-submit-btn').textContent = 'Close case';
+            } else {
+                document.getElementById('case-note-modal-title').textContent = 'Add Note to Case';
+                document.getElementById('case-note-label').textContent = 'Note';
+                document.getElementById('case-note-content').placeholder = 'Add a moderator note...';
+                document.getElementById('case-note-submit-btn').textContent = 'Save note';
+            }
+            document.getElementById('case-note-modal').style.display = '';
+        }
+        function closeCaseNoteModal() { document.getElementById('case-note-modal').style.display = 'none'; }
+
+        async function submitCaseAction() {
+            const guildId = '<%= guild.id %>';
+            const caseId = document.getElementById('case-note-case-id').value;
+            const mode = document.getElementById('case-note-mode').value;
+            const note = document.getElementById('case-note-content').value.trim();
+            const body = mode === 'close'
+                ? { action: 'close', ...(note && { resolution: note }) }
+                : { action: 'add_note', note };
+            if (mode === 'add_note' && !note) return alert('Note cannot be empty');
+            try {
+                const resp = await fetch(`/api/guild/${guildId}/cases/${caseId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+                if (!resp.ok) return alert(data.error || 'Failed');
+                closeCaseNoteModal();
+                loadCaseHistory(_casesCurrentPage);
+            } catch { alert('Request failed'); }
+        }
+
+        function closeCase(caseId) {
+            openCaseNoteModal(caseId, 'close');
+        }
+
+        // ── Economy Health ────────────────────────────────────────────────────
+        let _ecoCmdChart = null;
+
+        async function loadEcoHealth() {
+            const guildId = '<%= guild.id %>';
+            document.getElementById('eco-top-earners-loading').style.display = '';
+            document.getElementById('eco-top-earners-error').style.display = 'none';
+            document.getElementById('eco-top-earners-table').style.display = 'none';
+            try {
+                const resp = await fetch(`/api/guild/${guildId}/economy/stats`);
+                if (!resp.ok) throw new Error('Non-OK');
+                const stats = await resp.json();
+                document.getElementById('eco-stat-total-coins').textContent = (stats.totalCoins || 0).toLocaleString();
+                document.getElementById('eco-stat-active-users').textContent = (stats.activeUsers || 0).toLocaleString();
+                document.getElementById('eco-top-earners-loading').style.display = 'none';
+                const tbody = document.getElementById('eco-top-earners-tbody');
+                tbody.innerHTML = '';
+                for (let i = 0; i < (stats.topEarners || []).length; i++) {
+                    const u = stats.topEarners[i];
+                    tbody.insertAdjacentHTML('beforeend', `<tr><td>#${i+1}</td><td style="font-size:.8em">${u.userId}</td><td>${(u.balance||0).toLocaleString()}</td><td>${(u.bank||0).toLocaleString()}</td><td>${(u.total||0).toLocaleString()}</td></tr>`);
+                }
+                document.getElementById('eco-top-earners-table').style.display = '';
+                // Command frequency chart
+                const cmds = stats.commandFrequency || [];
+                if (_ecoCmdChart) _ecoCmdChart.destroy();
+                const ctx = document.getElementById('eco-cmd-chart')?.getContext('2d');
+                if (ctx && cmds.length) {
+                    _ecoCmdChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: cmds.map(c => `/${c.cmd}`),
+                            datasets: [{ label: 'Uses', data: cmds.map(c => c.count), backgroundColor: 'rgba(217,119,66,0.75)', borderRadius: 4 }]
+                        },
+                        options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#b8a898' } }, y: { ticks: { color: '#b8a898' } } } }
+                    });
+                }
+            } catch {
+                document.getElementById('eco-top-earners-loading').style.display = 'none';
+                document.getElementById('eco-top-earners-error').style.display = '';
+            }
+        }
+
+        let _ecoActionInFlight = false;
+        async function ecoAdminAction(action) {
+            if (_ecoActionInFlight) return;
+            const guildId = '<%= guild.id %>';
+            const userId = document.getElementById('eco-admin-user-id').value.trim();
+            const amount = parseInt(document.getElementById('eco-admin-amount').value, 10);
+            const msgEl = document.getElementById('eco-admin-msg');
+            if (!userId) { msgEl.textContent = 'Enter a user ID.'; msgEl.style.color = 'var(--red)'; return; }
+            if (['give', 'take'].includes(action) && (!amount || amount <= 0)) { msgEl.textContent = 'Enter a valid amount > 0.'; msgEl.style.color = 'var(--red)'; return; }
+            if (action === 'reset' && !confirm(`Reset balance for user ${userId}? This cannot be undone.`)) return;
+
+            _ecoActionInFlight = true;
+            const controls = ['eco-admin-user-id', 'eco-admin-amount'];
+            controls.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = true; });
+            document.querySelectorAll('#eco-tab-health .btn').forEach(b => b.disabled = true);
+            msgEl.textContent = '';
+
+            try {
+                const body = { userId, action };
+                if (['give', 'take'].includes(action)) body.amount = amount;
+                const resp = await fetch(`/api/guild/${guildId}/economy/adjust`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+                if (!resp.ok) { msgEl.textContent = data.error || 'Failed'; msgEl.style.color = 'var(--red)'; }
+                else {
+                    msgEl.style.color = 'var(--green)';
+                    if (action === 'freeze') msgEl.textContent = 'Account frozen.';
+                    else if (action === 'unfreeze') msgEl.textContent = 'Account unfrozen.';
+                    else if (action === 'reset') msgEl.textContent = 'Balance reset. Wallet: 0, Bank: 0.';
+                    else msgEl.textContent = `Done. New wallet balance: ${(data.balance||0).toLocaleString()}`;
+                    loadEcoHealth();
+                }
+            } catch {
+                msgEl.textContent = 'Request failed';
+                msgEl.style.color = 'var(--red)';
+            } finally {
+                _ecoActionInFlight = false;
+                controls.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = false; });
+                document.querySelectorAll('#eco-tab-health .btn').forEach(b => b.disabled = false);
             }
         }
 
