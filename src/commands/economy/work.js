@@ -35,12 +35,33 @@ const WORK_SCENARIOS = [
 
 // Items that can be found during a work shift (snake_case itemIds match effectsService canonical IDs)
 const LUCKY_FIND_ITEMS = [
-    { itemId: 'lucky_charm',     emoji: '🍀',   label: 'Lucky Charm' },
-    { itemId: 'streak_shield',   emoji: '🔥🛡️', label: 'Streak Shield' },
-    { itemId: 'lifesaver',       emoji: '🛟',   label: 'Lifesaver' },
-    { itemId: 'coin_booster_2x', emoji: '💰🚀', label: '2x Coin Booster' },
-    { itemId: 'xp_booster_2x',  emoji: '⭐🚀', label: '2x XP Booster' },
+    { itemId: 'lucky_charm',      emoji: '🍀',   label: 'Lucky Charm' },
+    { itemId: 'streak_shield',    emoji: '🔥🛡️', label: 'Streak Shield' },
+    { itemId: 'lifesaver',        emoji: '🛟',   label: 'Lifesaver' },
+    { itemId: 'coin_booster_2x',  emoji: '💰🚀', label: '2x Coin Booster' },
+    { itemId: 'xp_booster_2x',   emoji: '⭐🚀', label: '2x XP Booster' },
+    // Work-exclusive drops — only obtainable from shifts
+    { itemId: 'shift_booster',    emoji: '📋',   label: 'Shift Booster',      workExclusive: true },
+    { itemId: 'master_key',       emoji: '🔑',   label: 'Master Key',          workExclusive: true },
+    { itemId: 'career_badge',     emoji: '📛',   label: 'Career Badge',         workExclusive: true },
 ];
+
+// Career track mapping: which track each job family belongs to
+const CAREER_TRACKS = {
+    '🔒 Security':  { jobs: ['guard', 'bouncer', 'officer', 'security'], emoji: '🔒', bonus: '-15% rob success against you (at max level)' },
+    '🏦 Finance':   { jobs: ['banker', 'accountant', 'broker', 'trader', 'analyst'], emoji: '🏦', bonus: '+0.05% bank interest/hr (at max level)' },
+    '🌿 Wilderness':{ jobs: ['ranger', 'forester', 'scout', 'hunter', 'fisher'], emoji: '🌿', bonus: '+10% hunt/fish/mine stamina regen (at max level)' },
+    '🎨 Creative':  { jobs: ['artist', 'designer', 'musician', 'writer', 'streamer'], emoji: '🎨', bonus: 'Unique profile cosmetics (at max level)' },
+    '💻 Tech':      { jobs: ['developer', 'engineer', 'programmer', 'data scientist'], emoji: '💻', bonus: '-20% casino house edge (at max level)' },
+};
+
+function getCareerTrack(jobName) {
+    const lower = jobName.toLowerCase();
+    for (const [trackName, track] of Object.entries(CAREER_TRACKS)) {
+        if (track.jobs.some(j => lower.includes(j))) return { trackName, ...track };
+    }
+    return null;
+}
 
 // Mutually exclusive special events, checked in priority order (rarest first)
 // Returns null or { type, embedField: { name, value } } plus optional coinDelta / item
@@ -115,15 +136,19 @@ module.exports = {
             ]);
 
             const now = Date.now();
-            if (user.lastWork && now - user.lastWork.getTime() < 3600000) {
-                const nextAt = new Date(user.lastWork.getTime() + 3600000);
+            // Streak-based cooldown reduction: 7–29 day streak → 50min, 30+ → 45min
+            const streakDays = user.streak?.current ?? 0;
+            const cooldownMs = streakDays >= 30 ? 45 * 60_000 : streakDays >= 7 ? 50 * 60_000 : 3600_000;
+            if (user.lastWork && now - user.lastWork.getTime() < cooldownMs) {
+                const nextAt = new Date(user.lastWork.getTime() + cooldownMs);
+                const cooldownNote = streakDays >= 30 ? ' · 🔥 45min cooldown (30+ day streak)' : streakDays >= 7 ? ' · 🔥 50min cooldown (7+ day streak)' : '';
                 return interaction.reply({
                     embeds: [buildCooldownEmbed({
                         title: '💼 Still Clocked Out',
                         description: "You're recharging from your last shift.\nRest up — the grind will be there.",
                         color: '#e67e22',
                         nextAt,
-                        nextRewardPreview: 'Next shift: chance at 🔥 Exceptional performance · 💸 Bonus Tip · 🎁 Lucky Find',
+                        nextRewardPreview: `Next shift: chance at 🔥 Exceptional performance · 💸 Bonus Tip · 🎁 Lucky Find${cooldownNote}`,
                     })],
                     ephemeral: true,
                 });
@@ -182,7 +207,7 @@ module.exports = {
                     guildId: interaction.guild.id,
                     $or: [
                         { lastWork: null },
-                        { lastWork: { $lt: new Date(now - 3600000) } }
+                        { lastWork: { $lt: new Date(now - cooldownMs) } }
                     ]
                 },
                 {
@@ -333,6 +358,11 @@ module.exports = {
 
                 if (specialEvent) {
                     workEmbed.addFields(specialEvent.embedField);
+                }
+
+                const careerTrack = getCareerTrack(job.name);
+                if (careerTrack) {
+                    workEmbed.addFields({ name: `${careerTrack.emoji} Career Track: ${careerTrack.trackName}`, value: careerTrack.bonus, inline: false });
                 }
 
                 if (promotedTo && promotedTo.minShifts > 0) {
