@@ -2587,7 +2587,7 @@
     <div class="toast" id="toast"></div>
 
     <!-- Generic confirm modal -->
-    <div id="confirm-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)_confirmResolve(false)">
+    <div id="confirm-modal" class="modal-overlay" style="display:none;" aria-modal="true" aria-hidden="true" role="dialog" onclick="if(event.target===this)_confirmResolve(false)">
         <div class="modal-box" style="max-width:440px;">
             <div class="modal-head"><span id="confirm-modal-title">Confirm</span><button class="modal-close" onclick="_confirmResolve(false)">✕</button></div>
             <div style="padding:1.25rem;">
@@ -3668,6 +3668,16 @@
 
         // ── Styled confirmation modal ────────────────────────────────────────
         var _confirmResolve = null;
+        var _confirmPrevFocus = null;
+        var _confirmTrapHandler = null;
+
+        function _confirmFocusables() {
+            var modal = document.getElementById('confirm-modal');
+            return Array.from(modal.querySelectorAll(
+                'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            )).filter(function(el) { return el.offsetParent !== null; });
+        }
+
         function showConfirm(opts) {
             return new Promise(function(resolve) {
                 var title  = opts.title  || 'Are you sure?';
@@ -3677,7 +3687,7 @@
                 document.getElementById('confirm-modal-title').textContent = title;
                 document.getElementById('confirm-modal-body').textContent  = body;
                 document.getElementById('confirm-modal-ok').textContent    = okText;
-                var typeArea = document.getElementById('confirm-modal-type-reset');
+                var typeArea  = document.getElementById('confirm-modal-type-reset');
                 var typeInput = document.getElementById('confirm-type-input');
                 if (typeRequired) {
                     document.getElementById('confirm-type-label').innerHTML = 'Type <strong>' + escHtml(typeRequired) + '</strong> to confirm';
@@ -3687,7 +3697,32 @@
                 } else {
                     typeArea.style.display = 'none';
                 }
-                document.getElementById('confirm-modal').style.display = 'flex';
+                var modal = document.getElementById('confirm-modal');
+                _confirmPrevFocus = document.activeElement;
+                modal.setAttribute('aria-hidden', 'false');
+                modal.style.display = 'flex';
+
+                // Move focus into dialog
+                setTimeout(function() {
+                    (typeRequired ? typeInput : document.getElementById('confirm-modal-ok')).focus();
+                }, 0);
+
+                // Focus trap
+                if (_confirmTrapHandler) modal.removeEventListener('keydown', _confirmTrapHandler);
+                _confirmTrapHandler = function(e) {
+                    if (e.key === 'Escape') { e.preventDefault(); _confirmResolve(false); return; }
+                    if (e.key !== 'Tab') return;
+                    var focusables = _confirmFocusables();
+                    if (!focusables.length) { e.preventDefault(); return; }
+                    var first = focusables[0], last = focusables[focusables.length - 1];
+                    if (e.shiftKey) {
+                        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+                    } else {
+                        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+                    }
+                };
+                modal.addEventListener('keydown', _confirmTrapHandler);
+
                 _confirmResolve = function(ok) {
                     if (ok && typeRequired && typeInput.value.trim() !== typeRequired) {
                         typeInput.focus();
@@ -3695,7 +3730,13 @@
                         return;
                     }
                     typeInput.style.borderColor = '';
-                    document.getElementById('confirm-modal').style.display = 'none';
+                    modal.removeEventListener('keydown', _confirmTrapHandler);
+                    _confirmTrapHandler = null;
+                    modal.setAttribute('aria-hidden', 'true');
+                    modal.style.display = 'none';
+                    if (_confirmPrevFocus && typeof _confirmPrevFocus.focus === 'function') {
+                        _confirmPrevFocus.focus();
+                    }
                     _confirmResolve = function(){};
                     resolve(ok);
                 };
@@ -5031,9 +5072,13 @@
             const row = document.createElement('div');
             row.className = 'season-tier-row';
             row.style.cssText = 'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap';
-            const roleRef = document.querySelector('#season-tier-rewards-list .season-tier-role');
+            const roleRef = document.querySelector('#season-tier-rewards-list .season-tier-role')
+                         || document.getElementById('level-no-xp-roles-select');
             const roleOptionsHtml = roleRef
-                ? roleRef.innerHTML
+                ? '<option value="">No role</option>' + Array.from(roleRef.options)
+                    .filter(function(o) { return o.value; })
+                    .map(function(o) { return '<option value="' + escHtml(o.value) + '">' + escHtml(o.text) + '</option>'; })
+                    .join('')
                 : '<option value="">No role</option>';
             row.innerHTML =
                 '<input type="number" class="season-tier-num" min="1" style="width:70px" placeholder="Tier">' +
@@ -5280,10 +5325,17 @@
                 }
             }
 
+            // Helper: remove any stale "no data" placeholder from a chart card container
+            function clearChartPlaceholder(container) {
+                var p = container.querySelector('p.chart-no-data');
+                if (p) p.remove();
+            }
+
             // Economy activity chart
             if (_chartEconomy) _chartEconomy.destroy();
             const ctxE = document.getElementById('chart-economy')?.getContext('2d');
             if (ctxE) {
+                clearChartPlaceholder(ctxE.canvas.parentElement);
                 const ecoDaily = a.economyDaily || [];
                 const ecoSlice = ecoDaily.slice(-days);
                 if (ecoSlice.length) {
@@ -5299,7 +5351,7 @@
                         options: _chartDefaults
                     });
                 } else {
-                    ctxE.canvas.parentElement.insertAdjacentHTML('beforeend', '<p style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No economy data yet</p>');
+                    ctxE.canvas.parentElement.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No economy data yet</p>');
                 }
             }
 
@@ -5307,6 +5359,7 @@
             if (_chartLeveling) _chartLeveling.destroy();
             const ctxL = document.getElementById('chart-leveling')?.getContext('2d');
             if (ctxL) {
+                clearChartPlaceholder(ctxL.canvas.parentElement);
                 const xpDaily = a.xpDaily || [];
                 const xpSlice = xpDaily.slice(-days);
                 if (xpSlice.length) {
@@ -5322,14 +5375,15 @@
                         options: { ...JSON.parse(JSON.stringify(_chartDefaults)), scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' }, position: 'left' }, y2: { ticks: { color: '#b8a898' }, position: 'right', grid: { drawOnChartArea: false } } } }
                     });
                 } else {
-                    ctxL.canvas.parentElement.insertAdjacentHTML('beforeend', '<p style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No leveling data yet</p>');
+                    ctxL.canvas.parentElement.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No leveling data yet</p>');
                 }
             }
 
-            // AI requests chart — fetched from /ai/usage
+            // AI requests chart
             if (_chartAiRequests) _chartAiRequests.destroy();
             const ctxAI = document.getElementById('chart-ai-requests')?.getContext('2d');
             if (ctxAI) {
+                clearChartPlaceholder(ctxAI.canvas.parentElement);
                 const aiDaily = a.aiRequestsDaily || [];
                 const aiSlice = aiDaily.slice(-days);
                 if (aiSlice.length) {
@@ -5342,7 +5396,7 @@
                         options: _chartDefaults
                     });
                 } else {
-                    ctxAI.canvas.parentElement.insertAdjacentHTML('beforeend', '<p style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No AI usage data yet</p>');
+                    ctxAI.canvas.parentElement.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No AI usage data yet</p>');
                 }
             }
         }
