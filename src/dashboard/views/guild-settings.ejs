@@ -1775,8 +1775,22 @@
                         <div><label class="field-label" for="season-max-tiers">Max tiers</label><input type="number" id="season-max-tiers" value="<%= settings.season?.maxTiers ?? 50 %>" min="1"></div>
                     </div>
                     <div class="field" style="margin-top:.75rem;">
-                        <label class="field-label" for="season-tier-rewards">Tier rewards <small>— format: <code>tier|coins|roleId|label</code>, one per line (roleId and label optional)</small></label>
-                        <textarea id="season-tier-rewards" rows="6" placeholder="5|100||Bronze Tier&#10;10|250|ROLE_ID|Silver Tier&#10;25|500|ROLE_ID|Gold Tier"><%= (settings.season?.tierRewards || []).map(r => `${r.tier}|${r.coins}|${r.roleId||''}|${r.label||''}`).join('\n') %></textarea>
+                        <label class="field-label">Tier rewards</label>
+                        <div id="season-tier-rewards-list" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.season?.tierRewards || []).forEach(function(r) { %>
+                                <div class="season-tier-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                                    <input type="number" class="season-tier-num" value="<%= r.tier %>" min="1" style="width:70px" placeholder="Tier">
+                                    <input type="number" class="season-tier-coins" value="<%= r.coins %>" min="0" style="width:90px" placeholder="Coins">
+                                    <select class="season-tier-role">
+                                        <option value="">No role</option>
+                                        <% roles.forEach(function(role){ %><option value="<%= role.id %>" <%= r.roleId === role.id ? 'selected' : '' %>>@<%= role.name %></option><% }); %>
+                                    </select>
+                                    <input type="text" class="season-tier-label" value="<%= r.label || '' %>" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)">
+                                    <button class="btn btn-danger" type="button" onclick="this.closest('.season-tier-row').remove()" title="Remove">&times;</button>
+                                </div>
+                            <% }); %>
+                        </div>
+                        <button class="btn" type="button" onclick="addSeasonTierRow()">+ Add tier reward</button>
                     </div>
                     <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('season')">Save changes</button></div>
                 </section>
@@ -2075,8 +2089,27 @@
                     </label>
                     <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Global Exceptions <small style="font-weight:400;color:var(--text-dim)">— these users/roles bypass all rules</small></div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                        <div><label class="field-label" for="cp-exc-users">Exempt user IDs <small>(one per line)</small></label><textarea id="cp-exc-users" rows="3" placeholder="One user ID per line"><%= (settings.commandPolicies?.exceptions?.userIds||[]).join('\n') %></textarea></div>
-                        <div><label class="field-label" for="cp-exc-roles">Exempt role IDs <small>(one per line)</small></label><textarea id="cp-exc-roles" rows="3" placeholder="One role ID per line"><%= (settings.commandPolicies?.exceptions?.roleIds||[]).join('\n') %></textarea></div>
+                        <div>
+                            <label class="field-label">Exempt roles</label>
+                            <div id="cp-exc-roles-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
+                                <% (settings.commandPolicies?.exceptions?.roleIds||[]).forEach(function(rId) {
+                                   var role = roles.find(function(r){ return r.id === rId; });
+                                   if (role) { %>
+                                    <span class="role-tag" data-role-id="<%= rId %>">@<%= role.name %> <button type="button" onclick="this.closest('[data-role-id]').remove()" title="Remove">&times;</button></span>
+                                <% } }); %>
+                            </div>
+                            <div style="display:flex;gap:.5rem;align-items:center">
+                                <select id="cp-exc-roles-select">
+                                    <option value="">Select a role</option>
+                                    <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
+                                </select>
+                                <button class="btn btn-sm" type="button" onclick="addCpExcRole()">Add</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="field-label">Exempt user IDs <small>(one per line)</small></label>
+                            <textarea id="cp-exc-users" rows="3" placeholder="One user ID per line"><%= (settings.commandPolicies?.exceptions?.userIds||[]).join('\n') %></textarea>
+                        </div>
                     </div>
                     <div class="eco-section-head" style="margin-top:1.25rem;">
                         <span style="font-weight:600;font-size:.95rem;">Allow / Deny Rules</span>
@@ -2098,8 +2131,16 @@
                         <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
                             <div class="field"><label class="field-label">Command name</label><input type="text" id="cp-r-command" placeholder="e.g. ban"></div>
                             <div class="field"><label class="field-label">Effect</label><select id="cp-r-effect"><option value="allow">Allow</option><option value="deny">Deny</option></select></div>
-                            <div class="field"><label class="field-label">Role IDs <small>(comma-separated)</small></label><input type="text" id="cp-r-roles" placeholder="Leave blank for all roles"></div>
-                            <div class="field"><label class="field-label">Channel IDs <small>(comma-separated)</small></label><input type="text" id="cp-r-channels" placeholder="Leave blank for all channels"></div>
+                            <div class="field"><label class="field-label">Roles <small>(leave empty for all)</small></label>
+                                <select id="cp-r-roles" multiple size="4" style="height:auto;">
+                                    <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
+                                </select>
+                            </div>
+                            <div class="field"><label class="field-label">Channels <small>(leave empty for all)</small></label>
+                                <select id="cp-r-channels" multiple size="4" style="height:auto;">
+                                    <% channels.forEach(function(ch){ %><option value="<%= ch.id %>">#<%= ch.name %></option><% }); %>
+                                </select>
+                            </div>
                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                                 <div class="field"><label class="field-label">Start hour UTC (0–23)</label><input type="number" id="cp-r-start-hour" min="0" max="23" placeholder="Any"></div>
                                 <div class="field"><label class="field-label">End hour UTC (0–23)</label><input type="number" id="cp-r-end-hour" min="0" max="23" placeholder="Any"></div>
@@ -2115,7 +2156,12 @@
                         <div class="modal-head"><span>Cooldown Override</span><button class="modal-close" onclick="closeCpCooldownModal()">✕</button></div>
                         <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
                             <div class="field"><label class="field-label">Command name</label><input type="text" id="cp-cd-command" placeholder="e.g. daily"></div>
-                            <div class="field"><label class="field-label">Role ID</label><input type="text" id="cp-cd-role" placeholder="Role ID"></div>
+                            <div class="field"><label class="field-label">Role</label>
+                                <select id="cp-cd-role">
+                                    <option value="">Select a role</option>
+                                    <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
+                                </select>
+                            </div>
                             <div class="field"><label class="field-label">Cooldown (seconds)</label><input type="number" id="cp-cd-seconds" min="0" placeholder="0 = no cooldown"></div>
                         </div>
                         <div class="modal-foot"><button class="btn" onclick="closeCpCooldownModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpCooldownModal()">Save</button></div>
@@ -2446,12 +2492,24 @@
                                 <canvas id="chart-member-growth" height="160"></canvas>
                             </div>
                             <div class="analytics-chart-card">
-                                <div class="analytics-chart-title">Command Activity (message proxy)</div>
-                                <canvas id="chart-message-volume" height="160"></canvas>
+                                <div class="analytics-chart-title">Command Activity</div>
+                                <canvas id="chart-command-activity" height="160"></canvas>
                             </div>
                             <div class="analytics-chart-card">
-                                <div class="analytics-chart-title">Retention (%)</div>
+                                <div class="analytics-chart-title">Retention (D7 / D30)</div>
                                 <canvas id="chart-retention" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">Economy Activity</div>
+                                <canvas id="chart-economy" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">XP &amp; Level-ups</div>
+                                <canvas id="chart-leveling" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">AI Requests</div>
+                                <canvas id="chart-ai-requests" height="160"></canvas>
                             </div>
                         </div>
 
@@ -2527,6 +2585,24 @@
 </div><!-- /.dash -->
 
     <div class="toast" id="toast"></div>
+
+    <!-- Generic confirm modal -->
+    <div id="confirm-modal" class="modal-overlay" style="display:none;" aria-modal="true" aria-hidden="true" role="dialog" onclick="if(event.target===this)_confirmResolve(false)">
+        <div class="modal-box" style="max-width:440px;">
+            <div class="modal-head"><span id="confirm-modal-title">Confirm</span><button class="modal-close" onclick="_confirmResolve(false)">✕</button></div>
+            <div style="padding:1.25rem;">
+                <p id="confirm-modal-body" style="margin:0;line-height:1.5"></p>
+                <div id="confirm-modal-type-reset" style="display:none;margin-top:.75rem;">
+                    <label class="field-label" for="confirm-type-input" id="confirm-type-label">Type <strong>RESET</strong> to confirm</label>
+                    <input type="text" id="confirm-type-input" placeholder="RESET" autocomplete="off">
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn" onclick="_confirmResolve(false)">Cancel</button>
+                <button class="btn btn-danger" id="confirm-modal-ok" onclick="_confirmResolve(true)">Confirm</button>
+            </div>
+        </div>
+    </div>
     <datalist id="tz-datalist">
         <option value="UTC">
         <option value="America/New_York">
@@ -2888,8 +2964,9 @@
             renderEscalationLadder();
         }
 
-        function resetEscalationLadder() {
-            if (!confirm('Replace the current ladder with the default 4-step ladder?')) return;
+        async function resetEscalationLadder() {
+            const ok = await showConfirm({ title: 'Reset escalation ladder', body: 'Replace the current ladder with the default 4-step ladder? Your custom steps will be lost.', okText: 'Reset' });
+            if (!ok) return;
             ESCALATION_LADDER = JSON.parse(JSON.stringify(ESCALATION_DEFAULTS));
             renderEscalationLadder();
         }
@@ -3238,11 +3315,12 @@
                     'caseSettings.slaChannelId': document.getElementById('cs-sla-channel').value || null
                 };
             } else if (section === 'season') {
-                const tierText = document.getElementById('season-tier-rewards').value;
-                const tierRewards = tierText.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
-                    const [tier, coins, roleId, ...labelParts] = l.split('|');
-                    return { tier: parseInt(tier, 10), coins: parseInt(coins, 10) || 0, roleId: roleId || null, label: labelParts.join('|') || '' };
-                }).filter(r => !isNaN(r.tier));
+                const tierRewards = Array.from(document.querySelectorAll('#season-tier-rewards-list .season-tier-row')).map(row => ({
+                    tier: parseInt(row.querySelector('.season-tier-num').value, 10),
+                    coins: parseInt(row.querySelector('.season-tier-coins').value, 10) || 0,
+                    roleId: row.querySelector('.season-tier-role').value || null,
+                    label: row.querySelector('.season-tier-label').value.trim()
+                })).filter(r => !isNaN(r.tier) && r.tier > 0).sort((a, b) => a.tier - b.tier);
                 data = {
                     'season.enabled':    document.getElementById('season-enabled').checked,
                     'season.name':       document.getElementById('season-name').value.trim() || 'Season 1',
@@ -3263,12 +3341,13 @@
                     'progressionTracks.helperChannels': helperChannels
                 };
             } else if (section === 'commandpolicies') {
-                const splitIds = id => document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
+                const excRoleIds = Array.from(document.querySelectorAll('#cp-exc-roles-list [data-role-id]')).map(el => el.dataset.roleId);
+                const excUserIds = document.getElementById('cp-exc-users').value.split('\n').map(s => s.trim()).filter(Boolean);
                 data = {
                     'commandPolicies.enabled': document.getElementById('cp-enabled').checked,
                     'commandPolicies.exceptions': {
-                        userIds: splitIds('cp-exc-users'),
-                        roleIds: splitIds('cp-exc-roles')
+                        userIds: excUserIds,
+                        roleIds: excRoleIds
                     },
                     'commandPolicies.rules':            _cpRules,
                     'commandPolicies.cooldownOverrides': _cpCooldowns
@@ -3459,7 +3538,8 @@
         }
 
         async function removeActivityImage(itemId) {
-            if (!confirm('Remove image for this item?')) return;
+            const ok = await showConfirm({ title: 'Remove image', body: 'Remove the image for this activity item?', okText: 'Remove' });
+            if (!ok) return;
             try {
                 var r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'DELETE' });
                 if (r.ok) {
@@ -3482,7 +3562,8 @@
 
         async function triggerDailyNewsNow() {
             const guildId = '<%= guild.id %>';
-            if (!confirm('Send the daily digest right now to the configured channel?')) return;
+            const ok = await showConfirm({ title: 'Send digest now', body: 'Send the daily digest right now to the configured channel?', okText: 'Send' });
+            if (!ok) return;
             try {
                 const response = await fetch(`/api/guild/${guildId}/dailynews/trigger`, { method: 'POST' });
                 if (response.ok) toast('Digest sent ✓', 'success');
@@ -3561,6 +3642,8 @@
         }
 
         async function deleteRssFeed(index) {
+            const ok = await showConfirm({ title: 'Remove RSS feed', body: 'Remove this RSS feed? The bot will stop posting new articles from it.', okText: 'Remove feed' });
+            if (!ok) return;
             const guildId = '<%= guild.id %>';
             try {
                 const response = await fetch(`/api/guild/${guildId}/rss/${index}`, { method: 'DELETE' });
@@ -3583,6 +3666,83 @@
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
+        // ── Styled confirmation modal ────────────────────────────────────────
+        var _confirmResolve = null;
+        var _confirmPrevFocus = null;
+        var _confirmTrapHandler = null;
+
+        function _confirmFocusables() {
+            var modal = document.getElementById('confirm-modal');
+            return Array.from(modal.querySelectorAll(
+                'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            )).filter(function(el) { return el.offsetParent !== null; });
+        }
+
+        function showConfirm(opts) {
+            return new Promise(function(resolve) {
+                var title  = opts.title  || 'Are you sure?';
+                var body   = opts.body   || 'This action cannot be undone.';
+                var okText = opts.okText || 'Confirm';
+                var typeRequired = opts.typeRequired || null;
+                document.getElementById('confirm-modal-title').textContent = title;
+                document.getElementById('confirm-modal-body').textContent  = body;
+                document.getElementById('confirm-modal-ok').textContent    = okText;
+                var typeArea  = document.getElementById('confirm-modal-type-reset');
+                var typeInput = document.getElementById('confirm-type-input');
+                if (typeRequired) {
+                    document.getElementById('confirm-type-label').innerHTML = 'Type <strong>' + escHtml(typeRequired) + '</strong> to confirm';
+                    typeInput.value = '';
+                    typeInput.placeholder = typeRequired;
+                    typeArea.style.display = '';
+                } else {
+                    typeArea.style.display = 'none';
+                }
+                var modal = document.getElementById('confirm-modal');
+                _confirmPrevFocus = document.activeElement;
+                modal.setAttribute('aria-hidden', 'false');
+                modal.style.display = 'flex';
+
+                // Move focus into dialog
+                setTimeout(function() {
+                    (typeRequired ? typeInput : document.getElementById('confirm-modal-ok')).focus();
+                }, 0);
+
+                // Focus trap
+                if (_confirmTrapHandler) modal.removeEventListener('keydown', _confirmTrapHandler);
+                _confirmTrapHandler = function(e) {
+                    if (e.key === 'Escape') { e.preventDefault(); _confirmResolve(false); return; }
+                    if (e.key !== 'Tab') return;
+                    var focusables = _confirmFocusables();
+                    if (!focusables.length) { e.preventDefault(); return; }
+                    var first = focusables[0], last = focusables[focusables.length - 1];
+                    if (e.shiftKey) {
+                        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+                    } else {
+                        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+                    }
+                };
+                modal.addEventListener('keydown', _confirmTrapHandler);
+
+                _confirmResolve = function(ok) {
+                    if (ok && typeRequired && typeInput.value.trim() !== typeRequired) {
+                        typeInput.focus();
+                        typeInput.style.borderColor = 'var(--danger, #e05)';
+                        return;
+                    }
+                    typeInput.style.borderColor = '';
+                    modal.removeEventListener('keydown', _confirmTrapHandler);
+                    _confirmTrapHandler = null;
+                    modal.setAttribute('aria-hidden', 'true');
+                    modal.style.display = 'none';
+                    if (_confirmPrevFocus && typeof _confirmPrevFocus.focus === 'function') {
+                        _confirmPrevFocus.focus();
+                    }
+                    _confirmResolve = function(){};
+                    resolve(ok);
+                };
+            });
+        }
+
         function renderCpRules() {
             var list = document.getElementById('cp-rules-list');
             if (!_cpRules.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;">No rules — click <strong>+ Add rule</strong> to add one.</p>'; return; }
@@ -3594,12 +3754,14 @@
                     '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpRules.splice(' + i + ',1);renderCpRules()">✕</button></div>';
             }).join('');
         }
+        var _cpRoleMap = <%- JSON.stringify(Object.fromEntries((roles||[]).map(r => [r.id, r.name]))).replace(/</g,'\\u003c').replace(/>/g,'\\u003e') %>;
         function renderCpCooldowns() {
             var list = document.getElementById('cp-cooldowns-list');
             if (!_cpCooldowns.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;">No cooldown overrides — click <strong>+ Add override</strong>.</p>'; return; }
             list.innerHTML = _cpCooldowns.map(function(c, i) {
+                var roleName = _cpRoleMap[c.roleId] ? '@' + _cpRoleMap[c.roleId] : escHtml(c.roleId);
                 return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
-                    '<span style="flex:1"><strong>' + escHtml(c.command) + '</strong> — Role <code>' + escHtml(c.roleId) + '</code> → ' + escHtml(c.cooldownSeconds) + 's</span>' +
+                    '<span style="flex:1"><strong>' + escHtml(c.command) + '</strong> — ' + escHtml(roleName) + ' → ' + escHtml(c.cooldownSeconds) + 's</span>' +
                     '<button class="btn btn-sm" onclick="openCpCooldownModal(' + i + ')">Edit</button>' +
                     '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpCooldowns.splice(' + i + ',1);renderCpCooldowns()">✕</button></div>';
             }).join('');
@@ -3610,8 +3772,10 @@
             document.getElementById('cp-rule-modal-title').textContent = idx === -1 ? 'Add Rule' : 'Edit Rule';
             document.getElementById('cp-r-command').value   = r.command || '';
             document.getElementById('cp-r-effect').value    = r.effect || 'allow';
-            document.getElementById('cp-r-roles').value     = (r.roleIds || []).join(', ');
-            document.getElementById('cp-r-channels').value  = (r.channelIds || []).join(', ');
+            var rRoles = r.roleIds || [];
+            Array.from(document.getElementById('cp-r-roles').options).forEach(function(o) { o.selected = rRoles.includes(o.value); });
+            var rChans = r.channelIds || [];
+            Array.from(document.getElementById('cp-r-channels').options).forEach(function(o) { o.selected = rChans.includes(o.value); });
             document.getElementById('cp-r-start-hour').value = r.startHourUtc != null ? r.startHourUtc : '';
             document.getElementById('cp-r-end-hour').value   = r.endHourUtc   != null ? r.endHourUtc   : '';
             document.getElementById('cp-rule-modal').style.display = 'flex';
@@ -3620,14 +3784,13 @@
         function saveCpRuleModal() {
             var cmd = document.getElementById('cp-r-command').value.trim();
             if (!cmd) { toast('Command name is required', 'error'); return; }
-            var splitCsv = function(s) { return s.split(',').map(function(x){return x.trim();}).filter(Boolean); };
             var sh = document.getElementById('cp-r-start-hour').value;
             var eh = document.getElementById('cp-r-end-hour').value;
             var rule = {
                 command: cmd,
                 effect: document.getElementById('cp-r-effect').value,
-                roleIds: splitCsv(document.getElementById('cp-r-roles').value),
-                channelIds: splitCsv(document.getElementById('cp-r-channels').value),
+                roleIds: Array.from(document.getElementById('cp-r-roles').selectedOptions).map(function(o){return o.value;}),
+                channelIds: Array.from(document.getElementById('cp-r-channels').selectedOptions).map(function(o){return o.value;}),
                 startHourUtc: sh !== '' ? parseInt(sh, 10) : null,
                 endHourUtc:   eh !== '' ? parseInt(eh, 10) : null,
                 daysOfWeek: []
@@ -3651,6 +3814,27 @@
             var entry = { command: cmd, roleId: role, cooldownSeconds: parseInt(document.getElementById('cp-cd-seconds').value, 10) || 0 };
             if (_cpCdIdx === -1) _cpCooldowns.push(entry); else _cpCooldowns[_cpCdIdx] = entry;
             closeCpCooldownModal(); renderCpCooldowns();
+        }
+
+        function addCpExcRole() {
+            var sel = document.getElementById('cp-exc-roles-select');
+            var roleId = sel.value;
+            var roleName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : roleId;
+            if (!roleId) return;
+            if (document.querySelector('#cp-exc-roles-list [data-role-id="' + CSS.escape(roleId) + '"]')) { toast('Role already added', 'error'); return; }
+            var list = document.getElementById('cp-exc-roles-list');
+            var tag = document.createElement('span');
+            tag.className = 'role-tag';
+            tag.dataset.roleId = roleId;
+            tag.textContent = roleName + ' ';
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.title = 'Remove';
+            btn.textContent = '×';
+            btn.onclick = function() { tag.remove(); };
+            tag.appendChild(btn);
+            list.appendChild(tag);
+            sel.value = '';
         }
 
         // Initialize CP lists
@@ -3832,8 +4016,9 @@
             renderStoreItems();
         }
 
-        function deleteItem(idx) {
-            if (!confirm('Remove "' + storeItems[idx].name + '" from the store?')) return;
+        async function deleteItem(idx) {
+            const ok = await showConfirm({ title: 'Delete store item', body: 'Remove "' + storeItems[idx].name + '" from the store? This cannot be undone.', okText: 'Delete' });
+            if (!ok) return;
             storeItems.splice(idx, 1);
             renderStoreItems();
         }
@@ -4071,8 +4256,9 @@
             renderCustomAchievements();
         }
 
-        function deleteCustomAch(idx) {
-            if (!confirm('Remove "' + _customAchievements[idx].name + '"?')) return;
+        async function deleteCustomAch(idx) {
+            const ok = await showConfirm({ title: 'Delete achievement', body: 'Remove "' + _customAchievements[idx].name + '"? This cannot be undone.', okText: 'Delete' });
+            if (!ok) return;
             _customAchievements.splice(idx, 1);
             renderCustomAchievements();
         }
@@ -4246,7 +4432,8 @@
         }
 
         async function deleteRrPanel(messageId) {
-            if (!confirm('Delete this reaction role panel? The Discord message will also be deleted.')) return;
+            const ok = await showConfirm({ title: 'Delete reaction role panel', body: 'Delete this panel? The Discord message will also be permanently deleted and all reaction mappings will be removed.', okText: 'Delete panel' });
+            if (!ok) return;
             var guildId = '<%= guild.id %>';
             try {
                 var response = await fetch('/api/guild/' + guildId + '/reactionrole/panel/' + messageId, { method: 'DELETE' });
@@ -4401,7 +4588,8 @@
         }
 
         async function deleteKbEntry(id) {
-            if (!confirm('Remove this knowledge base entry?')) return;
+            const ok = await showConfirm({ title: 'Delete knowledge base entry', body: 'Remove this entry? The AI will no longer have access to this context.', okText: 'Delete' });
+            if (!ok) return;
             var guildId = '<%= guild.id %>';
             try {
                 var resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, { method: 'DELETE' });
@@ -4505,7 +4693,8 @@
         }
 
         async function deleteSummaryJob(jobId) {
-            if (!confirm('Remove this summary job?')) return;
+            const ok = await showConfirm({ title: 'Delete summary job', body: 'Remove this scheduled summary job? It will no longer run.', okText: 'Delete' });
+            if (!ok) return;
             var guildId = '<%= guild.id %>';
             try {
                 var resp = await fetch('/api/guild/' + guildId + '/summary-jobs/' + jobId, { method: 'DELETE' });
@@ -4591,7 +4780,8 @@
         }
 
         async function removePersona(channelId) {
-            if (!confirm('Remove this persona?')) return;
+            const ok = await showConfirm({ title: 'Remove persona', body: 'Remove this channel persona? The AI will revert to the default system prompt for this channel.', okText: 'Remove' });
+            if (!ok) return;
             var guildId = '<%= guild.id %>';
             try {
                 var resp = await fetch('/api/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
@@ -4876,6 +5066,29 @@
             btn.closest('.level-reward-row').remove();
         }
 
+        // ── Season Pass: tier reward row builder ─────────────────────────────
+        function addSeasonTierRow() {
+            const list = document.getElementById('season-tier-rewards-list');
+            const row = document.createElement('div');
+            row.className = 'season-tier-row';
+            row.style.cssText = 'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap';
+            const roleRef = document.querySelector('#season-tier-rewards-list .season-tier-role')
+                         || document.getElementById('level-no-xp-roles-select');
+            const roleOptionsHtml = roleRef
+                ? '<option value="">No role</option>' + Array.from(roleRef.options)
+                    .filter(function(o) { return o.value; })
+                    .map(function(o) { return '<option value="' + escHtml(o.value) + '">' + escHtml(o.text) + '</option>'; })
+                    .join('')
+                : '<option value="">No role</option>';
+            row.innerHTML =
+                '<input type="number" class="season-tier-num" min="1" style="width:70px" placeholder="Tier">' +
+                '<input type="number" class="season-tier-coins" min="0" style="width:90px" placeholder="Coins">' +
+                '<select class="season-tier-role">' + roleOptionsHtml + '</select>' +
+                '<input type="text" class="season-tier-label" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)">' +
+                '<button class="btn btn-danger" type="button" onclick="this.closest(\'.season-tier-row\').remove()" title="Remove">&times;</button>';
+            list.appendChild(row);
+        }
+
         // ── Getting Started checklist ────────────────────────────────────────
         (function initGettingStarted() {
             const guildId = '<%= guild.id %>';
@@ -5009,8 +5222,11 @@
         let _analyticsData = null;
         let _analyticsInsights = null;
         let _chartMemberGrowth = null;
-        let _chartMessageVolume = null;
+        let _chartCommandActivity = null;
         let _chartRetention = null;
+        let _chartEconomy = null;
+        let _chartLeveling = null;
+        let _chartAiRequests = null;
         let _analyticsRange = 7;
 
         function setAnalyticsRange(days, btn) {
@@ -5020,6 +5236,12 @@
             if (_analyticsData) renderAnalyticsCharts(_analyticsData, _analyticsInsights);
         }
 
+        const _chartDefaults = {
+            responsive: true,
+            plugins: { legend: { labels: { color: '#ece4d2', font: { size: 11 } } } },
+            scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' } } }
+        };
+
         function renderAnalyticsCharts(data, insights) {
             const a = data.analytics || {};
             const days = _analyticsRange;
@@ -5027,55 +5249,155 @@
             // Member growth chart
             const growthAll = a.memberGrowth || [];
             const growthSlice = growthAll.slice(-days);
-            const growthLabels = growthSlice.map(d => d.date.slice(5));
             if (_chartMemberGrowth) _chartMemberGrowth.destroy();
             const ctxG = document.getElementById('chart-member-growth')?.getContext('2d');
             if (ctxG) {
                 _chartMemberGrowth = new Chart(ctxG, {
                     type: 'bar',
                     data: {
-                        labels: growthLabels,
+                        labels: growthSlice.map(d => d.date.slice(5)),
                         datasets: [
                             { label: 'Joins', data: growthSlice.map(d => d.joins), backgroundColor: 'rgba(93,138,90,0.7)', borderRadius: 3 },
                             { label: 'Leaves', data: growthSlice.map(d => d.leaves), backgroundColor: 'rgba(185,76,60,0.6)', borderRadius: 3 }
                         ]
                     },
-                    options: { responsive: true, plugins: { legend: { labels: { color: '#ece4d2', font: { size: 11 } } } }, scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' } } } }
+                    options: _chartDefaults
                 });
             }
 
-            // Message volume (command activity proxy)
-            const volAll = a.messageVolume || [];
-            const volSlice = volAll.slice(-days);
-            if (_chartMessageVolume) _chartMessageVolume.destroy();
-            const ctxV = document.getElementById('chart-message-volume')?.getContext('2d');
-            if (ctxV) {
-                _chartMessageVolume = new Chart(ctxV, {
-                    type: 'bar',
-                    data: {
-                        labels: volSlice.map(d => d.date.slice(5)),
-                        datasets: [{ label: 'Commands', data: volSlice.map(d => d.count), backgroundColor: 'rgba(217,119,66,0.7)', borderRadius: 3 }]
-                    },
-                    options: { responsive: true, plugins: { legend: { labels: { color: '#ece4d2', font: { size: 11 } } } }, scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' } } } }
-                });
+            // Command activity chart — real per-command daily counts
+            if (_chartCommandActivity) _chartCommandActivity.destroy();
+            const ctxCA = document.getElementById('chart-command-activity')?.getContext('2d');
+            if (ctxCA) {
+                const cmdDaily = a.commandDaily || [];
+                const cmdSlice = cmdDaily.slice(-days);
+                if (cmdSlice.length) {
+                    _chartCommandActivity = new Chart(ctxCA, {
+                        type: 'bar',
+                        data: {
+                            labels: cmdSlice.map(d => d.date.slice(5)),
+                            datasets: [{ label: 'Commands', data: cmdSlice.map(d => d.count), backgroundColor: 'rgba(217,119,66,0.7)', borderRadius: 3 }]
+                        },
+                        options: _chartDefaults
+                    });
+                } else {
+                    // Fallback: aggregate top commands as horizontal bar
+                    const cmdRows = Object.entries(a.commandUsage || {}).sort((x,y) => y[1].total - x[1].total).slice(0, 8);
+                    _chartCommandActivity = new Chart(ctxCA, {
+                        type: 'bar',
+                        data: {
+                            labels: cmdRows.map(([cmd]) => '/' + cmd),
+                            datasets: [{ label: 'Total runs', data: cmdRows.map(([,m]) => m.total), backgroundColor: 'rgba(217,119,66,0.7)', borderRadius: 3 }]
+                        },
+                        options: { ...JSON.parse(JSON.stringify(_chartDefaults)), indexAxis: 'y', plugins: { legend: { display: false } } }
+                    });
+                }
             }
 
-            // Retention chart (single data-point line — or show as doughnut)
+            // Retention cohort chart (D7/D30 by join month)
             if (_chartRetention) _chartRetention.destroy();
             const ctxR = document.getElementById('chart-retention')?.getContext('2d');
+            const cohorts = insights?.retentionCohorts || [];
             const ret7 = insights?.retention?.retained7Pct || 0;
             const ret30 = insights?.retention?.retained30Pct || 0;
-            const conv7 = insights?.newcomerConversion?.days7?.pct || 0;
-            const conv30 = insights?.newcomerConversion?.days30?.pct || 0;
             if (ctxR) {
-                _chartRetention = new Chart(ctxR, {
-                    type: 'bar',
-                    data: {
-                        labels: ['Retention 7d', 'Retention 30d', 'Conversion 7d', 'Conversion 30d'],
-                        datasets: [{ label: '%', data: [ret7, ret30, conv7, conv30], backgroundColor: ['rgba(93,138,90,0.8)','rgba(93,138,90,0.5)','rgba(217,119,66,0.8)','rgba(217,119,66,0.5)'], borderRadius: 4 }]
-                    },
-                    options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#b8a898' }, max: 100 }, y: { ticks: { color: '#b8a898', font: { size: 11 } } } } }
-                });
+                if (cohorts.length) {
+                    _chartRetention = new Chart(ctxR, {
+                        type: 'bar',
+                        data: {
+                            labels: cohorts.map(c => c.month),
+                            datasets: [
+                                { label: 'D7 %', data: cohorts.map(c => c.d7Pct || 0), backgroundColor: 'rgba(93,138,90,0.8)', borderRadius: 3 },
+                                { label: 'D30 %', data: cohorts.map(c => c.d30Pct || 0), backgroundColor: 'rgba(93,138,90,0.45)', borderRadius: 3 }
+                            ]
+                        },
+                        options: { ...JSON.parse(JSON.stringify(_chartDefaults)), scales: { ...JSON.parse(JSON.stringify(_chartDefaults.scales)), y: { ticks: { color: '#b8a898' }, max: 100 } } }
+                    });
+                } else {
+                    _chartRetention = new Chart(ctxR, {
+                        type: 'bar',
+                        data: {
+                            labels: ['D7 retention', 'D30 retention'],
+                            datasets: [{ label: '%', data: [ret7, ret30], backgroundColor: ['rgba(93,138,90,0.8)', 'rgba(93,138,90,0.5)'], borderRadius: 4 }]
+                        },
+                        options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#b8a898' }, max: 100 }, y: { ticks: { color: '#b8a898', font: { size: 11 } } } } }
+                    });
+                }
+            }
+
+            // Helper: remove any stale "no data" placeholder from a chart card container
+            function clearChartPlaceholder(container) {
+                var p = container.querySelector('p.chart-no-data');
+                if (p) p.remove();
+            }
+
+            // Economy activity chart
+            if (_chartEconomy) _chartEconomy.destroy();
+            const ctxE = document.getElementById('chart-economy')?.getContext('2d');
+            if (ctxE) {
+                clearChartPlaceholder(ctxE.canvas.parentElement);
+                const ecoDaily = a.economyDaily || [];
+                const ecoSlice = ecoDaily.slice(-days);
+                if (ecoSlice.length) {
+                    _chartEconomy = new Chart(ctxE, {
+                        type: 'bar',
+                        data: {
+                            labels: ecoSlice.map(d => d.date.slice(5)),
+                            datasets: [
+                                { label: 'Coins earned', data: ecoSlice.map(d => d.earned || 0), backgroundColor: 'rgba(230,190,80,0.75)', borderRadius: 3 },
+                                { label: 'Coins spent', data: ecoSlice.map(d => d.spent || 0), backgroundColor: 'rgba(185,76,60,0.6)', borderRadius: 3 }
+                            ]
+                        },
+                        options: _chartDefaults
+                    });
+                } else {
+                    ctxE.canvas.parentElement.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No economy data yet</p>');
+                }
+            }
+
+            // Leveling / XP chart
+            if (_chartLeveling) _chartLeveling.destroy();
+            const ctxL = document.getElementById('chart-leveling')?.getContext('2d');
+            if (ctxL) {
+                clearChartPlaceholder(ctxL.canvas.parentElement);
+                const xpDaily = a.xpDaily || [];
+                const xpSlice = xpDaily.slice(-days);
+                if (xpSlice.length) {
+                    _chartLeveling = new Chart(ctxL, {
+                        type: 'bar',
+                        data: {
+                            labels: xpSlice.map(d => d.date.slice(5)),
+                            datasets: [
+                                { label: 'XP awarded', data: xpSlice.map(d => d.xp || 0), backgroundColor: 'rgba(122,167,255,0.7)', borderRadius: 3 },
+                                { label: 'Level-ups', data: xpSlice.map(d => d.levelUps || 0), backgroundColor: 'rgba(168,120,230,0.7)', borderRadius: 3, yAxisID: 'y2' }
+                            ]
+                        },
+                        options: { ...JSON.parse(JSON.stringify(_chartDefaults)), scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' }, position: 'left' }, y2: { ticks: { color: '#b8a898' }, position: 'right', grid: { drawOnChartArea: false } } } }
+                    });
+                } else {
+                    ctxL.canvas.parentElement.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No leveling data yet</p>');
+                }
+            }
+
+            // AI requests chart
+            if (_chartAiRequests) _chartAiRequests.destroy();
+            const ctxAI = document.getElementById('chart-ai-requests')?.getContext('2d');
+            if (ctxAI) {
+                clearChartPlaceholder(ctxAI.canvas.parentElement);
+                const aiDaily = a.aiRequestsDaily || [];
+                const aiSlice = aiDaily.slice(-days);
+                if (aiSlice.length) {
+                    _chartAiRequests = new Chart(ctxAI, {
+                        type: 'line',
+                        data: {
+                            labels: aiSlice.map(d => d.date.slice(5)),
+                            datasets: [{ label: 'AI requests', data: aiSlice.map(d => d.count || 0), borderColor: 'rgba(122,167,255,0.9)', backgroundColor: 'rgba(122,167,255,0.15)', fill: true, tension: 0.3, pointRadius: 2 }]
+                        },
+                        options: _chartDefaults
+                    });
+                } else {
+                    ctxAI.canvas.parentElement.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No AI usage data yet</p>');
+                }
             }
         }
 
@@ -5148,10 +5470,20 @@
                     'welcome': 'welcome', 'moderation': 'moderation', 'auto-moderation': 'moderation',
                     'rss': 'rss', 'economy': 'economy', 'leveling': 'leveling', 'command': 'commandpolicies'
                 };
-                if (!(a.recommendations || []).length) {
-                    recCont.innerHTML = '<p style="opacity:.5">No recommendations right now.</p>';
+                const defaultRecs = [
+                    { text: 'Set up a welcome message to greet new members automatically', tab: 'welcome' },
+                    { text: 'Configure a moderation log channel to track mod actions', tab: 'moderation' },
+                    { text: 'Enable economy to boost member engagement with coins and a shop', tab: 'economy' },
+                    { text: 'Set up leveling to reward active members with roles and XP', tab: 'leveling' },
+                    { text: 'Configure command policies to restrict commands by role or channel', tab: 'commandpolicies' }
+                ];
+                const activeRecs = a.recommendations || [];
+                if (!activeRecs.length) {
+                    for (const r of defaultRecs) {
+                        recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${r.text}</span><a href="#" class="analytics-rec-link" onclick="document.querySelector('.nav-item[data-tab=${r.tab}]')?.click();return false">Configure →</a></div>`);
+                    }
                 } else {
-                    for (const rec of a.recommendations) {
+                    for (const rec of activeRecs) {
                         const navTarget = Object.keys(navMap).find(k => rec.toLowerCase().includes(k));
                         const linkHtml = navTarget ? `<a href="#" class="analytics-rec-link" onclick="document.querySelector('.nav-item[data-tab=${navMap[navTarget]}]')?.click();return false">Configure →</a>` : '';
                         recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${rec}</span>${linkHtml}</div>`);
@@ -5249,7 +5581,8 @@
         }
 
         async function doUnban(userId) {
-            if (!confirm(`Unban user ${userId}?`)) return;
+            const ok = await showConfirm({ title: 'Unban user', body: `Unban user ${userId}? They will be able to rejoin the server.`, okText: 'Unban' });
+            if (!ok) return;
             const guildId = '<%= guild.id %>';
             try {
                 const resp = await fetch(`/api/guild/${guildId}/sanctions/unban/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
@@ -5260,7 +5593,8 @@
         }
 
         async function doRemoveTimeout(userId) {
-            if (!confirm(`Remove timeout for user ${userId}?`)) return;
+            const ok = await showConfirm({ title: 'Remove timeout', body: `Remove the active timeout for user ${userId}?`, okText: 'Remove timeout' });
+            if (!ok) return;
             const guildId = '<%= guild.id %>';
             try {
                 const resp = await fetch(`/api/guild/${guildId}/sanctions/untimeout/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
@@ -5421,7 +5755,10 @@
             const msgEl = document.getElementById('eco-admin-msg');
             if (!userId) { msgEl.textContent = 'Enter a user ID.'; msgEl.style.color = 'var(--red)'; return; }
             if (['give', 'take'].includes(action) && (!amount || amount <= 0)) { msgEl.textContent = 'Enter a valid amount > 0.'; msgEl.style.color = 'var(--red)'; return; }
-            if (action === 'reset' && !confirm(`Reset balance for user ${userId}? This cannot be undone.`)) return;
+            if (action === 'reset') {
+                const ok = await showConfirm({ title: 'Reset balance', body: `This will permanently wipe the wallet and bank balance for user ${userId}. This cannot be undone.`, okText: 'Reset balance', typeRequired: 'RESET' });
+                if (!ok) return;
+            }
 
             _ecoActionInFlight = true;
             const controls = ['eco-admin-user-id', 'eco-admin-amount'];
