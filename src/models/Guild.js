@@ -149,7 +149,7 @@ const guildSchema = new Schema({
     economy: {
         enabled: { type: Boolean, default: true },
         currency: { type: String, default: '💰' },
-        dailyAmount: { type: Number, default: 100 },
+        dailyAmount: { type: Number, default: 2500 },
         workMin: { type: Number, default: 50 },
         workMax: { type: Number, default: 150 },
         shopEnabled: { type: Boolean, default: true },

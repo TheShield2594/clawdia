@@ -27,6 +27,13 @@ const DEFAULT_SHOP_ITEMS = [
     { name: 'Permanent Stamina +1',   itemId: 'permanent_stamina',       rarity: 'Mythic', price: 100000, category: 'prestige', description: '⚡ Permanently increases your max hunt/fish/mine stamina by 1.',     lore: "The grind never ends. At least now you last a little longer." },
     { name: 'Prestige Accelerator',   itemId: 'prestige_accelerator',    rarity: 'Mythic', price: 200000, category: 'prestige', description: '🚀 -20% XP required for your next prestige (one-time use).',         lore: "The shortcut nobody talks about. Until they use it." },
 
+    // ── Endgame Cosmetics (high-value coin sinks, no gameplay advantage) ─────
+    { name: 'Diamond Profile Frame',  itemId: 'diamond_profile_frame',  rarity: 'Mythic', price: 1_000_000,  category: 'endgame', description: '💎 Animated diamond border on your /profile for 30 days.',                    lore: "Cut from something rarer than stone. Harder to earn." },
+    { name: 'Elite Title: Sovereign', itemId: 'title_sovereign',        rarity: 'Mythic', price: 5_000_000,  category: 'endgame', description: '👑 Displays the title "Sovereign" above your name in /profile for 30 days.',  lore: "The servers bow. Briefly. Then they keep grinding." },
+    { name: 'Prestige Aura',          itemId: 'prestige_aura',          rarity: 'Mythic', price: 10_000_000, category: 'endgame', description: '✨ Glowing aura effect on your /profile embed for 30 days.',                   lore: "Not everyone can see it. Everyone can feel it." },
+    { name: 'Grand Master Badge',     itemId: 'grand_master_badge',     rarity: 'Mythic', price: 25_000_000, category: 'endgame', description: '🏅 Permanent Grand Master badge shown on your /profile (no expiry).',          lore: "The number on your balance used to scare you. Now it just fuels you." },
+    { name: 'Apex Legend Title',      itemId: 'title_apex_legend',      rarity: 'Mythic', price: 50_000_000, category: 'endgame', description: '🌟 Displays "Apex Legend" — the rarest title — on your /profile permanently.', lore: "There are Diamond-prestige players. Then there is you." },
+
     // ── Black Market (Prestige I+ only) ──────────────────────────────────────
     { name: 'Phantom Token',          itemId: 'phantom_token',           rarity: 'Mythic', price: 120000, category: 'black_market', description: '👻 Skip the next /rob fine you would owe — undetectable.',         lore: "It wasn't you. It was never you." },
     { name: 'Silvered Talisman',      itemId: 'silvered_talisman',       rarity: 'Mythic', price: 180000, category: 'black_market', description: '🪙 Doubles coin yield from your next 5 hunts, fishes, or mines.',   lore: "Pawned by a stranger. Repurchased by you. The cycle continues." },
@@ -65,6 +72,11 @@ function isBlackMarketItem(itemId) {
     return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'black_market';
 }
 
+// Returns true if the item is in the endgame cosmetics category.
+function isEndgameItem(itemId) {
+    return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'endgame';
+}
+
 // Idempotent: appends any default items missing from the guild's shop and flips
 // the seeded flag so an admin can permanently remove items without them
 // reappearing. Returns true if the shop was modified (caller should save).
@@ -78,7 +90,7 @@ function ensureDefaultShopItems(guildSettings) {
 
     const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
-    const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market']);
+    const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame']);
     let changed = false;
 
     if (!guildSettings.shopDefaultsSeeded) {
@@ -107,4 +119,4 @@ function ensureDefaultShopItems(guildSettings) {
     return changed;
 }
 
-module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, RARITY_ORDER };
+module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, isEndgameItem, RARITY_ORDER };

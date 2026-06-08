@@ -47,7 +47,10 @@ module.exports = {
         statusCooldowns.set(cdKey, Date.now());
         setTimeout(() => statusCooldowns.delete(cdKey), STATUS_COOLDOWN_MS);
 
-        const victim = await User.findOne({ userId: target.id, guildId: interaction.guild.id });
+        const [victim, robber] = await Promise.all([
+            User.findOne({ userId: target.id,           guildId: interaction.guild.id }),
+            User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
+        ]);
 
         const lines = [];
 
@@ -76,10 +79,20 @@ module.exports = {
             }
         }
 
+        const mySuccesses = robber?.successfulRobs ?? 0;
+        const myFails     = robber?.failedRobs     ?? 0;
+        const myTotal     = mySuccesses + myFails;
+        const myRate      = myTotal > 0 ? `${Math.round((mySuccesses / myTotal) * 100)}%` : '—';
+
         const embed = new EmbedBuilder()
             .setColor('#9b59b6')
             .setTitle(`🔍 Rob Status: ${target.username}`)
             .setDescription(lines.join('\n'))
+            .addFields({
+                name: '📊 Your Heist Record',
+                value: `✅ ${mySuccesses} successful · ❌ ${myFails} failed · 🎯 ${myRate} success rate`,
+                inline: false,
+            })
             .setFooter({ text: 'Padlock status is not revealed. Cooldown: 2m' })
             .setTimestamp();
 
