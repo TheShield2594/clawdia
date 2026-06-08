@@ -188,12 +188,17 @@ module.exports = {
     configure: sub => sub
         .addIntegerOption(opt =>
             opt.setName('bet')
-                .setDescription('Amount of coins to bet (10–5,000)')
+                .setDescription('Amount of coins to bet (min 10)')
                 .setMinValue(10)
-                .setMaxValue(5000)
+                .setMaxValue(1_000_000_000)
                 .setRequired(true)),
     async execute(interaction) {
-        const bet = interaction.options.getInteger('bet');
+        const bet           = interaction.options.getInteger('bet');
+        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
+        if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+        }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
         const { shouldProceed: slProceed, alreadyReplied: slReplied } = await confirmBet(interaction, bet, wallet, 'Slots');
