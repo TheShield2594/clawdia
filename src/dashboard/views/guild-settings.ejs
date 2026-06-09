@@ -260,7 +260,7 @@
         <option value="Pacific/Guam">
     </datalist>
 
-    <script>
+    <script nonce="<%= locals.cspNonce %>">
         const DAILY_NEWS_INITIAL_PROFILES = <%- JSON.stringify(settings.dailyNewsProfiles || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
         const DAILY_NEWS_CHANNELS = <%- JSON.stringify(channels || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
         const ESCALATION_DEFAULTS = [

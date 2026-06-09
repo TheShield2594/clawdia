@@ -26,7 +26,9 @@ function isPrivateIp(ip) {
             (a === 100 && b >= 64 && b <= 127) || // RFC 6598 shared address space
             (a === 172 && b >= 16 && b <= 31) ||
             (a === 192 && b === 168) ||
-            (a === 169 && b === 254)              // link-local
+            (a === 169 && b === 254) ||            // link-local
+            (a >= 224 && a <= 239) ||              // multicast 224.0.0.0/4
+            a >= 240                               // reserved/broadcast 240.0.0.0/4 + 255.255.255.255
         );
     }
     if (net.isIPv6(ip)) {
@@ -37,6 +39,7 @@ function isPrivateIp(ip) {
             n.startsWith('fc') ||                  // ULA fc00::/7
             n.startsWith('fd') ||                  // ULA fd00::/8
             /^fe[89ab]/i.test(n) ||                // link-local fe80::/10
+            n.startsWith('ff') ||                  // multicast ff00::/8
             n.startsWith('::ffff:') ||             // IPv4-mapped ::ffff:0:0/96
             n.startsWith('::ffff:0:') ||           // IPv4-translated (RFC 2765)
             n.startsWith('64:ff9b:') ||            // IPv4-IPv6 translation (RFC 6052)
@@ -142,7 +145,9 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
         });
 
         if (result.redirect) {
-            if (!result.redirect) throw new Error('Redirect with empty Location header.');
+            if (typeof result.redirect !== 'string' || !result.redirect.trim()) {
+                throw new Error('Redirect with empty Location header.');
+            }
             current = new URL(result.redirect, current.href);
             continue;
         }
