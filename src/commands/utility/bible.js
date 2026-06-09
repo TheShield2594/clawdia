@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { lookupVerse, getDailyVerse, createVerseEmbed } = require('../../services/bibleService');
+const { lookupVerse, getDailyVerse, createVerseEmbed, createVerseComponents } = require('../../services/bibleService');
 const Guild = require('../../models/Guild');
 
 module.exports = {
@@ -50,7 +50,7 @@ module.exports = {
             }
 
             const embed = createVerseEmbed(verseData);
-            await interaction.editReply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed], components: createVerseComponents(verseData) });
 
         } else if (sub === 'daily') {
             const verseData = await getDailyVerse();
@@ -70,7 +70,7 @@ module.exports = {
             }
 
             const embed = createVerseEmbed(displayVerse, '📖 Daily Bible Verse');
-            await interaction.editReply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed], components: createVerseComponents(displayVerse) });
         }
     }
 };
