@@ -659,6 +659,140 @@ const ACHIEVEMENTS = [
         check: (user) => (user.lifetimeGambled || 0) >= 250_000,
         progress: (user) => [Math.min(user.lifetimeGambled || 0, 250_000), 250_000]
     },
+
+    // ── Exploration ───────────────────────────────────────────────────────────
+    {
+        id: 'first_footsteps',
+        name: 'First Footsteps',
+        description: 'Set out on your first expedition',
+        emoji: '🥾',
+        category: 'exploration',
+        xpReward: 25,
+        coinReward: 100,
+        check: (user) => (user.exploration?.totalExpeditions || 0) >= 1,
+        progress: (user) => [Math.min(user.exploration?.totalExpeditions || 0, 1), 1]
+    },
+    {
+        id: 'wayfarer',
+        name: 'Wayfarer',
+        description: 'Complete 50 expeditions',
+        emoji: '🧭',
+        category: 'exploration',
+        xpReward: 100,
+        coinReward: 750,
+        check: (user) => (user.exploration?.totalExpeditions || 0) >= 50,
+        progress: (user) => [Math.min(user.exploration?.totalExpeditions || 0, 50), 50]
+    },
+    {
+        id: 'no_blank_spaces',
+        name: 'No Blank Spaces',
+        description: 'Complete 250 expeditions',
+        emoji: '🗺️',
+        category: 'exploration',
+        xpReward: 300,
+        coinReward: 4_000,
+        check: (user) => (user.exploration?.totalExpeditions || 0) >= 250,
+        progress: (user) => [Math.min(user.exploration?.totalExpeditions || 0, 250), 250]
+    },
+    {
+        id: 'four_corners',
+        name: 'The Four Corners',
+        description: 'Set foot in all four core regions',
+        emoji: '🌍',
+        category: 'exploration',
+        xpReward: 200,
+        coinReward: 2_000,
+        check: (user) => {
+            const visited = (user.exploration?.regions || []).map(r => r.regionId);
+            return ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks']
+                .every(id => visited.includes(id));
+        },
+        progress: (user) => {
+            const visited = (user.exploration?.regions || []).map(r => r.regionId);
+            const count = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks']
+                .filter(id => visited.includes(id)).length;
+            return [count, 4];
+        }
+    },
+    {
+        id: 'loremonger',
+        name: 'Loremonger',
+        description: 'Collect 10 lore fragments',
+        emoji: '📜',
+        category: 'exploration',
+        xpReward: 150,
+        coinReward: 1_000,
+        check: (user) => (user.exploration?.loreCollected || 0) >= 10,
+        progress: (user) => [Math.min(user.exploration?.loreCollected || 0, 10), 10]
+    },
+    {
+        id: 'relic_runner',
+        name: 'Relic Runner',
+        description: 'Recover 5 relics from the wilds',
+        emoji: '🏺',
+        category: 'exploration',
+        xpReward: 200,
+        coinReward: 1_500,
+        check: (user) => (user.exploration?.relicsRecovered || 0) >= 5,
+        progress: (user) => [Math.min(user.exploration?.relicsRecovered || 0, 5), 5]
+    },
+    {
+        id: 'trap_connoisseur',
+        name: 'Trap Connoisseur',
+        description: 'Spring 10 traps and live to file the expense reports',
+        emoji: '🪤',
+        category: 'exploration',
+        xpReward: 75,
+        coinReward: 500,
+        check: (user) => (user.exploration?.trapsSprung || 0) >= 10,
+        progress: (user) => [Math.min(user.exploration?.trapsSprung || 0, 10), 10]
+    },
+    {
+        id: 'secret_seeker',
+        name: 'Secret Seeker',
+        description: 'Uncover your first secret',
+        emoji: '✨',
+        category: 'exploration',
+        xpReward: 250,
+        coinReward: 2_000,
+        secret: true,
+        check: (user) => (user.exploration?.secretsFound || 0) >= 1,
+        progress: (user) => [Math.min(user.exploration?.secretsFound || 0, 1), 1]
+    },
+    {
+        id: 'keeper_of_secrets',
+        name: 'Keeper of Secrets',
+        description: 'Uncover 8 secrets across the world',
+        emoji: '🗝️',
+        category: 'exploration',
+        xpReward: 500,
+        coinReward: 6_000,
+        check: (user) => (user.exploration?.secretsFound || 0) >= 8,
+        progress: (user) => [Math.min(user.exploration?.secretsFound || 0, 8), 8]
+    },
+    {
+        id: 'the_atlas_complete',
+        name: 'The Atlas Complete',
+        description: 'Uncover all 16 secrets of the four core regions',
+        emoji: '👑',
+        category: 'exploration',
+        xpReward: 1_000,
+        coinReward: 20_000,
+        check: (user) => {
+            const core = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks'];
+            const found = (user.exploration?.regions || [])
+                .filter(r => core.includes(r.regionId))
+                .reduce((sum, r) => sum + (r.secretsFound?.length || 0), 0);
+            return found >= 16;
+        },
+        progress: (user) => {
+            const core = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks'];
+            const found = (user.exploration?.regions || [])
+                .filter(r => core.includes(r.regionId))
+                .reduce((sum, r) => sum + (r.secretsFound?.length || 0), 0);
+            return [Math.min(found, 16), 16];
+        }
+    },
 ];
 
 const CATEGORY_LABELS = {
@@ -666,6 +800,7 @@ const CATEGORY_LABELS = {
     leveling: 'Leveling',
     hunt: 'Hunt',
     fishing: 'Fishing',
+    exploration: 'Exploration',
     community: 'Community',
     moderation: 'Moderation',
     custom: 'Custom'
@@ -676,6 +811,7 @@ const CATEGORY_EMOJIS = {
     leveling: '📈',
     hunt: '🏹',
     fishing: '🎣',
+    exploration: '🧭',
     community: '👥',
     moderation: '🛡️',
     custom: '⚙️'

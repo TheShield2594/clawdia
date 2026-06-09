@@ -735,6 +735,19 @@ const guildSchema = new Schema({
         announceChannelId:     { type: String,  default: null }
     },
 
+    // World Exploration System
+    exploration: {
+        enabled:            { type: Boolean, default: true },
+        // Scales all expedition coin payouts (0.1×–5×)
+        dropRateMultiplier: { type: Number,  default: 1,   min: 0.1, max: 5 },
+        // Shifts event-table weight from quiet/trap rolls toward treasure & secrets (0–0.25)
+        rareEventBonus:     { type: Number,  default: 0,   min: 0,   max: 0.25 },
+        // Region ids switched off by admins (hidden from /explore and the map)
+        disabledRegions:    [{ type: String }],
+        // Broadcast secret discoveries to the economy announcement channel
+        announceSecrets:    { type: Boolean, default: true }
+    },
+
     // Scheduler claim timestamps — prevent duplicate runs across cron restarts
     potwLastRunAt:          { type: Date, default: null },
     bankInterestLastRunAt:  { type: Date, default: null },
