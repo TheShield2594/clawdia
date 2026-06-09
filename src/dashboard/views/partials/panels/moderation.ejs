@@ -189,7 +189,7 @@
                             <span>⚠ Could not load sanctions</span>
                             <button class="btn btn-sm" onclick="loadActiveSanctions()">Retry</button>
                         </div>
-                        <div id="sanctions-empty" style="display:none;opacity:.5;font-size:.9em">No active bans or timeouts found.</div>
+                        <div id="sanctions-empty" style="display:none" class="empty-state"><h3>No active sanctions</h3><p>There are no active bans or timeouts in this server right now.</p></div>
                         <table id="sanctions-table" class="cases-table" style="display:none">
                             <thead><tr><th>User</th><th>Type</th><th>Expires</th><th>Reason</th><th>Actions</th></tr></thead>
                             <tbody id="sanctions-tbody"></tbody>
@@ -231,7 +231,7 @@
                             <span>⚠ Could not load cases</span>
                             <button class="btn btn-sm" onclick="loadCaseHistory(1)">Retry</button>
                         </div>
-                        <div id="cases-empty" style="display:none;opacity:.5;font-size:.9em">No cases found.</div>
+                        <div id="cases-empty" style="display:none" class="empty-state"><h3>No cases found</h3><p>No moderation cases match the current filters.</p></div>
                         <table id="cases-table" class="cases-table" style="display:none">
                             <thead><tr><th>Case #</th><th>User</th><th>Type</th><th>Mod</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
                             <tbody id="cases-tbody"></tbody>

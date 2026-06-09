@@ -1,7 +1,7 @@
                 <section id="suggestions" class="panel">
                     <div class="panel-head">
                         <h2>Suggestions</h2>
-                        <p>Designate a channel where members post suggestions. The bot auto-adds upvote/downvote reactions.</p>
+                        <p>Designate a channel where members post suggestions. The bot auto-adds reactions and supports a full staff review workflow.</p>
                     </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable suggestions</strong></span>
@@ -20,6 +20,50 @@
                         <div><label class="field-label" for="suggestions-upvote">Upvote emoji</label><input type="text" id="suggestions-upvote" value="<%= settings.suggestions?.upvoteEmoji || '👍' %>"></div>
                         <div><label class="field-label" for="suggestions-downvote">Downvote emoji</label><input type="text" id="suggestions-downvote" value="<%= settings.suggestions?.downvoteEmoji || '👎' %>"></div>
                     </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem">
+                        <h3>Staff review</h3>
+                        <p>Let staff discuss suggestions privately before they go public, and update suggestion statuses.</p>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="suggestions-staff-channel">Staff review channel <small style="font-weight:400">(optional)</small></label>
+                        <select id="suggestions-staff-channel">
+                            <option value="">None — skip staff review</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.suggestions?.staffReviewChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>New suggestions are forwarded here for staff discussion before being visible to members.</small>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Auto-create discussion thread</strong><span>Opens a thread on each suggestion for community discussion</span></span>
+                        <span class="switch"><input type="checkbox" id="suggestions-auto-thread" <%= settings.suggestions?.autoThread ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Anonymous submissions</strong><span>Strip author attribution — suggestions post without showing who submitted them</span></span>
+                        <span class="switch"><input type="checkbox" id="suggestions-anonymous" <%= settings.suggestions?.anonymous ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="panel-head" style="margin-top:1.5rem">
+                        <h3>Submission requirements</h3>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="suggestions-min-age">Minimum account age (days)</label>
+                        <input type="number" id="suggestions-min-age" min="0" max="365" value="<%= settings.suggestions?.minAccountAgeDays ?? 0 %>">
+                        <small>Accounts newer than this cannot submit suggestions. Set to 0 to allow all accounts.</small>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem">
+                        <h3>Suggestion statuses</h3>
+                        <p>Configure which emoji staff react with to update a suggestion's status badge.</p>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="sug-status-approve">Approve emoji</label><input type="text" id="sug-status-approve" value="<%= settings.suggestions?.statusEmojis?.approve || '✅' %>"></div>
+                        <div><label class="field-label" for="sug-status-deny">Deny emoji</label><input type="text" id="sug-status-deny" value="<%= settings.suggestions?.statusEmojis?.deny || '❌' %>"></div>
+                        <div><label class="field-label" for="sug-status-review">Under review emoji</label><input type="text" id="sug-status-review" value="<%= settings.suggestions?.statusEmojis?.review || '🔎' %>"></div>
+                        <div><label class="field-label" for="sug-status-implement">Implemented emoji</label><input type="text" id="sug-status-implement" value="<%= settings.suggestions?.statusEmojis?.implement || '🚀' %>"></div>
+                    </div>
+
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('suggestions')">Save changes</button>
                     </div>
