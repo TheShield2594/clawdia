@@ -31,7 +31,7 @@
                                         <div style="margin-top:.4rem;font-size:.78rem;color:var(--text-dim)">Message ID: <%= messageId %></div>
                                     </div>
                                     <div class="store-card-actions">
-                                        <button class="btn btn-sm btn-danger" onclick="deleteRrPanel('<%= messageId %>')">Delete panel</button>
+                                        <button class="btn btn-sm btn-danger" data-message-id="<%= messageId %>" onclick="deleteRrPanel(this.dataset.messageId)">Delete panel</button>
                                     </div>
                                 </div>
                             <% }); %>
@@ -57,7 +57,7 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="rr-description">Embed description <small style="font-weight:400">(optional)</small></label>
-                        <textarea id="rr-description" rows="3" placeholder="Click a reaction below to assign yourself a role."></textarea>
+                        <textarea id="rr-description" rows="3" placeholder="Click a reaction below to assign yourself a role." maxlength="3500"></textarea>
                         <small>The emoji → role list is appended automatically below your description.</small>
                     </div>
                     <div class="field">

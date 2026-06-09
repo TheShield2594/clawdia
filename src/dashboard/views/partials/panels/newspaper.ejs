@@ -21,7 +21,7 @@
                             <label class="field-label" for="newspaper-day">Delivery day</label>
                             <select id="newspaper-day">
                                 <% ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].forEach((d, i) => { %>
-                                <option value="<%= i %>" <%= (settings.newspaper?.deliveryDay ?? 1) == i ? 'selected' : '' %>><%= d %></option>
+                                <option value="<%= i %>" <%= (settings.newspaper?.deliveryDay ?? 1) === i ? 'selected' : '' %>><%= d %></option>
                                 <% }); %>
                             </select>
                         </div>

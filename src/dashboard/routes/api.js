@@ -1705,7 +1705,7 @@ router.get('/guild/:guildId/leveling/leaderboard', checkAuth, checkGuildAccess, 
     const skip = (page - 1) * limit;
     try {
         const [users, total] = await Promise.all([
-            User.find({ guildId }).sort({ level: -1, xp: -1 }).skip(skip).limit(limit).select('userId level xp messages'),
+            User.find({ guildId, $or: [{ level: { $gt: 0 } }, { xp: { $gt: 0 } }] }).sort({ level: -1, xp: -1 }).skip(skip).limit(limit).select('userId level xp messages'),
             User.countDocuments({ guildId, $or: [{ level: { $gt: 0 } }, { xp: { $gt: 0 } }] })
         ]);
         res.json({
@@ -1729,8 +1729,14 @@ router.post('/guild/:guildId/leveling/adjust', checkAuth, checkGuildAccess, chec
     }
     if (['give', 'take', 'set_level'].includes(action)) {
         const amt = Number(amount);
-        if (!Number.isFinite(amt) || amt < 0 || !Number.isInteger(amt)) {
-            return res.status(400).json({ error: 'amount must be a non-negative integer' });
+        if (!Number.isFinite(amt) || !Number.isInteger(amt)) {
+            return res.status(400).json({ error: 'amount must be an integer' });
+        }
+        if (['give', 'take'].includes(action) && amt <= 0) {
+            return res.status(400).json({ error: 'amount must be positive for give/take' });
+        }
+        if (action === 'set_level' && amt < 0) {
+            return res.status(400).json({ error: 'level cannot be negative' });
         }
     }
     try {
@@ -1761,12 +1767,15 @@ router.post('/guild/:guildId/leveling/xp-event', checkAuth, checkGuildAccess, ch
     if (!Number.isFinite(mult) || mult < 1.1 || mult > 10) return res.status(400).json({ error: 'multiplier must be between 1.1 and 10' });
     if (!Number.isFinite(hours) || hours < 1 || hours > 168) return res.status(400).json({ error: 'durationHours must be between 1 and 168' });
     try {
+        const existing = await Guild.findOne({ guildId }).select('leveling.xpBoostEvent').lean();
+        const existingEvent = existing?.leveling?.xpBoostEvent;
+        const isActive = existingEvent?.multiplier && existingEvent?.endTime && new Date(existingEvent.endTime).getTime() > Date.now();
         const startTime = new Date();
         const endTime = new Date(startTime.getTime() + hours * 3600 * 1000);
         await Guild.findOneAndUpdate({ guildId }, {
             $set: { 'leveling.xpBoostEvent.multiplier': mult, 'leveling.xpBoostEvent.startTime': startTime, 'leveling.xpBoostEvent.endTime': endTime }
         }, { upsert: true });
-        res.json({ success: true, multiplier: mult, startTime, endTime });
+        res.json({ success: true, multiplier: mult, startTime, endTime, replacedActive: !!isActive });
     } catch (err) {
         console.error('XP event error:', err);
         res.status(500).json({ error: 'Internal server error' });
