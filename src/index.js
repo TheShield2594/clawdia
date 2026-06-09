@@ -75,8 +75,8 @@ async function loadEvents() {
 }
 
 async function connectDatabase() {
-    // M6: Mask credentials in log output so the URI never appears in log files.
-    const maskedUri = (process.env.MONGODB_URI || '').replace(/:[^:@]*@/, ':***@');
+    // M6: Mask the entire userinfo section (username:password) in log output.
+    const maskedUri = (process.env.MONGODB_URI || '').replace(/\/\/[^@]*@/, '//***@');
     try {
         await connect(process.env.MONGODB_URI, {
             serverSelectionTimeoutMS: 10000,

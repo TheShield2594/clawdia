@@ -12,4 +12,16 @@ const auditLogSchema = new Schema({
 
 auditLogSchema.index({ guildId: 1, createdAt: -1 });
 
+// TTL: automatically expire records that carry PII (ip address) after a
+// configurable retention period. Records without an ip field (those that don't
+// originate from an HTTP request) are unaffected by this index.
+const retentionDays = Math.max(1, parseInt(process.env.AUDIT_LOG_RETENTION_DAYS || '90', 10));
+auditLogSchema.index(
+    { createdAt: 1 },
+    {
+        expireAfterSeconds: retentionDays * 24 * 60 * 60,
+        partialFilterExpression: { ip: { $type: 'string' } },
+    }
+);
+
 module.exports = model('AuditLog', auditLogSchema);

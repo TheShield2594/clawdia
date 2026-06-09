@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
@@ -18,11 +19,12 @@ function resolveDashboardUrl() {
     } catch {
         throw new Error(`[DASHBOARD] DASHBOARD_URL is not a valid URL: "${raw}"`);
     }
-    // M5: Enforce HTTPS in production; non-HTTPS OAuth callbacks are rejected by Discord.
+    // M5: Enforce HTTPS in production unconditionally — localhost is not exempt
+    // because production deployments should never be reached via localhost.
     const isProduction = process.env.NODE_ENV === 'production';
-    if (parsed.hostname !== 'localhost' && parsed.protocol !== 'https:') {
+    if (parsed.protocol !== 'https:') {
         if (isProduction) {
-            throw new Error(`[DASHBOARD] DASHBOARD_URL must use HTTPS in production. Got: "${raw}". Generate a valid URL or set NODE_ENV=development for local testing.`);
+            throw new Error(`[DASHBOARD] DASHBOARD_URL must use HTTPS in production. Got: "${raw}". Set NODE_ENV=development for local testing.`);
         }
         console.warn(`[DASHBOARD] WARNING: DASHBOARD_URL "${raw}" is not HTTPS. Discord OAuth will reject non-HTTPS redirect URIs in production.`);
     }
@@ -86,14 +88,21 @@ function start(client) {
     if (isProduction) app.set('trust proxy', 1);
 
     // L3: Baseline security response headers for all routes.
+    // A fresh nonce is generated per request and made available to EJS templates
+    // via res.locals.cspNonce so inline <script> tags can opt in safely.
+    // Note: style-src retains 'unsafe-inline' because the templates contain ~400
+    // inline style="" attributes which cannot accept nonces (nonces only apply to
+    // <style> blocks). Removing it requires a separate CSS refactor.
     app.use((req, res, next) => {
+        const nonce = crypto.randomBytes(16).toString('base64');
+        res.locals.cspNonce = nonce;
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('X-Frame-Options', 'DENY');
         res.setHeader('X-XSS-Protection', '1; mode=block');
         res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
         res.setHeader('Content-Security-Policy', [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline'",
+            `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net`,
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: https: cdn.discordapp.com",
             "connect-src 'self'",
