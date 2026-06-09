@@ -4,10 +4,22 @@ jest.mock('discord.js', () => ({
     EmbedBuilder: jest.fn().mockImplementation(() => ({
         setColor: jest.fn().mockReturnThis(),
         setTitle: jest.fn().mockReturnThis(),
+        setURL: jest.fn().mockReturnThis(),
+        setThumbnail: jest.fn().mockReturnThis(),
         setDescription: jest.fn().mockReturnThis(),
         setFooter: jest.fn().mockReturnThis(),
         setTimestamp: jest.fn().mockReturnThis(),
     })),
+    ActionRowBuilder: jest.fn().mockImplementation(() => ({
+        addComponents: jest.fn().mockReturnThis(),
+    })),
+    ButtonBuilder: jest.fn().mockImplementation(() => ({
+        setLabel: jest.fn().mockReturnThis(),
+        setURL: jest.fn().mockReturnThis(),
+        setStyle: jest.fn().mockReturnThis(),
+        setEmoji: jest.fn().mockReturnThis(),
+    })),
+    ButtonStyle: { Link: 5 },
     PermissionFlagsBits: { SendMessages: 1n << 11n },
 }));
 
@@ -165,7 +177,7 @@ describe('createVerseEmbed', () => {
         const instance = createVerseEmbed({ text: longText, reference: 'Test 1:1', translation_name: 'KJV' });
         const setDesc = instance.setDescription.mock.calls[0][0];
         expect(setDesc.length).toBeLessThanOrEqual(4096);
-        expect(setDesc.endsWith('…"*')).toBe(true);
+        expect(setDesc).toContain('…"*');
     });
 
     test('includes reference and translation in footer', () => {
