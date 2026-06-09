@@ -44,63 +44,70 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg>
         </a>
 
+        <!-- Sidebar search -->
+        <div class="dash-nav-search-wrap">
+            <svg class="dash-nav-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search" id="sidebar-search" class="dash-nav-search" placeholder="Search sections… (/ or Ctrl+K)" autocomplete="off" aria-label="Filter dashboard sections">
+        </div>
+        <div id="sidebar-no-results" style="display:none;font-size:.8rem;color:var(--ink-500);padding:6px 8px;">No sections match</div>
+
         <!-- Configure -->
         <div class="dash-nav-label">// Configure</div>
         <ul class="dash-nav">
-            <li class="nav-item active" data-tab="overview"><span class="nav-emoji" aria-hidden="true">📊</span><span>Overview</span></li>
-            <li class="nav-item" data-tab="welcome"><span class="nav-emoji" aria-hidden="true">👋</span><span>Welcome</span></li>
-            <li class="nav-item" data-tab="farewell"><span class="nav-emoji" aria-hidden="true">🚪</span><span>Farewell</span></li>
-            <li class="nav-item" data-tab="leveling"><span class="nav-emoji" aria-hidden="true">📈</span><span>Leveling</span></li>
-            <li class="nav-item" data-tab="economy"><span class="nav-emoji" aria-hidden="true">💰</span><span>Economy</span></li>
-            <li class="nav-item" data-tab="birthdays"><span class="nav-emoji">🎂</span><span>Birthdays</span></li>
+            <li class="nav-item active" data-tab="overview" data-keywords="stats kpis dashboard home"><span class="nav-emoji" aria-hidden="true">📊</span><span>Overview</span></li>
+            <li class="nav-item" data-tab="welcome" data-keywords="join greet card dm autorole message"><span class="nav-emoji" aria-hidden="true">👋</span><span>Welcome</span></li>
+            <li class="nav-item" data-tab="farewell" data-keywords="leave goodbye departure"><span class="nav-emoji" aria-hidden="true">🚪</span><span>Farewell</span></li>
+            <li class="nav-item" data-tab="leveling" data-keywords="xp level rank points progression"><span class="nav-emoji" aria-hidden="true">📈</span><span>Leveling</span></li>
+            <li class="nav-item" data-tab="economy" data-keywords="coins currency shop store jobs work daily"><span class="nav-emoji" aria-hidden="true">💰</span><span>Economy</span></li>
+            <li class="nav-item" data-tab="birthdays" data-keywords="birthday celebration age"><span class="nav-emoji">🎂</span><span>Birthdays</span></li>
         </ul>
 
         <!-- Moderation -->
         <div class="dash-nav-label">// Moderation</div>
         <ul class="dash-nav">
-            <li class="nav-item" data-tab="moderation"><span class="nav-emoji" aria-hidden="true">🛡️</span><span>Moderation</span></li>
-            <li class="nav-item" data-tab="raiddetection"><span class="nav-emoji">🚨</span><span>Raid Detection</span></li>
-            <li class="nav-item" data-tab="antinuke"><span class="nav-emoji" aria-hidden="true">🔒</span><span>Anti-Nuke</span></li>
+            <li class="nav-item" data-tab="moderation" data-keywords="ban kick mute warn automod spam filter profanity caps"><span class="nav-emoji" aria-hidden="true">🛡️</span><span>Moderation</span></li>
+            <li class="nav-item" data-tab="raiddetection" data-keywords="raid bot attack lockdown"><span class="nav-emoji">🚨</span><span>Raid Detection</span></li>
+            <li class="nav-item" data-tab="antinuke" data-keywords="nuke protect security whitelist threshold"><span class="nav-emoji" aria-hidden="true">🔒</span><span>Anti-Nuke</span></li>
         </ul>
 
         <!-- Progression -->
         <div class="dash-nav-label">// Progression</div>
         <ul class="dash-nav">
-            <li class="nav-item" data-tab="achievements"><span class="nav-emoji">🏅</span><span>Achievements</span></li>
-            <li class="nav-item" data-tab="quests"><span class="nav-emoji">🗺️</span><span>Quests</span></li>
-            <li class="nav-item" data-tab="season"><span class="nav-emoji">🏆</span><span>Season Pass</span></li>
-            <li class="nav-item" data-tab="progressiontracks"><span class="nav-emoji">🧭</span><span>Progression Tracks</span></li>
+            <li class="nav-item" data-tab="achievements" data-keywords="badge milestone unlock reward"><span class="nav-emoji">🏅</span><span>Achievements</span></li>
+            <li class="nav-item" data-tab="quests" data-keywords="task challenge daily weekly mission"><span class="nav-emoji">🗺️</span><span>Quests</span></li>
+            <li class="nav-item" data-tab="season" data-keywords="seasonal pass battle tier"><span class="nav-emoji">🏆</span><span>Season Pass</span></li>
+            <li class="nav-item" data-tab="progressiontracks" data-keywords="track creator helper raider bonus xp multiplier"><span class="nav-emoji">🧭</span><span>Progression Tracks</span></li>
         </ul>
 
         <!-- Community -->
         <div class="dash-nav-label">// Community</div>
         <ul class="dash-nav">
-            <li class="nav-item" data-tab="starboard"><span class="nav-emoji">⭐</span><span>Starboard</span></li>
-            <li class="nav-item" data-tab="suggestions"><span class="nav-emoji">💡</span><span>Suggestions</span></li>
-            <li class="nav-item" data-tab="reactionroles"><span class="nav-emoji">🎭</span><span>Reaction Roles</span></li>
+            <li class="nav-item" data-tab="starboard" data-keywords="star highlight pin featured"><span class="nav-emoji">⭐</span><span>Starboard</span></li>
+            <li class="nav-item" data-tab="suggestions" data-keywords="ideas feedback vote upvote downvote approve staff anonymous"><span class="nav-emoji">💡</span><span>Suggestions</span></li>
+            <li class="nav-item" data-tab="reactionroles" data-keywords="self assign emoji role react"><span class="nav-emoji">🎭</span><span>Reaction Roles</span></li>
         </ul>
 
         <!-- Tools -->
         <div class="dash-nav-label">// Tools</div>
         <ul class="dash-nav">
-            <li class="nav-item" data-tab="commandpolicies"><span class="nav-emoji" aria-hidden="true">⚙️</span><span>Command Policies</span></li>
-            <li class="nav-item" data-tab="ai"><span class="nav-emoji" aria-hidden="true">🤖</span><span>AI Chat</span></li>
-            <li class="nav-item" data-tab="tempvoice"><span class="nav-emoji">🔊</span><span>Temp Voice</span></li>
+            <li class="nav-item" data-tab="commandpolicies" data-keywords="permissions restrict cooldown command disable"><span class="nav-emoji" aria-hidden="true">⚙️</span><span>Command Policies</span></li>
+            <li class="nav-item" data-tab="ai" data-keywords="chatbot gpt openai knowledge persona summary"><span class="nav-emoji" aria-hidden="true">🤖</span><span>AI Chat</span></li>
+            <li class="nav-item" data-tab="tempvoice" data-keywords="voice channel temporary dynamic create"><span class="nav-emoji">🔊</span><span>Temp Voice</span></li>
         </ul>
 
         <!-- Feeds & Automation -->
         <div class="dash-nav-label">// Feeds &amp; Automation</div>
         <ul class="dash-nav">
-            <li class="nav-item" data-tab="newspaper"><span class="nav-emoji">📰</span><span>Newspaper</span></li>
-            <li class="nav-item" data-tab="bibleverses"><span class="nav-emoji">📖</span><span>Bible Verses</span></li>
-            <li class="nav-item" data-tab="rss"><span class="nav-emoji" aria-hidden="true">📡</span><span>RSS Feeds</span></li>
+            <li class="nav-item" data-tab="newspaper" data-keywords="news daily digest article ai"><span class="nav-emoji">📰</span><span>Newspaper</span></li>
+            <li class="nav-item" data-tab="bibleverses" data-keywords="bible verse scripture daily scripture"><span class="nav-emoji">📖</span><span>Bible Verses</span></li>
+            <li class="nav-item" data-tab="rss" data-keywords="feed rss atom url news blog"><span class="nav-emoji" aria-hidden="true">📡</span><span>RSS Feeds</span></li>
         </ul>
 
         <!-- Insights -->
         <div class="dash-nav-label">// Insights</div>
         <ul class="dash-nav">
-            <li class="nav-item" data-tab="analytics"><span class="nav-emoji" aria-hidden="true">📊</span><span>Analytics</span></li>
-            <li class="nav-item" data-tab="eventlog"><span class="nav-emoji">📋</span><span>Event Log</span></li>
+            <li class="nav-item" data-tab="analytics" data-keywords="stats graphs reports activity commands usage"><span class="nav-emoji" aria-hidden="true">📊</span><span>Analytics</span></li>
+            <li class="nav-item" data-tab="eventlog" data-keywords="log audit events voice messages members server"><span class="nav-emoji">📋</span><span>Event Log</span></li>
         </ul>
 
         <!-- User footer -->
@@ -389,6 +396,84 @@
             } else {
                 const target = document.querySelector(`.nav-item[data-tab="${hash}"]`);
                 if (target) target.click();
+            }
+        }
+
+        // ── Sidebar search ────────────────────────────────────────────────────
+        (function() {
+            const search = document.getElementById('sidebar-search');
+            if (!search) return;
+            const sp = new URLSearchParams(location.search);
+            if (sp.get('search')) { search.value = sp.get('search'); filterSidebarNav(sp.get('search')); }
+            search.addEventListener('input', () => filterSidebarNav(search.value));
+            search.addEventListener('keydown', e => { if (e.key === 'Escape') { search.value = ''; filterSidebarNav(''); search.blur(); } });
+            document.addEventListener('keydown', e => {
+                const active = document.activeElement;
+                const inField = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT');
+                if ((e.ctrlKey && e.key === 'k') || (!e.ctrlKey && !e.metaKey && !e.altKey && !inField && e.key === '/')) {
+                    e.preventDefault();
+                    search.focus();
+                    search.select();
+                }
+            });
+        })();
+
+        function filterSidebarNav(query) {
+            const q = (query || '').trim().toLowerCase();
+            const sp = new URLSearchParams(location.search);
+            if (q) sp.set('search', q); else sp.delete('search');
+            if (history.replaceState) {
+                const qs = sp.toString();
+                history.replaceState(null, '', qs ? '?' + qs + location.hash : location.pathname + location.hash);
+            }
+            const labels = document.querySelectorAll('.dash-nav-label');
+            const noResults = document.getElementById('sidebar-no-results');
+            if (!q) {
+                document.querySelectorAll('.dash-nav li').forEach(li => li.style.display = '');
+                labels.forEach(l => l.style.display = '');
+                if (noResults) noResults.style.display = 'none';
+                return;
+            }
+            let anyVisible = false;
+            labels.forEach(label => {
+                const navList = label.nextElementSibling;
+                if (!navList) return;
+                let groupVisible = false;
+                navList.querySelectorAll('li').forEach(li => {
+                    const text = li.textContent.toLowerCase();
+                    const keywords = (li.dataset.keywords || '').toLowerCase();
+                    const matches = text.includes(q) || keywords.includes(q);
+                    li.style.display = matches ? '' : 'none';
+                    if (matches) { groupVisible = true; anyVisible = true; }
+                });
+                label.style.display = groupVisible ? '' : 'none';
+            });
+            if (noResults) noResults.style.display = anyVisible ? 'none' : '';
+        }
+
+        // ── Welcome card preview ──────────────────────────────────────────────
+        async function sendWelcomeCardPreview() {
+            const btn = document.getElementById('welcome-preview-btn');
+            const guildId = '<%= guild.id %>';
+            const channelId = document.getElementById('welcome-channel').value;
+            if (!channelId) { toast('Select a welcome channel first', 'error'); return; }
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            try {
+                const resp = await fetch(`/api/guild/${guildId}/welcome/preview`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channelId })
+                });
+                if (resp.ok) {
+                    toast('Preview sent to channel ✓', 'success');
+                } else {
+                    const d = await resp.json().catch(() => ({}));
+                    toast(d.error || 'Failed to send preview', 'error');
+                }
+            } catch { toast('Network error', 'error'); } finally {
+                btn.disabled = false;
+                btn.textContent = 'Send card preview to channel';
             }
         }
 
@@ -837,10 +922,29 @@
                     'eventLog.channelId': document.getElementById('eventlog-channel').value || null,
                     'eventLog.logMessageEdit': document.getElementById('log-msg-edit').checked,
                     'eventLog.logMessageDelete': document.getElementById('log-msg-delete').checked,
+                    'eventLog.logMessageBulkDelete': document.getElementById('log-msg-bulk-delete').checked,
                     'eventLog.logMemberJoin': document.getElementById('log-member-join').checked,
                     'eventLog.logMemberLeave': document.getElementById('log-member-leave').checked,
+                    'eventLog.logNicknameChange': document.getElementById('log-nickname-change').checked,
+                    'eventLog.logUsernameChange': document.getElementById('log-username-change').checked,
+                    'eventLog.logAvatarChange': document.getElementById('log-avatar-change').checked,
+                    'eventLog.logTimeout': document.getElementById('log-timeout').checked,
+                    'eventLog.logBoost': document.getElementById('log-boost').checked,
                     'eventLog.logRoleChanges': document.getElementById('log-role-changes').checked,
-                    'eventLog.logChannelChanges': document.getElementById('log-channel-changes').checked
+                    'eventLog.logChannelChanges': document.getElementById('log-channel-changes').checked,
+                    'eventLog.logVoiceJoin': document.getElementById('log-voice-join').checked,
+                    'eventLog.logVoiceLeave': document.getElementById('log-voice-leave').checked,
+                    'eventLog.logVoiceMove': document.getElementById('log-voice-move').checked,
+                    'eventLog.logVoiceMuteDeafen': document.getElementById('log-voice-mute').checked,
+                    'eventLog.logInviteCreate': document.getElementById('log-invite-create').checked,
+                    'eventLog.logInviteDelete': document.getElementById('log-invite-delete').checked,
+                    'eventLog.logServerUpdate': document.getElementById('log-server-update').checked,
+                    'eventLog.logEmojiUpdate': document.getElementById('log-emoji-update').checked,
+                    'eventLog.logWebhookUpdate': document.getElementById('log-webhook-update').checked,
+                    'eventLog.logBotAdd': document.getElementById('log-bot-add').checked,
+                    'eventLog.logThreadCreate': document.getElementById('log-thread-create').checked,
+                    'eventLog.logThreadDelete': document.getElementById('log-thread-delete').checked,
+                    'eventLog.logThreadArchive': document.getElementById('log-thread-archive').checked
                 };
             } else if (section === 'quests') {
                 const safeReward = (id, fallback) => { const v = parseInt(document.getElementById(id).value, 10); return Number.isFinite(v) ? v : fallback; };
@@ -860,7 +964,15 @@
                     'suggestions.enabled': document.getElementById('suggestions-enabled').checked,
                     'suggestions.channelId': document.getElementById('suggestions-channel').value || null,
                     'suggestions.upvoteEmoji': document.getElementById('suggestions-upvote').value || '👍',
-                    'suggestions.downvoteEmoji': document.getElementById('suggestions-downvote').value || '👎'
+                    'suggestions.downvoteEmoji': document.getElementById('suggestions-downvote').value || '👎',
+                    'suggestions.staffReviewChannelId': document.getElementById('suggestions-staff-channel').value || null,
+                    'suggestions.autoThread': document.getElementById('suggestions-auto-thread').checked,
+                    'suggestions.anonymous': document.getElementById('suggestions-anonymous').checked,
+                    'suggestions.minAccountAgeDays': parseInt(document.getElementById('suggestions-min-age').value, 10) || 0,
+                    'suggestions.statusEmojis.approve': document.getElementById('sug-status-approve').value || '✅',
+                    'suggestions.statusEmojis.deny': document.getElementById('sug-status-deny').value || '❌',
+                    'suggestions.statusEmojis.review': document.getElementById('sug-status-review').value || '🔎',
+                    'suggestions.statusEmojis.implement': document.getElementById('sug-status-implement').value || '🚀'
                 };
             } else if (section === 'antinuke') {
                 const splitIds = id => document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
@@ -1445,7 +1557,7 @@
         function renderStoreItems() {
             var grid = document.getElementById('store-items-grid');
             if (!storeItems.length) {
-                grid.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;padding:.25rem 0">No items yet — click <strong>+ Add item</strong> to get started.</p>';
+                grid.innerHTML = '<div class="empty-state"><h3>No store items yet</h3><p>Click <strong>+ Add item</strong> to create your first shop listing.</p></div>';
                 return;
             }
             grid.innerHTML = storeItems.map(function(item, i) {
@@ -3442,6 +3554,7 @@
             const guildId = '<%= guild.id %>';
             document.getElementById('eco-top-earners-loading').style.display = '';
             document.getElementById('eco-top-earners-error').style.display = 'none';
+            document.getElementById('eco-top-earners-empty').style.display = 'none';
             document.getElementById('eco-top-earners-table').style.display = 'none';
             try {
                 const resp = await fetch(`/api/guild/${guildId}/economy/stats`);
@@ -3450,16 +3563,21 @@
                 document.getElementById('eco-stat-total-coins').textContent = (stats.totalCoins || 0).toLocaleString();
                 document.getElementById('eco-stat-active-users').textContent = (stats.activeUsers || 0).toLocaleString();
                 document.getElementById('eco-top-earners-loading').style.display = 'none';
+                const topEarners = stats.topEarners || [];
+                if (!topEarners.length) {
+                    document.getElementById('eco-top-earners-empty').style.display = '';
+                } else {
+                    document.getElementById('eco-top-earners-table').style.display = '';
+                }
                 const tbody = document.getElementById('eco-top-earners-tbody');
                 tbody.innerHTML = '';
-                for (let i = 0; i < (stats.topEarners || []).length; i++) {
-                    const u = stats.topEarners[i];
+                for (let i = 0; i < topEarners.length; i++) {
+                    const u = topEarners[i];
                     const userCell = u.userTag
                         ? `<span title="${escHtml(u.userId)}">${u.avatarUrl ? `<img src="${escHtml(u.avatarUrl)}" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(u.userTag)}</span>`
                         : `<span style="font-size:.8em">${escHtml(u.userId)}</span>`;
                     tbody.insertAdjacentHTML('beforeend', `<tr><td>#${i+1}</td><td>${userCell}</td><td>${(u.balance||0).toLocaleString()}</td><td>${(u.bank||0).toLocaleString()}</td><td>${(u.total||0).toLocaleString()}</td></tr>`);
                 }
-                document.getElementById('eco-top-earners-table').style.display = '';
                 // Command frequency chart
                 const cmds = stats.commandFrequency || [];
                 if (_ecoCmdChart) _ecoCmdChart.destroy();
