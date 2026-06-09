@@ -1,0 +1,60 @@
+<%
+// Region catalog mirrored from src/data/exploreData.js — keep ids in sync.
+const explorationRegions = [
+    { id: 'whispering_forest', emoji: '🌲', name: 'Whispering Forest', seasonal: false },
+    { id: 'crumbling_ruins',   emoji: '🏛️', name: 'Crumbling Ruins',   seasonal: false },
+    { id: 'crystal_caves',     emoji: '💎', name: 'Crystal Caves',     seasonal: false },
+    { id: 'sunken_docks',      emoji: '⚓', name: 'Sunken Docks',      seasonal: false },
+    { id: 'frostveil_pass',    emoji: '❄️', name: 'Frostveil Pass',    seasonal: 'Winter Wonderland' },
+    { id: 'hollowgrave_lane',  emoji: '🎃', name: 'Hollowgrave Lane',  seasonal: 'Spooky Season' },
+    { id: 'scorchglass_shore', emoji: '☀️', name: 'Scorchglass Shore', seasonal: 'Summer Festival' },
+    { id: 'velvet_arcade',     emoji: '💝', name: 'The Velvet Arcade', seasonal: "Valentine's Day" },
+];
+const explorationDisabled = settings.exploration?.disabledRegions || [];
+%>
+                <section id="exploration" class="panel">
+                    <div class="panel-head">
+                        <h2>Exploration</h2>
+                        <p>World exploration sends members on narrated expeditions with <code>/explore</code>. Loot feeds the economy and inventory, XP feeds leveling, and rare finds unlock achievements. The Explorer's Map is visible via <code>/map</code>.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable exploration</strong></span>
+                        <span class="switch"><input type="checkbox" id="exploration-enabled" <%= settings.exploration?.enabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Drop rates</h3></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="exploration-droprate">Payout multiplier <small>(0.1–5, default 1)</small></label>
+                            <input type="number" id="exploration-droprate" step="0.1" min="0.1" max="5" value="<%= settings.exploration?.dropRateMultiplier ?? 1 %>">
+                            <small>Scales every expedition's coin payout. Raise for a generous server, lower to slow inflation.</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="exploration-rarebonus">Rare event bonus <small>(0–0.25, default 0)</small></label>
+                            <input type="number" id="exploration-rarebonus" step="0.01" min="0" max="0.25" value="<%= settings.exploration?.rareEventBonus ?? 0 %>">
+                            <small>Shifts the event table away from quiet runs and traps, toward treasure and secrets.</small>
+                        </div>
+                    </div>
+
+                    <label class="toggle" style="margin-top:.75rem">
+                        <span class="toggle-text"><strong>Announce secret discoveries</strong> <small>— posts to the economy announcement channel</small></span>
+                        <span class="switch"><input type="checkbox" id="exploration-announce-secrets" <%= settings.exploration?.announceSecrets !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Regions</h3></div>
+                    <div class="field">
+                        <small>Unchecked regions are hidden from <code>/explore</code> and the map. Seasonal regions also require their event to be running.</small>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-top:.5rem;">
+                            <% explorationRegions.forEach(region => { %>
+                            <label class="toggle">
+                                <span class="toggle-text"><%= region.emoji %> <%= region.name %><% if (region.seasonal) { %> <small>(seasonal — <%= region.seasonal %>)</small><% } %></span>
+                                <span class="switch"><input type="checkbox" class="exploration-region" data-region-id="<%= region.id %>" <%= explorationDisabled.includes(region.id) ? '' : 'checked' %>><span class="slider"></span></span>
+                            </label>
+                            <% }); %>
+                        </div>
+                    </div>
+
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('exploration')">Save changes</button>
+                    </div>
+                </section>

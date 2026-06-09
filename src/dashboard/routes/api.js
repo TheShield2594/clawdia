@@ -320,7 +320,7 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'dailyNews', 'dailyNewsProfiles', 'rssFeeds',
     'autoRoles', 'reactionRoles', 'analytics',
     'giveaways', 'notifications',
-    'newspaper', 'heist'
+    'newspaper', 'heist', 'exploration'
 ]);
 
 function isAllowedSettingKey(key) {
@@ -494,6 +494,34 @@ function validateNewspaperUpdate(updates) {
     return null;
 }
 
+// Field-level validation for exploration settings before they reach Mongoose.
+// Returns an error string, or null if valid.
+function validateExplorationUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        if (!key.startsWith('exploration.') && key !== 'exploration') continue;
+        const field = key.split('.')[1];
+        if (field === 'enabled' || field === 'announceSecrets') {
+            if (typeof value !== 'boolean') return `exploration.${field} must be a boolean`;
+        }
+        if (field === 'dropRateMultiplier') {
+            if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.1 || value > 5) {
+                return 'exploration.dropRateMultiplier must be a number between 0.1 and 5';
+            }
+        }
+        if (field === 'rareEventBonus') {
+            if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 0.25) {
+                return 'exploration.rareEventBonus must be a number between 0 and 0.25';
+            }
+        }
+        if (field === 'disabledRegions') {
+            if (!Array.isArray(value) || value.some(v => typeof v !== 'string' || v.length > 64)) {
+                return 'exploration.disabledRegions must be an array of region id strings';
+            }
+        }
+    }
+    return null;
+}
+
 function validateHeistUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         if (!key.startsWith('heist.') && key !== 'heist') continue;
@@ -539,6 +567,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkCsrfOr
 
     const heistError = validateHeistUpdate(updates);
     if (heistError) return res.status(400).json({ error: heistError });
+
+    const explorationError = validateExplorationUpdate(updates);
+    if (explorationError) return res.status(400).json({ error: explorationError });
 
     try {
         const guildSettings = await Guild.findOne({ guildId });

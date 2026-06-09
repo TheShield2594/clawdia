@@ -5,7 +5,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS } = require('../../data/achievements');
 
-const CATEGORY_ORDER = ['economy', 'leveling', 'hunt', 'fishing', 'community', 'moderation', 'custom'];
+const CATEGORY_ORDER = ['economy', 'leveling', 'hunt', 'fishing', 'exploration', 'community', 'moderation', 'custom'];
 
 module.exports = {
     data: new SlashCommandBuilder()
