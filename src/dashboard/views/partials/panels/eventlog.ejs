@@ -16,13 +16,44 @@
                             <% }); %>
                         </select>
                     </div>
-                    <div class="panel-head" style="margin-top:1rem"><h3>Events to log</h3></div>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Messages</h3></div>
                     <label class="toggle"><span class="toggle-text"><strong>Message edits</strong></span><span class="switch"><input type="checkbox" id="log-msg-edit" <%= settings.eventLog?.logMessageEdit !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text"><strong>Message deletions</strong></span><span class="switch"><input type="checkbox" id="log-msg-delete" <%= settings.eventLog?.logMessageDelete !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Bulk message deletes (purge)</strong></span><span class="switch"><input type="checkbox" id="log-msg-bulk-delete" <%= settings.eventLog?.logMessageBulkDelete !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Members</h3></div>
                     <label class="toggle"><span class="toggle-text"><strong>Member joins</strong></span><span class="switch"><input type="checkbox" id="log-member-join" <%= settings.eventLog?.logMemberJoin !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text"><strong>Member leaves</strong></span><span class="switch"><input type="checkbox" id="log-member-leave" <%= settings.eventLog?.logMemberLeave !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Nickname changed</strong></span><span class="switch"><input type="checkbox" id="log-nickname-change" <%= settings.eventLog?.logNicknameChange !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Username / discriminator changed</strong></span><span class="switch"><input type="checkbox" id="log-username-change" <%= settings.eventLog?.logUsernameChange !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Avatar changed</strong></span><span class="switch"><input type="checkbox" id="log-avatar-change" <%= settings.eventLog?.logAvatarChange !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Member timed out / timeout removed</strong></span><span class="switch"><input type="checkbox" id="log-timeout" <%= settings.eventLog?.logTimeout !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Member boosted / stopped boosting</strong></span><span class="switch"><input type="checkbox" id="log-boost" <%= settings.eventLog?.logBoost !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Roles &amp; Channels</h3></div>
                     <label class="toggle"><span class="toggle-text"><strong>Role changes</strong></span><span class="switch"><input type="checkbox" id="log-role-changes" <%= settings.eventLog?.logRoleChanges !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
                     <label class="toggle"><span class="toggle-text"><strong>Channel changes</strong></span><span class="switch"><input type="checkbox" id="log-channel-changes" <%= settings.eventLog?.logChannelChanges !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Voice</h3></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Member joins voice channel</strong></span><span class="switch"><input type="checkbox" id="log-voice-join" <%= settings.eventLog?.logVoiceJoin !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Member leaves voice channel</strong></span><span class="switch"><input type="checkbox" id="log-voice-leave" <%= settings.eventLog?.logVoiceLeave !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Member moves between voice channels</strong></span><span class="switch"><input type="checkbox" id="log-voice-move" <%= settings.eventLog?.logVoiceMove !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Server mute / deafen</strong></span><span class="switch"><input type="checkbox" id="log-voice-mute" <%= settings.eventLog?.logVoiceMuteDeafen !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Server</h3></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Invite created</strong></span><span class="switch"><input type="checkbox" id="log-invite-create" <%= settings.eventLog?.logInviteCreate !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Invite deleted / expired</strong></span><span class="switch"><input type="checkbox" id="log-invite-delete" <%= settings.eventLog?.logInviteDelete !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Server settings changed</strong><span>Name, icon, verification level</span></span><span class="switch"><input type="checkbox" id="log-server-update" <%= settings.eventLog?.logServerUpdate !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Emoji created / deleted</strong></span><span class="switch"><input type="checkbox" id="log-emoji-update" <%= settings.eventLog?.logEmojiUpdate !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Webhook created / deleted</strong></span><span class="switch"><input type="checkbox" id="log-webhook-update" <%= settings.eventLog?.logWebhookUpdate !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Bot added to server</strong></span><span class="switch"><input type="checkbox" id="log-bot-add" <%= settings.eventLog?.logBotAdd !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Threads</h3></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Thread created</strong></span><span class="switch"><input type="checkbox" id="log-thread-create" <%= settings.eventLog?.logThreadCreate !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Thread deleted</strong></span><span class="switch"><input type="checkbox" id="log-thread-delete" <%= settings.eventLog?.logThreadDelete !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Thread archived / unarchived</strong></span><span class="switch"><input type="checkbox" id="log-thread-archive" <%= settings.eventLog?.logThreadArchive !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('eventlog')">Save changes</button>
                     </div>
