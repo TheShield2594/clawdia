@@ -1,0 +1,23 @@
+                <section id="progressiontracks" class="panel">
+                    <div class="panel-head">
+                        <h2>Progression Tracks</h2>
+                        <p>Members choose a track (Creator, Helper, or Raider) that gives them a bonus XP multiplier for activity matching their role.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable progression tracks</strong></span>
+                        <span class="switch"><input type="checkbox" id="pt-enabled" <%= settings.progressionTracks?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-top:.75rem;">
+                        <div><label class="field-label" for="pt-creator-bonus">Creator bonus %</label><input type="number" id="pt-creator-bonus" value="<%= settings.progressionTracks?.creatorBonus ?? 20 %>" min="0" max="200"><small>XP bonus for posts with attachments</small></div>
+                        <div><label class="field-label" for="pt-helper-bonus">Helper bonus %</label><input type="number" id="pt-helper-bonus" value="<%= settings.progressionTracks?.helperBonus ?? 20 %>" min="0" max="200"><small>XP bonus for activity in helper channels</small></div>
+                        <div><label class="field-label" for="pt-raider-bonus">Raider bonus %</label><input type="number" id="pt-raider-bonus" value="<%= settings.progressionTracks?.raiderBonus ?? 20 %>" min="0" max="200"><small>XP bonus for first 10 daily messages</small></div>
+                    </div>
+                    <div class="field" style="margin-top:.75rem;">
+                        <label class="field-label" for="pt-helper-channels">Helper channels <small>— select channels that count for the Helper track bonus</small></label>
+                        <select id="pt-helper-channels" multiple style="height:120px;">
+                            <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= (settings.progressionTracks?.helperChannels||[]).includes(ch.id) ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                        </select>
+                        <small>Hold Ctrl/Cmd to select multiple channels</small>
+                    </div>
+                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('progressiontracks')">Save changes</button></div>
+                </section>

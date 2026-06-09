@@ -1696,6 +1696,83 @@ router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, check
     }
 });
 
+// ── Leveling admin endpoints ────────────────────────────────────────────────
+
+router.get('/guild/:guildId/leveling/leaderboard', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = 25;
+    const skip = (page - 1) * limit;
+    try {
+        const [users, total] = await Promise.all([
+            User.find({ guildId }).sort({ level: -1, xp: -1 }).skip(skip).limit(limit).select('userId level xp messages'),
+            User.countDocuments({ guildId, $or: [{ level: { $gt: 0 } }, { xp: { $gt: 0 } }] })
+        ]);
+        res.json({
+            entries: users.map((u, i) => ({ rank: skip + i + 1, userId: u.userId, level: u.level, xp: u.xp, messages: u.messages })),
+            total,
+            page,
+            pages: Math.ceil(total / limit)
+        });
+    } catch (err) {
+        console.error('Leveling leaderboard error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.post('/guild/:guildId/leveling/adjust', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId } = req.params;
+    const { userId, action, amount } = req.body;
+    if (!userId || !isValidDiscordId(String(userId))) return res.status(400).json({ error: 'userId must be a valid Discord snowflake' });
+    if (!action || !['give', 'take', 'reset', 'set_level'].includes(action)) {
+        return res.status(400).json({ error: 'action must be give, take, reset, or set_level' });
+    }
+    if (['give', 'take', 'set_level'].includes(action)) {
+        const amt = Number(amount);
+        if (!Number.isFinite(amt) || amt < 0 || !Number.isInteger(amt)) {
+            return res.status(400).json({ error: 'amount must be a non-negative integer' });
+        }
+    }
+    try {
+        const filter = { userId: String(userId), guildId };
+        let update;
+        if (action === 'give') {
+            update = { $inc: { xp: Number(amount) } };
+        } else if (action === 'take') {
+            update = [{ $set: { xp: { $max: [0, { $subtract: ['$xp', Number(amount)] }] } } }];
+        } else if (action === 'reset') {
+            update = { $set: { xp: 0, level: 0 } };
+        } else {
+            update = { $set: { level: Number(amount) } };
+        }
+        const user = await User.findOneAndUpdate(filter, update, { upsert: true, new: true, setDefaultsOnInsert: true });
+        res.json({ success: true, level: user.level, xp: user.xp });
+    } catch (err) {
+        console.error('Leveling adjust error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.post('/guild/:guildId/leveling/xp-event', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId } = req.params;
+    const { multiplier, durationHours } = req.body;
+    const mult = Number(multiplier);
+    const hours = Number(durationHours);
+    if (!Number.isFinite(mult) || mult < 1.1 || mult > 10) return res.status(400).json({ error: 'multiplier must be between 1.1 and 10' });
+    if (!Number.isFinite(hours) || hours < 1 || hours > 168) return res.status(400).json({ error: 'durationHours must be between 1 and 168' });
+    try {
+        const startTime = new Date();
+        const endTime = new Date(startTime.getTime() + hours * 3600 * 1000);
+        await Guild.findOneAndUpdate({ guildId }, {
+            $set: { 'leveling.xpBoostEvent.multiplier': mult, 'leveling.xpBoostEvent.startTime': startTime, 'leveling.xpBoostEvent.endTime': endTime }
+        }, { upsert: true });
+        res.json({ success: true, multiplier: mult, startTime, endTime });
+    } catch (err) {
+        console.error('XP event error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 module.exports = router;
 module.exports.computeRetention = computeRetention;
 module.exports.validateEventLogUpdate = validateEventLogUpdate;

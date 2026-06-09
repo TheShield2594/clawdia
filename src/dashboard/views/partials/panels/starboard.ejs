@@ -1,0 +1,34 @@
+                <section id="starboard" class="panel">
+                    <div class="panel-head">
+                        <h2>Starboard</h2>
+                        <p>Highlight popular messages when they receive enough reactions.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable starboard</strong></span>
+                        <span class="switch"><input type="checkbox" id="starboard-enabled" <%= settings.starboard?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="starboard-channel">Starboard channel</label>
+                        <select id="starboard-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.starboard?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="starboard-emoji">Trigger emoji</label>
+                            <input type="text" id="starboard-emoji" value="<%= settings.starboard?.emoji || '⭐' %>">
+                            <small>Standard emoji or custom <code>&lt;:name:id&gt;</code></small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="starboard-threshold">Reaction threshold</label>
+                            <input type="number" id="starboard-threshold" value="<%= settings.starboard?.threshold || 3 %>" min="1" max="100">
+                            <small>Reactions needed to post</small>
+                        </div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('starboard')">Save changes</button>
+                    </div>
+                </section>

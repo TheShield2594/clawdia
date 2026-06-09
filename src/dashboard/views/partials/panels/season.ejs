@@ -1,0 +1,37 @@
+                <section id="season" class="panel">
+                    <div class="panel-head">
+                        <h2>Season Pass</h2>
+                        <p>Run a seasonal progression system. Members earn season XP through quests and activity, unlocking tier rewards.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable season pass</strong></span>
+                        <span class="switch"><input type="checkbox" id="season-enabled" <%= settings.season?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.75rem;">
+                        <div><label class="field-label" for="season-name">Season name</label><input type="text" id="season-name" value="<%= settings.season?.name || 'Season 1' %>"></div>
+                        <div><label class="field-label" for="season-id">Season ID <small>(unique slug)</small></label><input type="text" id="season-id" value="<%= settings.season?.seasonId || '' %>" placeholder="e.g. s1-2025"></div>
+                        <div><label class="field-label" for="season-start">Start date</label><input type="date" id="season-start" value="<%= settings.season?.startDate ? new Date(settings.season.startDate).toISOString().slice(0,10) : '' %>"></div>
+                        <div><label class="field-label" for="season-end">End date</label><input type="date" id="season-end" value="<%= settings.season?.endDate ? new Date(settings.season.endDate).toISOString().slice(0,10) : '' %>"></div>
+                        <div><label class="field-label" for="season-xp-per-tier">XP per tier</label><input type="number" id="season-xp-per-tier" value="<%= settings.season?.xpPerTier ?? 100 %>" min="1"></div>
+                        <div><label class="field-label" for="season-max-tiers">Max tiers</label><input type="number" id="season-max-tiers" value="<%= settings.season?.maxTiers ?? 50 %>" min="1"></div>
+                    </div>
+                    <div class="field" style="margin-top:.75rem;">
+                        <label class="field-label">Tier rewards</label>
+                        <div id="season-tier-rewards-list" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.season?.tierRewards || []).forEach(function(r) { %>
+                                <div class="season-tier-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                                    <input type="number" class="season-tier-num" value="<%= r.tier %>" min="1" style="width:70px" placeholder="Tier">
+                                    <input type="number" class="season-tier-coins" value="<%= r.coins %>" min="0" style="width:90px" placeholder="Coins">
+                                    <select class="season-tier-role">
+                                        <option value="">No role</option>
+                                        <% roles.forEach(function(role){ %><option value="<%= role.id %>" <%= r.roleId === role.id ? 'selected' : '' %>>@<%= role.name %></option><% }); %>
+                                    </select>
+                                    <input type="text" class="season-tier-label" value="<%= r.label || '' %>" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)">
+                                    <button class="btn btn-danger" type="button" onclick="this.closest('.season-tier-row').remove()" title="Remove">&times;</button>
+                                </div>
+                            <% }); %>
+                        </div>
+                        <button class="btn" type="button" onclick="addSeasonTierRow()">+ Add tier reward</button>
+                    </div>
+                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('season')">Save changes</button></div>
+                </section>

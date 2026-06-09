@@ -1,0 +1,334 @@
+                <section id="ai" class="panel">
+                    <div class="panel-head">
+                        <h2>AI</h2>
+                        <p>Configure AI chat, knowledge base, summaries, and per-channel personas for your server.</p>
+                    </div>
+
+                    <!-- Inner AI tabs -->
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab active" data-ai-tab="ai-chat">🧠 Chat</button>
+                        <button class="ai-inner-tab" data-ai-tab="ai-knowledgebase">📚 Knowledge Base</button>
+                        <button class="ai-inner-tab" data-ai-tab="ai-summaries">📝 Summaries</button>
+                        <button class="ai-inner-tab" data-ai-tab="ai-personas">👤 Personas</button>
+                    </div>
+
+                    <!-- Chat -->
+                    <div id="ai-chat" class="ai-inner-panel active">
+                        <p class="ai-inner-desc">Connect OpenAI, Gemini, Anthropic Claude, OpenRouter, or a self-hosted Ollama instance for chat in a designated channel.</p>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable AI chat</strong><span>Respond to messages in the AI channel</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-enabled" <%= settings.ai.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field">
+                            <label class="field-label" for="ai-provider">Provider</label>
+                            <select id="ai-provider" onchange="updateAiProviderUI()">
+                                <option value="openai" <%= settings.ai.provider === 'openai' || !settings.ai.provider ? 'selected' : '' %>>OpenAI</option>
+                                <option value="anthropic" <%= settings.ai.provider === 'anthropic' ? 'selected' : '' %>>Anthropic (Claude)</option>
+                                <option value="gemini" <%= settings.ai.provider === 'gemini' ? 'selected' : '' %>>Google Gemini</option>
+                                <option value="openrouter" <%= settings.ai.provider === 'openrouter' ? 'selected' : '' %>>OpenRouter</option>
+                                <option value="ollama" <%= settings.ai.provider === 'ollama' ? 'selected' : '' %>>Ollama (self-hosted)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="ai-model">Model</label>
+                            <input type="text" id="ai-model" value="<%= settings.ai.model || '' %>" placeholder="Leave empty for provider default">
+                            <small id="ai-model-hint">Default: gpt-4o-mini</small>
+                        </div>
+                        <form class="ai-keys-form" autocomplete="off" onsubmit="return false">
+                        <div class="field ai-key-field" data-provider="openai">
+                            <label class="field-label" for="ai-openai-key">OpenAI API key</label>
+                            <input type="password" id="ai-openai-key" value="" autocomplete="new-password" placeholder="<%= settings.ai.openaiKey ? '••••••••••••' : 'sk-…' %>">
+                            <small><% if (settings.ai.openaiKey) { %>Key configured — enter a new value to replace it<% } else { %>Leave empty to use the bot's default key<% } %></small>
+                        </div>
+                        <div class="field ai-key-field" data-provider="anthropic">
+                            <label class="field-label" for="ai-anthropic-key">Anthropic API key</label>
+                            <input type="password" id="ai-anthropic-key" value="" autocomplete="new-password" placeholder="<%= settings.ai.anthropicKey ? '••••••••••••' : 'sk-ant-…' %>">
+                            <small><% if (settings.ai.anthropicKey) { %>Key configured — enter a new value to replace it<% } else { %>Leave empty to use the bot's default key<% } %></small>
+                        </div>
+                        <div class="field ai-key-field" data-provider="gemini">
+                            <label class="field-label" for="ai-gemini-key">Gemini API key</label>
+                            <input type="password" id="ai-gemini-key" value="" autocomplete="new-password" placeholder="<%= settings.ai.geminiKey ? '••••••••••••' : 'AIza…' %>">
+                            <small><% if (settings.ai.geminiKey) { %>Key configured — enter a new value to replace it<% } else { %>Leave empty to use the bot's default key<% } %></small>
+                        </div>
+                        <div class="field ai-key-field" data-provider="openrouter">
+                            <label class="field-label" for="ai-openrouter-key">OpenRouter API key</label>
+                            <input type="password" id="ai-openrouter-key" value="" autocomplete="new-password" placeholder="<%= settings.ai.openrouterKey ? '••••••••••••' : 'sk-or-…' %>">
+                            <small><% if (settings.ai.openrouterKey) { %>Key configured — enter a new value to replace it<% } else { %>Get a key at openrouter.ai. Use any model OpenRouter supports (e.g. <code>anthropic/claude-3.5-sonnet</code>).<% } %></small>
+                        </div>
+                        </form>
+                        <div class="field ai-key-field" data-provider="ollama">
+                            <label class="field-label" for="ai-ollama-url">Ollama base URL</label>
+                            <input type="text" id="ai-ollama-url" value="<%= settings.ai.ollamaBaseUrl || 'http://localhost:11434' %>" placeholder="http://localhost:11434">
+                            <small>Point this at the host running <code>ollama serve</code>. Set the model field above to a tag you've pulled (e.g. <code>llama3.2</code>).</small>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="ai-channel">Restrict to channel <span style="font-weight:400;color:var(--muted,#888)">(optional — leave blank to respond in all channels)</span></label>
+                            <select id="ai-channel">
+                                <option value="">All channels</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>" <%= settings.ai.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <div class="prompt-field-head">
+                                <label class="field-label" for="ai-prompt" style="margin:0;">System prompt</label>
+                                <div class="prompt-field-meta">
+                                    <span class="prompt-char-count" id="ai-prompt-count">0 / 4000</span>
+                                    <button type="button" class="prompt-expand-btn" onclick="openPromptEditor('ai-prompt', 'System prompt')">⛶ Full-screen</button>
+                                </div>
+                            </div>
+                            <textarea id="ai-prompt" class="auto-resize" rows="8" maxlength="4000" oninput="updatePromptCount('ai-prompt')"><%= settings.ai.systemPrompt %></textarea>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="ai-temperature">Temperature (<span id="ai-temp-display"><%= settings.ai.temperature ?? 0.7 %></span>)</label>
+                            <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="<%= settings.ai.temperature ?? 0.7 %>" oninput="document.getElementById('ai-temp-display').textContent = this.value">
+                        </div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div><label class="field-label" for="ai-max-tokens">Max output tokens</label><input type="number" id="ai-max-tokens" min="32" max="8192" value="<%= settings.ai.maxTokens ?? 1024 %>"></div>
+                            <div><label class="field-label" for="ai-max-history">Conversation history length</label><input type="number" id="ai-max-history" min="0" max="100" value="<%= settings.ai.maxHistory ?? 20 %>"><small>0 disables history</small></div>
+                        </div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Stream responses</strong><span>Edit messages in real-time as the model generates</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-streaming" <%= settings.ai.streaming !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                            <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables</small></div>
+                            <div><label class="field-label" for="ai-rate-channel">Rate limit (requests / channel)</label><input type="number" id="ai-rate-channel" min="0" value="<%= settings.ai.rateLimitPerChannel ?? 0 %>"><small>0 disables</small></div>
+                            <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
+                        </div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable AI actions</strong><span>Let the AI create polls, set reminders, and suggest mod actions</span></span>
+                            <span class="switch"><input type="checkbox" id="ai-actions-enabled" <%= settings.ai.actionsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <p style="font-size:.8rem;opacity:.65;margin:.25rem 0 1rem;">Users can type <code>!reset</code> in the AI channel to clear their conversation history.</p>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('ai')">Save changes</button>
+                        </div>
+
+                        <!-- Token Usage Stats -->
+                        <div class="ai-usage-card" id="ai-usage-card">
+                            <div class="ai-usage-card-head">
+                                <h3>📊 Token usage</h3>
+                                <span class="muted" id="ai-usage-status">Loading…</span>
+                            </div>
+                            <div class="ai-usage-stats">
+                                <div class="ai-usage-stat">
+                                    <div class="ai-usage-stat-label">Today</div>
+                                    <div class="ai-usage-stat-value" id="ai-usage-today-tokens">—</div>
+                                    <div class="ai-usage-stat-sub" id="ai-usage-today-cost"></div>
+                                </div>
+                                <div class="ai-usage-stat">
+                                    <div class="ai-usage-stat-label">This week</div>
+                                    <div class="ai-usage-stat-value" id="ai-usage-week-tokens">—</div>
+                                    <div class="ai-usage-stat-sub" id="ai-usage-week-cost"></div>
+                                </div>
+                                <div class="ai-usage-stat">
+                                    <div class="ai-usage-stat-label">This month</div>
+                                    <div class="ai-usage-stat-value" id="ai-usage-month-tokens">—</div>
+                                    <div class="ai-usage-stat-sub" id="ai-usage-month-cost"></div>
+                                </div>
+                            </div>
+                            <div style="font-size:.78rem;color:var(--text-mute);margin-bottom:.35rem;">Tokens per day — last 14 days</div>
+                            <svg class="ai-usage-sparkline" id="ai-usage-sparkline" viewBox="0 0 280 60" preserveAspectRatio="none"></svg>
+                            <div class="ai-usage-breakdown" id="ai-usage-breakdown"></div>
+                            <p style="font-size:.74rem;color:var(--text-mute);margin:.75rem 0 0;">
+                                Costs are estimates based on published per-token pricing for known models; OpenRouter and unknown models show no cost. Self-hosted Ollama is always $0.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Knowledge Base -->
+                    <div id="ai-knowledgebase" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Add context entries that the AI references when answering in this server. Changes take effect immediately — no commands needed.</p>
+                        <div id="kb-list" style="margin-bottom:1.5rem;">
+                            <div id="kb-skeleton">
+                                <div class="skel-bar" style="width:75%"></div>
+                                <div class="skel-bar" style="width:60%"></div>
+                                <div class="skel-bar" style="width:80%"></div>
+                            </div>
+                            <div id="kb-error" style="display:none" class="analytics-error-card">
+                                <span>⚠ Couldn't load entries</span>
+                                <button class="btn btn-sm" onclick="retryLoadKnowledgeBase()">Retry</button>
+                            </div>
+                        </div>
+                        <div class="panel-head" style="margin-top:1rem"><h3>Add entry</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="kb-title">Title</label>
+                            <input type="text" id="kb-title" placeholder="e.g. Server Rules">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="kb-content">Content</label>
+                            <textarea id="kb-content" rows="5" placeholder="The information the AI should know…"></textarea>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="kb-tags">Tags <small style="font-weight:normal;opacity:.7;">(comma-separated, optional)</small></label>
+                            <input type="text" id="kb-tags" placeholder="rules, faq, moderation">
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="addKbEntry()">Add entry</button>
+                        </div>
+                    </div>
+
+                    <!-- Summaries -->
+                    <div id="ai-summaries" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Schedule automatic AI-generated summaries of channel activity. The bot fetches recent messages and posts a digest to a target channel at the specified UTC time each day.</p>
+
+                        <!-- Daily Server Digest -->
+                        <div class="panel-head" style="margin-bottom:.75rem"><h3>Daily Server Digest</h3></div>
+                        <p style="opacity:.75;font-size:.875rem;margin-bottom:1rem;">A scheduled embed posted once per day summarizing server activity in the bot's persona voice. Collects the last 24 hours of messages from selected channels.</p>
+                        <label class="toggle" style="margin-bottom:1rem;">
+                            <span class="toggle-text"><strong>Enable daily digest</strong></span>
+                            <span class="switch"><input type="checkbox" id="digest-enabled" <%= settings.ai?.dailyDigest?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field">
+                            <label class="field-label" for="digest-channel">Digest channel (where the embed is posted)</label>
+                            <select id="digest-channel">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>" <%= settings.ai?.dailyDigest?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="digest-sources">Source channels <small style="font-weight:normal;opacity:.7;">(leave empty to include all text channels)</small></label>
+                            <select id="digest-sources" multiple style="min-height:80px;">
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>" <%= (settings.ai?.dailyDigest?.sourceChannelIds || []).includes(channel.id) ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                            <div>
+                                <label class="field-label" for="digest-hour">Hour (0–23)</label>
+                                <input type="number" id="digest-hour" min="0" max="23" value="<%= settings.ai?.dailyDigest?.hour ?? 9 %>">
+                            </div>
+                            <div>
+                                <label class="field-label" for="digest-minute">Minute (0–59)</label>
+                                <input type="number" id="digest-minute" min="0" max="59" value="<%= settings.ai?.dailyDigest?.minute ?? 0 %>">
+                            </div>
+                            <div>
+                                <label class="field-label" for="digest-timezone">Timezone</label>
+                                <input type="text" id="digest-timezone" list="tz-datalist" placeholder="UTC" value="<%= settings.ai?.dailyDigest?.timezone ?? 'UTC' %>" autocomplete="off" onblur="validateTimezoneInput(this)">
+                                <small id="digest-timezone-err" class="field-error" style="display:none"></small>
+                            </div>
+                        </div>
+                        <div class="actions-row" style="margin-bottom:1.5rem;">
+                            <button class="btn btn-primary" onclick="saveDailyDigest()">Save digest settings</button>
+                        </div>
+                        <hr style="border:none;border-top:1px solid var(--border);margin:1.5rem 0;">
+
+                        <!-- Per-channel summary jobs -->
+                        <div class="panel-head"><h3>Per-channel summary jobs</h3></div>
+                        <div id="summary-jobs-list" style="margin-bottom:1.5rem;">
+                            <div id="summary-jobs-skeleton">
+                                <div class="skel-bar" style="width:70%"></div>
+                                <div class="skel-bar" style="width:55%"></div>
+                                <div class="skel-bar" style="width:65%"></div>
+                            </div>
+                            <div id="summary-jobs-error" style="display:none" class="analytics-error-card">
+                                <span>⚠ Couldn't load summary jobs</span>
+                                <button class="btn btn-sm" onclick="retryLoadSummaryJobs()">Retry</button>
+                            </div>
+                        </div>
+                        <div class="panel-head" style="margin-top:1rem"><h3>Add summary job</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="summary-source">Source channel (channel to summarize)</label>
+                            <select id="summary-source">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="summary-target">Target channel (where the summary is posted)</label>
+                            <select id="summary-target">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div>
+                                <label class="field-label" for="summary-hour">UTC hour (0–23)</label>
+                                <input type="number" id="summary-hour" min="0" max="23" value="9">
+                            </div>
+                            <div>
+                                <label class="field-label" for="summary-minute">UTC minute (0–59)</label>
+                                <input type="number" id="summary-minute" min="0" max="59" value="0">
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="summary-label">Label <small style="font-weight:normal;opacity:.7;">(optional)</small></label>
+                            <input type="text" id="summary-label" placeholder="e.g. Daily Summary of #general">
+                            <small>Defaults to "Daily Summary of #channel" if left empty.</small>
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="addSummaryJob()">Add summary job</button>
+                        </div>
+                    </div>
+
+                    <!-- Personas -->
+                    <div id="ai-personas" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Assign a custom AI persona to specific channels. When the bot is active in a channel with a persona, it uses that persona's system prompt instead of the server-wide default.</p>
+                        <div id="persona-channel-warning" style="display:none;margin-bottom:1rem;padding:.75rem 1rem;background:var(--warn-bg,#fffbe6);border:1px solid var(--warn-border,#ffe58f);border-radius:6px;color:var(--warn-text,#7a5f00);font-size:.9rem;">
+                            ⚠️ The bot is currently restricted to a single channel in the <strong>Chat</strong> tab. Personas configured for other channels won't be active until you clear that restriction or select "All channels."
+                        </div>
+                        <div id="personas-list" style="margin-bottom:1.5rem;">
+                            <div id="personas-skeleton">
+                                <div class="skel-bar" style="width:70%"></div>
+                                <div class="skel-bar" style="width:55%"></div>
+                                <div class="skel-bar" style="width:65%"></div>
+                            </div>
+                        </div>
+                        <div class="panel-head" style="margin-top:1rem"><h3>Add / update persona</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="persona-channel">Channel</label>
+                            <select id="persona-channel">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="persona-name">Persona name</label>
+                            <input type="text" id="persona-name" placeholder="e.g. Support Bot">
+                        </div>
+                        <div class="field">
+                            <div class="prompt-field-head">
+                                <label class="field-label" for="persona-prompt" style="margin:0;">System prompt</label>
+                                <div class="prompt-field-meta">
+                                    <span class="prompt-char-count" id="persona-prompt-count">0 / 4000</span>
+                                    <button type="button" class="prompt-expand-btn" onclick="openPromptEditor('persona-prompt', 'Persona system prompt')">⛶ Full-screen</button>
+                                </div>
+                            </div>
+                            <textarea id="persona-prompt" class="auto-resize" rows="8" maxlength="4000" placeholder="You are a helpful support assistant…" oninput="updatePromptCount('persona-prompt')"></textarea>
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="addPersona()">Save persona</button>
+                        </div>
+                    </div>
+
+                    <!-- Full-screen prompt editor (shared by ai-prompt and persona-prompt) -->
+                    <div id="prompt-editor-modal" class="modal-overlay prompt-editor-modal" style="display:none;" onclick="if(event.target===this)closePromptEditor(false)">
+                        <div class="modal-box modal-box-wide">
+                            <div class="modal-head">
+                                <h3 id="prompt-editor-title">Edit prompt</h3>
+                                <button class="modal-close" onclick="closePromptEditor(false)">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <textarea id="prompt-editor-textarea" maxlength="4000" oninput="updatePromptEditorCount()"></textarea>
+                                <div style="display:flex;justify-content:flex-end;margin-top:.5rem;font-size:.78rem;color:var(--text-mute);">
+                                    <span id="prompt-editor-count">0 / 4000</span>
+                                </div>
+                            </div>
+                            <div class="modal-actions">
+                                <button class="btn" onclick="closePromptEditor(false)">Cancel</button>
+                                <button class="btn btn-primary" onclick="closePromptEditor(true)">Done</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>

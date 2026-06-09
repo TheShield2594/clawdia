@@ -1,0 +1,155 @@
+                <section id="leveling" class="panel">
+                    <div class="panel-head">
+                        <h2>Leveling</h2>
+                        <p>Reward active members with XP and customizable level-up messages.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable leveling</strong><span>Track XP and level progression</span></span>
+                        <span class="switch"><input type="checkbox" id="level-enabled" <%= settings.leveling.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable XP rewards</strong><span>Award XP from messages and unlock level rewards</span></span>
+                        <span class="switch"><input type="checkbox" id="level-rewards-enabled" <%= settings.leveling.rewardsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="level-xp-rate">Message XP rate multiplier</label>
+                        <input type="number" id="level-xp-rate" value="<%= settings.leveling.xpRate %>" min="0.1" max="10" step="0.1">
+                        <small>Default 1.0 · higher values award more XP per message</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="level-max-level">Maximum level</label>
+                        <input type="number" id="level-max-level" value="<%= settings.leveling.maxLevel || '' %>" min="1" max="9999" placeholder="No cap">
+                        <small>Optional level cap. Leave empty for no maximum.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="level-message">Level-up message</label>
+                        <textarea id="level-message" rows="2"><%= settings.leveling.levelUpMessage %></textarea>
+                        <small>Variables: <code>{user}</code> · <code>{level}</code></small>
+                    </div>
+                    <div class="field"><label class="field-label" for="level-reward-channel">Reward announcement channel</label><select id="level-reward-channel"><option value="">Use current channel</option><% channels.forEach(channel => { %><option value="<%= channel.id %>" <%= settings.leveling.rewardChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option><% }); %></select></div>
+                    <div class="field">
+                        <label class="field-label">No-XP roles</label>
+                        <div id="level-no-xp-roles-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.leveling.noXpRoleIds || []).forEach(function(rId) {
+                               var role = roles.find(function(r){ return r.id === rId; });
+                               if (role) { %>
+                                <span class="role-tag" data-role-id="<%= rId %>">@<%= role.name %> <button type="button" onclick="removeLevelNoXpRole('<%= rId %>')" title="Remove">&times;</button></span>
+                            <% } }); %>
+                        </div>
+                        <div style="display:flex;gap:.5rem;align-items:center">
+                            <select id="level-no-xp-roles-select">
+                                <option value="">Select a role</option>
+                                <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
+                            </select>
+                            <button class="btn btn-primary" type="button" onclick="addLevelNoXpRole()">Add role</button>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">No-XP channels</label>
+                        <div id="level-no-xp-channels-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.leveling.noXpChannelIds || []).forEach(function(cId) {
+                               var ch = channels.find(function(c){ return c.id === cId; });
+                               if (ch) { %>
+                                <span class="role-tag" data-channel-id="<%= cId %>">#<%= ch.name %> <button type="button" onclick="removeLevelNoXpChannel('<%= cId %>')" title="Remove">&times;</button></span>
+                            <% } }); %>
+                        </div>
+                        <div style="display:flex;gap:.5rem;align-items:center">
+                            <select id="level-no-xp-channels-select">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(function(ch){ %><option value="<%= ch.id %>">#<%= ch.name %></option><% }); %>
+                            </select>
+                            <button class="btn btn-primary" type="button" onclick="addLevelNoXpChannel()">Add channel</button>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Level role rewards</label>
+                        <div id="level-role-rewards-list" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.levelRoles || []).forEach(function(r) { %>
+                                <div class="level-reward-row" style="display:flex;gap:.5rem;align-items:center">
+                                    <input type="number" class="level-reward-level" value="<%= r.level %>" min="1" max="999" style="width:80px" placeholder="Level">
+                                    <select class="level-reward-role">
+                                        <option value="">Select a role</option>
+                                        <% roles.forEach(function(role){ %><option value="<%= role.id %>" <%= r.roleId === role.id ? 'selected' : '' %>>@<%= role.name %></option><% }); %>
+                                    </select>
+                                    <button class="btn btn-danger" type="button" onclick="removeLevelRoleReward(this)" title="Remove">&times;</button>
+                                </div>
+                            <% }); %>
+                        </div>
+                        <button class="btn" type="button" onclick="addLevelRoleReward()">+ Add reward</button>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Voice XP</h3><p>Award XP for time spent in voice channels (3 XP/minute × rate).</p></div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable voice XP</strong><span>Members earn XP while in voice channels</span></span>
+                        <span class="switch"><input type="checkbox" id="level-voice-xp" <%= settings.leveling.voiceXpEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="level-voice-rate">Voice XP rate multiplier</label>
+                        <input type="number" id="level-voice-rate" value="<%= settings.leveling.voiceXpRate ?? 1.0 %>" min="0.1" max="10" step="0.1">
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('leveling')">Save changes</button>
+                    </div>
+
+                    <!-- Admin XP Actions -->
+                    <div class="panel-head" style="margin-top:1.75rem">
+                        <h3>Admin XP Actions</h3>
+                        <p>Give, take, reset, or set the level of a specific member.</p>
+                    </div>
+                    <div class="field" style="max-width:360px">
+                        <label class="field-label" for="level-admin-user-id">Discord User ID</label>
+                        <input type="text" id="level-admin-user-id" placeholder="17–20 digit user ID">
+                    </div>
+                    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center">
+                        <input type="number" id="level-admin-amount" placeholder="Amount / Level" min="0" style="width:130px">
+                        <button class="btn btn-sm btn-primary" onclick="levelAdminAction('give')">Give XP</button>
+                        <button class="btn btn-sm" onclick="levelAdminAction('take')">Take XP</button>
+                        <button class="btn btn-sm" onclick="levelAdminAction('set_level')">Set level</button>
+                        <button class="btn btn-sm btn-danger" onclick="levelAdminAction('reset')">Reset XP</button>
+                    </div>
+                    <div id="level-admin-msg" style="min-height:1.4em;font-size:.85em"></div>
+
+                    <!-- Boost Events -->
+                    <div class="panel-head" style="margin-top:1.75rem">
+                        <h3>Boost Events</h3>
+                        <p>Run a timed XP multiplier for all members in this server.</p>
+                    </div>
+                    <div id="level-boost-active" style="display:none;margin-bottom:1rem;padding:.75rem 1rem;background:var(--ink-850);border:1px solid var(--ink-700);border-radius:8px;font-size:.9rem;"></div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.75rem;max-width:480px;align-items:flex-end;margin-bottom:.5rem">
+                        <div>
+                            <label class="field-label" for="boost-multiplier">Multiplier (×)</label>
+                            <input type="number" id="boost-multiplier" value="2" min="1.1" max="10" step="0.1">
+                        </div>
+                        <div>
+                            <label class="field-label" for="boost-duration">Duration (hours)</label>
+                            <input type="number" id="boost-duration" value="24" min="1" max="168" step="1">
+                        </div>
+                        <button class="btn btn-primary" onclick="startBoostEvent()">Activate boost</button>
+                    </div>
+                    <div id="level-boost-msg" style="min-height:1.4em;font-size:.85em"></div>
+
+                    <!-- Leaderboard -->
+                    <div class="panel-head" style="margin-top:1.75rem">
+                        <h3>XP Leaderboard</h3>
+                        <button class="btn btn-sm" onclick="loadLevelLeaderboard(1,true)">↻ Refresh</button>
+                    </div>
+                    <div id="level-leaderboard-skeleton" style="display:none">
+                        <div class="skel-bar" style="width:90%"></div>
+                        <div class="skel-bar" style="width:80%"></div>
+                        <div class="skel-bar" style="width:85%"></div>
+                        <div class="skel-bar" style="width:70%"></div>
+                        <div class="skel-bar" style="width:75%"></div>
+                    </div>
+                    <div id="level-leaderboard-error" style="display:none" class="analytics-error-card">
+                        <span>⚠ Couldn't load leaderboard</span>
+                        <button class="btn btn-sm" onclick="loadLevelLeaderboard(1,true)">Retry</button>
+                    </div>
+                    <div id="level-leaderboard-content" style="display:none">
+                        <table class="cases-table" style="width:100%">
+                            <thead><tr><th>#</th><th>User ID</th><th>Level</th><th>Total XP</th><th>Messages</th></tr></thead>
+                            <tbody id="level-leaderboard-tbody"></tbody>
+                        </table>
+                        <div id="level-leaderboard-pagination" style="display:flex;gap:.5rem;align-items:center;justify-content:center;margin-top:.75rem"></div>
+                    </div>
+                    <div id="level-leaderboard-empty" style="display:none;padding:1.5rem 0;text-align:center;color:var(--text-dim);font-size:.9rem">No members with XP yet.</div>
+                </section>

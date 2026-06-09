@@ -1,0 +1,96 @@
+                <section id="commandpolicies" class="panel">
+                    <div class="panel-head">
+                        <h2>Command Policies</h2>
+                        <p>Restrict or allow commands by role, channel, or time of day. Also override per-role cooldowns.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable command policies</strong></span>
+                        <span class="switch"><input type="checkbox" id="cp-enabled" <%= settings.commandPolicies?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Global Exceptions <small style="font-weight:400;color:var(--text-dim)">— these users/roles bypass all rules</small></div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label">Exempt roles</label>
+                            <div id="cp-exc-roles-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
+                                <% (settings.commandPolicies?.exceptions?.roleIds||[]).forEach(function(rId) {
+                                   var role = roles.find(function(r){ return r.id === rId; });
+                                   if (role) { %>
+                                    <span class="role-tag" data-role-id="<%= rId %>">@<%= role.name %> <button type="button" onclick="this.closest('[data-role-id]').remove()" title="Remove">&times;</button></span>
+                                <% } }); %>
+                            </div>
+                            <div style="display:flex;gap:.5rem;align-items:center">
+                                <select id="cp-exc-roles-select">
+                                    <option value="">Select a role</option>
+                                    <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
+                                </select>
+                                <button class="btn btn-sm" type="button" onclick="addCpExcRole()">Add</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="field-label">Exempt users</label>
+                            <div class="user-search-widget">
+                                <div class="user-tag-list" id="cp-exc-users-tags"></div>
+                                <div style="position:relative">
+                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" data-widget="cp-exc-users">
+                                    <div class="user-search-dropdown" id="cp-exc-users-dropdown" style="display:none"></div>
+                                </div>
+                                <textarea id="cp-exc-users" style="display:none"><%= (settings.commandPolicies?.exceptions?.userIds||[]).join('\n') %></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="eco-section-head" style="margin-top:1.25rem;">
+                        <span style="font-weight:600;font-size:.95rem;">Allow / Deny Rules</span>
+                        <button class="btn btn-sm btn-primary" onclick="openCpRuleModal(-1)">+ Add rule</button>
+                    </div>
+                    <div id="cp-rules-list" style="margin-top:.6rem;"></div>
+                    <div class="eco-section-head" style="margin-top:1.25rem;">
+                        <span style="font-weight:600;font-size:.95rem;">Cooldown Overrides</span>
+                        <button class="btn btn-sm btn-primary" onclick="openCpCooldownModal(-1)">+ Add override</button>
+                    </div>
+                    <div id="cp-cooldowns-list" style="margin-top:.6rem;"></div>
+                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('commandpolicies')">Save changes</button></div>
+                </section>
+
+                <!-- Command Policies — Rule Modal -->
+                <div id="cp-rule-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeCpRuleModal()">
+                    <div class="modal-box" style="max-width:520px;">
+                        <div class="modal-head"><span id="cp-rule-modal-title">Add Rule</span><button class="modal-close" onclick="closeCpRuleModal()">✕</button></div>
+                        <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
+                            <div class="field"><label class="field-label">Command name</label><input type="text" id="cp-r-command" placeholder="e.g. ban"></div>
+                            <div class="field"><label class="field-label">Effect</label><select id="cp-r-effect"><option value="allow">Allow</option><option value="deny">Deny</option></select></div>
+                            <div class="field"><label class="field-label">Roles <small>(leave empty for all)</small></label>
+                                <select id="cp-r-roles" multiple size="4" style="height:auto;">
+                                    <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
+                                </select>
+                            </div>
+                            <div class="field"><label class="field-label">Channels <small>(leave empty for all)</small></label>
+                                <select id="cp-r-channels" multiple size="4" style="height:auto;">
+                                    <% channels.forEach(function(ch){ %><option value="<%= ch.id %>">#<%= ch.name %></option><% }); %>
+                                </select>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                                <div class="field"><label class="field-label">Start hour UTC (0–23)</label><input type="number" id="cp-r-start-hour" min="0" max="23" placeholder="Any"></div>
+                                <div class="field"><label class="field-label">End hour UTC (0–23)</label><input type="number" id="cp-r-end-hour" min="0" max="23" placeholder="Any"></div>
+                            </div>
+                        </div>
+                        <div class="modal-foot"><button class="btn" onclick="closeCpRuleModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpRuleModal()">Save</button></div>
+                    </div>
+                </div>
+
+                <!-- Command Policies — Cooldown Modal -->
+                <div id="cp-cooldown-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeCpCooldownModal()">
+                    <div class="modal-box" style="max-width:420px;">
+                        <div class="modal-head"><span>Cooldown Override</span><button class="modal-close" onclick="closeCpCooldownModal()">✕</button></div>
+                        <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
+                            <div class="field"><label class="field-label">Command name</label><input type="text" id="cp-cd-command" placeholder="e.g. daily"></div>
+                            <div class="field"><label class="field-label">Role</label>
+                                <select id="cp-cd-role">
+                                    <option value="">Select a role</option>
+                                    <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
+                                </select>
+                            </div>
+                            <div class="field"><label class="field-label">Cooldown (seconds)</label><input type="number" id="cp-cd-seconds" min="0" placeholder="0 = no cooldown"></div>
+                        </div>
+                        <div class="modal-foot"><button class="btn" onclick="closeCpCooldownModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpCooldownModal()">Save</button></div>
+                    </div>
+                </div>

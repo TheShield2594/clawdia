@@ -1,0 +1,64 @@
+                <section id="welcome" class="panel">
+                    <div class="panel-head">
+                        <h2>Welcome Settings</h2>
+                        <p>Greet new members with a custom message and optional welcome card.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable welcome messages</strong><span>Send a message when someone joins</span></span>
+                        <span class="switch"><input type="checkbox" id="welcome-enabled" <%= settings.welcome.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="welcome-channel">Welcome channel</label>
+                        <select id="welcome-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.welcome.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="welcome-message">Welcome message</label>
+                        <textarea id="welcome-message" rows="3" oninput="updateMsgPreview('welcome-message','welcome-preview')"><%= settings.welcome.message %></textarea>
+                        <small>Variables: <code>{user}</code> · <code>{username}</code> · <code>{tag}</code> · <code>{server}</code> · <code>{memberCount}</code></small>
+                        <div class="msg-preview" id="welcome-preview"></div>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable welcome card</strong><span>Generate a rich image card for new members</span></span>
+                        <span class="switch"><input type="checkbox" id="welcome-card" <%= settings.welcome.cardEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Send DM to new members</strong><span>Privately message each new member when they join</span></span>
+                        <span class="switch"><input type="checkbox" id="welcome-dm-enabled" <%= settings.welcome.dmEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="welcome-dm-message">DM message</label>
+                        <textarea id="welcome-dm-message" rows="3"><%= settings.welcome.dmMessage %></textarea>
+                        <small>Variables: <code>{username}</code> · <code>{tag}</code> · <code>{server}</code> · <code>{memberCount}</code></small>
+                    </div>
+                    <div class="panel-head" style="margin-top:1.5rem">
+                        <h3>Auto-assign roles on join</h3>
+                        <p>Automatically assign roles when a member joins.</p>
+                    </div>
+                    <div class="field">
+                        <div id="autorole-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+                            <% (settings.autoRoles || []).forEach(r => { %>
+                                <% const role = roles.find(ro => ro.id === r.roleId); %>
+                                <% if (role) { %>
+                                    <span class="role-tag" data-role-id="<%= r.roleId %>">@<%= role.name %> <button onclick="removeAutoRole('<%= r.roleId %>')" title="Remove">&times;</button></span>
+                                <% } %>
+                            <% }); %>
+                        </div>
+                        <div style="display:flex;gap:.5rem;align-items:center">
+                            <select id="autorole-select">
+                                <option value="">Select a role</option>
+                                <% roles.forEach(role => { %>
+                                    <option value="<%= role.id %>">@<%= role.name %></option>
+                                <% }); %>
+                            </select>
+                            <button class="btn btn-primary" onclick="addAutoRole()">Add role</button>
+                        </div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('welcome')">Save changes</button>
+                    </div>
+                </section>
