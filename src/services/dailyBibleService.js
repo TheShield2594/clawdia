@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const { PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
-const { getDailyVerse, lookupVerse, createVerseEmbed } = require('./bibleService');
+const { getDailyVerse, lookupVerse, createVerseEmbed, createVerseComponents } = require('./bibleService');
 
 const bibleJobs = new Map();
 
@@ -56,7 +56,7 @@ async function postDailyVerse(client, guildId, channelId, translation) {
         }
 
         const embed = createVerseEmbed(displayVerse, '📖 Daily Bible Verse');
-        await channel.send({ embeds: [embed] });
+        await channel.send({ embeds: [embed], components: createVerseComponents(displayVerse) });
     } catch (err) {
         console.error(`[BibleService] Failed to post daily verse for guild ${guildId}:`, err);
     }
