@@ -49,7 +49,7 @@
             <svg class="dash-nav-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="search" id="sidebar-search" class="dash-nav-search" placeholder="Search sections… (/ or Ctrl+K)" autocomplete="off" aria-label="Filter dashboard sections">
         </div>
-        <div id="sidebar-no-results" style="display:none;font-size:.8rem;color:var(--ink-500);padding:6px 8px;">No sections match</div>
+        <div id="sidebar-no-results" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true" style="display:none;font-size:.8rem;color:var(--ink-500);padding:6px 8px;">No sections match</div>
 
         <!-- Configure -->
         <div class="dash-nav-label">// Configure</div>
@@ -431,7 +431,7 @@
             if (!q) {
                 document.querySelectorAll('.dash-nav li').forEach(li => li.style.display = '');
                 labels.forEach(l => l.style.display = '');
-                if (noResults) noResults.style.display = 'none';
+                if (noResults) { noResults.style.display = 'none'; noResults.setAttribute('aria-hidden', 'true'); }
                 return;
             }
             let anyVisible = false;
@@ -448,7 +448,10 @@
                 });
                 label.style.display = groupVisible ? '' : 'none';
             });
-            if (noResults) noResults.style.display = anyVisible ? 'none' : '';
+            if (noResults) {
+                noResults.style.display = anyVisible ? 'none' : '';
+                noResults.setAttribute('aria-hidden', anyVisible ? 'true' : 'false');
+            }
         }
 
         // ── Welcome card preview ──────────────────────────────────────────────
