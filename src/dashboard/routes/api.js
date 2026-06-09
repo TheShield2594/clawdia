@@ -296,8 +296,14 @@ function validateBirthdaysUpdate(updates) {
 
 function validateEventLogUpdate(updates) {
     const EVENT_LOG_BOOLEAN_FIELDS = new Set([
-        'enabled', 'logMessageEdit', 'logMessageDelete',
-        'logMemberJoin', 'logMemberLeave', 'logRoleChanges', 'logChannelChanges',
+        'enabled', 'logMessageEdit', 'logMessageDelete', 'logMessageBulkDelete',
+        'logMemberJoin', 'logMemberLeave', 'logNicknameChange', 'logUsernameChange',
+        'logAvatarChange', 'logTimeout', 'logBoost',
+        'logRoleChanges', 'logChannelChanges',
+        'logVoiceJoin', 'logVoiceLeave', 'logVoiceMove', 'logVoiceMuteDeafen',
+        'logInviteCreate', 'logInviteDelete', 'logServerUpdate', 'logEmojiUpdate',
+        'logWebhookUpdate', 'logBotAdd',
+        'logThreadCreate', 'logThreadDelete', 'logThreadArchive',
     ]);
     for (const [key, value] of Object.entries(updates)) {
         if (!key.startsWith('eventLog.') && key !== 'eventLog') continue;
