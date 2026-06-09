@@ -1,0 +1,26 @@
+                <section id="suggestions" class="panel">
+                    <div class="panel-head">
+                        <h2>Suggestions</h2>
+                        <p>Designate a channel where members post suggestions. The bot auto-adds upvote/downvote reactions.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable suggestions</strong></span>
+                        <span class="switch"><input type="checkbox" id="suggestions-enabled" <%= settings.suggestions?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="suggestions-channel">Suggestions channel</label>
+                        <select id="suggestions-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.suggestions?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="suggestions-upvote">Upvote emoji</label><input type="text" id="suggestions-upvote" value="<%= settings.suggestions?.upvoteEmoji || '👍' %>"></div>
+                        <div><label class="field-label" for="suggestions-downvote">Downvote emoji</label><input type="text" id="suggestions-downvote" value="<%= settings.suggestions?.downvoteEmoji || '👎' %>"></div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('suggestions')">Save changes</button>
+                    </div>
+                </section>

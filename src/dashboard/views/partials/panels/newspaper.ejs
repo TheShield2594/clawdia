@@ -1,0 +1,47 @@
+                <section id="newspaper" class="panel">
+                    <div class="panel-head">
+                        <h2>📰 Server Newspaper</h2>
+                        <p>A weekly AI-generated recap of what happened in your server — top earners, level-ups, casino highlights, moderation digest, and more. Use <code>/newspaper preview</code> to see a draft before the scheduled delivery.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable server newspaper</strong></span>
+                        <span class="switch"><input type="checkbox" id="newspaper-enabled" <%= settings.newspaper?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Delivery schedule</h3></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="newspaper-channel">Delivery channel</label>
+                            <select id="newspaper-channel">
+                                <option value="">— Select a channel —</option>
+                                <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.newspaper?.channelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="field-label" for="newspaper-day">Delivery day</label>
+                            <select id="newspaper-day">
+                                <% ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].forEach((d, i) => { %>
+                                <option value="<%= i %>" <%= (settings.newspaper?.deliveryDay ?? 1) === i ? 'selected' : '' %>><%= d %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="field-label" for="newspaper-hour">Delivery hour <small>(UTC, 0–23)</small></label>
+                            <input type="number" id="newspaper-hour" value="<%= settings.newspaper?.deliveryHourUtc ?? 9 %>" min="0" max="23">
+                        </div>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Sections</h3></div>
+                    <p style="color:var(--ink-400);font-size:.85rem;margin:.25rem 0 .75rem;">Choose which sections appear in each edition. Disabled sections are silently skipped.</p>
+                    <label class="toggle"><span class="toggle-text">💰 Top Earners</span><span class="switch"><input type="checkbox" id="np-top-earners" <%= settings.newspaper?.sections?.topEarners !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">📈 Level Ups</span><span class="switch"><input type="checkbox" id="np-level-ups" <%= settings.newspaper?.sections?.levelUps !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">🎰 Casino Highlights</span><span class="switch"><input type="checkbox" id="np-casino" <%= settings.newspaper?.sections?.casinoHighlights !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">🛡️ Moderation Digest <small>(action count only, no names)</small></span><span class="switch"><input type="checkbox" id="np-mod" <%= settings.newspaper?.sections?.moderationDigest !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">🎮 Game Standouts</span><span class="switch"><input type="checkbox" id="np-games" <%= settings.newspaper?.sections?.gameStandouts !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">✨ Quote of the Week <small>(AI-invented if no channel opted in)</small></span><span class="switch"><input type="checkbox" id="np-quote" <%= settings.newspaper?.sections?.quoteOfTheWeek !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text">👋 New Members</span><span class="switch"><input type="checkbox" id="np-new-members" <%= settings.newspaper?.sections?.newMembers !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('newspaper')">Save changes</button>
+                    </div>
+                </section>

@@ -1,0 +1,503 @@
+                <section id="economy" class="panel">
+                    <div class="panel-head">
+                        <h2>Economy</h2>
+                        <p>Tune currency rewards, manage the store, games, and jobs.</p>
+                    </div>
+
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab eco-inner-tab active" data-eco-tab="eco-tab-settings">⚙️ Settings &amp; Store</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-games">🎮 Games</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-careers">💼 Careers</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-hunt">🏹 Hunting</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-fish">🎣 Fishing</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-mine">⛏️ Mining</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-heist">🎭 Heist</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-health">📊 Economy Health</button>
+                    </div>
+
+                    <!-- Settings & Store -->
+                    <div id="eco-tab-settings" class="ai-inner-panel active">
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable economy</strong><span>Allow members to earn and spend currency</span></span>
+                            <span class="switch"><input type="checkbox" id="economy-enabled" <%= settings.economy.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field">
+                            <label class="field-label" for="economy-currency">Currency symbol</label>
+                            <input type="text" id="economy-currency" value="<%= settings.economy.currency %>">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="economy-daily">Daily reward amount</label>
+                            <input type="number" id="economy-daily" value="<%= settings.economy.dailyAmount %>" min="0">
+                        </div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div><label class="field-label" for="economy-work-min">Work payout (min)</label><input type="number" id="economy-work-min" value="<%= settings.economy.workMin %>" min="0"></div>
+                            <div><label class="field-label" for="economy-work-max">Work payout (max)</label><input type="number" id="economy-work-max" value="<%= settings.economy.workMax %>" min="0"></div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="economy-announcement-channel">Announcements channel</label>
+                            <select id="economy-announcement-channel">
+                                <option value="">None (no announcements)</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>" <%= settings.economy.announcementChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                            <small>Channel where shop purchases and economy events are announced</small>
+                        </div>
+
+                        <!-- Store -->
+                        <div class="eco-section-head" style="margin-top:1.5rem">
+                            <label class="toggle" style="margin:0;flex:1">
+                                <span class="toggle-text"><strong>Store</strong><span>Items available for purchase with /shop buy</span></span>
+                                <span class="switch"><input type="checkbox" id="economy-shop-enabled" <%= settings.economy.shopEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
+                            <button class="btn btn-sm btn-primary" onclick="openItemModal(-1)">+ Add item</button>
+                        </div>
+                        <div id="store-items-grid" class="store-grid"></div>
+
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                        </div>
+                    </div>
+
+                    <!-- Games -->
+                    <div id="eco-tab-games" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Toggle individual economy games on or off for your server.</p>
+                        <div class="eco-section-head" style="margin-bottom:.75rem">
+                            <label class="toggle" style="margin:0;flex:1">
+                                <span class="toggle-text"><strong>Enable all games</strong><span>Master switch for all economy games</span></span>
+                                <span class="switch"><input type="checkbox" id="economy-games-enabled" <%= settings.economy.gamesEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
+                        </div>
+                        <div class="games-grid">
+                            <div class="game-card">
+                                <div class="game-card-icon">🪙</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Coinflip</span>
+                                    <span class="game-card-desc">Bet coins — heads or tails wins double</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-coinflip-enabled" <%= settings.economy.coinflipEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🎲</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Dice Roll</span>
+                                    <span class="game-card-desc">Roll dice and multiply your wager</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-roll-enabled" <%= settings.economy.rollEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🃏</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Blackjack</span>
+                                    <span class="game-card-desc">Beat the dealer to win your bet</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-blackjack-enabled" <%= settings.economy.blackjackEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🎰</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Casino</span>
+                                    <span class="game-card-desc">Slots, roulette, poker, crash and more</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-casino-enabled" <%= settings.economy.casinoEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">⚔️</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Duel</span>
+                                    <span class="game-card-desc">Challenge another member to a coin wager</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-duel-enabled" <%= settings.economy.duelEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🦹</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Crime</span>
+                                    <span class="game-card-desc">Attempt a heist for a chance at big coins</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-crime-enabled" <%= settings.economy.crimeEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🥷</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Rob</span>
+                                    <span class="game-card-desc">Steal coins from another member's wallet</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-rob-enabled" <%= settings.economy.robEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                            <div class="game-card">
+                                <div class="game-card-icon">🎓</div>
+                                <div class="game-card-info">
+                                    <span class="game-card-name">Quiz</span>
+                                    <span class="game-card-desc">Answer trivia questions to earn coins</span>
+                                </div>
+                                <label class="switch"><input type="checkbox" id="economy-quiz-enabled" <%= settings.economy.quizEnabled !== false ? 'checked' : '' %>><span class="slider"></span></label>
+                            </div>
+                        </div>
+
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                        </div>
+                    </div>
+
+                    <!-- Careers -->
+                    <div id="eco-tab-careers" class="ai-inner-panel">
+                        <!-- Career Tiers -->
+                        <div class="eco-section-head">
+                            <span class="toggle-text"><strong>Career Tiers</strong><span>Rename tiers and set how many shifts unlock each one</span></span>
+                        </div>
+                        <div id="job-tiers-grid" class="job-tiers-grid"></div>
+
+                        <!-- Jobs -->
+                        <div class="eco-section-head" style="margin-top:1.5rem">
+                            <label class="toggle" style="margin:0;flex:1">
+                                <span class="toggle-text"><strong>Jobs</strong><span>Jobs shown when members use /work</span></span>
+                                <span class="switch"><input type="checkbox" id="economy-jobs-enabled" <%= settings.economy.jobsEnabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                            </label>
+                            <button class="btn btn-sm btn-primary" onclick="openJobModal(-1)">+ Add job</button>
+                        </div>
+                        <div id="jobs-list" class="jobs-list"></div>
+
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                        </div>
+                    </div>
+
+                    <!-- Economy Health -->
+                    <div id="eco-tab-health" class="ai-inner-panel">
+                        <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
+                            <!-- KPI tiles -->
+                            <div class="eco-kpi-tile"><div class="eco-kpi-label">Total coins in circulation</div><div class="eco-kpi-value" id="eco-stat-total-coins">—</div></div>
+                            <div class="eco-kpi-tile"><div class="eco-kpi-label">Active economy users (7d)</div><div class="eco-kpi-value" id="eco-stat-active-users">—</div></div>
+                        </div>
+
+                        <!-- Admin Actions -->
+                        <div class="panel-head"><h3>Admin Actions</h3><p>Give, take, reset, or freeze a member's economy account.</p></div>
+                        <div class="field" style="max-width:360px">
+                            <label class="field-label">User ID</label>
+                            <input type="text" id="eco-admin-user-id" placeholder="Discord user ID (17–20 digits)">
+                        </div>
+                        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
+                            <input type="number" id="eco-admin-amount" placeholder="Amount" min="1" style="width:120px">
+                            <button class="btn btn-sm btn-primary" onclick="ecoAdminAction('give')">Give coins</button>
+                            <button class="btn btn-sm" onclick="ecoAdminAction('take')">Take coins</button>
+                            <button class="btn btn-sm btn-danger" onclick="ecoAdminAction('reset')">Reset balance</button>
+                            <button class="btn btn-sm" onclick="ecoAdminAction('freeze')">Freeze account</button>
+                            <button class="btn btn-sm" onclick="ecoAdminAction('unfreeze')">Unfreeze account</button>
+                        </div>
+                        <div id="eco-admin-msg" style="min-height:1.4em;font-size:.85em"></div>
+
+                        <!-- Top earners -->
+                        <div class="panel-head" style="margin-top:1.5rem"><h3>Top 10 Richest Users</h3></div>
+                        <div id="eco-top-earners-loading">
+                            <div class="skel-bar" style="width:90%"></div>
+                            <div class="skel-bar" style="width:75%"></div>
+                            <div class="skel-bar" style="width:85%"></div>
+                            <div class="skel-bar" style="width:70%"></div>
+                        </div>
+                        <div id="eco-top-earners-error" style="display:none" class="analytics-error-card">
+                            <span>⚠ Could not load economy stats</span>
+                            <button class="btn btn-sm" onclick="loadEcoHealth()">Retry</button>
+                        </div>
+                        <table id="eco-top-earners-table" class="cases-table" style="display:none">
+                            <thead><tr><th>Rank</th><th>User</th><th>Wallet</th><th>Bank</th><th>Total</th></tr></thead>
+                            <tbody id="eco-top-earners-tbody"></tbody>
+                        </table>
+
+                        <!-- Command frequency chart -->
+                        <div class="panel-head" style="margin-top:1.5rem"><h3>Most-Used Economy Commands</h3></div>
+                        <div style="max-width:540px;position:relative"><canvas id="eco-cmd-chart" height="200"></canvas></div>
+                    </div>
+
+                    <!-- Hunting item images -->
+                    <div id="eco-tab-hunt" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>🏹 Hunting Item Images</h3>
+                            <p>Manage item images for the hunting mini-game. Images show as thumbnails when members browse and purchase items.</p>
+                        </div>
+                        <div class="ai-inner-tabs">
+                            <button class="hunt-inner-tab active" data-hunt-tab="hunt-weapons">🔫 Weapons</button>
+                            <button class="hunt-inner-tab" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
+                            <button class="hunt-inner-tab" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
+                            <button class="hunt-inner-tab" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
+                        </div>
+                        <div id="hunt-weapons" class="ai-inner-panel active">
+                            <p class="ai-inner-desc">Weapons used for hunting. Tier 1–12 progression.</p>
+                            <div class="game-items-grid">
+                                <% huntItems.weapons.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="hunt-upgrades" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Permanent module upgrades installed on weapons.</p>
+                            <div class="game-items-grid">
+                                <% huntItems.upgrades.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="hunt-ammo" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Ammunition packs consumed during hunts.</p>
+                            <div class="game-items-grid">
+                                <% huntItems.ammo.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="hunt-consumables" class="ai-inner-panel">
+                            <p class="ai-inner-desc">One-time use consumables for hunt boosts.</p>
+                            <div class="game-items-grid">
+                                <% huntItems.consumables.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fishing item images -->
+                    <div id="eco-tab-fish" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>🎣 Fishing Item Images</h3>
+                            <p>Manage item images for the fishing mini-game.</p>
+                        </div>
+                        <div class="ai-inner-tabs">
+                            <button class="fish-inner-tab active" data-fish-tab="fish-rods">🎣 Rods</button>
+                            <button class="fish-inner-tab" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
+                            <button class="fish-inner-tab" data-fish-tab="fish-bait">🪱 Bait</button>
+                            <button class="fish-inner-tab" data-fish-tab="fish-consumables">🧪 Consumables</button>
+                        </div>
+                        <div id="fish-rods" class="ai-inner-panel active">
+                            <p class="ai-inner-desc">Fishing rods used to catch fish. Tier 1–5 progression.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.rods.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="fish-upgrades" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Permanent module upgrades for rods.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.upgrades.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="fish-bait" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Bait packs used when fishing.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.bait.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="fish-consumables" class="ai-inner-panel">
+                            <p class="ai-inner-desc">One-time use consumables for fishing boosts.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.consumables.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Mining item images -->
+                    <div id="eco-tab-mine" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>⛏️ Mining Item Images</h3>
+                            <p>Manage item images for the mining mini-game.</p>
+                        </div>
+                        <div class="ai-inner-tabs">
+                            <button class="mine-inner-tab active" data-mine-tab="mine-pickaxes">⛏️ Pickaxes</button>
+                            <button class="mine-inner-tab" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
+                            <button class="mine-inner-tab" data-mine-tab="mine-blasts">💥 Blasts</button>
+                            <button class="mine-inner-tab" data-mine-tab="mine-consumables">🧪 Consumables</button>
+                        </div>
+                        <div id="mine-pickaxes" class="ai-inner-panel active">
+                            <p class="ai-inner-desc">Pickaxes used for mining. Tier 1–5 progression.</p>
+                            <div class="game-items-grid">
+                                <% mineItems.pickaxes.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="mine-upgrades" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Permanent module upgrades for pickaxes.</p>
+                            <div class="game-items-grid">
+                                <% mineItems.upgrades.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="mine-blasts" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Blast charge packs used when mining.</p>
+                            <div class="game-items-grid">
+                                <% mineItems.blasts.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <div id="mine-consumables" class="ai-inner-panel">
+                            <p class="ai-inner-desc">One-time use consumables for mining boosts.</p>
+                            <div class="game-items-grid">
+                                <% mineItems.consumables.forEach(function(item){ %>
+                                <%- include('partials/game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Heist configuration -->
+                    <div id="eco-tab-heist" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>🎭 Strategic Heist</h3>
+                            <p>A group economy event where players plan and execute a heist together. Each role carries a unique skill check — strategy and team composition matter. Use <code>/heist start</code> to open a lobby.</p>
+                        </div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable heist system</strong></span>
+                            <span class="switch"><input type="checkbox" id="heist-enabled" <%= settings.heist?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+
+                        <div class="panel-head" style="margin-top:1.25rem"><h3>Timing &amp; Limits</h3></div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div>
+                                <label class="field-label" for="heist-cooldown">Cooldown between heists <small>(hours, 1–168)</small></label>
+                                <input type="number" id="heist-cooldown" value="<%= settings.heist?.cooldownHours ?? 6 %>" min="1" max="168">
+                                <small>How long a user must wait before starting another heist.</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="heist-lobby">Lobby duration <small>(seconds, 30–300)</small></label>
+                                <input type="number" id="heist-lobby" value="<%= settings.heist?.lobbyDurationSeconds ?? 60 %>" min="30" max="300">
+                                <small>How long the join window stays open.</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="heist-min-players">Minimum players <small>(2–4)</small></label>
+                                <input type="number" id="heist-min-players" value="<%= settings.heist?.minPlayers ?? 2 %>" min="2" max="4">
+                                <small>Minimum crew size required for the heist to proceed.</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="heist-jail">Jail duration <small>(minutes, 5–1440)</small></label>
+                                <input type="number" id="heist-jail" value="<%= settings.heist?.jailDurationMinutes ?? 30 %>" min="5" max="1440">
+                                <small>How long caught players are locked out of economy commands.</small>
+                            </div>
+                        </div>
+
+                        <div class="panel-head" style="margin-top:1.25rem"><h3>Rewards</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="heist-max-payout">Max payout per full-success heist <small>(split among successful players)</small></label>
+                            <input type="number" id="heist-max-payout" value="<%= settings.heist?.maxPayout ?? 10000 %>" min="100">
+                            <small>The server bank / vault / casino has this much available. Vault rewards 1.5×, casino 1.25×, bank 1×.</small>
+                        </div>
+
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('heist')">Save changes</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Store Item Modal -->
+                <div id="item-modal" class="modal-overlay" style="display:none">
+                    <div class="modal-box">
+                        <div class="modal-head">
+                            <h3 id="item-modal-title">Add Store Item</h3>
+                            <button class="modal-close" onclick="closeItemModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="field">
+                                <label class="field-label">Item name *</label>
+                                <input type="text" id="modal-item-name" placeholder="e.g. VIP Role">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Description</label>
+                                <input type="text" id="modal-item-desc" placeholder="e.g. Access to the VIP channel">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Price *</label>
+                                <input type="number" id="modal-item-price" placeholder="500" min="0">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Role to grant on purchase</label>
+                                <select id="modal-item-role">
+                                    <option value="">None</option>
+                                    <% roles.forEach(role => { %>
+                                        <option value="<%= role.id %>">@<%= role.name %></option>
+                                    <% }); %>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Stock</label>
+                                <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;cursor:pointer">
+                                    <input type="checkbox" id="modal-item-unlimited" onchange="toggleStockInput(this)" checked>
+                                    <span>Unlimited stock</span>
+                                </label>
+                                <input type="number" id="modal-item-stock" placeholder="100" min="1" style="display:none">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Item Image</label>
+                                <div class="shop-img-upload-row">
+                                    <div class="shop-img-preview-wrap" id="shop-img-preview-wrap">
+                                        <img id="shop-img-preview" src="" alt="" style="display:none;width:64px;height:64px;object-fit:contain;border-radius:6px;border:1px solid var(--border)">
+                                        <span id="shop-img-placeholder" style="font-size:2rem">🖼️</span>
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;gap:.4rem">
+                                        <label class="btn btn-sm btn-primary" style="cursor:pointer;width:fit-content">
+                                            Upload image
+                                            <input type="file" id="modal-item-image-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="previewShopItemImage(this)">
+                                        </label>
+                                        <button class="btn btn-sm btn-danger" type="button" id="shop-img-clear-btn" onclick="clearShopItemImage()" style="display:none;width:fit-content">Remove image</button>
+                                    </div>
+                                </div>
+                                <small>64×64 px PNG recommended (max). Shown in <code>/shop view</code> tiles and on purchase confirmation.</small>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn" onclick="closeItemModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="saveItemModal()">Save item</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Job Modal -->
+                <div id="job-modal" class="modal-overlay" style="display:none">
+                    <div class="modal-box" style="max-width:460px">
+                        <div class="modal-head">
+                            <h3 id="job-modal-title">Add Job</h3>
+                            <button class="modal-close" onclick="closeJobModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="field">
+                                <label class="field-label">Job name *</label>
+                                <input type="text" id="modal-job-name" placeholder="e.g. Astronaut">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Emoji (optional)</label>
+                                <input type="text" id="modal-job-emoji" placeholder="🚀" maxlength="4">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Career tier *</label>
+                                <select id="modal-job-tier">
+                                    <option value="1">Tier 1 — Intern (0 shifts)</option>
+                                    <option value="2">Tier 2 — Skilled Worker (10 shifts)</option>
+                                    <option value="3">Tier 3 — Senior Specialist (25 shifts)</option>
+                                    <option value="4">Tier 4 — Executive (50 shifts)</option>
+                                </select>
+                                <small>Members unlock this job when they reach the required shift count.</small>
+                            </div>
+                            <div style="display:flex;gap:.75rem">
+                                <div class="field" style="flex:1">
+                                    <label class="field-label">Min pay *</label>
+                                    <input type="number" id="modal-job-min-pay" placeholder="50" min="0">
+                                </div>
+                                <div class="field" style="flex:1">
+                                    <label class="field-label">Max pay *</label>
+                                    <input type="number" id="modal-job-max-pay" placeholder="150" min="0">
+                                </div>
+                            </div>
+                            <small style="color:var(--text-dim)">Coins earned per /work shift for this job. Performance ratings apply a multiplier on top.</small>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn" onclick="closeJobModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="saveJobModal()">Save job</button>
+                        </div>
+                    </div>
+                </div>

@@ -185,7 +185,7 @@ function playAgainRow(id) {
 
 module.exports = {
     name: 'higherlower',
-    description: 'Bet on whether the next card will be higher or lower — build a streak and cash out to multiply your bet',
+    description: 'Bet higher or lower on the next card — build a streak and cash out to multiply your bet',
     cooldown: 5,
     configure: sub => sub
         .addIntegerOption(opt =>

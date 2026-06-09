@@ -1,0 +1,116 @@
+                <section id="achievements" class="panel">
+                    <div class="panel-head">
+                        <h2>Achievements &amp; Badges</h2>
+                        <p>Let members earn badges for hitting milestones. Configure which achievements are active and where to announce them.</p>
+                    </div>
+
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable achievements</strong><span>Track and award achievements for server activity</span></span>
+                        <span class="switch"><input type="checkbox" id="ach-enabled" <%= settings.achievements?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="field">
+                        <label class="field-label" for="ach-announce-channel">Announcement channel</label>
+                        <select id="ach-announce-channel">
+                            <option value="">None (no announcements)</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.achievements?.announcementChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Channel where achievement unlocks are posted</small>
+                    </div>
+
+                    <!-- Built-in achievements toggle -->
+                    <div class="eco-section-head" style="margin-top:1.5rem">
+                        <span class="toggle-text"><strong>Built-in Achievements</strong><span>Toggle individual achievements on or off for this server</span></span>
+                    </div>
+                    <div id="builtin-ach-list" style="margin-top:.5rem"></div>
+
+                    <!-- Custom achievements -->
+                    <div class="eco-section-head" style="margin-top:1.75rem">
+                        <span class="toggle-text"><strong>Custom Achievements</strong><span>Server-specific achievements admins can manually grant</span></span>
+                        <button class="btn btn-sm btn-primary" onclick="openAchModal(-1)">+ Add achievement</button>
+                    </div>
+                    <div id="custom-ach-list" style="margin-top:.5rem"></div>
+
+                    <div class="actions-row" style="margin-top:1.5rem">
+                        <button class="btn btn-primary" onclick="saveSettings('achievements')">Save changes</button>
+                    </div>
+                </section>
+
+                <!-- Achievement Modal -->
+                <div id="ach-modal" class="modal-overlay" style="display:none">
+                    <div class="modal-box" style="max-width:480px">
+                        <div class="modal-head">
+                            <h3 id="ach-modal-title">Add Achievement</h3>
+                            <button class="modal-close" onclick="closeAchModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="field">
+                                <label class="field-label">Name *</label>
+                                <input type="text" id="modal-ach-name" placeholder="e.g. Server Regular">
+                            </div>
+                            <div class="field">
+                                <label class="field-label">Description *</label>
+                                <input type="text" id="modal-ach-desc" placeholder="e.g. Reached 500 messages">
+                            </div>
+                            <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+                                <div>
+                                    <label class="field-label">Emoji</label>
+                                    <input type="text" id="modal-ach-emoji" placeholder="🏆" maxlength="8">
+                                </div>
+                                <div>
+                                    <label class="field-label">Category</label>
+                                    <select id="modal-ach-category">
+                                        <option value="custom">Custom</option>
+                                        <option value="economy">Economy</option>
+                                        <option value="leveling">Leveling</option>
+                                        <option value="hunt">Hunt</option>
+                                        <option value="fishing">Fishing</option>
+                                        <option value="community">Community</option>
+                                        <option value="moderation">Moderation</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+                                <div>
+                                    <label class="field-label">XP reward</label>
+                                    <input type="number" id="modal-ach-xp" value="0" min="0">
+                                </div>
+                                <div>
+                                    <label class="field-label">Coin reward</label>
+                                    <input type="number" id="modal-ach-coins" value="0" min="0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn" onclick="closeAchModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="saveAchModal()">Save achievement</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Achievement Grant Modal -->
+                <div id="ach-grant-modal" class="modal-overlay" style="display:none">
+                    <div class="modal-box" style="max-width:420px">
+                        <div class="modal-head">
+                            <h3>Grant Achievement</h3>
+                            <button class="modal-close" onclick="closeAchGrantModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="grant-ach-id">
+                            <p id="grant-ach-name" style="font-weight:600;margin-bottom:.75rem"></p>
+                            <div class="field">
+                                <label class="field-label" for="grant-member-search">Search member</label>
+                                <input type="text" id="grant-member-search" placeholder="Type a username…" autocomplete="off" oninput="debouncedMemberSearch()">
+                                <div id="grant-member-results" style="display:none;border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;max-height:180px;overflow-y:auto;background:var(--surface-1)"></div>
+                                <input type="hidden" id="grant-member-id">
+                                <div id="grant-selected-member" style="display:none;margin-top:.5rem;font-size:.88rem;color:var(--text-mute)"></div>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn" onclick="closeAchGrantModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="submitAchGrant()">Grant</button>
+                        </div>
+                    </div>
+                </div>

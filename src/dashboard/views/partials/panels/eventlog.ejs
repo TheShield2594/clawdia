@@ -1,0 +1,29 @@
+                <section id="eventlog" class="panel">
+                    <div class="panel-head">
+                        <h2>Event Log</h2>
+                        <p>Record server activity to a dedicated log channel.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable event logging</strong></span>
+                        <span class="switch"><input type="checkbox" id="eventlog-enabled" <%= settings.eventLog?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="eventlog-channel">Log channel</label>
+                        <select id="eventlog-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.eventLog?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="panel-head" style="margin-top:1rem"><h3>Events to log</h3></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Message edits</strong></span><span class="switch"><input type="checkbox" id="log-msg-edit" <%= settings.eventLog?.logMessageEdit !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Message deletions</strong></span><span class="switch"><input type="checkbox" id="log-msg-delete" <%= settings.eventLog?.logMessageDelete !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Member joins</strong></span><span class="switch"><input type="checkbox" id="log-member-join" <%= settings.eventLog?.logMemberJoin !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Member leaves</strong></span><span class="switch"><input type="checkbox" id="log-member-leave" <%= settings.eventLog?.logMemberLeave !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Role changes</strong></span><span class="switch"><input type="checkbox" id="log-role-changes" <%= settings.eventLog?.logRoleChanges !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Channel changes</strong></span><span class="switch"><input type="checkbox" id="log-channel-changes" <%= settings.eventLog?.logChannelChanges !== false ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('eventlog')">Save changes</button>
+                    </div>
+                </section>

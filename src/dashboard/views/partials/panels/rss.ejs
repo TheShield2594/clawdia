@@ -1,0 +1,104 @@
+                <section id="rss" class="panel">
+                    <div class="panel-head">
+                        <h2>RSS Feeds</h2>
+                        <p>Manage live RSS feeds and daily news digests for your server.</p>
+                    </div>
+
+                    <!-- Inner RSS tabs -->
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab rss-inner-tab active" data-rss-tab="rss-tab-feeds">📰 RSS Feeds</button>
+                        <button class="ai-inner-tab rss-inner-tab" data-rss-tab="rss-tab-dailynews">🗞️ Daily News</button>
+                    </div>
+
+                    <!-- RSS Feeds inner panel -->
+                    <div id="rss-tab-feeds" class="ai-inner-panel active">
+                        <p class="ai-inner-desc">Pipe any RSS feed straight into a Discord channel.</p>
+                        <div id="rss-feeds" style="margin-bottom:1.5rem;">
+                            <% if ((settings.rssFeeds || []).length === 0) { %>
+                                <div class="empty-state" style="padding:2rem 1.5rem;">
+                                    <h3>No feeds yet</h3>
+                                    <p>Add your first RSS feed below.</p>
+                                </div>
+                            <% } %>
+                            <% (settings.rssFeeds || []).forEach((feed, index) => { %>
+                                <div class="list-item">
+                                    <div style="min-width:0;flex:1;">
+                                        <div class="url"><%= feed.url %></div>
+                                        <small style="color:var(--text-mute);font-size:0.78rem;">→ #<%= channels.find(c => c.id === feed.channelId)?.name || 'unknown' %></small>
+                                    </div>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteRssFeed(<%= index %>)">Remove</button>
+                                </div>
+                            <% }); %>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="rss-url">Feed URL</label>
+                            <input type="text" id="rss-url" placeholder="https://example.com/feed.xml">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="rss-channel">Post to channel</label>
+                            <select id="rss-channel">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="addRssFeed()">Add feed</button>
+                        </div>
+                    </div>
+
+                    <!-- Daily News inner panel -->
+                    <div id="rss-tab-dailynews" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Roll multiple feeds into one tidy daily digest at a time of your choosing.</p>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable daily digest</strong><span>Compile feeds into a daily post</span></span>
+                            <span class="switch"><input type="checkbox" id="dailynews-enabled" <%= settings.dailyNews?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+                        <div class="field">
+                            <label class="field-label" for="dailynews-channel">Post to channel</label>
+                            <select id="dailynews-channel">
+                                <option value="">Select a channel</option>
+                                <% channels.forEach(channel => { %>
+                                    <option value="<%= channel.id %>" <%= settings.dailyNews?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div>
+                                <label class="field-label" for="dailynews-time">Delivery time (24h)</label>
+                                <input type="text" id="dailynews-time" value="<%= settings.dailyNews?.time || '09:00' %>" placeholder="09:00">
+                            </div>
+                            <div>
+                                <label class="field-label" for="dailynews-timezone">Timezone</label>
+                                <input type="text" id="dailynews-timezone" list="tz-datalist" value="<%= settings.dailyNews?.timezone || 'UTC' %>" placeholder="America/New_York" autocomplete="off" onblur="validateTimezoneInput(this)">
+                                <small id="dailynews-timezone-err" class="field-error" style="display:none"></small>
+                                <small>IANA timezone — e.g. <code>UTC</code>, <code>America/New_York</code>, <code>Europe/London</code>.</small>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="dailynews-title">Digest title</label>
+                            <input type="text" id="dailynews-title" value="<%= settings.dailyNews?.title || '📰 Daily News Digest' %>">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="dailynews-max-items">Max items per feed</label>
+                            <input type="number" id="dailynews-max-items" value="<%= settings.dailyNews?.maxItemsPerFeed || 3 %>" min="1" max="10">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="dailynews-feeds">RSS feed URLs (one per line)</label>
+                            <textarea id="dailynews-feeds" rows="6" placeholder="https://example.com/feed1.xml&#10;https://example.com/feed2.xml"><%= settings.dailyNews?.feeds?.join('\n') || '' %></textarea>
+                            <div id="main-feed-status" style="font-size:.8rem;margin-top:.35rem;"></div>
+                            <button class="btn btn-sm" type="button" style="margin-top:.35rem;" onclick="validateMainFeeds()">Validate feeds</button>
+                        </div>
+                        <div class="field">
+                            <label class="field-label">Additional delivery profiles</label>
+                            <div id="dailynews-profiles-list"></div>
+                            <button class="btn btn-sm" type="button" onclick="addDailyNewsProfile()">+ Add profile</button>
+                            <small>Create multiple independent digests (e.g., AI news to one channel, gaming news to another).</small>
+                        </div>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('dailynews')">Save changes</button>
+                            <button class="btn" type="button" onclick="triggerDailyNewsNow()">Send digest now</button>
+                        </div>
+                    </div>
+                </section>
