@@ -8,7 +8,7 @@ services:
     volumes:
       - mongodb_data:/data/db
     networks:
-      - ultrabot-network
+      - db-network   # internal-only: no external routing, no published ports
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
@@ -31,7 +31,13 @@ services:
       - ultrabot_logs:/app/logs
       - ./backups:/app/backups
     networks:
-      - ultrabot-network
+      - db-network      # reaches MongoDB
+      - ultrabot-network # reaches the internet (Discord API, AI APIs, etc.)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     # Dedicated JSON health endpoint; 503 when mongo is down
     healthcheck:
       test: ["CMD", "node", "-e",
@@ -60,7 +66,7 @@ services:
     volumes:
       - ./backups:/backups
     networks:
-      - ultrabot-network
+      - db-network   # only needs to reach MongoDB
     depends_on:
       mongodb:
         condition: service_healthy
@@ -90,3 +96,6 @@ volumes:
 networks:
   ultrabot-network:
     driver: bridge
+  db-network:
+    driver: bridge
+    internal: true  # no external gateway — MongoDB cannot initiate outbound connections

@@ -75,19 +75,21 @@ async function loadEvents() {
 }
 
 async function connectDatabase() {
+    // M6: Mask credentials in log output so the URI never appears in log files.
+    const maskedUri = (process.env.MONGODB_URI || '').replace(/:[^:@]*@/, ':***@');
     try {
         await connect(process.env.MONGODB_URI, {
             serverSelectionTimeoutMS: 10000,
         });
         console.log('[DATABASE] Connected to MongoDB');
     } catch (error) {
-        console.error('[DATABASE] Failed to connect:', error);
+        console.error(`[DATABASE] Failed to connect to ${maskedUri}:`, error.message);
         process.exit(1);
     }
 
     connection.on('disconnected', () => console.warn('[DATABASE] Disconnected from MongoDB'));
     connection.on('reconnected', () => console.log('[DATABASE] Reconnected to MongoDB'));
-    connection.on('error', err => console.error('[DATABASE] Connection error:', err));
+    connection.on('error', err => console.error('[DATABASE] Connection error:', err.message));
 }
 
 async function startDashboard() {

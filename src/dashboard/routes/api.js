@@ -15,34 +15,42 @@ const net = require('net');
 const http = require('http');
 const https = require('https');
 
-// Returns true for any IP that must not be fetched (loopback, RFC1918, link-local, IPv6 ULA/LL).
+// Returns true for any IP that must not be fetched (loopback, RFC1918, link-local, IPv6 ULA/LL, etc.).
 function isPrivateIp(ip) {
     if (net.isIPv4(ip)) {
         const [a, b] = ip.split('.').map(Number);
         return (
+            a === 0 ||
             a === 127 ||
             a === 10 ||
+            (a === 100 && b >= 64 && b <= 127) || // RFC 6598 shared address space
             (a === 172 && b >= 16 && b <= 31) ||
             (a === 192 && b === 168) ||
-            (a === 169 && b === 254) ||
-            a === 0
+            (a === 169 && b === 254)              // link-local
         );
     }
     if (net.isIPv6(ip)) {
         const n = ip.toLowerCase();
         return (
-            n === '::1' ||
-            n.startsWith('fc') ||
-            n.startsWith('fd') ||
-            /^fe[89ab]/i.test(n) ||
-            n === '::' ||
-            n.startsWith('::ffff:')
+            n === '::1' ||                         // loopback
+            n === '::' ||                          // unspecified
+            n.startsWith('fc') ||                  // ULA fc00::/7
+            n.startsWith('fd') ||                  // ULA fd00::/8
+            /^fe[89ab]/i.test(n) ||                // link-local fe80::/10
+            n.startsWith('::ffff:') ||             // IPv4-mapped ::ffff:0:0/96
+            n.startsWith('::ffff:0:') ||           // IPv4-translated (RFC 2765)
+            n.startsWith('64:ff9b:') ||            // IPv4-IPv6 translation (RFC 6052)
+            n.startsWith('2001:db8:') ||           // documentation (RFC 3849)
+            n.startsWith('100::')                  // discard prefix (RFC 6666)
         );
     }
-    return true;
+    return true; // unknown format — block by default
 }
 
-async function assertHostPublic(hostname) {
+// Resolves a hostname to all its IP addresses, validates none are private, and returns
+// the first address to use as a pinned IP for the actual TCP connection.
+// Pinning prevents DNS rebinding: the IP checked here is the IP we connect to.
+async function resolveAndPin(hostname) {
     const addrs = await new Promise((resolve, reject) => {
         dns.lookup(hostname, { all: true }, (err, results) => {
             if (err) reject(new Error(`DNS lookup failed: ${err.message}`));
@@ -53,47 +61,81 @@ async function assertHostPublic(hostname) {
     for (const { address } of addrs) {
         if (isPrivateIp(address)) throw new Error('Feed URL resolves to a private or reserved IP address.');
     }
+    return addrs[0].address; // pinned IP used for the actual connection
 }
 
-// Fetches a feed URL safely: checks DNS on every hop, follows redirects up to maxRedirects.
+// Fetches a feed URL safely: pins DNS on every hop, follows redirects up to maxRedirects.
 // Returns the response body as a string.
 async function safeFetchFeed(urlStr, maxRedirects = 5) {
+    const tls = require('tls');
     let current = new URL(urlStr);
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
         if (!['http:', 'https:'].includes(current.protocol)) {
             throw new Error('Redirect to non-HTTP protocol rejected.');
         }
-        await assertHostPublic(current.hostname);
 
+        // Resolve DNS once, validate all returned IPs, then pin to avoid rebinding.
+        const pinnedIp = await resolveAndPin(current.hostname);
+        const port = current.port ? Number(current.port) : (current.protocol === 'https:' ? 443 : 80);
         const FEED_MAX_BYTES = 5 * 1024 * 1024; // 5 MB — enough for any real RSS feed
+
         const result = await new Promise((resolve, reject) => {
-            const mod = current.protocol === 'https:' ? https : http;
-            const port = current.port ? Number(current.port) : (current.protocol === 'https:' ? 443 : 80);
-            const req = mod.request(
-                { hostname: current.hostname, port, path: current.pathname + current.search, method: 'GET',
-                  headers: { 'User-Agent': 'Clawdia-FeedValidator/1.0', Accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
-                  timeout: 8000 },
-                (res) => {
-                    if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
-                        const loc = res.headers.location;
-                        res.destroy();
-                        return resolve({ redirect: loc });
-                    }
-                    const chunks = [];
-                    let totalBytes = 0;
-                    res.on('data', c => {
-                        totalBytes += c.length;
-                        if (totalBytes > FEED_MAX_BYTES) {
-                            res.destroy();
-                            return reject(new Error('Feed response exceeds maximum allowed size (5 MB).'));
-                        }
-                        chunks.push(c);
-                    });
-                    res.on('end', () => resolve({ body: Buffer.concat(chunks).toString('utf8') }));
-                    res.on('error', reject);
+            const commonHeaders = {
+                'User-Agent': 'Clawdia-FeedValidator/1.0',
+                Accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*',
+                Host: current.hostname, // required when connecting directly to a pinned IP
+            };
+
+            let req;
+            if (current.protocol === 'https:') {
+                // For HTTPS: connect to the pinned IP but validate the TLS cert against
+                // the original hostname (SNI + checkServerIdentity).
+                req = https.request({
+                    hostname: current.hostname,
+                    port,
+                    path: current.pathname + current.search,
+                    method: 'GET',
+                    headers: commonHeaders,
+                    timeout: 8000,
+                    createConnection: (opts, cb) => tls.connect({
+                        host: pinnedIp,
+                        port,
+                        servername: current.hostname,
+                        rejectUnauthorized: true,
+                    }, cb),
+                }, handleResponse);
+            } else {
+                req = http.request({
+                    hostname: pinnedIp, // connect to pinned IP directly
+                    port,
+                    path: current.pathname + current.search,
+                    method: 'GET',
+                    headers: commonHeaders,
+                    timeout: 8000,
+                }, handleResponse);
+            }
+
+            function handleResponse(res) {
+                if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                    const loc = res.headers.location;
+                    res.destroy();
+                    return resolve({ redirect: loc });
                 }
-            );
+                const chunks = [];
+                let totalBytes = 0;
+                res.on('data', c => {
+                    totalBytes += c.length;
+                    if (totalBytes > FEED_MAX_BYTES) {
+                        res.destroy();
+                        return reject(new Error('Feed response exceeds maximum allowed size (5 MB).'));
+                    }
+                    chunks.push(c);
+                });
+                res.on('end', () => resolve({ body: Buffer.concat(chunks).toString('utf8') }));
+                res.on('error', reject);
+            }
+
             req.on('timeout', () => { req.destroy(); reject(new Error('Feed request timed out.')); });
             req.on('error', reject);
             req.end();
@@ -161,39 +203,99 @@ function checkGuildAccess(req, res, next) {
     next();
 }
 
-// In-memory rate limiter for write operations: 60 requests per minute per user
-const writeRateLimits = new Map();
+// Bounded in-memory rate limiter.
+// Uses a Map (insertion-order preserved) so that when the map is full the oldest
+// entry is evicted first — giving FIFO/LRU behaviour without a separate library.
+// Max size of 10 000 entries prevents memory exhaustion even under sustained
+// enumeration attacks using unique fake user IDs.
+class BoundedRateLimiter {
+    constructor(maxSize = 10_000) {
+        this._map = new Map();
+        this._maxSize = maxSize;
+    }
+
+    check(userId, windowMs, limit) {
+        const now = Date.now();
+        const arr = (this._map.get(userId) || []).filter(t => now - t < windowMs);
+        if (arr.length >= limit) {
+            this._map.set(userId, arr); // refresh pruned array
+            return false;
+        }
+        // Evict oldest entry before inserting a new key
+        if (!this._map.has(userId) && this._map.size >= this._maxSize) {
+            this._map.delete(this._map.keys().next().value);
+        }
+        arr.push(now);
+        this._map.set(userId, arr);
+        return true;
+    }
+
+    cleanup(windowMs) {
+        const cutoff = Date.now() - windowMs;
+        for (const [userId, timestamps] of this._map) {
+            if (timestamps.every(t => t < cutoff)) this._map.delete(userId);
+        }
+    }
+}
+
 const WRITE_RL_WINDOW_MS = 60 * 1000;
-const WRITE_RL_MAX_ENTRIES = 50_000; // evict oldest entry when map exceeds this size
-setInterval(() => {
-    const cutoff = Date.now() - WRITE_RL_WINDOW_MS;
-    for (const [userId, timestamps] of writeRateLimits) {
-        if (timestamps.every(t => t < cutoff)) writeRateLimits.delete(userId);
-    }
-    // Safety valve: if the map is still over the limit, drop the oldest half
-    if (writeRateLimits.size > WRITE_RL_MAX_ENTRIES) {
-        const keys = [...writeRateLimits.keys()];
-        for (let i = 0; i < Math.floor(keys.length / 2); i++) writeRateLimits.delete(keys[i]);
-    }
-}, 5 * 60 * 1000).unref();
+const WRITE_RL_LIMIT = 60;
+const writeRateLimiter = new BoundedRateLimiter(10_000);
+// Clean up stale entries every minute (was every 5 min — tightened to reduce memory growth window)
+setInterval(() => writeRateLimiter.cleanup(WRITE_RL_WINDOW_MS), 60 * 1000).unref();
 
 function checkWriteRateLimit(req, res, next) {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-
-    const now = Date.now();
-    const windowMs = 60 * 1000;
-    const limit = 60;
-    const arr = (writeRateLimits.get(userId) || []).filter(t => now - t < windowMs);
-
-    if (arr.length >= limit) {
-        writeRateLimits.set(userId, arr);
+    if (!writeRateLimiter.check(userId, WRITE_RL_WINDOW_MS, WRITE_RL_LIMIT)) {
         return res.status(429).json({ error: 'Too many requests. Please slow down.' });
     }
-
-    arr.push(now);
-    writeRateLimits.set(userId, arr);
     next();
+}
+
+// M2: CSRF origin validation for all state-changing API requests.
+// Complements sameSite: 'lax' cookies — rejects cross-origin POST/PUT/DELETE that
+// carry an Origin header pointing to a different host than the dashboard.
+function checkCsrfOrigin(req, res, next) {
+    const origin = req.headers.origin;
+    if (!origin) return next(); // same-origin requests may omit Origin
+    const dashboardUrl = process.env.DASHBOARD_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3000}`;
+    try {
+        if (new URL(origin).origin === new URL(dashboardUrl).origin) return next();
+    } catch { /* fall through to reject */ }
+    return res.status(403).json({ error: 'Forbidden: cross-origin request rejected' });
+}
+
+// H1: Recursively strip any object key starting with '$' to prevent NoSQL operator
+// injection. Mongoose schema type validation is the primary defence; this is a
+// belt-and-suspenders layer applied before any .set() call.
+function sanitizeMongoValue(value) {
+    if (value === null || value === undefined || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map(sanitizeMongoValue);
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+        if (k.startsWith('$')) continue;
+        out[k] = sanitizeMongoValue(v);
+    }
+    return out;
+}
+
+// L1: Structured audit log — writes to the AuditLog collection. Failures are
+// swallowed so audit errors never block the main operation.
+async function logAuditEvent(req, guildId, action, details = null) {
+    try {
+        const AuditLog = require('../../models/AuditLog');
+        await AuditLog.create({
+            guildId,
+            userId:    req.user?.id || 'unknown',
+            action,
+            ip:        req.ip || null,
+            userAgent: req.get('user-agent') || null,
+            details,
+        });
+    } catch (err) {
+        console.error('[AUDIT] Failed to write audit event:', err.message);
+    }
 }
 
 // Top-level Guild schema keys that the dashboard is allowed to update.
@@ -399,7 +501,7 @@ function validateHeistUpdate(updates) {
     return null;
 }
 
-router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
 
@@ -459,12 +561,16 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
             });
         }
 
+        // H1: Strip any MongoDB operator keys ($ne, $regex, etc.) before writing.
         Object.keys(updates).forEach(key => {
-            guildSettings.set(key, updates[key]);
+            guildSettings.set(key, sanitizeMongoValue(updates[key]));
         });
 
         await guildSettings.save();
-        
+
+        // L1: Record what changed and who changed it.
+        await logAuditEvent(req, guildId, 'settings_update', { keys: Object.keys(updates) });
+
         const shouldRescheduleDailyNews = Object.keys(updates).some(key => key.startsWith('dailyNews.') || key === 'dailyNewsProfiles');
         if (shouldRescheduleDailyNews) {
             rescheduleDailyNews(req.client, guildId);
@@ -1252,7 +1358,7 @@ router.get('/guild/:guildId/ai/usage', checkAuth, checkGuildAccess, async (req, 
 
 // ── Member Search ────────────────────────────────────────────────────────────
 
-router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const q = (req.query.q || '').trim();
     if (q.length < 2) return res.json([]);
@@ -1272,7 +1378,7 @@ router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, async 
     }
 });
 
-router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, async (req, res) => {
+router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const ids = (req.query.ids || '').split(',').map(s => s.trim()).filter(s => /^\d{17,20}$/.test(s)).slice(0, 50);
     if (!ids.length) return res.json({});
     try {
@@ -1338,6 +1444,23 @@ router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, c
 const multer = require('multer');
 const ItemImage = require('../../models/ItemImage');
 
+// M4: Validate image files by magic bytes rather than trusting the client-supplied
+// MIME type. Prevents disguised file uploads (e.g. PHP named as image/jpeg).
+const IMAGE_SIGNATURES = [
+    { mime: 'image/jpeg', offset: 0, bytes: [0xFF, 0xD8, 0xFF] },
+    { mime: 'image/png',  offset: 0, bytes: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A] },
+    { mime: 'image/gif',  offset: 0, bytes: [0x47, 0x49, 0x46, 0x38] },
+    { mime: 'image/webp', offset: 8, bytes: [0x57, 0x45, 0x42, 0x50] },
+];
+
+function detectImageType(buffer) {
+    for (const sig of IMAGE_SIGNATURES) {
+        if (buffer.length < sig.offset + sig.bytes.length) continue;
+        if (sig.bytes.every((b, i) => buffer[sig.offset + i] === b)) return sig.mime;
+    }
+    return null;
+}
+
 const _uploadRaw = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 512 * 1024 },
@@ -1377,13 +1500,16 @@ router.get('/item-image/shop/:guildId/:itemId', async (req, res) => {
 // Upload image for a guild shop item
 router.post('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, uploadImage, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
+    // M4: Verify file contents match a known image signature.
+    const detectedType = detectImageType(req.file.buffer);
+    if (!detectedType) return res.status(400).json({ error: 'Invalid image file: unrecognized format' });
     try {
         const guild = await require('../../models/Guild').findOne({ guildId: req.params.guildId });
         if (!guild) return res.status(404).json({ error: 'Guild not found' });
         const item = guild.shop.find(i => i.itemId === req.params.itemId);
         if (!item) return res.status(404).json({ error: 'Shop item not found' });
         item.imageData = req.file.buffer;
-        item.imageType = req.file.mimetype;
+        item.imageType = detectedType; // use detected type, not client-supplied MIME
         await guild.save();
         res.json({ success: true });
     } catch (err) {
@@ -1424,10 +1550,13 @@ router.post('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, check
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
     const { itemId } = req.params;
     if (!/^[a-z0-9_:\-]{1,64}$/.test(itemId)) return res.status(400).json({ error: 'Invalid itemId' });
+    // M4: Verify file contents match a known image signature.
+    const detectedType = detectImageType(req.file.buffer);
+    if (!detectedType) return res.status(400).json({ error: 'Invalid image file: unrecognized format' });
     try {
         await ItemImage.findOneAndUpdate(
             { itemId },
-            { imageData: req.file.buffer, imageType: req.file.mimetype, updatedAt: new Date() },
+            { imageData: req.file.buffer, imageType: detectedType, updatedAt: new Date() },
             { upsert: true }
         );
         res.json({ success: true });
@@ -1491,7 +1620,7 @@ router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res
     }
 });
 
-router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
     const { guildId, caseId } = req.params;
     const { action, note, resolution } = req.body;
 
@@ -1521,6 +1650,7 @@ router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, check
         }
 
         await c.save();
+        await logAuditEvent(req, guildId, 'case_update', { caseId: parsedId, action });
         res.json({ success: true, case: c });
     } catch (error) {
         console.error('Case update error:', error);
@@ -1572,13 +1702,14 @@ router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, asyn
     }
 });
 
-router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
     try {
         const guild = req.client.guilds.cache.get(guildId);
         if (!guild) return res.status(404).json({ error: 'Guild not found' });
         await guild.members.unban(userId, `Unbanned via dashboard by ${req.user.username}`);
+        await logAuditEvent(req, guildId, 'unban', { targetUserId: userId });
         res.json({ success: true });
     } catch (error) {
         console.error('Unban error:', error);
@@ -1586,7 +1717,7 @@ router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAcce
     }
 });
 
-router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
     try {
@@ -1595,6 +1726,7 @@ router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuild
         const member = await guild.members.fetch(userId).catch(() => null);
         if (!member) return res.status(404).json({ error: 'Member not found' });
         await member.timeout(null, `Timeout removed via dashboard by ${req.user.username}`);
+        await logAuditEvent(req, guildId, 'untimeout', { targetUserId: userId });
         res.json({ success: true });
     } catch (error) {
         console.error('Remove timeout error:', error);
@@ -1663,7 +1795,7 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
     }
 });
 
-router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { userId, action, amount } = req.body;
 
@@ -1695,6 +1827,7 @@ router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, check
         }
 
         const user = await User.findOneAndUpdate(filter, update, { upsert: true, new: true, setDefaultsOnInsert: true });
+        await logAuditEvent(req, guildId, 'economy_adjust', { targetUserId: String(userId), action, amount: amount ?? null });
         res.json({ success: true, balance: user.balance, bank: user.bank, economyFrozen: user.economyFrozen });
     } catch (error) {
         console.error('Economy adjust error:', error);
