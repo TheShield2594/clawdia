@@ -1,0 +1,57 @@
+                <section id="raiddetection" class="panel">
+                    <div class="panel-head">
+                        <h2>Raid Detection</h2>
+                        <p>Automatically detect and respond to mass-join events. Use <code>/raidmode</code> to toggle manually.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable raid detection</strong></span>
+                        <span class="switch"><input type="checkbox" id="raid-enabled" <%= settings.raidDetection?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="raid-threshold">Join threshold</label>
+                            <input type="number" id="raid-threshold" value="<%= settings.raidDetection?.threshold || 10 %>" min="2" max="100">
+                            <small>Joins to trigger detection</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="raid-window">Time window (seconds)</label>
+                            <input type="number" id="raid-window" value="<%= settings.raidDetection?.windowSeconds || 60 %>" min="5" max="600">
+                            <small>Within this many seconds</small>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="raid-min-age">Min account age (days)</label>
+                        <input type="number" id="raid-min-age" value="<%= settings.raidDetection?.minAccountAgeDays ?? 7 %>" min="0" max="365">
+                        <small>Flag accounts newer than this as suspicious. 0 = disabled.</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="raid-action">Action</label>
+                        <select id="raid-action">
+                            <option value="alert" <%= (settings.raidDetection?.action || 'alert') === 'alert' ? 'selected' : '' %>>Alert only</option>
+                            <option value="quarantine" <%= settings.raidDetection?.action === 'quarantine' ? 'selected' : '' %>>Quarantine (assign role)</option>
+                            <option value="kick" <%= settings.raidDetection?.action === 'kick' ? 'selected' : '' %>>Kick raiders</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="raid-quarantine-role">Quarantine role</label>
+                        <select id="raid-quarantine-role">
+                            <option value="">None</option>
+                            <% roles.forEach(role => { %>
+                                <option value="<%= role.id %>" <%= settings.raidDetection?.quarantineRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Assigned to raiders when action is "Quarantine".</small>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="raid-alert-channel">Alert channel</label>
+                        <select id="raid-alert-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.raidDetection?.alertChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('raiddetection')">Save changes</button>
+                    </div>
+                </section>

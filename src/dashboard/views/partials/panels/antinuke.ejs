@@ -1,0 +1,64 @@
+                <section id="antinuke" class="panel">
+                    <div class="panel-head">
+                        <h2>Anti-Nuke</h2>
+                        <p>Detect and punish coordinated destructive actions (mass channel/role deletion, mass bans, webhook spam) before they cause permanent damage.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable anti-nuke</strong></span>
+                        <span class="switch"><input type="checkbox" id="an-enabled" <%= settings.antiNuke?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="an-alert-channel">Alert channel</label>
+                        <select id="an-alert-channel">
+                            <option value="">None</option>
+                            <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.antiNuke?.alertChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                        </select>
+                    </div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="an-window">Detection window (seconds)</label>
+                            <input type="number" id="an-window" value="<%= settings.antiNuke?.windowSeconds ?? 30 %>" min="5">
+                        </div>
+                        <div>
+                            <label class="field-label" for="an-punishment">Punishment</label>
+                            <select id="an-punishment">
+                                <% ['alert','strip-roles','kick','ban'].forEach(p => { %><option value="<%= p %>" <%= settings.antiNuke?.punishment === p ? 'selected' : '' %>><%= p %></option><% }); %>
+                            </select>
+                        </div>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Auto-lockdown</strong><span>Lock all text channels when a nuke event fires</span></span>
+                        <span class="switch"><input type="checkbox" id="an-auto-lockdown" <%= settings.antiNuke?.autoLockdown ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Action Thresholds <small style="font-weight:400;color:var(--text-dim)">(per window)</small></div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.6rem;">
+                        <% [['channelDelete','Channel Delete'],['channelCreate','Channel Create'],['roleDelete','Role Delete'],['roleCreate','Role Create'],['ban','Ban'],['kick','Kick'],['webhookCreate','Webhook Create']].forEach(([k,label]) => { %>
+                        <div><label class="field-label" for="an-t-<%= k %>"><%= label %></label><input type="number" id="an-t-<%= k %>" value="<%= settings.antiNuke?.thresholds?.[k] ?? 3 %>" min="1"></div>
+                        <% }); %>
+                    </div>
+                    <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Join Gate</div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable join gate</strong><span>Reject accounts younger than a minimum age</span></span>
+                        <span class="switch"><input type="checkbox" id="an-jg-enabled" <%= settings.antiNuke?.joinGate?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.5rem;">
+                        <div><label class="field-label" for="an-jg-age">Min account age (days)</label><input type="number" id="an-jg-age" value="<%= settings.antiNuke?.joinGate?.minAccountAgeDays ?? 3 %>" min="0"></div>
+                        <div><label class="field-label" for="an-jg-action">Action</label><select id="an-jg-action"><option value="kick" <%= settings.antiNuke?.joinGate?.action === 'kick' ? 'selected' : '' %>>Kick</option><option value="ban" <%= settings.antiNuke?.joinGate?.action === 'ban' ? 'selected' : '' %>>Ban</option></select></div>
+                    </div>
+                    <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Whitelist <small style="font-weight:400;color:var(--text-dim)">— one ID per line</small></div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label">Whitelisted users</label>
+                            <div class="user-search-widget">
+                                <div class="user-tag-list" id="an-whitelist-users-tags"></div>
+                                <div style="position:relative">
+                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" data-widget="an-whitelist-users">
+                                    <div class="user-search-dropdown" id="an-whitelist-users-dropdown" style="display:none"></div>
+                                </div>
+                                <textarea id="an-whitelist-users" style="display:none"><%= (settings.antiNuke?.whitelistUserIds||[]).join('\n') %></textarea>
+                            </div>
+                        </div>
+                        <div><label class="field-label" for="an-whitelist-roles">Role IDs</label><textarea id="an-whitelist-roles" rows="3" placeholder="One role ID per line"><%= (settings.antiNuke?.whitelistRoleIds||[]).join('\n') %></textarea></div>
+                    </div>
+                    <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('antinuke')">Save changes</button></div>
+                </section>

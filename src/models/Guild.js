@@ -136,7 +136,13 @@ const guildSchema = new Schema({
         rewardChannelId: { type: String, default: null },
         voiceXpEnabled: { type: Boolean, default: false },
         voiceXpRate: { type: Number, default: 1.0 },
-        disableLevelUpAnnounce: { type: Boolean, default: false }
+        disableLevelUpAnnounce: { type: Boolean, default: false },
+        maxLevel: { type: Number, default: null, min: 1, max: 9999 },
+        xpBoostEvent: {
+            multiplier: { type: Number, default: null, min: 1.1, max: 10 },
+            startTime:  { type: Date,   default: null },
+            endTime:    { type: Date,   default: null }
+        }
     },
     
     serverBoost: {

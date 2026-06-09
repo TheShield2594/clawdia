@@ -1,0 +1,28 @@
+                <section id="farewell" class="panel">
+                    <div class="panel-head">
+                        <h2>Farewell Settings</h2>
+                        <p>Send a message when a member leaves the server.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable farewell messages</strong><span>Send a message when someone leaves</span></span>
+                        <span class="switch"><input type="checkbox" id="farewell-enabled" <%= settings.farewell?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="farewell-channel">Farewell channel</label>
+                        <select id="farewell-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.farewell?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="farewell-message">Farewell message</label>
+                        <textarea id="farewell-message" rows="3" oninput="updateMsgPreview('farewell-message','farewell-preview')"><%= settings.farewell?.message || '' %></textarea>
+                        <small>Variables: <code>{user}</code> · <code>{username}</code> · <code>{tag}</code> · <code>{server}</code> · <code>{memberCount}</code></small>
+                        <div class="msg-preview" id="farewell-preview"></div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('farewell')">Save changes</button>
+                    </div>
+                </section>
