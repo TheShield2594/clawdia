@@ -18,7 +18,12 @@ function resolveDashboardUrl() {
     } catch {
         throw new Error(`[DASHBOARD] DASHBOARD_URL is not a valid URL: "${raw}"`);
     }
+    // M5: Enforce HTTPS in production; non-HTTPS OAuth callbacks are rejected by Discord.
+    const isProduction = process.env.NODE_ENV === 'production';
     if (parsed.hostname !== 'localhost' && parsed.protocol !== 'https:') {
+        if (isProduction) {
+            throw new Error(`[DASHBOARD] DASHBOARD_URL must use HTTPS in production. Got: "${raw}". Generate a valid URL or set NODE_ENV=development for local testing.`);
+        }
         console.warn(`[DASHBOARD] WARNING: DASHBOARD_URL "${raw}" is not HTTPS. Discord OAuth will reject non-HTTPS redirect URIs in production.`);
     }
     if (parsed.pathname && parsed.pathname !== '/' && parsed.pathname !== '') {
@@ -66,8 +71,12 @@ function start(client) {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
+    // M1: Validate SESSION_SECRET exists and meets minimum strength requirements.
     if (!process.env.SESSION_SECRET) {
         throw new Error('[DASHBOARD] SESSION_SECRET is not set. Add a strong random value to your .env file.');
+    }
+    if (process.env.SESSION_SECRET.length < 32) {
+        throw new Error('[DASHBOARD] SESSION_SECRET must be at least 32 characters. Generate one with: openssl rand -hex 32');
     }
 
     // Trust the first hop from a reverse proxy (nginx, Caddy, etc.) so that
@@ -75,6 +84,26 @@ function start(client) {
     // cookie flag works correctly when deployed behind a proxy.
     const isProduction = process.env.NODE_ENV === 'production';
     if (isProduction) app.set('trust proxy', 1);
+
+    // L3: Baseline security response headers for all routes.
+    app.use((req, res, next) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('X-Frame-Options', 'DENY');
+        res.setHeader('X-XSS-Protection', '1; mode=block');
+        res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+        res.setHeader('Content-Security-Policy', [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: https: cdn.discordapp.com",
+            "connect-src 'self'",
+            "font-src 'self'",
+            "object-src 'none'",
+            "frame-ancestors 'none'",
+        ].join('; '));
+        next();
+    });
+
     app.use(session({
         secret: process.env.SESSION_SECRET,
         resave: false,
