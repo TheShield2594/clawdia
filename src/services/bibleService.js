@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 // All recognised book names and abbreviations, sorted longest-first so the
 // regex alternation matches greedily (e.g. "1 Samuel" before "Samuel").
@@ -37,6 +37,53 @@ const VERSE_REGEX = new RegExp(
     'gi'
 );
 
+// Per-book embed colors: warm tones for OT, cool tones for NT.
+const BOOK_COLORS = {
+    // Torah — warm amber
+    genesis:0xD4891A, exodus:0xD4891A, leviticus:0xD4891A, numbers:0xD4891A, deuteronomy:0xD4891A,
+    // Historical — warm orange
+    joshua:0xE07B39, judges:0xE07B39, ruth:0xE07B39,
+    '1 samuel':0xE07B39, '2 samuel':0xE07B39, '1 kings':0xE07B39, '2 kings':0xE07B39,
+    '1 chronicles':0xE07B39, '2 chronicles':0xE07B39, ezra:0xE07B39, nehemiah:0xE07B39, esther:0xE07B39,
+    // Wisdom — warm yellow
+    job:0xF0C040, psalms:0xF0C040, psalm:0xF0C040, proverbs:0xF0C040, ecclesiastes:0xF0C040,
+    'song of solomon':0xF0C040, 'song of songs':0xF0C040,
+    // Major prophets — deep red
+    isaiah:0xC0392B, jeremiah:0xC0392B, lamentations:0xC0392B, ezekiel:0xC0392B, daniel:0xC0392B,
+    // Minor prophets — rust
+    hosea:0xBF6A2E, joel:0xBF6A2E, amos:0xBF6A2E, obadiah:0xBF6A2E, jonah:0xBF6A2E,
+    micah:0xBF6A2E, nahum:0xBF6A2E, habakkuk:0xBF6A2E, zephaniah:0xBF6A2E,
+    haggai:0xBF6A2E, zechariah:0xBF6A2E, malachi:0xBF6A2E,
+    // Gospels — royal blue
+    matthew:0x2E86AB, mark:0x2E86AB, luke:0x2E86AB, john:0x2E86AB,
+    // Acts — teal
+    acts:0x1A9E8A,
+    // Paul's epistles — purple
+    romans:0x7B2D8B, '1 corinthians':0x7B2D8B, '2 corinthians':0x7B2D8B,
+    galatians:0x7B2D8B, ephesians:0x7B2D8B, philippians:0x7B2D8B, colossians:0x7B2D8B,
+    '1 thessalonians':0x7B2D8B, '2 thessalonians':0x7B2D8B,
+    '1 timothy':0x7B2D8B, '2 timothy':0x7B2D8B, titus:0x7B2D8B, philemon:0x7B2D8B,
+    // General epistles — slate blue
+    hebrews:0x4A6FA5, james:0x4A6FA5,
+    '1 peter':0x4A6FA5, '2 peter':0x4A6FA5, '1 john':0x4A6FA5, '2 john':0x4A6FA5, '3 john':0x4A6FA5,
+    jude:0x4A6FA5,
+    // Revelation — deep indigo
+    revelation:0x5B2C8D,
+};
+
+const BG_VERSIONS = { kjv:'KJV', asv:'ASV', web:'WEB', ylt:'YLT', darby:'DARBY', bbe:'BBE', webbe:'WEBBE', niv:'NIV' };
+const BOOK_THUMBNAIL = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f4d6.png';
+
+function getBookColor(reference) {
+    const book = (reference || '').replace(/\s+\d+:\d+.*$/, '').trim().toLowerCase();
+    return BOOK_COLORS[book] ?? 0xF5C518;
+}
+
+function getBibleGatewayUrl(reference, translationId) {
+    const version = BG_VERSIONS[(translationId || '').toLowerCase()] || 'KJV';
+    return `https://www.biblegateway.com/passage/?search=${encodeURIComponent(reference)}&version=${version}`;
+}
+
 async function lookupVerse(reference, translation = 'kjv') {
     try {
         const encoded = encodeURIComponent(reference);
@@ -68,25 +115,63 @@ async function getDailyVerse() {
 }
 
 function createVerseEmbed(verseData, title = '📖 Bible Verse') {
-    // Normalise whitespace within each line but preserve verse-break newlines.
-    let text = (verseData.text || '')
-        .trim()
-        .split('\n')
-        .map(line => line.trim().replace(/\s+/g, ' '))
-        .filter(Boolean)
-        .join('\n');
     const reference = verseData.reference || '';
-    const translation = verseData.translation_name || verseData.translation_id?.toUpperCase() || 'KJV';
+    const translationId = verseData.translation_id || '';
+    const translation = verseData.translation_name || translationId.toUpperCase() || 'KJV';
+    const bgUrl = getBibleGatewayUrl(reference, translationId);
+    const isMultiVerse = Array.isArray(verseData.verses) && verseData.verses.length > 1;
+    const linkSuffix = `\n\n[Continue reading →](${bgUrl})`;
 
-    // Discord embed description limit is 4096 chars; *"…"* wrapping adds 4
-    if (text.length > 4090) text = text.slice(0, 4087) + '…';
+    let body;
+    if (isMultiVerse) {
+        body = verseData.verses
+            .map(v => `**[${v.verse}]** *${v.text.trim().replace(/\s+/g, ' ')}*`)
+            .join('\n');
+    } else {
+        const text = (verseData.text || '')
+            .trim()
+            .split('\n')
+            .map(line => line.trim().replace(/\s+/g, ' '))
+            .filter(Boolean)
+            .join('\n');
+        body = `*"${text}"*`;
+    }
+
+    // Cap description at Discord's 4096-char limit, reserving space for the link suffix.
+    const hardLimit = 4096 - linkSuffix.length;
+    let truncated = false;
+    if (body.length > hardLimit) {
+        if (isMultiVerse) {
+            body = body.slice(0, hardLimit - 1) + '…';
+        } else {
+            // Close the quote cleanly before truncation marker: *"text…"*
+            body = body.slice(0, hardLimit - 4) + '…"*';
+        }
+        truncated = true;
+    }
+
+    if (isMultiVerse || truncated) {
+        body += linkSuffix;
+    }
 
     return new EmbedBuilder()
-        .setColor(0xF5C518)
+        .setColor(getBookColor(reference))
         .setTitle(title)
-        .setDescription(`*"${text}"*`)
+        .setURL(bgUrl)
+        .setThumbnail(BOOK_THUMBNAIL)
+        .setDescription(body)
         .setFooter({ text: `${reference}  ·  ${translation}` })
         .setTimestamp();
+}
+
+function createVerseComponents(verseData) {
+    const bgUrl = getBibleGatewayUrl(verseData.reference || '', verseData.translation_id || '');
+    const button = new ButtonBuilder()
+        .setLabel('Read on BibleGateway')
+        .setURL(bgUrl)
+        .setStyle(ButtonStyle.Link)
+        .setEmoji('📖');
+    return [new ActionRowBuilder().addComponents(button)];
 }
 
 function detectVerseReferences(content) {
@@ -112,4 +197,4 @@ function detectVerseReferences(content) {
     return refs;
 }
 
-module.exports = { lookupVerse, getDailyVerse, createVerseEmbed, detectVerseReferences };
+module.exports = { lookupVerse, getDailyVerse, createVerseEmbed, createVerseComponents, detectVerseReferences };
