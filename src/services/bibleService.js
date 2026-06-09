@@ -84,6 +84,15 @@ function getBibleGatewayUrl(reference, translationId) {
     return `https://www.biblegateway.com/passage/?search=${encodeURIComponent(reference)}&version=${version}`;
 }
 
+// Resolves a verseData object to a BG_VERSIONS key, preferring translation_id
+// then falling back to translation_name (e.g. ourmanna returns only 'KJV' there).
+function resolveTranslationKey(verseData) {
+    const id = (verseData.translation_id || '').toLowerCase();
+    if (BG_VERSIONS[id]) return id;
+    const nameAsId = (verseData.translation_name || '').toLowerCase();
+    return BG_VERSIONS[nameAsId] ? nameAsId : 'kjv';
+}
+
 async function lookupVerse(reference, translation = 'kjv') {
     try {
         const encoded = encodeURIComponent(reference);
@@ -118,7 +127,7 @@ function createVerseEmbed(verseData, title = '📖 Bible Verse') {
     const reference = verseData.reference || '';
     const translationId = verseData.translation_id || '';
     const translation = verseData.translation_name || translationId.toUpperCase() || 'KJV';
-    const bgUrl = getBibleGatewayUrl(reference, translationId);
+    const bgUrl = getBibleGatewayUrl(reference, resolveTranslationKey(verseData));
     const isMultiVerse = Array.isArray(verseData.verses) && verseData.verses.length > 1;
     const linkSuffix = `\n\n[Continue reading →](${bgUrl})`;
 
@@ -165,7 +174,7 @@ function createVerseEmbed(verseData, title = '📖 Bible Verse') {
 }
 
 function createVerseComponents(verseData) {
-    const bgUrl = getBibleGatewayUrl(verseData.reference || '', verseData.translation_id || '');
+    const bgUrl = getBibleGatewayUrl(verseData.reference || '', resolveTranslationKey(verseData));
     const button = new ButtonBuilder()
         .setLabel('Read on BibleGateway')
         .setURL(bgUrl)
