@@ -26,6 +26,10 @@
                         <span class="toggle-text"><strong>Enable welcome card</strong><span>Generate a rich image card for new members</span></span>
                         <span class="switch"><input type="checkbox" id="welcome-card" <%= settings.welcome?.cardEnabled ? 'checked' : '' %>><span class="slider"></span></span>
                     </label>
+                    <div style="margin:.1rem 0 .75rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+                        <button class="btn btn-sm" type="button" id="welcome-preview-btn" onclick="sendWelcomeCardPreview()">Send card preview to channel</button>
+                        <small style="color:var(--text-dim)">Sends a sample welcome card using your Discord profile to the configured channel.</small>
+                    </div>
                     <label class="toggle">
                         <span class="toggle-text"><strong>Send DM to new members</strong><span>Privately message each new member when they join</span></span>
                         <span class="switch"><input type="checkbox" id="welcome-dm-enabled" <%= settings.welcome?.dmEnabled ? 'checked' : '' %>><span class="slider"></span></span>

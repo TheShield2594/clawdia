@@ -1319,6 +1319,14 @@ textarea.auto-resize {
 /* Nav item keyboard focus */
 .dash-nav li:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; border-radius: 10px; }
 
+/* Sidebar search */
+.dash-nav-search-wrap { position: relative; margin-bottom: 14px; }
+.dash-nav-search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink-500); pointer-events: none; }
+.dash-nav-search { width: 100%; box-sizing: border-box; background: var(--ink-850); border: 1px solid var(--ink-800); border-radius: 10px; padding: 7px 10px 7px 30px; font-size: 13px; font-family: inherit; color: var(--cream-100); outline: none; transition: border-color .15s; }
+.dash-nav-search::placeholder { color: var(--ink-500); }
+.dash-nav-search:focus { border-color: var(--claw-500); }
+.dash-nav-search::-webkit-search-cancel-button { display: none; }
+
 /* Quick-action bar at top of settings panels */
 .dash-panel-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--ink-800); }
 .dash-panel-bar h1 { font-family: 'Instrument Serif', serif; font-size: 32px; margin: 0; color: var(--cream-50); }
