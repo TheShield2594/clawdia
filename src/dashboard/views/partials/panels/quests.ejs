@@ -1,0 +1,44 @@
+                <section id="quests" class="panel">
+                    <div class="panel-head">
+                        <h2>Quests</h2>
+                        <p>Daily and weekly quests keep members engaged with difficulty-scaled rewards. Use <code>/quests</code> to view progress.</p>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable quests</strong></span>
+                        <span class="switch"><input type="checkbox" id="quests-enabled" <%= settings.quests?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Notifications</h3></div>
+                    <div class="field">
+                        <label class="field-label" for="quests-notif-channel">Quest completion channel <small>— post a rich embed here when a member finishes a quest (leave blank to post in the current channel)</small></label>
+                        <select id="quests-notif-channel">
+                            <option value="">— Same channel as activity —</option>
+                            <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.quests?.notificationChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                        </select>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Quest slots per reset</h3></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="quests-per-day">Daily quests assigned <small>(1–6)</small></label>
+                            <input type="number" id="quests-per-day" value="<%= settings.quests?.questsPerDay ?? 3 %>" min="1" max="6">
+                            <small>How many random daily quests each member receives per day.</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="quests-per-week">Weekly quests assigned <small>(1–4)</small></label>
+                            <input type="number" id="quests-per-week" value="<%= settings.quests?.questsPerWeek ?? 2 %>" min="1" max="4">
+                            <small>How many random weekly quests each member receives per week.</small>
+                        </div>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.25rem"><h3>Base rewards <small>— scaled ×1.0 / ×1.75 / ×3.0 by difficulty</small></h3></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="quests-daily-xp">Daily XP (easy base)</label><input type="number" id="quests-daily-xp" value="<%= settings.quests?.dailyXpReward || 50 %>" min="0"></div>
+                        <div><label class="field-label" for="quests-daily-coins">Daily coins (easy base)</label><input type="number" id="quests-daily-coins" value="<%= settings.quests?.dailyCoinReward || 25 %>" min="0"></div>
+                        <div><label class="field-label" for="quests-weekly-xp">Weekly XP (easy base)</label><input type="number" id="quests-weekly-xp" value="<%= settings.quests?.weeklyXpReward || 300 %>" min="0"></div>
+                        <div><label class="field-label" for="quests-weekly-coins">Weekly coins (easy base)</label><input type="number" id="quests-weekly-coins" value="<%= settings.quests?.weeklyCoinReward || 150 %>" min="0"></div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('quests')">Save changes</button>
+                    </div>
+                </section>

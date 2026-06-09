@@ -1,0 +1,56 @@
+                <section id="bibleverses" class="panel">
+                    <div class="panel-head">
+                        <h2>Bible Verses</h2>
+                        <p>Post a daily Bible verse to a channel and auto-respond when members mention a verse reference like <code>John 3:16</code>.</p>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Daily Verse</h3></div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable daily Bible verse</strong><span>Post a verse automatically at the scheduled time</span></span>
+                        <span class="switch"><input type="checkbox" id="bv-enabled" <%= (settings.bibleVerse && settings.bibleVerse.enabled) ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="bv-channel">Post to channel</label>
+                        <select id="bv-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= (settings.bibleVerse && settings.bibleVerse.channelId === channel.id) ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="bv-time">Post time (24h)</label>
+                            <input type="text" id="bv-time" placeholder="08:00" value="<%= (settings.bibleVerse && settings.bibleVerse.time) || '08:00' %>">
+                        </div>
+                        <div>
+                            <label class="field-label" for="bv-timezone">Timezone</label>
+                            <input type="text" id="bv-timezone" list="tz-datalist" placeholder="UTC" value="<%= (settings.bibleVerse && settings.bibleVerse.timezone) || 'UTC' %>" autocomplete="off" onblur="validateTimezoneInput(this)">
+                            <small id="bv-timezone-err" class="field-error" style="display:none"></small>
+                        </div>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1rem"><h3>Auto-Response</h3></div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Auto-respond to verse references</strong><span>When a member types a reference like <code>John 3:16</code> the bot replies with the verse</span></span>
+                        <span class="switch"><input type="checkbox" id="bv-autorespond" <%= (!settings.bibleVerse || settings.bibleVerse.autoRespond !== false) ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="bv-translation">Default translation</label>
+                        <select id="bv-translation">
+                            <option value="kjv" <%= (!settings.bibleVerse || settings.bibleVerse.translation === 'kjv') ? 'selected' : '' %>>King James Version (KJV)</option>
+                            <option value="niv" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'niv') ? 'selected' : '' %>>New International Version (NIV)</option>
+                            <option value="asv" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'asv') ? 'selected' : '' %>>American Standard Version (ASV)</option>
+                            <option value="web" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'web') ? 'selected' : '' %>>World English Bible (WEB)</option>
+                            <option value="ylt" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'ylt') ? 'selected' : '' %>>Young's Literal Translation (YLT)</option>
+                            <option value="darby" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'darby') ? 'selected' : '' %>>Darby</option>
+                            <option value="bbe" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'bbe') ? 'selected' : '' %>>Bible in Basic English (BBE)</option>
+                            <option value="webbe" <%= (settings.bibleVerse && settings.bibleVerse.translation === 'webbe') ? 'selected' : '' %>>World English Bible British Edition (WEBBE)</option>
+                        </select>
+                        <small>Used for scheduled daily verses and the <code>/bible daily</code> command. Auto-response lookups also use this translation, except NIV — NIV auto-responses fall back to KJV.</small>
+                    </div>
+
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('bibleverses')">Save changes</button>
+                    </div>
+                </section>

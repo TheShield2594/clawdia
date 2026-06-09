@@ -1,0 +1,70 @@
+                <section id="analytics" class="panel">
+                    <div class="panel-head">
+                        <h2>Insights &amp; Recommendations</h2>
+                        <p>Track retention, active hours, toxic channels, mod SLA trends, and next-best actions.</p>
+                    </div>
+
+                    <!-- Skeleton loader -->
+                    <div id="analytics-skeleton">
+                        <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+                            <div class="skel-tile"></div><div class="skel-tile"></div><div class="skel-tile"></div>
+                        </div>
+                        <div class="skel-bar" style="width:60%;margin-bottom:.5rem"></div>
+                        <div class="skel-bar" style="width:80%;margin-bottom:.5rem"></div>
+                        <div class="skel-bar" style="width:70%;margin-bottom:.5rem"></div>
+                        <div class="skel-chart"></div>
+                    </div>
+
+                    <!-- Error state -->
+                    <div id="analytics-error" style="display:none" class="analytics-error-card">
+                        <span>⚠ Couldn't load analytics. Check that the bot is online and retry.</span>
+                        <button class="btn btn-sm" onclick="loadAnalytics()">Retry</button>
+                    </div>
+
+                    <!-- Loaded content -->
+                    <div id="analytics-content" style="display:none">
+                        <!-- KPI tiles -->
+                        <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem" id="analytics-kpi-row"></div>
+
+                        <!-- Time-range toggles for charts -->
+                        <div style="display:flex;gap:.4rem;margin-bottom:.75rem" id="analytics-range-btns">
+                            <button class="btn btn-sm analytics-range active" data-days="7" onclick="setAnalyticsRange(7,this)">7d</button>
+                            <button class="btn btn-sm analytics-range" data-days="30" onclick="setAnalyticsRange(30,this)">30d</button>
+                        </div>
+
+                        <!-- Charts row -->
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-bottom:1.25rem">
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">Member Growth</div>
+                                <canvas id="chart-member-growth" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">Command Activity</div>
+                                <canvas id="chart-command-activity" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">Retention (D7 / D30)</div>
+                                <canvas id="chart-retention" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">Economy Activity</div>
+                                <canvas id="chart-economy" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">XP &amp; Level-ups</div>
+                                <canvas id="chart-leveling" height="160"></canvas>
+                            </div>
+                            <div class="analytics-chart-card">
+                                <div class="analytics-chart-title">AI Requests</div>
+                                <canvas id="chart-ai-requests" height="160"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Insights list -->
+                        <div id="analytics-insights-content"></div>
+
+                        <!-- Recommendations -->
+                        <div class="panel-head" style="margin-top:1rem"><h3>Recommendations</h3></div>
+                        <div id="analytics-recommendations"></div>
+                    </div>
+                </section>

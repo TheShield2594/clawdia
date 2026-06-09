@@ -1,0 +1,264 @@
+                <section id="moderation" class="panel">
+                    <div class="panel-head">
+                        <h2>Moderation</h2>
+                        <p>Auto-mod, spam protection, link &amp; invite filtering, escalation, and audit logging.</p>
+                    </div>
+
+                    <div class="ai-inner-tabs">
+                        <button class="ai-inner-tab mod-inner-tab active" data-mod-tab="mod-tab-automod">🛡️ Auto-Mod</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-escalation">⚖️ Escalation</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-logging">📋 Logging</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-appeals">🔔 Appeals</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-sanctions">🔨 Active Sanctions</button>
+                        <button class="ai-inner-tab mod-inner-tab" data-mod-tab="mod-tab-cases">📚 Case History</button>
+                    </div>
+
+                    <!-- Auto-Mod tab -->
+                    <div id="mod-tab-automod" class="ai-inner-panel active">
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable auto-moderation</strong><span>Automatically delete or warn on rule violations</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-automod" <%= settings.moderation.autoModEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="mod-immunity-roles">Immunity roles</label>
+                        <select id="mod-immunity-roles" multiple size="4" style="height:auto;">
+                            <% roles.forEach(role => { %>
+                                <option value="<%= role.id %>" <%= (settings.moderation.immunityRoleIds || []).includes(role.id) ? 'selected' : '' %>>@<%= role.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Members with these roles bypass auto-moderation. Hold Ctrl/Cmd to select multiple.</small>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Spam protection</strong><span>Throttle rapid repeat messages</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-spam" <%= settings.moderation.spamProtection ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="mod-spam-threshold">Spam threshold (messages)</label><input type="number" id="mod-spam-threshold" value="<%= settings.moderation.spamThreshold || 5 %>" min="2" max="30"></div>
+                        <div><label class="field-label" for="mod-spam-window">Spam window (seconds)</label><input type="number" id="mod-spam-window" value="<%= settings.moderation.spamWindow || 5 %>" min="1" max="60"></div>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Filter invite links</strong><span>Block other Discord server invites</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-invites" <%= settings.moderation.inviteFilter ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field" style="margin-left:1rem;">
+                        <label class="field-label" for="mod-invite-allowlist">Allowed server IDs (one per line)</label>
+                        <textarea id="mod-invite-allowlist" rows="3" placeholder="123456789012345678"><%= (settings.moderation.inviteAllowlist || []).join('\n') %></textarea>
+                        <small>Invites to these server IDs will not be blocked.</small>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Filter links</strong><span>Block external URLs in messages</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-links" <%= settings.moderation.linkFilter ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field" style="margin-left:1rem;">
+                        <label class="field-label" for="mod-link-allowlist">Allowed domains (one per line)</label>
+                        <textarea id="mod-link-allowlist" rows="3" placeholder="youtube.com&#10;twitch.tv"><%= (settings.moderation.linkAllowlist || []).join('\n') %></textarea>
+                        <small>URLs matching these domains will not be blocked.</small>
+                    </div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Filter profanity</strong><span>Delete messages containing blocked words (uses built-in + custom list)</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-profanity" <%= settings.moderation.profanityFilter ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field"><label class="field-label" for="mod-bad-words">Custom blocked words</label><textarea id="mod-bad-words" rows="3"><%= (settings.moderation.customBadWords || []).join('\n') %></textarea><small>One word/phrase per line. Added on top of the built-in list.</small></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter repeated text</strong></span><span class="switch"><input type="checkbox" id="mod-repeated" <%= settings.moderation.repeatedTextFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter excessive caps</strong></span><span class="switch"><input type="checkbox" id="mod-caps" <%= settings.moderation.excessiveCapsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <div class="field"><label class="field-label" for="mod-caps-threshold">Caps threshold %</label><input type="number" id="mod-caps-threshold" value="<%= settings.moderation.capsThresholdPercent || 70 %>" min="1" max="100"></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter excessive emojis</strong></span><span class="switch"><input type="checkbox" id="mod-emojis" <%= settings.moderation.excessiveEmojisFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <div class="field"><label class="field-label" for="mod-emoji-threshold">Emoji threshold</label><input type="number" id="mod-emoji-threshold" value="<%= settings.moderation.emojiThreshold || 8 %>" min="1" max="50"></div>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter Zalgo text</strong></span><span class="switch"><input type="checkbox" id="mod-zalgo" <%= settings.moderation.zalgoFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <label class="toggle"><span class="toggle-text"><strong>Filter excessive mentions</strong></span><span class="switch"><input type="checkbox" id="mod-mentions" <%= settings.moderation.excessiveMentionsFilter ? 'checked' : '' %>><span class="slider"></span></span></label>
+                    <div class="field"><label class="field-label" for="mod-mention-threshold">Mention threshold</label><input type="number" id="mod-mention-threshold" value="<%= settings.moderation.mentionThreshold || 5 %>" min="1" max="25"></div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                    </div>
+                    </div><!-- end mod-tab-automod -->
+
+                    <!-- Escalation tab -->
+                    <div id="mod-tab-escalation" class="ai-inner-panel">
+                    <div class="panel-head"><h3>Escalation Thresholds</h3><p>Auto-actions taken as warning count rises. Set 0 to disable an action.</p></div>
+                    <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
+                        <div><label class="field-label" for="mod-warn-threshold">Warn count</label><input type="number" id="mod-warn-threshold" value="<%= settings.moderation.warnThreshold || 3 %>" min="1" max="50"><small>DM user at this many warnings</small></div>
+                        <div><label class="field-label" for="mod-kick-threshold">Kick at (warnings)</label><input type="number" id="mod-kick-threshold" value="<%= settings.moderation.kickThreshold || 5 %>" min="0" max="50"><small>0 = disabled</small></div>
+                        <div><label class="field-label" for="mod-ban-threshold">Ban at (warnings)</label><input type="number" id="mod-ban-threshold" value="<%= settings.moderation.banThreshold || 0 %>" min="0" max="50"><small>0 = disabled</small></div>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Auto-Escalation Ladder</h3><p>Per-step actions triggered when a user reaches a warning threshold. Duration is required for mute/tempban.</p></div>
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable auto-escalation</strong><span>Apply the ladder below as warnings accumulate</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-escalation-enabled" <%= settings.moderation.escalation?.enabled !== false ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div id="mod-escalation-ladder"></div>
+                    <div class="actions-row" style="margin-top:.5rem;">
+                        <button type="button" class="btn btn-sm" onclick="addEscalationStep()">+ Add step</button>
+                        <button type="button" class="btn btn-sm" onclick="resetEscalationLadder()">Reset to defaults</button>
+                    </div>
+
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Behavior Score Escalation</h3><p>Separate score system that decays over time. Each automod violation adds to the score.</p></div>
+                    <div class="field mod-score-grid">
+                        <div><label class="field-label" for="mod-score-mute">Mute at score</label><input type="number" id="mod-score-mute" value="<%= settings.moderation.behaviorScoreMuteAt ?? 10 %>" min="0"><small>0 = disabled</small></div>
+                        <div><label class="field-label" for="mod-score-kick">Kick at score</label><input type="number" id="mod-score-kick" value="<%= settings.moderation.behaviorScoreKickAt ?? 20 %>" min="0"><small>0 = disabled</small></div>
+                        <div><label class="field-label" for="mod-score-ban">Ban at score</label><input type="number" id="mod-score-ban" value="<%= settings.moderation.behaviorScoreBanAt ?? 30 %>" min="0"><small>0 = disabled</small></div>
+                        <div><label class="field-label" for="mod-score-decay">Decay (days)</label><input type="number" id="mod-score-decay" value="<%= settings.moderation.behaviorScoreDecayDays ?? 7 %>" min="1"><small>Score halves every N days</small></div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                    </div>
+                    </div><!-- end mod-tab-escalation -->
+
+                    <!-- Logging tab -->
+                    <div id="mod-tab-logging" class="ai-inner-panel">
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable moderation</strong><span>Master switch for all moderation features</span></span>
+                        <span class="switch"><input type="checkbox" id="mod-enabled" <%= settings.moderation.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="mod-log-channel">Audit log channel</label>
+                        <select id="mod-log-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.moderation.logChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="mod-mute-role">Mute role</label>
+                        <select id="mod-mute-role">
+                            <option value="">Select a role (or use Discord timeout)</option>
+                            <% roles.forEach(role => { %>
+                                <option value="<%= role.id %>" <%= settings.moderation.muteRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
+                            <% }); %>
+                        </select>
+                        <small>Assigned when a member is muted. Leave empty to use Discord's native timeout.</small>
+                    </div>
+                    <div class="panel-head" style="margin-top:1.5rem"><h3>Case Management</h3><p>Configure SLA monitoring for open moderation cases.</p></div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                        <div>
+                            <label class="field-label" for="cs-sla-hours">SLA deadline (hours)</label>
+                            <input type="number" id="cs-sla-hours" value="<%= settings.caseSettings?.slaHours ?? 48 %>" min="1">
+                            <small>Cases open longer than this trigger an alert</small>
+                        </div>
+                        <div>
+                            <label class="field-label" for="cs-sla-channel">SLA alert channel</label>
+                            <select id="cs-sla-channel">
+                                <option value="">None</option>
+                                <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.caseSettings?.slaChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                        <button class="btn btn-primary" onclick="saveSettings('casesettings')" style="margin-left:.5rem">Save case settings</button>
+                    </div>
+                    </div><!-- end mod-tab-logging -->
+
+                    <!-- Appeals tab -->
+                    <div id="mod-tab-appeals" class="ai-inner-panel">
+                    <label class="toggle">
+                        <span class="toggle-text"><strong>Enable ban/mute appeals</strong><span>Allow users to submit appeals via <code>/appeal</code></span></span>
+                        <span class="switch"><input type="checkbox" id="mod-appeals-enabled" <%= settings.moderation.appealsEnabled ? 'checked' : '' %>><span class="slider"></span></span>
+                    </label>
+                    <div class="field">
+                        <label class="field-label" for="mod-appeal-channel">Appeals channel</label>
+                        <select id="mod-appeal-channel">
+                            <option value="">Select a channel</option>
+                            <% channels.forEach(channel => { %>
+                                <option value="<%= channel.id %>" <%= settings.moderation.appealChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                    </div>
+                    </div><!-- end mod-tab-appeals -->
+
+                    <!-- Active Sanctions tab -->
+                    <div id="mod-tab-sanctions" class="ai-inner-panel">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+                            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                                <button class="btn btn-sm sanctions-filter active" data-filter="all" onclick="setSanctionsFilter('all',this)">All</button>
+                                <button class="btn btn-sm sanctions-filter" data-filter="ban" onclick="setSanctionsFilter('ban',this)">Bans</button>
+                                <button class="btn btn-sm sanctions-filter" data-filter="timeout" onclick="setSanctionsFilter('timeout',this)">Timeouts</button>
+                            </div>
+                            <button class="btn btn-sm" onclick="loadActiveSanctions()">↻ Refresh</button>
+                        </div>
+                        <div id="sanctions-loading">
+                            <div class="skel-bar" style="width:90%"></div>
+                            <div class="skel-bar" style="width:75%"></div>
+                            <div class="skel-bar" style="width:85%"></div>
+                        </div>
+                        <div id="sanctions-error" style="display:none" class="analytics-error-card">
+                            <span>⚠ Could not load sanctions</span>
+                            <button class="btn btn-sm" onclick="loadActiveSanctions()">Retry</button>
+                        </div>
+                        <div id="sanctions-empty" style="display:none;opacity:.5;font-size:.9em">No active bans or timeouts found.</div>
+                        <table id="sanctions-table" class="cases-table" style="display:none">
+                            <thead><tr><th>User</th><th>Type</th><th>Expires</th><th>Reason</th><th>Actions</th></tr></thead>
+                            <tbody id="sanctions-tbody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Case History tab -->
+                    <div id="mod-tab-cases" class="ai-inner-panel">
+                        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+                            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                                <select id="cases-filter-type" class="cases-filter-select" onchange="loadCaseHistory(1)">
+                                    <option value="">All types</option>
+                                    <option value="warn">Warn</option>
+                                    <option value="mute">Mute</option>
+                                    <option value="kick">Kick</option>
+                                    <option value="ban">Ban</option>
+                                    <option value="unban">Unban</option>
+                                    <option value="unmute">Unmute</option>
+                                    <option value="note">Note</option>
+                                    <option value="appeal">Appeal</option>
+                                </select>
+                                <select id="cases-filter-status" class="cases-filter-select" onchange="loadCaseHistory(1)">
+                                    <option value="">All statuses</option>
+                                    <option value="open">Open</option>
+                                    <option value="closed">Closed</option>
+                                    <option value="appealed">Appealed</option>
+                                    <option value="appeal_approved">Appeal approved</option>
+                                    <option value="appeal_denied">Appeal denied</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-sm" onclick="loadCaseHistory(1)">↻ Refresh</button>
+                        </div>
+                        <div id="cases-loading">
+                            <div class="skel-bar" style="width:90%"></div>
+                            <div class="skel-bar" style="width:75%"></div>
+                            <div class="skel-bar" style="width:85%"></div>
+                        </div>
+                        <div id="cases-error" style="display:none" class="analytics-error-card">
+                            <span>⚠ Could not load cases</span>
+                            <button class="btn btn-sm" onclick="loadCaseHistory(1)">Retry</button>
+                        </div>
+                        <div id="cases-empty" style="display:none;opacity:.5;font-size:.9em">No cases found.</div>
+                        <table id="cases-table" class="cases-table" style="display:none">
+                            <thead><tr><th>Case #</th><th>User</th><th>Type</th><th>Mod</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="cases-tbody"></tbody>
+                        </table>
+                        <div id="cases-pagination" style="display:none;margin-top:.75rem;display:flex;gap:.5rem;align-items:center;justify-content:center"></div>
+                    </div>
+
+                </section>
+
+                <!-- Case Note / Close Modal -->
+                <div id="case-note-modal" class="modal-overlay" style="display:none">
+                    <div class="modal-box" style="max-width:440px">
+                        <div class="modal-head">
+                            <h3 id="case-note-modal-title">Add Note to Case</h3>
+                            <button class="modal-close" onclick="closeCaseNoteModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="case-note-case-id">
+                            <input type="hidden" id="case-note-mode" value="add_note">
+                            <div class="field">
+                                <label class="field-label" id="case-note-label">Note</label>
+                                <textarea id="case-note-content" rows="4" placeholder="Add a moderator note..."></textarea>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn" onclick="closeCaseNoteModal()">Cancel</button>
+                            <button class="btn btn-primary" id="case-note-submit-btn" onclick="submitCaseAction()">Save note</button>
+                        </div>
+                    </div>
+                </div>
