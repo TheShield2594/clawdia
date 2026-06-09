@@ -630,12 +630,19 @@ const NL_REMINDER_COOLDOWN_MS = 30_000; // 30 seconds between NL-created reminde
 const nlReminderLastUsed = new Map(); // userId → timestamp
 
 function sanitizeReminderText(text) {
-    return text
+    // Normalize first to prevent Unicode normalization attacks / length bypass tricks.
+    const normalized = text.normalize('NFC');
+    const sanitized = normalized
         // Strip @everyone, @here, and role/user mention tokens
         .replace(/@(everyone|here)/gi, '')
         .replace(/<@[!&]?\d+>/g, '')
+        // Strip URLs — reminder text should never need a link
+        .replace(/https?:\/\/\S+/gi, '')
+        // Strip control characters and non-printable code points
+        .replace(/\p{Cc}/gu, '')
         .trim()
         .slice(0, NL_REMINDER_MAX_TEXT);
+    return sanitized;
 }
 
 async function handleNLReminder(message, contentOverride) {
