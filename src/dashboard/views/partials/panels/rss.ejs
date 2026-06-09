@@ -14,13 +14,13 @@
                     <div id="rss-tab-feeds" class="ai-inner-panel active">
                         <p class="ai-inner-desc">Pipe any RSS feed straight into a Discord channel.</p>
                         <div id="rss-feeds" style="margin-bottom:1.5rem;">
-                            <% if (settings.rssFeeds.length === 0) { %>
+                            <% if ((settings.rssFeeds || []).length === 0) { %>
                                 <div class="empty-state" style="padding:2rem 1.5rem;">
                                     <h3>No feeds yet</h3>
                                     <p>Add your first RSS feed below.</p>
                                 </div>
                             <% } %>
-                            <% settings.rssFeeds.forEach((feed, index) => { %>
+                            <% (settings.rssFeeds || []).forEach((feed, index) => { %>
                                 <div class="list-item">
                                     <div style="min-width:0;flex:1;">
                                         <div class="url"><%= feed.url %></div>

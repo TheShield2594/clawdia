@@ -27,11 +27,11 @@
                         </div>
                         <div class="field">
                             <label class="field-label" for="economy-daily">Daily reward amount</label>
-                            <input type="text" id="economy-daily" value="<%= settings.economy.dailyAmount %>">
+                            <input type="number" id="economy-daily" value="<%= settings.economy.dailyAmount %>" min="0">
                         </div>
                         <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                            <div><label class="field-label" for="economy-work-min">Work payout (min)</label><input type="text" id="economy-work-min" value="<%= settings.economy.workMin %>"></div>
-                            <div><label class="field-label" for="economy-work-max">Work payout (max)</label><input type="text" id="economy-work-max" value="<%= settings.economy.workMax %>"></div>
+                            <div><label class="field-label" for="economy-work-min">Work payout (min)</label><input type="number" id="economy-work-min" value="<%= settings.economy.workMin %>" min="0"></div>
+                            <div><label class="field-label" for="economy-work-max">Work payout (max)</label><input type="number" id="economy-work-max" value="<%= settings.economy.workMax %>" min="0"></div>
                         </div>
                         <div class="field">
                             <label class="field-label" for="economy-announcement-channel">Announcements channel</label>

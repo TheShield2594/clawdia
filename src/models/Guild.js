@@ -137,9 +137,9 @@ const guildSchema = new Schema({
         voiceXpEnabled: { type: Boolean, default: false },
         voiceXpRate: { type: Number, default: 1.0 },
         disableLevelUpAnnounce: { type: Boolean, default: false },
-        maxLevel: { type: Number, default: null },
+        maxLevel: { type: Number, default: null, min: 1, max: 9999 },
         xpBoostEvent: {
-            multiplier: { type: Number, default: null },
+            multiplier: { type: Number, default: null, min: 1.1, max: 10 },
             startTime:  { type: Date,   default: null },
             endTime:    { type: Date,   default: null }
         }
