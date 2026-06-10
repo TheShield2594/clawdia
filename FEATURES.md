@@ -183,7 +183,8 @@ Set a moderation log channel to track:
 Narrated expeditions in Clawdia's voice. Players set out into distinct regions, each with its own weighted event table — encounters, discoveries, traps, treasure, lore fragments, and rare secrets.
 
 **Commands:**
-```
+
+```text
 /explore go [region]   - Set out on an expedition (1 stamina, 60s cooldown)
 /explore travel        - Unlock and move between regions
 /explore regions       - Browse every region, requirements, and progress

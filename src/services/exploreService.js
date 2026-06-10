@@ -143,7 +143,11 @@ function applyExplorerXp(user, amount) {
     return { leveled, newLevel: e.level, newTitle: getLevelData(e.level).title };
 }
 
-// ─── RNG ─────────────────────────────────────────────────────────────────────
+// ─── RNG / UTILS ─────────────────────────────────────────────────────────────
+
+function clamp(n, min, max) {
+    return Math.min(max, Math.max(min, n));
+}
 
 function weightedRoll(items) {
     const total = items.reduce((s, i) => s + i.weight, 0);
@@ -439,10 +443,6 @@ function finishAsTreasure(user, region, progress, result, coinMult, { smallOnly 
 }
 
 // ─── REWARD HELPERS ──────────────────────────────────────────────────────────
-
-function clamp(n, min, max) {
-    return Math.min(max, Math.max(min, n));
-}
 
 // Credit coins, respecting the rolling daily hard cap. Returns amount granted.
 function applyPayout(user, amount) {

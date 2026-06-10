@@ -1,15 +1,6 @@
 <%
-// Region catalog mirrored from src/data/exploreData.js — keep ids in sync.
-const explorationRegions = [
-    { id: 'whispering_forest', emoji: '🌲', name: 'Whispering Forest', seasonal: false },
-    { id: 'crumbling_ruins',   emoji: '🏛️', name: 'Crumbling Ruins',   seasonal: false },
-    { id: 'crystal_caves',     emoji: '💎', name: 'Crystal Caves',     seasonal: false },
-    { id: 'sunken_docks',      emoji: '⚓', name: 'Sunken Docks',      seasonal: false },
-    { id: 'frostveil_pass',    emoji: '❄️', name: 'Frostveil Pass',    seasonal: 'Winter Wonderland' },
-    { id: 'hollowgrave_lane',  emoji: '🎃', name: 'Hollowgrave Lane',  seasonal: 'Spooky Season' },
-    { id: 'scorchglass_shore', emoji: '☀️', name: 'Scorchglass Shore', seasonal: 'Summer Festival' },
-    { id: 'velvet_arcade',     emoji: '💝', name: 'The Velvet Arcade', seasonal: "Valentine's Day" },
-];
+// Region catalog is injected by the dashboard route (explorationRegions),
+// derived from src/data/exploreData.js so the panel never drifts from game data.
 const explorationDisabled = settings.exploration?.disabledRegions || [];
 %>
                 <section id="exploration" class="panel">

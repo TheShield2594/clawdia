@@ -32,6 +32,7 @@ const {
     getEventXpMultiplier, getEventCoinMultiplier,
     hasActiveEvent, getEventCurrencyId, addEventCurrency,
 } = require('../../services/seasonalEventService');
+const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { logTransaction } = require('../../utils/logTransaction');
 const { logBigWin } = require('../../utils/bigWinLogger');
@@ -405,8 +406,7 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     if (result.xp > 0)      gains.push(`+${result.xp} Explorer XP`);
     if (mainXp > 0)         gains.push(`+${mainXp} XP`);
     if (eventDrop) {
-        const ev = require('../../data/seasonalEvents').SEASONAL_EVENTS;
-        const def = Object.values(ev).find(s => s.currency?.id === eventDrop.currencyId);
+        const def = Object.values(SEASONAL_EVENTS).find(s => s.currency?.id === eventDrop.currencyId);
         gains.push(`+${eventDrop.amount} ${def?.currency?.emoji ?? '🎟️'} ${def?.currency?.name ?? eventDrop.currencyId}`);
     }
     if (gains.length) embed.addFields({ name: '🎒 The Haul', value: gains.join('  ·  '), inline: false });

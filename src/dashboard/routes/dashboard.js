@@ -9,6 +9,8 @@ const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
 const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES } = require('../../data/huntData');
 const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES } = require('../../data/fishData');
 const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES } = require('../../data/mineData');
+const { REGION_LIST } = require('../../data/exploreData');
+const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
@@ -150,6 +152,15 @@ async function renderGuildSettings(req, res) {
             consumables: Object.values(MINE_CONSUMABLES).map(c => toItem('mine', c))
         };
 
+        // Canonical exploration region catalog for the dashboard panel —
+        // derived from exploreData so the template never drifts from the game data.
+        const explorationRegions = REGION_LIST.map(r => ({
+            id: r.id,
+            emoji: r.emoji,
+            name: r.name,
+            seasonal: r.seasonalEventId ? (SEASONAL_EVENTS[r.seasonalEventId]?.name ?? r.seasonalEventId) : false,
+        }));
+
         res.render('guild-settings', {
             user: req.user,
             guild: { id: guild.id, name: guild.name, icon: guild.icon, ownerId: guild.ownerId, owner: req.user.id === guild.ownerId },
@@ -164,7 +175,8 @@ async function renderGuildSettings(req, res) {
             builtinAchievements,
             huntItems,
             fishItems,
-            mineItems
+            mineItems,
+            explorationRegions
         });
     } catch (error) {
         console.error('Dashboard error:', error);
