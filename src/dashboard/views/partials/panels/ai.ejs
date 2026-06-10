@@ -149,7 +149,7 @@
                             </div>
                             <div id="kb-error" style="display:none" class="analytics-error-card">
                                 <span>⚠ Couldn't load entries</span>
-                                <button class="btn btn-sm" onclick="retryLoadKnowledgeBase()">Retry</button>
+                                <button class="btn btn-sm" id="kb-retry-btn">Retry</button>
                             </div>
                         </div>
                         <div class="panel-head" style="margin-top:1rem"><h3>Add entry</h3></div>
@@ -166,7 +166,7 @@
                             <input type="text" id="kb-tags" placeholder="rules, faq, moderation">
                         </div>
                         <div class="actions-row">
-                            <button class="btn btn-primary" onclick="addKbEntry()">Add entry</button>
+                            <button class="btn btn-primary" id="kb-add-btn">Add entry</button>
                         </div>
                     </div>
 

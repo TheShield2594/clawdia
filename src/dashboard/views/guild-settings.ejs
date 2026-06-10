@@ -2293,8 +2293,8 @@
                     tagsHtml +
                 '</div>' +
                 '<div style="display:flex;gap:.5rem;flex-shrink:0;">' +
-                    '<button class="btn btn-sm" onclick="editKbEntry(\'' + entry._id + '\',\'' + encodeURIComponent(entry.title) + '\',\'' + encodeURIComponent(entry.content) + '\',\'' + encodeURIComponent((entry.tags||[]).join(',')) + '\')">Edit</button>' +
-                    '<button class="btn btn-danger btn-sm" onclick="deleteKbEntry(\'' + entry._id + '\')">Remove</button>' +
+                    '<button class="btn btn-sm kb-edit-btn" data-id="' + entry._id + '" data-title="' + encodeURIComponent(entry.title) + '" data-content="' + encodeURIComponent(entry.content) + '" data-tags="' + encodeURIComponent((entry.tags||[]).join(',')) + '">Edit</button>' +
+                    '<button class="btn btn-danger btn-sm kb-delete-btn" data-id="' + entry._id + '">Remove</button>' +
                 '</div>';
             return div;
         }
@@ -2311,8 +2311,8 @@
                     '<textarea id="kb-edit-content-' + id + '" rows="4" style="width:100%;resize:vertical;" placeholder="Content">' + escHtml(content) + '</textarea>' +
                     '<input id="kb-edit-tags-' + id + '" class="field-input" value="' + escHtml(tags) + '" placeholder="Tags (comma-separated)" style="width:100%;">' +
                     '<div style="display:flex;gap:.5rem;">' +
-                        '<button class="btn btn-primary btn-sm" onclick="saveKbEntry(\'' + id + '\')">Save</button>' +
-                        '<button class="btn btn-sm" onclick="cancelKbEdit()">Cancel</button>' +
+                        '<button class="btn btn-primary btn-sm kb-save-btn" data-id="' + id + '">Save</button>' +
+                        '<button class="btn btn-sm kb-cancel-btn">Cancel</button>' +
                     '</div>' +
                 '</div>';
         }
@@ -2397,6 +2397,29 @@
                 toast('An error occurred', 'error');
             }
         }
+
+        // KB static button listeners (inline onclick blocked by CSP)
+        document.addEventListener('DOMContentLoaded', function() {
+            var addBtn = document.getElementById('kb-add-btn');
+            if (addBtn) addBtn.addEventListener('click', addKbEntry);
+            var retryBtn = document.getElementById('kb-retry-btn');
+            if (retryBtn) retryBtn.addEventListener('click', retryLoadKnowledgeBase);
+            var kbList = document.getElementById('kb-list');
+            if (kbList) {
+                kbList.addEventListener('click', function(e) {
+                    var t = e.target;
+                    if (t.classList.contains('kb-edit-btn')) {
+                        editKbEntry(t.dataset.id, t.dataset.title, t.dataset.content, t.dataset.tags);
+                    } else if (t.classList.contains('kb-delete-btn')) {
+                        deleteKbEntry(t.dataset.id);
+                    } else if (t.classList.contains('kb-save-btn')) {
+                        saveKbEntry(t.dataset.id);
+                    } else if (t.classList.contains('kb-cancel-btn')) {
+                        cancelKbEdit();
+                    }
+                });
+            }
+        });
 
         // ── AI Summaries ──────────────────────────────────────────────────────────
         var summaryJobsLoaded = false;
