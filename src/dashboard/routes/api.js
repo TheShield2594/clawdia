@@ -484,7 +484,7 @@ function validateNewspaperUpdate(updates) {
             if (err) return err;
         }
         if (field === 'quoteChannelIds') {
-            if (!Array.isArray(value)) return 'newspaper.quoteChannelIds must be an array';
+            if (!Array.isArray(value) || value.length > 100) return 'newspaper.quoteChannelIds must be an array of at most 100 channel ids';
             for (const id of value) {
                 const err = validateSnowflakeOrNull(id, 'newspaper.quoteChannelIds entry');
                 if (err) return err;
@@ -514,8 +514,8 @@ function validateExplorationUpdate(updates) {
             }
         }
         if (field === 'disabledRegions') {
-            if (!Array.isArray(value) || value.some(v => typeof v !== 'string' || v.length > 64)) {
-                return 'exploration.disabledRegions must be an array of region id strings';
+            if (!Array.isArray(value) || value.length > 100 || value.some(v => typeof v !== 'string' || v.length > 64)) {
+                return 'exploration.disabledRegions must be an array of at most 100 region id strings';
             }
         }
     }
