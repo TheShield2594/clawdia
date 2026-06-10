@@ -432,6 +432,63 @@ const userSchema = new Schema({
     },
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ── World Exploration System ─────────────────────────────────────────────
+    exploration: {
+        // Stamina (regenerates over time, gates how often you can explore)
+        stamina:          { type: Number, default: 10 },
+        staminaLastRegen: { type: Date,   default: null },
+
+        // Explorer progression (cumulative XP; separate from Discord leveling XP)
+        xp:    { type: Number, default: 0 },
+        level: { type: Number, default: 1 },
+
+        // Cooldowns
+        lastExplore: { type: Date, default: null },
+        injuryUntil: { type: Date, default: null },
+
+        // Active region & purchased region unlocks (seasonal regions are
+        // calendar-gated instead and never appear here)
+        activeRegion:    { type: String, default: 'whispering_forest' },
+        unlockedRegions: [{ type: String }],
+
+        // The Explorer's Map: per-region chart progress, created on first visit
+        regions: [{
+            regionId:       { type: String, required: true },
+            discoveredAt:   { type: Date,   default: Date.now },
+            expeditions:    { type: Number, default: 0 },
+            landmarksFound: [{ type: String }],
+            loreFound:      [{ type: String }],
+            secretsFound:   [{ type: String }],
+        }],
+
+        // Expedition journal — most recent finds first, capped in the service
+        journal: [{
+            at:        { type: Date,   default: Date.now },
+            regionId:  { type: String },
+            eventType: { type: String },
+            summary:   { type: String },
+        }],
+
+        // Lifetime stats (used by achievement checks)
+        totalExpeditions:    { type: Number, default: 0 },
+        treasuresFound:      { type: Number, default: 0 },
+        trapsSprung:         { type: Number, default: 0 },
+        encountersWon:       { type: Number, default: 0 },
+        secretsFound:        { type: Number, default: 0 },
+        loreCollected:       { type: Number, default: 0 },
+        landmarksDiscovered: { type: Number, default: 0 },
+        relicsRecovered:     { type: Number, default: 0 },
+        totalEarned:         { type: Number, default: 0 },
+        bestHaul:            { type: Number, default: 0 },
+        sinceSecret:         { type: Number, default: 0 },  // expeditions since last secret (pity)
+
+        // Anti-exploit: rolling 24-hour window tracking
+        dailyCoins:       { type: Number, default: 0 },
+        dailyExpeditions: { type: Number, default: 0 },
+        dailyWindowStart: { type: Date,   default: null },
+    },
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Rob trap — set via /trap set; triggers on successful rob against this user
     trap: {
         setAt:     { type: Date, default: null },

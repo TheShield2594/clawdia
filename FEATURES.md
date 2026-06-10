@@ -178,6 +178,36 @@ Set a moderation log channel to track:
 - Work reward range (min-max)
 - Wheel of Fortune: enable/disable, cooldown hours, extra spin cost
 
+### World Exploration
+
+Narrated expeditions in Clawdia's voice. Players set out into distinct regions, each with its own weighted event table — encounters, discoveries, traps, treasure, lore fragments, and rare secrets.
+
+**Commands:**
+
+```text
+/explore go [region]   - Set out on an expedition (1 stamina, 60s cooldown)
+/explore travel        - Unlock and move between regions
+/explore regions       - Browse every region, requirements, and progress
+/explore journal       - Reread your most recent finds
+/explore profile       - Explorer level, stamina, and field record
+/explore map  or  /map - Unroll your persistent Explorer's Map
+```
+
+**Regions:**
+- Core: Whispering Forest → Crumbling Ruins → Crystal Caves → Sunken Docks (level + coin gated, rising payouts)
+- Seasonal: Frostveil Pass (winter), Hollowgrave Lane (spooky), Scorchglass Shore (summer), The Velvet Arcade (Valentine's) — open only while their seasonal event runs and they drop event currency for the event shop
+
+**Integration:**
+- Treasure coins feed the economy (transaction-logged, daily-capped); relics land in `/inventory`
+- Expeditions grant Explorer XP and mirror guild leveling XP
+- Rare finds unlock exploration achievements (including secret ones)
+- The Explorer's Map persists per player: landmarks, lore, and secrets charted per region
+
+**Dashboard Settings:**
+- Enable/disable exploration, per-region toggles
+- Payout multiplier and rare-event bonus knobs
+- Secret discovery announcements
+
 ## 👋 Welcome System
 
 ### Features

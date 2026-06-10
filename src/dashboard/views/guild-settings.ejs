@@ -75,6 +75,7 @@
         <ul class="dash-nav">
             <li class="nav-item" data-tab="achievements" data-keywords="badge milestone unlock reward"><span class="nav-emoji">🏅</span><span>Achievements</span></li>
             <li class="nav-item" data-tab="quests" data-keywords="task challenge daily weekly mission"><span class="nav-emoji">🗺️</span><span>Quests</span></li>
+            <li class="nav-item" data-tab="exploration" data-keywords="explore expedition region map secret treasure relic wilds"><span class="nav-emoji">🥾</span><span>Exploration</span></li>
             <li class="nav-item" data-tab="season" data-keywords="seasonal pass battle tier"><span class="nav-emoji">🏆</span><span>Season Pass</span></li>
             <li class="nav-item" data-tab="progressiontracks" data-keywords="track creator helper raider bonus xp multiplier"><span class="nav-emoji">🧭</span><span>Progression Tracks</span></li>
         </ul>
@@ -151,6 +152,7 @@
         <%- include('partials/panels/starboard') %>
         <%- include('partials/panels/eventlog') %>
         <%- include('partials/panels/quests') %>
+        <%- include('partials/panels/exploration') %>
         <%- include('partials/panels/newspaper') %>
         <%- include('partials/panels/season') %>
         <%- include('partials/panels/progressiontracks') %>
@@ -1145,6 +1147,21 @@
                     'heist.minPlayers':            safeInt('heist-min-players', 2),
                     'heist.jailDurationMinutes':   safeInt('heist-jail', 30),
                     'heist.maxPayout':             safeInt('heist-max-payout', 10000),
+                };
+            } else if (section === 'exploration') {
+                const safeFloat = (id, fallback, min, max) => {
+                    const v = parseFloat(document.getElementById(id).value);
+                    return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+                };
+                const disabledRegions = Array.from(document.querySelectorAll('.exploration-region'))
+                    .filter(cb => !cb.checked)
+                    .map(cb => cb.dataset.regionId);
+                data = {
+                    'exploration.enabled':            document.getElementById('exploration-enabled').checked,
+                    'exploration.dropRateMultiplier': safeFloat('exploration-droprate', 1, 0.1, 5),
+                    'exploration.rareEventBonus':     safeFloat('exploration-rarebonus', 0, 0, 0.25),
+                    'exploration.announceSecrets':    document.getElementById('exploration-announce-secrets').checked,
+                    'exploration.disabledRegions':    disabledRegions,
                 };
             }
 
