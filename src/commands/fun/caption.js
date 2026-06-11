@@ -7,6 +7,7 @@ const MAX_DIM     = 4000;
 const CAPTION_H   = 70;
 const FONT_SIZE   = 28;
 const LINE_HEIGHT = FONT_SIZE * 1.25;
+const LOAD_TIMEOUT_MS = 10_000;
 
 const _measCtx = createCanvas(1, 1).getContext('2d');
 
@@ -43,7 +44,7 @@ module.exports = {
         try {
             await interaction.deferReply();
 
-            const src = await loadImage(imageUrl);
+            const src = await loadImageSafe(imageUrl);
             if (src.width > MAX_DIM || src.height > MAX_DIM) {
                 return interaction.editReply(`❌ Image is too large. Maximum dimensions are ${MAX_DIM}×${MAX_DIM} pixels.`);
             }
@@ -93,11 +94,40 @@ module.exports = {
 
 function isValidHttpUrl(str) {
     try {
-        const { protocol } = new URL(str);
-        return protocol === 'http:' || protocol === 'https:';
+        const { protocol, hostname } = new URL(str);
+        if (protocol !== 'http:' && protocol !== 'https:') return false;
+        return !isPrivateHost(hostname);
     } catch {
         return false;
     }
+}
+
+// Blocks loopback, link-local, and private-range hosts so the bot can't be used
+// to probe its own network (SSRF). Literal-IP check only — a hostname resolving
+// to a private address is out of scope for this layer.
+function isPrivateHost(hostname) {
+    const host = hostname.toLowerCase();
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true;
+    if (host === '0.0.0.0' || host === '[::1]' || host === '::1') return true;
+    const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+        const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+        if (a === 127 || a === 10 || a === 0) return true;                  // loopback / 10.x / this-net
+        if (a === 172 && b >= 16 && b <= 31) return true;                   // 172.16-31.x
+        if (a === 192 && b === 168) return true;                            // 192.168.x
+        if (a === 169 && b === 254) return true;                            // link-local / cloud metadata
+    }
+    return false;
+}
+
+// loadImage with a hard timeout — node-canvas has none, so a slow or
+// unresponsive URL would otherwise hang the deferred reply indefinitely.
+function loadImageSafe(url) {
+    return Promise.race([
+        loadImage(url),
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('image load timed out')), LOAD_TIMEOUT_MS).unref?.()),
+    ]);
 }
 
 function wrapText(ctx, text, maxWidth) {

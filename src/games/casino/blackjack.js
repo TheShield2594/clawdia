@@ -7,7 +7,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
+const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const { randomFrom, BJ_WIN_LINES, BJ_LOSE_LINES, BJ_BUST_LINES, BJ_PUSH_LINES } = require('../../utils/copyLines');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
@@ -585,10 +585,10 @@ module.exports = {
                     } else if (hTotal === dealerTotal) {
                         totalCredit += hBet;
                         handResults.push(`Hand ${h + 1}: 🤝 Push`);
-                    } else if (luckyActive && Math.random() < 0.20) {
+                    } else if (luckySaveEligible(hBet) && luckyActive && Math.random() < 0.20) {
                         totalCredit += hBet;
                         handResults.push(`Hand ${h + 1}: 🍀 Lucky Push`);
-                    } else if (luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+                    } else if (luckySaveEligible(hBet) && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
                         totalCredit += hBet;
                         handResults.push(`Hand ${h + 1}: 🎯 Lucky Push`);
                     } else {
@@ -620,12 +620,12 @@ module.exports = {
                     title       = '🃏 Blackjack — Push';
                     description = `${randomFrom(BJ_PUSH_LINES)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#f39c12';
-                } else if (luckyActive && Math.random() < 0.20) {
+                } else if (luckySaveEligible(activeBet) && luckyActive && Math.random() < 0.20) {
                     totalCredit = activeBet;
                     title       = '🃏 Blackjack — Lucky Push';
                     description = `🍀 Lucky Charm saved you. Bet returned.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;
                     color       = '#f39c12';
-                } else if (luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+                } else if (luckySaveEligible(activeBet) && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
                     totalCredit = activeBet;
                     title       = '🃏 Blackjack — Lucky Push';
                     description = `🎯 Lucky Streak saved you. Bet returned.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  🤝 Returned: ${currency}${activeBet.toLocaleString()}\n━━━━━━━━━━━━━━━━━━━━━━━━━━`;

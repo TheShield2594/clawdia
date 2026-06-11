@@ -7,7 +7,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
+const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -305,8 +305,8 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
             const won = pickedHigher ? next.value > current.value : next.value < current.value;
 
-            // Lucky Charm on loss: return bet silently and end session
-            if (!won && luckyActive && Math.random() < 0.20) {
+            // Lucky Charm on loss: return bet silently and end session (low-stakes bets only)
+            if (!won && luckySaveEligible(bet) && luckyActive && Math.random() < 0.20) {
                 const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }, { new: true });
                 const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                 await i.update({
@@ -324,8 +324,8 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                 return;
             }
 
-            // Lucky Streak on loss: return bet silently and end session
-            if (!won && lsBonus > 0 && Math.random() < lsBonus) {
+            // Lucky Streak on loss: return bet silently and end session (low-stakes bets only)
+            if (!won && luckySaveEligible(bet) && lsBonus > 0 && Math.random() < lsBonus) {
                 const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }, { new: true });
                 const replayId = `hl_replay_${interaction.id}_${Date.now()}`;
                 await i.update({

@@ -1911,3 +1911,24 @@ async function handleRaid(interaction) {
     targetUser.send({ embeds: [dmEmbed] }).catch(() => null);
 }
 
+
+// ── Per-user action lock ──────────────────────────────────────────────────────
+// Mining mutates the user document with read-modify-write saves, so concurrent
+// /mine invocations from the same user can race stamina, daily caps, and drops.
+// Serialize them: one mining action at a time per user.
+const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
+const _mineExecute = module.exports.execute;
+module.exports.execute = async function (interaction) {
+    const lockKey = `grind:mine:${interaction.guild?.id}:${interaction.user.id}`;
+    if (!_lockAcquire(lockKey, 120_000)) {
+        return interaction.reply({
+            content: '⛏️ You already have a mining action in progress — finish it first.',
+            ephemeral: true,
+        }).catch(() => {});
+    }
+    try {
+        return await _mineExecute(interaction);
+    } finally {
+        _lockRelease(lockKey);
+    }
+};
