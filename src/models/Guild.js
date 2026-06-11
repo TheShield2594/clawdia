@@ -161,6 +161,8 @@ const guildSchema = new Schema({
         shopEnabled: { type: Boolean, default: true },
         gamesEnabled: { type: Boolean, default: true },
         coinflipEnabled: { type: Boolean, default: true },
+        // Ambient chat events (airdrops, crates, flash trivia) — see chatEventService
+        chatEventsEnabled: { type: Boolean, default: true },
         rollEnabled: { type: Boolean, default: true },
         blackjackEnabled: { type: Boolean, default: true },
         jobsEnabled: { type: Boolean, default: true },
