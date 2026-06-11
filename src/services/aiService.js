@@ -129,14 +129,17 @@ const KB_CANDIDATE_LIMIT = 50;
 const KB_SMALL_THRESHOLD = 15; // include all entries when KB is this size or smaller
 
 async function retrieveKnowledge(guildId, query, limit = 5) {
-    // For small knowledge bases, include every entry — no retrieval needed.
+    // For small knowledge bases, include every entry as background context.
+    // isBackground=true means entries weren't matched to the query, so they
+    // shouldn't be cited as sources in the channel.
     const totalCount = await KnowledgeBase.countDocuments({ guildId });
     if (totalCount <= KB_SMALL_THRESHOLD) {
-        return KnowledgeBase.find({ guildId }).sort({ createdAt: -1 }).lean();
+        const entries = await KnowledgeBase.find({ guildId }).sort({ createdAt: -1 }).lean();
+        return { entries, isBackground: true };
     }
 
     const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    if (!queryWords.length) return [];
+    if (!queryWords.length) return { entries: [], isBackground: false };
 
     // Use the MongoDB text index for a bounded candidate set; fall back to a
     // capped scan if the text index doesn't exist yet (e.g., fresh deployment).
@@ -149,7 +152,7 @@ async function retrieveKnowledge(guildId, query, limit = 5) {
     } catch {
         candidates = await KnowledgeBase.find({ guildId }).limit(KB_CANDIDATE_LIMIT).lean();
     }
-    if (!candidates.length) return [];
+    if (!candidates.length) return { entries: [], isBackground: false };
 
     // Combine MongoDB textScore (handles stemming) with exact keyword hit count
     // for a more reliable relevance ranking.
@@ -162,11 +165,13 @@ async function retrieveKnowledge(guildId, query, limit = 5) {
         return { entry, combined };
     });
 
-    return scored
+    const entries = scored
         .filter(s => s.combined > 0)
         .sort((a, b) => b.combined - a.combined)
         .slice(0, limit)
         .map(s => s.entry);
+
+    return { entries, isBackground: false };
 }
 
 function buildKnowledgeContext(entries) {
@@ -777,7 +782,7 @@ async function handleAIChat(message, aiSettings) {
     // Build system prompt: base + knowledge context + action instructions
     let systemPrompt = aiSettings.systemPrompt || 'You are a helpful Discord bot assistant.';
 
-    const kbEntries = await retrieveKnowledge(message.guild.id, content);
+    const { entries: kbEntries, isBackground: kbIsBackground } = await retrieveKnowledge(message.guild.id, content);
     if (kbEntries.length) {
         systemPrompt += buildKnowledgeContext(kbEntries);
     }
@@ -881,7 +886,7 @@ async function handleAIChat(message, aiSettings) {
                 message.guild.id, message.channel.id, message.author.id,
                 content, fullResponse, maxHistory
             );
-            if (kbEntries.length) {
+            if (kbEntries.length && !kbIsBackground) {
                 const prefix = '📚 Sources: ';
                 const limit = DISCORD_MAX_LEN - prefix.length - 10;
                 let body = '';
