@@ -2,6 +2,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
+const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { getStreakMultiplier, MILESTONES } = require('../../utils/streakMultiplier');
@@ -50,6 +51,7 @@ module.exports = {
                 User.findOne({ userId: targetUser.id, guildId: interaction.guild.id }),
                 Guild.findOne({ guildId: interaction.guild.id }),
             ]);
+            await attachGrind(userData);
 
             if (!userData) {
                 return interaction.reply({

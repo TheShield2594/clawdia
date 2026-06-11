@@ -5,6 +5,7 @@ const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder
 } = require('discord.js');
 const User  = require('../../models/User');
+const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const {
     PET_DEFINITIONS,
@@ -45,11 +46,13 @@ function decrementMaterial(user, materialId) {
 }
 
 async function resolveUser(interaction) {
-    return User.findOneAndUpdate(
+    const user = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId: interaction.guild.id },
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    // Feeding consumes hunt/fish/mine materials, which live on GrindProfile now
+    return attachGrind(user);
 }
 
 async function syncHungerAndRunaway(user, interaction) {

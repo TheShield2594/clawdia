@@ -8,6 +8,8 @@ const {
     ButtonStyle
 } = require('discord.js');
 const User  = require('../../models/User');
+const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
+const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse }          = require('../../utils/shopBrowse');
@@ -386,6 +388,7 @@ async function executeStart(interaction) {
         { upsert: true, new: true }
     );
 
+    await attachGrind(user);
     ensureHuntData(user);
     applyStaminaRegen(user);
     applyDailyReset(user);
@@ -1019,6 +1022,7 @@ async function executeProfile(interaction) {
         User.findOne({ userId: target.id, guildId: interaction.guild.id }),
         Guild.findOne({ guildId: interaction.guild.id })
     ]);
+    await attachGrind(userData);
 
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1193,6 +1197,7 @@ async function executePrestige(interaction) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
     const h = user.hunt;
 
@@ -1256,6 +1261,7 @@ async function executePrestige(interaction) {
         }
 
         const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        await attachGrind(freshUser);
         ensureHuntData(freshUser);
         const fh = freshUser.hunt;
 
@@ -1324,6 +1330,7 @@ async function executeInv(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
     const h = user.hunt;
 
@@ -1518,6 +1525,7 @@ async function executeQuests(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
     assignDailyHuntQuests(user);
 
@@ -1687,6 +1695,7 @@ async function executeShop(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
 
     switch (sub) {
@@ -1868,7 +1877,7 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
 
     const updated = await User.findOneAndUpdate(
         { userId: user.userId, guildId: user.guildId, balance: { $gte: weaponData.cost } },
-        { $inc: { balance: -weaponData.cost }, $push: { 'hunt.weapons': newWeapon } },
+        { $inc: { balance: -weaponData.cost } },
         { new: true }
     );
 
@@ -1877,16 +1886,32 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
         return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
     }
 
-    const h = updated.hunt;
+    await persistGrindIfNew(user, 'hunt');
+    const profUpdated = await GrindProfile.findOneAndUpdate(
+        { userId: user.userId, guildId: user.guildId, system: 'hunt' },
+        { $push: { 'data.weapons': newWeapon } },
+        { new: true }
+    ).catch(err => { console.error('[huntshop weapon] profile push error:', err); return null; });
+
+    if (!profUpdated) {
+        // Refund the debit — the weapon was never granted
+        await User.updateOne({ userId: user.userId, guildId: user.guildId }, { $inc: { balance: weaponData.cost } }).catch(() => {});
+        const reply = { content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] };
+        return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
+    }
+
+    // Sync the in-memory profile so any later save doesn't clobber the purchase
+    user.hunt.weapons = profUpdated.data.weapons;
+    const h = user.hunt;
     const newIndex = h.weapons.length - 1;
 
     if (autoEquip) {
         const oldIndex = h.equippedWeaponIndex;
         h.equippedWeaponIndex = newIndex;
         try {
-            await User.updateOne(
-                { userId: user.userId, guildId: user.guildId },
-                { $set: { 'hunt.equippedWeaponIndex': newIndex } }
+            await GrindProfile.updateOne(
+                { userId: user.userId, guildId: user.guildId, system: 'hunt' },
+                { $set: { 'data.equippedWeaponIndex': newIndex } }
             );
         } catch (err) {
             console.error('[huntshop weapon] equip update error:', err);
@@ -2238,6 +2263,7 @@ async function executeZone(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
     const h = user.hunt;
 

@@ -8,6 +8,8 @@ const {
     ButtonStyle
 } = require('discord.js');
 const User  = require('../../models/User');
+const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
+const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse }          = require('../../utils/shopBrowse');
@@ -365,6 +367,7 @@ async function handleCast(interaction) {
         { upsert: true, new: true }
     );
 
+    await attachGrind(user);
     ensureFishingData(user);
     ensureHuntData(user);
     applyStaminaRegen(user);
@@ -857,6 +860,7 @@ async function handleCast(interaction) {
 
         // Resolve outcome
         const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        await attachGrind(freshUser);
         ensureFishingData(freshUser);
         const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choicesMade, bossType);
 
@@ -1229,6 +1233,7 @@ async function handleProfile(interaction) {
         User.findOne({ userId: target.id, guildId: interaction.guild.id }),
         Guild.findOne({ guildId: interaction.guild.id })
     ]);
+    await attachGrind(userData);
 
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1391,6 +1396,7 @@ async function handlePrestige(interaction) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureFishingData(user);
     const f = user.fishing;
 
@@ -1454,6 +1460,7 @@ async function handlePrestige(interaction) {
         }
 
         const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        await attachGrind(freshUser);
         ensureFishingData(freshUser);
         const ff = freshUser.fishing;
 
@@ -1539,6 +1546,7 @@ async function handleInv(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureFishingData(user);
     applyStaminaRegen(user);
 
@@ -1693,6 +1701,7 @@ async function handleQuests(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureFishingData(user);
     assignDailyFishQuests(user);
 
@@ -1832,6 +1841,7 @@ async function handleShop(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureFishingData(user);
 
     switch (sub) {
@@ -1976,6 +1986,7 @@ async function handleBuyRod(interaction, user, currency) {
         }
 
         const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        await attachGrind(freshUser);
         ensureFishingData(freshUser);
 
         if (freshUser.balance < rodData.cost) {
@@ -2087,6 +2098,7 @@ async function handleBuyUpgrade(interaction, user, currency) {
         }
 
         const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        await attachGrind(freshUser);
         ensureFishingData(freshUser);
 
         if (freshUser.balance < cost) {
@@ -2154,25 +2166,38 @@ async function handleBuy(interaction, user, currency) {
             return interaction.reply({ content: `You can't carry more than 200 of that bait type.`, ephemeral: true });
         }
 
-        const baitField = `fishing.bait.${baitPack.baitType}`;
+        const baitField = `data.bait.${baitPack.baitType}`;
         const addedQty  = baitPack.quantity * quantity;
 
         const updated = await User.findOneAndUpdate(
-            {
-                userId:  interaction.user.id,
-                guildId: interaction.guild.id,
-                balance: { $gte: totalCost },
-                $expr: { $lte: [{ $add: [{ $ifNull: [`$${baitField}`, 0] }, addedQty] }, 200] }
-            },
-            { $inc: { balance: -totalCost, [baitField]: addedQty } },
+            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: totalCost } },
+            { $inc: { balance: -totalCost } },
             { new: true }
         );
-
         if (!updated) {
             return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', ephemeral: true });
         }
 
-        const newBaitQty = updated.fishing?.bait?.[baitPack.baitType] ?? addedQty;
+        await persistGrindIfNew(user, 'fishing');
+        const profUpdated = await GrindProfile.findOneAndUpdate(
+            {
+                userId:  interaction.user.id,
+                guildId: interaction.guild.id,
+                system:  'fishing',
+                $expr: { $lte: [{ $add: [{ $ifNull: [`$${baitField}`, 0] }, addedQty] }, 200] }
+            },
+            { $inc: { [baitField]: addedQty } },
+            { new: true }
+        ).catch(() => null);
+
+        if (!profUpdated) {
+            await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
+            return interaction.reply({ content: 'Purchase failed — your coins were refunded. Please try again.', ephemeral: true });
+        }
+
+        // Sync the in-memory profile so a later save doesn't clobber the purchase
+        f.bait[baitPack.baitType] = profUpdated.data?.bait?.[baitPack.baitType] ?? addedQty;
+        const newBaitQty = f.bait[baitPack.baitType];
         return interaction.reply({
             embeds: [
                 new EmbedBuilder()
@@ -2208,23 +2233,37 @@ async function handleBuy(interaction, user, currency) {
         return interaction.reply({ content: `You can only carry ${consumable.maxStack} **${consumable.name}** at a time.`, ephemeral: true });
     }
 
-    const consumableField = `fishing.consumables.${itemId}`;
+    const consumableField = `data.consumables.${itemId}`;
     const stackCap        = consumable.maxStack ?? 99;
 
     const updated = await User.findOneAndUpdate(
-        {
-            userId:  interaction.user.id,
-            guildId: interaction.guild.id,
-            balance: { $gte: totalCost },
-            $expr: { $lte: [{ $add: [{ $ifNull: [`$${consumableField}`, 0] }, quantity] }, stackCap] }
-        },
-        { $inc: { balance: -totalCost, [consumableField]: quantity } },
+        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: totalCost } },
+        { $inc: { balance: -totalCost } },
         { new: true }
     );
-
     if (!updated) {
         return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', ephemeral: true });
     }
+
+    await persistGrindIfNew(user, 'fishing');
+    const profUpdated = await GrindProfile.findOneAndUpdate(
+        {
+            userId:  interaction.user.id,
+            guildId: interaction.guild.id,
+            system:  'fishing',
+            $expr: { $lte: [{ $add: [{ $ifNull: [`$${consumableField}`, 0] }, quantity] }, stackCap] }
+        },
+        { $inc: { [consumableField]: quantity } },
+        { new: true }
+    ).catch(() => null);
+
+    if (!profUpdated) {
+        await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
+        return interaction.reply({ content: 'Purchase failed — your coins were refunded. Please try again.', ephemeral: true });
+    }
+
+    // Sync the in-memory profile so a later save doesn't clobber the purchase
+    f.consumables[itemId] = profUpdated.data?.consumables?.[itemId] ?? quantity;
 
     return interaction.reply({
         embeds: [
@@ -2235,7 +2274,7 @@ async function handleBuy(interaction, user, currency) {
                 .addFields(
                     { name: 'Spent',   value: `${currency}${totalCost.toLocaleString()}`,                            inline: true },
                     { name: 'Balance', value: `${currency}${updated.balance.toLocaleString()}`,                      inline: true },
-                    { name: 'Stock',   value: `${updated.fishing?.consumables?.[itemId] ?? quantity} owned`,         inline: true }
+                    { name: 'Stock',   value: `${f.consumables[itemId]} owned`,                                     inline: true }
                 )
                 .setFooter({ text: `Use /fish shop use ${consumable.id} to activate it` })
                 .setTimestamp()
@@ -2409,25 +2448,45 @@ async function handleUnlock(interaction, user, currency) {
         });
     }
 
+    // Phase 1: claim the unlock on the fishing profile (level gate + not-yet-unlocked)
+    await persistGrindIfNew(user, 'fishing');
+    const profUpdated = await GrindProfile.findOneAndUpdate(
+        {
+            userId:  interaction.user.id,
+            guildId: interaction.guild.id,
+            system:  'fishing',
+            'data.level': { $gte: location.unlockLevel },
+            'data.unlockedLocations': { $ne: locationId }
+        },
+        {
+            $addToSet: { 'data.unlockedLocations': locationId },
+            $set:      { 'data.activeLocation': locationId }
+        },
+        { new: true }
+    ).catch(() => null);
+
+    if (!profUpdated) {
+        return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', ephemeral: true });
+    }
+
+    // Phase 2: charge the unlock cost; roll the unlock back if the debit fails
     const updated = await User.findOneAndUpdate(
-        {
-            userId:   interaction.user.id,
-            guildId:  interaction.guild.id,
-            balance:  { $gte: location.unlockCost },
-            'fishing.level': { $gte: location.unlockLevel },
-            'fishing.unlockedLocations': { $ne: locationId }
-        },
-        {
-            $inc:      { balance: -location.unlockCost },
-            $addToSet: { 'fishing.unlockedLocations': locationId },
-            $set:      { 'fishing.activeLocation': locationId }
-        },
+        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: location.unlockCost } },
+        { $inc: { balance: -location.unlockCost } },
         { new: true }
     );
 
     if (!updated) {
+        await GrindProfile.updateOne(
+            { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' },
+            { $pull: { 'data.unlockedLocations': locationId }, $set: { 'data.activeLocation': user.fishing.activeLocation } }
+        ).catch(() => {});
         return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', ephemeral: true });
     }
+
+    // Sync the in-memory profile so a later save doesn't clobber the unlock
+    user.fishing.unlockedLocations = profUpdated.data.unlockedLocations;
+    user.fishing.activeLocation    = locationId;
 
     return interaction.reply({
         embeds: [
@@ -2461,6 +2520,7 @@ async function handleCraft(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureFishingData(user);
     ensureHuntData(user);
     const f = user.fishing;
@@ -2617,6 +2677,7 @@ async function handleLocation(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureFishingData(user);
 
     switch (sub) {
