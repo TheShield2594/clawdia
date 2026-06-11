@@ -11,7 +11,8 @@ const {
     LIMITS,
     PRESTIGE_BONUSES,
     HUNT_QUEST_TEMPLATES,
-    TROPHY_QUALITIES
+    TROPHY_QUALITIES,
+    APEX_TYPES
 } = require('../data/huntData');
 const { hasEffect, consumeEffect } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
@@ -822,6 +823,14 @@ function executeHunt(user, zoneId, options = {}) {
 
         if (weapon.currentDurability <= 0) result.weaponBroke = true;
 
+        // ── Apex encounter check ────────────────────────────────────────
+        // 12% chance for legendary, 8% for epic, 3% for rare, skipped for others
+        const apexTierChance = tier === 'legendary' ? 0.12 : tier === 'epic' ? 0.08 : tier === 'rare' ? 0.03 : 0;
+        if (apexTierChance > 0 && Math.random() < apexTierChance) {
+            result.apexEncounter = { animal, tier };
+            // Bonus payout handled when the player responds to the encounter
+        }
+
     } else {
         // ── Failure path ────────────────────────────────────────────────
         const severity = rollFailureSeverity();
@@ -1007,6 +1016,74 @@ function durabilityBar(current, max, length = 10) {
     return '█'.repeat(filled) + '░'.repeat(length - filled);
 }
 
+// ─── APEX ENCOUNTER RESOLUTION ───────────────────────────────────────────────
+
+function rollApexType() {
+    const keys = Object.keys(APEX_TYPES);
+    return APEX_TYPES[keys[Math.floor(Math.random() * keys.length)]];
+}
+
+/**
+ * Resolve the played phases. 'safe' never costs nerve; a wrong aggressive
+ * choice does. Returns { phaseResults, nerve } — at 0 nerve you lose the duel.
+ */
+function resolveApexPhases(apexType, choicesMade) {
+    let nerve = 3;
+    const phaseResults = [];
+    for (let i = 0; i < choicesMade.length; i++) {
+        const phase   = apexType.phases[i];
+        const chosen  = choicesMade[i];
+        const correct = chosen === phase.correct;
+        if (!correct && chosen !== 'safe') {
+            nerve = Math.max(0, nerve - 1);
+        }
+        phaseResults.push({ correct, chosen, correctChoice: phase.correct });
+    }
+    return { phaseResults, nerve };
+}
+
+/**
+ * Resolve the final apex outcome after all phases.
+ * Returns { outcome, bonusPayout, durabilityLost, correctCount, phaseResults, apexType, message }
+ */
+function resolveApexEncounter(user, animal, tier, choicesMade, apexType) {
+    const weapon = user.hunt?.weapons[user.hunt.equippedWeaponIndex];
+    const at     = apexType ?? rollApexType();
+    const { phaseResults, nerve } = resolveApexPhases(at, choicesMade);
+
+    const correctCount = phaseResults.filter(p => p.correct).length;
+    const broken       = nerve <= 0;
+
+    let bonusPayout = 0, durabilityLost = 0, outcome = '';
+
+    if (broken || correctCount === 0) {
+        outcome = 'escaped';
+        if (weapon) { applyDurabilityLoss(weapon, 4); durabilityLost = 4; }
+    } else if (correctCount === 1) {
+        outcome = 'survived';
+        bonusPayout = Math.round(randInt(animal.payoutMin, animal.payoutMax) * 0.4);
+        if (weapon) { applyDurabilityLoss(weapon, 3); durabilityLost = 3; }
+    } else if (correctCount === 2) {
+        outcome = 'win';
+        bonusPayout = Math.round(randInt(animal.payoutMin, animal.payoutMax) * 1.0);
+        if (weapon) { applyDurabilityLoss(weapon, 2); durabilityLost = 2; }
+    } else {
+        outcome = 'perfect';
+        bonusPayout = Math.round(randInt(animal.payoutMin, animal.payoutMax) * 1.5);
+        if (weapon) { applyDurabilityLoss(weapon, 1); durabilityLost = 1; }
+    }
+
+    const messages = {
+        perfect:  `🏆 **FLAWLESS** — You read the ${at.name} like a book. Maximum trophy!`,
+        win:      `✅ You outmaneuvered the ${at.name}. A worthy trophy.`,
+        survived: `😓 You barely walked away — the ${at.name} left its mark. Partial reward.`,
+        escaped:  `💀 The ${at.name} broke your nerve and vanished into the wild!`
+    };
+
+    if (weapon) user.markModified('hunt');
+    return { outcome, bonusPayout, durabilityLost, correctCount, phaseResults, apexType: at, message: messages[outcome] };
+}
+
 module.exports = {
     ensureHuntData,
     getMaxStamina,
@@ -1030,6 +1107,8 @@ module.exports = {
     tickConsumables,
     rollTrophyQuality,
     executeHunt,
+    rollApexType,
+    resolveApexEncounter,
     assignDailyHuntQuests,
     updateHuntQuestProgress,
     formatMs,
