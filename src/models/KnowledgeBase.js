@@ -6,8 +6,8 @@ const knowledgeBaseSchema = new Schema({
     content:   { type: String, required: true },
     tags:      [{ type: String }],
     addedBy:   { type: String, required: true },
-    // Stable key for pin-synced entries (`${guildId}:${messageId}`); null for manual entries
-    sourceKey: { type: String, default: null },
+    // Stable key for pin-synced entries (`${guildId}:${messageId}`); absent for manual entries
+    sourceKey: { type: String },
     createdAt: { type: Date, default: Date.now }
 });
 
