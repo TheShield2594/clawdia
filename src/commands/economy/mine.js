@@ -2,6 +2,8 @@
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User  = require('../../models/User');
+const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
+const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse }          = require('../../utils/shopBrowse');
@@ -276,6 +278,7 @@ async function handleDig(interaction) {
         { upsert: true, new: true }
     );
 
+    await attachGrind(user);
     ensureMineData(user);
     applyStaminaRegen(user);
     applyDailyReset(user);
@@ -753,6 +756,7 @@ async function handleProfile(interaction) {
         User.findOne({ userId: target.id, guildId: interaction.guild.id }),
         Guild.findOne({ guildId: interaction.guild.id })
     ]);
+    await attachGrind(userData);
 
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -901,6 +905,7 @@ async function handleInv(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureMineData(user);
     const m = user.mining;
 
@@ -1013,6 +1018,7 @@ async function handleQuests(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureMineData(user);
     assignDailyMineQuests(user);
 
@@ -1169,6 +1175,7 @@ async function handleShop(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureMineData(user);
     const m = user.mining;
 
@@ -1692,6 +1699,7 @@ async function handleMap(interaction) {
             ephemeral: true
         });
     }
+    await attachGrind(user);
     ensureMineData(user);
     const m = user.mining;
 
@@ -1761,6 +1769,7 @@ async function handleRaid(interaction) {
         ),
         User.findOne({ userId: targetUser.id, guildId: interaction.guild.id })
     ]);
+    await Promise.all([attachGrind(raider), attachGrind(defender)]);
 
     ensureMineData(raider);
 
@@ -1844,23 +1853,26 @@ async function handleRaid(interaction) {
         if (qty <= 0) continue;
         const take = Math.max(1, Math.floor(qty * stealFraction));
         stolen[matId] = take;
-        defenderInc[`mining.oreStash.${matId}`] = -take;
-        raiderInc[`mining.materials.${matId}`]  = take;
+        defenderInc[`data.oreStash.${matId}`] = -take;
+        raiderInc[`data.materials.${matId}`]  = take;
     }
+
+    // Make sure the raider's mining profile exists before the conditional commit below
+    await persistGrindIfNew(raider, 'mining');
 
     // Condition: each stolen material still exists; defender not under active shield.
-    const defenderCond = { userId: defender.userId, guildId: interaction.guild.id };
+    const defenderCond = { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' };
     for (const [matId, take] of Object.entries(stolen)) {
-        defenderCond[`mining.oreStash.${matId}`] = { $gte: take };
+        defenderCond[`data.oreStash.${matId}`] = { $gte: take };
     }
     defenderCond.$or = [
-        { 'mining.lastRaidReceived': null },
-        { 'mining.lastRaidReceived': { $lte: new Date(Date.now() - RAID_SHIELD_MS) } },
+        { 'data.lastRaidReceived': null },
+        { 'data.lastRaidReceived': { $lte: new Date(Date.now() - RAID_SHIELD_MS) } },
     ];
 
-    const defenderResult = await User.findOneAndUpdate(
+    const defenderResult = await GrindProfile.findOneAndUpdate(
         defenderCond,
-        { $inc: defenderInc, $set: { 'mining.lastRaidReceived': new Date() } }
+        { $inc: defenderInc, $set: { 'data.lastRaidReceived': new Date() } }
     ).catch(err => { console.error('[mine raid] defender save error:', err); return null; });
 
     if (!defenderResult) {
@@ -1870,16 +1882,17 @@ async function handleRaid(interaction) {
         });
     }
 
-    await User.findOneAndUpdate(
+    await GrindProfile.findOneAndUpdate(
         {
             userId: raider.userId,
             guildId: interaction.guild.id,
+            system: 'mining',
             $or: [
-                { 'mining.lastRaidSent': null },
-                { 'mining.lastRaidSent': { $lte: new Date(Date.now() - RAID_COOLDOWN_MS) } },
+                { 'data.lastRaidSent': null },
+                { 'data.lastRaidSent': { $lte: new Date(Date.now() - RAID_COOLDOWN_MS) } },
             ],
         },
-        { $inc: raiderInc, $set: { 'mining.lastRaidSent': new Date() } }
+        { $inc: raiderInc, $set: { 'data.lastRaidSent': new Date() } }
     ).catch(err => console.error('[mine raid] raider save error:', err));
 
     const stolenLines = Object.entries(stolen).map(([id, qty]) => `• ${MATERIAL_NAMES[id] ?? id} ×${qty}`).join('\n');

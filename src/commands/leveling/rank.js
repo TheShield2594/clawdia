@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const User = require('../../models/User');
+const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const { createRankCard } = require('../../utils/cardGenerator');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
@@ -21,7 +22,7 @@ function getRarestCatch(userData) {
             if (rank) candidates.push({ rank, name: m.name || m.itemId || m.id });
         }
     };
-    checkMaterials(userData.hunting?.materials);
+    checkMaterials(userData.hunt?.materials);
     checkMaterials(userData.fishing?.materials);
     checkMaterials(userData.mining?.materials);
     if (!candidates.length) return null;
@@ -47,6 +48,7 @@ module.exports = {
                 Guild.findOne({ guildId: interaction.guild.id }),
                 User.find({ guildId: interaction.guild.id }).sort({ level: -1, xp: -1 })
             ]);
+            await attachGrind(user);
 
             if (!user) {
                 return interaction.reply({ content: `${targetUser.username} hasn't earned any XP yet!`, ephemeral: true });
