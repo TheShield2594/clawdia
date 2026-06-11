@@ -623,6 +623,10 @@ const userSchema = new Schema({
     dailyGiftSent:  { type: Number, default: 0 },
     dailyGiftReset: { type: Date,   default: null },
 
+    // Gift cap tracking (daily incoming coin gifts — limits multi-alt funneling)
+    dailyGiftReceived:      { type: Number, default: 0 },
+    dailyGiftReceivedReset: { type: Date,   default: null },
+
     // Crime syndicate membership
     syndicateId: { type: String, default: null },
 
