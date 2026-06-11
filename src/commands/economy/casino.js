@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { processJackpotBet, getJackpotDisplay } = require('../../services/casinoJackpotService');
+const { tryAcquire, release } = require('../../utils/activeGameLock');
 
 const games = [
     require('../../games/casino/blackjack'),
@@ -95,6 +96,16 @@ module.exports = {
             return interaction.reply({ content: 'Unknown casino game.', ephemeral: true });
         }
 
+        // One active casino game per user — prevents concurrent sessions from racing
+        // each other's debits, effects, and jackpot snapshots.
+        const lockKey = `casino:${interaction.guild.id}:${interaction.user.id}`;
+        if (!tryAcquire(lockKey)) {
+            return interaction.reply({
+                content: '🎰 You already have a casino game in progress — finish it first.',
+                ephemeral: true,
+            });
+        }
+
         // Progressive jackpot: contribute a share of each bet to the pool and check for a win.
         // Fire-and-forget — the service handles pool reset, user credit, and logging.
         const bet = interaction.options.getInteger('bet') ?? 0;
@@ -108,6 +119,10 @@ module.exports = {
             }).catch(err => console.error('[CasinoJackpot] error:', err));
         }
 
-        return game.execute(interaction);
+        try {
+            return await game.execute(interaction);
+        } finally {
+            release(lockKey);
+        }
     },
 };

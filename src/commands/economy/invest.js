@@ -15,7 +15,7 @@ const DISTRICTS = [
         id:      'bank',
         name:    'Bank',
         emoji:   '🏦',
-        benefit: '+5% interest on banked coins (weekly)',
+        benefit: '+5% interest on banked coins (weekly, first 100k)',
         color:   '#2980b9',
     },
     {

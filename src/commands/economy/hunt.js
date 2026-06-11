@@ -2356,3 +2356,24 @@ async function checkGrandPrestige(client, user, guild, guildId) {
         } catch { /* non-critical */ }
     }
 }
+
+// ── Per-user action lock ──────────────────────────────────────────────────────
+// Hunting mutates the user document with read-modify-write saves, so concurrent
+// /hunt invocations from the same user can race stamina, daily caps, and drops.
+// Serialize them: one hunting action at a time per user.
+const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
+const _huntExecute = module.exports.execute;
+module.exports.execute = async function (interaction) {
+    const lockKey = `grind:hunt:${interaction.guild?.id}:${interaction.user.id}`;
+    if (!_lockAcquire(lockKey, 120_000)) {
+        return interaction.reply({
+            content: '🏹 You already have a hunting action in progress — finish it first.',
+            ephemeral: true,
+        }).catch(() => {});
+    }
+    try {
+        return await _huntExecute(interaction);
+    } finally {
+        _lockRelease(lockKey);
+    }
+};

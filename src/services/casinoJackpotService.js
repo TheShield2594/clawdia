@@ -61,12 +61,27 @@ async function processJackpotBet({ guildId, userId, username, bet, interaction }
         // Persist the exact amount won now that we know it
         Guild.updateOne({ guildId }, { $set: { 'casinoJackpot.lastWonAmount': wonAmount } }).catch(() => {});
 
-        // Credit the winner — pool is already reset above so this is safe to retry
-        const updatedUser = await User.findOneAndUpdate(
-            { userId, guildId },
-            { $inc: { balance: wonAmount } },
-            { new: true }
-        );
+        // Credit the winner — pool is already reset above so this is safe to retry.
+        // If the credit persistently fails, restore the pool so the coins aren't lost.
+        let updatedUser = null;
+        for (let attempt = 0; attempt < 3 && !updatedUser; attempt++) {
+            try {
+                updatedUser = await User.findOneAndUpdate(
+                    { userId, guildId },
+                    { $inc: { balance: wonAmount } },
+                    { new: true }
+                );
+            } catch (err) {
+                console.error(`[CasinoJackpot] credit attempt ${attempt + 1} failed for ${userId} (${wonAmount} coins):`, err);
+                await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
+            }
+        }
+        if (!updatedUser) {
+            console.error(`[CasinoJackpot] CRITICAL: could not credit ${wonAmount} coins to ${userId} in guild ${guildId} — restoring pool`);
+            await Guild.updateOne({ guildId }, { $inc: { 'casinoJackpot.pool': poolAtWin } }).catch(err =>
+                console.error('[CasinoJackpot] pool restore also failed:', err));
+            return { triggered: false, newPool: poolAtWin + contribution };
+        }
 
         logTransaction({
             userId,

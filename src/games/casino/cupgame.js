@@ -7,7 +7,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
+const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0bd.png';
 const MIN_BET = 10;
@@ -210,11 +210,12 @@ async function playMonte(interaction, bet, round = 1) {
         let streakTriggered = false;
         let grossPayout     = won ? currentPayout : 0;
 
-        if (!won && luckyActive && Math.random() < 0.20) {
+        const luckySavable = luckySaveEligible(bet);
+        if (!won && luckySavable && luckyActive && Math.random() < 0.20) {
             grossPayout    = bet;
             charmTriggered = true;
         }
-        if (!won && !charmTriggered && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+        if (!won && !charmTriggered && luckySavable && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
             grossPayout     = bet;
             streakTriggered = true;
         }

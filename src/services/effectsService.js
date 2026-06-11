@@ -133,6 +133,16 @@ function getLuckyStreakBonus(user) {
     return hasEffect(user, 'lucky_streak') ? 0.25 : 0.0;
 }
 
+// Lucky Charm / Lucky Streak loss-saves only apply to bets at or below this size.
+// A 20-25% loss refund on an unbounded bet flips every casino game's house edge
+// player-positive, so the saves are capped to low-stakes play.
+const LUCKY_SAVE_MAX_BET = 25_000;
+
+// Whether lucky loss-save effects (charm re-spin / streak push) may trigger for this bet.
+function luckySaveEligible(bet) {
+    return bet <= LUCKY_SAVE_MAX_BET;
+}
+
 // Returns server-wide coin boost multiplier (1.0 if none active)
 function getServerCoinMultiplier(guildSettings) {
     const sb = guildSettings?.serverBoost;
@@ -170,6 +180,8 @@ module.exports = {
     getSalaryMultiplier,
     getXpMultiplier,
     getLuckyStreakBonus,
+    LUCKY_SAVE_MAX_BET,
+    luckySaveEligible,
     getServerCoinMultiplier,
     getServerXpMultiplier,
     getPublicProtectionStatus,

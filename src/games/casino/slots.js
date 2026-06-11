@@ -6,7 +6,7 @@ const {
 } = require('discord.js');
 const User = require('../../models/User');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
+const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const Guild = require('../../models/Guild');
 const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES } = require('../../utils/copyLines');
 
@@ -29,7 +29,6 @@ const WIN_ANNOUNCE_MULT  = 50;
 
 const TOTAL_WEIGHT      = SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
 const SPIN_POOL         = SYMBOLS.filter(s => s.type === 'regular' || s.type === 'wild');
-const JACKPOT_FALLBACK  = 50;  // fixed multiplier used only if atomic claim fails
 const JACKPOT_SEED      = 5000;
 const JACKPOT_CONTRIB   = 10;
 
@@ -275,14 +274,15 @@ async function playSlots(interaction, bet) {
         let result = evaluate(reels, bet);
         let charmTriggered = false;
 
-        // Lucky Charm: on loss, 20% chance to re-spin
-        if (result.outcome === 'lose' && luckyActive && Math.random() < 0.20) {
+        // Lucky Charm: on loss, 20% chance to re-spin (low-stakes bets only)
+        const luckySavable = luckySaveEligible(bet);
+        if (result.outcome === 'lose' && luckySavable && luckyActive && Math.random() < 0.20) {
             reels  = [spinReel(), spinReel(), spinReel()];
             result = evaluate(reels, bet);
             charmTriggered = true;
         }
         // Lucky Streak: on remaining loss, convert to a push (bet returned)
-        if (result.outcome === 'lose' && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+        if (result.outcome === 'lose' && luckySavable && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
             result = { ...result, outcome: 'push', payout: bet };
         }
 
@@ -291,28 +291,35 @@ async function playSlots(interaction, bet) {
         let jackpotWon = false;
 
         if (result.outcome === 'jackpot') {
-            // Atomically claim the pool — conditional on pool matching snapshot (race protection)
-            const claimed = await Guild.findOneAndUpdate(
-                { ...guildFilter, 'slots.jackpotPool': jackpotPool },
-                {
-                    $set: {
-                        'slots.jackpotPool':       JACKPOT_SEED,
-                        'slots.lastJackpotWinner': interaction.user.id,
-                        'slots.lastJackpotAmount': jackpotPool,
-                        'slots.lastJackpotAt':     new Date(),
-                    }
-                },
-                { new: false }
-            );
-            if (claimed) {
-                result = { ...result, payout: jackpotPool };
-                finalJackpotPool = JACKPOT_SEED;
-                jackpotWon = true;
-            } else {
-                // Pool changed since snapshot — fall back to fixed 50x; pool already reset by winner
-                result = { ...result, payout: bet * JACKPOT_FALLBACK };
-                finalJackpotPool = JACKPOT_SEED;
+            // Atomically claim the pool — conditional on pool matching snapshot (race
+            // protection). If a concurrent spin moved the pool, re-read and retry so a
+            // second simultaneous winner claims the actual (reseeded) pool instead of
+            // minting an arbitrary multiple of their bet.
+            let claimedAmount = null;
+            let snapshot      = jackpotPool;
+            for (let attempt = 0; attempt < 3 && claimedAmount === null; attempt++) {
+                const claimed = await Guild.findOneAndUpdate(
+                    { ...guildFilter, 'slots.jackpotPool': snapshot },
+                    {
+                        $set: {
+                            'slots.jackpotPool':       JACKPOT_SEED,
+                            'slots.lastJackpotWinner': interaction.user.id,
+                            'slots.lastJackpotAmount': snapshot,
+                            'slots.lastJackpotAt':     new Date(),
+                        }
+                    },
+                    { new: false }
+                );
+                if (claimed) {
+                    claimedAmount = snapshot;
+                } else {
+                    const fresh = await Guild.findOne(guildFilter, 'slots.jackpotPool');
+                    snapshot = fresh?.slots?.jackpotPool ?? JACKPOT_SEED;
+                }
             }
+            result = { ...result, payout: claimedAmount ?? JACKPOT_SEED };
+            finalJackpotPool = JACKPOT_SEED;
+            jackpotWon = claimedAmount !== null;
         } else {
             await Guild.updateOne(guildFilter, { $inc: { 'slots.jackpotPool': JACKPOT_CONTRIB } });
             finalJackpotPool = jackpotPool + JACKPOT_CONTRIB;
@@ -373,6 +380,9 @@ async function playSlots(interaction, bet) {
             for (let fs = 0; fs < freeSpinCount; fs++) {
                 const freeReels = [spinReel(), spinReel(), spinReel()];
                 const freeResult = evaluate(freeReels, bet);
+                // Triple wilds in a free spin pay a flat mega-win — the progressive
+                // pool is only claimable on paid spins (evaluate leaves payout at 0).
+                if (freeResult.outcome === 'jackpot') freeResult.payout = bet * 25;
                 const freePayout = Math.round(freeResult.payout * freeSpinMult);
                 freeTotalPayout += freePayout;
                 freeResults.push({ reels: freeReels, payout: freePayout, outcome: freeResult.outcome });

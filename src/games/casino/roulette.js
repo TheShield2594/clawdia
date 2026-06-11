@@ -7,7 +7,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect } = require('../../services/effectsService');
+const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a1.png';
 const MIN_BET = 10;
@@ -238,9 +238,9 @@ async function playRoulette(interaction, betKey, bet, target) {
         let result   = spin();
         const betDef   = BETS[betKey];
         let won        = betDef.matches(result, target);
-        // Lucky Charm: on loss, 20% chance to re-spin
+        // Lucky Charm: on loss, 20% chance to re-spin (low-stakes bets only)
         let charmTriggered = false;
-        if (!won && hasEffect(debited, 'lucky_charm') && Math.random() < 0.20) {
+        if (!won && luckySaveEligible(bet) && hasEffect(debited, 'lucky_charm') && Math.random() < 0.20) {
             result = spin();
             won    = betDef.matches(result, target);
             charmTriggered = true;
