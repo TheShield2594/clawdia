@@ -113,14 +113,22 @@ async function spawnAirdrop(message, guildSettings) {
         if (claimed) {
             return i.reply({ content: '💨 Too slow — someone got there first!', ephemeral: true }).catch(() => {});
         }
+        // Reserve before the first await so interleaved clicks can't double-claim;
+        // only stop the collector once the award has actually been persisted.
         claimed = true;
+        let updated;
+        try {
+            updated = await User.findOneAndUpdate(
+                { userId: i.user.id, guildId: message.guild.id },
+                { $inc: { balance: amount }, $setOnInsert: { userId: i.user.id, guildId: message.guild.id } },
+                { upsert: true, new: true }
+            );
+        } catch (err) {
+            claimed = false; // release the reservation — the drop is still up for grabs
+            console.error('[chatEvent] airdrop award failed:', err);
+            return i.reply({ content: '⚠️ Something went wrong grabbing that — try again!', ephemeral: true }).catch(() => {});
+        }
         collector.stop('claimed');
-
-        const updated = await User.findOneAndUpdate(
-            { userId: i.user.id, guildId: message.guild.id },
-            { $inc: { balance: amount }, $setOnInsert: { userId: i.user.id, guildId: message.guild.id } },
-            { upsert: true, new: true }
-        );
         logTransaction({ userId: i.user.id, guildId: message.guild.id, type: 'chat_event', amount, balance: updated?.balance ?? amount, note: 'Airdrop claim' });
 
         await i.update({
@@ -175,21 +183,27 @@ async function spawnCrate(message, guildSettings) {
         if (claimed) {
             return i.reply({ content: '💨 Too slow — the crate is already open!', ephemeral: true }).catch(() => {});
         }
+        // Reserve before the first await; only stop the collector once persisted.
         claimed = true;
-        collector.stop('claimed');
-
-        // Increment existing inventory slot, or push a new one
-        const res = await User.updateOne(
-            { userId: i.user.id, guildId: message.guild.id, 'inventory.itemId': item.itemId },
-            { $inc: { 'inventory.$.quantity': 1 } }
-        );
-        if (res.matchedCount === 0) {
-            await User.updateOne(
-                { userId: i.user.id, guildId: message.guild.id },
-                { $push: { inventory: { itemId: item.itemId, quantity: 1 } }, $setOnInsert: { userId: i.user.id, guildId: message.guild.id } },
-                { upsert: true }
+        try {
+            // Increment existing inventory slot, or push a new one
+            const res = await User.updateOne(
+                { userId: i.user.id, guildId: message.guild.id, 'inventory.itemId': item.itemId },
+                { $inc: { 'inventory.$.quantity': 1 } }
             );
+            if (res.matchedCount === 0) {
+                await User.updateOne(
+                    { userId: i.user.id, guildId: message.guild.id },
+                    { $push: { inventory: { itemId: item.itemId, quantity: 1 } }, $setOnInsert: { userId: i.user.id, guildId: message.guild.id } },
+                    { upsert: true }
+                );
+            }
+        } catch (err) {
+            claimed = false;
+            console.error('[chatEvent] crate award failed:', err);
+            return i.reply({ content: '⚠️ Something went wrong opening that — try again!', ephemeral: true }).catch(() => {});
         }
+        collector.stop('claimed');
         logTransaction({ userId: i.user.id, guildId: message.guild.id, type: 'chat_event', amount: 0, balance: 0, note: `Crate drop: ${item.itemId}` });
 
         await i.update({
@@ -267,14 +281,22 @@ async function spawnTrivia(message, guildSettings) {
             return i.reply({ content: `❌ Not **${answers[idx]}** — better luck next time!`, ephemeral: true }).catch(() => {});
         }
 
+        // Reserve before the first await; only stop the collector once persisted.
         solved = true;
+        let updated;
+        try {
+            updated = await User.findOneAndUpdate(
+                { userId: i.user.id, guildId: message.guild.id },
+                { $inc: { balance: TRIVIA_REWARD }, $setOnInsert: { userId: i.user.id, guildId: message.guild.id } },
+                { upsert: true, new: true }
+            );
+        } catch (err) {
+            solved = false;
+            attempted.delete(i.user.id); // they answered correctly — let them claim again
+            console.error('[chatEvent] trivia award failed:', err);
+            return i.reply({ content: '⚠️ Something went wrong with the reward — answer again!', ephemeral: true }).catch(() => {});
+        }
         collector.stop('solved');
-
-        const updated = await User.findOneAndUpdate(
-            { userId: i.user.id, guildId: message.guild.id },
-            { $inc: { balance: TRIVIA_REWARD }, $setOnInsert: { userId: i.user.id, guildId: message.guild.id } },
-            { upsert: true, new: true }
-        );
         logTransaction({ userId: i.user.id, guildId: message.guild.id, type: 'chat_event', amount: TRIVIA_REWARD, balance: updated?.balance ?? TRIVIA_REWARD, note: 'Flash trivia win' });
 
         await i.update({

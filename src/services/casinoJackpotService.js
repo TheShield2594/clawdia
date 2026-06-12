@@ -78,7 +78,11 @@ async function processJackpotBet({ guildId, userId, username, bet, interaction }
         }
         if (!updatedUser) {
             console.error(`[CasinoJackpot] CRITICAL: could not credit ${wonAmount} coins to ${userId} in guild ${guildId} — restoring pool`);
-            await Guild.updateOne({ guildId }, { $inc: { 'casinoJackpot.pool': poolAtWin } }).catch(err =>
+            // The claim above set the pool to seedAmount; restore it to
+            // poolAtWin + contribution. Using the $inc delta (rather than $set)
+            // preserves contributions from bets that landed in between.
+            const restoreDelta = poolAtWin + contribution - seedAmount;
+            await Guild.updateOne({ guildId }, { $inc: { 'casinoJackpot.pool': restoreDelta } }).catch(err =>
                 console.error('[CasinoJackpot] pool restore also failed:', err));
             return { triggered: false, newPool: poolAtWin + contribution };
         }

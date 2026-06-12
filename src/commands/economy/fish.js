@@ -2967,8 +2967,9 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
 const _fishExecute = module.exports.execute;
 module.exports.execute = async function (interaction) {
-    const lockKey = `grind:fish:${interaction.guild?.id}:${interaction.user.id}`;
-    if (!_lockAcquire(lockKey, 120_000)) {
+    const lockKey   = `grind:fish:${interaction.guild?.id}:${interaction.user.id}`;
+    const lockToken = _lockAcquire(lockKey, 120_000);
+    if (!lockToken) {
         return interaction.reply({
             content: '🎣 You already have a fishing action in progress — finish it first.',
             ephemeral: true,
@@ -2977,6 +2978,6 @@ module.exports.execute = async function (interaction) {
     try {
         return await _fishExecute(interaction);
     } finally {
-        _lockRelease(lockKey);
+        _lockRelease(lockKey, lockToken);
     }
 };

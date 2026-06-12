@@ -890,13 +890,22 @@ async function executeStart(interaction) {
         for (let i = 0; i < phaseCount; i++) {
             state = await runPhase(i, state.results, state.btn);
             if (state.timedOut) {
-                interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+                const timeoutEmbed = new EmbedBuilder()
+                    .setColor('#3b1f04')
+                    .setTitle(`💨 ${apexType.emoji} The ${apexType.name} Escaped`)
+                    .setDescription('You hesitated too long — it melted back into the wild. No bonus this time.')
+                    .setTimestamp();
+                interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
                 return;
             }
         }
 
         // Resolve outcome on a fresh user document
         const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        if (!freshUser) {
+            console.error(`[hunt apex] user document vanished mid-encounter — user=${interaction.user.id} guild=${interaction.guild.id}`);
+            return state.btn.update({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [] }).catch(() => {});
+        }
         await attachGrind(freshUser);
         ensureHuntData(freshUser);
         const apexResult = resolveApexEncounter(freshUser, result.apexEncounter.animal, result.apexEncounter.tier, choicesMade, apexType);
@@ -915,7 +924,7 @@ async function executeStart(interaction) {
             await freshUser.save();
         } catch (saveErr) {
             console.error('[hunt apex] save error:', saveErr);
-            return state.btn.update({ content: 'Something went wrong saving your apex result. Please try again.', embeds: [], components: [] }).catch(() => {});
+            return state.btn.update({ content: 'Something went wrong saving your apex result — the encounter is lost and cannot be retried. Your original hunt rewards were already saved.', embeds: [], components: [] }).catch(() => {});
         }
 
         if (apexResult.bonusPayout > 0) {
@@ -2534,8 +2543,9 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
 const _huntExecute = module.exports.execute;
 module.exports.execute = async function (interaction) {
-    const lockKey = `grind:hunt:${interaction.guild?.id}:${interaction.user.id}`;
-    if (!_lockAcquire(lockKey, 120_000)) {
+    const lockKey   = `grind:hunt:${interaction.guild?.id}:${interaction.user.id}`;
+    const lockToken = _lockAcquire(lockKey, 120_000);
+    if (!lockToken) {
         return interaction.reply({
             content: '🏹 You already have a hunting action in progress — finish it first.',
             ephemeral: true,
@@ -2544,6 +2554,6 @@ module.exports.execute = async function (interaction) {
     try {
         return await _huntExecute(interaction);
     } finally {
-        _lockRelease(lockKey);
+        _lockRelease(lockKey, lockToken);
     }
 };
