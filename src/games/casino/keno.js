@@ -7,7 +7,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
+const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b1.png';
 const MIN_BET = 10;
@@ -16,9 +16,10 @@ const POOL_SIZE  = 40;
 const PICK_COUNT = 5;
 const DRAW_COUNT = 10;
 
-// Approximate RTP ~78% (hypergeometric: P2≈27.8%, P3≈7.9%, P4≈0.96%, P5≈0.038%)
-// EV = 0.278×1 + 0.079×4 + 0.0096×15 + 0.00038×100 ≈ 0.778
-const PAYOUTS = { 2: 1, 3: 4, 4: 15, 5: 100 };
+// Approximate RTP ~92% (hypergeometric: P2≈27.8%, P3≈7.9%, P4≈0.96%, P5≈0.038%)
+// EV = 0.278×1 + 0.079×5 + 0.0096×20 + 0.00038×150 ≈ 0.923
+const PAYOUTS = { 2: 1, 3: 5, 4: 20, 5: 150 };
+const PAYTABLE_FOOTER = `2 matches = ${PAYOUTS[2]}× · 3 = ${PAYOUTS[3]}× · 4 = ${PAYOUTS[4]}× · 5 = ${PAYOUTS[5]}×`;
 
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
@@ -119,7 +120,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
                     { name: '🎯 Your Picks', value: pickedStr, inline: true },
                     { name: `🔵 Drawing (${i}/10)`, value: `${hitBar(hits)}  **${hits}** hit`, inline: true },
                 )
-                .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' });
+                .setFooter({ text: PAYTABLE_FOOTER });
             await interaction.editReply({ embeds: [embed] });
             await delay(650);
         }
@@ -144,7 +145,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
                 { name: '🎯 Your Picks', value: pickedStr, inline: true },
                 { name: '📊 Midpoint', value: suspenseText, inline: false },
             )
-            .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' });
+            .setFooter({ text: PAYTABLE_FOOTER });
         await interaction.editReply({ embeds: [midEmbed] });
         await delay(1200);
 
@@ -161,7 +162,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
                     { name: '🎯 Your Picks', value: pickedStr, inline: true },
                     { name: `🔵 Drawing (${i}/10)`, value: `${hitBar(hits)}  **${hits}** hit`, inline: true },
                 )
-                .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' });
+                .setFooter({ text: PAYTABLE_FOOTER });
             await interaction.editReply({ embeds: [embed] });
             await delay(650);
         }
@@ -178,14 +179,16 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
 
         let grossPayout = multiplier > 0 ? bet * multiplier : 0;
 
+        const luckySavable = luckySaveEligible(bet);
+
         let charmTriggered = false;
-        if (grossPayout === 0 && luckyActive && Math.random() < 0.20) {
+        if (grossPayout === 0 && luckySavable && luckyActive && Math.random() < 0.20) {
             grossPayout = bet;
             charmTriggered = true;
         }
 
         let streakTriggered = false;
-        if (grossPayout === 0 && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
+        if (grossPayout === 0 && luckySavable && luckyStreakBonus > 0 && Math.random() < luckyStreakBonus) {
             grossPayout = bet;
             streakTriggered = true;
         }
@@ -245,14 +248,14 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
         if (matches === 5) {
             color = '#FFD700';
             title = '🎱 ★ PERFECT KENO ★  ALL FIVE MATCHED!';
-            desc  = '🟨🟨🟨🟨🟨\n# 💥 100× JACKPOT! 💥\nEvery single pick hit. This almost never happens.';
+            desc  = `🟨🟨🟨🟨🟨\n# 💥 ${PAYOUTS[5]}× JACKPOT! 💥\nEvery single pick hit. This almost never happens.`;
         } else if (matches === 4) {
             color = '#00FF88';
-            title = '🎱 Four Matches — 15× Win!';
+            title = `🎱 Four Matches — ${PAYOUTS[4]}× Win!`;
             desc  = '🟨🟨🟨🟨⬛\n**Four picks landed — huge payout!**';
         } else if (matches === 3) {
             color = '#FFAA00';
-            title = '🎱 Three Matches — 4× Win!';
+            title = `🎱 Three Matches — ${PAYOUTS[3]}× Win!`;
             desc  = '🟨🟨🟨⬛⬛\n**Three picks hit — you\'re up!**';
         } else if (matches === 2) {
             color = '#f39c12';
@@ -299,7 +302,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
                 { name: '✅ Matches',    value: `${hitBar(matches)}  **${matches} / ${PICK_COUNT}**`,      inline: true  },
                 { name: '💰 Balance',    value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`,   inline: true  },
             )
-            .setFooter({ text: '2 matches = 1× · 3 = 4× · 4 = 15× · 5 = 100×' })
+            .setFooter({ text: PAYTABLE_FOOTER })
             .setTimestamp();
 
         if (showNearMiss) {

@@ -2,6 +2,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
+const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const { SYNERGY_LIST } = require('../../data/crossSystemData');
 const { ensureHuntData }    = require('../../services/huntService');
@@ -26,6 +27,7 @@ module.exports = {
             { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
             { upsert: true, new: true }
         );
+        await attachGrind(user);
         ensureHuntData(user);
         ensureFishingData(user);
         ensureMineData(user);

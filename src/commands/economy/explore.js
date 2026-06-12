@@ -2,6 +2,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const User  = require('../../models/User');
+const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const {
     LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST,
@@ -118,6 +119,7 @@ async function loadContext(interaction) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureExploreData(user);
     return { guildSettings, user, currency: guildSettings?.economy?.currency ?? '💰' };
 }
@@ -422,6 +424,7 @@ async function handleMap(interaction) {
         User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
         Guild.findOne({ guildId: interaction.guild.id }),
     ]);
+    await attachGrind(userData);
 
     if (!userData?.exploration?.totalExpeditions) {
         return interaction.reply({
@@ -556,6 +559,7 @@ async function handleRegions(interaction) {
 
 async function handleJournal(interaction) {
     const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+    await attachGrind(userData);
 
     const journal = userData?.exploration?.journal ?? [];
     if (!journal.length) {
@@ -591,6 +595,7 @@ async function handleProfile(interaction) {
         User.findOne({ userId: target.id, guildId: interaction.guild.id }),
         Guild.findOne({ guildId: interaction.guild.id }),
     ]);
+    await attachGrind(userData);
 
     if (!userData?.exploration?.totalExpeditions) {
         return interaction.reply({

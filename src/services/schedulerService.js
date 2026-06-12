@@ -808,7 +808,11 @@ async function resolveRankedSeasons(client) {
 
 // ─── Bank district interest (issue #370) ─────────────────────────────────────
 // Credits 5% of each user's banked coins in guilds where the Bank district is active.
-// Intended to run once per week.
+// Intended to run once per week. Only the first INTEREST_BEARING_CAP coins of a
+// user's bank earn interest — uncapped 5%/week compounds to ~260% APY and lets
+// large balances inflate the economy unboundedly.
+const INTEREST_BEARING_CAP = 100_000;
+
 async function applyBankInterest(client) {
     const { EmbedBuilder } = require('discord.js');
     const { isDistrictActive } = require('./districtService');
@@ -843,13 +847,13 @@ async function applyBankInterest(client) {
             let totalInterestPaid = 0;
 
             for (const user of users) {
-                const interest = Math.floor(user.bank * 0.05);
+                const interest = Math.floor(Math.min(user.bank, INTEREST_BEARING_CAP) * 0.05);
                 if (interest <= 0) continue;
                 await User.findOneAndUpdate(
                     { _id: user._id },
                     { $inc: { bank: interest } }
                 );
-                logTransaction({ userId: user.userId, guildId, type: 'bank_interest', amount: interest, balance: user.balance, note: '5% weekly bank interest (Bank district active)' });
+                logTransaction({ userId: user.userId, guildId, type: 'bank_interest', amount: interest, balance: user.balance, note: `5% weekly bank interest (Bank district active, first ${INTEREST_BEARING_CAP.toLocaleString()} coins)` });
                 totalInterestPaid += interest;
             }
 
@@ -863,7 +867,7 @@ async function applyBankInterest(client) {
                 .setColor('#f1c40f')
                 .setTitle('🏦 Weekly Bank Interest Paid')
                 .setDescription(
-                    `The **Bank district** is active — all members with banked coins earned **5% weekly interest**.\n\n` +
+                    `The **Bank district** is active — all members with banked coins earned **5% weekly interest** (on the first ${INTEREST_BEARING_CAP.toLocaleString()} coins).\n\n` +
                     `Total interest distributed: **${currency}${totalInterestPaid.toLocaleString()}**`
                 )
                 .setFooter({ text: 'Deposit coins with /bank deposit to earn interest each week.' })

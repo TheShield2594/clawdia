@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const User = require('../../models/User');
+const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
@@ -141,6 +142,7 @@ module.exports = {
             User.findOne({ userId: target.id, guildId: interaction.guild.id }),
             Guild.findOne({ guildId: interaction.guild.id })
         ]);
+        await attachGrind(userData);
 
         const currency = guildSettings?.economy?.currency ?? '💰';
         // Read-only: prune expired effects in memory for display only, no save performed.

@@ -7,7 +7,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
-const { getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier } = require('../../services/effectsService');
+const { getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -702,7 +702,7 @@ async function playPoker(interaction, bet) {
 
         if (result === 'win')  grossPayout = playerStake * 2;
         if (result === 'push') grossPayout = playerStake;
-        if (result === 'lose' && streakBonus > 0 && Math.random() < streakBonus) {
+        if (result === 'lose' && luckySaveEligible(playerStake) && streakBonus > 0 && Math.random() < streakBonus) {
             grossPayout = playerStake;
             outcome = 'push';
         }

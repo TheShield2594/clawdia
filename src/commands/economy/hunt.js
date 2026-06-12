@@ -8,6 +8,8 @@ const {
     ButtonStyle
 } = require('discord.js');
 const User  = require('../../models/User');
+const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
+const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse }          = require('../../utils/shopBrowse');
@@ -38,7 +40,10 @@ const {
     activateConsumable,
     applyRepair,
     updateWeaponStatus,
-    applyXp
+    applyXp,
+    rollApexType,
+    resolveApexEncounter,
+    applyPayoutModifiers
 } = require('../../services/huntService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -386,6 +391,7 @@ async function executeStart(interaction) {
         { upsert: true, new: true }
     );
 
+    await attachGrind(user);
     ensureHuntData(user);
     applyStaminaRegen(user);
     applyDailyReset(user);
@@ -806,6 +812,156 @@ async function executeStart(interaction) {
             .setTimestamp();
         announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
     }
+
+    // ── Apex encounter — multi-phase showdown (mirrors the fishing boss UI) ──
+    if (result.apexEncounter) {
+        const apexType    = rollApexType();
+        const choicesMade = [];
+        const phaseCount  = apexType.phases.length;
+
+        const buildApexPhaseEmbed = (phaseIndex, prevResults) => {
+            const phase  = apexType.phases[phaseIndex];
+            const nerve  = 3 - prevResults.filter(p => !p.correct && p.chosen !== 'safe').length;
+            const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(3 - nerve);
+            const histLines = prevResults.map((p, i) => {
+                const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
+                return `Phase ${i + 1}: ${icon}`;
+            }).join('  ');
+
+            return new EmbedBuilder()
+                .setColor('#3b1f04')
+                .setTitle(`${apexType.emoji} ${apexType.name} — Phase ${phaseIndex + 1}/${phaseCount}`)
+                .setDescription(
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `  ${result.apexEncounter.animal.emoji}  The pack leader of your **${result.apexEncounter.animal.name}** appears!\n` +
+                    `  Nerve: ${nerveBar}\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                    `${phase.hint}\n\n` +
+                    (histLines ? `${histLines}\n\n` : '') +
+                    `**Choose your move — NOW:**`
+                )
+                .setFooter({ text: `⏱️ 30 seconds per phase • Outcomes: 3/3=1.5x bonus | 2/3=1x | 1/3=0.4x | 0/3=Nothing` });
+        };
+
+        const buildPhaseRow = (phaseIndex) => {
+            const choices = apexType.phases[phaseIndex].choices;
+            return new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('apex_match').setLabel(choices.match.label).setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId('apex_hold').setLabel(choices.hold.label).setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId('apex_safe').setLabel(choices.safe.label).setStyle(ButtonStyle.Secondary)
+            );
+        };
+
+        const validIds = ['apex_match', 'apex_hold', 'apex_safe'];
+        const idToKey  = { apex_match: 'match', apex_hold: 'hold', apex_safe: 'safe' };
+
+        await interaction.editReply({ embeds: [embed, buildApexPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
+
+        const runPhase = async (phaseIndex, prevResults, prevBtn) => {
+            const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
+            return new Promise(resolve => {
+                const collector = fetchReply.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && validIds.includes(i.customId),
+                    time: 30_000, max: 1
+                });
+                collector.on('collect', async btn => {
+                    const chosen  = idToKey[btn.customId];
+                    const phase   = apexType.phases[phaseIndex];
+                    const correct = chosen === phase.correct;
+                    const results = [...prevResults, { correct, chosen, correctChoice: phase.correct }];
+                    choicesMade.push(chosen);
+
+                    if (phaseIndex < phaseCount - 1) {
+                        await btn.update({ embeds: [embed, buildApexPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
+                        resolve({ btn, results });
+                    } else {
+                        resolve({ btn, results, done: true });
+                    }
+                });
+                collector.on('end', (collected, reason) => {
+                    if (reason === 'time' && collected.size === 0) {
+                        resolve({ btn: null, results: prevResults, timedOut: true });
+                    }
+                });
+            });
+        };
+
+        let state = { btn: null, results: [], done: false, timedOut: false };
+        for (let i = 0; i < phaseCount; i++) {
+            state = await runPhase(i, state.results, state.btn);
+            if (state.timedOut) {
+                const timeoutEmbed = new EmbedBuilder()
+                    .setColor('#3b1f04')
+                    .setTitle(`💨 ${apexType.emoji} The ${apexType.name} Escaped`)
+                    .setDescription('You hesitated too long — it melted back into the wild. No bonus this time.')
+                    .setTimestamp();
+                interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
+                return;
+            }
+        }
+
+        // Resolve outcome on a fresh user document
+        const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        if (!freshUser) {
+            console.error(`[hunt apex] user document vanished mid-encounter — user=${interaction.user.id} guild=${interaction.guild.id}`);
+            return state.btn.update({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [] }).catch(() => {});
+        }
+        await attachGrind(freshUser);
+        ensureHuntData(freshUser);
+        const apexResult = resolveApexEncounter(freshUser, result.apexEncounter.animal, result.apexEncounter.tier, choicesMade, apexType);
+
+        if (apexResult.bonusPayout > 0) {
+            const apexZone = ZONES[freshUser.hunt.activeZone] ?? zone;
+            const { adjustedPayout } = applyPayoutModifiers(freshUser, apexResult.bonusPayout, apexZone);
+            apexResult.bonusPayout = adjustedPayout;
+            freshUser.balance          += adjustedPayout;
+            freshUser.hunt.totalEarned += adjustedPayout;
+            freshUser.hunt.dailyCoins  += adjustedPayout;
+            if (adjustedPayout > freshUser.hunt.bestPayout) freshUser.hunt.bestPayout = adjustedPayout;
+        }
+        freshUser.markModified('hunt');
+        try {
+            await freshUser.save();
+        } catch (saveErr) {
+            console.error('[hunt apex] save error:', saveErr);
+            return state.btn.update({ content: 'Something went wrong saving your apex result — the encounter is lost and cannot be retried. Your original hunt rewards were already saved.', embeds: [], components: [] }).catch(() => {});
+        }
+
+        if (apexResult.bonusPayout > 0) {
+            const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+            if (apexResult.bonusPayout >= bigWinThreshold) {
+                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: apexResult.bonusPayout, source: 'hunt', details: `${result.apexEncounter.animal.emoji ?? ''} ${result.apexEncounter.animal.name} [apex]`.trim() });
+            }
+        }
+
+        const phaseScoreLine = apexResult.phaseResults.map((p, i) => {
+            const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
+            return `Phase ${i + 1}: ${icon}`;
+        }).join('  ');
+
+        const outcomeColors = { perfect: '#FFD700', win: '#2ecc71', survived: '#3498db', escaped: '#3b1f04' };
+        const outcomeTitles = {
+            perfect:  `🏆 ${apexType.emoji} PERFECT — ${apexType.name} Brought Down!`,
+            win:      `✅ ${apexType.emoji} ${apexType.name} Defeated!`,
+            survived: `😓 ${apexType.emoji} You Survived the ${apexType.name}`,
+            escaped:  `💀 ${apexType.emoji} The ${apexType.name} Escaped`
+        };
+
+        const apexEmbed = new EmbedBuilder()
+            .setColor(outcomeColors[apexResult.outcome])
+            .setTitle(outcomeTitles[apexResult.outcome])
+            .setDescription(
+                `${apexResult.message}\n\n${phaseScoreLine}\n\n` +
+                (apexResult.bonusPayout > 0
+                    ? `💰 Bonus trophy: **+${currency}${apexResult.bonusPayout.toLocaleString()}**`
+                    : '*No bonus this time — but you lived to tell the tale.*') +
+                `\n🔧 Weapon wear: -${apexResult.durabilityLost} durability`
+            )
+            .setTimestamp();
+
+        await state.btn.update({ embeds: [embed, apexEmbed], components: [] }).catch(() => {});
+        return;
+    }
 }
 
 function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
@@ -1019,6 +1175,7 @@ async function executeProfile(interaction) {
         User.findOne({ userId: target.id, guildId: interaction.guild.id }),
         Guild.findOne({ guildId: interaction.guild.id })
     ]);
+    await attachGrind(userData);
 
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1193,6 +1350,7 @@ async function executePrestige(interaction) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
     const h = user.hunt;
 
@@ -1256,6 +1414,7 @@ async function executePrestige(interaction) {
         }
 
         const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+        await attachGrind(freshUser);
         ensureHuntData(freshUser);
         const fh = freshUser.hunt;
 
@@ -1324,6 +1483,7 @@ async function executeInv(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
     const h = user.hunt;
 
@@ -1518,6 +1678,7 @@ async function executeQuests(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
     assignDailyHuntQuests(user);
 
@@ -1687,6 +1848,7 @@ async function executeShop(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
 
     switch (sub) {
@@ -1868,7 +2030,7 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
 
     const updated = await User.findOneAndUpdate(
         { userId: user.userId, guildId: user.guildId, balance: { $gte: weaponData.cost } },
-        { $inc: { balance: -weaponData.cost }, $push: { 'hunt.weapons': newWeapon } },
+        { $inc: { balance: -weaponData.cost } },
         { new: true }
     );
 
@@ -1877,16 +2039,32 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
         return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
     }
 
-    const h = updated.hunt;
+    await persistGrindIfNew(user, 'hunt');
+    const profUpdated = await GrindProfile.findOneAndUpdate(
+        { userId: user.userId, guildId: user.guildId, system: 'hunt' },
+        { $push: { 'data.weapons': newWeapon } },
+        { new: true }
+    ).catch(err => { console.error('[huntshop weapon] profile push error:', err); return null; });
+
+    if (!profUpdated) {
+        // Refund the debit — the weapon was never granted
+        await User.updateOne({ userId: user.userId, guildId: user.guildId }, { $inc: { balance: weaponData.cost } }).catch(() => {});
+        const reply = { content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] };
+        return interactionOrBtn.editReply ? interactionOrBtn.editReply(reply) : interactionOrBtn.update(reply);
+    }
+
+    // Sync the in-memory profile so any later save doesn't clobber the purchase
+    user.hunt.weapons = profUpdated.data.weapons;
+    const h = user.hunt;
     const newIndex = h.weapons.length - 1;
 
     if (autoEquip) {
         const oldIndex = h.equippedWeaponIndex;
         h.equippedWeaponIndex = newIndex;
         try {
-            await User.updateOne(
-                { userId: user.userId, guildId: user.guildId },
-                { $set: { 'hunt.equippedWeaponIndex': newIndex } }
+            await GrindProfile.updateOne(
+                { userId: user.userId, guildId: user.guildId, system: 'hunt' },
+                { $set: { 'data.equippedWeaponIndex': newIndex } }
             );
         } catch (err) {
             console.error('[huntshop weapon] equip update error:', err);
@@ -2238,6 +2416,7 @@ async function executeZone(interaction, sub) {
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
+    await attachGrind(user);
     ensureHuntData(user);
     const h = user.hunt;
 
@@ -2356,3 +2535,25 @@ async function checkGrandPrestige(client, user, guild, guildId) {
         } catch { /* non-critical */ }
     }
 }
+
+// ── Per-user action lock ──────────────────────────────────────────────────────
+// Hunting mutates the user document with read-modify-write saves, so concurrent
+// /hunt invocations from the same user can race stamina, daily caps, and drops.
+// Serialize them: one hunting action at a time per user.
+const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
+const _huntExecute = module.exports.execute;
+module.exports.execute = async function (interaction) {
+    const lockKey   = `grind:hunt:${interaction.guild?.id}:${interaction.user.id}`;
+    const lockToken = _lockAcquire(lockKey, 120_000);
+    if (!lockToken) {
+        return interaction.reply({
+            content: '🏹 You already have a hunting action in progress — finish it first.',
+            ephemeral: true,
+        }).catch(() => {});
+    }
+    try {
+        return await _huntExecute(interaction);
+    } finally {
+        _lockRelease(lockKey, lockToken);
+    }
+};

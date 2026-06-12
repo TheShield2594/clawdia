@@ -4,8 +4,6 @@ const {
     ActionRowBuilder,
     StringSelectMenuBuilder,
     StringSelectMenuOptionBuilder,
-    ButtonBuilder,
-    ButtonStyle,
 } = require('discord.js');
 const axios = require('axios');
 const User  = require('../../models/User');
@@ -197,7 +195,9 @@ module.exports = {
                     { name: '🔴 Hard   — Win 750, Lose 150 (cap 20/day)', value: 'hard'   },
                     { name: '⚪ Random (any difficulty)',            value: 'any'    },
                 )),
-    cooldown: 20,
+    // 5 minutes — at 20s this was the highest uncapped coins/hour faucet in the bot
+    // (easy quizzes net ~+200 EV per attempt with no daily cap).
+    cooldown: 300,
 
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -310,24 +310,11 @@ async function runQuiz(interaction, diffChoice) {
             await User.updateOne(userFilter, { $inc: { dailyQuizHard: 1 } });
         }
 
-        const replayId = `quiz_replay_${interaction.id}_${Date.now()}`;
-        const replayRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(replayId).setLabel('🎓 Play Again').setStyle(ButtonStyle.Primary),
-        );
-
+        // No replay button: quiz is a net-positive income command, so a replay
+        // chain would bypass the command cooldown and become an unbounded faucet.
         await i.update({
             embeds:     [resultEmbed(interaction, isCorrect, question, correctAnswer, chosenAnswer, difficulty, rewards, netChange, updated?.balance ?? 0)],
-            components: [replayRow],
-        });
-
-        message.createMessageComponentCollector({
-            filter: ri => ri.user.id === interaction.user.id && ri.customId === replayId,
-            max: 1, time: 60_000,
-        }).on('collect', async ri => {
-            await ri.deferUpdate();
-            await runQuiz(interaction, diffChoice);
-        }).on('end', (_, reason) => {
-            if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
+            components: [],
         });
     });
 
