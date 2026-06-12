@@ -150,6 +150,14 @@ const userSchema = new Schema({
         potw:               { type: Boolean, default: false },
         weeklyInteractions: { type: Number,  default: 0    },
         personality:        { type: String,  default: null },
+        // Progression (Phase 4): pets gain XP from feeding and battles, level up,
+        // and evolve through stages that scale their passive bonus.
+        level:              { type: Number,  default: 1, min: 1 },
+        xp:                 { type: Number,  default: 0, min: 0 },
+        evolutionStage:     { type: Number,  default: 1, min: 1, max: 3 },
+        battleWins:         { type: Number,  default: 0 },
+        battleLosses:       { type: Number,  default: 0 },
+        lastBattle:         { type: Date,    default: null },
     }],
 
     // Pet of the Week tracking
