@@ -10,6 +10,7 @@ const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = req
 const { checkRivalry } = require('../services/rivalryService');
 const { checkAndAward, announceAchievements } = require('../services/achievementService');
 const { checkAndBroadcastWealthMilestone } = require('../utils/wealthMilestone');
+const { maybeTriggerChatEvent } = require('../services/chatEventService');
 const { applyXpGain, announceLevelUp } = require('../utils/applyXpGain');
 const BASE_BAD_WORDS = require('../data/profanityList');
 
@@ -117,6 +118,9 @@ module.exports = {
             // Streak + quests (only for non-blocked messages)
             // Reuse user fetched by handleLeveling when available — avoids a second DB round-trip
             await handleStreakAndQuests(message, guildSettings, sharedUser);
+
+            // Ambient chat events (airdrops, crates, trivia) — fire-and-forget
+            maybeTriggerChatEvent(message, guildSettings).catch(() => {});
 
         } catch (error) {
             console.error('Error in messageCreate:', error);

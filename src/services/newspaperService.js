@@ -1,8 +1,9 @@
 const { EmbedBuilder } = require('discord.js');
-const Guild       = require('../models/Guild');
-const User        = require('../models/User');
-const Case        = require('../models/Case');
-const Transaction = require('../models/Transaction');
+const Guild        = require('../models/Guild');
+const User         = require('../models/User');
+const Case         = require('../models/Case');
+const Transaction  = require('../models/Transaction');
+const GrindProfile = require('../models/GrindProfile');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -48,10 +49,15 @@ async function collectStats(guildId, sections) {
     }
 
     if (sections.gameStandouts !== false) {
+        const topBySystem = system =>
+            GrindProfile.findOne({ guildId, system, 'data.xp': { $gt: 0 } })
+                .sort({ 'data.xp': -1 }).select('userId data').lean()
+                // Preserve the legacy { userId, <system>: data } shape for the renderers
+                .then(p => (p ? { userId: p.userId, [system]: p.data } : null));
         const [topHunter, topFisher, topMiner] = await Promise.all([
-            User.findOne({ guildId, 'hunt.xp': { $gt: 0 } }).sort({ 'hunt.xp': -1 }).select('userId hunt').lean(),
-            User.findOne({ guildId, 'fishing.xp': { $gt: 0 } }).sort({ 'fishing.xp': -1 }).select('userId fishing').lean(),
-            User.findOne({ guildId, 'mining.xp': { $gt: 0 } }).sort({ 'mining.xp': -1 }).select('userId mining').lean(),
+            topBySystem('hunt'),
+            topBySystem('fishing'),
+            topBySystem('mining'),
         ]);
         data.gameStandouts = { topHunter, topFisher, topMiner };
     }

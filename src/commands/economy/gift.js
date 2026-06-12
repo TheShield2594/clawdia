@@ -2,8 +2,14 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getItemLore } = require('../../data/defaultShopItems');
+const { logTransaction } = require('../../utils/logTransaction');
 
 const DAILY_COIN_CAP = 10_000;
+// Incoming cap is higher than the outgoing cap (several friends can legitimately
+// gift one person) but low enough that funneling from a farm of alts is capped.
+const DAILY_RECEIVE_CAP = 25_000;
+// Fresh Discord accounts can't send gifts — blocks throwaway-alt funnels.
+const MIN_ACCOUNT_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Items that cannot be gifted (soulbound — matches market.js)
 const SOULBOUND_ITEMS = new Set(['lifesaver', 'streak_shield']);
@@ -53,6 +59,18 @@ module.exports = {
         if (target.bot) {
             return interaction.reply({ content: "You can't gift a bot.", ephemeral: true });
         }
+        if (Date.now() - interaction.user.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
+            return interaction.reply({
+                content: 'Your Discord account is too new to send gifts. Try again in a few days.',
+                ephemeral: true,
+            });
+        }
+        if (Date.now() - target.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
+            return interaction.reply({
+                content: `${target.username}'s Discord account is too new to receive gifts.`,
+                ephemeral: true,
+            });
+        }
 
         if (type === 'coins') {
             const amount  = interaction.options.getInteger('amount');
@@ -84,6 +102,19 @@ module.exports = {
                 });
             }
 
+            // Receiver-side daily cap — limits how much one account can be funneled per day
+            const receiverNow  = await User.findOne({ userId: target.id, guildId });
+            const rxResetAge   = receiverNow?.dailyGiftReceivedReset
+                ? Date.now() - new Date(receiverNow.dailyGiftReceivedReset).getTime()
+                : Infinity;
+            const currentReceived = rxResetAge >= 86_400_000 ? 0 : (receiverNow?.dailyGiftReceived ?? 0);
+            if (currentReceived + amount > DAILY_RECEIVE_CAP) {
+                return interaction.reply({
+                    content: `<@${target.id}> has reached their daily gift-receiving cap. They can receive up to **${currency}${Math.max(0, DAILY_RECEIVE_CAP - currentReceived).toLocaleString()}** more today.`,
+                    ephemeral: true,
+                });
+            }
+
             // Atomic deduction: filter enforces balance and daily cap atomically so concurrent
             // gifts can't race past either check. Reset cap counter if the 24h window expired.
             const capFilter = capResetAge >= 86_400_000
@@ -106,11 +137,45 @@ module.exports = {
                 });
             }
 
-            await User.findOneAndUpdate(
-                { userId: target.id, guildId },
-                { $inc: { balance: amount } },
-                { upsert: true }
+            // Ensure the receiver document exists, then credit with the receive-cap
+            // enforced atomically (no upsert here — an unmatched conditional upsert
+            // would try to insert a duplicate userId+guildId document).
+            await User.updateOne({ userId: target.id, guildId }, {}, { upsert: true });
+
+            const rxCapFilter = rxResetAge >= 86_400_000
+                ? {}
+                : { $expr: { $lte: [{ $add: [{ $ifNull: ['$dailyGiftReceived', 0] }, amount] }, DAILY_RECEIVE_CAP] } };
+            const rxCapUpdate = rxResetAge >= 86_400_000
+                ? { $inc: { balance: amount }, $set: { dailyGiftReceived: amount, dailyGiftReceivedReset: new Date() } }
+                : { $inc: { balance: amount, dailyGiftReceived: amount } };
+
+            const credited = await User.findOneAndUpdate(
+                { userId: target.id, guildId, ...rxCapFilter },
+                rxCapUpdate,
+                { new: true }
             );
+            if (!credited) {
+                // Receiver hit their cap in a race — roll the sender back
+                try {
+                    await User.updateOne(
+                        { userId: interaction.user.id, guildId },
+                        { $inc: { balance: amount, dailyGiftSent: -amount } }
+                    );
+                } catch (rollbackErr) {
+                    console.error(`[gift] CRITICAL: sender rollback failed — sender=${interaction.user.id} guild=${guildId} amount=${amount}:`, rollbackErr);
+                    return interaction.reply({
+                        content: 'Something went wrong returning your coins — please contact a server admin.',
+                        ephemeral: true,
+                    });
+                }
+                return interaction.reply({
+                    content: `Could not complete the transfer — <@${target.id}> just reached their daily gift-receiving cap. Your coins were returned.`,
+                    ephemeral: true,
+                });
+            }
+
+            logTransaction({ userId: interaction.user.id, guildId, type: 'gift_send',    amount: -amount, balance: deducted.balance, relatedUserId: target.id, note: 'Coin gift' });
+            logTransaction({ userId: target.id,           guildId, type: 'gift_receive', amount,          balance: credited.balance, relatedUserId: interaction.user.id, note: 'Coin gift' });
 
             const newRemaining = DAILY_COIN_CAP - (deducted.dailyGiftSent ?? 0);
 
@@ -184,6 +249,9 @@ module.exports = {
             recipient.markModified('inventory');
 
             await Promise.all([sender.save(), recipient.save()]);
+
+            logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'gift_item_send',    amount: 0, balance: sender.balance,    relatedUserId: target.id,           note: `Gifted ${qty}x ${itemId}` });
+            logTransaction({ userId: target.id,           guildId: interaction.guild.id, type: 'gift_item_receive', amount: 0, balance: recipient.balance, relatedUserId: interaction.user.id, note: `Received ${qty}x ${itemId}` });
 
             const embed = new EmbedBuilder()
                 .setColor('#f1c40f')

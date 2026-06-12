@@ -7,7 +7,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
-const { hasEffect } = require('../../services/effectsService');
+const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
 const {
     LOBBY_JOIN_WINDOW_MS,
     MAX_PLAYERS,
@@ -387,7 +387,9 @@ async function startCrashGame(interaction, lobby, lobbyId) {
     const guildId   = interaction.guild.id;
 
     const hostDoc     = await User.findOne({ userId: lobby.hostId, guildId });
-    const luckyActive = hostDoc ? hasEffect(hostDoc, 'lucky_charm') : false;
+    // Charm boost only applies to low-stakes lobbies — a +20% crash-point shift on an
+    // unbounded bet would flip the game's expected value player-positive.
+    const luckyActive = hostDoc ? hasEffect(hostDoc, 'lucky_charm') && luckySaveEligible(lobby.bet) : false;
     const crash       = luckyActive
         ? Math.min(100.00, parseFloat((generateCrashPoint() * 1.2).toFixed(2)))
         : generateCrashPoint();

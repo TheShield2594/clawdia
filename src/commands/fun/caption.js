@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
+const dns = require('dns');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 
 const MAX_WIDTH   = 800;
@@ -7,6 +8,7 @@ const MAX_DIM     = 4000;
 const CAPTION_H   = 70;
 const FONT_SIZE   = 28;
 const LINE_HEIGHT = FONT_SIZE * 1.25;
+const LOAD_TIMEOUT_MS = 10_000;
 
 const _measCtx = createCanvas(1, 1).getContext('2d');
 
@@ -33,7 +35,7 @@ module.exports = {
         const imageUrl = interaction.options.getString('image_url');
         const text     = interaction.options.getString('text');
 
-        if (!isValidHttpUrl(imageUrl)) {
+        if (!(await isValidHttpUrl(imageUrl))) {
             return interaction.reply({
                 content: '❌ Please provide a valid image URL (must start with http:// or https://).',
                 ephemeral: true,
@@ -43,7 +45,7 @@ module.exports = {
         try {
             await interaction.deferReply();
 
-            const src = await loadImage(imageUrl);
+            const src = await loadImageSafe(imageUrl);
             if (src.width > MAX_DIM || src.height > MAX_DIM) {
                 return interaction.editReply(`❌ Image is too large. Maximum dimensions are ${MAX_DIM}×${MAX_DIM} pixels.`);
             }
@@ -91,13 +93,69 @@ module.exports = {
     },
 };
 
-function isValidHttpUrl(str) {
+async function isValidHttpUrl(str) {
     try {
-        const { protocol } = new URL(str);
-        return protocol === 'http:' || protocol === 'https:';
+        const { protocol, hostname } = new URL(str);
+        if (protocol !== 'http:' && protocol !== 'https:') return false;
+        return !(await isPrivateHost(hostname));
     } catch {
         return false;
     }
+}
+
+// Canonicalize a hostname for the private-range checks: lowercase, strip IPv6
+// brackets, and trim trailing dots (so "localhost." can't slip past).
+function canonicalizeHost(hostname) {
+    let host = hostname.trim().toLowerCase();
+    if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+    while (host.endsWith('.')) host = host.slice(0, -1);
+    return host;
+}
+
+// Literal-address checks for loopback, link-local, and private ranges (v4 + v6).
+function isPrivateAddress(host) {
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true;
+    if (host === '' || host === '::' || host === '::1') return true;
+    if (host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) return true; // v6 link-local / ULA
+    if (host.startsWith('::ffff:')) return isPrivateAddress(host.slice(7));                       // v4-mapped v6
+    const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+        const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+        if (a === 127 || a === 10 || a === 0) return true;                  // loopback / 10.x / this-net
+        if (a === 172 && b >= 16 && b <= 31) return true;                   // 172.16-31.x
+        if (a === 192 && b === 168) return true;                            // 192.168.x
+        if (a === 169 && b === 254) return true;                            // link-local / cloud metadata
+    }
+    return false;
+}
+
+// Blocks hosts that are, or resolve to, private address space (SSRF). The DNS
+// check is best-effort: loadImage re-resolves the name, so a rebinding attacker
+// could still race it, but the straightforward private-DNS cases are rejected.
+async function isPrivateHost(hostname) {
+    const host = canonicalizeHost(hostname);
+    if (isPrivateAddress(host)) return true;
+
+    const isIpLiteral = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
+    if (!isIpLiteral) {
+        try {
+            const addrs = await dns.promises.lookup(host, { all: true, verbatim: true });
+            return addrs.some(a => isPrivateAddress(String(a.address).toLowerCase()));
+        } catch {
+            return true; // unresolvable — the image load would fail anyway
+        }
+    }
+    return false;
+}
+
+// loadImage with a hard timeout — node-canvas has none, so a slow or
+// unresponsive URL would otherwise hang the deferred reply indefinitely.
+function loadImageSafe(url) {
+    return Promise.race([
+        loadImage(url),
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('image load timed out')), LOAD_TIMEOUT_MS).unref?.()),
+    ]);
 }
 
 function wrapText(ctx, text, maxWidth) {

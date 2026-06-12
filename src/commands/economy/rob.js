@@ -10,6 +10,7 @@ const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
 const ROBBER_COOLDOWN_MS  = 1 * 3_600_000; // 1 hour
 const VICTIM_IMMUNITY_MS  = 30 * 60_000;   // 30 minutes
+const MIN_ACCOUNT_AGE_MS  = 7 * 24 * 3_600_000; // robber & victim Discord accounts must be 7+ days old
 const BASE_SUCCESS_CHANCE = 0.40;
 const ROB_STEAL_MIN       = 0.10;
 const ROB_STEAL_MAX       = 0.40;
@@ -129,6 +130,14 @@ module.exports = {
         }
         if (target.bot) {
             return interaction.reply({ content: "You can't rob a bot.", ephemeral: true });
+        }
+        // Fresh Discord accounts can't rob or be robbed — blocks wealth-extraction
+        // chains through disposable alts (fund an alt, "rob" it back with the main).
+        if (Date.now() - interaction.user.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
+            return interaction.reply({ content: 'Your Discord account is too new to rob anyone. Try again in a few days.', ephemeral: true });
+        }
+        if (Date.now() - target.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
+            return interaction.reply({ content: `${target.username}'s account is too new to be robbed.`, ephemeral: true });
         }
 
         const [robber, victim] = await Promise.all([

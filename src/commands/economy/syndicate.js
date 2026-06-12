@@ -9,6 +9,7 @@ const mongoose = require('mongoose');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const Syndicate = require('../../models/Syndicate');
+const FailedJob = require('../../models/FailedJob');
 const { logTransaction } = require('../../utils/logTransaction');
 const { buildSkillCheck } = require('../../services/heistService');
 const {
@@ -139,6 +140,7 @@ async function resolveHeist(client, heist) {
 
     const players = [...heist.players.entries()];
     const resultLines = [];
+    const failedCredits = [];
 
     for (const [userId, player] of players) {
         const roleMeta = SYNDICATE_ROLES[player.role];
@@ -163,6 +165,27 @@ async function resolveHeist(client, heist) {
             }
             if (!credited) {
                 console.error(`[syndicate] CRITICAL: all credit attempts failed — userId=${userId} guildId=${heist.guildId} amount=${perPlayer} heistId=${heist.heistId}`);
+                // Record for recovery so the unpaid share isn't lost when the log
+                // scrolls by. Status 'pending' keeps it retriable via retryJob()
+                // (which refuses 'exhausted' records). Await so the embed below can
+                // honestly say whether the recovery record was written.
+                let recoveryLogged = false;
+                try {
+                    await FailedJob.create({
+                        service:      'syndicateService',
+                        jobName:      'heist_credit',
+                        guildId:      heist.guildId,
+                        payload:      { userId, amount: perPlayer, heistId: heist.heistId, target: heist.target },
+                        errorMessage: `Failed to credit ${perPlayer} coins after 3 attempts`,
+                        attempts:     3,
+                        maxAttempts:  6,
+                        status:       'pending',
+                    });
+                    recoveryLogged = true;
+                } catch (err) {
+                    console.error('[syndicate] failed to record FailedJob:', err.message);
+                }
+                failedCredits.push({ userId, username: player.username, amount: perPlayer, recoveryLogged });
             } else {
                 const u = await User.findOne({ userId, guildId: heist.guildId }, 'balance').lean();
                 logTransaction({
@@ -223,6 +246,17 @@ async function resolveHeist(client, heist) {
         embed.addFields({
             name: '⚡ Sabotaged',
             value: `This heist was sabotaged **${heist.sabotageCount}** time(s) — success chance was reduced!`,
+        });
+    }
+
+    if (failedCredits.length > 0) {
+        embed.addFields({
+            name: '⚠️ Payout Issue',
+            value: failedCredits.map(f =>
+                f.recoveryLogged
+                    ? `Could not credit **${f.username}**'s share of ${currency}${f.amount.toLocaleString()} — it has been logged for recovery. Contact a server admin.`
+                    : `Could not credit **${f.username}**'s share of ${currency}${f.amount.toLocaleString()} — and recovery logging also failed. Contact a server admin urgently with this message.`
+            ).join('\n'),
         });
     }
 

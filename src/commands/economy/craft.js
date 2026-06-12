@@ -2,6 +2,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User  = require('../../models/User');
+const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const { CRAFT_RECIPES: HUNT_RECIPES, CONSUMABLES: HUNT_CONSUMABLES, MATERIAL_NAMES: HUNT_MAT_NAMES } = require('../../data/huntData');
 const { CRAFT_RECIPES: MINE_RECIPES, CONSUMABLES: MINE_CONSUMABLES, MATERIAL_NAMES: MINE_MAT_NAMES } = require('../../data/mineData');
@@ -56,6 +57,7 @@ module.exports = {
             { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
             { upsert: true, new: true }
         );
+        await attachGrind(user);
         ensureHuntData(user);
         ensureMineData(user);
         ensureFishingData(user);

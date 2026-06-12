@@ -1104,6 +1104,117 @@ const TROPHY_QUALITIES = [
     { id: 'mythic',   label: 'Mythic',   emoji: '🟣', multiplier: 2.50 },
 ];
 
+// ── Apex encounters (Issue: interactive hunts) ───────────────────────────────
+// After bringing down rare+ prey, its apex pack-leader may appear — a 3-phase
+// choice fight mirroring the fishing boss pattern. Each apex has a hidden
+// strategy players learn over time: match its moves, hold your ground, or
+// wait it out. 'safe' choices never cost nerve but only the correct choice
+// counts toward the reward.
+const APEX_TYPES = {
+    dire_alpha: {
+        name: 'Dire Alpha',
+        emoji: '🐺',
+        strategy: 'match', // mirror its feints
+        phases: [
+            {
+                hint: '**THE DIRE ALPHA** feints LEFT, hackles raised!',
+                choices: {
+                    match: { label: '🎯 Mirror it — sidestep LEFT', risk: 'high' },
+                    hold:  { label: '🛑 Stand your ground',          risk: 'high' },
+                    safe:  { label: '🌿 Back away slowly',           risk: 'none' }
+                },
+                correct: 'match'
+            },
+            {
+                hint: 'It lunges RIGHT, snapping at your flank!',
+                choices: {
+                    match: { label: '🎯 Pivot RIGHT with it',  risk: 'high' },
+                    hold:  { label: '🛑 Brace for the hit',    risk: 'high' },
+                    safe:  { label: '🌿 Give ground',          risk: 'none' }
+                },
+                correct: 'match'
+            },
+            {
+                hint: '**It rears for a final pounce** — read the angle.',
+                choices: {
+                    match: { label: '💪 Strike as it commits',     risk: 'high' },
+                    hold:  { label: '🛑 Plant and counter',        risk: 'high' },
+                    safe:  { label: '🌿 Wait for an opening',      risk: 'none' }
+                },
+                correct: 'match'
+            }
+        ]
+    },
+    phantom_stag: {
+        name: 'Phantom Stag',
+        emoji: '🦌',
+        strategy: 'safe', // it cannot be forced — patience wins
+        phases: [
+            {
+                hint: 'The **Phantom Stag** flickers between the trees — your eyes can\'t track it!',
+                choices: {
+                    match: { label: '🎯 Chase the afterimage',  risk: 'high' },
+                    hold:  { label: '🛑 Take the shot anyway',  risk: 'high' },
+                    safe:  { label: '🌿 Stay still and watch',  risk: 'none' }
+                },
+                correct: 'safe'
+            },
+            {
+                hint: 'It freezes… antlers shimmering… then it\'s somewhere else entirely.',
+                choices: {
+                    match: { label: '🎯 Swing to the new spot', risk: 'high' },
+                    hold:  { label: '🛑 Hold your aim',         risk: 'high' },
+                    safe:  { label: '🌿 Lower your weapon',     risk: 'none' }
+                },
+                correct: 'safe'
+            },
+            {
+                hint: 'The stag steps into a moonbeam and **looks straight at you**.',
+                choices: {
+                    match: { label: '🎯 Take the shot NOW',      risk: 'high' },
+                    hold:  { label: '🛑 Steady... steady...',    risk: 'high' },
+                    safe:  { label: '🌿 Let it come closer',     risk: 'none' }
+                },
+                correct: 'safe'
+            }
+        ]
+    },
+    ironhide_boar: {
+        name: 'Ironhide Boar',
+        emoji: '🐗',
+        strategy: 'hold', // it only respects an unmoving hunter
+        phases: [
+            {
+                hint: '**THE IRONHIDE BOAR** charges head-on, tusks down!',
+                choices: {
+                    match: { label: '🎯 Dodge and strike',     risk: 'high' },
+                    hold:  { label: '🛑 Plant your feet',      risk: 'high' },
+                    safe:  { label: '🌿 Dive clear',           risk: 'none' }
+                },
+                correct: 'hold'
+            },
+            {
+                hint: 'It wheels around, pawing the dirt for another charge!',
+                choices: {
+                    match: { label: '🎯 Flank it',             risk: 'high' },
+                    hold:  { label: '🛑 Hold the line',        risk: 'high' },
+                    safe:  { label: '🌿 Put a tree between you', risk: 'none' }
+                },
+                correct: 'hold'
+            },
+            {
+                hint: '**Its armored hide is cracked** — it charges one last time.',
+                choices: {
+                    match: { label: '🎯 Sidestep and slash',   risk: 'high' },
+                    hold:  { label: '🛑 Meet it head-on',      risk: 'high' },
+                    safe:  { label: '🌿 Stand aside',          risk: 'none' }
+                },
+                correct: 'hold'
+            }
+        ]
+    }
+};
+
 module.exports = {
     WEAPON_TIERS,
     WEAPON_BY_SLUG,
@@ -1123,5 +1234,6 @@ module.exports = {
     MATERIAL_NAMES,
     CRAFT_RECIPES,
     HUNT_QUEST_TEMPLATES,
-    TROPHY_QUALITIES
+    TROPHY_QUALITIES,
+    APEX_TYPES
 };
