@@ -98,31 +98,32 @@ module.exports = {
 
         // One active casino game per user — prevents concurrent sessions from racing
         // each other's debits, effects, and jackpot snapshots.
-        const lockKey = `casino:${interaction.guild.id}:${interaction.user.id}`;
-        if (!tryAcquire(lockKey)) {
+        const lockKey   = `casino:${interaction.guild.id}:${interaction.user.id}`;
+        const lockToken = tryAcquire(lockKey);
+        if (!lockToken) {
             return interaction.reply({
                 content: '🎰 You already have a casino game in progress — finish it first.',
                 ephemeral: true,
             });
         }
 
-        // Progressive jackpot: contribute a share of each bet to the pool and check for a win.
-        // Fire-and-forget — the service handles pool reset, user credit, and logging.
-        const bet = interaction.options.getInteger('bet') ?? 0;
-        if (bet > 0) {
-            processJackpotBet({
-                guildId:  interaction.guild.id,
-                userId:   interaction.user.id,
-                username: interaction.user.username,
-                bet,
-                interaction,
-            }).catch(err => console.error('[CasinoJackpot] error:', err));
-        }
-
         try {
+            // Progressive jackpot: contribute a share of each bet to the pool and check for a win.
+            // Fire-and-forget — the service handles pool reset, user credit, and logging.
+            const bet = interaction.options.getInteger('bet') ?? 0;
+            if (bet > 0) {
+                processJackpotBet({
+                    guildId:  interaction.guild.id,
+                    userId:   interaction.user.id,
+                    username: interaction.user.username,
+                    bet,
+                    interaction,
+                }).catch(err => console.error('[CasinoJackpot] error:', err));
+            }
+
             return await game.execute(interaction);
         } finally {
-            release(lockKey);
+            release(lockKey, lockToken);
         }
     },
 };

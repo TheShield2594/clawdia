@@ -65,6 +65,12 @@ module.exports = {
                 ephemeral: true,
             });
         }
+        if (Date.now() - target.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
+            return interaction.reply({
+                content: `${target.username}'s Discord account is too new to receive gifts.`,
+                ephemeral: true,
+            });
+        }
 
         if (type === 'coins') {
             const amount  = interaction.options.getInteger('amount');
@@ -150,10 +156,18 @@ module.exports = {
             );
             if (!credited) {
                 // Receiver hit their cap in a race — roll the sender back
-                await User.updateOne(
-                    { userId: interaction.user.id, guildId },
-                    { $inc: { balance: amount, dailyGiftSent: -amount } }
-                );
+                try {
+                    await User.updateOne(
+                        { userId: interaction.user.id, guildId },
+                        { $inc: { balance: amount, dailyGiftSent: -amount } }
+                    );
+                } catch (rollbackErr) {
+                    console.error(`[gift] CRITICAL: sender rollback failed — sender=${interaction.user.id} guild=${guildId} amount=${amount}:`, rollbackErr);
+                    return interaction.reply({
+                        content: 'Something went wrong returning your coins — please contact a server admin.',
+                        ephemeral: true,
+                    });
+                }
                 return interaction.reply({
                     content: `Could not complete the transfer — <@${target.id}> just reached their daily gift-receiving cap. Your coins were returned.`,
                     ephemeral: true,

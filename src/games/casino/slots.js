@@ -291,35 +291,26 @@ async function playSlots(interaction, bet) {
         let jackpotWon = false;
 
         if (result.outcome === 'jackpot') {
-            // Atomically claim the pool — conditional on pool matching snapshot (race
-            // protection). If a concurrent spin moved the pool, re-read and retry so a
-            // second simultaneous winner claims the actual (reseeded) pool instead of
-            // minting an arbitrary multiple of their bet.
-            let claimedAmount = null;
-            let snapshot      = jackpotPool;
-            for (let attempt = 0; attempt < 3 && claimedAmount === null; attempt++) {
-                const claimed = await Guild.findOneAndUpdate(
-                    { ...guildFilter, 'slots.jackpotPool': snapshot },
-                    {
-                        $set: {
-                            'slots.jackpotPool':       JACKPOT_SEED,
-                            'slots.lastJackpotWinner': interaction.user.id,
-                            'slots.lastJackpotAmount': snapshot,
-                            'slots.lastJackpotAt':     new Date(),
-                        }
-                    },
-                    { new: false }
-                );
-                if (claimed) {
-                    claimedAmount = snapshot;
-                } else {
-                    const fresh = await Guild.findOne(guildFilter, 'slots.jackpotPool');
-                    snapshot = fresh?.slots?.jackpotPool ?? JACKPOT_SEED;
-                }
-            }
-            result = { ...result, payout: claimedAmount ?? JACKPOT_SEED };
+            // Atomically swap the pool for the seed and pay out whatever was in it.
+            // findOneAndUpdate returns the pre-update document, so two concurrent
+            // winners settle cleanly: the first takes the accumulated pool, the
+            // second takes the fresh seed — nothing is minted, nobody gets zero.
+            const claimed = await Guild.findOneAndUpdate(
+                guildFilter,
+                {
+                    $set: {
+                        'slots.jackpotPool':       JACKPOT_SEED,
+                        'slots.lastJackpotWinner': interaction.user.id,
+                        'slots.lastJackpotAt':     new Date(),
+                    }
+                },
+                { new: false }
+            );
+            const claimedAmount = claimed?.slots?.jackpotPool ?? JACKPOT_SEED;
+            Guild.updateOne(guildFilter, { $set: { 'slots.lastJackpotAmount': claimedAmount } }).catch(() => {});
+            result = { ...result, payout: claimedAmount };
             finalJackpotPool = JACKPOT_SEED;
-            jackpotWon = claimedAmount !== null;
+            jackpotWon = true;
         } else {
             await Guild.updateOne(guildFilter, { $inc: { 'slots.jackpotPool': JACKPOT_CONTRIB } });
             finalJackpotPool = jackpotPool + JACKPOT_CONTRIB;

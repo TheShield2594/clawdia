@@ -1932,8 +1932,9 @@ async function handleRaid(interaction) {
 const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
 const _mineExecute = module.exports.execute;
 module.exports.execute = async function (interaction) {
-    const lockKey = `grind:mine:${interaction.guild?.id}:${interaction.user.id}`;
-    if (!_lockAcquire(lockKey, 120_000)) {
+    const lockKey   = `grind:mine:${interaction.guild?.id}:${interaction.user.id}`;
+    const lockToken = _lockAcquire(lockKey, 120_000);
+    if (!lockToken) {
         return interaction.reply({
             content: '⛏️ You already have a mining action in progress — finish it first.',
             ephemeral: true,
@@ -1942,6 +1943,6 @@ module.exports.execute = async function (interaction) {
     try {
         return await _mineExecute(interaction);
     } finally {
-        _lockRelease(lockKey);
+        _lockRelease(lockKey, lockToken);
     }
 };
