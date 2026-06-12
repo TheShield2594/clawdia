@@ -12,7 +12,7 @@ const knowledgeBaseSchema = new Schema({
 });
 
 knowledgeBaseSchema.index({ guildId: 1, createdAt: -1 });
-// Sparse unique index on sourceKey so reruns of sync-pins upsert in place and manual entries (sourceKey=null) are unaffected
+// Sparse unique index on sourceKey so reruns of sync-pins upsert in place and manual entries (sourceKey absent/undefined, not present) are unaffected
 knowledgeBaseSchema.index({ guildId: 1, sourceKey: 1 }, { unique: true, sparse: true });
 // Compound text index with guildId as equality-prefix so MongoDB can scope $text searches per guild
 knowledgeBaseSchema.index({ guildId: 1, title: 'text', content: 'text', tags: 'text' });
