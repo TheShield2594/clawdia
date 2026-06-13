@@ -236,7 +236,7 @@ async function awardQuest(user, questDef, guildSettings) {
 
 async function awardSeasonXp(user, xp, guildSettings) {
     const season = guildSettings?.season;
-    if (!season?.enabled || !season.seasonId) return;
+    if (!season?.enabled || !season.seasonId) return 0;
     if (user.season?.seasonId !== season.seasonId) {
         user.season = { seasonId: season.seasonId, xp: 0, tier: 0, claimedTiers: [], premium: false, claimedPremiumTiers: [], weekXp: 0, weekStart: null };
     }
@@ -253,7 +253,7 @@ async function awardSeasonXp(user, xp, guildSettings) {
         }
         const remaining = Math.max(0, weeklyCap - (user.season.weekXp || 0));
         xp = Math.min(xp, remaining);
-        if (xp <= 0) return;
+        if (xp <= 0) return 0;
         user.season.weekXp = (user.season.weekXp || 0) + xp;
     }
 
@@ -261,6 +261,7 @@ async function awardSeasonXp(user, xp, guildSettings) {
     const xpPerTier = season.xpPerTier || 100;
     const maxTiers  = season.maxTiers  || 50;
     user.season.tier = Math.min(Math.floor(user.season.xp / xpPerTier), maxTiers);
+    return xp;
 }
 
 // ── Event hooks ──────────────────────────────────────────────────────────────
