@@ -75,7 +75,13 @@ const userSchema = new Schema({
         seasonId: { type: String, default: null },
         xp: { type: Number, default: 0 },
         tier: { type: Number, default: 0 },
-        claimedTiers: [{ type: Number }]
+        claimedTiers: [{ type: Number }],
+        // Premium track (unlocked via a large coin sink — see /season unlock)
+        premium: { type: Boolean, default: false },
+        claimedPremiumTiers: [{ type: Number }],
+        // Weekly XP pacing
+        weekXp: { type: Number, default: 0 },
+        weekStart: { type: Date, default: null },
     },
 
     // Progression archetype track
@@ -150,6 +156,14 @@ const userSchema = new Schema({
         potw:               { type: Boolean, default: false },
         weeklyInteractions: { type: Number,  default: 0    },
         personality:        { type: String,  default: null },
+        // Progression (Phase 4): pets gain XP from feeding and battles, level up,
+        // and evolve through stages that scale their passive bonus.
+        level:              { type: Number,  default: 1, min: 1 },
+        xp:                 { type: Number,  default: 0, min: 0 },
+        evolutionStage:     { type: Number,  default: 1, min: 1, max: 3 },
+        battleWins:         { type: Number,  default: 0 },
+        battleLosses:       { type: Number,  default: 0 },
+        lastBattle:         { type: Date,    default: null },
     }],
 
     // Pet of the Week tracking

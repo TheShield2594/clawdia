@@ -215,16 +215,200 @@ function getPetBonus(pet) {
 
 /**
  * Get total bonus of a given type from all active pets.
+ * Uses each pet's *effective* bonus (scaled by evolution + level), so investing
+ * in a pet meaningfully improves its passive.
  */
 function getTotalBonus(pets, bonusType) {
     let total = 0;
     for (const pet of pets) {
         const bonus = getPetBonus(pet);
         if (bonus && bonus.bonusType === bonusType) {
-            total += bonus.bonusPct;
+            total += getEffectiveBonusPct(pet);
         }
     }
     return total;
+}
+
+// ── Progression: leveling & evolution ───────────────────────────────────────
+
+const PET_MAX_LEVEL = 30;
+// Evolution stage boundaries by level. Stage 1: 1–9, Stage 2: 10–19, Stage 3: 20+.
+const EVOLUTION_LEVELS = [10, 20];
+// Effective passive bonus multiplier per evolution stage.
+const STAGE_BONUS_MULT = { 1: 1.0, 2: 1.5, 3: 2.0 };
+// Per-level passive growth on top of the stage multiplier (caps the total at a
+// sane ceiling so the 10x combined-multiplier economy isn't blown open).
+const PER_LEVEL_BONUS_GROWTH = 0.03;
+const MAX_EFFECTIVE_BONUS_MULT = 2.5;
+
+// XP sources
+const XP_FEED_FAVORITE = 8;
+const XP_FEED_OTHER    = 4;
+const XP_BATTLE_WIN    = 30;
+const XP_BATTLE_LOSS   = 10;
+const XP_WILD_WIN      = 22;
+const XP_WILD_LOSS     = 8;
+
+// Evolution display: stage title prefixes + an optional evolved emoji per pet.
+const EVOLUTION_TITLES = { 1: '', 2: 'Seasoned ', 3: 'Apex ' };
+const EVOLVED_EMOJI = {
+    dog:         { 2: '🐕',  3: '🐺' },
+    cat:         { 2: '🐈',  3: '🐅' },
+    bird:        { 2: '🦜',  3: '🦅' },
+    fish:        { 2: '🐟',  3: '🦈' },
+    fox:         { 2: '🦊',  3: '🌟' },
+    wolf:        { 2: '🐺',  3: '🌑' },
+    eagle:       { 2: '🦅',  3: '⚡' },
+    shark:       { 2: '🦈',  3: '🌊' },
+    crystal_fox: { 2: '💎',  3: '🔮' },
+};
+
+// Total XP required to *reach* a given level (cumulative). Gentle quadratic curve.
+function xpForLevel(level) {
+    if (level <= 1) return 0;
+    let total = 0;
+    for (let l = 2; l <= level; l++) total += 40 + (l - 1) * 20;
+    return total;
+}
+
+function stageForLevel(level) {
+    let stage = 1;
+    for (const boundary of EVOLUTION_LEVELS) if (level >= boundary) stage += 1;
+    return stage;
+}
+
+/**
+ * Display emoji + name for a pet, accounting for its evolution stage.
+ */
+function getPetDisplay(pet) {
+    const def   = PET_DEFINITIONS[pet.petId] ?? { emoji: '🐾', name: pet.petId };
+    const stage = pet.evolutionStage ?? 1;
+    const emoji = EVOLVED_EMOJI[pet.petId]?.[stage] ?? def.emoji;
+    const title = EVOLUTION_TITLES[stage] ?? '';
+    const baseName = pet.name || def.name;
+    return { emoji, name: baseName, titledName: `${title}${baseName}`.trim() };
+}
+
+/**
+ * Effective passive bonus % for a pet (base × stage × per-level growth), capped.
+ */
+function getEffectiveBonusPct(pet) {
+    const def = PET_DEFINITIONS[pet.petId];
+    if (!def) return 0;
+    const stage = pet.evolutionStage ?? 1;
+    const level = pet.level ?? 1;
+    const mult  = Math.min(
+        MAX_EFFECTIVE_BONUS_MULT,
+        (STAGE_BONUS_MULT[stage] ?? 1.0) + (level - 1) * PER_LEVEL_BONUS_GROWTH
+    );
+    return Math.round(def.bonusPct * mult * 10) / 10;
+}
+
+/**
+ * Award XP to a pet, applying level-ups and evolution.
+ * Mutates `pet` in place. Returns { gained, leveledUp, fromLevel, toLevel, evolved, fromStage, toStage }.
+ */
+function applyPetXp(pet, amount) {
+    const fromLevel = pet.level ?? 1;
+    const fromStage = pet.evolutionStage ?? 1;
+    pet.level = fromLevel;
+    pet.xp = (pet.xp ?? 0) + Math.max(0, amount);
+
+    while (pet.level < PET_MAX_LEVEL && pet.xp >= xpForLevel(pet.level + 1)) {
+        pet.level += 1;
+    }
+    pet.evolutionStage = stageForLevel(pet.level);
+
+    return {
+        gained:    Math.max(0, amount),
+        leveledUp: pet.level > fromLevel,
+        fromLevel, toLevel: pet.level,
+        evolved:   pet.evolutionStage > fromStage,
+        fromStage, toStage: pet.evolutionStage,
+    };
+}
+
+// ── Battle engine ───────────────────────────────────────────────────────────
+
+// Personalities tilt combat stats: each leans into attack/defense/speed.
+const PERSONALITY_COMBAT = {
+    energetic:   { atk: 2, def: 0, spd: 2 },
+    mischievous: { atk: 2, def: 1, spd: 1 },
+    loyal:       { atk: 1, def: 3, spd: 0 },
+    lazy:        { atk: 0, def: 2, spd: 1 },
+};
+
+/**
+ * Derive battle stats from a pet's level, evolution, and personality.
+ */
+function getPetStats(pet) {
+    const level = pet.level ?? 1;
+    const stage = pet.evolutionStage ?? 1;
+    const p     = PERSONALITY_COMBAT[pet.personality] ?? { atk: 1, def: 1, spd: 1 };
+    return {
+        hp:  40 + level * 6 + stage * 10,
+        atk: 8  + level * 2 + stage * 3 + p.atk,
+        def: 4  + level * 1 + stage * 2 + p.def,
+        spd: 5  + level + p.spd,
+    };
+}
+
+/**
+ * Simulate a battle between two pets. `rng` is injectable for testing.
+ * Returns { winner: 'a'|'b', rounds, finalHpA, finalHpB }.
+ */
+function simulateBattle(petA, petB, rng = Math.random) {
+    const a = getPetStats(petA);
+    const b = getPetStats(petB);
+    let hpA = a.hp, hpB = b.hp;
+    const rounds = [];
+
+    // Faster pet strikes first each round.
+    let turnA = a.spd >= b.spd;
+    const MAX_ROUNDS = 30;
+
+    for (let r = 0; r < MAX_ROUNDS && hpA > 0 && hpB > 0; r++) {
+        const atk = turnA ? a : b;
+        const def = turnA ? b : a;
+        // Damage = atk - def/2, ±25% variance, min 1; ~10% crit for 1.5x.
+        const base     = Math.max(1, atk.atk - def.def / 2);
+        const variance = 0.75 + rng() * 0.5;
+        const crit     = rng() < 0.10 ? 1.5 : 1.0;
+        const damage   = Math.max(1, Math.round(base * variance * crit));
+
+        if (turnA) hpB = Math.max(0, hpB - damage);
+        else       hpA = Math.max(0, hpA - damage);
+
+        rounds.push({ attacker: turnA ? 'a' : 'b', damage, crit: crit > 1, hpA, hpB });
+        turnA = !turnA;
+    }
+
+    // On HP tie / round cap, higher remaining HP fraction wins; final tiebreak: A.
+    let winner;
+    if (hpA <= 0 && hpB <= 0) winner = hpA >= hpB ? 'a' : 'b';
+    else if (hpB <= 0) winner = 'a';
+    else if (hpA <= 0) winner = 'b';
+    else winner = (hpA / a.hp) >= (hpB / b.hp) ? 'a' : 'b';
+
+    return { winner, rounds, finalHpA: hpA, finalHpB: hpB };
+}
+
+/**
+ * Build a scaled "wild" opponent pet near the given level for PvE battles.
+ */
+function makeWildPet(level, rng = Math.random) {
+    const WILD = [
+        { petId: 'wild_boar',   name: 'Wild Boar',   personality: 'energetic' },
+        { petId: 'feral_cat',   name: 'Feral Cat',   personality: 'mischievous' },
+        { petId: 'stray_hound', name: 'Stray Hound', personality: 'loyal' },
+        { petId: 'cave_bat',    name: 'Cave Bat',    personality: 'energetic' },
+    ];
+    const pick = WILD[Math.floor(rng() * WILD.length)];
+    const lvl  = Math.max(1, level + Math.floor(rng() * 3) - 1); // ±1 around the player
+    return {
+        petId: pick.petId, name: pick.name, personality: pick.personality,
+        level: lvl, evolutionStage: stageForLevel(lvl), hunger: 100, wild: true,
+    };
 }
 
 module.exports = {
@@ -246,4 +430,20 @@ module.exports = {
     getMoodColor,
     heartBar,
     assignPersonality,
+    // Progression & battles
+    PET_MAX_LEVEL,
+    XP_FEED_FAVORITE,
+    XP_FEED_OTHER,
+    XP_BATTLE_WIN,
+    XP_BATTLE_LOSS,
+    XP_WILD_WIN,
+    XP_WILD_LOSS,
+    xpForLevel,
+    stageForLevel,
+    getPetDisplay,
+    getEffectiveBonusPct,
+    applyPetXp,
+    getPetStats,
+    simulateBattle,
+    makeWildPet,
 };

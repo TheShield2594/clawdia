@@ -7,59 +7,34 @@ const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { getEventCurrencyBalance } = require('../../services/seasonalEventService');
 const { progressBar } = require('../../utils/progressBar');
 const { rewardReveal } = require('../../utils/rewardReveal');
+const { logTransaction } = require('../../utils/logTransaction');
+const { awardSeasonXp } = require('../../services/questService');
 
-// ── Battle pass tier reward definitions ──────────────────────────────────────
-// 20 tiers; alternating between coin bonuses, cosmetic badges, material bundles, rare items
-// itemId present → add 1× to user.inventory on claim; cosmetic badges have no itemId
-const TIER_REWARDS = [
-    { tier: 1,  coins: 500,   label: '💰 500 coins' },
-    { tier: 2,  coins: 0,     label: '🎖️ Apprentice Badge' },
-    { tier: 3,  coins: 1000,  label: '💰 1,000 coins' },
-    { tier: 4,  coins: 0,     label: '🗡️ Hunter\'s Crest Badge' },
-    { tier: 5,  coins: 2000,  label: '💰 2,000 coins' },
-    { tier: 6,  coins: 0,     label: '⚗️ Material Bundle (×5 random)' },
-    { tier: 7,  coins: 3000,  label: '💰 3,000 coins' },
-    { tier: 8,  coins: 0,     label: '🎭 Prestige Frame Badge' },
-    { tier: 9,  coins: 4000,  label: '💰 4,000 coins' },
-    { tier: 10, coins: 0,     label: '🛡️ Lifesaver (rare item)',      itemId: 'lifesaver'     },
-    { tier: 11, coins: 5000,  label: '💰 5,000 coins' },
-    { tier: 12, coins: 0,     label: '🌟 Elite Badge' },
-    { tier: 13, coins: 6000,  label: '💰 6,000 coins' },
-    { tier: 14, coins: 0,     label: '⚗️ Premium Material Bundle (×10)' },
-    { tier: 15, coins: 8000,  label: '💰 8,000 coins' },
-    { tier: 16, coins: 0,     label: '💫 Radiant Badge' },
-    { tier: 17, coins: 10000, label: '💰 10,000 coins' },
-    { tier: 18, coins: 0,     label: '🔥 Legend Badge' },
-    { tier: 19, coins: 15000, label: '💰 15,000 coins' },
-    { tier: 20, coins: 0,     label: '❄️ Streak Shield (rare item)',   itemId: 'streak_shield' }
-];
+// Reset a user's season sub-document to the fresh shape when their stored
+// seasonId is stale (a new season started). Prevents carrying old xp / claimed
+// tiers / premium across seasons. Returns true if a reset happened.
+function normalizeSeason(user, seasonId) {
+    if (!seasonId) return false;
+    if (user.season?.seasonId === seasonId) return false;
+    user.season = { seasonId, xp: 0, tier: 0, claimedTiers: [], premium: false, claimedPremiumTiers: [], weekXp: 0, weekStart: null };
+    user.markModified('season');
+    return true;
+}
 
-const XP_PER_TIER = 100;
-const MAX_TIERS = 20;
+// ── Battle pass tier definitions ─────────────────────────────────────────────
+// 50 tiers across a free track and a premium track (see src/data/seasonPass.js).
+// Premium is unlocked with a large coin payment (/season unlock) — the economy's
+// primary deliberate money sink.
+const { TIER_COUNT, XP_PER_TIER, TIER_TABLE, loreForTier } = require('../../data/seasonPass');
 
-// Flavor lore shown on claim embeds
-const TIER_LORE = [
-    'Every journey starts with a single step.',
-    'The spark of ambition ignites here.',
-    'Diligence rewarded — this is just the beginning.',
-    'Forged in discipline, tempered by purpose.',
-    'Halfway to legendary. The path sharpens.',
-    'Matter responds to mastery.',
-    'A warrior refined — not born.',
-    'Prestige is earned, never given.',
-    'Nine tiers climbed. Eleven more await.',
-    'The rarest items demand the rarest resolve.',
-    'Champions do not rest at the summit.',
-    'A radiant mark for those who endure.',
-    'Six thousand reasons to keep going.',
-    'Only the tireless reach this depth.',
-    'Wealth and will in equal measure.',
-    'Radiance touches those who refuse to quit.',
-    'Ten thousand coins — a testament to grind.',
-    'Legends write their names in fire.',
-    'Fifteen thousand. The last stretch burns bright.',
-    'You have reached the pinnacle. The season bows to you.',
-];
+const MAX_TIERS = TIER_COUNT;
+const DEFAULT_PREMIUM_COST = 100_000;
+
+function tierDef(tier)     { return TIER_TABLE[tier - 1] ?? null; }
+function rewardFor(tier, premium) {
+    const def = tierDef(tier);
+    return def ? (premium ? def.premium : def.free) : null;
+}
 
 function getTierFromXp(xp) {
     return Math.min(MAX_TIERS, Math.floor(xp / XP_PER_TIER));
@@ -104,30 +79,53 @@ async function executeView(interaction) {
     }
 
     await ensureMissions(user);
+    normalizeSeason(user, season.seasonId); // drop stale cross-season progress
 
     const userXp = user.season?.xp ?? 0;
     const currentTier = getTierFromXp(userXp);
-    const claimedTiers = new Set(user.season?.claimedTiers ?? []);
+    const premium = user.season?.premium === true;
+    const claimedFree    = new Set(user.season?.claimedTiers ?? []);
+    const claimedPremium = new Set(user.season?.claimedPremiumTiers ?? []);
     const currency = guildSettings?.economy?.currency ?? '💰';
 
-    const nextRewards = TIER_REWARDS
-        .filter(r => r.tier > currentTier)
-        .slice(0, 5)
-        .map(r => `Tier ${r.tier}: ${r.label}`)
+    // Upcoming rewards across both tracks
+    const upcoming = TIER_TABLE
+        .filter(t => t.tier > currentTier)
+        .slice(0, 4)
+        .map(t => `**Tier ${t.tier}** — 🆓 ${t.free.label}  ·  ✨ ${t.premium.label}`)
         .join('\n') || 'All tiers unlocked! 🎉';
+
+    // Unclaimed rewards already available
+    const claimableFree = TIER_TABLE.filter(t => t.tier <= currentTier && !claimedFree.has(t.tier)).length;
+    const claimablePrem = premium
+        ? TIER_TABLE.filter(t => t.tier <= currentTier && !claimedPremium.has(t.tier)).length
+        : 0;
 
     const endsIn = season.endDate
         ? `<t:${Math.floor(new Date(season.endDate).getTime() / 1000)}:R>`
         : '*No end date set*';
 
+    const premiumCost = season.premiumCost ?? DEFAULT_PREMIUM_COST;
+    const premiumLine = premium
+        ? '✨ **Premium unlocked** — claim premium rewards on every tier you reach.'
+        : `🔒 Premium locked — unlock both tracks for **${currency}${premiumCost.toLocaleString()}** with \`/season unlock\`.`;
+
+    const weeklyCap = season.weeklyXpCap ?? 0;
+    const weekXp    = user.season?.weekXp ?? 0;
+    const weeklyLine = weeklyCap > 0
+        ? `\n🗓️ Weekly XP: **${Math.min(weekXp, weeklyCap)}/${weeklyCap}**`
+        : '';
+
     const embed = new EmbedBuilder()
-        .setColor('#5865f2')
+        .setColor(premium ? '#ffd700' : '#5865f2')
         .setTitle(`🎫 ${season.name ?? 'Season Pass'}`)
+        .setDescription(`${premiumLine}${weeklyLine}`)
         .addFields(
             { name: '📊 Your Progress', value: xpProgressBar(userXp) },
             { name: '🏆 Current Tier', value: `**Tier ${currentTier} / ${MAX_TIERS}**`, inline: true },
             { name: '⏰ Season Ends', value: endsIn, inline: true },
-            { name: '🎁 Upcoming Rewards', value: nextRewards },
+            { name: '🎁 Unclaimed', value: `🆓 ${claimableFree} free${premium ? `  ·  ✨ ${claimablePrem} premium` : ''}`, inline: true },
+            { name: '🪜 Upcoming Rewards', value: upcoming },
             {
                 name: '📋 Today\'s Missions',
                 value: (user.seasonMissions ?? []).map(m =>
@@ -135,7 +133,7 @@ async function executeView(interaction) {
                 ).join('\n') || '*No missions generated*'
             }
         )
-        .setFooter({ text: `Season XP: ${userXp} total | Use /season claim to collect tier rewards` })
+        .setFooter({ text: `Season XP: ${userXp} total | /season claim tier:<n> [premium:true]` })
         .setTimestamp();
 
     await user.save().catch(() => {});
@@ -158,13 +156,25 @@ async function executeClaim(interaction) {
         return interaction.reply({ content: 'No active season pass is running.', ephemeral: true });
     }
 
+    const wantsPremium = interaction.options.getBoolean('premium') ?? false;
     const currency = guildSettings?.economy?.currency ?? '💰';
+    normalizeSeason(user, season.seasonId); // drop stale cross-season progress
     const userXp = user.season?.xp ?? 0;
     const unlockedTier = getTierFromXp(userXp);
-    const claimedTiers = new Set(user.season?.claimedTiers ?? []);
+
+    // Guard against missing sub-document arrays on old docs
+    if (!user.season) user.season = {};
+    if (!Array.isArray(user.season.claimedTiers))        user.season.claimedTiers = [];
+    if (!Array.isArray(user.season.claimedPremiumTiers)) user.season.claimedPremiumTiers = [];
+
+    const claimedTiers = new Set(wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers);
 
     if (tier > MAX_TIERS || tier < 1) {
         return interaction.reply({ content: `Tier must be between 1 and ${MAX_TIERS}.`, ephemeral: true });
+    }
+    if (wantsPremium && user.season.premium !== true) {
+        const premiumCost = season.premiumCost ?? DEFAULT_PREMIUM_COST;
+        return interaction.reply({ content: `You haven't unlocked the premium track. Unlock it for **${currency}${premiumCost.toLocaleString()}** with \`/season unlock\`.`, ephemeral: true });
     }
     if (tier > unlockedTier) {
         return interaction.reply({
@@ -173,22 +183,17 @@ async function executeClaim(interaction) {
         });
     }
     if (claimedTiers.has(tier)) {
-        return interaction.reply({ content: `You've already claimed Tier ${tier}'s reward!`, ephemeral: true });
+        return interaction.reply({ content: `You've already claimed Tier ${tier}'s ${wantsPremium ? 'premium' : 'free'} reward!`, ephemeral: true });
     }
 
-    const reward = TIER_REWARDS.find(r => r.tier === tier);
+    const reward = rewardFor(tier, wantsPremium);
     if (!reward) return interaction.reply({ content: 'Invalid tier.', ephemeral: true });
-
-    // Guard against missing sub-document array on old docs
-    if (!Array.isArray(user.season?.claimedTiers)) {
-        if (!user.season) user.season = {};
-        user.season.claimedTiers = [];
-    }
 
     if (reward.coins > 0) user.balance += reward.coins;
     if (reward.itemId) user.inventory.push({ itemId: reward.itemId, quantity: 1 });
-    user.season.claimedTiers.push(tier);
+    (wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers).push(tier);
     user.markModified('season');
+    if (reward.itemId) user.markModified('inventory');
 
     try {
         await user.save();
@@ -197,31 +202,33 @@ async function executeClaim(interaction) {
         throw err;
     }
 
-    // Social proof: how many users in this guild have claimed this tier
+    // Social proof: how many users in this guild have claimed this tier (this track)
     const claimedCount = await User.countDocuments({
         guildId: interaction.guild.id,
-        'season.claimedTiers': tier
+        [wantsPremium ? 'season.claimedPremiumTiers' : 'season.claimedTiers']: tier
     }).catch(() => null);
 
-    // Next tier teaser
-    const nextTier = TIER_REWARDS.find(r => r.tier === tier + 1);
+    // Next tier teaser (same track)
+    const nextTier = tier + 1 <= MAX_TIERS ? tierDef(tier + 1) : null;
+    const nextReward = nextTier ? rewardFor(tier + 1, wantsPremium) : null;
     const xpToNext = nextTier ? Math.max(0, (tier + 1) * XP_PER_TIER - (user.season?.xp ?? 0)) : 0;
 
-    const lore = TIER_LORE[tier - 1] ?? 'Your dedication speaks louder than words.';
+    const lore = loreForTier(tier);
 
+    const trackLabel = wantsPremium ? '✨ Premium' : '🆓 Free';
     const embed = new EmbedBuilder()
-        .setColor('#ffd700')
-        .setTitle(reward.label)
+        .setColor(wantsPremium ? '#ffd700' : '#5865f2')
+        .setTitle(`${trackLabel} — Tier ${tier}`)
         .setDescription(
             `> *${lore}*\n\n` +
             `You received: **${reward.label}**` +
             (reward.coins > 0 ? `\n+**${reward.coins.toLocaleString()} ${currency}** added to your wallet` : '')
         );
 
-    if (nextTier) {
+    if (nextTier && nextReward) {
         embed.addFields({
-            name: `⏭️ Next: Tier ${nextTier.tier}`,
-            value: `${nextTier.label}${xpToNext > 0 ? ` — ${xpToNext} XP away` : ' — **Ready to claim!**'}`
+            name: `⏭️ Next: Tier ${nextTier.tier} (${wantsPremium ? 'premium' : 'free'})`,
+            value: `${nextReward.label}${xpToNext > 0 ? ` — ${xpToNext} XP away` : ' — **Ready to claim!**'}`
         });
     }
 
@@ -231,8 +238,9 @@ async function executeClaim(interaction) {
 
     embed.setTimestamp();
 
-    // Broadcast to announcement channel for mythic-tier (≥ 10) rewards
-    if (tier >= 10) {
+    // Broadcast milestone tiers (every 10th) to the announcement channel —
+    // with 50 tiers, broadcasting everything past 10 would be spam.
+    if (tier % 10 === 0) {
         const announceChannelId = guildSettings?.economy?.announcementChannelId;
         if (announceChannelId) {
             const announceChannel = interaction.guild.channels.cache.get(announceChannelId);
@@ -258,6 +266,61 @@ async function executeClaim(interaction) {
         resultEmbed: embed,
         delayMs: 900,
     });
+}
+
+async function executeUnlock(interaction) {
+    const [user, guildSettings] = await Promise.all([
+        User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+            { upsert: true, new: true }
+        ),
+        Guild.findOne({ guildId: interaction.guild.id })
+    ]);
+
+    const season = guildSettings?.season;
+    if (!season?.enabled || !season?.seasonId) {
+        return interaction.reply({ content: 'No active season pass is running.', ephemeral: true });
+    }
+
+    const currency = guildSettings?.economy?.currency ?? '💰';
+    const cost = season.premiumCost ?? DEFAULT_PREMIUM_COST;
+
+    // If the user's season state is stale, reset it to the current season first.
+    if (user.season?.seasonId !== season.seasonId) {
+        await User.updateOne(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $set: { 'season.seasonId': season.seasonId, 'season.premium': false, 'season.claimedPremiumTiers': [] } }
+        );
+    } else if (user.season?.premium === true) {
+        return interaction.reply({ content: '✨ You already have the premium track unlocked this season.', ephemeral: true });
+    }
+
+    // Atomic: debit the cost and flip premium on in one guarded update (coin sink).
+    const unlocked = await User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: cost }, 'season.premium': { $ne: true } },
+        { $inc: { balance: -cost }, $set: { 'season.premium': true } },
+        { new: true }
+    );
+    if (!unlocked) {
+        const bal = (await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'balance'))?.balance ?? 0;
+        return interaction.reply({ content: `You need **${currency}${cost.toLocaleString()}** to unlock the premium track — you have **${currency}${bal.toLocaleString()}**.`, ephemeral: true });
+    }
+    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'season_premium', amount: -cost, balance: unlocked.balance, note: 'Season pass premium unlock' });
+
+    const unlockedTier = getTierFromXp(unlocked.season?.xp ?? 0);
+    const embed = new EmbedBuilder()
+        .setColor('#ffd700')
+        .setTitle('✨ Premium Season Pass Unlocked!')
+        .setDescription(
+            `You paid **${currency}${cost.toLocaleString()}** to unlock the **premium track** for **${season.name ?? 'this season'}**.\n\n` +
+            `Premium rewards are now claimable on every tier you've reached` +
+            (unlockedTier > 0 ? ` — that's **${unlockedTier}** tier${unlockedTier === 1 ? '' : 's'} ready right now!` : '.') +
+            `\n\nClaim them with \`/season claim tier:<n> premium:true\`.`
+        )
+        .setFooter({ text: 'Premium rewards include exclusive items and richer coin payouts.' })
+        .setTimestamp();
+    return interaction.reply({ embeds: [embed] });
 }
 
 async function executeMissions(interaction) {
@@ -323,9 +386,10 @@ async function executeClaimMission(interaction) {
     if (mission.claimed) return interaction.reply({ content: 'Already claimed!', ephemeral: true });
 
     user.seasonMissions[missionIndex].claimed = true;
-    if (!user.season) user.season = {};
-    user.season.xp = (user.season.xp ?? 0) + mission.seasonXp;
-    user.season.tier = getTierFromXp(user.season.xp);
+    normalizeSeason(user, season.seasonId);
+    // Route through the shared grant so the weekly XP cap and rollover apply.
+    // awardSeasonXp returns the actual granted amount (may be < mission.seasonXp if capped).
+    const grantedXp = await awardSeasonXp(user, mission.seasonXp, guildSettings);
     user.balance += mission.coinReward;
     user.markModified('seasonMissions');
     user.markModified('season');
@@ -338,7 +402,7 @@ async function executeClaimMission(interaction) {
     }
 
     return interaction.reply({
-        content: `✅ Mission claimed! +**${mission.seasonXp} Season XP** and +**${mission.coinReward.toLocaleString()} ${currency}**`,
+        content: `✅ Mission claimed! +**${grantedXp} Season XP** and +**${mission.coinReward.toLocaleString()} ${currency}**`,
         ephemeral: true
     });
 }
@@ -643,11 +707,20 @@ module.exports = {
                 .setDescription('Claim a tier reward from the season pass.')
                 .addIntegerOption(opt =>
                     opt.setName('tier')
-                        .setDescription('Tier number to claim (1–20)')
+                        .setDescription('Tier number to claim (1–50)')
                         .setRequired(true)
                         .setMinValue(1)
-                        .setMaxValue(20)
+                        .setMaxValue(50)
                 )
+                .addBooleanOption(opt =>
+                    opt.setName('premium')
+                        .setDescription('Claim the premium-track reward for this tier (requires /season unlock)')
+                        .setRequired(false)
+                )
+        )
+        .addSubcommand(sub =>
+            sub.setName('unlock')
+                .setDescription('Unlock the premium season-pass track for a one-time coin payment.')
         )
         .addSubcommand(sub =>
             sub.setName('missions')
@@ -706,6 +779,7 @@ module.exports = {
         try {
             if (sub === 'view')          return await executeView(interaction);
             if (sub === 'claim')         return await executeClaim(interaction);
+            if (sub === 'unlock')        return await executeUnlock(interaction);
             if (sub === 'missions')      return await executeMissions(interaction);
             if (sub === 'claim-mission') return await executeClaimMission(interaction);
             if (sub === 'leaderboard')   return await executeLeaderboard(interaction);
