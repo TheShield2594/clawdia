@@ -80,12 +80,15 @@ function buildTierTable() {
         const pItem  = PREMIUM_ITEMS[tier];
         const pBadge = PREMIUM_BADGES[tier];
         const pCoins = premiumCoins(tier);
+        const pParts = [];
+        if (pItem)      pParts.push(pItem.label);
+        if (pBadge)     pParts.push(pBadge);                              // titles stack with items
+        if (pCoins > 0) pParts.push(`💰 ${pCoins.toLocaleString()}`);
         const premium = {
             coins:  pCoins,
             itemId: pItem?.itemId ?? null,
-            label:  pItem
-                ? (pCoins > 0 ? `${pItem.label} + 💰 ${pCoins.toLocaleString()}` : pItem.label)
-                : pBadge ?? `💰 ${pCoins.toLocaleString()} coins`,
+            title:  pBadge ?? null,
+            label:  pParts.length ? pParts.join(' + ') : `💰 ${pCoins.toLocaleString()} coins`,
         };
 
         table.push({ tier, free, premium });
