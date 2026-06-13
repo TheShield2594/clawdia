@@ -759,10 +759,14 @@ async function pvpBattle(interaction, ctx) {
 
         // If a fighter is gone, no longer battle-ready, or went on cooldown
         // between the challenge and acceptance, refund and abort.
-        const refundAndCancel = (reason) => {
+        const refundAndCancel = async (reason) => {
             if (bet > 0) {
-                User.updateOne({ userId: interaction.user.id, guildId }, { $inc: { balance: bet } }).catch(() => {});
-                User.updateOne({ userId: opponent.id, guildId }, { $inc: { balance: bet } }).catch(() => {});
+                const [rA, rB] = await Promise.allSettled([
+                    User.updateOne({ userId: interaction.user.id, guildId }, { $inc: { balance: bet } }),
+                    User.updateOne({ userId: opponent.id, guildId }, { $inc: { balance: bet } }),
+                ]);
+                if (rA.status === 'rejected') console.error('[pet battle] refund failed for challenger:', rA.reason);
+                if (rB.status === 'rejected') console.error('[pet battle] refund failed for opponent:', rB.reason);
             }
             return interaction.editReply({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor('#e74c3c').setDescription(`${reason} — the battle was cancelled${bet > 0 ? ' and any wagers refunded' : ''}.`)], components: [] }).catch(() => {});
         };

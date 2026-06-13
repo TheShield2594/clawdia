@@ -388,8 +388,8 @@ async function executeClaimMission(interaction) {
     user.seasonMissions[missionIndex].claimed = true;
     normalizeSeason(user, season.seasonId);
     // Route through the shared grant so the weekly XP cap and rollover apply.
-    await awardSeasonXp(user, mission.seasonXp, guildSettings);
-    user.season.tier = getTierFromXp(user.season.xp ?? 0);
+    // awardSeasonXp returns the actual granted amount (may be < mission.seasonXp if capped).
+    const grantedXp = await awardSeasonXp(user, mission.seasonXp, guildSettings);
     user.balance += mission.coinReward;
     user.markModified('seasonMissions');
     user.markModified('season');
@@ -402,7 +402,7 @@ async function executeClaimMission(interaction) {
     }
 
     return interaction.reply({
-        content: `✅ Mission claimed! +**${mission.seasonXp} Season XP** and +**${mission.coinReward.toLocaleString()} ${currency}**`,
+        content: `✅ Mission claimed! +**${grantedXp} Season XP** and +**${mission.coinReward.toLocaleString()} ${currency}**`,
         ephemeral: true
     });
 }
