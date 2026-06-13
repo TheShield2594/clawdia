@@ -545,6 +545,9 @@ const guildSchema = new Schema({
         endDate: { type: Date, default: null },
         xpPerTier: { type: Number, default: 100 },
         maxTiers: { type: Number, default: 50 },
+        // Premium track unlock price (coin sink) and weekly season-XP cap (pacing)
+        premiumCost: { type: Number, default: 100000 },
+        weeklyXpCap: { type: Number, default: 1500 },
         tierRewards: [{
             tier: { type: Number, required: true },
             coins: { type: Number, default: 0 },

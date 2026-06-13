@@ -238,8 +238,25 @@ async function awardSeasonXp(user, xp, guildSettings) {
     const season = guildSettings?.season;
     if (!season?.enabled || !season.seasonId) return;
     if (user.season?.seasonId !== season.seasonId) {
-        user.season = { seasonId: season.seasonId, xp: 0, tier: 0, claimedTiers: [] };
+        user.season = { seasonId: season.seasonId, xp: 0, tier: 0, claimedTiers: [], premium: false, claimedPremiumTiers: [], weekXp: 0, weekStart: null };
     }
+
+    // Weekly XP cap (pacing): roll the window over after 7 days and clamp the
+    // grant so the pass can't be finished in a few days of grinding.
+    const weeklyCap = season.weeklyXpCap || 0;
+    if (weeklyCap > 0) {
+        const now = Date.now();
+        const weekStart = user.season.weekStart ? new Date(user.season.weekStart).getTime() : 0;
+        if (!weekStart || now - weekStart >= 7 * 24 * 60 * 60 * 1000) {
+            user.season.weekStart = new Date();
+            user.season.weekXp = 0;
+        }
+        const remaining = Math.max(0, weeklyCap - (user.season.weekXp || 0));
+        xp = Math.min(xp, remaining);
+        if (xp <= 0) return;
+        user.season.weekXp = (user.season.weekXp || 0) + xp;
+    }
+
     user.season.xp = (user.season.xp || 0) + xp;
     const xpPerTier = season.xpPerTier || 100;
     const maxTiers  = season.maxTiers  || 50;

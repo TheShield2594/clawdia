@@ -75,7 +75,13 @@ const userSchema = new Schema({
         seasonId: { type: String, default: null },
         xp: { type: Number, default: 0 },
         tier: { type: Number, default: 0 },
-        claimedTiers: [{ type: Number }]
+        claimedTiers: [{ type: Number }],
+        // Premium track (unlocked via a large coin sink — see /season unlock)
+        premium: { type: Boolean, default: false },
+        claimedPremiumTiers: [{ type: Number }],
+        // Weekly XP pacing
+        weekXp: { type: Number, default: 0 },
+        weekStart: { type: Date, default: null },
     },
 
     // Progression archetype track
