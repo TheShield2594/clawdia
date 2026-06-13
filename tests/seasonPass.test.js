@@ -34,6 +34,14 @@ describe('season pass tier table', () => {
         expect(TIER_TABLE[0].premium.itemId).toBe('lucky_charm'); // tier 1 premium hook
     });
 
+    test('tier 50 grants both the item and the Season Sovereign title', () => {
+        const t50 = TIER_TABLE[49].premium;
+        expect(t50.itemId).toBe('lifesaver');
+        expect(t50.title).toMatch(/Sovereign/);
+        expect(t50.label).toMatch(/Lifesaver/);
+        expect(t50.label).toMatch(/Sovereign/); // title not dropped when an item is also present
+    });
+
     test('lore exists for every tier', () => {
         for (let t = 1; t <= TIER_COUNT; t++) expect(loreForTier(t)).toBeTruthy();
     });

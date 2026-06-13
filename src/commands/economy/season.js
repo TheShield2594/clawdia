@@ -8,6 +8,18 @@ const { getEventCurrencyBalance } = require('../../services/seasonalEventService
 const { progressBar } = require('../../utils/progressBar');
 const { rewardReveal } = require('../../utils/rewardReveal');
 const { logTransaction } = require('../../utils/logTransaction');
+const { awardSeasonXp } = require('../../services/questService');
+
+// Reset a user's season sub-document to the fresh shape when their stored
+// seasonId is stale (a new season started). Prevents carrying old xp / claimed
+// tiers / premium across seasons. Returns true if a reset happened.
+function normalizeSeason(user, seasonId) {
+    if (!seasonId) return false;
+    if (user.season?.seasonId === seasonId) return false;
+    user.season = { seasonId, xp: 0, tier: 0, claimedTiers: [], premium: false, claimedPremiumTiers: [], weekXp: 0, weekStart: null };
+    user.markModified('season');
+    return true;
+}
 
 // ── Battle pass tier definitions ─────────────────────────────────────────────
 // 50 tiers across a free track and a premium track (see src/data/seasonPass.js).
@@ -67,6 +79,7 @@ async function executeView(interaction) {
     }
 
     await ensureMissions(user);
+    normalizeSeason(user, season.seasonId); // drop stale cross-season progress
 
     const userXp = user.season?.xp ?? 0;
     const currentTier = getTierFromXp(userXp);
@@ -145,6 +158,7 @@ async function executeClaim(interaction) {
 
     const wantsPremium = interaction.options.getBoolean('premium') ?? false;
     const currency = guildSettings?.economy?.currency ?? '💰';
+    normalizeSeason(user, season.seasonId); // drop stale cross-season progress
     const userXp = user.season?.xp ?? 0;
     const unlockedTier = getTierFromXp(userXp);
 
@@ -372,9 +386,10 @@ async function executeClaimMission(interaction) {
     if (mission.claimed) return interaction.reply({ content: 'Already claimed!', ephemeral: true });
 
     user.seasonMissions[missionIndex].claimed = true;
-    if (!user.season) user.season = {};
-    user.season.xp = (user.season.xp ?? 0) + mission.seasonXp;
-    user.season.tier = getTierFromXp(user.season.xp);
+    normalizeSeason(user, season.seasonId);
+    // Route through the shared grant so the weekly XP cap and rollover apply.
+    await awardSeasonXp(user, mission.seasonXp, guildSettings);
+    user.season.tier = getTierFromXp(user.season.xp ?? 0);
     user.balance += mission.coinReward;
     user.markModified('seasonMissions');
     user.markModified('season');

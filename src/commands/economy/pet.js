@@ -568,6 +568,19 @@ function petUsable(pet) {
     return { ok: true };
 }
 
+function onBattleCooldown(pet) {
+    return pet?.lastBattle && Date.now() - new Date(pet.lastBattle).getTime() < BATTLE_COOLDOWN_MS;
+}
+
+// Snapshot the combat-relevant fields so result rendering reflects PRE-battle
+// state even after applyPetXp mutates the live pet (level/stage/xp).
+function petSnapshot(pet) {
+    return { petId: pet.petId, name: pet.name, personality: pet.personality, level: pet.level ?? 1, evolutionStage: pet.evolutionStage ?? 1 };
+}
+
+// petA/petB must be PRE-battle snapshots: result.finalHpA/B and the HP-bar
+// denominators (max HP) are computed from pre-battle stats, so rendering from
+// post-XP pets would mismatch the bars and show the wrong level.
 function battleResultEmbed({ color, title, petA, petB, result, currency, payoutLine, xpLineA, xpLineB }) {
     const da = getPetDisplay(petA), db = getPetDisplay(petB);
     const sa = getPetStats(petA),   sb = getPetStats(petB);
@@ -619,7 +632,12 @@ async function executeBattle(interaction) {
         return interaction.reply({ content: `${getPetDisplay(myPet).emoji} **${getPetDisplay(myPet).titledName}** is recovering — ready to battle again in **${mins}m**.`, ephemeral: true });
     }
 
-    if (!opponent) return wildBattle(interaction, user, slot, currency, guildSettings);
+    if (!opponent) {
+        if (bet > 0) {
+            return interaction.reply({ content: "You can't wager against a wild pet — challenge a member instead.", ephemeral: true });
+        }
+        return wildBattle(interaction, user, slot, currency, guildSettings);
+    }
 
     // ── PvP setup ──
     if (bet > 0) {
@@ -648,10 +666,11 @@ async function wildBattle(interaction, user, slot, currency, guildSettings) {
     await interaction.deferReply();
     const myPet  = user.pets[slot];
     const wild   = makeWildPet(myPet.level ?? 1);
+    const mySnap = petSnapshot(myPet); // pre-XP snapshot for consistent result rendering
     const result = simulateBattle(myPet, wild);
     const won    = result.winner === 'a';
 
-    const da = getPetDisplay(myPet), db = getPetDisplay(wild);
+    const da = getPetDisplay(mySnap), db = getPetDisplay(wild);
     const intro = new EmbedBuilder()
         .setColor('#9b59b6')
         .setTitle('⚔️ A wild challenger appears!')
@@ -675,7 +694,7 @@ async function wildBattle(interaction, user, slot, currency, guildSettings) {
         embeds: [battleResultEmbed({
             color: won ? '#2ecc71' : '#e74c3c',
             title: won ? `🏆 ${da.titledName} won the wild battle!` : `💀 ${da.titledName} was beaten back…`,
-            petA: myPet, petB: wild, result, currency,
+            petA: mySnap, petB: wild, result, currency,
             payoutLine: null,
             xpLineA: petXpLine(da.titledName, xpRes),
         })],
@@ -738,15 +757,21 @@ async function pvpBattle(interaction, ctx) {
         const aPet = chUser?.pets?.[slot];
         const bPet = opUser?.pets?.find(p => p.hunger >= STARVING_THRESHOLD);
 
-        // If a fighter vanished (released mid-challenge), refund and abort
-        if (!aPet || !bPet) {
+        // If a fighter is gone, no longer battle-ready, or went on cooldown
+        // between the challenge and acceptance, refund and abort.
+        const refundAndCancel = (reason) => {
             if (bet > 0) {
-                await User.updateOne({ userId: interaction.user.id, guildId }, { $inc: { balance: bet } }).catch(() => {});
-                await User.updateOne({ userId: opponent.id, guildId }, { $inc: { balance: bet } }).catch(() => {});
+                User.updateOne({ userId: interaction.user.id, guildId }, { $inc: { balance: bet } }).catch(() => {});
+                User.updateOne({ userId: opponent.id, guildId }, { $inc: { balance: bet } }).catch(() => {});
             }
-            return interaction.editReply({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor('#e74c3c').setDescription('A pet is no longer available — the battle was cancelled and any wagers refunded.')], components: [] }).catch(() => {});
-        }
+            return interaction.editReply({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor('#e74c3c').setDescription(`${reason} — the battle was cancelled${bet > 0 ? ' and any wagers refunded' : ''}.`)], components: [] }).catch(() => {});
+        };
+        if (!aPet || !bPet) return refundAndCancel('A pet is no longer available');
+        if (!petUsable(aPet).ok || !petUsable(bPet).ok) return refundAndCancel('A pet is no longer battle-ready');
+        if (onBattleCooldown(aPet) || onBattleCooldown(bPet)) return refundAndCancel('A pet is now recovering from a recent battle');
 
+        // Pre-battle snapshots for consistent result rendering (applyPetXp below mutates levels)
+        const aSnap = petSnapshot(aPet), bSnap = petSnapshot(bPet);
         const result = simulateBattle(aPet, bPet);
         const aWon   = result.winner === 'a';
 
@@ -789,14 +814,14 @@ async function pvpBattle(interaction, ctx) {
             console.error('[pet battle] save error:', err);
         }
 
-        const da2 = getPetDisplay(aPet), db2 = getPetDisplay(bPet);
+        const da2 = getPetDisplay(aSnap), db2 = getPetDisplay(bSnap);
         const winnerDisp = aWon ? da2 : db2;
         return interaction.editReply({
             content: null,
             embeds: [battleResultEmbed({
                 color: '#f1c40f',
                 title: `🏆 ${winnerDisp.titledName} wins the battle!`,
-                petA: aPet, petB: bPet, result, currency,
+                petA: aSnap, petB: bSnap, result, currency,
                 payoutLine,
                 xpLineA: petXpLine(da2.titledName, aXp),
                 xpLineB: petXpLine(db2.titledName, bXp),
