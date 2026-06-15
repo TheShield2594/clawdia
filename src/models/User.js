@@ -18,8 +18,6 @@ const userSchema = new Schema({
     lastRob: { type: Date, default: null },
     lastRobbedAt: { type: Date, default: null },
     lastDuel: { type: Date, default: null },
-    // TODO: wheel game removed — this field is unused and can be dropped in a future migration
-    // lastWheelSpin: { type: Date, default: null },
     lastFish: { type: Date, default: null },
     lastMine: { type: Date, default: null },
     lastCrime: { type: Date, default: null },
