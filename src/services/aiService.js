@@ -784,10 +784,7 @@ async function handleAIChat(message, aiSettings) {
     let systemPrompt = aiSettings.systemPrompt || 'You are a helpful Discord bot assistant.';
 
     const userDoc = await User.findOne({ userId: message.author.id, guildId: message.guild.id }).lean();
-    if (userDoc?.pinnedMemories?.length) {
-        const memoriesText = userDoc.pinnedMemories.map(m => `- ${m.content}`).join('\n');
-        systemPrompt += `\n\n## User's Pinned Memories\n${memoriesText}`;
-    }
+    const pinnedMemories = userDoc?.pinnedMemories?.length ? userDoc.pinnedMemories : null;
 
     const { entries: kbEntries, isBackground: kbIsBackground } = await retrieveKnowledge(message.guild.id, content);
     if (kbEntries.length) {
@@ -799,9 +796,19 @@ async function handleAIChat(message, aiSettings) {
 
     try {
         await message.channel.sendTyping();
-        const { messages: history } = await loadHistory(
+        const { messages: rawHistory } = await loadHistory(
             message.guild.id, message.channel.id, message.author.id, maxHistory
         );
+
+        // Prepend pinned memories as a user-context message so the model treats
+        // them as reference information, not authoritative system instructions.
+        const history = pinnedMemories
+            ? [
+                { role: 'user', content: `[My saved context for this conversation]\n${pinnedMemories.map(m => `- ${m.content}`).join('\n')}` },
+                { role: 'assistant', content: 'Understood, I have noted your saved context.' },
+                ...rawHistory
+              ]
+            : rawHistory;
 
         const usageOut = {};
         const callArgs = {
