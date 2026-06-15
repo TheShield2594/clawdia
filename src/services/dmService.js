@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const DmSession = require('../models/DmSession');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 const Guild = require('../models/Guild');
@@ -163,13 +163,21 @@ async function beginSession(interaction) {
             { $push: { storyLog: story } }
         );
 
+        const updatedSession = await DmSession.findOne({ sessionId: session.sessionId });
+
         const embed = new EmbedBuilder()
             .setTitle('📖 The Adventure Begins...')
             .setColor('#8b4513')
             .setDescription(story)
             .setFooter({ text: 'Use /dm action to take an action!' });
 
-        return interaction.editReply({ embeds: [embed] });
+        const storyRow = makeStoryButton(session.sessionId);
+        await interaction.editReply({ embeds: [embed], components: [storyRow] });
+
+        if (updatedSession) {
+            await postOrUpdateStatCard(channel, updatedSession).catch(console.error);
+        }
+        return;
     } catch (err) {
         console.error('[DM] begin error:', err.message);
         return interaction.editReply('Failed to generate the opening scene. Please try again.');
@@ -262,17 +270,25 @@ async function takeAction(interaction) {
             );
         }
 
+        const updatedSession = await DmSession.findOne({ sessionId: session.sessionId });
+
         const embed = new EmbedBuilder()
             .setTitle(`⚔️ ${player.name} acts!`)
             .setColor(wiped ? '#ff0000' : '#4169e1')
             .setDescription(narrative)
-            .setFooter({ text: wiped ? 'The party has fallen...' : 'Use /dm action to respond | /dm status to check party' });
+            .setFooter({ text: wiped ? 'The party has fallen...' : 'Use /dm action to respond!' });
 
         if (wiped) {
             embed.addFields({ name: '💀 Session Ended', value: 'The entire party has fallen. The adventure is over.' });
         }
 
-        return interaction.editReply({ embeds: [embed] });
+        const components = wiped ? [] : [makeStoryButton(session.sessionId)];
+        await interaction.editReply({ embeds: [embed], components });
+
+        if (updatedSession && !wiped) {
+            await postOrUpdateStatCard(channel, updatedSession).catch(console.error);
+        }
+        return;
     } catch (err) {
         console.error('[DM] action error:', err.message);
         return interaction.editReply('Failed to generate a response. Please try again.');
@@ -335,6 +351,107 @@ async function stopSession(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
+function makeStoryButton(sessionId) {
+    const row = new ActionRowBuilder();
+    row.addComponents(
+        new ButtonBuilder()
+            .setCustomId(`dm_storysofar_${sessionId}`)
+            .setLabel('📖 Story So Far')
+            .setStyle(ButtonStyle.Secondary)
+    );
+    return row;
+}
+
+function buildStatCardEmbed(session) {
+    const MAX_BAR = 10;
+    const fields = session.players.map(p => {
+        const maxHp = CLASS_HP[p.characterClass] || 100;
+        const filled = Math.round((Math.max(0, p.hp) / maxHp) * MAX_BAR);
+        const bar = '█'.repeat(filled) + '░'.repeat(MAX_BAR - filled);
+        const invLine = p.inventory.length ? p.inventory.join(', ') : 'Empty';
+        return {
+            name: `${p.name} — ${p.characterClass}`,
+            value: `❤️ \`${bar}\` ${p.hp}/${maxHp}\n🎒 ${invLine}`,
+            inline: false
+        };
+    });
+
+    return new EmbedBuilder()
+        .setTitle('🗡️ Party Status')
+        .setColor('#2f3136')
+        .addFields(fields)
+        .setFooter({ text: 'Updated after each action' })
+        .setTimestamp();
+}
+
+async function postOrUpdateStatCard(channel, session) {
+    const embed = buildStatCardEmbed(session);
+    if (session.statCardMessageId) {
+        try {
+            const msg = await channel.messages.fetch(session.statCardMessageId);
+            await msg.edit({ embeds: [embed] });
+            return;
+        } catch {
+            // message deleted or inaccessible — post a new one
+        }
+    }
+    const sent = await channel.send({ embeds: [embed] });
+    await DmSession.findOneAndUpdate(
+        { sessionId: session.sessionId },
+        { $set: { statCardMessageId: sent.id } }
+    );
+}
+
+async function handleDmButton(interaction, client) {
+    if (!interaction.customId.startsWith('dm_storysofar_')) return false;
+
+    const sessionId = interaction.customId.slice('dm_storysofar_'.length);
+    const session = await DmSession.findOne({ sessionId });
+    if (!session || !session.active) {
+        await interaction.reply({ content: 'This session is no longer active.', ephemeral: true });
+        return true;
+    }
+
+    if (session.storyLog.length === 0) {
+        await interaction.reply({ content: 'The adventure has not begun yet.', ephemeral: true });
+        return true;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+        const gs = await Guild.findOne({ guildId: session.guildId });
+        const aiSettings = gs?.ai || {};
+        const { provider, model, apiKey, baseUrl } = resolveProviderConfig(aiSettings);
+
+        if (provider !== 'ollama' && !apiKey) {
+            return interaction.editReply('AI is not configured for this server.');
+        }
+
+        const logSnippet = session.storyLog.slice(-16).join('\n\n');
+        const recap = await getCompletion({
+            provider, model, apiKey, baseUrl,
+            systemPrompt: 'You are a dramatic fantasy narrator. Summarize the story concisely.',
+            history: [],
+            prompt: `Summarize the following campaign story so far as a dramatic narrator in 3-5 sentences:\n\n${logSnippet}`,
+            temperature: 0.8,
+            maxTokens: 300
+        });
+
+        const embed = new EmbedBuilder()
+            .setTitle('📖 Story So Far...')
+            .setColor('#8b4513')
+            .setDescription(recap)
+            .setFooter({ text: 'Only visible to you' });
+
+        await interaction.editReply({ embeds: [embed] });
+    } catch (err) {
+        console.error('[DM] story recap error:', err.message);
+        await interaction.editReply('Failed to generate recap. Please try again.');
+    }
+    return true;
+}
+
 function buildDMSystemPrompt() {
     return `You are an experienced, creative Dungeon Master running a text-based RPG on Discord. Your role is to:
 - Narrate vivid, engaging story scenes
@@ -348,4 +465,4 @@ function buildDMSystemPrompt() {
 The party is playing in a classic fantasy setting. Be creative, dramatic, and fun!`;
 }
 
-module.exports = { startSession, joinSession, beginSession, takeAction, partyStatus, stopSession, CLASSES };
+module.exports = { startSession, joinSession, beginSession, takeAction, partyStatus, stopSession, handleDmButton, CLASSES };

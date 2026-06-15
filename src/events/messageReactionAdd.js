@@ -24,6 +24,7 @@ module.exports = {
         await handleReactionRole(reaction, user, guild, guildSettings);
         await handleStarboard(reaction, user, guild, guildSettings);
         await handleReactionQuests(reaction, user, guild, guildSettings);
+        await handleMemoryPin(reaction, user, guild, client);
     }
 };
 
@@ -110,4 +111,47 @@ async function handleStarboard(reaction, user, guild, guildSettings) {
         content: `${sb.emoji} **${count}** | <#${message.channel.id}>`,
         embeds: [embed]
     }).catch(console.error);
+}
+
+const MEMORY_PIN_EMOJI = '📌';
+const MEMORY_CAP = 10;
+
+async function handleMemoryPin(reaction, discordUser, guild, client) {
+    const emojiKey = reaction.emoji.id
+        ? `<${reaction.emoji.animated ? 'a' : ''}:${reaction.emoji.name}:${reaction.emoji.id}>`
+        : reaction.emoji.name;
+
+    if (emojiKey !== MEMORY_PIN_EMOJI) return;
+
+    const message = reaction.message;
+    const botUser = client?.user;
+    if (!botUser || message.author.id !== botUser.id) return;
+
+    const content = message.content || (message.embeds[0]?.description ?? '');
+    if (!content) return;
+
+    const userDoc = await User.findOne({ userId: discordUser.id, guildId: guild.id });
+    if (!userDoc) return;
+
+    if (!userDoc.pinnedMemories) userDoc.pinnedMemories = [];
+
+    if (userDoc.pinnedMemories.length >= MEMORY_CAP) {
+        const dmChannel = await discordUser.createDM().catch(() => null);
+        if (dmChannel) {
+            await dmChannel.send(
+                `Your pinned memory limit (${MEMORY_CAP}) is full. Use \`/ai memories\` to delete some before pinning more.`
+            ).catch(() => null);
+        }
+        return;
+    }
+
+    // Truncate to a reasonable length for context injection
+    const truncated = content.length > 500 ? content.slice(0, 500) + '…' : content;
+    userDoc.pinnedMemories.push({ content: truncated, pinnedAt: new Date(), channelId: message.channel.id });
+    await userDoc.save();
+
+    const dmChannel = await discordUser.createDM().catch(() => null);
+    if (dmChannel) {
+        await dmChannel.send(`📌 Memory pinned! I'll remember this in future conversations.\n> ${truncated.slice(0, 100)}${truncated.length > 100 ? '…' : ''}`).catch(() => null);
+    }
 }

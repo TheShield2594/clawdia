@@ -3,6 +3,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Anthropic = require('@anthropic-ai/sdk');
 const axios = require('axios');
 const Conversation = require('../models/Conversation');
+const User = require('../models/User');
 const KnowledgeBase = require('../models/KnowledgeBase');
 const Reminder = require('../models/Reminder');
 const AIUsage = require('../models/AIUsage');
@@ -779,8 +780,14 @@ async function handleAIChat(message, aiSettings) {
     const maxHistory = aiSettings.maxHistory ?? 20;
     const useStreaming = aiSettings.streaming !== false;
 
-    // Build system prompt: base + knowledge context + action instructions
+    // Build system prompt: base + pinned memories + knowledge context + action instructions
     let systemPrompt = aiSettings.systemPrompt || 'You are a helpful Discord bot assistant.';
+
+    const userDoc = await User.findOne({ userId: message.author.id, guildId: message.guild.id }).lean();
+    if (userDoc?.pinnedMemories?.length) {
+        const memoriesText = userDoc.pinnedMemories.map(m => `- ${m.content}`).join('\n');
+        systemPrompt += `\n\n## User's Pinned Memories\n${memoriesText}`;
+    }
 
     const { entries: kbEntries, isBackground: kbIsBackground } = await retrieveKnowledge(message.guild.id, content);
     if (kbEntries.length) {

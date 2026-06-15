@@ -3,6 +3,7 @@ const User = require('../models/User');
 const { handlePollVote } = require('../commands/utility/poll');
 const { handleHeistButton } = require('../commands/economy/heist');
 const { handleSyndicateButton } = require('../commands/economy/syndicate');
+const { handleDmButton } = require('../services/dmService');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 async function logCommandMetric(interaction, success, reason = null) {
     try {
@@ -155,6 +156,13 @@ module.exports = {
 
             if (interaction.customId.startsWith('poll_')) {
                 await handlePollVote(interaction);
+            }
+
+            if (interaction.customId.startsWith('dm_storysofar_')) {
+                await handleDmButton(interaction, client).catch(err => {
+                    console.error('[dm] button handler error:', err);
+                });
+                return;
             }
 
             return;
