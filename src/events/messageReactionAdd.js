@@ -130,7 +130,11 @@ async function handleMemoryPin(reaction, discordUser, guild, client) {
     const content = message.content || (message.embeds[0]?.description ?? '');
     if (!content) return;
 
-    const userDoc = await User.findOne({ userId: discordUser.id, guildId: guild.id });
+    const userDoc = await User.findOneAndUpdate(
+        { userId: discordUser.id, guildId: guild.id },
+        { $setOnInsert: { userId: discordUser.id, guildId: guild.id } },
+        { upsert: true, new: true }
+    );
     if (!userDoc) return;
 
     if (!userDoc.pinnedMemories) userDoc.pinnedMemories = [];

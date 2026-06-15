@@ -366,7 +366,7 @@ function buildStatCardEmbed(session) {
     const MAX_BAR = 10;
     const fields = session.players.map(p => {
         const maxHp = CLASS_HP[p.characterClass] || 100;
-        const filled = Math.round((Math.max(0, p.hp) / maxHp) * MAX_BAR);
+        const filled = Math.min(MAX_BAR, Math.round((Math.max(0, p.hp) / maxHp) * MAX_BAR));
         const bar = '█'.repeat(filled) + '░'.repeat(MAX_BAR - filled);
         const invLine = p.inventory.length ? p.inventory.join(', ') : 'Empty';
         return {
