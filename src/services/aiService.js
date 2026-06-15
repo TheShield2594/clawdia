@@ -3,6 +3,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Anthropic = require('@anthropic-ai/sdk');
 const axios = require('axios');
 const Conversation = require('../models/Conversation');
+const User = require('../models/User');
 const KnowledgeBase = require('../models/KnowledgeBase');
 const Reminder = require('../models/Reminder');
 const AIUsage = require('../models/AIUsage');
@@ -779,8 +780,11 @@ async function handleAIChat(message, aiSettings) {
     const maxHistory = aiSettings.maxHistory ?? 20;
     const useStreaming = aiSettings.streaming !== false;
 
-    // Build system prompt: base + knowledge context + action instructions
+    // Build system prompt: base + pinned memories + knowledge context + action instructions
     let systemPrompt = aiSettings.systemPrompt || 'You are a helpful Discord bot assistant.';
+
+    const userDoc = await User.findOne({ userId: message.author.id, guildId: message.guild.id }).lean();
+    const pinnedMemories = userDoc?.pinnedMemories?.length ? userDoc.pinnedMemories : null;
 
     const { entries: kbEntries, isBackground: kbIsBackground } = await retrieveKnowledge(message.guild.id, content);
     if (kbEntries.length) {
@@ -792,9 +796,19 @@ async function handleAIChat(message, aiSettings) {
 
     try {
         await message.channel.sendTyping();
-        const { messages: history } = await loadHistory(
+        const { messages: rawHistory } = await loadHistory(
             message.guild.id, message.channel.id, message.author.id, maxHistory
         );
+
+        // Prepend pinned memories as a user-context message so the model treats
+        // them as reference information, not authoritative system instructions.
+        const history = pinnedMemories
+            ? [
+                { role: 'user', content: `[My saved context for this conversation]\n${pinnedMemories.map(m => `- ${m.content}`).join('\n')}` },
+                { role: 'assistant', content: 'Understood, I have noted your saved context.' },
+                ...rawHistory
+              ]
+            : rawHistory;
 
         const usageOut = {};
         const callArgs = {

@@ -126,6 +126,13 @@ const userSchema = new Schema({
         amount:     { type: Number, default: 0, min: 0 }
     }],
 
+    // Pinned AI memories (set via 📌 reaction on bot messages)
+    pinnedMemories: [{
+        content: { type: String, required: true },
+        pinnedAt: { type: Date, default: Date.now },
+        channelId: { type: String, default: null }
+    }],
+
     // Per-user notification preferences
     notifications: {
         leaderboard: {
