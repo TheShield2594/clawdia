@@ -16,7 +16,8 @@ const dmSessionSchema = new Schema({
     players: { type: [dmCharacterSchema], default: [] },
     storyLog: { type: [String], default: [] },
     partyState: { type: Schema.Types.Mixed, default: {} },
-    active: { type: Boolean, default: true }
+    active: { type: Boolean, default: true },
+    statCardMessageId: { type: String, default: null }
 }, { timestamps: true });
 
 dmSessionSchema.index({ guildId: 1, channelId: 1, active: 1 });
