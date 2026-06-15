@@ -169,10 +169,6 @@ const guildSchema = new Schema({
         robEnabled: { type: Boolean, default: true },
         robMinWallet: { type: Number, default: 100, min: 0 },
         robFailFineRate: { type: Number, default: 0.2, min: 0, max: 1 },
-        // TODO: wheel game removed — these fields are unused and can be dropped in a future migration
-        // wheelEnabled: { type: Boolean, default: true },
-        // wheelCooldownHours: { type: Number, default: 24, min: 1, max: 168 },
-        // wheelExtraSpinCost: { type: Number, default: 200, min: 1 },
         duelEnabled: { type: Boolean, default: true },
         duelMaxBet: { type: Number, default: 10000, min: 1 },
         casinoEnabled: { type: Boolean, default: true },
