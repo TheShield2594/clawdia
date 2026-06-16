@@ -2224,6 +2224,7 @@ async function handleBuy(interaction, user, currency) {
                 const baitField = `data.bait.${baitPack.baitType}`;
                 const addedQty  = baitPack.quantity * quantity;
 
+                await persistGrindIfNew(user, 'fishing');
                 const updated = await User.findOneAndUpdate(
                     { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: totalCost } },
                     { $inc: { balance: -totalCost } },
@@ -2233,7 +2234,6 @@ async function handleBuy(interaction, user, currency) {
                     return interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
                 }
 
-                await persistGrindIfNew(user, 'fishing');
                 const profUpdated = await GrindProfile.findOneAndUpdate(
                     {
                         userId:  interaction.user.id,
@@ -2272,6 +2272,7 @@ async function handleBuy(interaction, user, currency) {
             const consumableField = `data.consumables.${itemId}`;
             const stackCap        = consumable.maxStack ?? 99;
 
+            await persistGrindIfNew(user, 'fishing');
             const updated = await User.findOneAndUpdate(
                 { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: totalCost } },
                 { $inc: { balance: -totalCost } },
@@ -2281,7 +2282,6 @@ async function handleBuy(interaction, user, currency) {
                 return interaction.editReply({ content: 'Purchase failed. Conditions may have changed — please try again.', embeds: [], components: [] });
             }
 
-            await persistGrindIfNew(user, 'fishing');
             const profUpdated = await GrindProfile.findOneAndUpdate(
                 {
                     userId:  interaction.user.id,

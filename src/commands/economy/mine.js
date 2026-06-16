@@ -1411,16 +1411,48 @@ async function handleShop(interaction, sub) {
             try {
                 await btn.deferUpdate();
 
-                if (consumableDef) {
-                    user.balance -= totalCost;
-                    m.consumables[itemId] = (m.consumables[itemId] ?? 0) + qty;
-                } else {
-                    user.balance -= totalCost;
-                    m.charges[blastDef.chargeType] = (m.charges[blastDef.chargeType] ?? 0) + (blastDef.quantity * qty);
+                await persistGrindIfNew(user, 'mining');
+                const balanceUpdated = await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: totalCost } },
+                    { $inc: { balance: -totalCost } },
+                    { new: true }
+                );
+                if (!balanceUpdated) {
+                    return interaction.editReply({ content: 'Insufficient funds. Please try again.', embeds: [], components: [] });
                 }
 
-                user.markModified('mining');
-                await user.save();
+                if (consumableDef) {
+                    const consumableField = `data.consumables.${itemId}`;
+                    const profUpdated = await GrindProfile.findOneAndUpdate(
+                        {
+                            userId:  interaction.user.id,
+                            guildId: interaction.guild.id,
+                            system:  'mining',
+                            $expr: { $lte: [{ $add: [{ $ifNull: [`$${consumableField}`, 0] }, qty] }, consumableDef.maxStack] }
+                        },
+                        { $inc: { [consumableField]: qty } },
+                        { new: true }
+                    ).catch(() => null);
+
+                    if (!profUpdated) {
+                        await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
+                        return interaction.editReply({ content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] });
+                    }
+                    m.consumables[itemId] = profUpdated.data?.consumables?.[itemId] ?? qty;
+                } else {
+                    const chargeField = `data.charges.${blastDef.chargeType}`;
+                    const profUpdated = await GrindProfile.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id, system: 'mining' },
+                        { $inc: { [chargeField]: blastDef.quantity * qty } },
+                        { new: true }
+                    ).catch(() => null);
+
+                    if (!profUpdated) {
+                        await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
+                        return interaction.editReply({ content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] });
+                    }
+                    m.charges[blastDef.chargeType] = profUpdated.data?.charges?.[blastDef.chargeType] ?? (blastDef.quantity * qty);
+                }
 
                 const received = blastDef
                     ? `${blastDef.quantity * qty}× ${blastDef.chargeType.replace(/_/g, ' ')}`
@@ -1429,10 +1461,10 @@ async function handleShop(interaction, sub) {
                 await interaction.editReply({
                     embeds: [
                         new EmbedBuilder()
-                            .setColor('#b5651d')
+                            .setColor('#2ecc71')
                             .setTitle('✅ Purchase Complete')
                             .setDescription(`Bought **${received}** for **${currency}${totalCost.toLocaleString()}**.`)
-                            .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
+                            .addFields({ name: 'Balance', value: `${currency}${balanceUpdated.balance.toLocaleString()}`, inline: true })
                             .setTimestamp()
                     ],
                     components: []
