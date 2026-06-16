@@ -1368,27 +1368,88 @@ async function handleShop(interaction, sub) {
             if (current + qty > consumableDef.maxStack) {
                 return interaction.reply({ content: `You can only carry ${consumableDef.maxStack}× **${consumableDef.name}**. You already have ${current}.`, ephemeral: true });
             }
-            user.balance -= totalCost;
-            m.consumables[itemId] = (m.consumables[itemId] ?? 0) + qty;
-        } else {
-            user.balance -= totalCost;
-            m.charges[blastDef.chargeType] = (m.charges[blastDef.chargeType] ?? 0) + (blastDef.quantity * qty);
         }
 
-        user.markModified('mining');
-        await user.save();
+        const gainedLabel  = blastDef
+            ? `${blastDef.quantity * qty}× ${blastDef.chargeType.replace(/_/g, ' ')}`
+            : `${qty}× ${consumableDef.name}`;
+        const currentStock = blastDef
+            ? `${m.charges[blastDef.chargeType] ?? 0} in stock`
+            : `${m.consumables[itemId] ?? 0}/${consumableDef.maxStack} in stock`;
 
-        const received = blastDef ? `${blastDef.quantity * qty}× ${blastDef.chargeType.replace(/_/g, ' ')}` : `${qty}× ${consumableDef.name}`;
-        return interaction.reply({
-            embeds: [
-                new EmbedBuilder()
-                    .setColor('#b5651d')
-                    .setTitle('✅ Purchase Complete')
-                    .setDescription(`Bought **${received}** for **${currency}${totalCost.toLocaleString()}**.`)
-                    .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
-                    .setTimestamp()
-            ]
+        const confirmEmbed = new EmbedBuilder()
+            .setColor('#f39c12')
+            .setTitle(`${itemDef.emoji ?? '🛒'} Confirm Purchase`)
+            .setDescription(itemDef.description ?? '')
+            .addFields(
+                { name: 'Item',         value: itemDef.name,                                  inline: true },
+                { name: 'Quantity',     value: gainedLabel,                                   inline: true },
+                { name: 'Total Cost',   value: `${currency}${totalCost.toLocaleString()}`,    inline: true },
+                { name: 'Your Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true },
+                { name: 'Currently',    value: currentStock,                                   inline: true }
+            )
+            .setFooter({ text: 'Confirmation expires in 30 seconds' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('minebuy_confirm').setLabel('Buy').setStyle(ButtonStyle.Success).setEmoji('✅'),
+            new ButtonBuilder().setCustomId('minebuy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+        );
+
+        const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+        const collector = reply.createMessageComponentCollector({ time: 30_000 });
+
+        collector.on('collect', async btn => {
+            if (btn.user.id !== interaction.user.id) {
+                return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+            }
+            collector.stop();
+
+            if (btn.customId === 'minebuy_cancel') {
+                return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
+            }
+
+            try {
+                await btn.deferUpdate();
+
+                if (consumableDef) {
+                    user.balance -= totalCost;
+                    m.consumables[itemId] = (m.consumables[itemId] ?? 0) + qty;
+                } else {
+                    user.balance -= totalCost;
+                    m.charges[blastDef.chargeType] = (m.charges[blastDef.chargeType] ?? 0) + (blastDef.quantity * qty);
+                }
+
+                user.markModified('mining');
+                await user.save();
+
+                const received = blastDef
+                    ? `${blastDef.quantity * qty}× ${blastDef.chargeType.replace(/_/g, ' ')}`
+                    : `${qty}× ${consumableDef.name}`;
+
+                await interaction.editReply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor('#b5651d')
+                            .setTitle('✅ Purchase Complete')
+                            .setDescription(`Bought **${received}** for **${currency}${totalCost.toLocaleString()}**.`)
+                            .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
+                            .setTimestamp()
+                    ],
+                    components: []
+                });
+            } catch (err) {
+                console.error('[mineshop buy] purchase error:', err);
+                interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
+            }
         });
+
+        collector.on('end', (_, reason) => {
+            if (reason === 'time') {
+                interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
+            }
+        });
+
+        return;
     }
 
     if (sub === 'use') {
