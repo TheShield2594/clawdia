@@ -5,13 +5,15 @@ const Guild = require('../models/Guild');
 const { runJob } = require('../utils/jobRunner');
 
 async function getNextCaseId(guildId) {
+    // Aggregation-pipeline update atomically initializes nextCaseId to 1 when the field
+    // is missing, or increments it — both in a single round-trip with no race window.
+    // The returned value is the ID to assign directly (no subtract-1 needed).
     const result = await Guild.findOneAndUpdate(
         { guildId },
-        { $inc: { 'caseSettings.nextCaseId': 1 } },
+        [{ $set: { 'caseSettings.nextCaseId': { $ifNull: [{ $add: ['$caseSettings.nextCaseId', 1] }, 1] } } }],
         { upsert: true, new: true, projection: { 'caseSettings.nextCaseId': 1 } }
     );
-    // new:true returns the post-increment value; subtract 1 for the id we're assigning now
-    return (result?.caseSettings?.nextCaseId ?? 2) - 1;
+    return result.caseSettings.nextCaseId;
 }
 
 async function createCase({ guildId, type, targetUserId, moderatorId, reason, evidence = null, duration = null }) {
