@@ -18,4 +18,6 @@ const aiQuestSchema = new Schema({
     createdAt:   { type: Date,   default: Date.now },
 });
 
+aiQuestSchema.index({ userId: 1, guildId: 1, createdAt: -1 });
+
 module.exports = model('AiQuest', aiQuestSchema);
