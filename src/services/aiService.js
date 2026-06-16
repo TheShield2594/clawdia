@@ -763,6 +763,10 @@ async function handleAIChat(message, aiSettings) {
         return message.reply(`${providerLabel} is not configured. Add an API key in the dashboard.`);
     }
 
+    if (provider === 'openrouter' && model && !model.includes('/')) {
+        return message.reply(`OpenRouter model names must include a provider prefix (e.g. \`openai/gpt-4o-mini\`). Your current model \`${model}\` is missing the prefix — update it in the AI settings dashboard.`);
+    }
+
     const content = message.content.trim();
     if (content.toLowerCase() === '!reset') {
         await clearHistory(message.guild.id, message.channel.id, message.author.id);
@@ -922,6 +926,7 @@ async function handleAIChat(message, aiSettings) {
         const status = error?.status || error?.response?.status;
         let detail = status ? ` (HTTP ${status})` : '';
         if (status === 401) detail += ' — check your API key';
+        else if (status === 404) detail += ' — model not found; check your model name in the AI settings';
         else if (status === 429) detail += ' — rate limit exceeded';
         else if (status === 503) detail += ' — provider unavailable';
         await message.reply(`Sorry, I hit an error talking to ${providerLabel}${detail}.`).catch(() => {});
