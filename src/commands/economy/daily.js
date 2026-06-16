@@ -392,10 +392,10 @@ module.exports = {
 
             const isFirstDaily = !user.onboarding?.firstDailyClaimed;
             if (isFirstDaily) {
-                await User.findOneAndUpdate(
+                User.findOneAndUpdate(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
                     { $set: { 'onboarding.firstDailyClaimed': true } }
-                );
+                ).catch(err => console.error('[daily] onboarding flag update failed:', err.message));
             }
 
             const rankMedals = { 1: '🥇', 2: '🥈', 3: '🥉' };
