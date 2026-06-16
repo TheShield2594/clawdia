@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const User = require('../../models/User');
+const User    = require('../../models/User');
+const AiItem  = require('../../models/AiItem');
 const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
@@ -70,7 +71,7 @@ function buildMaterialsEmbed(source, mats, color, footer, target, avatarURL) {
     return embed;
 }
 
-function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, footer, target, avatarURL) {
+function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, footer, target, avatarURL, aiItemMap = {}) {
     const embed = new EmbedBuilder()
         .setColor(color)
         .setTitle(`🎒 Inventory — ${target.username}`)
@@ -80,16 +81,33 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
     let hasContent = false;
 
     if (inventory.length) {
-        const lines = inventory.map(entry => {
-            const shopItem = shopItems.find(s => s.name.toLowerCase() === entry.itemId.toLowerCase()
-                                              || (s.itemId && s.itemId.toLowerCase() === entry.itemId.toLowerCase()));
-            const worth = shopItem ? ` (worth ${currency}${shopItem.price} each)` : '';
-            const lore = getItemLore(entry.itemId);
-            const loreLine = lore ? `\n*${lore}*` : '';
-            return `**${entry.itemId}** ×${entry.quantity}${worth}${loreLine}`;
-        });
-        embed.addFields({ name: '🛍️ Shop Items', value: lines.join('\n'), inline: false });
-        hasContent = true;
+        const shopLines = [];
+        const aiLines   = [];
+        for (const entry of inventory) {
+            if (entry.itemId.startsWith('ai_') && aiItemMap[entry.itemId]) {
+                const ai = aiItemMap[entry.itemId];
+                const rarityLine = ai.rarity ? ` *(${ai.rarity})*` : '';
+                const loreLine   = ai.lore    ? `\n*${ai.lore}*`   : '';
+                aiLines.push(`${ai.emoji ?? '✨'} **${ai.name}** ×${entry.quantity}${rarityLine}${loreLine}`);
+            } else if (entry.itemId.startsWith('ai_')) {
+                aiLines.push(`✨ *Unknown forged item* ×${entry.quantity} *(data missing)*`);
+            } else {
+                const shopItem = shopItems.find(s => s.name.toLowerCase() === entry.itemId.toLowerCase()
+                                                  || (s.itemId && s.itemId.toLowerCase() === entry.itemId.toLowerCase()));
+                const worth    = shopItem ? ` (worth ${currency}${shopItem.price} each)` : '';
+                const lore     = getItemLore(entry.itemId);
+                const loreLine = lore ? `\n*${lore}*` : '';
+                shopLines.push(`**${entry.itemId}** ×${entry.quantity}${worth}${loreLine}`);
+            }
+        }
+        if (shopLines.length) {
+            embed.addFields({ name: '🛍️ Shop Items', value: shopLines.join('\n'), inline: false });
+            hasContent = true;
+        }
+        if (aiLines.length) {
+            embed.addFields({ name: '⚒️ Forged Items', value: aiLines.join('\n'), inline: false });
+            hasContent = true;
+        }
     }
 
     if (activeEffects.length) {
@@ -156,6 +174,19 @@ module.exports = {
         const activeEffects = userData?.activeEffects    ?? [];
         const shopItems   = guildSettings?.shop          ?? [];
 
+        // Load AI item definitions for items starting with "ai_"
+        const aiItemIds = inventory.filter(i => i.itemId.startsWith('ai_')).map(i => i.itemId);
+        let aiItemDocs = [];
+        try {
+            if (aiItemIds.length) {
+                aiItemDocs = await AiItem.find({ itemId: { $in: aiItemIds } }).lean();
+            }
+        } catch (err) {
+            console.error('[INVENTORY] AiItem lookup failed:', err?.message || err);
+            // Degrade gracefully: ai_ items will show as orphaned
+        }
+        const aiItemMap = Object.fromEntries(aiItemDocs.map(d => [d.itemId, d]));
+
         const hasItems = inventory.length > 0 || activeEffects.length > 0;
         const hasMaterials = Object.entries(MATERIAL_RARITY).some(([key, data]) => {
             const qty = data.source === 'hunt' ? huntMats[key]
@@ -179,7 +210,7 @@ module.exports = {
         const avatarURL = target.displayAvatarURL({ dynamic: true });
 
         const embeds = {
-            items: buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, footer, target, avatarURL),
+            items: buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, footer, target, avatarURL, aiItemMap),
             hunt:  buildMaterialsEmbed('hunt', huntMats, color, footer, target, avatarURL),
             fish:  buildMaterialsEmbed('fish', fishMats, color, footer, target, avatarURL),
             mine:  buildMaterialsEmbed('mine', mineMats, color, footer, target, avatarURL),

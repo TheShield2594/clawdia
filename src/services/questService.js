@@ -191,11 +191,20 @@ function getDefById(questId) {
 // Increment progress on an active quest.
 // Returns { completed: def|null, nearComplete: def|null }.
 // nearComplete fires once when progress first crosses 80% without completing.
-async function incrementQuest(user, questId, amount = 1) {
+// defOverride allows callers to pass a pre-loaded definition (avoids duplicate DB lookups for AI quests).
+async function incrementQuest(user, questId, amount = 1, defOverride = null) {
     const entry = user.quests?.find(q => q.questId === questId && !q.completedAt && q.expiresAt > new Date());
     if (!entry) return { completed: null, nearComplete: null };
 
-    const def = getDefById(questId);
+    let def = defOverride;
+    if (!def) {
+        if (questId.startsWith('ai_')) {
+            const AiQuest = require('../models/AiQuest');
+            def = await AiQuest.findOne({ questId }).lean();
+        } else {
+            def = getDefById(questId);
+        }
+    }
     if (!def) return { completed: null, nearComplete: null };
 
     const prevProgress = entry.progress || 0;
@@ -217,6 +226,18 @@ async function incrementQuest(user, questId, amount = 1) {
 
 // Award XP + coins scaled by difficulty; returns { xp, coins, def }
 async function awardQuest(user, questDef, guildSettings) {
+    // AI legendary quests carry their own reward values
+    if (questDef.questId?.startsWith('ai_')) {
+        const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
+        const xp    = Math.round((questDef.xpReward    ?? 500) * streakMult);
+        const coins = Math.round((questDef.coinReward   ?? 250) * streakMult);
+        user.xp      += xp;
+        user.balance += coins;
+        user.questsCompleted = (user.questsCompleted || 0) + 1;
+        await awardSeasonXp(user, xp, guildSettings);
+        return { xp, coins, def: questDef };
+    }
+
     const isDaily = DAILY_QUEST_POOL.some(d => d.questId === questDef.questId);
     const mult = DIFFICULTY_MULTIPLIERS[questDef.difficulty] ?? 1;
     const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
@@ -275,6 +296,8 @@ async function onMessage(user, guildSettings) {
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
     }
+    const ai = await incrementAiQuestsForMechanic(user, 'social', 1, guildSettings);
+    completed.push(...ai.completed); nearComplete.push(...ai.nearComplete);
     return { completed, nearComplete };
 }
 
@@ -283,6 +306,26 @@ async function onReaction(user, guildSettings) {
     const completed = [], nearComplete = [];
     for (const questId of ['daily_reactions_3', 'daily_reactions_5', 'daily_reactions_10', 'daily_reactions_20']) {
         const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
+        if (def)     completed.push(await awardQuest(user, def, guildSettings));
+        if (nearDef) nearComplete.push(nearDef);
+    }
+    return { completed, nearComplete };
+}
+
+// Increment any active AI legendary quests matching the given mechanic.
+async function incrementAiQuestsForMechanic(user, mechanic, amount, guildSettings) {
+    const AiQuest = require('../models/AiQuest');
+    const now = new Date();
+    const aiEntries = (user.quests || []).filter(q =>
+        q.questId.startsWith('ai_') && !q.completedAt && q.expiresAt > now
+    );
+    if (!aiEntries.length) return { completed: [], nearComplete: [] };
+
+    const completed = [], nearComplete = [];
+    for (const entry of aiEntries) {
+        const aiDef = await AiQuest.findOne({ questId: entry.questId, mechanic }).lean();
+        if (!aiDef) continue;
+        const { completed: def, nearComplete: nearDef } = await incrementQuest(user, entry.questId, amount, aiDef);
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
     }
@@ -298,6 +341,8 @@ async function onCommandUse(user, guildSettings) {
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
     }
+    const ai = await incrementAiQuestsForMechanic(user, 'explore', 1, guildSettings);
+    completed.push(...ai.completed); nearComplete.push(...ai.nearComplete);
     return { completed, nearComplete };
 }
 
@@ -310,6 +355,8 @@ async function onEconomyEarn(user, guildSettings, amount) {
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
     }
+    const ai = await incrementAiQuestsForMechanic(user, 'economy', amount, guildSettings);
+    completed.push(...ai.completed); nearComplete.push(...ai.nearComplete);
     return { completed, nearComplete };
 }
 
@@ -322,6 +369,8 @@ async function onHunt(user, guildSettings) {
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
     }
+    const ai = await incrementAiQuestsForMechanic(user, 'hunt', 1, guildSettings);
+    completed.push(...ai.completed); nearComplete.push(...ai.nearComplete);
     return { completed, nearComplete };
 }
 
@@ -334,6 +383,8 @@ async function onFish(user, guildSettings) {
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
     }
+    const ai = await incrementAiQuestsForMechanic(user, 'fishing', 1, guildSettings);
+    completed.push(...ai.completed); nearComplete.push(...ai.nearComplete);
     return { completed, nearComplete };
 }
 
@@ -345,6 +396,8 @@ async function onMine(user, guildSettings) {
         if (def)     completed.push(await awardQuest(user, def, guildSettings));
         if (nearDef) nearComplete.push(nearDef);
     }
+    const ai = await incrementAiQuestsForMechanic(user, 'mining', 1, guildSettings);
+    completed.push(...ai.completed); nearComplete.push(...ai.nearComplete);
     return { completed, nearComplete };
 }
 
@@ -492,6 +545,7 @@ module.exports = {
     ensureQuests, getQuestDefs, getDailyPool, getWeeklyPool,
     getCategoryEmojis, getDifficultyColors,
     onMessage, onReaction, onCommandUse, onEconomyEarn, onHunt, onFish, onMine, onStreakUpdate,
-    awardSeasonXp, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset,
+    awardSeasonXp, awardQuest, incrementAiQuestsForMechanic,
+    notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset,
     startQuestService,
 };
