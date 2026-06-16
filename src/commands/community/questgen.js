@@ -168,16 +168,24 @@ Create a legendary quest that feels fitting for their journey so far.`;
         const questId = `ai_${interaction.user.id}_${Date.now()}`;
         const expiresAt = getWeeklyExpiry();
 
-        await AiQuest.create({
-            questId, userId: interaction.user.id, guildId: interaction.guild.id,
-            name, lore, description: desc, mechanic, target, emoji,
-            xpReward, coinReward,
-        });
+        try {
+            await AiQuest.create({
+                questId, userId: interaction.user.id, guildId: interaction.guild.id,
+                name, lore, description: desc, mechanic, target, emoji,
+                xpReward, coinReward,
+            });
 
-        // Add to user quest array and save
-        user.quests = user.quests || [];
-        user.quests.push({ questId, progress: 0, completedAt: null, expiresAt });
-        await user.save();
+            user.quests = user.quests || [];
+            user.quests.push({ questId, progress: 0, completedAt: null, expiresAt });
+            await user.save();
+        } catch (err) {
+            console.error('[QUESTGEN] Persistence failed:', err?.message || err);
+            // Compensate: remove the quest doc if it was created before user.save() failed
+            await AiQuest.deleteOne({ questId }).catch(() => {});
+            user.balance += COST;
+            await user.save().catch(() => {});
+            return interaction.editReply({ content: 'The quest forge failed to save! Your coins have been refunded. Try again in a moment.' });
+        }
 
         const currency = guildSettings?.economy?.currency ?? '💰';
         const mechEmoji = MECHANIC_EMOJIS[mechanic];

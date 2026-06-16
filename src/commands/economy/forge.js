@@ -87,11 +87,21 @@ module.exports = {
             }
         }
 
-        // Deduct coins
-        user.balance -= cfg.cost;
+        // Atomic balance deduction — guards against concurrent forge requests
+        const chargedUser = await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: cfg.cost } },
+            { $inc: { balance: -cfg.cost } },
+            { new: true }
+        );
+        if (!chargedUser) {
+            const currency = guildSettings?.economy?.currency ?? '💰';
+            return interaction.editReply({
+                content: `You need **${currency}${cfg.cost.toLocaleString()}** to forge a ${cfg.emoji} ${cfg.label} item. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
+            });
+        }
 
         // Build AI prompt
-        const level  = user.level ?? 0;
+        const level  = chargedUser.level ?? 0;
         const currency = guildSettings?.economy?.currency ?? '💰';
 
         const systemPrompt = `You are a master artificer creating unique magical items for a Discord economy bot called Clawdia.
@@ -123,8 +133,10 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
             parsed = JSON.parse(cleaned);
         } catch (err) {
             console.error('[FORGE] AI generation failed:', err?.message || err);
-            user.balance += cfg.cost;
-            await user.save();
+            await User.updateOne(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: cfg.cost } }
+            ).catch(() => {});
             return interaction.editReply({ content: 'The forge misfired! Your coins have been refunded. Try again in a moment.' });
         }
 
@@ -134,24 +146,26 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
         const description = String(parsed.description || '').slice(0, 200);
         const lore        = String(parsed.lore        || '').slice(0, 300);
 
-        // Create item record
+        // Create item record and update inventory/XP
         const itemId = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        await AiItem.create({
-            itemId, name, emoji, rarity: cfg.label, description, lore,
-            createdBy: interaction.user.id, guildId: interaction.guild.id,
-        });
+        try {
+            await AiItem.create({
+                itemId, name, emoji, rarity: cfg.label, description, lore,
+                createdBy: interaction.user.id, guildId: interaction.guild.id,
+            });
 
-        // Add to inventory and award XP
-        user.inventory = user.inventory || [];
-        const existing = user.inventory.find(i => i.itemId === itemId);
-        if (existing) {
-            existing.quantity += 1;
-        } else {
-            user.inventory.push({ itemId, quantity: 1 });
+            chargedUser.inventory = chargedUser.inventory || [];
+            chargedUser.inventory.push({ itemId, quantity: 1 });
+            chargedUser.xp = (chargedUser.xp || 0) + cfg.xpReward;
+            await chargedUser.save();
+        } catch (err) {
+            console.error('[FORGE] Persistence failed:', err?.message || err);
+            await User.updateOne(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: cfg.cost } }
+            ).catch(() => {});
+            return interaction.editReply({ content: 'The forge failed to save your item! Your coins have been refunded. Try again in a moment.' });
         }
-        user.xp = (user.xp || 0) + cfg.xpReward;
-
-        await user.save();
 
         const embed = new EmbedBuilder()
             .setColor(cfg.color)

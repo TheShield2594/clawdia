@@ -89,6 +89,8 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
                 const rarityLine = ai.rarity ? ` *(${ai.rarity})*` : '';
                 const loreLine   = ai.lore    ? `\n*${ai.lore}*`   : '';
                 aiLines.push(`${ai.emoji ?? '✨'} **${ai.name}** ×${entry.quantity}${rarityLine}${loreLine}`);
+            } else if (entry.itemId.startsWith('ai_')) {
+                aiLines.push(`✨ *Unknown forged item* ×${entry.quantity} *(data missing)*`);
             } else {
                 const shopItem = shopItems.find(s => s.name.toLowerCase() === entry.itemId.toLowerCase()
                                                   || (s.itemId && s.itemId.toLowerCase() === entry.itemId.toLowerCase()));
@@ -174,9 +176,15 @@ module.exports = {
 
         // Load AI item definitions for items starting with "ai_"
         const aiItemIds = inventory.filter(i => i.itemId.startsWith('ai_')).map(i => i.itemId);
-        const aiItemDocs = aiItemIds.length
-            ? await AiItem.find({ itemId: { $in: aiItemIds } }).lean()
-            : [];
+        let aiItemDocs = [];
+        try {
+            if (aiItemIds.length) {
+                aiItemDocs = await AiItem.find({ itemId: { $in: aiItemIds } }).lean();
+            }
+        } catch (err) {
+            console.error('[INVENTORY] AiItem lookup failed:', err?.message || err);
+            // Degrade gracefully: ai_ items will show as orphaned
+        }
         const aiItemMap = Object.fromEntries(aiItemDocs.map(d => [d.itemId, d]));
 
         const hasItems = inventory.length > 0 || activeEffects.length > 0;
