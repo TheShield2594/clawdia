@@ -103,6 +103,9 @@ function start(client) {
         res.setHeader('Content-Security-Policy', [
             "default-src 'self'",
             `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net`,
+            // Inline event handlers (onclick, onchange, etc.) cannot carry nonces,
+            // so allow them the same way inline styles are allowed.
+            "script-src-attr 'unsafe-inline'",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: https: cdn.discordapp.com",
             "connect-src 'self'",
