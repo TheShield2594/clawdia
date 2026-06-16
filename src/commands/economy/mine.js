@@ -1368,27 +1368,120 @@ async function handleShop(interaction, sub) {
             if (current + qty > consumableDef.maxStack) {
                 return interaction.reply({ content: `You can only carry ${consumableDef.maxStack}× **${consumableDef.name}**. You already have ${current}.`, ephemeral: true });
             }
-            user.balance -= totalCost;
-            m.consumables[itemId] = (m.consumables[itemId] ?? 0) + qty;
-        } else {
-            user.balance -= totalCost;
-            m.charges[blastDef.chargeType] = (m.charges[blastDef.chargeType] ?? 0) + (blastDef.quantity * qty);
         }
 
-        user.markModified('mining');
-        await user.save();
+        const gainedLabel  = blastDef
+            ? `${blastDef.quantity * qty}× ${blastDef.chargeType.replace(/_/g, ' ')}`
+            : `${qty}× ${consumableDef.name}`;
+        const currentStock = blastDef
+            ? `${m.charges[blastDef.chargeType] ?? 0} in stock`
+            : `${m.consumables[itemId] ?? 0}/${consumableDef.maxStack} in stock`;
 
-        const received = blastDef ? `${blastDef.quantity * qty}× ${blastDef.chargeType.replace(/_/g, ' ')}` : `${qty}× ${consumableDef.name}`;
-        return interaction.reply({
-            embeds: [
-                new EmbedBuilder()
-                    .setColor('#b5651d')
-                    .setTitle('✅ Purchase Complete')
-                    .setDescription(`Bought **${received}** for **${currency}${totalCost.toLocaleString()}**.`)
-                    .addFields({ name: 'Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true })
-                    .setTimestamp()
-            ]
+        const confirmEmbed = new EmbedBuilder()
+            .setColor('#f39c12')
+            .setTitle(`${itemDef.emoji ?? '🛒'} Confirm Purchase`)
+            .setDescription(itemDef.description ?? '')
+            .addFields(
+                { name: 'Item',         value: itemDef.name,                                  inline: true },
+                { name: 'Quantity',     value: gainedLabel,                                   inline: true },
+                { name: 'Total Cost',   value: `${currency}${totalCost.toLocaleString()}`,    inline: true },
+                { name: 'Your Balance', value: `${currency}${user.balance.toLocaleString()}`, inline: true },
+                { name: 'Currently',    value: currentStock,                                   inline: true }
+            )
+            .setFooter({ text: 'Confirmation expires in 30 seconds' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('minebuy_confirm').setLabel('Buy').setStyle(ButtonStyle.Success).setEmoji('✅'),
+            new ButtonBuilder().setCustomId('minebuy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+        );
+
+        const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+        const collector = reply.createMessageComponentCollector({ time: 30_000 });
+
+        collector.on('collect', async btn => {
+            if (btn.user.id !== interaction.user.id) {
+                return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+            }
+            collector.stop();
+
+            if (btn.customId === 'minebuy_cancel') {
+                return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
+            }
+
+            try {
+                await btn.deferUpdate();
+
+                await persistGrindIfNew(user, 'mining');
+                const balanceUpdated = await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: totalCost } },
+                    { $inc: { balance: -totalCost } },
+                    { new: true }
+                );
+                if (!balanceUpdated) {
+                    return interaction.editReply({ content: 'Insufficient funds. Please try again.', embeds: [], components: [] });
+                }
+
+                if (consumableDef) {
+                    const consumableField = `data.consumables.${itemId}`;
+                    const profUpdated = await GrindProfile.findOneAndUpdate(
+                        {
+                            userId:  interaction.user.id,
+                            guildId: interaction.guild.id,
+                            system:  'mining',
+                            $expr: { $lte: [{ $add: [{ $ifNull: [`$${consumableField}`, 0] }, qty] }, consumableDef.maxStack] }
+                        },
+                        { $inc: { [consumableField]: qty } },
+                        { new: true }
+                    ).catch(() => null);
+
+                    if (!profUpdated) {
+                        await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
+                        return interaction.editReply({ content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] });
+                    }
+                    m.consumables[itemId] = profUpdated.data?.consumables?.[itemId] ?? qty;
+                } else {
+                    const chargeField = `data.charges.${blastDef.chargeType}`;
+                    const profUpdated = await GrindProfile.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id, system: 'mining' },
+                        { $inc: { [chargeField]: blastDef.quantity * qty } },
+                        { new: true }
+                    ).catch(() => null);
+
+                    if (!profUpdated) {
+                        await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(() => {});
+                        return interaction.editReply({ content: 'Purchase failed — your coins were refunded. Please try again.', embeds: [], components: [] });
+                    }
+                    m.charges[blastDef.chargeType] = profUpdated.data?.charges?.[blastDef.chargeType] ?? (blastDef.quantity * qty);
+                }
+
+                const received = blastDef
+                    ? `${blastDef.quantity * qty}× ${blastDef.chargeType.replace(/_/g, ' ')}`
+                    : `${qty}× ${consumableDef.name}`;
+
+                await interaction.editReply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor('#2ecc71')
+                            .setTitle('✅ Purchase Complete')
+                            .setDescription(`Bought **${received}** for **${currency}${totalCost.toLocaleString()}**.`)
+                            .addFields({ name: 'Balance', value: `${currency}${balanceUpdated.balance.toLocaleString()}`, inline: true })
+                            .setTimestamp()
+                    ],
+                    components: []
+                });
+            } catch (err) {
+                console.error('[mineshop buy] purchase error:', err);
+                interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
+            }
         });
+
+        collector.on('end', (_, reason) => {
+            if (reason === 'time') {
+                interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
+            }
+        });
+
+        return;
     }
 
     if (sub === 'use') {
