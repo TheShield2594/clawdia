@@ -1,0 +1,202 @@
+'use strict';
+
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const User     = require('../../models/User');
+const Guild    = require('../../models/Guild');
+const AiQuest  = require('../../models/AiQuest');
+const { resolveProviderConfig, getCompletion } = require('../../services/aiService');
+
+const COST         = 200;       // coins to generate
+const COOLDOWN_MS  = 23 * 60 * 60 * 1000; // 23h — allow slight drift
+const MAX_AI_QUESTS = 1;        // only one legendary quest active at a time
+
+const MECHANIC_EMOJIS = {
+    hunt:    '🏹',
+    fishing: '🎣',
+    mining:  '⛏️',
+    social:  '💬',
+    economy: '💰',
+    explore: '🔍',
+};
+
+const MECHANIC_LABELS = {
+    hunt:    'Hunting',
+    fishing: 'Fishing',
+    mining:  'Mining',
+    social:  'Chat',
+    economy: 'Economy',
+    explore: 'Commands',
+};
+
+// Target ranges per mechanic so the AI prompt gives sensible numbers
+const MECHANIC_TARGETS = {
+    hunt:    { min: 5,  max: 25 },
+    fishing: { min: 5,  max: 25 },
+    mining:  { min: 5,  max: 20 },
+    social:  { min: 20, max: 80 },
+    economy: { min: 200, max: 1000 },
+    explore: { min: 5,  max: 20 },
+};
+
+function clampTarget(mechanic, value) {
+    const { min, max } = MECHANIC_TARGETS[mechanic] ?? { min: 5, max: 25 };
+    return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function getWeeklyExpiry() {
+    const d = new Date();
+    const daysUntilSunday = (7 - d.getUTCDay()) % 7 || 7;
+    d.setUTCDate(d.getUTCDate() + daysUntilSunday);
+    d.setUTCHours(0, 0, 0, 0);
+    return d;
+}
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('questgen')
+        .setDescription('Spend 200 coins to have the AI forge you a unique Legendary Quest'),
+
+    async execute(interaction) {
+        await interaction.deferReply();
+
+        const [user, guildSettings] = await Promise.all([
+            User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
+            Guild.findOne({ guildId: interaction.guild.id }),
+        ]);
+
+        if (!guildSettings?.quests?.enabled) {
+            return interaction.editReply({ content: 'Quests are not enabled on this server.' });
+        }
+
+        if (!guildSettings?.ai?.enabled) {
+            return interaction.editReply({ content: 'AI features are not enabled on this server.' });
+        }
+
+        if (!user || user.balance < COST) {
+            return interaction.editReply({
+                content: `You need at least **${COST} coins** to forge a Legendary Quest. Current balance: **${user?.balance ?? 0}**`,
+            });
+        }
+
+        // Cooldown: check the most recent AI quest this user created in this guild
+        const lastAiQuest = await AiQuest.findOne({ userId: interaction.user.id, guildId: interaction.guild.id })
+            .sort({ createdAt: -1 }).lean();
+        if (lastAiQuest) {
+            const elapsed = Date.now() - new Date(lastAiQuest.createdAt).getTime();
+            if (elapsed < COOLDOWN_MS) {
+                const remaining = COOLDOWN_MS - elapsed;
+                const h = Math.floor(remaining / 3_600_000);
+                const m = Math.floor((remaining % 3_600_000) / 60_000);
+                return interaction.editReply({
+                    content: `The Legendary Quest forge needs time to recharge. Try again in **${h}h ${m}m**.`,
+                });
+            }
+        }
+
+        // One active AI legendary quest at a time
+        const now = new Date();
+        const activeAiQuests = (user.quests || []).filter(q =>
+            q.questId.startsWith('ai_') && !q.completedAt && q.expiresAt > now
+        );
+        if (activeAiQuests.length >= MAX_AI_QUESTS) {
+            return interaction.editReply({
+                content: 'You already have an active Legendary Quest. Complete it before forging a new one! Use `/quests` to check progress.',
+            });
+        }
+
+        // Deduct coins
+        user.balance -= COST;
+
+        // Build AI prompt
+        const level     = user.level ?? 0;
+        const messages  = user.messages ?? 0;
+        const balance   = user.balance ?? 0;
+        const completed = user.questsCompleted ?? 0;
+
+        const systemPrompt = `You are a dramatic fantasy quest narrator for a Discord bot called Clawdia.
+Generate a single "Legendary Quest" as valid JSON with these exact fields:
+- name: dramatic quest title (2–5 words, fantasy/adventure style)
+- lore: one sentence of narrative backstory (immersive, vivid, 10–20 words)
+- description: the plain objective e.g. "Complete 12 hunts" or "Send 50 messages" (keep it concise)
+- mechanic: EXACTLY one of: hunt, fishing, mining, social, economy, explore
+- target: integer (hunt 5–25, fishing 5–25, mining 5–20, social 20–80, economy 200–1000, explore 5–20)
+- emoji: a single relevant emoji character
+
+Respond with ONLY the JSON object. No markdown, no explanation.`;
+
+        const prompt = `Player stats — Level: ${level}, Messages sent: ${messages}, Balance: ${balance} coins, Quests completed: ${completed}.
+Create a legendary quest that feels fitting for their journey so far.`;
+
+        let parsed;
+        try {
+            const config = resolveProviderConfig(guildSettings.ai);
+            const raw = await getCompletion({
+                ...config,
+                guildId: interaction.guild.id,
+                systemPrompt,
+                history: [],
+                prompt,
+                temperature: 0.9,
+                maxTokens: 200,
+            });
+
+            // Strip any accidental markdown fences
+            const cleaned = raw.replace(/```json|```/gi, '').trim();
+            parsed = JSON.parse(cleaned);
+        } catch (err) {
+            console.error('[QUESTGEN] AI generation failed:', err?.message || err);
+            // Refund coins on failure
+            user.balance += COST;
+            await user.save();
+            return interaction.editReply({ content: 'The quest forge misfired! Your coins have been refunded. Try again in a moment.' });
+        }
+
+        // Validate and sanitize
+        const validMechanics = ['hunt', 'fishing', 'mining', 'social', 'economy', 'explore'];
+        const mechanic = validMechanics.includes(parsed.mechanic) ? parsed.mechanic : 'hunt';
+        const target   = clampTarget(mechanic, Number(parsed.target) || 10);
+        const name     = String(parsed.name     || 'Legendary Quest').slice(0, 60);
+        const lore     = String(parsed.lore     || '').slice(0, 200);
+        const desc     = String(parsed.description || `Complete ${target} ${mechanic} activities`).slice(0, 150);
+        const emoji    = String(parsed.emoji    || MECHANIC_EMOJIS[mechanic]).slice(0, 8);
+
+        // Rewards scale with user level — notably better than standard quests
+        const xpReward   = Math.round(300 + level * 10);
+        const coinReward = Math.round(150 + level * 5);
+
+        // Persist the definition
+        const questId = `ai_${interaction.user.id}_${Date.now()}`;
+        const expiresAt = getWeeklyExpiry();
+
+        await AiQuest.create({
+            questId, userId: interaction.user.id, guildId: interaction.guild.id,
+            name, lore, description: desc, mechanic, target, emoji,
+            xpReward, coinReward,
+        });
+
+        // Add to user quest array and save
+        user.quests = user.quests || [];
+        user.quests.push({ questId, progress: 0, completedAt: null, expiresAt });
+        await user.save();
+
+        const currency = guildSettings?.economy?.currency ?? '💰';
+        const mechEmoji = MECHANIC_EMOJIS[mechanic];
+        const mechLabel = MECHANIC_LABELS[mechanic];
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFFD700)
+            .setTitle(`⚔️ Legendary Quest Forged!`)
+            .setDescription(`*${lore}*`)
+            .addFields(
+                { name: `${emoji} ${name}`, value: desc, inline: false },
+                { name: '🎯 Mechanic', value: `${mechEmoji} ${mechLabel}`, inline: true },
+                { name: '📊 Target',   value: `${target}`,                 inline: true },
+                { name: '💎 Rewards',  value: `${xpReward} XP  •  ${currency}${coinReward}`, inline: true },
+                { name: '⏰ Expires',  value: `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>`, inline: true },
+            )
+            .setFooter({ text: `Cost: ${COST} coins deducted  •  Use /quests to track progress` })
+            .setTimestamp();
+
+        return interaction.editReply({ embeds: [embed] });
+    },
+};
