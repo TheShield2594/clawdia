@@ -8,6 +8,7 @@ const {
     getEventCurrencyBalance,
 } = require('../../services/seasonalEventService');
 const { addEffect, resolveEffectType } = require('../../services/effectsService');
+const { paginate, chunkArray } = require('../../utils/paginator');
 
 // Items that grant effects when purchased (grant via effectsService)
 const EFFECT_ITEMS = new Set(['coin_booster_2x', 'xp_booster_2x', 'lucky_charm', 'lucky_streak', 'salary_raise']);
@@ -75,6 +76,8 @@ async function handleBalance(interaction, guildSettings, currency) {
     });
 }
 
+const BROWSE_PAGE_SIZE = 5;
+
 async function handleBrowse(interaction, ev, def, currency) {
     const shop = ev.eventShop ?? [];
 
@@ -85,25 +88,31 @@ async function handleBrowse(interaction, ev, def, currency) {
         });
     }
 
-    const lines = shop.map((item, i) => {
-        const stockStr = item.stock === -1 ? '∞' : item.stock.toLocaleString();
-        return `**${i + 1}.** ${item.emoji || '•'} **${item.name}** — \`${item.cost} ${currency.emoji}\`\n` +
-               `   ${item.description || ''}  •  Stock: ${stockStr}`;
+    const chunks = chunkArray(shop, BROWSE_PAGE_SIZE);
+    const totalItems = shop.length;
+
+    const pages = chunks.map((chunk, pageIndex) => {
+        const offset = pageIndex * BROWSE_PAGE_SIZE;
+        const lines = chunk.map((item, i) => {
+            const stockStr = item.stock === -1 ? '∞' : item.stock.toLocaleString();
+            return `**${offset + i + 1}.** ${item.emoji || '•'} **${item.name}** — \`${item.cost} ${currency.emoji}\`\n` +
+                   `   ${item.description || ''}  •  Stock: ${stockStr}`;
+        });
+
+        return new EmbedBuilder()
+            .setColor(ev.color ?? '#5865F2')
+            .setTitle(`${ev.emoji ?? '🛒'} ${ev.name} — Event Shop`)
+            .setDescription(lines.join('\n\n'))
+            .addFields({
+                name: `${currency.emoji} Your Balance`,
+                value: 'Use `/eventshop balance` to check your balance',
+                inline: false
+            })
+            .setFooter({ text: `Use /eventshop buy <item name> to purchase  •  ${totalItems} items total` })
+            .setTimestamp();
     });
 
-    const embed = new EmbedBuilder()
-        .setColor(ev.color ?? '#5865F2')
-        .setTitle(`${ev.emoji ?? '🛒'} ${ev.name} — Event Shop`)
-        .setDescription(lines.join('\n\n'))
-        .addFields({
-            name: `${currency.emoji} Your Balance`,
-            value: 'Use `/eventshop balance` to check your balance',
-            inline: false
-        })
-        .setFooter({ text: 'Use /eventshop buy <item name> to purchase' })
-        .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+    return paginate(interaction, pages);
 }
 
 async function handleBuy(interaction, ev, def, currency, currencyId) {
