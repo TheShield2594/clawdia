@@ -384,13 +384,13 @@ async function awardWeeklyLeaderboardBadges(client) {
                     {
                         $pull:  { badges: { id: `leaderboard_1_${cat.key}` } },
                     }
-                ).catch(() => {});
+                ).catch(err => console.error(`[scheduler] badge $pull failed for ${top.userId}:`, err.message));
                 await User.updateOne(
                     { userId: top.userId, guildId },
                     {
                         $push: { badges: { id: `leaderboard_1_${cat.key}`, label: '👑 #1', expiresAt: badgeExpiry } }
                     }
-                ).catch(() => {});
+                ).catch(err => console.error(`[scheduler] badge $push failed for ${top.userId}:`, err.message));
 
                 let username = `<@${top.userId}>`;
                 if (discordGuild) {
@@ -556,7 +556,7 @@ async function announceHourlyWinners(client) {
         await User.findOneAndUpdate(
             { userId: winner.userId, guildId: winner.guildId },
             { $inc: { balance: rewardAmount } }
-        ).catch(() => {});
+        ).catch(err => console.error(`[scheduler] reward credit failed for ${winner.userId}:`, err.message));
     }
 
     // Announce per guild (best-effort — reward already granted above)

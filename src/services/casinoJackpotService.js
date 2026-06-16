@@ -59,7 +59,7 @@ async function processJackpotBet({ guildId, userId, username, bet, interaction }
         const wonAmount = poolAtWin + contribution;
 
         // Persist the exact amount won now that we know it
-        Guild.updateOne({ guildId }, { $set: { 'casinoJackpot.lastWonAmount': wonAmount } }).catch(() => {});
+        Guild.updateOne({ guildId }, { $set: { 'casinoJackpot.lastWonAmount': wonAmount } }).catch(err => console.error('[casinoJackpot] lastWonAmount persist failed:', err.message));
 
         // Credit the winner — pool is already reset above so this is safe to retry.
         // If the credit persistently fails, restore the pool so the coins aren't lost.

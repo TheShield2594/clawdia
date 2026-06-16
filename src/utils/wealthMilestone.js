@@ -37,7 +37,7 @@ async function checkAndBroadcastWealthMilestone(client, guildSettings, user, cha
         if (!milestone) return;
 
         user.wealthTier = newTier;
-        await user.save().catch(() => {});
+        await user.save().catch(err => console.error('[wealthMilestone] user.save failed:', err.message));
 
         if (!channel) return;
 
