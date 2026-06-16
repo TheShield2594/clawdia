@@ -115,9 +115,9 @@ module.exports = {
             // Natural language reminders — available to everyone, any channel
             await handleNLReminder(message);
 
-            // Streak + quests (only for non-blocked messages)
-            // Reuse user fetched by handleLeveling when available — avoids a second DB round-trip
-            await handleStreakAndQuests(message, guildSettings, sharedUser);
+            // Streak + quests — fetch independently to avoid operating on a stale,
+            // already-saved Mongoose document from handleLeveling.
+            await handleStreakAndQuests(message, guildSettings);
 
             // Ambient chat events (airdrops, crates, trivia) — fire-and-forget
             maybeTriggerChatEvent(message, guildSettings).catch(() => {});

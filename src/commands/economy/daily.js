@@ -395,7 +395,7 @@ module.exports = {
                 User.findOneAndUpdate(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
                     { $set: { 'onboarding.firstDailyClaimed': true } }
-                ).catch(() => {});
+                ).catch(err => console.error('[daily] onboarding flag update failed:', err.message));
             }
 
             const rankMedals = { 1: '🥇', 2: '🥈', 3: '🥉' };

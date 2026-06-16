@@ -97,7 +97,7 @@ async function checkRivalry(client, guild, savedUser) {
             await User.updateOne(
                 { userId: entry.userId, guildId: guild.id },
                 { $set: { 'leaderboard.lastOvertakenNotification': new Date() } }
-            ).catch(() => {});
+            ).catch(err => console.error('[rivalry] lastOvertakenNotification update failed:', err.message));
         }
 
         // Optional "climbed" DM — only on significant threshold crossings
@@ -122,7 +122,7 @@ async function checkRivalry(client, guild, savedUser) {
             await User.updateOne(
                 { userId: savedUser.userId, guildId: guild.id },
                 { $set: { 'leaderboard.lastClimbedNotification': new Date() } }
-            ).catch(() => {});
+            ).catch(err => console.error('[rivalry] lastClimbedNotification update failed:', err.message));
         }
     } catch (err) {
         console.error('Rivalry check error:', err);
