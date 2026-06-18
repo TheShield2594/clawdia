@@ -222,11 +222,28 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('buy')
                 .setDescription('Purchase an item from the shop')
-                .addStringOption(o => o.setName('item').setDescription('Exact name of the item to buy (see /shop view for the full list)').setRequired(true)))
+                .addStringOption(o => o.setName('item').setDescription('Item to buy').setRequired(true).setAutocomplete(true)))
         .addSubcommand(sub =>
             sub.setName('trends')
                 .setDescription('Show price movement on shop items (dynamic pricing must be enabled).'))
         .setDefaultMemberPermissions(null),
+
+    async autocomplete(interaction) {
+        try {
+            const focused = interaction.options.getFocused()?.toLowerCase() ?? '';
+            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'shop').lean();
+            const items = guildSettings?.shop ?? [];
+            const matches = focused
+                ? items.filter(i => i.name.toLowerCase().includes(focused))
+                : items;
+            await interaction.respond(
+                matches.slice(0, 25).map(i => ({ name: i.name, value: i.name }))
+            );
+        } catch (err) {
+            console.error('[shop] autocomplete error:', err);
+            await interaction.respond([]).catch(() => {});
+        }
+    },
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
