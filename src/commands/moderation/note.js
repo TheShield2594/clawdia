@@ -9,9 +9,9 @@ module.exports = {
         .addIntegerOption(o =>
             o.setName('case_id').setDescription('Case ID').setRequired(true).setMinValue(1))
         .addStringOption(o =>
-            o.setName('text').setDescription('Note text').setRequired(true))
+            o.setName('text').setDescription('Note text').setRequired(true).setMaxLength(1024))
         .addStringOption(o =>
-            o.setName('label').setDescription('Add a label to the case').setRequired(false))
+            o.setName('label').setDescription('Add a label to the case').setRequired(false).setMaxLength(256))
         .addUserOption(o =>
             o.setName('assign').setDescription('Assign this case to a moderator').setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
