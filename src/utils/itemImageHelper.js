@@ -31,7 +31,11 @@ async function getItemImageAttachment(itemId, guildId = null) {
     if (!imageData) return null;
 
     const ext = (imageType.split('/')[1] || 'png').replace('jpeg', 'jpg');
-    const filename = `item-${itemId}.${ext}`;
+    // itemId may contain characters (e.g. the `system:slug` colon used by
+    // hunt/fish/mine activity items) that Discord rejects in attachment
+    // filenames, so sanitize it here without touching the lookups above.
+    const safeId = itemId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `item-${safeId}.${ext}`;
     const attachment = new AttachmentBuilder(Buffer.from(imageData), { name: filename });
     return { attachment, url: `attachment://${filename}` };
 }
