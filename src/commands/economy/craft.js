@@ -125,20 +125,46 @@ module.exports = {
                 });
             }
 
+            // Discord embed field values must be 1..1024 chars. Split a category's
+            // lines across multiple same-named fields rather than overflowing one.
+            const FIELD_LIMIT = 1024;
+            function buildFields(name, lines) {
+                if (!lines.length) return [{ name, value: 'None', inline: false }];
+                const fields = [];
+                let chunk = '';
+                for (const line of lines) {
+                    const candidate = chunk ? `${chunk}\n\n${line}` : line;
+                    if (candidate.length > FIELD_LIMIT) {
+                        if (chunk) fields.push(chunk);
+                        chunk = line.length > FIELD_LIMIT ? line.slice(0, FIELD_LIMIT - 1) + '…' : line;
+                    } else {
+                        chunk = candidate;
+                    }
+                }
+                if (chunk) fields.push(chunk);
+                return fields.map((value, i) => ({
+                    name: i === 0 ? name : `${name} (cont.)`,
+                    value,
+                    inline: false
+                }));
+            }
+
             const huntLines  = recipeLines(HUNT_RECIPES,  { luckyPaw: h.luckyPaw });
             const mineLines  = recipeLines(MINE_RECIPES);
             const fishLines  = recipeLines(FISH_CRAFT_RECIPES, { luckyHook: f.luckyHook });
             const crossLines = recipeLines(CROSS_CRAFT_RECIPES, { precisionScope: h.precisionScope });
 
+            const fields = [
+                ...buildFields('🏹 Hunting Recipes', huntLines),
+                ...buildFields('⛏️ Mining Recipes', mineLines),
+                ...buildFields('🎣 Fishing Recipes', fishLines),
+                ...buildFields('🔗 Cross-System Recipes', crossLines)
+            ].slice(0, 25);
+
             const embed = new EmbedBuilder()
                 .setColor('#1abc9c')
                 .setTitle('🔨 Crafting Recipes')
-                .addFields(
-                    { name: '🏹 Hunting Recipes',        value: huntLines.join('\n\n')  || 'None', inline: false },
-                    { name: '⛏️ Mining Recipes',          value: mineLines.join('\n\n')  || 'None', inline: false },
-                    { name: '🎣 Fishing Recipes',         value: fishLines.join('\n\n')  || 'None', inline: false },
-                    { name: '🔗 Cross-System Recipes',    value: crossLines.join('\n\n') || 'None', inline: false }
-                )
+                .addFields(...fields)
                 .setFooter({ text: '✅ = can craft now  •  /craft make <recipe>' });
 
             return interaction.reply({ embeds: [embed] });
