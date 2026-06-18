@@ -79,7 +79,7 @@ const INTENSITY_LEVELS = [
 ];
 
 module.exports = {
-    cooldown: 30,
+    cooldown: 5,
 
     data: new SlashCommandBuilder()
         .setName('mine')
