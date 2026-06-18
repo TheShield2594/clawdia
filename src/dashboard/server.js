@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
+const MongoStore = require('connect-mongo');
 const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const path = require('path');
@@ -117,6 +118,7 @@ function start(client) {
     });
 
     app.use(session({
+        store: MongoStore.create({ mongoUrl: process.env.MONGODB_URI, collectionName: 'sessions' }),
         secret: process.env.SESSION_SECRET,
         resave: false,
         saveUninitialized: false,

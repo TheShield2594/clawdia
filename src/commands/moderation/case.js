@@ -35,7 +35,7 @@ module.exports = {
                 { name: 'Target', value: `<@${modCase.targetUserId}> (${modCase.targetUserId})`, inline: true },
                 { name: 'Moderator', value: `<@${modCase.moderatorId}>`, inline: true },
                 { name: 'Status', value: `${STATUS_EMOJI[modCase.status] || '⚪'} ${modCase.status}`, inline: true },
-                { name: 'Reason', value: modCase.reason }
+                { name: 'Reason', value: (modCase.reason || 'No reason provided').slice(0, 1024) }
             )
             .setTimestamp(modCase.createdAt);
 
@@ -63,13 +63,15 @@ module.exports = {
         if (modCase.notes?.length) {
             const notesText = modCase.notes
                 .slice(-3)
-                .map((n, i) => `**${i + 1}.** <@${n.moderatorId}>: ${n.content}`)
-                .join('\n');
+                .map((n, i) => `**${i + 1}.** <@${n.moderatorId}>: ${n.content.slice(0, 300)}`)
+                .join('\n')
+                .slice(0, 1024);
             embed.addFields({ name: `Notes (last ${Math.min(3, modCase.notes.length)})`, value: notesText });
         }
 
         if (modCase.labels?.length) {
-            embed.addFields({ name: 'Labels', value: modCase.labels.join(', '), inline: true });
+            const labelsText = modCase.labels.join(', ').slice(0, 1024) || 'None';
+            embed.addFields({ name: 'Labels', value: labelsText, inline: true });
         }
 
         await interaction.reply({ embeds: [embed], ephemeral: true });
