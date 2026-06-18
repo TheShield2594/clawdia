@@ -229,15 +229,20 @@ module.exports = {
         .setDefaultMemberPermissions(null),
 
     async autocomplete(interaction) {
-        const focused = interaction.options.getFocused()?.toLowerCase() ?? '';
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'shop').lean();
-        const items = guildSettings?.shop ?? [];
-        const matches = focused
-            ? items.filter(i => i.name.toLowerCase().includes(focused))
-            : items;
-        await interaction.respond(
-            matches.slice(0, 25).map(i => ({ name: i.name, value: i.name }))
-        );
+        try {
+            const focused = interaction.options.getFocused()?.toLowerCase() ?? '';
+            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'shop').lean();
+            const items = guildSettings?.shop ?? [];
+            const matches = focused
+                ? items.filter(i => i.name.toLowerCase().includes(focused))
+                : items;
+            await interaction.respond(
+                matches.slice(0, 25).map(i => ({ name: i.name, value: i.name }))
+            );
+        } catch (err) {
+            console.error('[shop] autocomplete error:', err);
+            await interaction.respond([]).catch(() => {});
+        }
     },
 
     async execute(interaction) {
