@@ -94,10 +94,11 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
             } else {
                 const shopItem = shopItems.find(s => s.name.toLowerCase() === entry.itemId.toLowerCase()
                                                   || (s.itemId && s.itemId.toLowerCase() === entry.itemId.toLowerCase()));
+                const displayName = shopItem ? shopItem.name : entry.itemId;
                 const worth    = shopItem ? ` (worth ${currency}${shopItem.price} each)` : '';
                 const lore     = getItemLore(entry.itemId);
                 const loreLine = lore ? `\n*${lore}*` : '';
-                shopLines.push(`**${entry.itemId}** ×${entry.quantity}${worth}${loreLine}`);
+                shopLines.push(`**${displayName}** ×${entry.quantity}${worth}${loreLine}`);
             }
         }
         if (shopLines.length) {
