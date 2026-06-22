@@ -71,6 +71,16 @@ jest.mock('canvas', () => ({
 }));
 
 const huntCommand = require('../src/commands/economy/hunt.js');
+const User = require('../src/models/User');
+const GrindProfile = require('../src/models/GrindProfile');
+
+beforeEach(() => {
+    jest.clearAllMocks();
+    GrindProfile.__existingHuntProfile.data.weapons = [
+        { name: 'Wooden Rifle', tier: 1, slug: 'wooden_rifle', currentDurability: 80, maxDurability: 80, baseDurability: 80, repairCount: 0, upgrade: null, status: 'good', acquiredAt: new Date() }
+    ];
+    User.__fakeUser.balance = 1000000;
+});
 
 test('hunt shop weapon -> confirm purchase does not throw, even with a colon-keyed item image', async () => {
     let collectHandler;
@@ -98,6 +108,11 @@ test('hunt shop weapon -> confirm purchase does not throw, even with a colon-key
     await huntCommand.execute(interaction);
     expect(collectHandler).toBeDefined();
 
+    // execute() already upserts the user once before the button exists; only
+    // count calls made during the confirm click itself.
+    const userCallsBeforeConfirm = User.findOneAndUpdate.mock.calls.length;
+    const grindCallsBeforeConfirm = GrindProfile.findOneAndUpdate.mock.calls.length;
+
     const btn = {
         user: { id: 'u1' },
         customId: 'buygun_confirm',
@@ -113,4 +128,9 @@ test('hunt shop weapon -> confirm purchase does not throw, even with a colon-key
 
     const successEmbed = editReplyCalls.find(c => c.embeds?.[0]?.data?.title?.includes('Purchased'));
     expect(successEmbed).toBeDefined();
+
+    expect(User.findOneAndUpdate.mock.calls.length).toBe(userCallsBeforeConfirm + 1);
+    expect(GrindProfile.findOneAndUpdate.mock.calls.length).toBe(grindCallsBeforeConfirm + 1);
+    expect(User.findOneAndUpdate.mock.invocationCallOrder[userCallsBeforeConfirm])
+        .toBeLessThan(GrindProfile.findOneAndUpdate.mock.invocationCallOrder[grindCallsBeforeConfirm]);
 });
