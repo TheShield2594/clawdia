@@ -748,6 +748,78 @@ const REGIONS = {
             { id: 'va_secret_lamp',   name: 'The First Lamp',              reward: 7_000, reveal: 'The Arcade\'s oldest gas lamp burns from no line and no main. Inside the flame, very small, two figures dance. The lamplighter tells you who they were. The Arcade exists because of them. Now your map does, a little, too.' },
         ],
     },
+    // ── Seasonal: The Winter Hunt ────────────────────────────────────────────
+    arctic_tundra: {
+        id: 'arctic_tundra',
+        name: 'The Arctic Tundra',
+        emoji: '🏔️',
+        color: '#6ab4f5',
+        defaultUnlocked: false,
+        unlockLevel: 1,
+        unlockCost: 0,
+        seasonalEventId: 'winter_hunt',
+        payoutMultiplier: 1.5,
+        eventCurrency: { min: 3, max: 8 },
+        tagline: 'New year, old cold. The hunt is already on.',
+        description: 'A frozen stretch beyond Misty Lake where the first two weeks of the year belong to whoever\'s willing to track something across the ice. The snow here keeps better records than you do.',
+        intros: [
+            'The wind doesn\'t howl so much as narrate. You\'re the subject. It\'s not flattering.',
+            'Fresh tracks cross the ice ahead of you — too large, too even, gone the second you look directly at them.',
+            'The tundra is flat, white, and lying about it. Something below the surface is keeping very still.',
+            'Your breath freezes mid-air and hangs there, politely waiting for you to catch up to it.',
+        ],
+        eventWeights: { encounter: 24, discovery: 16, trap: 16, treasure: 22, lore: 12, secret: 5, quiet: 5 },
+        landmarks: [
+            { id: 'at_frozen_camp',  name: 'The Abandoned Hunting Camp', line: 'Tents still pitched, fire still circled in stones, nobody home. The cold preserved the coffee. Don\'t.' },
+            { id: 'at_bonecairn',    name: 'The Bone Cairn',              line: 'A stack of antlers, tusks, and one very confused-looking ski. Someone\'s been keeping score for a long time.' },
+            { id: 'at_aurora_rift', name: 'The Aurora Rift',             line: 'A crack in the ice that glows the same colors as the sky above it, as if the tundra got tired of waiting for the lights and grew its own.' },
+        ],
+        lore: [
+            { id: 'at_lore_1', text: '“The Hunt starts the first morning of the year and ends two weeks later, whether anyone\'s ready or not. Mostly nobody\'s ready.”' },
+            { id: 'at_lore_2', text: '“Trackers say the prize isn\'t the catch. It\'s being the thing the tundra decided to notice for once.”' },
+            { id: 'at_lore_3', text: '“Frost Tokens don\'t melt. Nobody knows what they\'re made of. The mint isn\'t talking and neither is the ice.”' },
+        ],
+        encounters: [
+            {
+                id: 'at_enc_tracker',
+                name: 'A Tracker Twice Your Age',
+                emoji: '🥾',
+                intro: 'An old hunter kneels over a print in the snow that doesn\'t match anything alive. "Fresh," she says, without looking up. "Help me follow it or get out of the wind. Your call."',
+                winChance: 0.55,
+                reward: { min: 1_500, max: 3_000 },
+                winLine: 'You match her pace for three miles without complaint. The trail ends at a cache she\'s clearly been saving for someone who could keep up. That\'s apparently you now.',
+                loseLine: 'You lose the trail at the second ridge. She doesn\'t say anything, which is worse than if she had. The walk back costs you in coin and dignity.',
+                safeLine: 'You hang back and let her work alone. She finds what she\'s after, and tosses you a cut anyway — for, in her words, "not getting in the way for once."',
+            },
+            {
+                id: 'at_enc_white_stag',
+                name: 'Something White and Patient',
+                emoji: '🦌',
+                intro: 'A shape that might be a stag, made of packed snow and old moonlight, watches you from the ridgeline. It has been there, the tracks suggest, since before you arrived.',
+                winChance: 0.45,
+                reward: { min: 1_800, max: 3_600 },
+                winLine: 'You sit down in the snow instead of approaching. Eventually it comes to you, sheds a sliver of something cold and valuable at your feet, and walks back into the white.',
+                loseLine: 'You approach too fast. It\'s gone before you blink, taking the warmth out of the air with it. You shiver the rest of the way home, lighter in pocket.',
+                safeLine: 'You photograph the tracks and leave it be. The tundra, oddly grateful for the restraint, leaves something behind on your way out.',
+            },
+        ],
+        traps: [
+            { id: 'at_trap_thinice', name: 'Thin Ice With a Grudge', line: 'The ice was load-bearing right up until it had an audience. You climb out colder, wetter, and short a few coins that are now, technically, the lake\'s problem.', penalty: { min: 300, max: 800 }, injuryChance: 0.30 },
+            { id: 'at_trap_whiteout', name: 'A Sudden Whiteout',     line: 'The snow erases the horizon, the path, and briefly your confidence. You find your way out by accident and pay the tundra\'s toll for the detour.', penalty: { min: 250, max: 700 }, injuryChance: 0.25 },
+        ],
+        treasureLines: [
+            'A hunting cache half-buried in a drift, left by someone who never came back for it. You do.',
+            'The Bone Cairn shifts as you pass, and a pouch of frost-rimed coins tumbles loose from somewhere inside it.',
+        ],
+        relics: [
+            { itemId: 'Tundra Tracker\'s Compass', rarity: 'rare', lore: 'Points not north, but toward whatever\'s worth following. Currently it\'s pointing at you, which is either a malfunction or a compliment.' },
+            { itemId: 'Sliver of the White Stag',  rarity: 'epic', lore: 'Cold to the touch, year-round. Hunters who carry one report the strong feeling of being allowed to.' },
+        ],
+        secrets: [
+            { id: 'at_secret_denning', name: 'The Denning Grounds', reward: 7_000, reveal: 'Beneath the Aurora Rift, a hollow where the tundra\'s oldest things sleep through the dark months. You note the entrance and back away slowly, with enormous respect and a small souvenir.' },
+        ],
+    },
+
 };
 
 const REGION_LIST = Object.values(REGIONS);

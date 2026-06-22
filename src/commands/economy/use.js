@@ -9,6 +9,14 @@ const {
     timeRemaining,
 } = require('../../services/effectsService');
 const { getItemLore } = require('../../data/defaultShopItems');
+const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
+
+// itemId of a seasonal loot box -> the event definition that owns it
+const LOOT_BOX_EVENTS = new Map(
+    Object.values(SEASONAL_EVENTS)
+        .filter(ev => ev.lootBox)
+        .map(ev => [ev.lootBox.itemId.toLowerCase(), ev])
+);
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -80,6 +88,39 @@ module.exports = {
                 value: `${user.inventory.find(e => e.itemId.toLowerCase() === itemName.toLowerCase())?.quantity ?? 0}x`,
                 inline: true
             });
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        // ── Seasonal loot boxes ────────────────────────────────────────────────
+        const lootBoxEvent = LOOT_BOX_EVENTS.get(invEntry.itemId.toLowerCase());
+        if (lootBoxEvent) {
+            const won = rollLootBox(lootBoxEvent);
+            if (!won) {
+                return interaction.reply({ content: `The **${lootBoxEvent.lootBox.name}** is empty. That shouldn't happen — let a mod know.`, ephemeral: true });
+            }
+
+            invEntry.quantity -= 1;
+            if (invEntry.quantity <= 0) {
+                user.inventory = user.inventory.filter(e => e.itemId.toLowerCase() !== itemName.toLowerCase());
+            }
+
+            if (!user.inventory) user.inventory = [];
+            const wonSlot = user.inventory.find(e => e.itemId === won.itemId);
+            if (wonSlot) {
+                wonSlot.quantity += 1;
+            } else {
+                user.inventory.push({ itemId: won.itemId, quantity: 1 });
+            }
+
+            await user.save();
+
+            const embed = new EmbedBuilder()
+                .setColor(RARITY_COLORS[won.rarity] ?? '#5865F2')
+                .setTitle(`${lootBoxEvent.lootBox.emoji} Opened: ${lootBoxEvent.lootBox.name}`)
+                .setDescription(`You found a **${won.rarity}** item:\n\n${won.emoji} **${won.name}**`)
+                .addFields({ name: 'Remaining in inventory', value: `${user.inventory.find(e => e.itemId === invEntry.itemId)?.quantity ?? 0}x ${lootBoxEvent.lootBox.name}`, inline: true })
+                .setTimestamp();
 
             return interaction.reply({ embeds: [embed] });
         }
