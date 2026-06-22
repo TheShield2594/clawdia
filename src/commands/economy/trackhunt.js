@@ -95,19 +95,20 @@ module.exports = {
 
         const isLost = Math.random() < LOST_CHANCE;
         let embed;
+        let logPayload;
 
         if (isLost) {
             const lost = LOST_OUTCOMES[Math.floor(Math.random() * LOST_OUTCOMES.length)];
             const loss = Math.min(lost.coinLoss, user.balance ?? 0);
             user.balance = Math.max(0, (user.balance ?? 0) - loss);
 
-            logTransaction({
+            logPayload = {
                 userId:   interaction.user.id,
                 guildId:  interaction.guild.id,
                 type:     'trackhunt_lost',
                 amount:   -loss,
                 balance:  user.balance,
-            });
+            };
 
             embed = new EmbedBuilder()
                 .setColor('#888888')
@@ -141,13 +142,13 @@ module.exports = {
                 user.inventory.push({ itemId: 'snowflake_lure', quantity: 1 });
             }
 
-            logTransaction({
+            logPayload = {
                 userId:   interaction.user.id,
                 guildId:  interaction.guild.id,
                 type:     'trackhunt_find',
                 amount:   find.coins,
                 balance:  user.balance,
-            });
+            };
 
             embed = new EmbedBuilder()
                 .setColor('#6ab4f5')
@@ -164,6 +165,7 @@ module.exports = {
         }
 
         await user.save();
+        logTransaction(logPayload);
         return interaction.editReply({ embeds: [embed] });
     }
 };

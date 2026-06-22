@@ -95,19 +95,20 @@ module.exports = {
 
         const isWave = Math.random() < WAVE_CHANCE;
         let embed;
+        let logPayload;
 
         if (isWave) {
             const wave = WAVE_OUTCOMES[Math.floor(Math.random() * WAVE_OUTCOMES.length)];
             const loss = Math.min(wave.coinLoss, user.balance ?? 0);
             user.balance = Math.max(0, (user.balance ?? 0) - loss);
 
-            logTransaction({
+            logPayload = {
                 userId:   interaction.user.id,
                 guildId:  interaction.guild.id,
                 type:     'sandcastle_wave',
                 amount:   -loss,
                 balance:  user.balance,
-            });
+            };
 
             embed = new EmbedBuilder()
                 .setColor('#1565c0')
@@ -141,13 +142,13 @@ module.exports = {
                 user.inventory.push({ itemId: 'seashell', quantity: 1 });
             }
 
-            logTransaction({
+            logPayload = {
                 userId:   interaction.user.id,
                 guildId:  interaction.guild.id,
                 type:     'sandcastle_prize',
                 amount:   prize.coins,
                 balance:  user.balance,
-            });
+            };
 
             embed = new EmbedBuilder()
                 .setColor('#ffd700')
@@ -164,6 +165,7 @@ module.exports = {
         }
 
         await user.save();
+        logTransaction(logPayload);
         return interaction.editReply({ embeds: [embed] });
     }
 };
