@@ -43,11 +43,11 @@ function makeGuildSettings(overrides = {}) {
 }
 
 describe('exploreData integrity', () => {
-    test('has 4 core and 4 seasonal regions', () => {
+    test('has 4 core and 5 seasonal regions', () => {
         const core = REGION_LIST.filter(r => !r.seasonalEventId);
         const seasonal = REGION_LIST.filter(r => r.seasonalEventId);
         expect(core).toHaveLength(4);
-        expect(seasonal).toHaveLength(4);
+        expect(seasonal).toHaveLength(5);
     });
 
     test('core regions hold 16 secrets total (matches achievement target)', () => {
