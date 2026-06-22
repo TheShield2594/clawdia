@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const Reminder = require('../../models/Reminder');
 
 module.exports = {
@@ -33,7 +33,7 @@ module.exports = {
         const days = interaction.options.getInteger('days') || 0;
 
         if (minutes === 0 && hours === 0 && days === 0) {
-            return interaction.reply({ content: 'Please specify at least one time unit!', ephemeral: true });
+            return interaction.reply({ content: 'Please specify at least one time unit!', flags: MessageFlags.Ephemeral });
         }
 
         const totalMinutes = minutes + (hours * 60) + (days * 1440);
@@ -51,7 +51,7 @@ module.exports = {
             await interaction.reply(`✅ I'll remind you about "${message}" <t:${Math.floor(remindAt.getTime() / 1000)}:R>`);
         } catch (error) {
             console.error('Reminder error:', error);
-            await interaction.reply({ content: 'Failed to create reminder.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to create reminder.', flags: MessageFlags.Ephemeral });
         }
     }
 };

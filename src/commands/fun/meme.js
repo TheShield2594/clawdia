@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const axios = require('axios');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 
@@ -50,7 +50,7 @@ module.exports = {
     async execute(interaction) {
         const rl = checkImageRateLimit(interaction.user.id);
         if (rl.limited) {
-            return interaction.reply({ content: rl.message, ephemeral: true });
+            return interaction.reply({ content: rl.message, flags: MessageFlags.Ephemeral });
         }
 
         const templateId = interaction.options.getString('template');
@@ -68,7 +68,7 @@ module.exports = {
         if (!username || !password) {
             return interaction.reply({
                 content: '❌ Meme generation is not configured. Ask an admin to set `IMGFLIP_USERNAME` and `IMGFLIP_PASSWORD`.',
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 
@@ -96,7 +96,7 @@ module.exports = {
                 if (interaction.deferred || interaction.replied) {
                     await interaction.editReply(msg);
                 } else {
-                    await interaction.reply({ content: msg, ephemeral: true });
+                    await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
                 }
             } catch (replyErr) {
                 console.error('meme: failed to send error reply', replyErr);

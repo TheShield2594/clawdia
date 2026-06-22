@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 
 module.exports = {
@@ -61,7 +61,7 @@ module.exports = {
                 })
                 .setFooter({ text: 'Use /notifications leaderboard to change this at any time.' });
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
         }
     }
 };

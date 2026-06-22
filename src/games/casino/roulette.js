@@ -3,6 +3,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
@@ -143,6 +144,7 @@ module.exports = {
     name: 'roulette',
     description: 'Bet on Red/Black, Odd/Even, dozens, columns, or a specific number.',
     cooldown: 5,
+    betOptionName: 'amount',
     configure: sub => sub
         .addStringOption(opt =>
             opt.setName('bet')
@@ -178,7 +180,7 @@ module.exports = {
 
     async execute(interaction) {
         if (!interaction.guild) {
-            return interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+            return interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
         }
 
         const betKey = interaction.options.getString('bet');
@@ -188,14 +190,14 @@ module.exports = {
         if (betKey === 'number' && target === null) {
             return interaction.reply({
                 content: 'You must provide a `number` (0–36) when betting on a straight number.',
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;

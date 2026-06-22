@@ -4,6 +4,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const Guild = require('../../models/Guild');
 const User  = require('../../models/User');
@@ -72,7 +73,7 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.coinflipEnabled === false) {
-            return interaction.reply({ content: 'Coinflip is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Coinflip is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const bet      = interaction.options.getInteger('bet');
@@ -80,7 +81,7 @@ module.exports = {
 
         if (!bet) {
             if (opponent) {
-                return interaction.reply({ content: 'Challenging someone requires a `bet` — add one to make it interesting.', ephemeral: true });
+                return interaction.reply({ content: 'Challenging someone requires a `bet` — add one to make it interesting.', flags: MessageFlags.Ephemeral });
             }
             await interaction.deferReply();
             return playCasualFlip(interaction);
@@ -88,7 +89,7 @@ module.exports = {
 
         const maxBet = guildSettings?.economy?.duelMaxBet ?? 10_000;
         if (bet > maxBet) {
-            return interaction.reply({ content: `The maximum coinflip wager here is **${maxBet.toLocaleString()}** coins.`, ephemeral: true });
+            return interaction.reply({ content: `The maximum coinflip wager here is **${maxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
 
         if (opponent) return playVersusFlip(interaction, guildSettings, bet, opponent);
@@ -152,7 +153,7 @@ async function playSoloFlip(interaction, guildSettings, bet) {
         { new: true }
     );
     if (!debited) {
-        return interaction.reply({ content: `You don't have **${currency}${bet.toLocaleString()}** to wager.`, ephemeral: true });
+        return interaction.reply({ content: `You don't have **${currency}${bet.toLocaleString()}** to wager.`, flags: MessageFlags.Ephemeral });
     }
 
     await interaction.deferReply();
@@ -206,14 +207,14 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent) {
     const guildId  = interaction.guild.id;
 
     if (opponent.id === interaction.user.id) {
-        return interaction.reply({ content: 'Flipping a coin against yourself is called "thinking". Pick someone else.', ephemeral: true });
+        return interaction.reply({ content: 'Flipping a coin against yourself is called "thinking". Pick someone else.', flags: MessageFlags.Ephemeral });
     }
     if (opponent.bot) {
-        return interaction.reply({ content: "Bots don't carry pocket change.", ephemeral: true });
+        return interaction.reply({ content: "Bots don't carry pocket change.", flags: MessageFlags.Ephemeral });
     }
     if (Date.now() - interaction.user.createdTimestamp < MIN_ACCOUNT_AGE_MS
         || Date.now() - opponent.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
-        return interaction.reply({ content: 'Both accounts must be at least 7 days old for wagered flips.', ephemeral: true });
+        return interaction.reply({ content: 'Both accounts must be at least 7 days old for wagered flips.', flags: MessageFlags.Ephemeral });
     }
 
     const acceptId  = `cfv_accept_${interaction.id}`;

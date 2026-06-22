@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
@@ -161,7 +161,7 @@ module.exports = {
                         milestoneTeaser: getNextStreakMilestone(streak),
                         nextRewardPreview,
                     })],
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
@@ -330,7 +330,7 @@ module.exports = {
                         color: getStreakColor(streak),
                         milestoneTeaser: getNextStreakMilestone(streak),
                     })],
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 };
                 return usedFollowUp ? interaction.followUp(errorMsg) : interaction.reply(errorMsg);
             }
@@ -564,7 +564,7 @@ module.exports = {
                 });
                 const dailyAmountForCalendar = guildSettings?.economy?.dailyAmount ?? 100;
                 const calendarEmbed = buildCalendarEmbed(updated, dailyAmountForCalendar, streakCurrent);
-                await calendarResponse.reply({ embeds: [calendarEmbed], ephemeral: true });
+                await calendarResponse.reply({ embeds: [calendarEmbed], flags: MessageFlags.Ephemeral });
                 await reply.edit({ components: [] }).catch(() => {});
             } catch {
                 // Timeout — just remove the calendar button
@@ -572,7 +572,7 @@ module.exports = {
             }
         } catch (error) {
             console.error('Daily error:', error);
-            const errMsg = { content: 'Failed to claim daily reward.', ephemeral: true };
+            const errMsg = { content: 'Failed to claim daily reward.', flags: MessageFlags.Ephemeral };
             if (interaction.replied || interaction.deferred) {
                 await interaction.followUp(errMsg).catch(() => {});
             } else {

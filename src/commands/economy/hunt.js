@@ -5,7 +5,7 @@ const {
     EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle, MessageFlags
 } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
@@ -381,7 +381,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
 async function executeStart(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -408,18 +408,18 @@ async function executeStart(interaction) {
     const zone   = ZONES[zoneId];
 
     if (!zone) {
-        return interaction.reply({ content: `Unknown zone \`${zoneId}\`. Use \`/hunt zone list\` to see available zones.`, ephemeral: true });
+        return interaction.reply({ content: `Unknown zone \`${zoneId}\`. Use \`/hunt zone list\` to see available zones.`, flags: MessageFlags.Ephemeral });
     }
     if (!h.unlockedZones.includes(zoneId)) {
         return interaction.reply({
             content: `You haven't unlocked **${zone.name}** yet. Use \`/hunt shop unlock\` to unlock it.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     if (h.level < zone.unlockLevel) {
         return interaction.reply({
             content: `You need to be Hunter Level **${zone.unlockLevel}** to hunt in **${zone.name}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -427,7 +427,7 @@ async function executeStart(interaction) {
         const remaining = h.injuryUntil.getTime() - Date.now();
         return interaction.reply({
             content: `You're injured and need to rest. Back in action in **${formatMs(remaining)}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -440,7 +440,7 @@ async function executeStart(interaction) {
                 color: '#5a8a3c',
                 nextAt,
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -460,14 +460,14 @@ async function executeStart(interaction) {
                 pityStat,
                 nextRewardPreview: 'Full stamina = 10 hunts · Rare+ drops guaranteed by hunt ~50',
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
     if (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex]) {
         return interaction.reply({
             content: `You don't have a weapon equipped! Buy one with \`/hunt shop weapon\` and equip it with \`/hunt inv equip 1\`.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -476,7 +476,7 @@ async function executeStart(interaction) {
     if (weapon.status === 'broken' || weapon.currentDurability <= 0) {
         return interaction.reply({
             content: `Your **${weapon.name}** is broken! Repair it with \`/hunt shop repair\` or buy a new one with \`/hunt shop weapon\`.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -486,7 +486,7 @@ async function executeStart(interaction) {
         if (ammoStock <= 0) {
             return interaction.reply({
                 content: `You're out of **${weaponData.ammoType.replace(/_/g, ' ')}**! Buy more with \`/hunt shop buy\`.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
         h.ammo[weaponData.ammoType] = ammoStock - 1;
@@ -1184,7 +1184,7 @@ async function executeProfile(interaction) {
             content: isSelf
                 ? "You haven't started hunting yet! Buy a weapon with `/hunt shop weapon` and use `/hunt start` to begin."
                 : `${target.username} hasn't started hunting yet.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1342,7 +1342,7 @@ function formatBonuses(bonus) {
 async function executePrestige(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const user = await User.findOneAndUpdate(
@@ -1357,7 +1357,7 @@ async function executePrestige(interaction) {
     if (h.level < 50) {
         return interaction.reply({
             content: `You need Hunter Level **50** to prestige. You are currently Level **${h.level}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1365,7 +1365,7 @@ async function executePrestige(interaction) {
     if (currentPrestige >= MAX_PRESTIGE) {
         return interaction.reply({
             content: `You have already reached the maximum prestige (**P${MAX_PRESTIGE} — Diamond**). You are a true legend! 💎`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1475,7 +1475,7 @@ async function executePrestige(interaction) {
 async function executeInv(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const user = await User.findOneAndUpdate(
@@ -1491,7 +1491,7 @@ async function executeInv(interaction, sub) {
         if (!h.weapons.length) {
             return interaction.reply({
                 content: "You don't own any weapons! Buy one with `/hunt shop weapon`.",
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -1523,12 +1523,12 @@ async function executeInv(interaction, sub) {
         const index  = num - 1;
 
         if (index < 0 || index >= h.weapons.length) {
-            return interaction.reply({ content: `Invalid weapon number. You have ${h.weapons.length} weapon(s). Use \`/hunt inv weapons\` to see them.`, ephemeral: true });
+            return interaction.reply({ content: `Invalid weapon number. You have ${h.weapons.length} weapon(s). Use \`/hunt inv weapons\` to see them.`, flags: MessageFlags.Ephemeral });
         }
 
         const weapon = h.weapons[index];
         if (weapon.status === 'broken') {
-            return interaction.reply({ content: `**${weapon.name}** is broken and cannot be equipped. Repair it first with \`/hunt shop repair\`.`, ephemeral: true });
+            return interaction.reply({ content: `**${weapon.name}** is broken and cannot be equipped. Repair it first with \`/hunt shop repair\`.`, flags: MessageFlags.Ephemeral });
         }
 
         h.equippedWeaponIndex = index;
@@ -1629,14 +1629,14 @@ async function executeInv(interaction, sub) {
         const index = num - 1;
 
         if (index < 0 || index >= h.weapons.length) {
-            return interaction.reply({ content: `Invalid weapon number. You have ${h.weapons.length} weapon(s).`, ephemeral: true });
+            return interaction.reply({ content: `Invalid weapon number. You have ${h.weapons.length} weapon(s).`, flags: MessageFlags.Ephemeral });
         }
 
         const weapon = h.weapons[index];
         if (weapon.status !== 'broken' && weapon.status !== 'condemned') {
             return interaction.reply({
                 content: `**${weapon.name}** is not broken or condemned. You can only discard unusable weapons.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -1669,7 +1669,7 @@ async function executeInv(interaction, sub) {
 async function executeQuests(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1748,7 +1748,7 @@ async function executeQuests(interaction, sub) {
         const template = HUNT_QUEST_TEMPLATES.find(t => t.id === questId);
 
         if (!template) {
-            return interaction.reply({ content: 'Unknown quest.', ephemeral: true });
+            return interaction.reply({ content: 'Unknown quest.', flags: MessageFlags.Ephemeral });
         }
 
         const questEntry = user.quests.find(q =>
@@ -1759,14 +1759,14 @@ async function executeQuests(interaction, sub) {
         if (!questEntry) {
             return interaction.reply({
                 content: `You don't have an active **${template.name}** quest. Go hunting to get quests assigned!`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
         if (questEntry.progress === -1) {
             return interaction.reply({
                 content: `You already claimed **${template.name}**. Complete your other quests or wait for new ones!`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -1774,7 +1774,7 @@ async function executeQuests(interaction, sub) {
             const progress = Math.min(questEntry.progress, template.target);
             return interaction.reply({
                 content: `**${template.name}** is not complete yet (${progress}/${template.target}). Keep hunting!`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -1839,7 +1839,7 @@ function formatExpiry(ms) {
 async function executeShop(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1948,12 +1948,12 @@ async function handleBuyWeapon(interaction, user, currency) {
     const weaponData = WEAPON_BY_SLUG[slug];
 
     if (!weaponData) {
-        return interaction.reply({ content: 'Unknown weapon type.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown weapon type.', flags: MessageFlags.Ephemeral });
     }
     if (user.balance < weaponData.cost) {
         return interaction.reply({
             content: `You need **${currency}${weaponData.cost.toLocaleString()}** to buy the **${weaponData.name}**. You have **${currency}${user.balance.toLocaleString()}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1983,14 +1983,14 @@ async function handleBuyWeapon(interaction, user, currency) {
         new ButtonBuilder().setCustomId('buygun_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const huntConfirmPayload = { embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true };
+    const huntConfirmPayload = { embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true };
     if (weaponImg) huntConfirmPayload.files = [weaponImg.attachment];
     const reply = await interaction.reply(huntConfirmPayload);
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
     collector.on('collect', async btn => {
         if (btn.user.id !== interaction.user.id) {
-            return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+            return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
         }
         collector.stop();
 
@@ -2098,12 +2098,12 @@ async function handleBuyUpgrade(interaction, user, currency) {
     const upgradeDef = WEAPON_UPGRADES[moduleId];
 
     if (!upgradeDef) {
-        return interaction.reply({ content: 'Unknown upgrade module.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown upgrade module.', flags: MessageFlags.Ephemeral });
     }
 
     const h = user.hunt;
     if (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex]) {
-        return interaction.reply({ content: 'No weapon equipped. Equip a weapon first with `/hunt inv equip`.', ephemeral: true });
+        return interaction.reply({ content: 'No weapon equipped. Equip a weapon first with `/hunt inv equip`.', flags: MessageFlags.Ephemeral });
     }
 
     const weapon     = h.weapons[h.equippedWeaponIndex];
@@ -2113,13 +2113,13 @@ async function handleBuyUpgrade(interaction, user, currency) {
     if (weapon.upgrade) {
         return interaction.reply({
             content: `Your **${weapon.name}** already has a **${weapon.upgrade.replace(/_/g, ' ')}** installed. Each weapon supports only one upgrade.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     if (user.balance < cost) {
         return interaction.reply({
             content: `You need ${currency}${cost.toLocaleString()} but only have ${currency}${user.balance.toLocaleString()}.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2154,14 +2154,14 @@ async function handleBuy(interaction, user, currency) {
     const itemDef       = consumableDef ?? ammoDef;
 
     if (!itemDef) {
-        return interaction.reply({ content: 'Unknown item. Use `/hunt shop list` to see available items.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown item. Use `/hunt shop list` to see available items.', flags: MessageFlags.Ephemeral });
     }
 
     const totalCost = itemDef.cost * quantity;
     if (user.balance < totalCost) {
         return interaction.reply({
             content: `You need ${currency}${totalCost.toLocaleString()} but only have ${currency}${user.balance.toLocaleString()}.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2174,7 +2174,7 @@ async function handleBuy(interaction, user, currency) {
         if (currentStock + quantity > consumableDef.maxStack) {
             return interaction.reply({
                 content: `You can only hold **${consumableDef.maxStack}× ${consumableDef.name}** at once (you have ${currentStock}).`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     }
@@ -2203,12 +2203,12 @@ async function handleBuy(interaction, user, currency) {
         new ButtonBuilder().setCustomId('huntbuy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true });
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
     collector.on('collect', async btn => {
         if (btn.user.id !== interaction.user.id) {
-            return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+            return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
         }
         collector.stop();
 
@@ -2300,7 +2300,7 @@ async function handleUse(interaction, user) {
     const { success, error } = activateConsumable(user, itemId);
 
     if (!success) {
-        return interaction.reply({ content: error, ephemeral: true });
+        return interaction.reply({ content: error, flags: MessageFlags.Ephemeral });
     }
 
     await user.save();
@@ -2330,7 +2330,7 @@ async function handleRepair(interaction, user, currency) {
     const h = user.hunt;
 
     if (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex]) {
-        return interaction.reply({ content: 'No weapon equipped. Buy one with `/hunt shop weapon` first.', ephemeral: true });
+        return interaction.reply({ content: 'No weapon equipped. Buy one with `/hunt shop weapon` first.', flags: MessageFlags.Ephemeral });
     }
 
     const weapon = h.weapons[h.equippedWeaponIndex];
@@ -2339,7 +2339,7 @@ async function handleRepair(interaction, user, currency) {
     if (method === 'kit') {
         const kitId = interaction.options.getString('kit');
         if (!kitId) {
-            return interaction.reply({ content: 'Please specify a kit size using the `kit` option.', ephemeral: true });
+            return interaction.reply({ content: 'Please specify a kit size using the `kit` option.', flags: MessageFlags.Ephemeral });
         }
 
         const kitDef = CONSUMABLES[kitId];
@@ -2348,14 +2348,14 @@ async function handleRepair(interaction, user, currency) {
         if (stock <= 0) {
             return interaction.reply({
                 content: `You don't have any **${kitDef.name}**. Buy them with \`/hunt shop buy\`.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
         if (weapon.status === 'condemned') {
-            return interaction.reply({ content: 'This weapon is condemned and cannot be repaired. Replace it with `/hunt shop weapon`.', ephemeral: true });
+            return interaction.reply({ content: 'This weapon is condemned and cannot be repaired. Replace it with `/hunt shop weapon`.', flags: MessageFlags.Ephemeral });
         }
         if (weapon.currentDurability >= weapon.maxDurability) {
-            return interaction.reply({ content: `Your **${weapon.name}** is already at full durability.`, ephemeral: true });
+            return interaction.reply({ content: `Your **${weapon.name}** is already at full durability.`, flags: MessageFlags.Ephemeral });
         }
 
         const before = weapon.currentDurability;
@@ -2383,10 +2383,10 @@ async function handleRepair(interaction, user, currency) {
     }
 
     if (weapon.status === 'condemned') {
-        return interaction.reply({ content: 'This weapon is **condemned** and cannot be repaired. Replace it with `/hunt shop weapon`.', ephemeral: true });
+        return interaction.reply({ content: 'This weapon is **condemned** and cannot be repaired. Replace it with `/hunt shop weapon`.', flags: MessageFlags.Ephemeral });
     }
     if (weapon.currentDurability >= weapon.maxDurability && weapon.status !== 'broken') {
-        return interaction.reply({ content: `Your **${weapon.name}** is already at full durability (${weapon.currentDurability}/${weapon.maxDurability}).`, ephemeral: true });
+        return interaction.reply({ content: `Your **${weapon.name}** is already at full durability (${weapon.currentDurability}/${weapon.maxDurability}).`, flags: MessageFlags.Ephemeral });
     }
 
     const needed     = weapon.maxDurability - weapon.currentDurability;
@@ -2397,12 +2397,12 @@ async function handleRepair(interaction, user, currency) {
     const result = applyRepair(weapon, requestedAmt);
 
     if (result.error) {
-        return interaction.reply({ content: result.error, ephemeral: true });
+        return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
     }
     if (user.balance < result.cost) {
         return interaction.reply({
             content: `Repair costs ${currency}${result.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2442,21 +2442,21 @@ async function handleUnlock(interaction, user, currency) {
     const zone   = ZONES[zoneId];
 
     if (!zone) {
-        return interaction.reply({ content: 'Unknown zone.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown zone.', flags: MessageFlags.Ephemeral });
     }
     if (zone.defaultUnlocked || h.unlockedZones.includes(zoneId)) {
-        return interaction.reply({ content: `**${zone.name}** is already unlocked.`, ephemeral: true });
+        return interaction.reply({ content: `**${zone.name}** is already unlocked.`, flags: MessageFlags.Ephemeral });
     }
     if (h.level < zone.unlockLevel) {
         return interaction.reply({
             content: `You need Hunter Level **${zone.unlockLevel}** to unlock **${zone.name}**. You're Level ${h.level}.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     if (user.balance < zone.unlockCost) {
         return interaction.reply({
             content: `Unlocking **${zone.name}** costs ${currency}${zone.unlockCost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2495,7 +2495,7 @@ async function handleUnlock(interaction, user, currency) {
 async function executeZone(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -2541,22 +2541,22 @@ async function executeZone(interaction, sub) {
         const zone   = ZONES[zoneId];
 
         if (!zone) {
-            return interaction.reply({ content: 'Unknown zone.', ephemeral: true });
+            return interaction.reply({ content: 'Unknown zone.', flags: MessageFlags.Ephemeral });
         }
         if (!h.unlockedZones.includes(zoneId)) {
             return interaction.reply({
                 content: `**${zone.name}** is locked. Unlock it with \`/hunt shop unlock\`.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
         if (h.level < zone.unlockLevel) {
             return interaction.reply({
                 content: `You need Hunter Level **${zone.unlockLevel}** to hunt in **${zone.name}**. You're currently Level ${h.level}.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
         if (h.activeZone === zoneId) {
-            return interaction.reply({ content: `You're already hunting in **${zone.name}**.`, ephemeral: true });
+            return interaction.reply({ content: `You're already hunting in **${zone.name}**.`, flags: MessageFlags.Ephemeral });
         }
 
         const oldZone = ZONES[h.activeZone];
@@ -2636,7 +2636,7 @@ module.exports.execute = async function (interaction) {
     if (!lockToken) {
         return interaction.reply({
             content: '🏹 You already have a hunting action in progress — finish it first.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         }).catch(() => {});
     }
     try {

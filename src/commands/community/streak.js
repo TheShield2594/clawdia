@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const { getStreakMultiplier, getNextMultiplierTier, getNextMilestone } = require('../../utils/streakMultiplier');
 
@@ -19,7 +19,7 @@ module.exports = {
             if (!user) {
                 return interaction.reply({
                     content: `${target.id === interaction.user.id ? 'You have' : `${target.username} has`} no activity recorded yet.`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 
@@ -65,7 +65,7 @@ module.exports = {
                 embed.addFields({ name: 'Last Active', value: `<t:${Math.floor(lastActive / 1000)}:R>`, inline: true });
             }
 
-            return interaction.reply({ embeds: [embed], ephemeral: target.id !== interaction.user.id });
+            return interaction.reply({ embeds: [embed], flags: target.id !== interaction.user.id ? MessageFlags.Ephemeral : undefined });
         }
 
         // ── Server leaderboard view ───────────────────────────────────────────

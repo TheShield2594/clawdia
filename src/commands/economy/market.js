@@ -1,6 +1,7 @@
 const {
     SlashCommandBuilder, EmbedBuilder, ActionRowBuilder,
     ButtonBuilder, ButtonStyle, ComponentType,
+    MessageFlags,
 } = require('discord.js');
 const User           = require('../../models/User');
 const Guild          = require('../../models/Guild');
@@ -58,7 +59,7 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const currency = guildSettings?.economy?.currency || '💰';
@@ -77,7 +78,7 @@ async function handleList(interaction, currency) {
     const price  = interaction.options.getInteger('price');
 
     if (SOULBOUND_ITEMS.has(itemId)) {
-        return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be listed.`, ephemeral: true });
+        return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be listed.`, flags: MessageFlags.Ephemeral });
     }
 
     const seller = await User.findOneAndUpdate(
@@ -88,7 +89,7 @@ async function handleList(interaction, currency) {
 
     const slot = seller.inventory.find(i => i.itemId === itemId);
     if (!slot || slot.quantity < qty) {
-        return interaction.reply({ content: `You don't have ${qty}x \`${itemId}\` in your inventory.`, ephemeral: true });
+        return interaction.reply({ content: `You don't have ${qty}x \`${itemId}\` in your inventory.`, flags: MessageFlags.Ephemeral });
     }
 
     const activeListing = await MarketListing.countDocuments({
@@ -96,7 +97,7 @@ async function handleList(interaction, currency) {
         sellerId: interaction.user.id,
     });
     if (activeListing >= MAX_LISTINGS_PER_USER) {
-        return interaction.reply({ content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time.`, ephemeral: true });
+        return interaction.reply({ content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time.`, flags: MessageFlags.Ephemeral });
     }
 
     slot.quantity -= qty;
@@ -124,7 +125,7 @@ async function handleList(interaction, currency) {
             await restored.save().catch(console.error);
         }
         console.error('[market list] MarketListing.create failed:', err);
-        return interaction.reply({ content: 'Failed to create listing. Your item has been returned.', ephemeral: true });
+        return interaction.reply({ content: 'Failed to create listing. Your item has been returned.', flags: MessageFlags.Ephemeral });
     }
 
     const embed = new EmbedBuilder()
@@ -138,7 +139,7 @@ async function handleList(interaction, currency) {
         )
         .setTimestamp();
 
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 // Batch-fetches seller rep counts and Discord usernames for a page slice.
@@ -191,7 +192,7 @@ async function handleBrowse(interaction, currency) {
     if (total === 0) {
         return interaction.reply({
             content: filterItem ? `No listings found for \`${filterItem}\`.` : 'The marketplace is empty.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -287,14 +288,14 @@ async function handleBuy(interaction, currency) {
     try {
         listing = await MarketListing.findOne({ _id: rawId, guildId: interaction.guild.id });
     } catch {
-        return interaction.reply({ content: 'Invalid listing ID.', ephemeral: true });
+        return interaction.reply({ content: 'Invalid listing ID.', flags: MessageFlags.Ephemeral });
     }
 
     if (!listing) {
-        return interaction.reply({ content: 'Listing not found or already expired/sold.', ephemeral: true });
+        return interaction.reply({ content: 'Listing not found or already expired/sold.', flags: MessageFlags.Ephemeral });
     }
     if (listing.sellerId === interaction.user.id) {
-        return interaction.reply({ content: "You can't buy your own listing.", ephemeral: true });
+        return interaction.reply({ content: "You can't buy your own listing.", flags: MessageFlags.Ephemeral });
     }
 
     const totalCost      = listing.pricePerUnit * listing.quantity;
@@ -420,11 +421,11 @@ async function handleCancel(interaction, currency) {
             sellerId: interaction.user.id,
         });
     } catch {
-        return interaction.reply({ content: 'Invalid listing ID.', ephemeral: true });
+        return interaction.reply({ content: 'Invalid listing ID.', flags: MessageFlags.Ephemeral });
     }
 
     if (!listing) {
-        return interaction.reply({ content: 'Listing not found, already sold, or not yours.', ephemeral: true });
+        return interaction.reply({ content: 'Listing not found, already sold, or not yours.', flags: MessageFlags.Ephemeral });
     }
 
     const seller = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
@@ -440,5 +441,5 @@ async function handleCancel(interaction, currency) {
         .setDescription(`Returned **${listing.quantity}x \`${listing.itemId}\`** to your inventory.`)
         .setTimestamp();
 
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }

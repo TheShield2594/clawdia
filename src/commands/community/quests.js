@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { ensureQuests, getDailyPool, getWeeklyPool, getCategoryEmojis, getDifficultyColors } = require('../../services/questService');
@@ -15,7 +15,7 @@ module.exports = {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
         if (!guildSettings?.quests?.enabled) {
-            return interaction.reply({ content: 'Quests are not enabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Quests are not enabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
@@ -103,7 +103,7 @@ module.exports = {
             .setFooter({ text: 'Complete quests to earn XP, coins, and season pass progress.' })
             .setTimestamp();
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 };
 

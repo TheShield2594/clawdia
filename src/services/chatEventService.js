@@ -12,7 +12,7 @@
  * the award itself is an atomic $inc.
  */
 
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
 const QUIZ_FALLBACK = require('../data/quizFallback');
@@ -111,7 +111,7 @@ async function spawnAirdrop(message, guildSettings) {
 
     collector.on('collect', async i => {
         if (claimed) {
-            return i.reply({ content: '💨 Too slow — someone got there first!', ephemeral: true }).catch(() => {});
+            return i.reply({ content: '💨 Too slow — someone got there first!', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
         // Reserve before the first await so interleaved clicks can't double-claim;
         // only stop the collector once the award has actually been persisted.
@@ -126,7 +126,7 @@ async function spawnAirdrop(message, guildSettings) {
         } catch (err) {
             claimed = false; // release the reservation — the drop is still up for grabs
             console.error('[chatEvent] airdrop award failed:', err);
-            return i.reply({ content: '⚠️ Something went wrong grabbing that — try again!', ephemeral: true }).catch(() => {});
+            return i.reply({ content: '⚠️ Something went wrong grabbing that — try again!', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
         collector.stop('claimed');
         logTransaction({ userId: i.user.id, guildId: message.guild.id, type: 'chat_event', amount, balance: updated?.balance ?? amount, note: 'Airdrop claim' });
@@ -181,7 +181,7 @@ async function spawnCrate(message, guildSettings) {
 
     collector.on('collect', async i => {
         if (claimed) {
-            return i.reply({ content: '💨 Too slow — the crate is already open!', ephemeral: true }).catch(() => {});
+            return i.reply({ content: '💨 Too slow — the crate is already open!', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
         // Reserve before the first await; only stop the collector once persisted.
         claimed = true;
@@ -201,7 +201,7 @@ async function spawnCrate(message, guildSettings) {
         } catch (err) {
             claimed = false;
             console.error('[chatEvent] crate award failed:', err);
-            return i.reply({ content: '⚠️ Something went wrong opening that — try again!', ephemeral: true }).catch(() => {});
+            return i.reply({ content: '⚠️ Something went wrong opening that — try again!', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
         collector.stop('claimed');
         logTransaction({ userId: i.user.id, guildId: message.guild.id, type: 'chat_event', amount: 0, balance: 0, note: `Crate drop: ${item.itemId}` });
@@ -267,10 +267,10 @@ async function spawnTrivia(message, guildSettings) {
 
     collector.on('collect', async i => {
         if (solved) {
-            return i.reply({ content: '💨 Too slow — already answered!', ephemeral: true }).catch(() => {});
+            return i.reply({ content: '💨 Too slow — already answered!', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
         if (attempted.has(i.user.id)) {
-            return i.reply({ content: 'You already used your guess!', ephemeral: true }).catch(() => {});
+            return i.reply({ content: 'You already used your guess!', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
         attempted.add(i.user.id);
 
@@ -278,7 +278,7 @@ async function spawnTrivia(message, guildSettings) {
         const correct = answers[idx] === q.correct_answer;
 
         if (!correct) {
-            return i.reply({ content: `❌ Not **${answers[idx]}** — better luck next time!`, ephemeral: true }).catch(() => {});
+            return i.reply({ content: `❌ Not **${answers[idx]}** — better luck next time!`, flags: MessageFlags.Ephemeral }).catch(() => {});
         }
 
         // Reserve before the first await; only stop the collector once persisted.
@@ -294,7 +294,7 @@ async function spawnTrivia(message, guildSettings) {
             solved = false;
             attempted.delete(i.user.id); // they answered correctly — let them claim again
             console.error('[chatEvent] trivia award failed:', err);
-            return i.reply({ content: '⚠️ Something went wrong with the reward — answer again!', ephemeral: true }).catch(() => {});
+            return i.reply({ content: '⚠️ Something went wrong with the reward — answer again!', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
         collector.stop('solved');
         logTransaction({ userId: i.user.id, guildId: message.guild.id, type: 'chat_event', amount: TRIVIA_REWARD, balance: updated?.balance ?? TRIVIA_REWARD, note: 'Flash trivia win' });

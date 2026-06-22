@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
 
@@ -48,7 +48,7 @@ module.exports = {
         try {
             let guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             if (!guildSettings) {
-                return interaction.reply({ content: 'Guild settings not found.', ephemeral: true });
+                return interaction.reply({ content: 'Guild settings not found.', flags: MessageFlags.Ephemeral });
             }
 
             if (sub === 'server') {
@@ -94,7 +94,7 @@ module.exports = {
             if (sub === 'end') {
                 const sb = guildSettings.serverBoost;
                 if (!sb?.type || !sb.expiresAt || new Date(sb.expiresAt).getTime() <= Date.now()) {
-                    return interaction.reply({ content: 'There is no active server boost to end.', ephemeral: true });
+                    return interaction.reply({ content: 'There is no active server boost to end.', flags: MessageFlags.Ephemeral });
                 }
 
                 const endedType = sb.type;
@@ -118,7 +118,7 @@ module.exports = {
                 const isActive = (coinMult > 1.0 || xpMult > 1.0) && sb?.expiresAt;
 
                 if (!isActive) {
-                    return interaction.reply({ content: '❌ No server boost is currently active.', ephemeral: true });
+                    return interaction.reply({ content: '❌ No server boost is currently active.', flags: MessageFlags.Ephemeral });
                 }
 
                 const info = BOOST_LABELS[sb.type];
@@ -138,7 +138,7 @@ module.exports = {
 
         } catch (error) {
             console.error('Boost error:', error);
-            const errMsg = { content: 'Failed to manage server boost.', ephemeral: true };
+            const errMsg = { content: 'Failed to manage server boost.', flags: MessageFlags.Ephemeral };
             if (interaction.replied || interaction.deferred) {
                 await interaction.followUp(errMsg);
             } else {

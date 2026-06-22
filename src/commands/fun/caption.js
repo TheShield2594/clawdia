@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
 const dns = require('dns');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
@@ -29,7 +29,7 @@ module.exports = {
     async execute(interaction) {
         const rl = checkImageRateLimit(interaction.user.id);
         if (rl.limited) {
-            return interaction.reply({ content: rl.message, ephemeral: true });
+            return interaction.reply({ content: rl.message, flags: MessageFlags.Ephemeral });
         }
 
         const imageUrl = interaction.options.getString('image_url');
@@ -38,7 +38,7 @@ module.exports = {
         if (!(await isValidHttpUrl(imageUrl))) {
             return interaction.reply({
                 content: '❌ Please provide a valid image URL (must start with http:// or https://).',
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 
@@ -84,7 +84,7 @@ module.exports = {
                 if (interaction.deferred || interaction.replied) {
                     await interaction.editReply(msg);
                 } else {
-                    await interaction.reply({ content: msg, ephemeral: true });
+                    await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
                 }
             } catch (replyErr) {
                 console.error('caption: failed to send error reply', replyErr);

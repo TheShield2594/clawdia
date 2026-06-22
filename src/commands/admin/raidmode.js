@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { setRaidMode, raidModeActive, raidModeActivatedBy } = require('../../services/raidService');
 
@@ -195,7 +195,7 @@ module.exports = {
             if (Object.keys(update).length === 0) {
                 return interaction.reply({
                     content: 'Please provide at least one option to update (sla_hours, sla_channel, appeals_enabled, or appeal_channel).',
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 

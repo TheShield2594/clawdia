@@ -3,6 +3,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
@@ -389,13 +390,13 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
-            return interaction.reply({ content: 'Casino games are disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Casino games are disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const bet          = interaction.options.getInteger('bet');
         const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const numbersRaw = interaction.options.getString('numbers');
 
@@ -405,13 +406,13 @@ module.exports = {
         if (parsed.length !== PICK_COUNT || !valid) {
             return interaction.reply({
                 content: `❌ Please provide exactly **5 different numbers** between 1 and ${POOL_SIZE}.\nExample: \`3 12 21 33 39\``,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 
         const uniquePicked = [...new Set(parsed)];
         if (uniquePicked.length !== PICK_COUNT) {
-            return interaction.reply({ content: '❌ All 5 numbers must be different.', ephemeral: true });
+            return interaction.reply({ content: '❌ All 5 numbers must be different.', flags: MessageFlags.Ephemeral });
         }
 
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
@@ -419,7 +420,7 @@ module.exports = {
             const currency = guildSettings?.economy?.currency || '💰';
             return interaction.reply({
                 content: `You don't have enough ${currency}. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 

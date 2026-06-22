@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
@@ -45,7 +45,7 @@ module.exports = {
         if (!hasActiveEvent(guildSettings)) {
             return interaction.reply({
                 content: '🛒 There is no active event on this server. Check back during an event!',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -72,7 +72,7 @@ async function handleBalance(interaction, guildSettings, currency) {
             .setDescription(`You have **${balance.toLocaleString()} ${currency.name}** ${currency.emoji}`)
             .setFooter({ text: 'Earn more through event mini-games and activities!' })
             .setTimestamp()],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
     });
 }
 
@@ -84,7 +84,7 @@ async function handleBrowse(interaction, ev, def, currency) {
     if (!shop.length) {
         return interaction.reply({
             content: '🛒 The event shop is empty right now.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -116,7 +116,7 @@ async function handleBrowse(interaction, ev, def, currency) {
 }
 
 async function handleBuy(interaction, ev, def, currency, currencyId) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const itemQuery = interaction.options.getString('item').toLowerCase();
     const qty       = interaction.options.getInteger('quantity') ?? 1;

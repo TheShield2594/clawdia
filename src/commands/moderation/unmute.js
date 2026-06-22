@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -14,7 +14,7 @@ module.exports = {
         const member = interaction.guild.members.cache.get(user.id);
 
         if (!member) {
-            return interaction.reply({ content: 'User not found!', ephemeral: true });
+            return interaction.reply({ content: 'User not found!', flags: MessageFlags.Ephemeral });
         }
 
         try {
@@ -29,7 +29,7 @@ module.exports = {
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
             console.error('Unmute error:', error);
-            await interaction.reply({ content: 'Failed to unmute the user.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to unmute the user.', flags: MessageFlags.Ephemeral });
         }
     }
 };

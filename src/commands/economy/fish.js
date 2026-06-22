@@ -5,7 +5,7 @@ const {
     EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle, MessageFlags
 } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
@@ -357,7 +357,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
 async function handleCast(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -386,18 +386,18 @@ async function handleCast(interaction) {
     const location     = LOCATIONS[locationId];
 
     if (!location) {
-        return interaction.reply({ content: `Unknown location. Use \`/fish location list\` to see available spots.`, ephemeral: true });
+        return interaction.reply({ content: `Unknown location. Use \`/fish location list\` to see available spots.`, flags: MessageFlags.Ephemeral });
     }
     if (!f.unlockedLocations.includes(locationId)) {
         return interaction.reply({
             content: `You haven't unlocked **${location.name}** yet. Use \`/fish shop unlock\` to unlock it.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     if (f.level < location.unlockLevel) {
         return interaction.reply({
             content: `You need to be Fisher Level **${location.unlockLevel}** to fish at **${location.name}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -411,7 +411,7 @@ async function handleCast(interaction) {
                 color: '#1e6fa5',
                 nextAt,
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -425,7 +425,7 @@ async function handleCast(interaction) {
                 color: '#1e6fa5',
                 nextAt,
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -446,7 +446,7 @@ async function handleCast(interaction) {
                 pityStat,
                 nextRewardPreview: 'Full stamina = 10 casts · Boss encounters unlock at Prestige 1+',
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -454,7 +454,7 @@ async function handleCast(interaction) {
     if (f.equippedRodIndex < 0 || !f.rods[f.equippedRodIndex]) {
         return interaction.reply({
             content: `You don't have a rod equipped! Buy one with \`/fish shop rod\` and equip it with \`/fish inv equip 1\`.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -463,7 +463,7 @@ async function handleCast(interaction) {
     if (rod.status === 'broken' || rod.currentDurability <= 0) {
         return interaction.reply({
             content: `Your **${rod.name}** is broken! Repair it with \`/fish shop repair\` or buy a new one with \`/fish shop rod\`.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -474,7 +474,7 @@ async function handleCast(interaction) {
         if (baitStock <= 0) {
             return interaction.reply({
                 content: `You're out of **${rodData.baitType.replace(/_/g, ' ')}**! Buy more with \`/fish shop\`.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
         f.bait[rodData.baitType] = baitStock - 1;
@@ -1242,7 +1242,7 @@ async function handleProfile(interaction) {
             content: isSelf
                 ? "You haven't started fishing yet! Buy a rod with `/fish shop rod` and use `/fish cast` to begin."
                 : `${target.username} hasn't started fishing yet.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1388,7 +1388,7 @@ function buildXpBar(f, toNext) {
 async function handlePrestige(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const user = await User.findOneAndUpdate(
@@ -1403,7 +1403,7 @@ async function handlePrestige(interaction) {
     if (f.level < 50) {
         return interaction.reply({
             content: `You need Fisher Level **50** to prestige. You are currently Level **${f.level}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1411,7 +1411,7 @@ async function handlePrestige(interaction) {
     if (currentPrestige >= MAX_PRESTIGE) {
         return interaction.reply({
             content: `You have already reached the maximum prestige (**P${MAX_PRESTIGE} — Diamond Angler**). You are a true legend of the sea! 💎`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1537,7 +1537,7 @@ function formatPrestigeBonuses(bonus) {
 async function handleInv(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1562,7 +1562,7 @@ async function showRods(interaction, user) {
     const f = user.fishing;
 
     if (!f.rods.length) {
-        return interaction.reply({ content: `You don't own any rods yet. Buy one with \`/fish shop rod\`.`, ephemeral: true });
+        return interaction.reply({ content: `You don't own any rods yet. Buy one with \`/fish shop rod\`.`, flags: MessageFlags.Ephemeral });
     }
 
     const lines = f.rods.map((rod, i) => {
@@ -1589,12 +1589,12 @@ async function equipRod(interaction, user) {
     const index  = number - 1;
 
     if (index < 0 || index >= f.rods.length) {
-        return interaction.reply({ content: `Invalid rod number. You have **${f.rods.length}** rod(s).`, ephemeral: true });
+        return interaction.reply({ content: `Invalid rod number. You have **${f.rods.length}** rod(s).`, flags: MessageFlags.Ephemeral });
     }
 
     const rod = f.rods[index];
     if (rod.status === 'broken') {
-        return interaction.reply({ content: `Your **${rod.name}** is broken and cannot be equipped. Repair it first with \`/fish shop repair\`.`, ephemeral: true });
+        return interaction.reply({ content: `Your **${rod.name}** is broken and cannot be equipped. Repair it first with \`/fish shop repair\`.`, flags: MessageFlags.Ephemeral });
     }
 
     f.equippedRodIndex = index;
@@ -1604,7 +1604,7 @@ async function equipRod(interaction, user) {
         await user.save();
     } catch (err) {
         console.error('[fishinv equip] save error:', err);
-        return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
+        return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
     return interaction.reply({
@@ -1692,7 +1692,7 @@ async function showMaterials(interaction, user) {
 async function handleQuests(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1721,7 +1721,7 @@ async function showQuests(interaction, user, currency) {
     );
 
     if (!fishQuests.length) {
-        return interaction.reply({ content: 'No fishing quests assigned yet. Use `/fish cast` to start fishing!', ephemeral: true });
+        return interaction.reply({ content: 'No fishing quests assigned yet. Use `/fish cast` to start fishing!', flags: MessageFlags.Ephemeral });
     }
 
     const lines = fishQuests.map((q, i) => {
@@ -1765,22 +1765,22 @@ async function claimQuest(interaction, user, currency) {
 
     const questEntry = fishQuests[number - 1];
     if (!questEntry) {
-        return interaction.reply({ content: `No quest at slot #${number}. Use \`/fish quests view\` to see your quests.`, ephemeral: true });
+        return interaction.reply({ content: `No quest at slot #${number}. Use \`/fish quests view\` to see your quests.`, flags: MessageFlags.Ephemeral });
     }
 
     const template = FISH_QUEST_TEMPLATES.find(t => t.id === questEntry.questId);
     if (!template) {
-        return interaction.reply({ content: 'Quest data not found.', ephemeral: true });
+        return interaction.reply({ content: 'Quest data not found.', flags: MessageFlags.Ephemeral });
     }
 
     if (questEntry.progress === -1) {
-        return interaction.reply({ content: `**${template.name}** has already been claimed.`, ephemeral: true });
+        return interaction.reply({ content: `**${template.name}** has already been claimed.`, flags: MessageFlags.Ephemeral });
     }
     if (!questEntry.completedAt) {
         const progress = Math.min(questEntry.progress, template.target);
         return interaction.reply({
             content: `**${template.name}** is not complete yet. Progress: **${progress}/${template.target}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1798,7 +1798,7 @@ async function claimQuest(interaction, user, currency) {
         await user.save();
     } catch (err) {
         console.error('[fishquests claim] save error:', err);
-        return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
+        return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
     const embed = new EmbedBuilder()
@@ -1832,7 +1832,7 @@ function buildQuestProgressBar(current, total, length) {
 async function handleShop(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1939,12 +1939,12 @@ async function handleBuyRod(interaction, user, currency) {
     const rodData = ROD_BY_SLUG[slug];
 
     if (!rodData) {
-        return interaction.reply({ content: 'Unknown rod type.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown rod type.', flags: MessageFlags.Ephemeral });
     }
     if (user.balance < rodData.cost) {
         return interaction.reply({
             content: `You need **${currency}${rodData.cost.toLocaleString()}** to buy the **${rodData.name}**. You have **${currency}${user.balance.toLocaleString()}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1970,14 +1970,14 @@ async function handleBuyRod(interaction, user, currency) {
         new ButtonBuilder().setCustomId('buyrod_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const fishConfirmPayload = { embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true };
+    const fishConfirmPayload = { embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true };
     if (rodImg) fishConfirmPayload.files = [rodImg.attachment];
     const reply = await interaction.reply(fishConfirmPayload);
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
     collector.on('collect', async btn => {
         if (btn.user.id !== interaction.user.id) {
-            return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+            return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
         }
         collector.stop();
 
@@ -2041,14 +2041,14 @@ async function handleBuyUpgrade(interaction, user, currency) {
     const f = user.fishing;
 
     if (f.equippedRodIndex < 0 || !f.rods[f.equippedRodIndex]) {
-        return interaction.reply({ content: `You don't have a rod equipped. Use \`/fish inv equip\` first.`, ephemeral: true });
+        return interaction.reply({ content: `You don't have a rod equipped. Use \`/fish inv equip\` first.`, flags: MessageFlags.Ephemeral });
     }
 
     const upgradeId  = interaction.options.getString('type');
     const upgradeDef = ROD_UPGRADES[upgradeId];
 
     if (!upgradeDef) {
-        return interaction.reply({ content: 'Unknown upgrade.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown upgrade.', flags: MessageFlags.Ephemeral });
     }
 
     const targetRodIndex = f.equippedRodIndex;
@@ -2059,13 +2059,13 @@ async function handleBuyUpgrade(interaction, user, currency) {
     if (rod.upgrade) {
         return interaction.reply({
             content: `Your **${rod.name}** already has the **${rod.upgrade.replace(/_/g, ' ')}** upgrade. Each rod can only hold one upgrade.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     if (user.balance < cost) {
         return interaction.reply({
             content: `You need **${currency}${cost.toLocaleString()}** to install **${upgradeDef.name}**. You have **${currency}${user.balance.toLocaleString()}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2084,12 +2084,12 @@ async function handleBuyUpgrade(interaction, user, currency) {
         new ButtonBuilder().setCustomId('upgrade_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true });
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
     collector.on('collect', async btn => {
         if (btn.user.id !== interaction.user.id) {
-            return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+            return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
         }
         collector.stop();
 
@@ -2156,26 +2156,26 @@ async function handleBuy(interaction, user, currency) {
     const itemDef    = baitPack ?? consumable;
 
     if (!itemDef) {
-        return interaction.reply({ content: 'Unknown item.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown item.', flags: MessageFlags.Ephemeral });
     }
 
     const totalCost = itemDef.cost * quantity;
     if (user.balance < totalCost) {
         return interaction.reply({
             content: `You need **${currency}${totalCost.toLocaleString()}** for ${quantity}× **${itemDef.name}**. You have **${currency}${user.balance.toLocaleString()}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
     if (baitPack) {
         const totalBait = (f.bait[baitPack.baitType] ?? 0) + baitPack.quantity * quantity;
         if (totalBait > 200) {
-            return interaction.reply({ content: `You can't carry more than 200 of that bait type.`, ephemeral: true });
+            return interaction.reply({ content: `You can't carry more than 200 of that bait type.`, flags: MessageFlags.Ephemeral });
         }
     } else {
         const currentQty = f.consumables[itemId] ?? 0;
         if (currentQty + quantity > (consumable.maxStack ?? 99)) {
-            return interaction.reply({ content: `You can only carry ${consumable.maxStack} **${consumable.name}** at a time.`, ephemeral: true });
+            return interaction.reply({ content: `You can only carry ${consumable.maxStack} **${consumable.name}** at a time.`, flags: MessageFlags.Ephemeral });
         }
     }
 
@@ -2204,12 +2204,12 @@ async function handleBuy(interaction, user, currency) {
         new ButtonBuilder().setCustomId('fishbuy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
-    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+    const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true });
     const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
     collector.on('collect', async btn => {
         if (btn.user.id !== interaction.user.id) {
-            return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+            return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
         }
         collector.stop();
 
@@ -2334,14 +2334,14 @@ async function handleUse(interaction, user) {
     const result = activateConsumable(user, itemId);
 
     if (!result.success) {
-        return interaction.reply({ content: result.error, ephemeral: true });
+        return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
     }
 
     try {
         await user.save();
     } catch (err) {
         console.error('[fishshop use] save error:', err);
-        return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
+        return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
     const def = CONSUMABLES[itemId];
@@ -2368,7 +2368,7 @@ async function handleRepair(interaction, user, currency) {
     const f = user.fishing;
 
     if (f.equippedRodIndex < 0 || !f.rods[f.equippedRodIndex]) {
-        return interaction.reply({ content: `You don't have a rod equipped. Buy one with \`/fish shop rod\`.`, ephemeral: true });
+        return interaction.reply({ content: `You don't have a rod equipped. Buy one with \`/fish shop rod\`.`, flags: MessageFlags.Ephemeral });
     }
 
     const rod    = f.rods[f.equippedRodIndex];
@@ -2377,7 +2377,7 @@ async function handleRepair(interaction, user, currency) {
     if (method === 'kit') {
         const kitId = interaction.options.getString('kit');
         if (!kitId) {
-            return interaction.reply({ content: 'Please specify a kit size using the `kit` option.', ephemeral: true });
+            return interaction.reply({ content: 'Please specify a kit size using the `kit` option.', flags: MessageFlags.Ephemeral });
         }
 
         const kitStock   = f.consumables[kitId] ?? 0;
@@ -2385,13 +2385,13 @@ async function handleRepair(interaction, user, currency) {
         const kitName    = kitId === 'repair_kit_small' ? 'Small Repair Kit' : 'Large Repair Kit';
 
         if (kitStock <= 0) {
-            return interaction.reply({ content: `You don't have any **${kitName}**. Buy one with \`/fish shop buy\`.`, ephemeral: true });
+            return interaction.reply({ content: `You don't have any **${kitName}**. Buy one with \`/fish shop buy\`.`, flags: MessageFlags.Ephemeral });
         }
         if (rod.status === 'condemned') {
-            return interaction.reply({ content: 'This rod is condemned and cannot be repaired.', ephemeral: true });
+            return interaction.reply({ content: 'This rod is condemned and cannot be repaired.', flags: MessageFlags.Ephemeral });
         }
         if (rod.currentDurability >= rod.maxDurability && rod.status !== 'broken') {
-            return interaction.reply({ content: 'Your rod is already at full durability.', ephemeral: true });
+            return interaction.reply({ content: 'Your rod is already at full durability.', flags: MessageFlags.Ephemeral });
         }
 
         const restored = Math.min(kitRestore, rod.maxDurability - rod.currentDurability);
@@ -2404,7 +2404,7 @@ async function handleRepair(interaction, user, currency) {
             await user.save();
         } catch (err) {
             console.error('[fishshop repair kit] save error:', err);
-            return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
+            return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
         }
 
         return interaction.reply({
@@ -2429,12 +2429,12 @@ async function handleRepair(interaction, user, currency) {
     const result = applyRepair(rod, requestedAmount);
 
     if (result.error) {
-        return interaction.reply({ content: result.error, ephemeral: true });
+        return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
     }
     if (user.balance < result.cost) {
         return interaction.reply({
             content: `Repairing **${result.restoredAmount}** durability costs **${currency}${result.cost.toLocaleString()}**. You only have **${currency}${user.balance.toLocaleString()}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2445,7 +2445,7 @@ async function handleRepair(interaction, user, currency) {
         await user.save();
     } catch (err) {
         console.error('[fishshop repair shop] save error:', err);
-        return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
+        return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
     const embed = new EmbedBuilder()
@@ -2477,21 +2477,21 @@ async function handleUnlock(interaction, user, currency) {
     const location   = LOCATIONS[locationId];
 
     if (!location) {
-        return interaction.reply({ content: 'Unknown location.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown location.', flags: MessageFlags.Ephemeral });
     }
     if (f.unlockedLocations.includes(locationId)) {
-        return interaction.reply({ content: `**${location.name}** is already unlocked.`, ephemeral: true });
+        return interaction.reply({ content: `**${location.name}** is already unlocked.`, flags: MessageFlags.Ephemeral });
     }
     if (f.level < location.unlockLevel) {
         return interaction.reply({
             content: `You need Fisher Level **${location.unlockLevel}** to unlock **${location.name}**. You are Level **${f.level}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     if (user.balance < location.unlockCost) {
         return interaction.reply({
             content: `Unlocking **${location.name}** costs **${currency}${location.unlockCost.toLocaleString()}**. You have **${currency}${user.balance.toLocaleString()}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2513,7 +2513,7 @@ async function handleUnlock(interaction, user, currency) {
     ).catch(() => null);
 
     if (!profUpdated) {
-        return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', ephemeral: true });
+        return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', flags: MessageFlags.Ephemeral });
     }
 
     // Phase 2: charge the unlock cost; roll the unlock back if the debit fails
@@ -2528,7 +2528,7 @@ async function handleUnlock(interaction, user, currency) {
             { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' },
             { $pull: { 'data.unlockedLocations': locationId }, $set: { 'data.activeLocation': user.fishing.activeLocation } }
         ).catch(() => {});
-        return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', ephemeral: true });
+        return interaction.reply({ content: 'Purchase failed. Conditions may have changed — please try again.', flags: MessageFlags.Ephemeral });
     }
 
     // Sync the in-memory profile so a later save doesn't clobber the unlock
@@ -2559,7 +2559,7 @@ async function handleUnlock(interaction, user, currency) {
 async function handleCraft(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const user = await User.findOneAndUpdate(
@@ -2608,14 +2608,14 @@ async function handleCraft(interaction, sub) {
         if (!recipe) {
             return interaction.reply({
                 content: 'Unknown recipe. Use `/fish craft list` to see available recipes.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
         if (recipe.unique && recipe.output.id === 'luckyHook' && f.luckyHook) {
             return interaction.reply({
                 content: 'You already have the **🎣 Lucky Hook** upgrade!',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -2627,7 +2627,7 @@ async function handleCraft(interaction, sub) {
                 return interaction.reply({
                     content: `You can only hold **${def.maxStack}× ${def.name}** (you have ${currentStock}). ` +
                              `Free up space before crafting more.`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
         }
@@ -2644,7 +2644,7 @@ async function handleCraft(interaction, sub) {
         if (missing.length) {
             return interaction.reply({
                 content: `You are missing the following materials:\n${missing.join('\n')}`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -2715,7 +2715,7 @@ function getCraftMaterialStock(materialId, source, h, f) {
 async function handleLocation(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -2766,18 +2766,18 @@ async function setLocation(interaction, user, currency) {
     const location   = LOCATIONS[locationId];
 
     if (!location) {
-        return interaction.reply({ content: 'Unknown location.', ephemeral: true });
+        return interaction.reply({ content: 'Unknown location.', flags: MessageFlags.Ephemeral });
     }
     if (!f.unlockedLocations.includes(locationId)) {
         return interaction.reply({
             content: `**${location.name}** is locked. Unlock it with \`/fish shop unlock\`.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     if (f.level < location.unlockLevel) {
         return interaction.reply({
             content: `You need Fisher Level **${location.unlockLevel}** to fish at **${location.name}**. You are Level **${f.level}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2788,7 +2788,7 @@ async function setLocation(interaction, user, currency) {
         await user.save();
     } catch (err) {
         console.error('[location set] save error:', err);
-        return interaction.reply({ content: 'Something went wrong. Please try again.', ephemeral: true });
+        return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
     return interaction.reply({
@@ -2851,7 +2851,7 @@ async function handleTournamentStatus(interaction) {
 async function handleTournamentStart(interaction) {
     const member = interaction.guild.members.cache.get(interaction.user.id);
     if (!member?.permissions.has('ManageGuild')) {
-        return interaction.reply({ content: '❌ You need the **Manage Server** permission to start a tournament.', ephemeral: true });
+        return interaction.reply({ content: '❌ You need the **Manage Server** permission to start a tournament.', flags: MessageFlags.Ephemeral });
     }
 
     await interaction.deferReply();
@@ -3019,7 +3019,7 @@ module.exports.execute = async function (interaction) {
     if (!lockToken) {
         return interaction.reply({
             content: '🎣 You already have a fishing action in progress — finish it first.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         }).catch(() => {});
     }
     try {

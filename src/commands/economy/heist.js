@@ -4,6 +4,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const Guild = require('../../models/Guild');
 const User  = require('../../models/User');
@@ -190,23 +191,23 @@ async function handleHeistButton(interaction, client) {
         const prefix     = 'heist_join_';
         const afterPrefix = id.slice(prefix.length);           // "{heistId}_{role}"
         const lastSep    = afterPrefix.lastIndexOf('_');
-        if (lastSep === -1) return interaction.reply({ content: 'Malformed button ID.', ephemeral: true });
+        if (lastSep === -1) return interaction.reply({ content: 'Malformed button ID.', flags: MessageFlags.Ephemeral });
         const heistId = afterPrefix.slice(0, lastSep);
         const role    = afterPrefix.slice(lastSep + 1);
 
         if (!/^\d+-\d+$/.test(heistId) || !ROLES[role]) {
-            return interaction.reply({ content: 'Invalid heist button.', ephemeral: true });
+            return interaction.reply({ content: 'Invalid heist button.', flags: MessageFlags.Ephemeral });
         }
 
         const guildId = interaction.guildId;
         const heist = getHeist(guildId);
         if (!heist || heist.heistId !== heistId || heist.phase !== 'lobby') {
-            return interaction.reply({ content: 'This heist lobby is no longer active.', ephemeral: true });
+            return interaction.reply({ content: 'This heist lobby is no longer active.', flags: MessageFlags.Ephemeral });
         }
 
         const result = joinLobby(guildId, interaction.user.id, interaction.user.username, role);
         if (!result.ok) {
-            return interaction.reply({ content: result.reason, ephemeral: true });
+            return interaction.reply({ content: result.reason, flags: MessageFlags.Ephemeral });
         }
 
         // Update the lobby embed
@@ -225,7 +226,7 @@ async function handleHeistButton(interaction, client) {
         const lastSep     = afterPrefix.lastIndexOf('_');
         const beforeLast  = afterPrefix.lastIndexOf('_', lastSep - 1);
         if (lastSep === -1 || beforeLast === -1) {
-            return interaction.reply({ content: 'Malformed skill-check button.', ephemeral: true }).catch(() => {});
+            return interaction.reply({ content: 'Malformed skill-check button.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
         const answer  = afterPrefix.slice(lastSep + 1);
         const userId  = afterPrefix.slice(beforeLast + 1, lastSep);
@@ -239,12 +240,12 @@ async function handleHeistButton(interaction, client) {
         }
 
         if (!heist || !heist.players.has(userId)) {
-            return interaction.reply({ content: 'This skill check has expired.', ephemeral: true }).catch(() => {});
+            return interaction.reply({ content: 'This skill check has expired.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
 
         const player = heist.players.get(userId);
         if (player.skillPassed !== null) {
-            return interaction.reply({ content: 'You already submitted your answer.', ephemeral: true }).catch(() => {});
+            return interaction.reply({ content: 'You already submitted your answer.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
 
         const check = heist._skillChecks?.[userId];
@@ -310,18 +311,18 @@ module.exports = {
         const guildDoc = await Guild.findOne({ guildId: interaction.guild.id });
 
         if (!guildDoc?.economy?.enabled) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         if (!guildDoc?.heist?.enabled) {
-            return interaction.reply({ content: 'The Heist system is not enabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The Heist system is not enabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const sub = interaction.options.getSubcommand();
 
         if (sub === 'status') {
             const heist = getHeist(interaction.guild.id);
-            if (!heist) return interaction.reply({ content: 'No heist is currently active.', ephemeral: true });
-            return interaction.reply({ embeds: [buildLobbyEmbed(heist)], ephemeral: true });
+            if (!heist) return interaction.reply({ content: 'No heist is currently active.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ embeds: [buildLobbyEmbed(heist)], flags: MessageFlags.Ephemeral });
         }
 
         // ── /heist start ──────────────────────────────────────────────────
@@ -329,14 +330,14 @@ module.exports = {
         if (sub === 'start') {
             const existing = getHeist(interaction.guild.id);
             if (existing) {
-                return interaction.reply({ content: 'A heist is already in progress in this server.', ephemeral: true });
+                return interaction.reply({ content: 'A heist is already in progress in this server.', flags: MessageFlags.Ephemeral });
             }
 
             // Check jail
             const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             if (userDoc?.heistJailedUntil && userDoc.heistJailedUntil > new Date()) {
                 const ts = Math.floor(userDoc.heistJailedUntil.getTime() / 1000);
-                return interaction.reply({ content: `You're in jail! You can't start a heist until <t:${ts}:R>.`, ephemeral: true });
+                return interaction.reply({ content: `You're in jail! You can't start a heist until <t:${ts}:R>.`, flags: MessageFlags.Ephemeral });
             }
 
             // Cooldown check
@@ -346,7 +347,7 @@ module.exports = {
                 const diff = Date.now() - userDoc.lastHeist.getTime();
                 if (diff < cooldownMs) {
                     const ts = Math.floor((userDoc.lastHeist.getTime() + cooldownMs) / 1000);
-                    return interaction.reply({ content: `You're on heist cooldown! Try again <t:${ts}:R>.`, ephemeral: true });
+                    return interaction.reply({ content: `You're on heist cooldown! Try again <t:${ts}:R>.`, flags: MessageFlags.Ephemeral });
                 }
             }
 

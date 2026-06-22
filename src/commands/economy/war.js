@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 
@@ -28,14 +28,14 @@ function progressBar(score, opponentScore) {
 
 async function executeChallenge(interaction) {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: 'Only administrators can initiate a server war.', ephemeral: true });
+        return interaction.reply({ content: 'Only administrators can initiate a server war.', flags: MessageFlags.Ephemeral });
     }
 
     const inviteCode = interaction.options.getString('invite_code').trim();
 
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.activeWar?.status === 'active' || guildSettings?.activeWar?.status === 'pending') {
-        return interaction.reply({ content: 'Your server already has an active or pending war.', ephemeral: true });
+        return interaction.reply({ content: 'Your server already has an active or pending war.', flags: MessageFlags.Ephemeral });
     }
 
     await Guild.findOneAndUpdate(
@@ -80,14 +80,14 @@ async function executeChallenge(interaction) {
 
 async function executeAccept(interaction) {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: 'Only administrators can accept a war.', ephemeral: true });
+        return interaction.reply({ content: 'Only administrators can accept a war.', flags: MessageFlags.Ephemeral });
     }
 
     const challengerInvite = interaction.options.getString('challenger_invite').trim();
 
     const myGuild = await Guild.findOne({ guildId: interaction.guild.id });
     if (myGuild?.activeWar?.status === 'active' || myGuild?.activeWar?.status === 'pending') {
-        return interaction.reply({ content: 'Your server already has an active or pending war.', ephemeral: true });
+        return interaction.reply({ content: 'Your server already has an active or pending war.', flags: MessageFlags.Ephemeral });
     }
 
     // Find the challenger guild by invite code
@@ -99,12 +99,12 @@ async function executeAccept(interaction) {
     if (!challengerGuild) {
         return interaction.reply({
             content: 'No pending war challenge found for that invite code. Make sure the challenger ran `/war challenge` first.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
     if (challengerGuild.guildId === interaction.guild.id) {
-        return interaction.reply({ content: 'You can\'t accept your own war challenge.', ephemeral: true });
+        return interaction.reply({ content: 'You can\'t accept your own war challenge.', flags: MessageFlags.Ephemeral });
     }
 
     const now = new Date();
@@ -174,13 +174,13 @@ async function executeStatus(interaction) {
     const war = guildSettings?.activeWar;
 
     if (!war?.status || war.status === 'ended') {
-        return interaction.reply({ content: 'No active war for this server.', ephemeral: true });
+        return interaction.reply({ content: 'No active war for this server.', flags: MessageFlags.Ephemeral });
     }
 
     if (war.status === 'pending') {
         return interaction.reply({
             content: `⏳ War challenge pending. Waiting for the opponent server to run \`/war accept\`.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -222,14 +222,14 @@ async function executeStatus(interaction) {
 
 async function executeCancel(interaction) {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: 'Administrator only.', ephemeral: true });
+        return interaction.reply({ content: 'Administrator only.', flags: MessageFlags.Ephemeral });
     }
 
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     const war = guildSettings?.activeWar;
 
     if (!war?.status || war.status === 'ended') {
-        return interaction.reply({ content: 'No active war to cancel.', ephemeral: true });
+        return interaction.reply({ content: 'No active war to cancel.', flags: MessageFlags.Ephemeral });
     }
 
     await Guild.findOneAndUpdate(
@@ -245,7 +245,7 @@ async function executeCancel(interaction) {
         );
     }
 
-    return interaction.reply({ content: '⚔️ The war has been cancelled.', ephemeral: false });
+    return interaction.reply({ content: '⚔️ The war has been cancelled.' });
 }
 
 // ── Point granting utility (exported for use in other commands) ───────────────
@@ -354,7 +354,7 @@ module.exports = {
             if (sub === 'cancel')    return await executeCancel(interaction);
         } catch (err) {
             console.error('[war] error:', err);
-            const msg = { content: 'Something went wrong with the war command.', ephemeral: true };
+            const msg = { content: 'Something went wrong with the war command.', flags: MessageFlags.Ephemeral };
             if (interaction.replied || interaction.deferred) return interaction.followUp(msg);
             return interaction.reply(msg);
         }
