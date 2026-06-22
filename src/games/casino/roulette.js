@@ -143,6 +143,7 @@ module.exports = {
     name: 'roulette',
     description: 'Bet on Red/Black, Odd/Even, dozens, columns, or a specific number.',
     cooldown: 5,
+    betOptionName: 'amount',
     configure: sub => sub
         .addStringOption(opt =>
             opt.setName('bet')

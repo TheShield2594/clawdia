@@ -110,7 +110,7 @@ module.exports = {
         try {
             // Progressive jackpot: contribute a share of each bet to the pool and check for a win.
             // Fire-and-forget — the service handles pool reset, user credit, and logging.
-            const bet = interaction.options.getInteger('bet') ?? 0;
+            const bet = interaction.options.getInteger(game.betOptionName ?? 'bet') ?? 0;
             if (bet > 0) {
                 processJackpotBet({
                     guildId:  interaction.guild.id,
