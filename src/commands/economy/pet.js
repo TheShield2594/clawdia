@@ -2,7 +2,7 @@
 
 const {
     SlashCommandBuilder, EmbedBuilder,
-    ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, MessageFlags
 } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind } = require('../../utils/grindProfile');
@@ -116,7 +116,7 @@ async function syncHungerAndRunaway(user, interaction) {
         interaction.channel?.send({ content: deathMsg }).catch(() => {});
         await interaction.followUp({
             content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` to get a new companion, or buy a Revive Scroll from the shop to bring them back.*`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         }).catch(() => {});
     }
 }
@@ -213,24 +213,24 @@ async function executeAdopt(interaction) {
     const petName = interaction.options.getString('name')?.trim().slice(0, 32) ?? null;
     const def   = PET_DEFINITIONS[petId];
 
-    if (!def) return interaction.reply({ content: 'Unknown pet type.', ephemeral: true });
+    if (!def) return interaction.reply({ content: 'Unknown pet type.', flags: MessageFlags.Ephemeral });
     if (!def.purchasable) {
         return interaction.reply({
             content: `${def.emoji} **${def.name}** can only be obtained as a legendary drop — it's not sold in any shop!`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
     const [user, guildSettings] = await Promise.all([resolveUser(interaction), Guild.findOne({ guildId: interaction.guild.id })]);
 
-    if (guildSettings?.economy?.enabled === false) return interaction.reply({ content: 'The economy is disabled in this server.', ephemeral: true });
-    if ((user.pets ?? []).some(p => p.petId === petId)) return interaction.reply({ content: `You already own a ${def.emoji} **${def.name}**!`, ephemeral: true });
+    if (guildSettings?.economy?.enabled === false) return interaction.reply({ content: 'The economy is disabled in this server.', flags: MessageFlags.Ephemeral });
+    if ((user.pets ?? []).some(p => p.petId === petId)) return interaction.reply({ content: `You already own a ${def.emoji} **${def.name}**!`, flags: MessageFlags.Ephemeral });
 
     const currency = guildSettings?.economy?.currency ?? '💰';
     if (user.balance < def.cost) {
         return interaction.reply({
             content: `You need **${def.cost.toLocaleString()}** ${currency} to adopt this pet but only have **${user.balance.toLocaleString()}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -242,7 +242,7 @@ async function executeAdopt(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — please try again.', ephemeral: true });
+        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 
@@ -302,7 +302,7 @@ async function executeStatus(interaction) {
         // Re-fetch user so mutations from concurrent actions are reflected
         const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         if (!freshUser || !freshUser.pets[idx]) {
-            return btn.reply({ content: 'Pet not found.', ephemeral: true });
+            return btn.reply({ content: 'Pet not found.', flags: MessageFlags.Ephemeral });
         }
 
         if (action === 'pet_prev') {
@@ -328,7 +328,7 @@ async function executeStatus(interaction) {
 
             if (pet.lastPlay && (now - new Date(pet.lastPlay).getTime()) < PLAY_COOLDOWN_MS) {
                 const remaining = Math.ceil((PLAY_COOLDOWN_MS - (now - new Date(pet.lastPlay).getTime())) / 60000);
-                return btn.reply({ content: `🎾 **${name}** is tired from playing! Try again in **${remaining}m**.`, ephemeral: true });
+                return btn.reply({ content: `🎾 **${name}** is tired from playing! Try again in **${remaining}m**.`, flags: MessageFlags.Ephemeral });
             }
 
             const xpGain = 15 + Math.floor(Math.random() * 11); // 15–25 XP
@@ -342,10 +342,10 @@ async function executeStatus(interaction) {
                 await freshUser.save();
             } catch (err) {
                 if (err.name === 'VersionError') {
-                    return btn.reply({ content: '⚠️ Action conflict — please try again.', ephemeral: true });
+                    return btn.reply({ content: '⚠️ Action conflict — please try again.', flags: MessageFlags.Ephemeral });
                 }
                 console.error('[pet] play save error:', err);
-                return btn.reply({ content: '❌ Failed to save. Please try again.', ephemeral: true });
+                return btn.reply({ content: '❌ Failed to save. Please try again.', flags: MessageFlags.Ephemeral });
             }
 
             if (leveled) {
@@ -358,7 +358,7 @@ async function executeStatus(interaction) {
                 : petXpResult.leveledUp
                 ? `\n📈 **${name} reached pet Level ${petXpResult.toLevel}!**`
                 : '';
-            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n✨ **+${xpGain} XP** for you, **+${petXpResult.gained} XP** for ${name}!${levelNote}${petNote}`, ephemeral: true });
+            await btn.reply({ content: `🎾 You played with **${name}**! They loved it.\n✨ **+${xpGain} XP** for you, **+${petXpResult.gained} XP** for ${name}!${levelNote}${petNote}`, flags: MessageFlags.Ephemeral });
             await interaction.editReply({
                 embeds:     [buildPetEmbed(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL)],
                 components: buildNavComponents(interaction.user.id, idx, freshUser.pets.length),
@@ -371,7 +371,7 @@ async function executeStatus(interaction) {
 
             if (pet.restUntil && new Date(pet.restUntil).getTime() > Date.now()) {
                 const remaining = Math.ceil((new Date(pet.restUntil).getTime() - Date.now()) / 60000);
-                return btn.reply({ content: `🛏️ **${name}** is already resting! ${remaining}m remaining.`, ephemeral: true });
+                return btn.reply({ content: `🛏️ **${name}** is already resting! ${remaining}m remaining.`, flags: MessageFlags.Ephemeral });
             }
 
             freshUser.pets[idx].restUntil           = new Date(Date.now() + 2 * 60 * 60 * 1000);
@@ -382,13 +382,13 @@ async function executeStatus(interaction) {
                 await freshUser.save();
             } catch (err) {
                 if (err.name === 'VersionError') {
-                    return btn.reply({ content: '⚠️ Action conflict — please try again.', ephemeral: true });
+                    return btn.reply({ content: '⚠️ Action conflict — please try again.', flags: MessageFlags.Ephemeral });
                 }
                 console.error('[pet] rest save error:', err);
-                return btn.reply({ content: '❌ Failed to save. Please try again.', ephemeral: true });
+                return btn.reply({ content: '❌ Failed to save. Please try again.', flags: MessageFlags.Ephemeral });
             }
 
-            await btn.reply({ content: `🛏️ **${name}** is now resting! Hunger will decay at half speed for **2 hours**.`, ephemeral: true });
+            await btn.reply({ content: `🛏️ **${name}** is now resting! Hunger will decay at half speed for **2 hours**.`, flags: MessageFlags.Ephemeral });
             await interaction.editReply({
                 embeds:     [buildPetEmbed(freshUser.pets[idx], idx, freshUser.pets.length, ownerAvatarURL)],
                 components: buildNavComponents(interaction.user.id, idx, freshUser.pets.length),
@@ -407,10 +407,10 @@ async function executeStatus(interaction) {
                 await freshUser.save();
             } catch (err) {
                 if (err.name === 'VersionError') {
-                    return btn.reply({ content: '⚠️ Action conflict — please try again.', ephemeral: true });
+                    return btn.reply({ content: '⚠️ Action conflict — please try again.', flags: MessageFlags.Ephemeral });
                 }
                 console.error('[pet] showcase save error:', err);
-                return btn.reply({ content: '❌ Failed to save. Please try again.', ephemeral: true });
+                return btn.reply({ content: '❌ Failed to save. Please try again.', flags: MessageFlags.Ephemeral });
             }
 
             const showcaseEmbed = new EmbedBuilder()
@@ -517,7 +517,7 @@ async function executeRelease(interaction) {
     const user     = await resolveUser(interaction);
 
     if (!user.pets || petIndex < 0 || petIndex >= user.pets.length) {
-        return interaction.reply({ content: 'Invalid pet slot.', ephemeral: true });
+        return interaction.reply({ content: 'Invalid pet slot.', flags: MessageFlags.Ephemeral });
     }
 
     const pet  = user.pets[petIndex];
@@ -530,11 +530,11 @@ async function executeRelease(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', ephemeral: true });
+        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 
-    return interaction.reply({ content: `${def?.emoji ?? '🐾'} **${name}** has been released. Goodbye, friend!`, ephemeral: true });
+    return interaction.reply({ content: `${def?.emoji ?? '🐾'} **${name}** has been released. Goodbye, friend!`, flags: MessageFlags.Ephemeral });
 }
 
 async function executeRename(interaction) {
@@ -543,7 +543,7 @@ async function executeRename(interaction) {
     const user     = await resolveUser(interaction);
 
     if (!user.pets || petIndex < 0 || petIndex >= user.pets.length) {
-        return interaction.reply({ content: 'Invalid pet slot.', ephemeral: true });
+        return interaction.reply({ content: 'Invalid pet slot.', flags: MessageFlags.Ephemeral });
     }
 
     user.pets[petIndex].name = newName;
@@ -552,12 +552,12 @@ async function executeRename(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', ephemeral: true });
+        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 
     const def = PET_DEFINITIONS[user.pets[petIndex].petId];
-    return interaction.reply({ content: `${def?.emoji ?? '🐾'} Pet renamed to **${newName}**!`, ephemeral: true });
+    return interaction.reply({ content: `${def?.emoji ?? '🐾'} Pet renamed to **${newName}**!`, flags: MessageFlags.Ephemeral });
 }
 
 // ── Battle ──────────────────────────────────────────────────────────────────
@@ -612,7 +612,7 @@ async function executeBattle(interaction) {
 
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled in this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled in this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -623,40 +623,40 @@ async function executeBattle(interaction) {
     const myPet = user.pets?.[slot];
     const usable = petUsable(myPet);
     if (!usable.ok) {
-        return interaction.reply({ content: `Your pet in slot ${slot} is ${usable.reason}.`, ephemeral: true });
+        return interaction.reply({ content: `Your pet in slot ${slot} is ${usable.reason}.`, flags: MessageFlags.Ephemeral });
     }
 
     // Per-pet cooldown
     if (myPet.lastBattle && Date.now() - new Date(myPet.lastBattle).getTime() < BATTLE_COOLDOWN_MS) {
         const mins = Math.ceil((BATTLE_COOLDOWN_MS - (Date.now() - new Date(myPet.lastBattle).getTime())) / 60000);
-        return interaction.reply({ content: `${getPetDisplay(myPet).emoji} **${getPetDisplay(myPet).titledName}** is recovering — ready to battle again in **${mins}m**.`, ephemeral: true });
+        return interaction.reply({ content: `${getPetDisplay(myPet).emoji} **${getPetDisplay(myPet).titledName}** is recovering — ready to battle again in **${mins}m**.`, flags: MessageFlags.Ephemeral });
     }
 
     if (!opponent) {
         if (bet > 0) {
-            return interaction.reply({ content: "You can't wager against a wild pet — challenge a member instead.", ephemeral: true });
+            return interaction.reply({ content: "You can't wager against a wild pet — challenge a member instead.", flags: MessageFlags.Ephemeral });
         }
         return wildBattle(interaction, user, slot, currency, guildSettings);
     }
 
     // ── PvP setup ──
     if (bet > 0) {
-        if (opponent.id === interaction.user.id) return interaction.reply({ content: "You can't wager against yourself.", ephemeral: true });
-        if (opponent.bot) return interaction.reply({ content: "Bots don't keep pets.", ephemeral: true });
+        if (opponent.id === interaction.user.id) return interaction.reply({ content: "You can't wager against yourself.", flags: MessageFlags.Ephemeral });
+        if (opponent.bot) return interaction.reply({ content: "Bots don't keep pets.", flags: MessageFlags.Ephemeral });
         const maxBet = guildSettings?.economy?.duelMaxBet ?? 10_000;
-        if (bet > maxBet) return interaction.reply({ content: `The maximum battle wager here is **${maxBet.toLocaleString()}** coins.`, ephemeral: true });
+        if (bet > maxBet) return interaction.reply({ content: `The maximum battle wager here is **${maxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         if (Date.now() - interaction.user.createdTimestamp < BATTLE_MIN_ACCOUNT_AGE_MS
             || Date.now() - opponent.createdTimestamp < BATTLE_MIN_ACCOUNT_AGE_MS) {
-            return interaction.reply({ content: 'Both accounts must be at least 7 days old for wagered battles.', ephemeral: true });
+            return interaction.reply({ content: 'Both accounts must be at least 7 days old for wagered battles.', flags: MessageFlags.Ephemeral });
         }
     } else if (opponent.id === interaction.user.id || opponent.bot) {
-        return interaction.reply({ content: 'Pick another member to battle.', ephemeral: true });
+        return interaction.reply({ content: 'Pick another member to battle.', flags: MessageFlags.Ephemeral });
     }
 
     const oppUser = await User.findOne({ userId: opponent.id, guildId: interaction.guild.id });
     const oppPet  = oppUser?.pets?.find(p => p.hunger >= STARVING_THRESHOLD);
     if (!oppPet) {
-        return interaction.reply({ content: `${opponent.username} has no battle-ready pet (they need a fed pet).`, ephemeral: true });
+        return interaction.reply({ content: `${opponent.username} has no battle-ready pet (they need a fed pet).`, flags: MessageFlags.Ephemeral });
     }
 
     return pvpBattle(interaction, { user, myPet, slot, opponent, oppUser, oppPet, bet, currency, guildSettings });
@@ -968,7 +968,7 @@ module.exports = {
             if (sub === 'battle')      return await executeBattle(interaction);
         } catch (err) {
             console.error('[pet] error:', err);
-            const msg = { content: 'Something went wrong with the pet command.', ephemeral: true };
+            const msg = { content: 'Something went wrong with the pet command.', flags: MessageFlags.Ephemeral };
             if (interaction.replied || interaction.deferred) return interaction.followUp(msg);
             return interaction.reply(msg);
         }

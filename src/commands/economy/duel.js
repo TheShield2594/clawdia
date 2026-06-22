@@ -4,6 +4,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const { randomInt } = require('crypto');
 const User = require('../../models/User');
@@ -440,13 +441,13 @@ async function runChallenge(interaction, isRanked) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     if (guildSettings?.economy?.duelEnabled === false) {
-        return interaction.reply({ content: 'Duels are disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'Duels are disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     if (isRanked && guildSettings?.rankedDuels?.enabled === false) {
-        return interaction.reply({ content: 'Ranked duels are disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'Ranked duels are disabled on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const currency = guildSettings?.economy?.currency    || '💰';
@@ -459,16 +460,16 @@ async function runChallenge(interaction, isRanked) {
     const gameChoice = interaction.options.getString('game') ?? 'random';
 
     if (target.id === interaction.user.id) {
-        return interaction.reply({ content: "You can't duel yourself.", ephemeral: true });
+        return interaction.reply({ content: "You can't duel yourself.", flags: MessageFlags.Ephemeral });
     }
     if (target.bot) {
-        return interaction.reply({ content: "You can't duel a bot.", ephemeral: true });
+        return interaction.reply({ content: "You can't duel a bot.", flags: MessageFlags.Ephemeral });
     }
     if (amount > maxBet) {
-        return interaction.reply({ content: `The maximum bet on this server is **${currency}${maxBet.toLocaleString()}**.`, ephemeral: true });
+        return interaction.reply({ content: `The maximum bet on this server is **${currency}${maxBet.toLocaleString()}**.`, flags: MessageFlags.Ephemeral });
     }
     if (amount < minBet) {
-        return interaction.reply({ content: `Ranked duels require a minimum bet of **${currency}${minBet.toLocaleString()}**.`, ephemeral: true });
+        return interaction.reply({ content: `Ranked duels require a minimum bet of **${currency}${minBet.toLocaleString()}**.`, flags: MessageFlags.Ephemeral });
     }
 
     const [challenger, opponent] = await Promise.all([
@@ -478,15 +479,15 @@ async function runChallenge(interaction, isRanked) {
 
     if (challenger.lastDuel && Date.now() - new Date(challenger.lastDuel).getTime() < DUEL_COOLDOWN_MS) {
         const mins = Math.ceil((DUEL_COOLDOWN_MS - (Date.now() - new Date(challenger.lastDuel).getTime())) / 60_000);
-        return interaction.reply({ content: `You're cooling down from your last duel. Try again in **${mins} min**.`, ephemeral: true });
+        return interaction.reply({ content: `You're cooling down from your last duel. Try again in **${mins} min**.`, flags: MessageFlags.Ephemeral });
     }
     if (opponent.lastDuel && Date.now() - new Date(opponent.lastDuel).getTime() < DUEL_COOLDOWN_MS) {
         const mins = Math.ceil((DUEL_COOLDOWN_MS - (Date.now() - new Date(opponent.lastDuel).getTime())) / 60_000);
-        return interaction.reply({ content: `**${target.username}** is still on duel cooldown. Try again in **${mins} min**.`, ephemeral: true });
+        return interaction.reply({ content: `**${target.username}** is still on duel cooldown. Try again in **${mins} min**.`, flags: MessageFlags.Ephemeral });
     }
 
     if (challenger.balance < amount) {
-        return interaction.reply({ content: `You don't have enough ${currency}. Wallet: **${currency}${challenger.balance.toLocaleString()}**`, ephemeral: true });
+        return interaction.reply({ content: `You don't have enough ${currency}. Wallet: **${currency}${challenger.balance.toLocaleString()}**`, flags: MessageFlags.Ephemeral });
     }
 
     const duelId = `${interaction.user.id}_${Date.now()}`;
@@ -630,7 +631,7 @@ async function runRankView(interaction) {
         embed.addFields({ name: 'Earned Titles', value: titles.map(t => `🏷️ ${t}`).join('\n'), inline: false });
     }
     embed.setTimestamp();
-    return interaction.reply({ embeds: [embed], ephemeral: false });
+    return interaction.reply({ embeds: [embed] });
 }
 
 async function runLeaderboard(interaction) {
@@ -649,7 +650,7 @@ async function runLeaderboard(interaction) {
         .lean();
 
     if (!top.length) {
-        return interaction.reply({ content: 'No one has played a ranked duel yet on this server.', ephemeral: true });
+        return interaction.reply({ content: 'No one has played a ranked duel yet on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const lines = await Promise.all(top.map(async (row, idx) => {
@@ -721,7 +722,7 @@ module.exports = {
 
     async execute(interaction) {
         if (!interaction.guild) {
-            return interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+            return interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
         }
         const sub = interaction.options.getSubcommand();
         if (sub === 'casual')      return runChallenge(interaction, false);

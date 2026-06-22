@@ -124,7 +124,7 @@ async function startBot() {
     await loadEvents();
     await startDashboard();
 
-    client.once('ready', () => {
+    client.once('clientReady', () => {
         const { startSummaryService } = require('./services/summaryService');
         startSummaryService(client);
 

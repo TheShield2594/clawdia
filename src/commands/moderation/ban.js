@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../utils/logger');
 const TempBan = require('../../models/TempBan');
 
@@ -58,22 +58,22 @@ module.exports = {
         const deleteDays  = interaction.options.getInteger('delete_days') || 0;
 
         if (user.id === interaction.user.id) {
-            return interaction.reply({ content: 'You cannot ban yourself.', ephemeral: true });
+            return interaction.reply({ content: 'You cannot ban yourself.', flags: MessageFlags.Ephemeral });
         }
         if (user.id === interaction.client.user.id) {
-            return interaction.reply({ content: 'I cannot ban myself.', ephemeral: true });
+            return interaction.reply({ content: 'I cannot ban myself.', flags: MessageFlags.Ephemeral });
         }
 
         const member = interaction.guild.members.cache.get(user.id);
         if (member && !member.bannable) {
-            return interaction.reply({ content: 'I cannot ban this user — they may have higher permissions.', ephemeral: true });
+            return interaction.reply({ content: 'I cannot ban this user — they may have higher permissions.', flags: MessageFlags.Ephemeral });
         }
 
         let durationMs = null;
         if (durationStr) {
             durationMs = parseDuration(durationStr);
             if (durationMs === null) {
-                return interaction.reply({ content: 'Invalid duration format. Use e.g. `30m`, `12h`, `7d`.', ephemeral: true });
+                return interaction.reply({ content: 'Invalid duration format. Use e.g. `30m`, `12h`, `7d`.', flags: MessageFlags.Ephemeral });
             }
         }
 
@@ -110,7 +110,7 @@ module.exports = {
                 durationMs ? { duration: Math.round(durationMs / 60000) } : {});
         } catch (error) {
             console.error('Ban error:', error);
-            await interaction.reply({ content: 'Failed to ban the user.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to ban the user.', flags: MessageFlags.Ephemeral });
         }
     }
 };

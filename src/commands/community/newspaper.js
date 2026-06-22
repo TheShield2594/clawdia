@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { generateNewspaper } = require('../../services/newspaperService');
 
@@ -15,17 +15,17 @@ module.exports = {
     cooldownAmount: () => 30,
     async execute(interaction, client) {
         if (!interaction.inGuild()) {
-            return interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+            return interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
         }
         if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
-            return interaction.reply({ content: 'You need the **Manage Server** permission to use this command.', ephemeral: true });
+            return interaction.reply({ content: 'You need the **Manage Server** permission to use this command.', flags: MessageFlags.Ephemeral });
         }
 
         const guildDoc = await Guild.findOne({ guildId: interaction.guild.id });
         if (!guildDoc?.newspaper?.enabled) {
             return interaction.reply({
                 content: 'The Server Newspaper is not enabled. Enable it in the Dashboard under **Engagement → Newspaper**.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 

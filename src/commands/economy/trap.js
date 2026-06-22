@@ -22,10 +22,10 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         if (guildSettings?.economy?.robEnabled === false) {
-            return interaction.reply({ content: 'Robbing is disabled on this server — traps have no purpose here.', ephemeral: true });
+            return interaction.reply({ content: 'Robbing is disabled on this server — traps have no purpose here.', flags: MessageFlags.Ephemeral });
         }
 
         const currency = guildSettings?.economy?.currency || '💰';
@@ -50,7 +50,7 @@ module.exports = {
             } else {
                 embed.setDescription(`You have **no active trap**.\n\nUse \`/trap set\` to arm one for **${currency}${TRAP_COST.toLocaleString()}**.`);
             }
-            return interaction.reply({ embeds: [embed], ephemeral: true });
+            return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
         }
 
         // sub === 'set' — atomic: check balance + no active trap, deduct, arm in one query

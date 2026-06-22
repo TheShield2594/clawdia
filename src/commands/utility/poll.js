@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const Poll = require('../../models/Poll');
 
 module.exports = {
@@ -23,7 +23,7 @@ module.exports = {
         let endsAt = null;
         if (durationStr) {
             const ms = parseDuration(durationStr);
-            if (!ms) return interaction.reply({ content: 'Invalid duration. Use formats like `10m`, `1h`, `1d`.', ephemeral: true });
+            if (!ms) return interaction.reply({ content: 'Invalid duration. Use formats like `10m`, `1h`, `1d`.', flags: MessageFlags.Ephemeral });
             endsAt = new Date(Date.now() + ms);
         }
 
@@ -132,19 +132,19 @@ async function handlePollVote(interaction) {
 
     const poll = await Poll.findOne({ messageId });
     if (!poll) {
-        return interaction.reply({ content: 'This poll is no longer active.', ephemeral: true });
+        return interaction.reply({ content: 'This poll is no longer active.', flags: MessageFlags.Ephemeral });
     }
     if (poll.closed) {
-        return interaction.reply({ content: 'This poll is closed.', ephemeral: true });
+        return interaction.reply({ content: 'This poll is closed.', flags: MessageFlags.Ephemeral });
     }
 
     const existing = poll.votes.get(interaction.user.id);
     if (existing === optionIndex) {
         poll.votes.delete(interaction.user.id);
-        await interaction.reply({ content: 'Your vote has been removed.', ephemeral: true });
+        await interaction.reply({ content: 'Your vote has been removed.', flags: MessageFlags.Ephemeral });
     } else {
         poll.votes.set(interaction.user.id, optionIndex);
-        await interaction.reply({ content: `You voted for option **${optionIndex + 1}**.`, ephemeral: true });
+        await interaction.reply({ content: `You voted for option **${optionIndex + 1}**.`, flags: MessageFlags.Ephemeral });
     }
     poll.markModified('votes');
     await poll.save();

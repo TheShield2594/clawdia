@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../utils/logger');
 
 module.exports = {
@@ -27,11 +27,11 @@ module.exports = {
         const member = interaction.guild.members.cache.get(user.id);
 
         if (!member) {
-            return interaction.reply({ content: 'User not found!', ephemeral: true });
+            return interaction.reply({ content: 'User not found!', flags: MessageFlags.Ephemeral });
         }
 
         if (!member.moderatable) {
-            return interaction.reply({ content: 'I cannot mute this user!', ephemeral: true });
+            return interaction.reply({ content: 'I cannot mute this user!', flags: MessageFlags.Ephemeral });
         }
 
         try {
@@ -52,7 +52,7 @@ module.exports = {
             await logModeration(interaction.guild.id, 'mute', user, interaction.user, reason);
         } catch (error) {
             console.error('Mute error:', error);
-            await interaction.reply({ content: 'Failed to mute the user.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to mute the user.', flags: MessageFlags.Ephemeral });
         }
     }
 };

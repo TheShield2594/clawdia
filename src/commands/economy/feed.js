@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild  = require('../../models/Guild');
 const BigWin = require('../../models/BigWin');
 
@@ -32,7 +32,7 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const currency = guildSettings?.economy?.currency ?? '💰';
@@ -50,7 +50,6 @@ module.exports = {
                         .setTitle('📡 Big Win Feed')
                         .setDescription('No big wins recorded yet. Hit 50,000+ coins or land a Legendary to appear here!')
                 ],
-                ephemeral: false
             });
         }
 

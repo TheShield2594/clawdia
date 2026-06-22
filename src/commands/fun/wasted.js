@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 const { applyGrayscale } = require('../../utils/canvasFilters');
@@ -17,7 +17,7 @@ module.exports = {
     async execute(interaction) {
         const rl = checkImageRateLimit(interaction.user.id);
         if (rl.limited) {
-            return interaction.reply({ content: rl.message, ephemeral: true });
+            return interaction.reply({ content: rl.message, flags: MessageFlags.Ephemeral });
         }
 
         const target = interaction.options.getUser('user') || interaction.user;
@@ -65,7 +65,7 @@ module.exports = {
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply(msg);
             } else {
-                await interaction.reply({ content: msg, ephemeral: true });
+                await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
             }
         }
     },

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { buildClearedEvent } = require('../../services/seasonalEventService');
@@ -66,7 +66,7 @@ module.exports = {
 
         // start and end require ManageGuild
         if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-            return interaction.reply({ content: 'You need **Manage Server** permission to manage events.', ephemeral: true });
+            return interaction.reply({ content: 'You need **Manage Server** permission to manage events.', flags: MessageFlags.Ephemeral });
         }
 
         if (sub === 'start') return handleStart(interaction);

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { getCase } = require('../../services/caseService');
 const Case = require('../../models/Case');
 const Guild = require('../../models/Guild');
@@ -16,7 +16,7 @@ module.exports = {
         const caseId = interaction.options.getInteger('case_id');
         const reason = interaction.options.getString('reason');
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         try {
             const modCase = await getCase(interaction.guild.id, caseId);

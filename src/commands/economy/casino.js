@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { processJackpotBet, getJackpotDisplay } = require('../../services/casinoJackpotService');
 const { tryAcquire, release } = require('../../utils/activeGameLock');
@@ -45,19 +45,19 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         if (guildSettings?.economy?.gamesEnabled === false) {
-            return interaction.reply({ content: 'Economy games are disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Economy games are disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         if (guildSettings?.economy?.casinoEnabled === false) {
-            return interaction.reply({ content: 'Casino games are disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Casino games are disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         const sub = interaction.options.getSubcommand();
 
         if (sub === 'setlimit') {
             if (!interaction.memberPermissions?.has('ManageGuild')) {
-                return interaction.reply({ content: '❌ You need the **Manage Server** permission to set the casino bet limit.', ephemeral: true });
+                return interaction.reply({ content: '❌ You need the **Manage Server** permission to set the casino bet limit.', flags: MessageFlags.Ephemeral });
             }
             const limit = interaction.options.getInteger('limit');
             await Guild.findOneAndUpdate(
@@ -67,7 +67,7 @@ module.exports = {
             const msg = limit === 0
                 ? '✅ Casino bet limit **removed** — players can bet any amount up to their wallet balance.'
                 : `✅ Casino bet limit set to **${limit.toLocaleString()}** coins.`;
-            return interaction.reply({ content: msg, ephemeral: true });
+            return interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
         }
 
         if (sub === 'jackpot') {
@@ -93,7 +93,7 @@ module.exports = {
 
         const game = games.find(g => g.name === sub);
         if (!game) {
-            return interaction.reply({ content: 'Unknown casino game.', ephemeral: true });
+            return interaction.reply({ content: 'Unknown casino game.', flags: MessageFlags.Ephemeral });
         }
 
         // One active casino game per user — prevents concurrent sessions from racing
@@ -103,7 +103,7 @@ module.exports = {
         if (!lockToken) {
             return interaction.reply({
                 content: '🎰 You already have a casino game in progress — finish it first.',
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 

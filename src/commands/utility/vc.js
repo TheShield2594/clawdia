@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 
 module.exports = {
@@ -34,30 +34,30 @@ module.exports = {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
         if (!guildSettings?.tempVoice?.enabled) {
-            return interaction.reply({ content: 'Temporary voice channels are not enabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Temporary voice channels are not enabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const member = await interaction.guild.members.fetch(interaction.user.id);
         const voiceChannel = member.voice?.channel;
 
         if (!voiceChannel) {
-            return interaction.reply({ content: 'You must be in a voice channel to use this command.', ephemeral: true });
+            return interaction.reply({ content: 'You must be in a voice channel to use this command.', flags: MessageFlags.Ephemeral });
         }
 
         if (!(guildSettings.tempVoice.activeChannels ?? []).includes(voiceChannel.id)) {
-            return interaction.reply({ content: 'You must be in your own temporary voice channel to use this command.', ephemeral: true });
+            return interaction.reply({ content: 'You must be in your own temporary voice channel to use this command.', flags: MessageFlags.Ephemeral });
         }
 
         const overwrite = voiceChannel.permissionOverwrites.cache.get(interaction.user.id);
         if (!overwrite?.allow.has(PermissionFlagsBits.ManageChannels)) {
-            return interaction.reply({ content: 'This is not your temporary voice channel.', ephemeral: true });
+            return interaction.reply({ content: 'This is not your temporary voice channel.', flags: MessageFlags.Ephemeral });
         }
 
         try {
             if (sub === 'rename') {
                 const name = interaction.options.getString('name');
                 await voiceChannel.setName(name);
-                return interaction.reply({ content: `Your channel has been renamed to **${name}**.`, ephemeral: true });
+                return interaction.reply({ content: `Your channel has been renamed to **${name}**.`, flags: MessageFlags.Ephemeral });
             }
 
             if (sub === 'limit') {
@@ -67,22 +67,22 @@ module.exports = {
                     content: limit === 0
                         ? 'User limit removed — anyone can join.'
                         : `User limit set to **${limit}**.`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 
             if (sub === 'lock') {
                 await voiceChannel.permissionOverwrites.edit(interaction.guild.roles.everyone, { Connect: false });
-                return interaction.reply({ content: 'Your channel is now **locked**. Only users you invite can join.', ephemeral: true });
+                return interaction.reply({ content: 'Your channel is now **locked**. Only users you invite can join.', flags: MessageFlags.Ephemeral });
             }
 
             if (sub === 'unlock') {
                 await voiceChannel.permissionOverwrites.edit(interaction.guild.roles.everyone, { Connect: null });
-                return interaction.reply({ content: 'Your channel is now **unlocked**. Anyone can join.', ephemeral: true });
+                return interaction.reply({ content: 'Your channel is now **unlocked**. Anyone can join.', flags: MessageFlags.Ephemeral });
             }
         } catch (error) {
             console.error('VC command error:', error);
-            await interaction.reply({ content: 'Failed to update your voice channel.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to update your voice channel.', flags: MessageFlags.Ephemeral });
         }
     }
 };

@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
@@ -49,7 +49,7 @@ module.exports = {
 
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const user = await User.findOneAndUpdate(
@@ -178,15 +178,15 @@ module.exports = {
             if (!recipe) {
                 return interaction.reply({
                     content: 'Unknown recipe. Use `/craft list` to see available recipes.',
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 
             // Unique guard
             if (recipe.unique) {
-                if (recipe.output.id === 'luckyPaw'       && h.luckyPaw)       return interaction.reply({ content: 'You already have the **🐾 Lucky Paw** upgrade!',       ephemeral: true });
-                if (recipe.output.id === 'luckyHook'      && f.luckyHook)      return interaction.reply({ content: 'You already have the **🎣 Lucky Hook** upgrade!',      ephemeral: true });
-                if (recipe.output.id === 'precisionScope' && h.precisionScope) return interaction.reply({ content: 'You already have the **🔭 Precision Scope** upgrade!', ephemeral: true });
+                if (recipe.output.id === 'luckyPaw'       && h.luckyPaw)       return interaction.reply({ content: 'You already have the **🐾 Lucky Paw** upgrade!',       flags: MessageFlags.Ephemeral });
+                if (recipe.output.id === 'luckyHook'      && f.luckyHook)      return interaction.reply({ content: 'You already have the **🎣 Lucky Hook** upgrade!',      flags: MessageFlags.Ephemeral });
+                if (recipe.output.id === 'precisionScope' && h.precisionScope) return interaction.reply({ content: 'You already have the **🔭 Precision Scope** upgrade!', flags: MessageFlags.Ephemeral });
             }
 
             // Stack limit guards
@@ -194,28 +194,28 @@ module.exports = {
                 const def = HUNT_CONSUMABLES[recipe.output.id];
                 const cur = h.consumables[recipe.output.id] ?? 0;
                 if (def && cur + recipe.output.qty > def.maxStack) {
-                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, ephemeral: true });
+                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, flags: MessageFlags.Ephemeral });
                 }
             }
             if (recipe.output.type === 'mine_consumable') {
                 const def = MINE_CONSUMABLES[recipe.output.id];
                 const cur = m.consumables[recipe.output.id] ?? 0;
                 if (def && cur + recipe.output.qty > def.maxStack) {
-                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, ephemeral: true });
+                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, flags: MessageFlags.Ephemeral });
                 }
             }
             if (recipe.output.type === 'fish_consumable' || recipe.output.type === 'dual_stamina') {
                 const def = FISH_CONSUMABLES[recipe.output.id] ?? CROSS_CONSUMABLES[recipe.output.id];
                 const cur = f.consumables[recipe.output.id] ?? 0;
                 if (def?.maxStack && cur + recipe.output.qty > def.maxStack) {
-                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, ephemeral: true });
+                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, flags: MessageFlags.Ephemeral });
                 }
             }
             if (recipe.output.type === 'mine_immunity') {
                 const def = CROSS_CONSUMABLES[recipe.output.id];
                 const cur = m.consumables[recipe.output.id] ?? 0;
                 if (def?.maxStack && cur + recipe.output.qty > def.maxStack) {
-                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, ephemeral: true });
+                    return interaction.reply({ content: `You can only hold **${def.maxStack}× ${def.name}** (have ${cur}).`, flags: MessageFlags.Ephemeral });
                 }
             }
 
@@ -226,7 +226,7 @@ module.exports = {
             if (missing.length) {
                 return interaction.reply({
                     content: `You are missing the following materials:\n${missing.join('\n')}`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 
@@ -262,7 +262,7 @@ module.exports = {
 
             } else if (out.type === 'mine_consumable') {
                 if (out.id === 'mine_lock' && m.mineLockActive) {
-                    return interaction.reply({ content: 'Your mine already has an active **Mine Lock**.', ephemeral: true });
+                    return interaction.reply({ content: 'Your mine already has an active **Mine Lock**.', flags: MessageFlags.Ephemeral });
                 }
                 m.consumables[out.id] = (m.consumables[out.id] ?? 0) + out.qty;
                 const def = MINE_CONSUMABLES[out.id];

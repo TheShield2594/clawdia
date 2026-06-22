@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { closeCase, getCase } = require('../../services/caseService');
 
 module.exports = {
@@ -17,10 +17,10 @@ module.exports = {
 
         const modCase = await getCase(interaction.guild.id, caseId);
         if (!modCase) {
-            return interaction.reply({ content: `Case #${caseId} not found.`, ephemeral: true });
+            return interaction.reply({ content: `Case #${caseId} not found.`, flags: MessageFlags.Ephemeral });
         }
         if (modCase.status === 'closed') {
-            return interaction.reply({ content: `Case #${caseId} is already closed.`, ephemeral: true });
+            return interaction.reply({ content: `Case #${caseId} is already closed.`, flags: MessageFlags.Ephemeral });
         }
 
         await closeCase(interaction.guild.id, caseId, interaction.user.id, resolution);

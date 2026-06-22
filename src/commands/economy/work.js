@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
@@ -150,7 +150,7 @@ module.exports = {
                         nextAt,
                         nextRewardPreview: `Next shift: chance at 🔥 Exceptional performance · 💸 Bonus Tip · 🎁 Lucky Find${cooldownNote}`,
                     })],
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
@@ -218,7 +218,7 @@ module.exports = {
             );
 
             if (!updated) {
-                return interaction.reply({ content: "You're already working a shift right now!", ephemeral: true });
+                return interaction.reply({ content: "You're already working a shift right now!", flags: MessageFlags.Ephemeral });
             }
 
             // Inventory update for lucky find (separate, non-financial — no race risk)
@@ -378,7 +378,7 @@ module.exports = {
             }
         } catch (error) {
             console.error('Work error:', error);
-            await interaction.reply({ content: 'Failed to work.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to work.', flags: MessageFlags.Ephemeral });
         }
     }
 };

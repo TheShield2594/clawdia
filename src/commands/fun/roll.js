@@ -4,6 +4,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const Guild = require('../../models/Guild');
 
@@ -81,7 +82,7 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.rollEnabled === false) {
-            return interaction.reply({ content: 'Dice roll is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Dice roll is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         const sides = interaction.options.getInteger('sides') || 6;
         await interaction.deferReply();

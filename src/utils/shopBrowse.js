@@ -2,7 +2,7 @@
 
 const {
     EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
-    StringSelectMenuBuilder, AttachmentBuilder
+    StringSelectMenuBuilder, AttachmentBuilder, MessageFlags
 } = require('discord.js');
 
 const ItemImage = require('../models/ItemImage');
@@ -174,7 +174,7 @@ async function runShopBrowse(interaction, config) {
 
     collector.on('collect', async btn => {
         if (btn.user.id !== interaction.user.id) {
-            return btn.reply({ content: 'These controls aren\'t for you — run the command yourself.', ephemeral: true });
+            return btn.reply({ content: 'These controls aren\'t for you — run the command yourself.', flags: MessageFlags.Ephemeral });
         }
         if (btn.customId === 'shop_close') {
             collector.stop('closed');

@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } = require('discord.js');
 
 const DEFAULT_THRESHOLD = 10_000;
 
@@ -37,7 +37,7 @@ async function confirmBet(interaction, amount, walletBalance, gameName, guildSet
         ].join('\n'))
         .setFooter({ text: 'This prompt expires in 15 seconds.' });
 
-    const reply = await interaction.reply({ embeds: [embed], components: [row], ephemeral: true, fetchReply: true });
+    const reply = await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true });
 
     try {
         const response = await reply.awaitMessageComponent({

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { startSession, joinSession, beginSession, takeAction, partyStatus, stopSession, CLASSES } = require('../../services/dmService');
 
 module.exports = {
@@ -59,10 +59,10 @@ module.exports = {
             if (sub === 'status') return await partyStatus(interaction);
             if (sub === 'stop') return await stopSession(interaction);
             console.warn(`[DM] Unknown subcommand: ${sub}`);
-            return interaction.reply({ content: 'Unknown subcommand.', ephemeral: true });
+            return interaction.reply({ content: 'Unknown subcommand.', flags: MessageFlags.Ephemeral });
         } catch (err) {
             console.error('[DM] execute error:', err);
-            const msg = { content: 'An unexpected error occurred. Please try again.', ephemeral: true };
+            const msg = { content: 'An unexpected error occurred. Please try again.', flags: MessageFlags.Ephemeral };
             if (interaction.deferred || interaction.replied) {
                 return interaction.followUp(msg);
             }

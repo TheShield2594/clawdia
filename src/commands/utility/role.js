@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 
 module.exports = {
@@ -26,7 +26,7 @@ module.exports = {
 
         if (sub === 'list') {
             if (!selfRoleIds.length) {
-                return interaction.reply({ content: 'No self-assignable roles have been configured. Admins can set them up via Reaction Roles in the dashboard.', ephemeral: true });
+                return interaction.reply({ content: 'No self-assignable roles have been configured. Admins can set them up via Reaction Roles in the dashboard.', flags: MessageFlags.Ephemeral });
             }
 
             const lines = selfRoleIds.map(id => `<@&${id}>`).join('\n');
@@ -36,42 +36,42 @@ module.exports = {
                 .setDescription(lines)
                 .setFooter({ text: 'Use /role add <role> to assign one' });
 
-            return interaction.reply({ embeds: [embed], ephemeral: true });
+            return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
         }
 
         const role = interaction.options.getRole('role');
 
         if (!selfRoleIds.includes(role.id)) {
-            return interaction.reply({ content: `**${role.name}** is not a self-assignable role. Use \`/role list\` to see available roles.`, ephemeral: true });
+            return interaction.reply({ content: `**${role.name}** is not a self-assignable role. Use \`/role list\` to see available roles.`, flags: MessageFlags.Ephemeral });
         }
 
         const member = await interaction.guild.members.fetch(interaction.user.id);
 
         if (sub === 'add') {
             if (member.roles.cache.has(role.id)) {
-                return interaction.reply({ content: `You already have the **${role.name}** role.`, ephemeral: true });
+                return interaction.reply({ content: `You already have the **${role.name}** role.`, flags: MessageFlags.Ephemeral });
             }
 
             try {
                 await member.roles.add(role.id, 'Self-assigned via /role add');
-                return interaction.reply({ content: `You've been given the **${role.name}** role.`, ephemeral: true });
+                return interaction.reply({ content: `You've been given the **${role.name}** role.`, flags: MessageFlags.Ephemeral });
             } catch (error) {
                 console.error('Role add error:', error);
-                return interaction.reply({ content: 'Failed to assign the role. I may not have permission.', ephemeral: true });
+                return interaction.reply({ content: 'Failed to assign the role. I may not have permission.', flags: MessageFlags.Ephemeral });
             }
         }
 
         if (sub === 'remove') {
             if (!member.roles.cache.has(role.id)) {
-                return interaction.reply({ content: `You don't have the **${role.name}** role.`, ephemeral: true });
+                return interaction.reply({ content: `You don't have the **${role.name}** role.`, flags: MessageFlags.Ephemeral });
             }
 
             try {
                 await member.roles.remove(role.id, 'Self-removed via /role remove');
-                return interaction.reply({ content: `The **${role.name}** role has been removed.`, ephemeral: true });
+                return interaction.reply({ content: `The **${role.name}** role has been removed.`, flags: MessageFlags.Ephemeral });
             } catch (error) {
                 console.error('Role remove error:', error);
-                return interaction.reply({ content: 'Failed to remove the role. I may not have permission.', ephemeral: true });
+                return interaction.reply({ content: 'Failed to remove the role. I may not have permission.', flags: MessageFlags.Ephemeral });
             }
         }
     }
