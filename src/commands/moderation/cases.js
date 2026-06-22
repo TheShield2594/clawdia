@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getCasesForUser } = require('../../services/caseService');
 
 const TYPE_EMOJI = {
@@ -24,7 +24,7 @@ module.exports = {
         const cases = await getCasesForUser(interaction.guild.id, user.id, limit);
 
         if (!cases.length) {
-            return interaction.reply({ content: `No cases found for ${user.globalName ?? user.username}.`, ephemeral: true });
+            return interaction.reply({ content: `No cases found for ${user.globalName ?? user.username}.`, flags: MessageFlags.Ephemeral });
         }
 
         const lines = cases.map(c =>
@@ -39,6 +39,6 @@ module.exports = {
             .setFooter({ text: `Showing ${cases.length} most recent case(s)` })
             .setTimestamp();
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 };

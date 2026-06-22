@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const {
@@ -36,12 +36,12 @@ module.exports = {
         ]);
 
         if (!user || !user.inventory?.length) {
-            return interaction.reply({ content: "Your inventory is empty. Buy items with `/shop buy`.", ephemeral: true });
+            return interaction.reply({ content: "Your inventory is empty. Buy items with `/shop buy`.", flags: MessageFlags.Ephemeral });
         }
 
         const invEntry = user.inventory.find(e => e.itemId.toLowerCase() === itemName.toLowerCase());
         if (!invEntry || invEntry.quantity < 1) {
-            return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, ephemeral: true });
+            return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
         }
 
         const effectType = resolveEffectType(itemName);
@@ -53,7 +53,7 @@ module.exports = {
                 const existing = user.activeEffects.find(e => e.type === effectType);
                 return interaction.reply({
                     content: `**${cfg.emoji} ${cfg.label}** is already active (${timeRemaining(existing?.expiresAt)} remaining). It will refresh when it expires.`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 
@@ -97,7 +97,7 @@ module.exports = {
         if (lootBoxEvent) {
             const won = rollLootBox(lootBoxEvent);
             if (!won) {
-                return interaction.reply({ content: `The **${lootBoxEvent.lootBox.name}** is empty. That shouldn't happen — let a mod know.`, ephemeral: true });
+                return interaction.reply({ content: `The **${lootBoxEvent.lootBox.name}** is empty. That shouldn't happen — let a mod know.`, flags: MessageFlags.Ephemeral });
             }
 
             invEntry.quantity -= 1;

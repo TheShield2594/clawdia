@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS } = require('../../data/achievements');
@@ -47,7 +47,7 @@ module.exports = {
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
             if (!guildSettings?.achievements?.enabled) {
-                return interaction.reply({ content: 'Achievements are not enabled on this server.', ephemeral: true });
+                return interaction.reply({ content: 'Achievements are not enabled on this server.', flags: MessageFlags.Ephemeral });
             }
 
             const sub = interaction.options.getSubcommand();
@@ -146,7 +146,6 @@ module.exports = {
                 await interaction.reply({
                     embeds: [buildPageEmbed(currentPage)],
                     components: totalPages > 1 ? [buildPageRow(currentPage)] : [],
-                    ephemeral: false,
                 });
 
                 if (totalPages > 1) {
@@ -179,7 +178,7 @@ module.exports = {
 
                 const unclaimed = (user.achievements || []).filter(a => !a.claimed);
                 if (!unclaimed.length) {
-                    return interaction.reply({ content: 'You have no unclaimed achievement rewards.', ephemeral: true });
+                    return interaction.reply({ content: 'You have no unclaimed achievement rewards.', flags: MessageFlags.Ephemeral });
                 }
 
                 let totalXp = 0;
@@ -215,11 +214,11 @@ module.exports = {
                     .setDescription(names.join('\n') || 'No rewards.')
                     .addFields({ name: 'Total rewards', value: lines.join(' · ') || 'None', inline: false });
 
-                return interaction.reply({ embeds: [embed], ephemeral: true });
+                return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
             }
         } catch (err) {
             console.error('[achievements] execute error:', err);
-            const reply = { content: 'An error occurred while processing this command.', ephemeral: true };
+            const reply = { content: 'An error occurred while processing this command.', flags: MessageFlags.Ephemeral };
             if (interaction.replied || interaction.deferred) {
                 await interaction.editReply(reply).catch(() => null);
             } else {
@@ -247,7 +246,7 @@ async function handleTop(interaction, guildSettings) {
         .slice(0, 10);
 
     if (!sorted.length) {
-        return interaction.reply({ content: 'No achievements have been earned yet in this server.', ephemeral: true });
+        return interaction.reply({ content: 'No achievements have been earned yet in this server.', flags: MessageFlags.Ephemeral });
     }
 
     const lines = sorted.map(({ def, count }) => {
@@ -271,7 +270,7 @@ async function handleLeaderboard(interaction, guildSettings) {
     ).sort({ achievementsCount: -1 }).limit(10).lean();
 
     if (!topUsers.length) {
-        return interaction.reply({ content: 'No achievements have been earned yet in this server.', ephemeral: true });
+        return interaction.reply({ content: 'No achievements have been earned yet in this server.', flags: MessageFlags.Ephemeral });
     }
 
     const medals = ['🥇', '🥈', '🥉'];
@@ -295,22 +294,22 @@ async function handlePin(interaction, guildSettings) {
     const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
 
     if (!user) {
-        return interaction.reply({ content: 'You have no achievements yet.', ephemeral: true });
+        return interaction.reply({ content: 'You have no achievements yet.', flags: MessageFlags.Ephemeral });
     }
 
     const earned = (user.achievements || []).find(a => a.id === achievementId);
     if (!earned) {
-        return interaction.reply({ content: `You haven't earned achievement \`${achievementId}\` yet.`, ephemeral: true });
+        return interaction.reply({ content: `You haven't earned achievement \`${achievementId}\` yet.`, flags: MessageFlags.Ephemeral });
     }
 
     const disabled = new Set(guildSettings.achievements?.disabledAchievements || []);
     if (disabled.has(achievementId)) {
-        return interaction.reply({ content: 'That achievement is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'That achievement is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const def = ACHIEVEMENTS.find(d => d.id === achievementId);
     if (!def) {
-        return interaction.reply({ content: `Achievement \`${achievementId}\` not found.`, ephemeral: true });
+        return interaction.reply({ content: `Achievement \`${achievementId}\` not found.`, flags: MessageFlags.Ephemeral });
     }
 
     await User.updateOne(
@@ -324,6 +323,6 @@ async function handlePin(interaction, guildSettings) {
             .setTitle('📌 Featured Achievement Set!')
             .setDescription(`${def.emoji} **${def.name}** — ${def.description}\n\nThis achievement will now be displayed prominently on your profile.`)
         ],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
     });
 }

@@ -1,6 +1,7 @@
 const {
     SlashCommandBuilder, EmbedBuilder,
     ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType,
+    MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
@@ -87,7 +88,7 @@ async function handleInfo(interaction) {
         .setDescription(lines)
         .setFooter({ text: 'Each prestige resets your level to 0 but grants permanent bonuses and exclusive content.' })
         .setTimestamp();
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 async function handleUp(interaction) {
@@ -95,7 +96,7 @@ async function handleUp(interaction) {
     const guildSettings = await Guild.findOne({ guildId }, 'accountPrestige economy').lean();
 
     if (guildSettings?.accountPrestige?.enabled === false) {
-        return interaction.reply({ content: 'Account prestige is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'Account prestige is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const minLevel = guildSettings?.accountPrestige?.minLevelToPrestige ?? 50;
 
@@ -108,7 +109,7 @@ async function handleUp(interaction) {
     if ((userDoc.level ?? 0) < minLevel) {
         return interaction.reply({
             content: `You need to reach **level ${minLevel}** before you can prestige. (You're level ${userDoc.level ?? 0}.)`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -136,7 +137,7 @@ async function handleUp(interaction) {
         new ButtonBuilder().setCustomId('prestige_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
     );
 
-    const msg = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+    const msg = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true });
 
     const collector = msg.createMessageComponentCollector({
         componentType: ComponentType.Button,
@@ -249,7 +250,7 @@ module.exports = {
 
     async execute(interaction) {
         if (!interaction.guild) {
-            return interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+            return interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
         }
         const sub = interaction.options.getSubcommand();
         if (sub === 'status') return handleStatus(interaction);

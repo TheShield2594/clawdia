@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { addNote, getCase } = require('../../services/caseService');
 const Case = require('../../models/Case');
 
@@ -24,7 +24,7 @@ module.exports = {
 
         const modCase = await getCase(interaction.guild.id, caseId);
         if (!modCase) {
-            return interaction.reply({ content: `Case #${caseId} not found.`, ephemeral: true });
+            return interaction.reply({ content: `Case #${caseId} not found.`, flags: MessageFlags.Ephemeral });
         }
 
         await addNote(interaction.guild.id, caseId, interaction.user.id, text);
@@ -44,6 +44,6 @@ module.exports = {
         if (label) embed.addFields({ name: 'Label Added', value: label, inline: true });
         if (assignee) embed.addFields({ name: 'Assigned To', value: assignee.globalName ?? assignee.username, inline: true });
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 };

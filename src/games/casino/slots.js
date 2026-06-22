@@ -3,6 +3,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const User = require('../../models/User');
 const { confirmBet } = require('../../utils/confirmBet');
@@ -209,7 +210,7 @@ module.exports = {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
@@ -451,7 +452,7 @@ async function playSlots(interaction, bet) {
 
         collector.on('collect', async i => {
             if (i.customId === paytableId) {
-                await i.reply({ embeds: [paytableEmbed()], ephemeral: true });
+                await i.reply({ embeds: [paytableEmbed()], flags: MessageFlags.Ephemeral });
                 return;
             }
             collector.stop('replay');

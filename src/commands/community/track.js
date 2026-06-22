@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 
@@ -45,7 +45,7 @@ module.exports = {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
         if (!guildSettings?.progressionTracks?.enabled) {
-            return interaction.reply({ content: 'Progression tracks are not enabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Progression tracks are not enabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
@@ -64,7 +64,7 @@ module.exports = {
                     .setTitle(`Track Set: ${info.emoji} ${info.label}`)
                     .setDescription(info.description)
                     .setFooter({ text: 'Your XP bonuses will apply from your next message.' })],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -87,6 +87,6 @@ module.exports = {
             .setFooter({ text: 'Use /track choose:<track> to switch your track' })
             .setTimestamp();
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 };

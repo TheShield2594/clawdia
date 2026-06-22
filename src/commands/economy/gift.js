@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getItemLore } = require('../../data/defaultShopItems');
@@ -46,7 +46,7 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const currency = guildSettings?.economy?.currency || '💰';
@@ -54,21 +54,21 @@ module.exports = {
         const type     = interaction.options.getString('type');
 
         if (target.id === interaction.user.id) {
-            return interaction.reply({ content: "You can't gift yourself.", ephemeral: true });
+            return interaction.reply({ content: "You can't gift yourself.", flags: MessageFlags.Ephemeral });
         }
         if (target.bot) {
-            return interaction.reply({ content: "You can't gift a bot.", ephemeral: true });
+            return interaction.reply({ content: "You can't gift a bot.", flags: MessageFlags.Ephemeral });
         }
         if (Date.now() - interaction.user.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
             return interaction.reply({
                 content: 'Your Discord account is too new to send gifts. Try again in a few days.',
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
         if (Date.now() - target.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
             return interaction.reply({
                 content: `${target.username}'s Discord account is too new to receive gifts.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 
@@ -77,7 +77,7 @@ module.exports = {
             const guildId = interaction.guild.id;
 
             if (!amount) {
-                return interaction.reply({ content: 'Specify an `amount` when gifting coins.', ephemeral: true });
+                return interaction.reply({ content: 'Specify an `amount` when gifting coins.', flags: MessageFlags.Ephemeral });
             }
 
             // Read current state to provide user-facing balance/cap feedback before the atomic update
@@ -85,7 +85,7 @@ module.exports = {
             if (!senderNow || senderNow.balance < amount) {
                 return interaction.reply({
                     content: `You only have **${currency}${(senderNow?.balance ?? 0).toLocaleString()}** in your wallet.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
@@ -98,7 +98,7 @@ module.exports = {
             if (amount > remaining) {
                 return interaction.reply({
                     content: `Daily gift cap reached. You can still gift up to **${currency}${remaining.toLocaleString()}** today.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
@@ -111,7 +111,7 @@ module.exports = {
             if (currentReceived + amount > DAILY_RECEIVE_CAP) {
                 return interaction.reply({
                     content: `<@${target.id}> has reached their daily gift-receiving cap. They can receive up to **${currency}${Math.max(0, DAILY_RECEIVE_CAP - currentReceived).toLocaleString()}** more today.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
@@ -133,7 +133,7 @@ module.exports = {
             if (!deducted) {
                 return interaction.reply({
                     content: 'Could not complete the transfer — your balance or daily gift cap may have changed.',
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
@@ -165,12 +165,12 @@ module.exports = {
                     console.error(`[gift] CRITICAL: sender rollback failed — sender=${interaction.user.id} guild=${guildId} amount=${amount}:`, rollbackErr);
                     return interaction.reply({
                         content: 'Something went wrong returning your coins — please contact a server admin.',
-                        ephemeral: true,
+                        flags: MessageFlags.Ephemeral,
                     });
                 }
                 return interaction.reply({
                     content: `Could not complete the transfer — <@${target.id}> just reached their daily gift-receiving cap. Your coins were returned.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
@@ -204,11 +204,11 @@ module.exports = {
             const qty    = interaction.options.getInteger('quantity') ?? 1;
 
             if (!itemId) {
-                return interaction.reply({ content: 'Specify an `item` ID when gifting an item.', ephemeral: true });
+                return interaction.reply({ content: 'Specify an `item` ID when gifting an item.', flags: MessageFlags.Ephemeral });
             }
 
             if (SOULBOUND_ITEMS.has(itemId)) {
-                return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be gifted.`, ephemeral: true });
+                return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be gifted.`, flags: MessageFlags.Ephemeral });
             }
 
             const [sender, recipient] = await Promise.all([
@@ -220,7 +220,7 @@ module.exports = {
             if (!slot || slot.quantity < qty) {
                 return interaction.reply({
                     content: `You don't have ${qty}x \`${itemId}\` in your inventory.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
@@ -230,7 +230,7 @@ module.exports = {
             if (effectType && (sender.activeEffects || []).some(e => e.type === effectType)) {
                 return interaction.reply({
                     content: `You can't gift \`${itemId}\` while it's active as an effect. Deactivate it first.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 

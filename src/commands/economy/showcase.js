@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { MATERIAL_RARITY, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
@@ -71,7 +71,7 @@ module.exports = {
                     content: isSelf
                         ? "You don't have a profile yet. Use some economy commands to get started!"
                         : `${target.username} doesn't have a profile in this server.`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 
@@ -157,7 +157,7 @@ module.exports = {
             return interaction.reply({ embeds: [embed] });
         } catch (err) {
             console.error('[showcase] error:', err);
-            const msg = { content: 'Something went wrong displaying the showcase.', ephemeral: true };
+            const msg = { content: 'Something went wrong displaying the showcase.', flags: MessageFlags.Ephemeral };
             if (interaction.replied || interaction.deferred) return interaction.followUp(msg);
             return interaction.reply(msg);
         }

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
@@ -51,7 +51,7 @@ module.exports = {
             await attachGrind(user);
 
             if (!user) {
-                return interaction.reply({ content: `${targetUser.username} hasn't earned any XP yet!`, ephemeral: true });
+                return interaction.reply({ content: `${targetUser.username} hasn't earned any XP yet!`, flags: MessageFlags.Ephemeral });
             }
 
             pruneEffects(user);
@@ -126,7 +126,7 @@ module.exports = {
             }
         } catch (error) {
             console.error('Rank error:', error);
-            await interaction.reply({ content: 'Failed to fetch rank.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to fetch rank.', flags: MessageFlags.Ephemeral });
         }
     }
 };

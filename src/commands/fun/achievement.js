@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
 const { createAchievementCard } = require('../../utils/cardGenerator');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 
@@ -17,7 +17,7 @@ module.exports = {
     async execute(interaction) {
         const rl = checkImageRateLimit(interaction.user.id);
         if (rl.limited) {
-            return interaction.reply({ content: rl.message, ephemeral: true });
+            return interaction.reply({ content: rl.message, flags: MessageFlags.Ephemeral });
         }
 
         const text = interaction.options.getString('text');
@@ -32,7 +32,7 @@ module.exports = {
             const msg = '❌ Could not generate the achievement. Please try again.';
             try {
                 if (interaction.deferred || interaction.replied) await interaction.editReply(msg);
-                else await interaction.reply({ content: msg, ephemeral: true });
+                else await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
             } catch { /* ignore */ }
         }
     },

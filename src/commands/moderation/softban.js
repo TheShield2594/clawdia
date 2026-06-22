@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../utils/logger');
 
 module.exports = {
@@ -27,15 +27,15 @@ module.exports = {
         const deleteDays = interaction.options.getInteger('delete_days') ?? 1;
 
         if (user.id === interaction.user.id) {
-            return interaction.reply({ content: 'You cannot softban yourself.', ephemeral: true });
+            return interaction.reply({ content: 'You cannot softban yourself.', flags: MessageFlags.Ephemeral });
         }
         if (user.id === interaction.client.user.id) {
-            return interaction.reply({ content: 'I cannot softban myself.', ephemeral: true });
+            return interaction.reply({ content: 'I cannot softban myself.', flags: MessageFlags.Ephemeral });
         }
 
         const member = interaction.guild.members.cache.get(user.id);
         if (member && !member.bannable) {
-            return interaction.reply({ content: 'I cannot ban this user — they may have higher permissions.', ephemeral: true });
+            return interaction.reply({ content: 'I cannot ban this user — they may have higher permissions.', flags: MessageFlags.Ephemeral });
         }
 
         try {
@@ -45,7 +45,7 @@ module.exports = {
             });
         } catch (error) {
             console.error('Softban (ban step) error:', error);
-            return interaction.reply({ content: 'Failed to ban the user.', ephemeral: true });
+            return interaction.reply({ content: 'Failed to ban the user.', flags: MessageFlags.Ephemeral });
         }
 
         try {

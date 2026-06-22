@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, EmbedBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, EmbedBuilder, MessageFlags } = require('discord.js');
 
 function chunkArray(items, chunkSize) {
     if (!Array.isArray(items) || chunkSize <= 0) return [];
@@ -32,7 +32,7 @@ function buildDisabledControls(page, totalPages, interactionId) {
 
 async function paginate(interaction, pages) {
     if (!pages?.length) {
-        return interaction.reply({ content: 'Nothing to display.', ephemeral: true });
+        return interaction.reply({ content: 'Nothing to display.', flags: MessageFlags.Ephemeral });
     }
 
     const normalizedPages = pages.map((embed, index) => {

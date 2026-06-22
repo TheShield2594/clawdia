@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 
@@ -48,7 +48,7 @@ module.exports = {
             } else if (type === 'achievements') {
                 const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
                 if (!guildSettings?.achievements?.enabled) {
-                    return interaction.reply({ content: 'Achievements are not enabled on this server.', ephemeral: true });
+                    return interaction.reply({ content: 'Achievements are not enabled on this server.', flags: MessageFlags.Ephemeral });
                 }
                 users = await User.find({ guildId: interaction.guild.id, achievementsCount: { $gt: 0 } })
                     .sort({ achievementsCount: -1 })
@@ -63,7 +63,7 @@ module.exports = {
             }
 
             if (users.length === 0) {
-                return interaction.reply({ content: 'No users found on the leaderboard!', ephemeral: true });
+                return interaction.reply({ content: 'No users found on the leaderboard!', flags: MessageFlags.Ephemeral });
             }
 
             const embed = new EmbedBuilder()
@@ -139,7 +139,7 @@ module.exports = {
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
             console.error('Leaderboard error:', error);
-            await interaction.reply({ content: 'Failed to fetch leaderboard.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to fetch leaderboard.', flags: MessageFlags.Ephemeral });
         }
     }
 };

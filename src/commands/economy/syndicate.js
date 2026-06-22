@@ -4,6 +4,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const mongoose = require('mongoose');
 const Guild = require('../../models/Guild');
@@ -282,30 +283,30 @@ async function handleSyndicateButton(interaction, client) {
         const afterPrefix = id.slice('syn_join_'.length);
         const parts = afterPrefix.split('_');
         if (parts.length < 2) {
-            return interaction.reply({ content: 'Malformed button ID.', ephemeral: true });
+            return interaction.reply({ content: 'Malformed button ID.', flags: MessageFlags.Ephemeral });
         }
         const heistId = parts[0];
         const role    = parts[1];
 
         if (!SYNDICATE_ROLES[role]) {
-            return interaction.reply({ content: 'Invalid role.', ephemeral: true });
+            return interaction.reply({ content: 'Invalid role.', flags: MessageFlags.Ephemeral });
         }
 
         const guildId = interaction.guildId;
         const heist   = getSyndicateHeist(guildId);
         if (!heist || heist.heistId !== heistId || heist.phase !== 'lobby') {
-            return interaction.reply({ content: 'This heist lobby is no longer active.', ephemeral: true });
+            return interaction.reply({ content: 'This heist lobby is no longer active.', flags: MessageFlags.Ephemeral });
         }
 
         // Only syndicate members may join
         const userDoc = await User.findOne({ userId: interaction.user.id, guildId }, 'syndicateId').lean();
         if (!userDoc?.syndicateId || userDoc.syndicateId !== heist.syndicateId) {
-            return interaction.reply({ content: 'Only members of this syndicate can join.', ephemeral: true });
+            return interaction.reply({ content: 'Only members of this syndicate can join.', flags: MessageFlags.Ephemeral });
         }
 
         const result = joinSyndicateLobby(guildId, interaction.user.id, interaction.user.username, role);
         if (!result.ok) {
-            return interaction.reply({ content: result.reason, ephemeral: true });
+            return interaction.reply({ content: result.reason, flags: MessageFlags.Ephemeral });
         }
 
         const synDoc = await Syndicate.findOne({ syndicateId: heist.syndicateId, guildId }, 'name').lean();
@@ -326,7 +327,7 @@ async function handleSyndicateButton(interaction, client) {
         // parts[1] = userId
         // parts[2] = answer
         if (parts.length < 3) {
-            return interaction.reply({ content: 'Malformed skill-check button.', ephemeral: true }).catch(() => {});
+            return interaction.reply({ content: 'Malformed skill-check button.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
         const heistId = parts[0];
         const userId  = parts[1];
@@ -339,12 +340,12 @@ async function handleSyndicateButton(interaction, client) {
         }
 
         if (!heist || !heist.players.has(userId)) {
-            return interaction.reply({ content: 'This skill check has expired.', ephemeral: true }).catch(() => {});
+            return interaction.reply({ content: 'This skill check has expired.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
 
         const player = heist.players.get(userId);
         if (player.skillPassed !== null) {
-            return interaction.reply({ content: 'You already submitted your answer.', ephemeral: true }).catch(() => {});
+            return interaction.reply({ content: 'You already submitted your answer.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
 
         const check  = heist._skillChecks?.[userId];
@@ -383,22 +384,22 @@ async function executeCreate(interaction, guildDoc) {
     const currency  = guildDoc?.economy?.currency ?? '💰';
 
     if (name.length < 2 || name.length > 32) {
-        return interaction.reply({ content: 'Syndicate name must be 2–32 characters.', ephemeral: true });
+        return interaction.reply({ content: 'Syndicate name must be 2–32 characters.', flags: MessageFlags.Ephemeral });
     }
     if (rawTag && (rawTag.length < 2 || rawTag.length > 5)) {
-        return interaction.reply({ content: 'Syndicate tag must be 2–5 characters.', ephemeral: true });
+        return interaction.reply({ content: 'Syndicate tag must be 2–5 characters.', flags: MessageFlags.Ephemeral });
     }
 
     const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'balance syndicateId').lean();
     if (userDoc?.syndicateId) {
-        return interaction.reply({ content: 'You are already in a syndicate. Leave it first.', ephemeral: true });
+        return interaction.reply({ content: 'You are already in a syndicate. Leave it first.', flags: MessageFlags.Ephemeral });
     }
 
     const balance = userDoc?.balance ?? 0;
     if (balance < CREATION_COST) {
         return interaction.reply({
             content: `Creating a syndicate costs ${currency}${CREATION_COST.toLocaleString()}. You only have ${currency}${balance.toLocaleString()}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -407,7 +408,7 @@ async function executeCreate(interaction, guildDoc) {
         name: { $regex: new RegExp(`^${escapeRegex(name)}$`, 'i') },
     }).lean();
     if (existing) {
-        return interaction.reply({ content: `A syndicate named **${name}** already exists on this server.`, ephemeral: true });
+        return interaction.reply({ content: `A syndicate named **${name}** already exists on this server.`, flags: MessageFlags.Ephemeral });
     }
 
     const tag         = rawTag ? rawTag.toUpperCase() : null;
@@ -441,7 +442,7 @@ async function executeCreate(interaction, guildDoc) {
         if (err.message === 'PRECONDITION_FAILED') {
             return interaction.reply({
                 content: 'Could not create the syndicate — your balance or membership status changed. Please try again.',
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
         throw err;
@@ -478,7 +479,7 @@ async function executeJoin(interaction) {
     const name    = interaction.options.getString('name');
     const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'syndicateId').lean();
     if (userDoc?.syndicateId) {
-        return interaction.reply({ content: 'You are already in a syndicate. Leave it first.', ephemeral: true });
+        return interaction.reply({ content: 'You are already in a syndicate. Leave it first.', flags: MessageFlags.Ephemeral });
     }
 
     const synDoc = await Syndicate.findOne({
@@ -486,16 +487,16 @@ async function executeJoin(interaction) {
         name: { $regex: new RegExp(`^${escapeRegex(name)}$`, 'i') },
     });
     if (!synDoc) {
-        return interaction.reply({ content: `No syndicate named **${name}** was found on this server.`, ephemeral: true });
+        return interaction.reply({ content: `No syndicate named **${name}** was found on this server.`, flags: MessageFlags.Ephemeral });
     }
 
     if (synDoc.memberIds.length >= MAX_MEMBERS) {
-        return interaction.reply({ content: `**${synDoc.name}** is full (${MAX_MEMBERS} members).`, ephemeral: true });
+        return interaction.reply({ content: `**${synDoc.name}** is full (${MAX_MEMBERS} members).`, flags: MessageFlags.Ephemeral });
     }
 
     const inInvites = synDoc.pendingInvites.includes(interaction.user.id);
     if (!synDoc.openToJoin && !inInvites) {
-        return interaction.reply({ content: `**${synDoc.name}** is invite-only. Ask the leader to send you an invite.`, ephemeral: true });
+        return interaction.reply({ content: `**${synDoc.name}** is invite-only. Ask the leader to send you an invite.`, flags: MessageFlags.Ephemeral });
     }
 
     synDoc.memberIds.push(interaction.user.id);
@@ -520,64 +521,64 @@ async function executeJoin(interaction) {
 async function executeLeave(interaction) {
     const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'syndicateId').lean();
     if (!userDoc?.syndicateId) {
-        return interaction.reply({ content: 'You are not in a syndicate.', ephemeral: true });
+        return interaction.reply({ content: 'You are not in a syndicate.', flags: MessageFlags.Ephemeral });
     }
 
     const synDoc = await Syndicate.findOne({ syndicateId: userDoc.syndicateId, guildId: interaction.guild.id });
     if (!synDoc) {
         await User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, { $set: { syndicateId: null } });
-        return interaction.reply({ content: 'Your syndicate no longer exists. Membership cleared.', ephemeral: true });
+        return interaction.reply({ content: 'Your syndicate no longer exists. Membership cleared.', flags: MessageFlags.Ephemeral });
     }
 
     if (synDoc.leaderId === interaction.user.id) {
         if (synDoc.memberIds.length > 1) {
             return interaction.reply({
                 content: `You are the leader of **${synDoc.name}**. Kick all other members first with \`/syndicate kick\`, then \`/syndicate leave\` to disband.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
         // Last member — auto-disband
         await Syndicate.deleteOne({ syndicateId: synDoc.syndicateId });
         await User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, { $set: { syndicateId: null } });
-        return interaction.reply({ content: `**${synDoc.name}** has been disbanded.`, ephemeral: true });
+        return interaction.reply({ content: `**${synDoc.name}** has been disbanded.`, flags: MessageFlags.Ephemeral });
     }
 
     synDoc.memberIds = synDoc.memberIds.filter(id => id !== interaction.user.id);
     await synDoc.save();
     await User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, { $set: { syndicateId: null } });
 
-    return interaction.reply({ content: `You have left **${synDoc.name}**.`, ephemeral: true });
+    return interaction.reply({ content: `You have left **${synDoc.name}**.`, flags: MessageFlags.Ephemeral });
 }
 
 async function executeInvite(interaction) {
     const target  = interaction.options.getUser('user');
     const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'syndicateId').lean();
     if (!userDoc?.syndicateId) {
-        return interaction.reply({ content: 'You are not in a syndicate.', ephemeral: true });
+        return interaction.reply({ content: 'You are not in a syndicate.', flags: MessageFlags.Ephemeral });
     }
 
     const synDoc = await Syndicate.findOne({ syndicateId: userDoc.syndicateId, guildId: interaction.guild.id });
-    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', ephemeral: true });
+    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', flags: MessageFlags.Ephemeral });
 
     if (synDoc.leaderId !== interaction.user.id) {
-        return interaction.reply({ content: 'Only the syndicate leader can invite members.', ephemeral: true });
+        return interaction.reply({ content: 'Only the syndicate leader can invite members.', flags: MessageFlags.Ephemeral });
     }
     if (target.id === interaction.user.id) {
-        return interaction.reply({ content: "You can't invite yourself.", ephemeral: true });
+        return interaction.reply({ content: "You can't invite yourself.", flags: MessageFlags.Ephemeral });
     }
     if (synDoc.memberIds.includes(target.id)) {
-        return interaction.reply({ content: `<@${target.id}> is already a member.`, ephemeral: true });
+        return interaction.reply({ content: `<@${target.id}> is already a member.`, flags: MessageFlags.Ephemeral });
     }
     if (synDoc.pendingInvites.includes(target.id)) {
-        return interaction.reply({ content: `<@${target.id}> already has a pending invite.`, ephemeral: true });
+        return interaction.reply({ content: `<@${target.id}> already has a pending invite.`, flags: MessageFlags.Ephemeral });
     }
     if (synDoc.memberIds.length >= MAX_MEMBERS) {
-        return interaction.reply({ content: `Your syndicate is full (${MAX_MEMBERS} members).`, ephemeral: true });
+        return interaction.reply({ content: `Your syndicate is full (${MAX_MEMBERS} members).`, flags: MessageFlags.Ephemeral });
     }
 
     const targetDoc = await User.findOne({ userId: target.id, guildId: interaction.guild.id }, 'syndicateId').lean();
     if (targetDoc?.syndicateId) {
-        return interaction.reply({ content: `<@${target.id}> is already in a syndicate.`, ephemeral: true });
+        return interaction.reply({ content: `<@${target.id}> is already in a syndicate.`, flags: MessageFlags.Ephemeral });
     }
 
     synDoc.pendingInvites.push(target.id);
@@ -591,19 +592,19 @@ async function executeInvite(interaction) {
 async function executeKick(interaction) {
     const target  = interaction.options.getUser('user');
     const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'syndicateId').lean();
-    if (!userDoc?.syndicateId) return interaction.reply({ content: 'You are not in a syndicate.', ephemeral: true });
+    if (!userDoc?.syndicateId) return interaction.reply({ content: 'You are not in a syndicate.', flags: MessageFlags.Ephemeral });
 
     const synDoc = await Syndicate.findOne({ syndicateId: userDoc.syndicateId, guildId: interaction.guild.id });
-    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', ephemeral: true });
+    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', flags: MessageFlags.Ephemeral });
 
     if (synDoc.leaderId !== interaction.user.id) {
-        return interaction.reply({ content: 'Only the syndicate leader can kick members.', ephemeral: true });
+        return interaction.reply({ content: 'Only the syndicate leader can kick members.', flags: MessageFlags.Ephemeral });
     }
     if (target.id === interaction.user.id) {
-        return interaction.reply({ content: "Use `/syndicate leave` to leave your own syndicate.", ephemeral: true });
+        return interaction.reply({ content: "Use `/syndicate leave` to leave your own syndicate.", flags: MessageFlags.Ephemeral });
     }
     if (!synDoc.memberIds.includes(target.id)) {
-        return interaction.reply({ content: `<@${target.id}> is not a member of your syndicate.`, ephemeral: true });
+        return interaction.reply({ content: `<@${target.id}> is not a member of your syndicate.`, flags: MessageFlags.Ephemeral });
     }
 
     synDoc.memberIds = synDoc.memberIds.filter(id => id !== target.id);
@@ -619,13 +620,13 @@ async function executeKick(interaction) {
 
 async function executeOpen(interaction) {
     const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'syndicateId').lean();
-    if (!userDoc?.syndicateId) return interaction.reply({ content: 'You are not in a syndicate.', ephemeral: true });
+    if (!userDoc?.syndicateId) return interaction.reply({ content: 'You are not in a syndicate.', flags: MessageFlags.Ephemeral });
 
     const synDoc = await Syndicate.findOne({ syndicateId: userDoc.syndicateId, guildId: interaction.guild.id });
-    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', ephemeral: true });
+    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', flags: MessageFlags.Ephemeral });
 
     if (synDoc.leaderId !== interaction.user.id) {
-        return interaction.reply({ content: 'Only the syndicate leader can change membership settings.', ephemeral: true });
+        return interaction.reply({ content: 'Only the syndicate leader can change membership settings.', flags: MessageFlags.Ephemeral });
     }
 
     synDoc.openToJoin = !synDoc.openToJoin;
@@ -633,7 +634,7 @@ async function executeOpen(interaction) {
 
     return interaction.reply({
         content: `**${synDoc.name}** is now **${synDoc.openToJoin ? 'open — anyone can join' : 'invite-only'}**.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
     });
 }
 
@@ -647,14 +648,14 @@ async function executeInfo(interaction, guildDoc) {
             guildId: interaction.guild.id,
             name: { $regex: new RegExp(`^${escapeRegex(nameOpt)}$`, 'i') },
         });
-        if (!synDoc) return interaction.reply({ content: `No syndicate named **${nameOpt}** was found.`, ephemeral: true });
+        if (!synDoc) return interaction.reply({ content: `No syndicate named **${nameOpt}** was found.`, flags: MessageFlags.Ephemeral });
     } else {
         const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'syndicateId').lean();
         if (!userDoc?.syndicateId) {
-            return interaction.reply({ content: 'You are not in a syndicate. Provide a name to look one up.', ephemeral: true });
+            return interaction.reply({ content: 'You are not in a syndicate. Provide a name to look one up.', flags: MessageFlags.Ephemeral });
         }
         synDoc = await Syndicate.findOne({ syndicateId: userDoc.syndicateId, guildId: interaction.guild.id });
-        if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', ephemeral: true });
+        if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', flags: MessageFlags.Ephemeral });
     }
 
     const effectiveHeat = getEffectiveHeat(synDoc);
@@ -691,7 +692,7 @@ async function executeLeaderboard(interaction, guildDoc) {
         .lean();
 
     if (!top.length) {
-        return interaction.reply({ content: 'No syndicates have been founded on this server yet.', ephemeral: true });
+        return interaction.reply({ content: 'No syndicates have been founded on this server yet.', flags: MessageFlags.Ephemeral });
     }
 
     const medals = ['🥇', '🥈', '🥉'];
@@ -713,25 +714,25 @@ async function executeLeaderboard(interaction, guildDoc) {
 async function executeHeist(interaction, guildDoc, client) {
     const targetKey = interaction.options.getString('target');
     const target    = SYNDICATE_TARGETS[targetKey];
-    if (!target) return interaction.reply({ content: 'Invalid heist target.', ephemeral: true });
+    if (!target) return interaction.reply({ content: 'Invalid heist target.', flags: MessageFlags.Ephemeral });
 
     const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'syndicateId').lean();
-    if (!userDoc?.syndicateId) return interaction.reply({ content: 'You are not in a syndicate.', ephemeral: true });
+    if (!userDoc?.syndicateId) return interaction.reply({ content: 'You are not in a syndicate.', flags: MessageFlags.Ephemeral });
 
     const synDoc = await Syndicate.findOne({ syndicateId: userDoc.syndicateId, guildId: interaction.guild.id });
-    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', ephemeral: true });
+    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', flags: MessageFlags.Ephemeral });
 
     if (synDoc.leaderId !== interaction.user.id) {
-        return interaction.reply({ content: 'Only the syndicate leader can initiate a heist.', ephemeral: true });
+        return interaction.reply({ content: 'Only the syndicate leader can initiate a heist.', flags: MessageFlags.Ephemeral });
     }
     if (synDoc.memberIds.length < target.minPlayers) {
         return interaction.reply({
             content: `**${target.label}** requires at least ${target.minPlayers} syndicate members. You only have ${synDoc.memberIds.length}.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
     if (getSyndicateHeist(interaction.guild.id)) {
-        return interaction.reply({ content: 'A syndicate heist is already active on this server.', ephemeral: true });
+        return interaction.reply({ content: 'A syndicate heist is already active on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const cooldownMs = HEIST_COOLDOWN_H * 60 * 60 * 1000;
@@ -739,7 +740,7 @@ async function executeHeist(interaction, guildDoc, client) {
         const ts = Math.floor((synDoc.lastHeistAt.getTime() + cooldownMs) / 1000);
         return interaction.reply({
             content: `**${synDoc.name}** is on cooldown. Next heist available <t:${ts}:R>.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -836,31 +837,31 @@ async function executeHeist(interaction, guildDoc, client) {
 
 async function executeSabotage(interaction, guildDoc) {
     const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'syndicateId').lean();
-    if (!userDoc?.syndicateId) return interaction.reply({ content: 'You are not in a syndicate.', ephemeral: true });
+    if (!userDoc?.syndicateId) return interaction.reply({ content: 'You are not in a syndicate.', flags: MessageFlags.Ephemeral });
 
     const synDoc = await Syndicate.findOne({ syndicateId: userDoc.syndicateId, guildId: interaction.guild.id });
-    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', ephemeral: true });
+    if (!synDoc) return interaction.reply({ content: 'Your syndicate no longer exists.', flags: MessageFlags.Ephemeral });
 
     if (synDoc.leaderId !== interaction.user.id) {
-        return interaction.reply({ content: 'Only the syndicate leader can perform a sabotage.', ephemeral: true });
+        return interaction.reply({ content: 'Only the syndicate leader can perform a sabotage.', flags: MessageFlags.Ephemeral });
     }
 
     const activeHeist = getSyndicateHeist(interaction.guild.id);
     if (!activeHeist) {
-        return interaction.reply({ content: 'There is no active syndicate heist on this server to sabotage.', ephemeral: true });
+        return interaction.reply({ content: 'There is no active syndicate heist on this server to sabotage.', flags: MessageFlags.Ephemeral });
     }
     if (activeHeist.syndicateId === synDoc.syndicateId) {
-        return interaction.reply({ content: "You can't sabotage your own heist.", ephemeral: true });
+        return interaction.reply({ content: "You can't sabotage your own heist.", flags: MessageFlags.Ephemeral });
     }
     if (activeHeist.phase === 'lobby') {
-        return interaction.reply({ content: 'The rival heist is still in the lobby phase. Sabotage can only be used once it has started.', ephemeral: true });
+        return interaction.reply({ content: 'The rival heist is still in the lobby phase. Sabotage can only be used once it has started.', flags: MessageFlags.Ephemeral });
     }
 
     const effectiveHeat = getEffectiveHeat(synDoc);
     if (effectiveHeat < SABOTAGE_HEAT_COST) {
         return interaction.reply({
             content: `Sabotage costs **${SABOTAGE_HEAT_COST} heat**. **${synDoc.name}** only has **${effectiveHeat}** heat. Run more heists to build it up.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -958,14 +959,14 @@ module.exports = {
         const guildDoc = await Guild.findOne({ guildId: interaction.guild.id }, 'economy syndicates').lean();
 
         if (!guildDoc?.economy?.enabled) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const sub = interaction.options.getSubcommand();
 
         // Info and leaderboard are read-only — no syndicates.enabled gate
         if (!['info', 'leaderboard'].includes(sub) && !guildDoc?.syndicates?.enabled) {
-            return interaction.reply({ content: 'The syndicate system is not enabled on this server. An admin can enable it in server settings.', ephemeral: true });
+            return interaction.reply({ content: 'The syndicate system is not enabled on this server. An admin can enable it in server settings.', flags: MessageFlags.Ephemeral });
         }
 
         switch (sub) {

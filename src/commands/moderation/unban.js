@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../utils/logger');
 
 module.exports = {
@@ -21,13 +21,13 @@ module.exports = {
         const reason = interaction.options.getString('reason') || 'No reason provided';
 
         if (!/^\d{17,20}$/.test(userId)) {
-            return interaction.reply({ content: 'Invalid user ID. Provide a valid Discord user ID (17–20 digits).', ephemeral: true });
+            return interaction.reply({ content: 'Invalid user ID. Provide a valid Discord user ID (17–20 digits).', flags: MessageFlags.Ephemeral });
         }
 
         try {
             const ban = await interaction.guild.bans.fetch(userId).catch(() => null);
             if (!ban) {
-                return interaction.reply({ content: 'That user is not banned.', ephemeral: true });
+                return interaction.reply({ content: 'That user is not banned.', flags: MessageFlags.Ephemeral });
             }
 
             await interaction.guild.members.unban(userId, reason);
@@ -46,7 +46,7 @@ module.exports = {
             await logModeration(interaction.guild.id, 'unban', ban.user, interaction.user, reason);
         } catch (error) {
             console.error('Unban error:', error);
-            await interaction.reply({ content: 'Failed to unban the user.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to unban the user.', flags: MessageFlags.Ephemeral });
         }
     }
 };

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 
 const GIVEAWAY_EMOJI = '🎉';
@@ -39,7 +39,7 @@ module.exports = {
 
             const durationMs = parseDuration(durationStr);
             if (!durationMs) {
-                return interaction.reply({ content: 'Invalid duration. Use formats like `30m`, `2h`, `1d`.', ephemeral: true });
+                return interaction.reply({ content: 'Invalid duration. Use formats like `30m`, `2h`, `1d`.', flags: MessageFlags.Ephemeral });
             }
 
             const endsAt = new Date(Date.now() + durationMs);
@@ -64,7 +64,7 @@ module.exports = {
                     .setEmoji(GIVEAWAY_EMOJI)
             );
 
-            await interaction.reply({ content: 'Giveaway started!', ephemeral: true });
+            await interaction.reply({ content: 'Giveaway started!', flags: MessageFlags.Ephemeral });
             const msg = await interaction.channel.send({ embeds: [embed], components: [row] });
 
             guildSettings.giveaways.push({
@@ -83,25 +83,25 @@ module.exports = {
             const messageId = interaction.options.getString('message_id');
             const ga = guildSettings.giveaways.find(g => g.messageId === messageId);
 
-            if (!ga) return interaction.reply({ content: 'Giveaway not found.', ephemeral: true });
-            if (ga.ended) return interaction.reply({ content: 'That giveaway has already ended.', ephemeral: true });
+            if (!ga) return interaction.reply({ content: 'Giveaway not found.', flags: MessageFlags.Ephemeral });
+            if (ga.ended) return interaction.reply({ content: 'That giveaway has already ended.', flags: MessageFlags.Ephemeral });
 
             await endGiveaway(interaction.client, guildSettings, ga);
             await guildSettings.save();
-            await interaction.reply({ content: 'Giveaway ended.', ephemeral: true });
+            await interaction.reply({ content: 'Giveaway ended.', flags: MessageFlags.Ephemeral });
 
         } else if (sub === 'reroll') {
             const messageId = interaction.options.getString('message_id');
             const ga = guildSettings.giveaways.find(g => g.messageId === messageId && g.ended);
 
-            if (!ga) return interaction.reply({ content: 'Ended giveaway not found.', ephemeral: true });
+            if (!ga) return interaction.reply({ content: 'Ended giveaway not found.', flags: MessageFlags.Ephemeral });
 
             const channel = interaction.guild.channels.cache.get(ga.channelId);
             const msg = await channel?.messages.fetch(ga.messageId).catch(() => null);
-            if (!msg) return interaction.reply({ content: 'Original giveaway message not found.', ephemeral: true });
+            if (!msg) return interaction.reply({ content: 'Original giveaway message not found.', flags: MessageFlags.Ephemeral });
 
             const entrants = await getEntrants(msg);
-            if (!entrants.length) return interaction.reply({ content: 'No valid entrants to reroll from.', ephemeral: true });
+            if (!entrants.length) return interaction.reply({ content: 'No valid entrants to reroll from.', flags: MessageFlags.Ephemeral });
 
             const newWinners = pickWinners(entrants, ga.winners);
             ga.winnerIds = newWinners;

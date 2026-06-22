@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect, timeRemaining } = require('../../services/effectsService');
@@ -114,10 +114,10 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         if (guildSettings?.economy?.robEnabled === false) {
-            return interaction.reply({ content: 'Robbing is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Robbing is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const currency     = guildSettings?.economy?.currency || '💰';
@@ -126,18 +126,18 @@ module.exports = {
         const target       = interaction.options.getUser('target');
 
         if (target.id === interaction.user.id) {
-            return interaction.reply({ content: "You can't rob yourself.", ephemeral: true });
+            return interaction.reply({ content: "You can't rob yourself.", flags: MessageFlags.Ephemeral });
         }
         if (target.bot) {
-            return interaction.reply({ content: "You can't rob a bot.", ephemeral: true });
+            return interaction.reply({ content: "You can't rob a bot.", flags: MessageFlags.Ephemeral });
         }
         // Fresh Discord accounts can't rob or be robbed — blocks wealth-extraction
         // chains through disposable alts (fund an alt, "rob" it back with the main).
         if (Date.now() - interaction.user.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
-            return interaction.reply({ content: 'Your Discord account is too new to rob anyone. Try again in a few days.', ephemeral: true });
+            return interaction.reply({ content: 'Your Discord account is too new to rob anyone. Try again in a few days.', flags: MessageFlags.Ephemeral });
         }
         if (Date.now() - target.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
-            return interaction.reply({ content: `${target.username}'s account is too new to be robbed.`, ephemeral: true });
+            return interaction.reply({ content: `${target.username}'s account is too new to be robbed.`, flags: MessageFlags.Ephemeral });
         }
 
         const [robber, victim] = await Promise.all([
@@ -156,18 +156,18 @@ module.exports = {
                     nextAt,
                     nextRewardPreview: 'Next heist: 40% base success · Robbery Bag + Knife can tip it in your favour',
                 })],
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
         if (victim?.lastRobbedAt && Date.now() - new Date(victim.lastRobbedAt).getTime() < VICTIM_IMMUNITY_MS) {
             const remaining = VICTIM_IMMUNITY_MS - (Date.now() - new Date(victim.lastRobbedAt).getTime());
             const mins = Math.ceil(remaining / 60_000);
-            return interaction.reply({ content: `${target.username} is under rob immunity for **${mins} min**.`, ephemeral: true });
+            return interaction.reply({ content: `${target.username} is under rob immunity for **${mins} min**.`, flags: MessageFlags.Ephemeral });
         }
 
         const victimTotalWealth = (victim?.balance ?? 0) + (victim?.bank ?? 0);
         if (!victim || victimTotalWealth < minRobWallet) {
-            return interaction.reply({ content: `${target.username} doesn't have enough ${currency} to be worth robbing (minimum ${currency}${minRobWallet}).`, ephemeral: true });
+            return interaction.reply({ content: `${target.username} doesn't have enough ${currency} to be worth robbing (minimum ${currency}${minRobWallet}).`, flags: MessageFlags.Ephemeral });
         }
 
         try {
@@ -405,7 +405,7 @@ module.exports = {
             }
             console.error('Rob command error:', error);
             if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ content: 'Something went wrong.', ephemeral: true });
+                await interaction.reply({ content: 'Something went wrong.', flags: MessageFlags.Ephemeral });
             } else {
                 await interaction.editReply({ content: 'Something went wrong.' }).catch(() => {});
             }
