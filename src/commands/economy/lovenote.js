@@ -95,19 +95,20 @@ module.exports = {
 
         const isRejected = Math.random() < REJECT_CHANCE;
         let embed;
+        let logPayload;
 
         if (isRejected) {
             const rejection = REJECTION_OUTCOMES[Math.floor(Math.random() * REJECTION_OUTCOMES.length)];
             const loss = Math.min(rejection.coinLoss, user.balance ?? 0);
             user.balance = Math.max(0, (user.balance ?? 0) - loss);
 
-            logTransaction({
+            logPayload = {
                 userId:   interaction.user.id,
                 guildId:  interaction.guild.id,
                 type:     'lovenote_rejection',
                 amount:   -loss,
                 balance:  user.balance,
-            });
+            };
 
             embed = new EmbedBuilder()
                 .setColor('#888888')
@@ -141,13 +142,13 @@ module.exports = {
                 user.inventory.push({ itemId: 'chocolate_box', quantity: 1 });
             }
 
-            logTransaction({
+            logPayload = {
                 userId:   interaction.user.id,
                 guildId:  interaction.guild.id,
                 type:     'lovenote_reply',
                 amount:   reply.coins,
                 balance:  user.balance,
-            });
+            };
 
             embed = new EmbedBuilder()
                 .setColor('#ff69b4')
@@ -164,6 +165,7 @@ module.exports = {
         }
 
         await user.save();
+        logTransaction(logPayload);
         return interaction.editReply({ embeds: [embed] });
     }
 };

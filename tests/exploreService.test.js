@@ -48,6 +48,10 @@ describe('exploreData integrity', () => {
         const seasonal = REGION_LIST.filter(r => r.seasonalEventId);
         expect(core).toHaveLength(4);
         expect(seasonal).toHaveLength(5);
+
+        const arcticTundra = REGION_LIST.find(r => r.id === 'arctic_tundra');
+        expect(arcticTundra).toBeDefined();
+        expect(arcticTundra.seasonalEventId).toBe('winter_hunt');
     });
 
     test('core regions hold 16 secrets total (matches achievement target)', () => {

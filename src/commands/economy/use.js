@@ -15,7 +15,7 @@ const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seas
 const LOOT_BOX_EVENTS = new Map(
     Object.values(SEASONAL_EVENTS)
         .filter(ev => ev.lootBox)
-        .map(ev => [ev.lootBox.itemId, ev])
+        .map(ev => [ev.lootBox.itemId.toLowerCase(), ev])
 );
 
 module.exports = {
@@ -93,7 +93,7 @@ module.exports = {
         }
 
         // ── Seasonal loot boxes ────────────────────────────────────────────────
-        const lootBoxEvent = LOOT_BOX_EVENTS.get(invEntry.itemId);
+        const lootBoxEvent = LOOT_BOX_EVENTS.get(invEntry.itemId.toLowerCase());
         if (lootBoxEvent) {
             const won = rollLootBox(lootBoxEvent);
             if (!won) {
