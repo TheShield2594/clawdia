@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
@@ -127,7 +127,7 @@ module.exports = {
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
             console.error('Balance error:', error);
-            await interaction.reply({ content: 'Failed to fetch balance.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to fetch balance.', flags: MessageFlags.Ephemeral });
         }
     }
 };

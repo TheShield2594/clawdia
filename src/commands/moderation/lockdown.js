@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { startLockdown, endLockdown } = require('../../services/antiNukeService');
 
 module.exports = {
@@ -14,7 +14,7 @@ module.exports = {
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         if (sub === 'start') {
             const reason = interaction.options.getString('reason') || 'Manual lockdown';

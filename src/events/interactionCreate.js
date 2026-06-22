@@ -1,3 +1,4 @@
+const { MessageFlags } = require('discord.js');
 const Guild = require('../models/Guild');
 const User = require('../models/User');
 const { handlePollVote } = require('../commands/utility/poll');
@@ -147,10 +148,10 @@ module.exports = {
 
                 if (msg.giveawayEntrants.includes(interaction.user.id)) {
                     msg.giveawayEntrants = msg.giveawayEntrants.filter(id => id !== interaction.user.id);
-                    await interaction.reply({ content: 'You have left the giveaway.', ephemeral: true });
+                    await interaction.reply({ content: 'You have left the giveaway.', flags: MessageFlags.Ephemeral });
                 } else {
                     msg.giveawayEntrants.push(interaction.user.id);
-                    await interaction.reply({ content: `${interaction.user}, you have entered the giveaway! Good luck!`, ephemeral: true });
+                    await interaction.reply({ content: `${interaction.user}, you have entered the giveaway! Good luck!`, flags: MessageFlags.Ephemeral });
                 }
             }
 
@@ -201,7 +202,7 @@ module.exports = {
         const policy = getPolicyDecision(interaction, guildSettings);
         if (!policy.allowed) {
             await logCommandMetric(interaction, false, 'policy_denied');
-            return interaction.reply({ content: policy.reason, ephemeral: true });
+            return interaction.reply({ content: policy.reason, flags: MessageFlags.Ephemeral });
         }
 
         const { cooldowns } = client;
@@ -225,7 +226,7 @@ module.exports = {
 
                 return interaction.reply({
                     content: `Please wait, you are on cooldown. You can use \`/${command.data.name}\` again <t:${expiredTimestamp}:R>${exactTime}.`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
         }
@@ -244,7 +245,7 @@ module.exports = {
         } catch (error) {
             console.error(`Error executing ${interaction.commandName}:`, error);
             await logCommandMetric(interaction, false, error.name || 'execution_error');
-            const errorMessage = { content: 'There was an error while executing this command!', ephemeral: true };
+            const errorMessage = { content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral };
             
             if (interaction.replied || interaction.deferred) {
                 await interaction.followUp(errorMessage);

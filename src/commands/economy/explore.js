@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
@@ -107,11 +107,11 @@ module.exports = {
 async function loadContext(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        await interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        await interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         return null;
     }
     if (guildSettings?.exploration?.enabled === false) {
-        await interaction.reply({ content: 'Exploration is switched off on this server. The wilds will wait — they\'re good at it.', ephemeral: true });
+        await interaction.reply({ content: 'Exploration is switched off on this server. The wilds will wait — they\'re good at it.', flags: MessageFlags.Ephemeral });
         return null;
     }
     const user = await User.findOneAndUpdate(
@@ -163,7 +163,7 @@ async function handleGo(interaction) {
     const region = REGIONS[regionId];
 
     const gateError = regionGateError(user, region, guildSettings);
-    if (gateError) return interaction.reply({ content: gateError, ephemeral: true });
+    if (gateError) return interaction.reply({ content: gateError, flags: MessageFlags.Ephemeral });
 
     if (e.injuryUntil && Date.now() < e.injuryUntil.getTime()) {
         return interaction.reply({
@@ -173,7 +173,7 @@ async function handleGo(interaction) {
                 color: '#2e7d32',
                 nextAt: new Date(e.injuryUntil.getTime()),
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -188,7 +188,7 @@ async function handleGo(interaction) {
                     ? `It's been ${e.sinceSecret} expeditions since your last secret. Something is overdue to find you.`
                     : 'The map never fills itself in.',
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -201,7 +201,7 @@ async function handleGo(interaction) {
                 nextAt: new Date(Date.now() + msUntilNextStamina(user)),
                 nextRewardPreview: 'Stamina regenerates 1 every 5 minutes.',
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -429,7 +429,7 @@ async function handleMap(interaction) {
     if (!userData?.exploration?.totalExpeditions) {
         return interaction.reply({
             content: 'Your map is a blank page with your name on it. Poetic, but useless. `/explore go` fixes that.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -470,13 +470,13 @@ async function handleTravel(interaction) {
 
     const region = REGIONS[interaction.options.getString('region')];
     if (!region) {
-        return interaction.reply({ content: 'I don\'t have that place on any map, and I have several maps.', ephemeral: true });
+        return interaction.reply({ content: 'I don\'t have that place on any map, and I have several maps.', flags: MessageFlags.Ephemeral });
     }
     if (!isRegionEnabled(region, guildSettings)) {
-        return interaction.reply({ content: `**${region.name}** is closed by decree of the server staff.`, ephemeral: true });
+        return interaction.reply({ content: `**${region.name}** is closed by decree of the server staff.`, flags: MessageFlags.Ephemeral });
     }
     if (region.seasonalEventId && !isRegionInSeason(region, guildSettings)) {
-        return interaction.reply({ content: `**${region.emoji} ${region.name}** is out of season. It will return when the calendar does its part.`, ephemeral: true });
+        return interaction.reply({ content: `**${region.emoji} ${region.name}** is out of season. It will return when the calendar does its part.`, flags: MessageFlags.Ephemeral });
     }
 
     let unlockLine = '';
@@ -484,13 +484,13 @@ async function handleTravel(interaction) {
         if (e.level < region.unlockLevel) {
             return interaction.reply({
                 content: `The way to **${region.emoji} ${region.name}** needs Explorer Level **${region.unlockLevel}**. You're Level **${e.level}**. The road respects experience; go collect some.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
         if (user.balance < region.unlockCost) {
             return interaction.reply({
                 content: `Opening the route to **${region.emoji} ${region.name}** costs **${currency}${region.unlockCost.toLocaleString()}** — guides, bribes, one very specific key. You have ${currency}${user.balance.toLocaleString()}.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
         user.balance -= region.unlockCost;
@@ -565,7 +565,7 @@ async function handleJournal(interaction) {
     if (!journal.length) {
         return interaction.reply({
             content: 'Your journal is empty. Every page is still possible. `/explore go` writes the first one.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -602,7 +602,7 @@ async function handleProfile(interaction) {
             content: isSelf
                 ? 'You haven\'t set out yet. The wilds have noticed. `/explore go` settles the matter.'
                 : `${target.username} hasn't set a single boot past the gate yet.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 

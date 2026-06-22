@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const DmSession = require('../models/DmSession');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 const Guild = require('../models/Guild');
@@ -34,7 +34,7 @@ async function startSession(interaction) {
 
     const existing = await getActiveSession(guild.id, channel.id);
     if (existing) {
-        return interaction.reply({ content: 'An active DM session is already running in this channel. Use `/dm stop` to end it first.', ephemeral: true });
+        return interaction.reply({ content: 'An active DM session is already running in this channel. Use `/dm stop` to end it first.', flags: MessageFlags.Ephemeral });
     }
 
     const sessionId = makeSessionId(guild.id, channel.id);
@@ -75,7 +75,7 @@ async function joinSession(interaction) {
     // Verify session exists first to give a useful error message
     const session = await getActiveSession(guild.id, channel.id);
     if (!session) {
-        return interaction.reply({ content: 'No active DM session in this channel. Use `/dm start` to begin one.', ephemeral: true });
+        return interaction.reply({ content: 'No active DM session in this channel. Use `/dm start` to begin one.', flags: MessageFlags.Ephemeral });
     }
 
     const hp = CLASS_HP[characterClass] || 100;
@@ -98,12 +98,12 @@ async function joinSession(interaction) {
         // Re-read to give a precise error
         const current = await getActiveSession(guild.id, channel.id);
         if (!current) {
-            return interaction.reply({ content: 'The session has ended.', ephemeral: true });
+            return interaction.reply({ content: 'The session has ended.', flags: MessageFlags.Ephemeral });
         }
         if (current.players.some(p => p.userId === user.id)) {
-            return interaction.reply({ content: 'You have already joined this session.', ephemeral: true });
+            return interaction.reply({ content: 'You have already joined this session.', flags: MessageFlags.Ephemeral });
         }
-        return interaction.reply({ content: `The party is full (${MAX_PLAYERS} players max).`, ephemeral: true });
+        return interaction.reply({ content: `The party is full (${MAX_PLAYERS} players max).`, flags: MessageFlags.Ephemeral });
     }
 
     const embed = new EmbedBuilder()
@@ -123,19 +123,19 @@ async function beginSession(interaction) {
 
     const session = await getActiveSession(guild.id, channel.id);
     if (!session) {
-        return interaction.reply({ content: 'No active DM session in this channel.', ephemeral: true });
+        return interaction.reply({ content: 'No active DM session in this channel.', flags: MessageFlags.Ephemeral });
     }
 
     if (session.hostId !== user.id) {
-        return interaction.reply({ content: 'Only the session host can begin the adventure.', ephemeral: true });
+        return interaction.reply({ content: 'Only the session host can begin the adventure.', flags: MessageFlags.Ephemeral });
     }
 
     if (session.players.length === 0) {
-        return interaction.reply({ content: 'At least one player must join before beginning.', ephemeral: true });
+        return interaction.reply({ content: 'At least one player must join before beginning.', flags: MessageFlags.Ephemeral });
     }
 
     if (session.storyLog.length > 0) {
-        return interaction.reply({ content: 'The adventure has already begun!', ephemeral: true });
+        return interaction.reply({ content: 'The adventure has already begun!', flags: MessageFlags.Ephemeral });
     }
 
     await interaction.deferReply();
@@ -190,16 +190,16 @@ async function takeAction(interaction) {
 
     const session = await getActiveSession(guild.id, channel.id);
     if (!session) {
-        return interaction.reply({ content: 'No active DM session in this channel.', ephemeral: true });
+        return interaction.reply({ content: 'No active DM session in this channel.', flags: MessageFlags.Ephemeral });
     }
 
     const player = session.players.find(p => p.userId === user.id);
     if (!player) {
-        return interaction.reply({ content: 'You are not part of this session. Use `/dm join` first.', ephemeral: true });
+        return interaction.reply({ content: 'You are not part of this session. Use `/dm join` first.', flags: MessageFlags.Ephemeral });
     }
 
     if (session.storyLog.length === 0) {
-        return interaction.reply({ content: 'The adventure has not begun yet. The host must use `/dm begin`.', ephemeral: true });
+        return interaction.reply({ content: 'The adventure has not begun yet. The host must use `/dm begin`.', flags: MessageFlags.Ephemeral });
     }
 
     await interaction.deferReply();
@@ -300,11 +300,11 @@ async function partyStatus(interaction) {
 
     const session = await getActiveSession(guild.id, channel.id);
     if (!session) {
-        return interaction.reply({ content: 'No active DM session in this channel.', ephemeral: true });
+        return interaction.reply({ content: 'No active DM session in this channel.', flags: MessageFlags.Ephemeral });
     }
 
     if (session.players.length === 0) {
-        return interaction.reply({ content: 'No players have joined yet.', ephemeral: true });
+        return interaction.reply({ content: 'No players have joined yet.', flags: MessageFlags.Ephemeral });
     }
 
     const fields = session.players.map(p => ({
@@ -327,14 +327,14 @@ async function stopSession(interaction) {
 
     const session = await getActiveSession(guild.id, channel.id);
     if (!session) {
-        return interaction.reply({ content: 'No active DM session in this channel.', ephemeral: true });
+        return interaction.reply({ content: 'No active DM session in this channel.', flags: MessageFlags.Ephemeral });
     }
 
     const isHost = session.hostId === user.id;
     const hasPerms = interaction.member?.permissions?.has('ManageGuild') ?? false;
 
     if (!isHost && !hasPerms) {
-        return interaction.reply({ content: 'Only the session host or a server admin can stop the session.', ephemeral: true });
+        return interaction.reply({ content: 'Only the session host or a server admin can stop the session.', flags: MessageFlags.Ephemeral });
     }
 
     await DmSession.findOneAndUpdate(
@@ -408,16 +408,16 @@ async function handleDmButton(interaction, client) {
     const sessionId = interaction.customId.slice('dm_storysofar_'.length);
     const session = await DmSession.findOne({ sessionId });
     if (!session || !session.active) {
-        await interaction.reply({ content: 'This session is no longer active.', ephemeral: true });
+        await interaction.reply({ content: 'This session is no longer active.', flags: MessageFlags.Ephemeral });
         return true;
     }
 
     if (session.storyLog.length === 0) {
-        await interaction.reply({ content: 'The adventure has not begun yet.', ephemeral: true });
+        await interaction.reply({ content: 'The adventure has not begun yet.', flags: MessageFlags.Ephemeral });
         return true;
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
         const gs = await Guild.findOne({ guildId: session.guildId });

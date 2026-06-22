@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 
 const MEMORY_CAP = 10;
@@ -35,18 +35,18 @@ module.exports = {
         if (deleteIndex != null) {
             const idx = deleteIndex - 1;
             if (idx < 0 || idx >= memories.length) {
-                return interaction.reply({ content: `No memory #${deleteIndex} found. You have ${memories.length} pinned memory/memories.`, ephemeral: true });
+                return interaction.reply({ content: `No memory #${deleteIndex} found. You have ${memories.length} pinned memory/memories.`, flags: MessageFlags.Ephemeral });
             }
             memories.splice(idx, 1);
             userDoc.pinnedMemories = memories;
             await userDoc.save();
-            return interaction.reply({ content: `🗑️ Memory #${deleteIndex} deleted. You now have **${memories.length}** pinned memory/memories.`, ephemeral: true });
+            return interaction.reply({ content: `🗑️ Memory #${deleteIndex} deleted. You now have **${memories.length}** pinned memory/memories.`, flags: MessageFlags.Ephemeral });
         }
 
         if (memories.length === 0) {
             return interaction.reply({
                 content: '📌 You have no pinned memories. React with 📌 to a bot message to save it as a memory.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -61,6 +61,6 @@ module.exports = {
             .setDescription(lines.join('\n\n'))
             .setFooter({ text: `${memories.length}/${MEMORY_CAP} slots used · Use /ai memories delete:<number> to remove one` });
 
-        return interaction.reply({ embeds: [embed], ephemeral: true });
+        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 };

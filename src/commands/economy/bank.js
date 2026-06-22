@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { logTransaction } = require('../../utils/logTransaction');
@@ -21,12 +21,12 @@ async function handleDeposit(interaction) {
     const amount = input === 'all' ? userData.balance : parseInt(input, 10);
 
     if (isNaN(amount) || amount <= 0) {
-        return interaction.reply({ content: 'Please enter a valid positive amount.', ephemeral: true });
+        return interaction.reply({ content: 'Please enter a valid positive amount.', flags: MessageFlags.Ephemeral });
     }
     if (amount > userData.balance) {
         return interaction.reply({
             content: `You only have ${currency}${userData.balance} in your wallet.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -37,7 +37,7 @@ async function handleDeposit(interaction) {
         await userData.save();
     } catch (err) {
         console.error('[bank deposit] save error:', err);
-        return interaction.reply({ content: 'Failed to save your deposit. Please try again.', ephemeral: true });
+        return interaction.reply({ content: 'Failed to save your deposit. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
     logTransaction({
@@ -79,12 +79,12 @@ async function handleWithdraw(interaction) {
     const amount = input === 'all' ? userData.bank : parseInt(input, 10);
 
     if (isNaN(amount) || amount <= 0) {
-        return interaction.reply({ content: 'Please enter a valid positive amount.', ephemeral: true });
+        return interaction.reply({ content: 'Please enter a valid positive amount.', flags: MessageFlags.Ephemeral });
     }
     if (amount > userData.bank) {
         return interaction.reply({
             content: `You only have ${currency}${userData.bank} in your bank.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -95,7 +95,7 @@ async function handleWithdraw(interaction) {
         await userData.save();
     } catch (err) {
         console.error('[bank withdraw] save error:', err);
-        return interaction.reply({ content: 'Failed to save your withdrawal. Please try again.', ephemeral: true });
+        return interaction.reply({ content: 'Failed to save your withdrawal. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
     logTransaction({
@@ -121,10 +121,10 @@ async function handleTransfer(interaction) {
     const amount = interaction.options.getInteger('amount');
 
     if (recipient.bot) {
-        return interaction.reply({ content: 'You cannot transfer coins to bots!', ephemeral: true });
+        return interaction.reply({ content: 'You cannot transfer coins to bots!', flags: MessageFlags.Ephemeral });
     }
     if (recipient.id === interaction.user.id) {
-        return interaction.reply({ content: 'You cannot transfer coins to yourself!', ephemeral: true });
+        return interaction.reply({ content: 'You cannot transfer coins to yourself!', flags: MessageFlags.Ephemeral });
     }
 
     // Standalone MongoDB doesn't support multi-doc transactions; use atomic $inc
@@ -141,7 +141,7 @@ async function handleTransfer(interaction) {
             const currentBal = existing ? existing.balance : 0;
             return interaction.reply({
                 content: `You don't have enough coins! Your balance: ${currentBal.toLocaleString()} coins`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -170,7 +170,7 @@ async function handleTransfer(interaction) {
         await interaction.reply({ embeds: [embed] });
     } catch (error) {
         console.error('Transfer error:', error);
-        await interaction.reply({ content: 'Failed to transfer coins.', ephemeral: true }).catch(() => {});
+        await interaction.reply({ content: 'Failed to transfer coins.', flags: MessageFlags.Ephemeral }).catch(() => {});
     }
 }
 

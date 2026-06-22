@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getCase } = require('../../services/caseService');
 
 const TYPE_COLORS = {
@@ -25,7 +25,7 @@ module.exports = {
         const modCase = await getCase(interaction.guild.id, caseId);
 
         if (!modCase) {
-            return interaction.reply({ content: `Case #${caseId} not found.`, ephemeral: true });
+            return interaction.reply({ content: `Case #${caseId} not found.`, flags: MessageFlags.Ephemeral });
         }
 
         const embed = new EmbedBuilder()
@@ -74,6 +74,6 @@ module.exports = {
             embed.addFields({ name: 'Labels', value: labelsText, inline: true });
         }
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 };

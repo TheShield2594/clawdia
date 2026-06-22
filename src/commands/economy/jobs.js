@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
@@ -100,7 +100,7 @@ module.exports = {
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
             console.error('Jobs command error:', error);
-            await interaction.reply({ content: 'Failed to load job listings.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to load job listings.', flags: MessageFlags.Ephemeral });
         }
     }
 };

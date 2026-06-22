@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../utils/logger');
 
 module.exports = {
@@ -20,15 +20,15 @@ module.exports = {
         const member = interaction.guild.members.cache.get(user.id);
 
         if (!member) {
-            return interaction.reply({ content: 'User not found in this server!', ephemeral: true });
+            return interaction.reply({ content: 'User not found in this server!', flags: MessageFlags.Ephemeral });
         }
 
         if (user.id === interaction.user.id) {
-            return interaction.reply({ content: 'You cannot kick yourself!', ephemeral: true });
+            return interaction.reply({ content: 'You cannot kick yourself!', flags: MessageFlags.Ephemeral });
         }
 
         if (!member.kickable) {
-            return interaction.reply({ content: 'I cannot kick this user! They may have higher permissions.', ephemeral: true });
+            return interaction.reply({ content: 'I cannot kick this user! They may have higher permissions.', flags: MessageFlags.Ephemeral });
         }
 
         try {
@@ -48,7 +48,7 @@ module.exports = {
             await logModeration(interaction.guild.id, 'kick', user, interaction.user, reason);
         } catch (error) {
             console.error('Kick error:', error);
-            await interaction.reply({ content: 'Failed to kick the user.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to kick the user.', flags: MessageFlags.Ephemeral });
         }
     }
 };

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, MessageFlags } = require('discord.js');
 const User    = require('../../models/User');
 const AiItem  = require('../../models/AiItem');
 const { attachGrind } = require('../../utils/grindProfile');
@@ -202,7 +202,7 @@ module.exports = {
                 .setTitle('🎒 Inventory — Empty')
                 .setDescription('Nothing here yet.\nTry `/hunt`, `/fish`, or `/mine` to find materials.')
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }));
-            return interaction.reply({ embeds: [emptyEmbed], ephemeral: true });
+            return interaction.reply({ embeds: [emptyEmbed], flags: MessageFlags.Ephemeral });
         }
 
         const color    = highestRarityColor(huntMats, fishMats, mineMats, hasItems ? '#5865F2' : '#9e9e9e');

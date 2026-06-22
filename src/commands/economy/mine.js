@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const GrindProfile = require('../../models/GrindProfile');
@@ -268,7 +268,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
 async function handleDig(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -295,18 +295,18 @@ async function handleDig(interaction) {
     const depth   = DEPTHS[depthId];
 
     if (!depth) {
-        return interaction.reply({ content: `Unknown depth \`${depthId}\`. Use \`/mine shop list\` to see available depths.`, ephemeral: true });
+        return interaction.reply({ content: `Unknown depth \`${depthId}\`. Use \`/mine shop list\` to see available depths.`, flags: MessageFlags.Ephemeral });
     }
     if (!m.unlockedDepths.includes(depthId)) {
         return interaction.reply({
             content: `You haven't unlocked **${depth.name}** yet. Use \`/mine shop unlock\` to unlock it.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     if (m.level < depth.unlockLevel) {
         return interaction.reply({
             content: `You need to be Miner Level **${depth.unlockLevel}** to mine in **${depth.name}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -319,7 +319,7 @@ async function handleDig(interaction) {
                 color: '#b5651d',
                 nextAt,
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -337,7 +337,7 @@ async function handleDig(interaction) {
                 nextAt,
                 nextRewardPreview: depthHint ?? 'Next dig: Abyss tier multiplies your payout by 3×',
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
@@ -357,14 +357,14 @@ async function handleDig(interaction) {
                 pityStat,
                 nextRewardPreview: 'Full stamina + Deep intensity = best rare material odds',
             })],
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         });
     }
 
     if (m.equippedPickaxeIndex < 0 || !m.pickaxes[m.equippedPickaxeIndex]) {
         return interaction.reply({
             content: `You don't have a pickaxe equipped! Buy one with \`/mine shop pickaxe\` and equip it with \`/mine inv equip 1\`.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -373,7 +373,7 @@ async function handleDig(interaction) {
     if (pickaxe.status === 'broken' || pickaxe.currentDurability <= 0) {
         return interaction.reply({
             content: `Your **${pickaxe.name}** is broken! Repair it with \`/mine shop repair\` or buy a new one with \`/mine shop pickaxe\`.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -383,7 +383,7 @@ async function handleDig(interaction) {
         if (chargeStock <= 0) {
             return interaction.reply({
                 content: `You're out of **${pickaxeData.chargeType.replace(/_/g, ' ')}**! Buy more with \`/mine shop buy\`.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
         m.charges[pickaxeData.chargeType] = chargeStock - 1;
@@ -765,7 +765,7 @@ async function handleProfile(interaction) {
             content: isSelf
                 ? "You haven't started mining yet! Buy a pickaxe with `/mine shop pickaxe` and use `/mine dig` to begin."
                 : `${target.username} hasn't started mining yet.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -897,7 +897,7 @@ async function handleProfile(interaction) {
 async function handleInv(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const user = await User.findOneAndUpdate(
@@ -975,12 +975,12 @@ async function handleInv(interaction, sub) {
         const slot = interaction.options.getInteger('slot') - 1;
 
         if (!m.pickaxes[slot]) {
-            return interaction.reply({ content: `No pickaxe in slot ${slot + 1}.`, ephemeral: true });
+            return interaction.reply({ content: `No pickaxe in slot ${slot + 1}.`, flags: MessageFlags.Ephemeral });
         }
 
         const pickaxe = m.pickaxes[slot];
         if (pickaxe.status === 'broken') {
-            return interaction.reply({ content: `**${pickaxe.name}** is broken and can't be equipped. Repair it first with \`/mine shop repair\`.`, ephemeral: true });
+            return interaction.reply({ content: `**${pickaxe.name}** is broken and can't be equipped. Repair it first with \`/mine shop repair\`.`, flags: MessageFlags.Ephemeral });
         }
 
         m.equippedPickaxeIndex = slot;
@@ -1009,7 +1009,7 @@ async function handleInv(interaction, sub) {
 async function handleQuests(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1090,7 +1090,7 @@ async function handleQuests(interaction, sub) {
         const template = MINE_QUEST_TEMPLATES.find(t => t.id === questId);
 
         if (!template) {
-            return interaction.reply({ content: 'Unknown quest.', ephemeral: true });
+            return interaction.reply({ content: 'Unknown quest.', flags: MessageFlags.Ephemeral });
         }
 
         const questEntry = user.quests.find(q =>
@@ -1101,14 +1101,14 @@ async function handleQuests(interaction, sub) {
         if (!questEntry) {
             return interaction.reply({
                 content: `You don't have an active **${template.name}** quest. Go mining to get quests assigned!`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
         if (questEntry.progress === -1) {
             return interaction.reply({
                 content: `You already claimed **${template.name}**. Complete your other quests or wait for new ones!`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -1116,7 +1116,7 @@ async function handleQuests(interaction, sub) {
             const progress = Math.min(questEntry.progress, template.target);
             return interaction.reply({
                 content: `**${template.name}** is not complete yet (${progress}/${template.target}). Keep mining!`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -1166,7 +1166,7 @@ async function handleQuests(interaction, sub) {
 async function handleShop(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
     const currency = guildSettings?.economy?.currency ?? '💰';
 
@@ -1262,12 +1262,12 @@ async function handleShop(interaction, sub) {
         const autoEquip = interaction.options.getBoolean('equip') ?? true;
         const pickaxeData = PICKAXE_BY_SLUG[slug];
 
-        if (!pickaxeData) return interaction.reply({ content: 'Unknown pickaxe type.', ephemeral: true });
+        if (!pickaxeData) return interaction.reply({ content: 'Unknown pickaxe type.', flags: MessageFlags.Ephemeral });
 
         if (user.balance < pickaxeData.cost) {
             return interaction.reply({
                 content: `You need ${currency}${pickaxeData.cost.toLocaleString()} but only have ${currency}${user.balance.toLocaleString()}.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -1291,14 +1291,16 @@ async function handleShop(interaction, sub) {
             new ButtonBuilder().setCustomId('minepickaxe_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
         );
 
-        const confirmPayload = { embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true };
+        const confirmPayload = { embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, withResponse: true };
         if (pickaxeImg) confirmPayload.files = [pickaxeImg.attachment];
-        const reply = await interaction.reply(confirmPayload);
+        const response = await interaction.reply(confirmPayload);
+        const reply = response.resource.message;
         const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
-        collector.on('collect', async btn => {
+        let actionPromise = null;
+        collector.on('collect', btn => {
             if (btn.user.id !== interaction.user.id) {
-                return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+                return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
             }
             collector.stop();
 
@@ -1306,6 +1308,7 @@ async function handleShop(interaction, sub) {
                 return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
             }
 
+            actionPromise = (async () => {
             try {
                 await btn.deferUpdate();
 
@@ -1378,36 +1381,39 @@ async function handleShop(interaction, sub) {
                 console.error('[mineshop pickaxe] purchase error:', err);
                 interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
+            })();
         });
 
-        collector.on('end', (_, reason) => {
-            if (reason === 'time') {
-                interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
-            }
+        return new Promise(resolve => {
+            collector.on('end', async (_, reason) => {
+                if (reason === 'time') {
+                    interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
+                }
+                if (actionPromise) await actionPromise.catch(() => {});
+                resolve();
+            });
         });
-
-        return;
     }
 
     if (sub === 'upgrade') {
         const moduleId = interaction.options.getString('module');
         const upgradeDef = PICKAXE_UPGRADES[moduleId];
-        if (!upgradeDef) return interaction.reply({ content: 'Unknown upgrade module.', ephemeral: true });
+        if (!upgradeDef) return interaction.reply({ content: 'Unknown upgrade module.', flags: MessageFlags.Ephemeral });
 
         if (m.equippedPickaxeIndex < 0 || !m.pickaxes[m.equippedPickaxeIndex]) {
-            return interaction.reply({ content: `You don't have a pickaxe equipped. Equip one with \`/mine inv equip\`.`, ephemeral: true });
+            return interaction.reply({ content: `You don't have a pickaxe equipped. Equip one with \`/mine inv equip\`.`, flags: MessageFlags.Ephemeral });
         }
 
         const pickaxe = m.pickaxes[m.equippedPickaxeIndex];
         if (pickaxe.upgrade) {
-            return interaction.reply({ content: `Your **${pickaxe.name}** already has the **${pickaxe.upgrade.replace(/_/g, ' ')}** upgrade installed. Each pickaxe can only have one upgrade.`, ephemeral: true });
+            return interaction.reply({ content: `Your **${pickaxe.name}** already has the **${pickaxe.upgrade.replace(/_/g, ' ')}** upgrade installed. Each pickaxe can only have one upgrade.`, flags: MessageFlags.Ephemeral });
         }
 
         const pickaxeData = PICKAXE_BY_TIER[pickaxe.tier];
         const cost = Math.round(pickaxeData.cost * upgradeDef.costMultiplier);
 
         if (user.balance < cost) {
-            return interaction.reply({ content: `This upgrade costs ${currency}${cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, ephemeral: true });
+            return interaction.reply({ content: `This upgrade costs ${currency}${cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, flags: MessageFlags.Ephemeral });
         }
 
         user.balance -= cost;
@@ -1432,17 +1438,17 @@ async function handleShop(interaction, sub) {
         const blastDef      = BLAST_PACKS.find(b => b.id === itemId);
         const itemDef       = consumableDef || blastDef;
 
-        if (!itemDef) return interaction.reply({ content: 'Unknown item.', ephemeral: true });
+        if (!itemDef) return interaction.reply({ content: 'Unknown item.', flags: MessageFlags.Ephemeral });
 
         const totalCost = itemDef.cost * qty;
         if (user.balance < totalCost) {
-            return interaction.reply({ content: `You need ${currency}${totalCost.toLocaleString()} for ${qty}× but only have ${currency}${user.balance.toLocaleString()}.`, ephemeral: true });
+            return interaction.reply({ content: `You need ${currency}${totalCost.toLocaleString()} for ${qty}× but only have ${currency}${user.balance.toLocaleString()}.`, flags: MessageFlags.Ephemeral });
         }
 
         if (consumableDef) {
             const current = m.consumables[itemId] ?? 0;
             if (current + qty > consumableDef.maxStack) {
-                return interaction.reply({ content: `You can only carry ${consumableDef.maxStack}× **${consumableDef.name}**. You already have ${current}.`, ephemeral: true });
+                return interaction.reply({ content: `You can only carry ${consumableDef.maxStack}× **${consumableDef.name}**. You already have ${current}.`, flags: MessageFlags.Ephemeral });
             }
         }
 
@@ -1471,12 +1477,14 @@ async function handleShop(interaction, sub) {
             new ButtonBuilder().setCustomId('minebuy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
         );
 
-        const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true, fetchReply: true });
+        const response = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, withResponse: true });
+        const reply = response.resource.message;
         const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
-        collector.on('collect', async btn => {
+        let actionPromise = null;
+        collector.on('collect', btn => {
             if (btn.user.id !== interaction.user.id) {
-                return btn.reply({ content: 'This is not your confirmation.', ephemeral: true });
+                return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
             }
             collector.stop();
 
@@ -1484,6 +1492,7 @@ async function handleShop(interaction, sub) {
                 return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
             }
 
+            actionPromise = (async () => {
             try {
                 await btn.deferUpdate();
 
@@ -1549,15 +1558,18 @@ async function handleShop(interaction, sub) {
                 console.error('[mineshop buy] purchase error:', err);
                 interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
+            })();
         });
 
-        collector.on('end', (_, reason) => {
-            if (reason === 'time') {
-                interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
-            }
+        return new Promise(resolve => {
+            collector.on('end', async (_, reason) => {
+                if (reason === 'time') {
+                    interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
+                }
+                if (actionPromise) await actionPromise.catch(() => {});
+                resolve();
+            });
         });
-
-        return;
     }
 
     if (sub === 'use') {
@@ -1565,7 +1577,7 @@ async function handleShop(interaction, sub) {
         const result = activateConsumable(user, itemId);
 
         if (!result.success) {
-            return interaction.reply({ content: result.error, ephemeral: true });
+            return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
         }
 
         await user.save();
@@ -1586,17 +1598,17 @@ async function handleShop(interaction, sub) {
         const method = interaction.options.getString('method');
 
         if (m.equippedPickaxeIndex < 0 || !m.pickaxes[m.equippedPickaxeIndex]) {
-            return interaction.reply({ content: `You don't have a pickaxe equipped.`, ephemeral: true });
+            return interaction.reply({ content: `You don't have a pickaxe equipped.`, flags: MessageFlags.Ephemeral });
         }
 
         const pickaxe = m.pickaxes[m.equippedPickaxeIndex];
 
         if (method === 'shop') {
             const repairResult = applyRepair(pickaxe, null);
-            if (repairResult.error) return interaction.reply({ content: repairResult.error, ephemeral: true });
+            if (repairResult.error) return interaction.reply({ content: repairResult.error, flags: MessageFlags.Ephemeral });
 
             if (user.balance < repairResult.cost) {
-                return interaction.reply({ content: `Repair costs ${currency}${repairResult.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, ephemeral: true });
+                return interaction.reply({ content: `Repair costs ${currency}${repairResult.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, flags: MessageFlags.Ephemeral });
             }
 
             user.balance -= repairResult.cost;
@@ -1627,14 +1639,14 @@ async function handleShop(interaction, sub) {
             const stock = m.consumables[kitId] ?? 0;
 
             if (stock <= 0) {
-                return interaction.reply({ content: `You don't have any **${kit.name}**. Buy one with \`/mine shop buy\`.`, ephemeral: true });
+                return interaction.reply({ content: `You don't have any **${kit.name}**. Buy one with \`/mine shop buy\`.`, flags: MessageFlags.Ephemeral });
             }
 
             if (pickaxe.status === 'condemned') {
-                return interaction.reply({ content: 'This pickaxe is condemned and cannot be repaired.', ephemeral: true });
+                return interaction.reply({ content: 'This pickaxe is condemned and cannot be repaired.', flags: MessageFlags.Ephemeral });
             }
             if (pickaxe.currentDurability >= pickaxe.maxDurability) {
-                return interaction.reply({ content: 'Pickaxe is already at full durability.', ephemeral: true });
+                return interaction.reply({ content: 'Pickaxe is already at full durability.', flags: MessageFlags.Ephemeral });
             }
 
             m.consumables[kitId] -= 1;
@@ -1664,15 +1676,15 @@ async function handleShop(interaction, sub) {
         const depthId  = interaction.options.getString('depth');
         const depthDef = DEPTHS[depthId];
 
-        if (!depthDef) return interaction.reply({ content: 'Unknown depth.', ephemeral: true });
+        if (!depthDef) return interaction.reply({ content: 'Unknown depth.', flags: MessageFlags.Ephemeral });
         if (depthDef.defaultUnlocked || m.unlockedDepths.includes(depthId)) {
-            return interaction.reply({ content: `You've already unlocked **${depthDef.name}**.`, ephemeral: true });
+            return interaction.reply({ content: `You've already unlocked **${depthDef.name}**.`, flags: MessageFlags.Ephemeral });
         }
         if (m.level < depthDef.unlockLevel) {
-            return interaction.reply({ content: `You need Miner Level **${depthDef.unlockLevel}** to unlock **${depthDef.name}**. You're Level ${m.level}.`, ephemeral: true });
+            return interaction.reply({ content: `You need Miner Level **${depthDef.unlockLevel}** to unlock **${depthDef.name}**. You're Level ${m.level}.`, flags: MessageFlags.Ephemeral });
         }
         if (user.balance < depthDef.unlockCost) {
-            return interaction.reply({ content: `Unlocking **${depthDef.name}** costs ${currency}${depthDef.unlockCost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, ephemeral: true });
+            return interaction.reply({ content: `Unlocking **${depthDef.name}** costs ${currency}${depthDef.unlockCost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, flags: MessageFlags.Ephemeral });
         }
 
         user.balance -= depthDef.unlockCost;
@@ -1858,14 +1870,14 @@ function formatExpiry(ms) {
 async function handleMap(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
     if (!user) {
         return interaction.reply({
             content: "You haven't started mining yet! Use `/mine dig` to begin.",
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     await attachGrind(user);
@@ -1922,12 +1934,12 @@ async function handleMap(interaction) {
 async function handleRaid(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
-        return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const targetUser = interaction.options.getUser('target');
     if (targetUser.id === interaction.user.id) {
-        return interaction.reply({ content: "You can't raid your own mine.", ephemeral: true });
+        return interaction.reply({ content: "You can't raid your own mine.", flags: MessageFlags.Ephemeral });
     }
 
     const [raider, defender] = await Promise.all([
@@ -1945,7 +1957,7 @@ async function handleRaid(interaction) {
     if (!defender) {
         return interaction.reply({
             content: `${targetUser.username} hasn't started mining yet — nothing to raid.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     ensureMineData(defender);
@@ -1957,7 +1969,7 @@ async function handleRaid(interaction) {
         const remaining = formatMs(nextAt.getTime() - now);
         return interaction.reply({
             content: `You need to wait **${remaining}** before raiding again.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1967,7 +1979,7 @@ async function handleRaid(interaction) {
         const remaining  = formatMs(shieldEnds.getTime() - now);
         return interaction.reply({
             content: `**${targetUser.username}**'s mine is still recovering from a recent raid. Wait **${remaining}**.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -1976,7 +1988,7 @@ async function handleRaid(interaction) {
     if (rm.equippedPickaxeIndex < 0 || !rm.pickaxes[rm.equippedPickaxeIndex]) {
         return interaction.reply({
             content: "You need a pickaxe equipped to raid! Use `/mine inv equip`.",
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2005,7 +2017,7 @@ async function handleRaid(interaction) {
     if (isOreStashEmpty(defender)) {
         return interaction.reply({
             content: `**${targetUser.username}**'s ore stash is empty — nothing worth raiding.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2047,7 +2059,7 @@ async function handleRaid(interaction) {
     if (!defenderResult) {
         return interaction.reply({
             content: `**${targetUser.username}**'s ore stash was already raided — nothing left to take.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 
@@ -2106,7 +2118,7 @@ module.exports.execute = async function (interaction) {
     if (!lockToken) {
         return interaction.reply({
             content: '⛏️ You already have a mining action in progress — finish it first.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         }).catch(() => {});
     }
     try {

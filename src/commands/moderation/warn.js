@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const Case = require('../../models/Case');
 const { logModeration } = require('../../utils/logger');
 const { applyEscalation, findStepForCount } = require('../../services/escalationService');
@@ -33,7 +33,7 @@ module.exports = {
             const reason = interaction.options.getString('reason');
             const bypassRequested = interaction.options.getBoolean('bypass_escalation') === true;
 
-            if (user.bot) return interaction.reply({ content: 'You cannot warn bots.', ephemeral: true });
+            if (user.bot) return interaction.reply({ content: 'You cannot warn bots.', flags: MessageFlags.Ephemeral });
 
             await interaction.deferReply();
 
@@ -107,12 +107,12 @@ module.exports = {
                     } else if (result?.skipped) {
                         await interaction.followUp({
                             content: `Auto-escalation step **${result.step.threshold} → ${result.step.action.toUpperCase()}** skipped: ${result.reason}`,
-                            ephemeral: true
+                            flags: MessageFlags.Ephemeral
                         }).catch(() => {});
                     } else if (result?.error) {
                         await interaction.followUp({
                             content: `Auto-escalation step **${result.step.threshold} → ${result.step.action.toUpperCase()}** failed — see logs.`,
-                            ephemeral: true
+                            flags: MessageFlags.Ephemeral
                         }).catch(() => {});
                     }
                 }
@@ -133,7 +133,7 @@ module.exports = {
                 }).sort({ createdAt: -1 }).limit(20);
 
                 if (!warnings.length) {
-                    return interaction.reply({ content: `${user.globalName ?? user.username} has no warnings.`, ephemeral: true });
+                    return interaction.reply({ content: `${user.globalName ?? user.username} has no warnings.`, flags: MessageFlags.Ephemeral });
                 }
 
                 const lines = warnings.map(w => {
@@ -152,7 +152,7 @@ module.exports = {
             } catch (error) {
                 console.error('Warn list error:', error);
                 if (!interaction.replied) {
-                    await interaction.reply({ content: 'Failed to fetch warnings.', ephemeral: true });
+                    await interaction.reply({ content: 'Failed to fetch warnings.', flags: MessageFlags.Ephemeral });
                 }
             }
         } else if (sub === 'remove') {
@@ -166,7 +166,7 @@ module.exports = {
                 });
 
                 if (!warnCase) {
-                    return interaction.reply({ content: `Warning case #${caseId} not found in this server.`, ephemeral: true });
+                    return interaction.reply({ content: `Warning case #${caseId} not found in this server.`, flags: MessageFlags.Ephemeral });
                 }
 
                 await Case.deleteOne({ _id: warnCase._id });
@@ -185,7 +185,7 @@ module.exports = {
             } catch (error) {
                 console.error('Warn remove error:', error);
                 if (!interaction.replied) {
-                    await interaction.reply({ content: 'Failed to remove the warning.', ephemeral: true });
+                    await interaction.reply({ content: 'Failed to remove the warning.', flags: MessageFlags.Ephemeral });
                 }
             }
         }

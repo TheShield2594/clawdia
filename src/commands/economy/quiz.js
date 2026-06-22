@@ -4,6 +4,7 @@ const {
     ActionRowBuilder,
     StringSelectMenuBuilder,
     StringSelectMenuOptionBuilder,
+    MessageFlags,
 } = require('discord.js');
 const axios = require('axios');
 const User  = require('../../models/User');
@@ -202,10 +203,10 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         if (guildSettings?.economy?.quizEnabled === false) {
-            return interaction.reply({ content: 'The quiz command is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The quiz command is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         const diffChoice = interaction.options.getString('difficulty') ?? 'any';
         await interaction.deferReply();

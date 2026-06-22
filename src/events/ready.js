@@ -12,7 +12,7 @@ const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
 
 module.exports = {
-    name: 'ready',
+    name: 'clientReady',
     once: true,
     async execute(client) {
         console.log(`[READY] Logged in as ${client.user.tag}`);

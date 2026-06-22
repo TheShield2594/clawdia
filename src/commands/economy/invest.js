@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { logTransaction } = require('../../utils/logTransaction');
@@ -103,7 +103,7 @@ module.exports = {
         );
 
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         ensureDistricts(guildSettings);
@@ -155,7 +155,7 @@ module.exports = {
         const amount     = interaction.options.getInteger('amount');
         const distMeta   = DISTRICTS.find(d => d.id === districtId);
         if (!distMeta) {
-            return interaction.reply({ content: 'Unknown district.', ephemeral: true });
+            return interaction.reply({ content: 'Unknown district.', flags: MessageFlags.Ephemeral });
         }
 
         // Check district is not already active before touching the user's balance
@@ -163,7 +163,7 @@ module.exports = {
         if (distEntryCheck && isActive(distEntryCheck)) {
             return interaction.reply({
                 content: `The **${distMeta.name}** district is already active!`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 
@@ -172,7 +172,7 @@ module.exports = {
             const bal = userDoc?.balance ?? 0;
             return interaction.reply({
                 content: `You need ${currency}${amount.toLocaleString()} but only have ${currency}${bal.toLocaleString()}.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 
@@ -183,7 +183,7 @@ module.exports = {
             { new: true }
         );
         if (!updatedUser) {
-            return interaction.reply({ content: 'Insufficient balance — please try again.', ephemeral: true });
+            return interaction.reply({ content: 'Insufficient balance — please try again.', flags: MessageFlags.Ephemeral });
         }
 
         logTransaction({
@@ -217,7 +217,7 @@ module.exports = {
             });
             return interaction.reply({
                 content: `The **${distMeta.name}** district is already active! Coins refunded.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 

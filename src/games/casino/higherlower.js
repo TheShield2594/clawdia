@@ -3,6 +3,7 @@ const {
     ButtonBuilder,
     ButtonStyle,
     EmbedBuilder,
+    MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
@@ -204,12 +205,12 @@ module.exports = {
         const wallet = user?.balance ?? 0;
 
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
-            return interaction.reply({ content: 'Economy games are disabled in this server.', ephemeral: true });
+            return interaction.reply({ content: 'Economy games are disabled in this server.', flags: MessageFlags.Ephemeral });
         }
 
         const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
 
         const { shouldProceed: hlProceed, alreadyReplied: hlReplied } = await confirmBet(interaction, bet, wallet, 'Higher or Lower', guildSettings);

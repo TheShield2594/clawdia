@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
@@ -43,7 +43,7 @@ module.exports = {
         const cacheKey = `${targetUser.id}:${interaction.guild.id}`;
         const cached   = profileCache.get(cacheKey);
         if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-            return interaction.reply({ embeds: [cached.embedData], ephemeral: isPrivate });
+            return interaction.reply({ embeds: [cached.embedData], flags: isPrivate ? MessageFlags.Ephemeral : undefined });
         }
 
         try {
@@ -58,7 +58,7 @@ module.exports = {
                     content: isSelf
                         ? "You don't have a profile yet. Start chatting to build one!"
                         : `${targetUser.username} doesn't have a profile yet.`,
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
@@ -185,10 +185,10 @@ module.exports = {
             const embedData = embed.toJSON();
             profileCache.set(cacheKey, { embedData, timestamp: Date.now() });
 
-            return interaction.reply({ embeds: [embedData], ephemeral: isPrivate });
+            return interaction.reply({ embeds: [embedData], flags: isPrivate ? MessageFlags.Ephemeral : undefined });
         } catch (error) {
             console.error('Profile error:', error);
-            return interaction.reply({ content: 'Failed to fetch profile.', ephemeral: true });
+            return interaction.reply({ content: 'Failed to fetch profile.', flags: MessageFlags.Ephemeral });
         }
     },
 };

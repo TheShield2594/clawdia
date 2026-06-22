@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -21,7 +21,7 @@ module.exports = {
         const channel = interaction.options.getChannel('channel') ?? interaction.channel;
 
         if (!channel.isTextBased()) {
-            return interaction.reply({ content: 'Slowmode can only be set on text channels.', ephemeral: true });
+            return interaction.reply({ content: 'Slowmode can only be set on text channels.', flags: MessageFlags.Ephemeral });
         }
 
         try {
@@ -41,7 +41,7 @@ module.exports = {
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
             console.error('Slowmode error:', error);
-            await interaction.reply({ content: 'Failed to update slowmode.', ephemeral: true });
+            await interaction.reply({ content: 'Failed to update slowmode.', flags: MessageFlags.Ephemeral });
         }
     }
 };

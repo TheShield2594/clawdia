@@ -5,6 +5,7 @@ const {
     ButtonBuilder,
     ButtonStyle,
     ComponentType,
+    MessageFlags,
 } = require('discord.js');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
@@ -272,12 +273,12 @@ module.exports = {
         // ── VIEW ──────────────────────────────────────────────────────────────
         if (sub === 'view') {
             if (!guildSettings.shop.length) {
-                return interaction.reply({ content: 'The shop is empty. Admins can add items via the dashboard.', ephemeral: true });
+                return interaction.reply({ content: 'The shop is empty. Admins can add items via the dashboard.', flags: MessageFlags.Ephemeral });
             }
 
             const pages = await buildShopPages(guildSettings, currency, viewerPrestigeRank);
             if (!pages.length) {
-                return interaction.reply({ content: 'The shop is empty.', ephemeral: true });
+                return interaction.reply({ content: 'The shop is empty.', flags: MessageFlags.Ephemeral });
             }
 
             const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
@@ -297,7 +298,7 @@ module.exports = {
         // ── TRENDS ────────────────────────────────────────────────────────────
         if (sub === 'trends') {
             if (!guildSettings.dynamicPricing?.enabled) {
-                return interaction.reply({ content: 'Dynamic pricing is disabled on this server.', ephemeral: true });
+                return interaction.reply({ content: 'Dynamic pricing is disabled on this server.', flags: MessageFlags.Ephemeral });
             }
             const movers = guildSettings.shop
                 .filter(item => !isBlackMarketItem(item.itemId) || hasUnlock(viewerPrestigeRank, 'black_market'))
@@ -336,19 +337,19 @@ module.exports = {
             const item = guildSettings.shop.find(i => i.name.toLowerCase() === itemName);
 
             if (!item) {
-                return interaction.reply({ content: `Item \`${itemName}\` not found. Use \`/shop view\` to see available items.`, ephemeral: true });
+                return interaction.reply({ content: `Item \`${itemName}\` not found. Use \`/shop view\` to see available items.`, flags: MessageFlags.Ephemeral });
             }
 
             // Gate Black Market behind prestige unlock
             if (isBlackMarketItem(item.itemId) && !hasUnlock(viewerPrestigeRank, 'black_market')) {
                 return interaction.reply({
                     content: 'That item is sold on the Black Market — reach **Prestige I** to unlock it.',
-                    ephemeral: true,
+                    flags: MessageFlags.Ephemeral,
                 });
             }
 
             if (item.stock === 0) {
-                return interaction.reply({ content: 'That item is out of stock!', ephemeral: true });
+                return interaction.reply({ content: 'That item is out of stock!', flags: MessageFlags.Ephemeral });
             }
 
             const dynamicEnabled = !!guildSettings.dynamicPricing?.enabled;
@@ -363,7 +364,7 @@ module.exports = {
             if (userData.balance < itemPrice) {
                 return interaction.reply({
                     content: `You need ${currency}${itemPrice.toLocaleString()} but only have ${currency}${userData.balance.toLocaleString()}.`,
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getPublicProtectionStatus, timeRemaining } = require('../../services/effectsService');
@@ -21,19 +21,19 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         if (guildSettings?.economy?.robEnabled === false) {
-            return interaction.reply({ content: 'Robbing is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Robbing is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const target = interaction.options.getUser('target');
 
         if (target.id === interaction.user.id) {
-            return interaction.reply({ content: "Checking your own status is pointless.", ephemeral: true });
+            return interaction.reply({ content: "Checking your own status is pointless.", flags: MessageFlags.Ephemeral });
         }
         if (target.bot) {
-            return interaction.reply({ content: "Bots can't be robbed.", ephemeral: true });
+            return interaction.reply({ content: "Bots can't be robbed.", flags: MessageFlags.Ephemeral });
         }
 
         // Per-user cooldown
@@ -42,7 +42,7 @@ module.exports = {
         const elapsed  = Date.now() - lastUsed;
         if (elapsed < STATUS_COOLDOWN_MS) {
             const secs = Math.ceil((STATUS_COOLDOWN_MS - elapsed) / 1000);
-            return interaction.reply({ content: `You're on cooldown. Try again in **${secs}s**.`, ephemeral: true });
+            return interaction.reply({ content: `You're on cooldown. Try again in **${secs}s**.`, flags: MessageFlags.Ephemeral });
         }
         statusCooldowns.set(cdKey, Date.now());
         setTimeout(() => statusCooldowns.delete(cdKey), STATUS_COOLDOWN_MS);
@@ -96,6 +96,6 @@ module.exports = {
             .setFooter({ text: 'Padlock status is not revealed. Cooldown: 2m' })
             .setTimestamp();
 
-        return interaction.reply({ embeds: [embed], ephemeral: true });
+        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     },
 };

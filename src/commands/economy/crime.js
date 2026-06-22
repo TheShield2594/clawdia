@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
@@ -101,10 +101,10 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
-            return interaction.reply({ content: 'The economy is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
         if (guildSettings?.economy?.crimeEnabled === false) {
-            return interaction.reply({ content: 'The crime command is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'The crime command is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const currency = guildSettings?.economy?.currency || '💰';
@@ -125,7 +125,7 @@ module.exports = {
                     nextAt,
                     nextRewardPreview: 'Once clear: Grand Larceny pays 600–1500 coins · Casino Con is next on the board',
                 })],
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 
@@ -139,7 +139,7 @@ module.exports = {
                     nextAt,
                     nextRewardPreview: 'Next run: three new crimes roll — pick the right one for up to 1,500 coins',
                 })],
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
         }
 
@@ -450,7 +450,7 @@ module.exports = {
         } catch (error) {
             console.error('Crime command error:', error);
             if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ content: 'Something went wrong.', ephemeral: true });
+                await interaction.reply({ content: 'Something went wrong.', flags: MessageFlags.Ephemeral });
             } else {
                 await interaction.editReply({ content: 'Something went wrong. Try again.' }).catch(() => {});
             }

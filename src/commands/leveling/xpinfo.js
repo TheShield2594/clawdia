@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 
 const XP_COOLDOWN_SECONDS = 60;
@@ -31,7 +31,7 @@ module.exports = {
         .setDMPermission(false),
     async execute(interaction) {
         if (!interaction.inGuild()) return;
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         try {
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             const leveling = guildSettings?.leveling ?? {};

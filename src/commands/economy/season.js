@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const SeasonRecord = require('../../models/SeasonRecord');
@@ -75,7 +75,7 @@ async function executeView(interaction) {
 
     const season = guildSettings?.season;
     if (!season?.enabled || !season?.seasonId) {
-        return interaction.reply({ content: 'No active season pass is running on this server right now.', ephemeral: true });
+        return interaction.reply({ content: 'No active season pass is running on this server right now.', flags: MessageFlags.Ephemeral });
     }
 
     await ensureMissions(user);
@@ -153,7 +153,7 @@ async function executeClaim(interaction) {
 
     const season = guildSettings?.season;
     if (!season?.enabled || !season?.seasonId) {
-        return interaction.reply({ content: 'No active season pass is running.', ephemeral: true });
+        return interaction.reply({ content: 'No active season pass is running.', flags: MessageFlags.Ephemeral });
     }
 
     const wantsPremium = interaction.options.getBoolean('premium') ?? false;
@@ -170,24 +170,24 @@ async function executeClaim(interaction) {
     const claimedTiers = new Set(wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers);
 
     if (tier > MAX_TIERS || tier < 1) {
-        return interaction.reply({ content: `Tier must be between 1 and ${MAX_TIERS}.`, ephemeral: true });
+        return interaction.reply({ content: `Tier must be between 1 and ${MAX_TIERS}.`, flags: MessageFlags.Ephemeral });
     }
     if (wantsPremium && user.season.premium !== true) {
         const premiumCost = season.premiumCost ?? DEFAULT_PREMIUM_COST;
-        return interaction.reply({ content: `You haven't unlocked the premium track. Unlock it for **${currency}${premiumCost.toLocaleString()}** with \`/season unlock\`.`, ephemeral: true });
+        return interaction.reply({ content: `You haven't unlocked the premium track. Unlock it for **${currency}${premiumCost.toLocaleString()}** with \`/season unlock\`.`, flags: MessageFlags.Ephemeral });
     }
     if (tier > unlockedTier) {
         return interaction.reply({
             content: `You haven't unlocked Tier ${tier} yet! You're at Tier ${unlockedTier}.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
     if (claimedTiers.has(tier)) {
-        return interaction.reply({ content: `You've already claimed Tier ${tier}'s ${wantsPremium ? 'premium' : 'free'} reward!`, ephemeral: true });
+        return interaction.reply({ content: `You've already claimed Tier ${tier}'s ${wantsPremium ? 'premium' : 'free'} reward!`, flags: MessageFlags.Ephemeral });
     }
 
     const reward = rewardFor(tier, wantsPremium);
-    if (!reward) return interaction.reply({ content: 'Invalid tier.', ephemeral: true });
+    if (!reward) return interaction.reply({ content: 'Invalid tier.', flags: MessageFlags.Ephemeral });
 
     if (reward.coins > 0) user.balance += reward.coins;
     if (reward.itemId) user.inventory.push({ itemId: reward.itemId, quantity: 1 });
@@ -198,7 +198,7 @@ async function executeClaim(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', ephemeral: true });
+        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 
@@ -280,7 +280,7 @@ async function executeUnlock(interaction) {
 
     const season = guildSettings?.season;
     if (!season?.enabled || !season?.seasonId) {
-        return interaction.reply({ content: 'No active season pass is running.', ephemeral: true });
+        return interaction.reply({ content: 'No active season pass is running.', flags: MessageFlags.Ephemeral });
     }
 
     const currency = guildSettings?.economy?.currency ?? '💰';
@@ -293,7 +293,7 @@ async function executeUnlock(interaction) {
             { $set: { 'season.seasonId': season.seasonId, 'season.premium': false, 'season.claimedPremiumTiers': [] } }
         );
     } else if (user.season?.premium === true) {
-        return interaction.reply({ content: '✨ You already have the premium track unlocked this season.', ephemeral: true });
+        return interaction.reply({ content: '✨ You already have the premium track unlocked this season.', flags: MessageFlags.Ephemeral });
     }
 
     // Atomic: debit the cost and flip premium on in one guarded update (coin sink).
@@ -304,7 +304,7 @@ async function executeUnlock(interaction) {
     );
     if (!unlocked) {
         const bal = (await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'balance'))?.balance ?? 0;
-        return interaction.reply({ content: `You need **${currency}${cost.toLocaleString()}** to unlock the premium track — you have **${currency}${bal.toLocaleString()}**.`, ephemeral: true });
+        return interaction.reply({ content: `You need **${currency}${cost.toLocaleString()}** to unlock the premium track — you have **${currency}${bal.toLocaleString()}**.`, flags: MessageFlags.Ephemeral });
     }
     logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'season_premium', amount: -cost, balance: unlocked.balance, note: 'Season pass premium unlock' });
 
@@ -335,7 +335,7 @@ async function executeMissions(interaction) {
 
     const season = guildSettings?.season;
     if (!season?.enabled) {
-        return interaction.reply({ content: 'No active season on this server.', ephemeral: true });
+        return interaction.reply({ content: 'No active season on this server.', flags: MessageFlags.Ephemeral });
     }
 
     await ensureMissions(user);
@@ -373,17 +373,17 @@ async function executeClaimMission(interaction) {
     ]);
 
     const season = guildSettings?.season;
-    if (!season?.enabled) return interaction.reply({ content: 'No active season.', ephemeral: true });
+    if (!season?.enabled) return interaction.reply({ content: 'No active season.', flags: MessageFlags.Ephemeral });
 
     await ensureMissions(user);
     const currency = guildSettings?.economy?.currency ?? '💰';
     const mission = user.seasonMissions?.[missionIndex];
 
-    if (!mission) return interaction.reply({ content: 'Invalid mission number.', ephemeral: true });
+    if (!mission) return interaction.reply({ content: 'Invalid mission number.', flags: MessageFlags.Ephemeral });
     // Derive completion from progress vs target (completed flag is set by action handlers)
     const isDone = mission.completed || mission.progress >= mission.target;
-    if (!isDone) return interaction.reply({ content: 'Mission not completed yet.', ephemeral: true });
-    if (mission.claimed) return interaction.reply({ content: 'Already claimed!', ephemeral: true });
+    if (!isDone) return interaction.reply({ content: 'Mission not completed yet.', flags: MessageFlags.Ephemeral });
+    if (mission.claimed) return interaction.reply({ content: 'Already claimed!', flags: MessageFlags.Ephemeral });
 
     user.seasonMissions[missionIndex].claimed = true;
     normalizeSeason(user, season.seasonId);
@@ -397,13 +397,13 @@ async function executeClaimMission(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', ephemeral: true });
+        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 
     return interaction.reply({
         content: `✅ Mission claimed! +**${grantedXp} Season XP** and +**${mission.coinReward.toLocaleString()} ${currency}**`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
     });
 }
 
@@ -414,7 +414,7 @@ async function executeLeaderboard(interaction) {
     const currentSeason = guildSettings?.currentSeason;
 
     if (!currentSeason?.id) {
-        return interaction.reply({ content: 'No active economy season on this server.', ephemeral: true });
+        return interaction.reply({ content: 'No active economy season on this server.', flags: MessageFlags.Ephemeral });
     }
 
     const topUsers = await User.find({ guildId: interaction.guild.id })
@@ -423,7 +423,7 @@ async function executeLeaderboard(interaction) {
         .select('userId seasonCoins');
 
     if (topUsers.length === 0) {
-        return interaction.reply({ content: 'No season data yet.', ephemeral: true });
+        return interaction.reply({ content: 'No season data yet.', flags: MessageFlags.Ephemeral });
     }
 
     const currency = guildSettings?.economy?.currency ?? '💰';
@@ -455,11 +455,11 @@ async function executeSeasonMe(interaction) {
 
     const currentSeason = guildSettings?.currentSeason;
     if (!currentSeason?.id) {
-        return interaction.reply({ content: 'No active economy season on this server.', ephemeral: true });
+        return interaction.reply({ content: 'No active economy season on this server.', flags: MessageFlags.Ephemeral });
     }
 
     if (!user) {
-        return interaction.reply({ content: 'No profile found. Use an economy command first.', ephemeral: true });
+        return interaction.reply({ content: 'No profile found. Use an economy command first.', flags: MessageFlags.Ephemeral });
     }
 
     const currency = guildSettings?.economy?.currency ?? '💰';
@@ -487,7 +487,7 @@ async function executeHistory(interaction) {
         .limit(5);
 
     if (records.length === 0) {
-        return interaction.reply({ content: 'No past seasons recorded for this server.', ephemeral: true });
+        return interaction.reply({ content: 'No past seasons recorded for this server.', flags: MessageFlags.Ephemeral });
     }
 
     const fields = records.map(r => ({
@@ -511,7 +511,7 @@ async function executeHistory(interaction) {
 // Admin: start economy season
 async function executeAdminStart(interaction) {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: 'Administrator only.', ephemeral: true });
+        return interaction.reply({ content: 'Administrator only.', flags: MessageFlags.Ephemeral });
     }
 
     const name = interaction.options.getString('name') ?? `Season ${Date.now()}`;
@@ -519,7 +519,7 @@ async function executeAdminStart(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
     if (guildSettings?.currentSeason?.id) {
-        return interaction.reply({ content: 'A season is already active. End it first with `/season end`.', ephemeral: true });
+        return interaction.reply({ content: 'A season is already active. End it first with `/season end`.', flags: MessageFlags.Ephemeral });
     }
 
     const seasonId = `season_${Date.now()}`;
@@ -533,14 +533,13 @@ async function executeAdminStart(interaction) {
 
     return interaction.reply({
         content: `✅ Economy season **${name}** started! Ends <t:${Math.floor(endsAt.getTime() / 1000)}:R>.`,
-        ephemeral: false
     });
 }
 
 // Admin: end economy season
 async function executeAdminEnd(interaction) {
     if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: 'Administrator only.', ephemeral: true });
+        return interaction.reply({ content: 'Administrator only.', flags: MessageFlags.Ephemeral });
     }
 
     await interaction.deferReply();
@@ -617,12 +616,12 @@ async function executeSeasonEvent(interaction) {
 
     const activeEvent = guildSettings?.activeEvent;
     if (!activeEvent?.type) {
-        return interaction.reply({ content: 'No seasonal event is running on this server right now.', ephemeral: true });
+        return interaction.reply({ content: 'No seasonal event is running on this server right now.', flags: MessageFlags.Ephemeral });
     }
 
     const eventDef = SEASONAL_EVENTS[activeEvent.type];
     if (!eventDef) {
-        return interaction.reply({ content: 'No seasonal event data found.', ephemeral: true });
+        return interaction.reply({ content: 'No seasonal event data found.', flags: MessageFlags.Ephemeral });
     }
 
     const currency = eventDef.currency;
@@ -790,7 +789,7 @@ module.exports = {
             if (sub === 'event')         return await executeSeasonEvent(interaction);
         } catch (err) {
             console.error('[season] error:', err);
-            const msg = { content: 'Something went wrong with the season command.', ephemeral: true };
+            const msg = { content: 'Something went wrong with the season command.', flags: MessageFlags.Ephemeral };
             if (interaction.replied || interaction.deferred) return interaction.followUp(msg);
             return interaction.reply(msg);
         }

@@ -3,6 +3,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
@@ -202,21 +203,21 @@ module.exports = {
     async execute(interaction) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false || guildSettings?.economy?.blackjackEnabled === false) {
-            return interaction.reply({ content: 'Blackjack is disabled on this server.', ephemeral: true });
+            return interaction.reply({ content: 'Blackjack is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const currency     = guildSettings?.economy?.currency || '💰';
         const bet          = interaction.options.getInteger('bet');
         const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
 
         let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         if (!user) user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
 
         if (user.balance < bet) {
-            return interaction.reply({ content: `You don't have enough ${currency}. Your balance: **${currency}${user.balance.toLocaleString()}**`, ephemeral: true });
+            return interaction.reply({ content: `You don't have enough ${currency}. Your balance: **${currency}${user.balance.toLocaleString()}**`, flags: MessageFlags.Ephemeral });
         }
 
         if (!await confirmBet(interaction, bet, user.balance, 'Blackjack', guildSettings)) return;
@@ -228,7 +229,7 @@ module.exports = {
             { new: true },
         );
         if (!debited) {
-            return interaction.reply({ content: `❌ Not enough ${currency}! Your balance may have changed.`, ephemeral: true });
+            return interaction.reply({ content: `❌ Not enough ${currency}! Your balance may have changed.`, flags: MessageFlags.Ephemeral });
         }
         user = debited;
 

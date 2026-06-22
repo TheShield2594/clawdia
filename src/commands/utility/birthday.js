@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 
 function isValidDate(month, day, year) {
@@ -69,44 +69,44 @@ module.exports = {
         if (sub === 'add' || sub === 'set') {
             const target = sub === 'set' ? interaction.options.getUser('user', true) : interaction.user;
             if (sub === 'set' && !interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ content: 'You need Manage Server to set another member birthday.', ephemeral: true });
+                return interaction.reply({ content: 'You need Manage Server to set another member birthday.', flags: MessageFlags.Ephemeral });
             }
 
             const month = interaction.options.getInteger('month', true);
             const day = interaction.options.getInteger('day', true);
             const year = interaction.options.getInteger('year');
             if (!isValidDate(month, day, year || 2000)) {
-                return interaction.reply({ content: 'Invalid date provided.', ephemeral: true });
+                return interaction.reply({ content: 'Invalid date provided.', flags: MessageFlags.Ephemeral });
             }
 
             await upsertBirthday(interaction.guild.id, target.id, month, day, year);
-            return interaction.reply({ content: `✅ Birthday saved for ${target}: ${month}/${day}${year ? `/${year}` : ''}`, ephemeral: true });
+            return interaction.reply({ content: `✅ Birthday saved for ${target}: ${month}/${day}${year ? `/${year}` : ''}`, flags: MessageFlags.Ephemeral });
         }
 
         if (sub === 'remove' || sub === 'removeuser') {
             const target = sub === 'removeuser' ? interaction.options.getUser('user', true) : interaction.user;
             if (sub === 'removeuser' && !interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ content: 'You need Manage Server to remove another member birthday.', ephemeral: true });
+                return interaction.reply({ content: 'You need Manage Server to remove another member birthday.', flags: MessageFlags.Ephemeral });
             }
 
             const user = await User.findOne({ userId: target.id, guildId: interaction.guild.id });
-            if (!user) return interaction.reply({ content: `No birthday found for ${target}.`, ephemeral: true });
+            if (!user) return interaction.reply({ content: `No birthday found for ${target}.`, flags: MessageFlags.Ephemeral });
             user.birthday = { month: null, day: null, year: null, lastCelebratedYear: null };
             await user.save();
-            return interaction.reply({ content: `✅ Birthday removed for ${target}.`, ephemeral: true });
+            return interaction.reply({ content: `✅ Birthday removed for ${target}.`, flags: MessageFlags.Ephemeral });
         }
 
         if (sub === 'show') {
             const target = interaction.options.getUser('user') || interaction.user;
             const user = await User.findOne({ userId: target.id, guildId: interaction.guild.id });
             if (!user?.birthday?.month || !user?.birthday?.day) {
-                return interaction.reply({ content: `No birthday is set for ${target}.`, ephemeral: true });
+                return interaction.reply({ content: `No birthday is set for ${target}.`, flags: MessageFlags.Ephemeral });
             }
-            return interaction.reply({ content: `🎂 ${target}'s birthday: ${formatBirthday(user.birthday)}`, ephemeral: true });
+            return interaction.reply({ content: `🎂 ${target}'s birthday: ${formatBirthday(user.birthday)}`, flags: MessageFlags.Ephemeral });
         }
 
         const all = await User.find({ guildId: interaction.guild.id, 'birthday.month': { $ne: null }, 'birthday.day': { $ne: null } });
-        if (!all.length) return interaction.reply({ content: 'No birthdays have been set yet.', ephemeral: true });
+        if (!all.length) return interaction.reply({ content: 'No birthdays have been set yet.', flags: MessageFlags.Ephemeral });
 
         const now = new Date();
         const ranked = all
@@ -115,6 +115,6 @@ module.exports = {
             .slice(0, 5);
 
         const lines = ranked.map((u, i) => `${i + 1}. <@${u.userId}> — ${formatBirthday(u.birthday)} (${u.daysLeft} day${u.daysLeft === 1 ? '' : 's'})`);
-        return interaction.reply({ content: `🎉 **Next 5 Birthdays**\n${lines.join('\n')}`, ephemeral: true });
+        return interaction.reply({ content: `🎉 **Next 5 Birthdays**\n${lines.join('\n')}`, flags: MessageFlags.Ephemeral });
     }
 };

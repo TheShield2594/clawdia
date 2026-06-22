@@ -3,6 +3,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
@@ -262,7 +263,7 @@ module.exports = {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
-            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, ephemeral: true });
+            return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const user        = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash');
@@ -328,7 +329,7 @@ async function openLobby(interaction, bet, hostAutoCashout) {
 
         if (i.customId === `crash_start_${lobbyId}`) {
             if (i.user.id !== lobby.hostId) {
-                return i.reply({ content: 'Only the host can start early.', ephemeral: true });
+                return i.reply({ content: 'Only the host can start early.', flags: MessageFlags.Ephemeral });
             }
             await i.deferUpdate().catch(() => {});
             joinCollector.stop('started');
@@ -336,10 +337,10 @@ async function openLobby(interaction, bet, hostAutoCashout) {
         }
 
         if (lobby.players.has(i.user.id)) {
-            return i.reply({ content: "You're already in this lobby.", ephemeral: true });
+            return i.reply({ content: "You're already in this lobby.", flags: MessageFlags.Ephemeral });
         }
         if (lobby.players.size >= MAX_PLAYERS) {
-            return i.reply({ content: 'Lobby is full.', ephemeral: true });
+            return i.reply({ content: 'Lobby is full.', flags: MessageFlags.Ephemeral });
         }
 
         const deducted = await User.findOneAndUpdate(
@@ -348,7 +349,7 @@ async function openLobby(interaction, bet, hostAutoCashout) {
             { new: true }
         );
         if (!deducted) {
-            return i.reply({ content: `You need **${bet.toLocaleString()}** coins to join.`, ephemeral: true });
+            return i.reply({ content: `You need **${bet.toLocaleString()}** coins to join.`, flags: MessageFlags.Ephemeral });
         }
 
         const joined = addPlayer(channelId, i.user.id, null, i.user.username); // no auto cash-out for non-host joiners
@@ -357,7 +358,7 @@ async function openLobby(interaction, bet, hostAutoCashout) {
                 { userId: i.user.id, guildId: interaction.guild.id },
                 { $inc: { balance: bet, pendingCrashRefund: -bet } }
             ).catch(err => console.error('[crash] join refund failed:', err));
-            return i.reply({ content: 'Could not join the lobby (it may have just filled up). Your coins have been refunded.', ephemeral: true });
+            return i.reply({ content: 'Could not join the lobby (it may have just filled up). Your coins have been refunded.', flags: MessageFlags.Ephemeral });
         }
         await i.deferUpdate().catch(() => {});
         await updateLobbyEmbed();
@@ -474,18 +475,18 @@ async function startCrashGame(interaction, lobby, lobbyId) {
         if (gameOver) { await i.deferUpdate().catch(() => {}); return; }
         const state = lobby.players.get(i.user.id);
         if (!state || state.cashedOutAt !== null) {
-            return i.reply({ content: "You've already cashed out.", ephemeral: true });
+            return i.reply({ content: "You've already cashed out.", flags: MessageFlags.Ephemeral });
         }
 
         const cashed = await cashOutPlayer(i.user.id, currentMult, false);
         if (!cashed) {
-            return i.reply({ content: "You've already cashed out.", ephemeral: true });
+            return i.reply({ content: "You've already cashed out.", flags: MessageFlags.Ephemeral });
         }
 
         const payout = Math.floor(bet * currentMult);
         await i.reply({
             content: `✅ Cashed out at **${multLabel(currentMult)}** — **+${(payout - bet).toLocaleString()} coins**!`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         }).catch(() => {});
 
         const lines = await getPlayerLines();
@@ -550,7 +551,7 @@ async function startCrashGame(interaction, lobby, lobbyId) {
                     time:   60_000,
                 }).on('collect', async i => {
                     const lbEmbed = await buildWeeklyLeaderboard(guildId, interaction.client);
-                    await i.reply({ embeds: [lbEmbed], ephemeral: false }).catch(() => {});
+                    await i.reply({ embeds: [lbEmbed] }).catch(() => {});
                 }).on('end', () => {
                     interaction.editReply({ components: [] }).catch(() => {});
                 });
