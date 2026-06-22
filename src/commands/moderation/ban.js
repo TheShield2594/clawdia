@@ -110,7 +110,11 @@ module.exports = {
                 durationMs ? { duration: Math.round(durationMs / 60000) } : {});
         } catch (error) {
             console.error('Ban error:', error);
-            await interaction.reply({ content: 'Failed to ban the user.', flags: MessageFlags.Ephemeral });
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp({ content: 'Failed to ban the user.', flags: MessageFlags.Ephemeral }).catch(() => {});
+            } else {
+                await interaction.reply({ content: 'Failed to ban the user.', flags: MessageFlags.Ephemeral }).catch(() => {});
+            }
         }
     }
 };

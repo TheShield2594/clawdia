@@ -52,7 +52,11 @@ module.exports = {
             await logModeration(interaction.guild.id, 'mute', user, interaction.user, reason);
         } catch (error) {
             console.error('Mute error:', error);
-            await interaction.reply({ content: 'Failed to mute the user.', flags: MessageFlags.Ephemeral });
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp({ content: 'Failed to mute the user.', flags: MessageFlags.Ephemeral }).catch(() => {});
+            } else {
+                await interaction.reply({ content: 'Failed to mute the user.', flags: MessageFlags.Ephemeral }).catch(() => {});
+            }
         }
     }
 };
