@@ -43,10 +43,15 @@ module.exports = {
                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed] });
-            await logModeration(interaction.guild.id, 'unban', ban.user, interaction.user, reason);
+            await logModeration(interaction.guild.id, 'unban', ban.user, interaction.user, reason).catch(err => {
+                console.error('Unban log error:', err);
+                if (interaction.replied || interaction.deferred) {
+                    interaction.followUp({ content: 'Unban succeeded, but failed to log the action.', flags: MessageFlags.Ephemeral }).catch(() => {});
+                }
+            });
         } catch (error) {
             console.error('Unban error:', error);
-            await interaction.reply({ content: 'Failed to unban the user.', flags: MessageFlags.Ephemeral });
+            await interaction.reply({ content: 'Failed to unban the user.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
     }
 };

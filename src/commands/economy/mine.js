@@ -1291,12 +1291,14 @@ async function handleShop(interaction, sub) {
             new ButtonBuilder().setCustomId('minepickaxe_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
         );
 
-        const confirmPayload = { embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true };
+        const confirmPayload = { embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, withResponse: true };
         if (pickaxeImg) confirmPayload.files = [pickaxeImg.attachment];
-        const reply = await interaction.reply(confirmPayload);
+        const response = await interaction.reply(confirmPayload);
+        const reply = response.resource.message;
         const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
-        collector.on('collect', async btn => {
+        let actionPromise = null;
+        collector.on('collect', btn => {
             if (btn.user.id !== interaction.user.id) {
                 return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
             }
@@ -1306,6 +1308,7 @@ async function handleShop(interaction, sub) {
                 return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
             }
 
+            actionPromise = (async () => {
             try {
                 await btn.deferUpdate();
 
@@ -1378,15 +1381,18 @@ async function handleShop(interaction, sub) {
                 console.error('[mineshop pickaxe] purchase error:', err);
                 interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
+            })();
         });
 
-        collector.on('end', (_, reason) => {
-            if (reason === 'time') {
-                interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
-            }
+        return new Promise(resolve => {
+            collector.on('end', async (_, reason) => {
+                if (reason === 'time') {
+                    interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
+                }
+                if (actionPromise) await actionPromise.catch(() => {});
+                resolve();
+            });
         });
-
-        return;
     }
 
     if (sub === 'upgrade') {
@@ -1471,10 +1477,12 @@ async function handleShop(interaction, sub) {
             new ButtonBuilder().setCustomId('minebuy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
         );
 
-        const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, fetchReply: true });
+        const response = await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral, withResponse: true });
+        const reply = response.resource.message;
         const collector = reply.createMessageComponentCollector({ time: 30_000 });
 
-        collector.on('collect', async btn => {
+        let actionPromise = null;
+        collector.on('collect', btn => {
             if (btn.user.id !== interaction.user.id) {
                 return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
             }
@@ -1484,6 +1492,7 @@ async function handleShop(interaction, sub) {
                 return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
             }
 
+            actionPromise = (async () => {
             try {
                 await btn.deferUpdate();
 
@@ -1549,15 +1558,18 @@ async function handleShop(interaction, sub) {
                 console.error('[mineshop buy] purchase error:', err);
                 interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
+            })();
         });
 
-        collector.on('end', (_, reason) => {
-            if (reason === 'time') {
-                interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
-            }
+        return new Promise(resolve => {
+            collector.on('end', async (_, reason) => {
+                if (reason === 'time') {
+                    interaction.editReply({ content: 'Purchase timed out.', embeds: [], components: [] }).catch(() => {});
+                }
+                if (actionPromise) await actionPromise.catch(() => {});
+                resolve();
+            });
         });
-
-        return;
     }
 
     if (sub === 'use') {

@@ -378,7 +378,11 @@ module.exports = {
             }
         } catch (error) {
             console.error('Work error:', error);
-            await interaction.reply({ content: 'Failed to work.', flags: MessageFlags.Ephemeral });
+            if (interaction.replied || interaction.deferred) {
+                await interaction.editReply({ content: 'Failed to work.', embeds: [], components: [] }).catch(() => {});
+            } else {
+                await interaction.reply({ content: 'Failed to work.', flags: MessageFlags.Ephemeral }).catch(() => {});
+            }
         }
     }
 };
