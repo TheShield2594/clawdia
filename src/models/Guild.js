@@ -233,7 +233,11 @@ const guildSchema = new Schema({
         feeds: [{ type: String }],
         title: { type: String, default: '📰 Daily News Digest' },
         maxItemsPerFeed: { type: Number, default: 3 },
-        timezone: { type: String, default: 'UTC' }
+        timezone: { type: String, default: 'UTC' },
+        sentLinks: [{
+            link: { type: String, required: true },
+            sentAt: { type: Date, required: true }
+        }]
     },
 
     dailyNewsProfiles: {
@@ -246,7 +250,11 @@ const guildSchema = new Schema({
             timezone: { type: String, default: null },
             feeds: [{ type: String }],
             title: { type: String, default: '📰 Daily News Digest' },
-            maxItemsPerFeed: { type: Number, default: 3 }
+            maxItemsPerFeed: { type: Number, default: 3 },
+            sentLinks: [{
+                link: { type: String, required: true },
+                sentAt: { type: Date, required: true }
+            }]
         }],
         validate: {
             validator: distinctProfileIds,
