@@ -833,30 +833,33 @@ async function handleAIChat(message, aiSettings) {
             // Keep the typing indicator alive for long generations
             const typingInterval = setInterval(() => message.channel.sendTyping().catch(() => {}), TYPING_REFRESH_INTERVAL_MS);
 
-            await withRetry(async () => {
-                fullResponse = '';
-                currentBuf = '';
-                for await (const piece of streamCompletion(callArgs)) {
-                    fullResponse += piece;
-                    currentBuf += piece;
-                    if (currentBuf.length >= DISCORD_MAX_LEN - 50) {
-                        await currentMsg.edit(currentBuf.slice(0, DISCORD_MAX_LEN));
-                        const overflow = currentBuf.slice(DISCORD_MAX_LEN);
-                        currentMsg = await message.channel.send(overflow || '…');
-                        sentMessages.push(currentMsg);
-                        currentBuf = overflow;
-                        lastEdit = Date.now();
-                        continue;
+            try {
+                await withRetry(async () => {
+                    fullResponse = '';
+                    currentBuf = '';
+                    for await (const piece of streamCompletion(callArgs)) {
+                        fullResponse += piece;
+                        currentBuf += piece;
+                        if (currentBuf.length >= DISCORD_MAX_LEN - 50) {
+                            await currentMsg.edit(currentBuf.slice(0, DISCORD_MAX_LEN));
+                            const overflow = currentBuf.slice(DISCORD_MAX_LEN);
+                            currentMsg = await message.channel.send(overflow || '…');
+                            sentMessages.push(currentMsg);
+                            currentBuf = overflow;
+                            lastEdit = Date.now();
+                            continue;
+                        }
+                        const now = Date.now();
+                        if (now - lastEdit >= STREAM_EDIT_INTERVAL_MS) {
+                            await currentMsg.edit(currentBuf || '…').catch(() => {});
+                            lastEdit = now;
+                        }
                     }
-                    const now = Date.now();
-                    if (now - lastEdit >= STREAM_EDIT_INTERVAL_MS) {
-                        await currentMsg.edit(currentBuf || '…').catch(() => {});
-                        lastEdit = now;
-                    }
-                }
-                if (currentBuf) await currentMsg.edit(currentBuf).catch(() => {});
-            });
-            clearInterval(typingInterval);
+                    if (currentBuf) await currentMsg.edit(currentBuf).catch(() => {});
+                });
+            } finally {
+                clearInterval(typingInterval);
+            }
 
             // Post-process: reconcile sentMessages against the canonical cleanText chunks
             if (aiSettings.actionsEnabled) {
