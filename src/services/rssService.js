@@ -16,6 +16,17 @@ const DEAD_FEED_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
 const SENT_LINKS_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+function compareByDateDesc(a, b) {
+    const aTime = a.date.getTime();
+    const bTime = b.date.getTime();
+    const aValid = !Number.isNaN(aTime);
+    const bValid = !Number.isNaN(bTime);
+    if (aValid && bValid) return bTime - aTime;
+    if (aValid) return -1;
+    if (bValid) return 1;
+    return 0;
+}
+
 function createLegacyProfile(guild) {
     const legacy = guild.dailyNews || {};
     return {
@@ -171,7 +182,7 @@ async function sendDailyNewsForProfile(client, guild, profile) {
                     date: new Date(item.pubDate || item.isoDate)
                 }))
                 .filter(item => Number.isNaN(item.date.getTime()) || item.date.getTime() >= cutoffMs)
-                .sort((a, b) => b.date.getTime() - a.date.getTime())
+                .sort(compareByDateDesc)
                 .slice(0, profile.maxItemsPerFeed || 3);
 
             allItems.push(...feedItems);
@@ -201,7 +212,7 @@ async function sendDailyNewsForProfile(client, guild, profile) {
 
     if (uniqueItems.length === 0) return;
 
-    uniqueItems.sort((a, b) => b.date - a.date);
+    uniqueItems.sort(compareByDateDesc);
 
     const embed = new EmbedBuilder()
         .setColor('#0099ff')
