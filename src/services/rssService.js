@@ -14,6 +14,19 @@ const feedLastFailTime = new Map();
 const DEAD_FEED_THRESHOLD = 3;
 const DEAD_FEED_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
+const SENT_LINKS_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function compareByDateDesc(a, b) {
+    const aTime = a.date.getTime();
+    const bTime = b.date.getTime();
+    const aValid = !Number.isNaN(aTime);
+    const bValid = !Number.isNaN(bTime);
+    if (aValid && bValid) return bTime - aTime;
+    if (aValid) return -1;
+    if (bValid) return 1;
+    return 0;
+}
+
 function createLegacyProfile(guild) {
     const legacy = guild.dailyNews || {};
     return {
@@ -24,8 +37,32 @@ function createLegacyProfile(guild) {
         timezone: runtimeTimezone || undefined,
         feeds: Array.isArray(legacy.feeds) ? legacy.feeds : [],
         title: legacy.title || '📰 Daily News Digest',
-        maxItemsPerFeed: legacy.maxItemsPerFeed || 3
+        maxItemsPerFeed: legacy.maxItemsPerFeed || 3,
+        sentLinks: Array.isArray(legacy.sentLinks) ? legacy.sentLinks : []
     };
+}
+
+function getProfileSentLinksContainer(guild, profileId) {
+    if (Array.isArray(guild.dailyNewsProfiles) && guild.dailyNewsProfiles.length > 0) {
+        return guild.dailyNewsProfiles.find(p => p.profileId === profileId) || null;
+    }
+    return profileId === 'default' ? guild.dailyNews : null;
+}
+
+async function persistSentLinks(guild, profile, newlySentLinks) {
+    const container = getProfileSentLinksContainer(guild, profile.profileId);
+    if (!container) return;
+
+    const cutoff = Date.now() - SENT_LINKS_RETENTION_MS;
+    const existing = Array.isArray(container.sentLinks) ? container.sentLinks : [];
+    const now = new Date();
+
+    const merged = existing
+        .filter(entry => entry.sentAt && entry.sentAt.getTime() > cutoff)
+        .concat(newlySentLinks.map(link => ({ link, sentAt: now })));
+
+    container.sentLinks = merged;
+    await guild.save();
 }
 
 function getDailyNewsProfiles(guild) {
@@ -144,8 +181,8 @@ async function sendDailyNewsForProfile(client, guild, profile) {
                     source: parsedFeed.title || 'Unknown Source',
                     date: new Date(item.pubDate || item.isoDate)
                 }))
-                .filter(item => !Number.isNaN(item.date.getTime()) && item.date.getTime() >= cutoffMs)
-                .sort((a, b) => b.date.getTime() - a.date.getTime())
+                .filter(item => Number.isNaN(item.date.getTime()) || item.date.getTime() >= cutoffMs)
+                .sort(compareByDateDesc)
                 .slice(0, profile.maxItemsPerFeed || 3);
 
             allItems.push(...feedItems);
@@ -161,17 +198,21 @@ async function sendDailyNewsForProfile(client, guild, profile) {
         }
     }
 
+    const previouslySent = new Set(
+        (Array.isArray(profile.sentLinks) ? profile.sentLinks : []).map(entry => entry.link)
+    );
+
     const uniqueItems = [];
     const seenLinks = new Set();
     for (const item of allItems) {
-        if (item.normalizedLink && seenLinks.has(item.normalizedLink)) continue;
+        if (item.normalizedLink && (seenLinks.has(item.normalizedLink) || previouslySent.has(item.normalizedLink))) continue;
         seenLinks.add(item.normalizedLink);
         uniqueItems.push(item);
     }
 
     if (uniqueItems.length === 0) return;
 
-    uniqueItems.sort((a, b) => b.date - a.date);
+    uniqueItems.sort(compareByDateDesc);
 
     const embed = new EmbedBuilder()
         .setColor('#0099ff')
@@ -194,6 +235,9 @@ async function sendDailyNewsForProfile(client, guild, profile) {
     embed.setFooter({ text: `${uniqueItems.length} articles from ${profile.feeds.length} sources • last 24h` });
 
     await channel.send({ embeds: [embed] });
+
+    const sentLinks = uniqueItems.slice(0, 10).map(item => item.normalizedLink).filter(Boolean);
+    await persistSentLinks(guild, profile, sentLinks);
 }
 
 async function sendDailyNews(client, guildId, profileId = null) {
