@@ -431,7 +431,23 @@ async function executeStart(interaction) {
         });
     }
 
-    if (h.lastHunt && Date.now() - h.lastHunt.getTime() < LIMITS.HUNT_COOLDOWN_MS) {
+    // Atomically claim the cooldown slot up front — lastHunt is set the moment this
+    // request is accepted (not when the hunt finally resolves, ~20s later via the
+    // stealth/aim button flow), so two concurrent /hunt start calls can't both pass
+    // the cooldown check before either one's write commits.
+    const huntClaimNow = new Date();
+    const huntCooldownFloor = new Date(huntClaimNow.getTime() - LIMITS.HUNT_COOLDOWN_MS);
+    const claimedHunt = await User.findOneAndUpdate(
+        {
+            userId: interaction.user.id,
+            guildId: interaction.guild.id,
+            $or: [{ 'hunt.lastHunt': null }, { 'hunt.lastHunt': { $lte: huntCooldownFloor } }],
+        },
+        { $set: { 'hunt.lastHunt': huntClaimNow } },
+        { new: true },
+    );
+
+    if (!claimedHunt) {
         const nextAt = new Date(h.lastHunt.getTime() + LIMITS.HUNT_COOLDOWN_MS);
         return interaction.reply({
             embeds: [buildCooldownEmbed({
@@ -443,6 +459,7 @@ async function executeStart(interaction) {
             flags: MessageFlags.Ephemeral,
         });
     }
+    h.lastHunt = huntClaimNow;
 
     if (h.stamina <= 0) {
         const regenMs = msUntilNextStamina(user);

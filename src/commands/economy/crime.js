@@ -109,28 +109,46 @@ module.exports = {
 
         const currency = guildSettings?.economy?.currency || '💰';
 
-        const user = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
-            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+        // Atomically claim the cooldown slot up front — lastCrime is set the moment
+        // the job starts (not when it resolves ~30s later via the button flow), so
+        // two concurrent /crime invocations can't both pass the cooldown check
+        // before either one writes back.
+        const claimNow = new Date();
+        const cooldownFloor = new Date(claimNow.getTime() - COOLDOWN_MS);
+        const claimed = await User.findOneAndUpdate(
+            {
+                userId: interaction.user.id,
+                guildId: interaction.guild.id,
+                $and: [
+                    { $or: [{ wantedUntil: null }, { wantedUntil: { $lte: claimNow } }] },
+                    { $or: [{ lastCrime: null }, { lastCrime: { $lte: cooldownFloor } }] },
+                ],
+            },
+            {
+                $set: { lastCrime: claimNow },
+                $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id },
+            },
             { upsert: true, new: true }
         );
 
-        if (user.wantedUntil && Date.now() < user.wantedUntil.getTime()) {
-            const nextAt = new Date(user.wantedUntil.getTime());
-            return interaction.reply({
-                embeds: [buildCooldownEmbed({
-                    title: '🚨 Still Wanted',
-                    description: 'The city has eyes on you. Lay low. 🚨\nDon\'t even think about running another job until the heat breaks.',
-                    color: '#e74c3c',
-                    nextAt,
-                    nextRewardPreview: 'Once clear: Grand Larceny pays 600–1500 coins · Casino Con is next on the board',
-                })],
-                flags: MessageFlags.Ephemeral,
-            });
-        }
+        if (!claimed) {
+            const fresh = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
 
-        if (user.lastCrime && Date.now() - user.lastCrime.getTime() < COOLDOWN_MS) {
-            const nextAt = new Date(user.lastCrime.getTime() + COOLDOWN_MS);
+            if (fresh?.wantedUntil && Date.now() < fresh.wantedUntil.getTime()) {
+                const nextAt = new Date(fresh.wantedUntil.getTime());
+                return interaction.reply({
+                    embeds: [buildCooldownEmbed({
+                        title: '🚨 Still Wanted',
+                        description: 'The city has eyes on you. Lay low. 🚨\nDon\'t even think about running another job until the heat breaks.',
+                        color: '#e74c3c',
+                        nextAt,
+                        nextRewardPreview: 'Once clear: Grand Larceny pays 600–1500 coins · Casino Con is next on the board',
+                    })],
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            const nextAt = new Date((fresh?.lastCrime?.getTime() ?? Date.now()) + COOLDOWN_MS);
             return interaction.reply({
                 embeds: [buildCooldownEmbed({
                     title: '🌆 Laying Low',
@@ -142,6 +160,8 @@ module.exports = {
                 flags: MessageFlags.Ephemeral,
             });
         }
+
+        const user = claimed;
 
         // ── Step 1: Choose the crime ────────────────────────────────────────────
         const featured = getDailyFeatured(interaction.guild.id);
