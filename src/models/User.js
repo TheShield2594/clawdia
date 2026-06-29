@@ -33,9 +33,13 @@ const userSchema = new Schema({
     },
     shiftsWorked: { type: Number, default: 0 },
 
-    // Daily hard quiz attempt counter (resets midnight UTC)
+    // Daily quiz attempt counters per difficulty (each resets midnight UTC)
     dailyQuizHard: { type: Number, default: 0 },
     dailyQuizHardReset: { type: Date, default: null },
+    dailyQuizMedium: { type: Number, default: 0 },
+    dailyQuizMediumReset: { type: Date, default: null },
+    dailyQuizEasy: { type: Number, default: 0 },
+    dailyQuizEasyReset: { type: Date, default: null },
 
     inventory: [{
         itemId: { type: String, required: true },

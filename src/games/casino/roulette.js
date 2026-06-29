@@ -178,8 +178,9 @@ module.exports = {
                 .setMaxValue(36)
                 .setRequired(false)),
 
-    async execute(interaction) {
+    async execute(interaction, { releaseLock } = {}) {
         if (!interaction.guild) {
+            releaseLock?.();
             return interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
         }
 
@@ -188,6 +189,7 @@ module.exports = {
         const target = interaction.options.getInteger('number');
 
         if (betKey === 'number' && target === null) {
+            releaseLock?.();
             return interaction.reply({
                 content: 'You must provide a `number` (0–36) when betting on a straight number.',
                 flags: MessageFlags.Ephemeral,
@@ -197,18 +199,22 @@ module.exports = {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            releaseLock?.();
             return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
         const { shouldProceed: rProceed, alreadyReplied: rReplied } = await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings);
-        if (!rProceed) return;
+        if (!rProceed) { releaseLock?.(); return; }
         if (!rReplied) await interaction.deferReply();
-        await playRoulette(interaction, betKey, bet, target);
+        await playRoulette(interaction, betKey, bet, target, releaseLock);
     },
 };
 
-async function playRoulette(interaction, betKey, bet, target) {
+// releaseLock is called once the spin settles into a result — "Spin Again"
+// starts a brand-new hand with its own atomic debit, so it doesn't need the
+// lock re-held.
+async function playRoulette(interaction, betKey, bet, target, releaseLock) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -216,6 +222,7 @@ async function playRoulette(interaction, betKey, bet, target) {
     try {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
+            releaseLock?.();
             return interaction.editReply({ content: 'Economy games are disabled in this server.' });
         }
 
@@ -232,6 +239,7 @@ async function playRoulette(interaction, betKey, bet, target) {
         );
 
         if (!debited) {
+            releaseLock?.();
             return interaction.editReply({
                 content: `❌ Not enough coins to wager **${bet.toLocaleString()}**.`,
             });
@@ -279,6 +287,7 @@ async function playRoulette(interaction, betKey, bet, target) {
             );
         }
         settled = true;
+        releaseLock?.();
 
         // Save result to guild roulette history (last 15)
         await Guild.updateOne(
@@ -317,7 +326,7 @@ async function playRoulette(interaction, betKey, bet, target) {
         const wallet = user?.balance ?? 0;
         if (!await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings)) return;
 
-        await playRoulette(interaction, betKey, bet, target);
+        await playRoulette(interaction, betKey, bet, target, null);
         });
         collector.on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
@@ -325,6 +334,7 @@ async function playRoulette(interaction, betKey, bet, target) {
 
     } catch (err) {
         console.error('[Roulette] error:', err);
+        releaseLock?.();
         if (debited && !settled) {
             await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } }).catch(e =>
                 console.error('[Roulette] rollback failed:', e));

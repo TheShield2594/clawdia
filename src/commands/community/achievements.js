@@ -1,6 +1,7 @@
 'use strict';
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
+const mongoose = require('mongoose');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS } = require('../../data/achievements');
@@ -164,9 +165,9 @@ module.exports = {
             }
 
             if (sub === 'claim') {
-                let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-                if (!user) {
-                    user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
+                const existingUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }).lean();
+                if (!existingUser) {
+                    return interaction.reply({ content: 'You have no unclaimed achievement rewards.', flags: MessageFlags.Ephemeral });
                 }
 
                 const disabled = new Set(guildSettings.achievements?.disabledAchievements || []);
@@ -176,33 +177,63 @@ module.exports = {
                 for (const d of ACHIEVEMENTS) defMap.set(d.id, d);
                 for (const d of customAchievements) defMap.set(d.id, d);
 
-                const unclaimed = (user.achievements || []).filter(a => !a.claimed);
-                if (!unclaimed.length) {
+                // Only entries that are unclaimed, enabled, and actually carry a
+                // reward are eligible — this keeps disabled/no-reward achievements
+                // from being permanently marked claimed (which would block them
+                // from being claimed later if re-enabled).
+                const claimableIds = (existingUser.achievements || [])
+                    .filter(a => !a.claimed && !disabled.has(a.id))
+                    .map(a => a.id)
+                    .filter(id => {
+                        const def = defMap.get(id);
+                        return def && (def.xpReward || def.coinReward);
+                    });
+
+                if (!claimableIds.length) {
                     return interaction.reply({ content: 'You have no unclaimed achievement rewards.', flags: MessageFlags.Ephemeral });
                 }
 
+                // Claim + credit in one transaction so a payout failure can't leave
+                // achievements marked claimed without the reward having been granted.
                 let totalXp = 0;
                 let totalCoins = 0;
                 const names = [];
+                const session = await mongoose.startSession();
+                try {
+                    await session.withTransaction(async () => {
+                        const preClaim = await User.findOneAndUpdate(
+                            { userId: interaction.user.id, guildId: interaction.guild.id },
+                            { $set: { 'achievements.$[el].claimed': true } },
+                            {
+                                arrayFilters: [{ 'el.claimed': { $ne: true }, 'el.id': { $in: claimableIds } }],
+                                new: false,
+                                session,
+                            },
+                        );
 
-                for (const entry of unclaimed) {
-                    if (disabled.has(entry.id)) continue;
-                    const def = defMap.get(entry.id);
-                    if (!def) continue;
-                    if (!def.xpReward && !def.coinReward) {
-                        entry.claimed = true;
-                        continue;
-                    }
-                    totalXp    += def.xpReward    || 0;
-                    totalCoins += def.coinReward   || 0;
-                    names.push(`${def.emoji} ${def.name}`);
-                    entry.claimed = true;
+                        const justClaimed = (preClaim?.achievements || []).filter(a => claimableIds.includes(a.id) && !a.claimed);
+                        for (const entry of justClaimed) {
+                            const def = defMap.get(entry.id);
+                            totalXp    += def.xpReward    || 0;
+                            totalCoins += def.coinReward   || 0;
+                            names.push(`${def.emoji} ${def.name}`);
+                        }
+
+                        if (totalXp || totalCoins) {
+                            await User.updateOne(
+                                { userId: interaction.user.id, guildId: interaction.guild.id },
+                                { $inc: { xp: totalXp, balance: totalCoins } },
+                                { session },
+                            );
+                        }
+                    });
+                } finally {
+                    await session.endSession();
                 }
 
-                user.xp      = (user.xp      || 0) + totalXp;
-                user.balance = (user.balance  || 0) + totalCoins;
-                user.markModified('achievements');
-                await user.save();
+                if (!names.length) {
+                    return interaction.reply({ content: 'You have no unclaimed achievement rewards.', flags: MessageFlags.Ephemeral });
+                }
 
                 const lines = [];
                 if (totalXp)    lines.push(`+${totalXp} XP`);

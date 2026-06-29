@@ -1,4 +1,11 @@
-const { SlashCommandBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
+const {
+    SlashCommandBuilder,
+    AttachmentBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    MessageFlags,
+} = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 const { applyGrayscale } = require('../../utils/canvasFilters');
@@ -21,9 +28,13 @@ module.exports = {
         }
 
         const target = interaction.options.getUser('user') || interaction.user;
+        await interaction.deferReply();
+        await generateWasted(interaction, target);
+    },
+};
 
+async function generateWasted(interaction, target) {
         try {
-            await interaction.deferReply();
             const avatar = await loadImage(target.displayAvatarURL({ extension: 'png', size: SIZE }));
 
             const canvas = createCanvas(SIZE, SIZE);
@@ -56,11 +67,34 @@ module.exports = {
             ctx.strokeText('WASTED', SIZE / 2, SIZE / 2);
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'wasted.png' });
+            const regenId = `wasted_regen_${interaction.id}_${Date.now()}`;
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(regenId).setLabel('💀 Waste: Me').setStyle(ButtonStyle.Secondary),
+            );
             await interaction.editReply({
                 content: `💀 **${target.username}** has been wasted.`,
                 files: [attachment],
+                components: [row],
             });
-        } catch {
+
+            const msg = await interaction.fetchReply();
+            const collector = msg.createMessageComponentCollector({
+                filter: i => i.customId === regenId,
+                time:   60_000,
+            });
+
+            collector.on('collect', async i => {
+                const innerRl = checkImageRateLimit(i.user.id);
+                if (innerRl.limited) {
+                    return i.reply({ content: innerRl.message, flags: MessageFlags.Ephemeral }).catch(() => {});
+                }
+                await i.deferReply();
+                await generateWasted(i, i.user);
+            });
+
+            collector.on('end', () => interaction.editReply({ components: [] }).catch(() => {}));
+        } catch (err) {
+            console.error('[wasted] generation error:', err);
             const msg = '❌ Could not generate the wasted image. Please try again.';
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply(msg);
@@ -68,5 +102,4 @@ module.exports = {
                 await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
             }
         }
-    },
-};
+}

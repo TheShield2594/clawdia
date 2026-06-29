@@ -80,7 +80,10 @@ function phaseTitle(hits, total) {
     return '🎱 Drawing…';
 }
 
-async function playKeno(interaction, bet, picked, alreadyDebited = false) {
+// releaseLock is called once the draw settles into a result — replays/
+// rerolls don't need it re-held since they re-debit atomically like any
+// fresh bet.
+async function playKeno(interaction, bet, picked, alreadyDebited = false, releaseLock) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -98,6 +101,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
             );
 
             if (!debited) {
+                releaseLock?.();
                 const fresh = await User.findOne(userFilter);
                 return interaction.editReply({
                     content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
@@ -108,8 +112,30 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
         const drawn   = drawNumbers();
         const pickedStr = picked.map(n => `**${n}**`).join('  ');
 
+        // ── Skip-animation control — lets repeat players jump straight to the
+        // result instead of sitting through the full reveal each time ────────
+        const skipId   = `keno_skip_${interaction.id}_${Date.now()}`;
+        const skipRow  = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(skipId).setLabel('⏩ Skip Animation').setStyle(ButtonStyle.Secondary),
+        );
+        const animState = { skipped: false };
+        let skipCollector = null;
+        const armSkipCollector = async () => {
+            if (skipCollector) return;
+            const msg = await interaction.fetchReply().catch(() => null);
+            if (!msg) return;
+            skipCollector = msg.createMessageComponentCollector({
+                filter: i => i.user.id === interaction.user.id && i.customId === skipId,
+                time: 8_000,
+            });
+            skipCollector.on('collect', async i => {
+                animState.skipped = true;
+                await i.deferUpdate().catch(() => {});
+            });
+        };
+
         // ── Phase 1: Draw numbers 1-5 one at a time ──────────────────────────
-        for (let i = 1; i <= 5; i++) {
+        for (let i = 1; i <= 5 && !animState.skipped; i++) {
             const hits = drawn.slice(0, i).filter(n => picked.includes(n)).length;
             const embed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
@@ -122,36 +148,39 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
                     { name: `🔵 Drawing (${i}/10)`, value: `${hitBar(hits)}  **${hits}** hit`, inline: true },
                 )
                 .setFooter({ text: PAYTABLE_FOOTER });
-            await interaction.editReply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed], components: [skipRow] });
+            if (i === 1) await armSkipCollector();
             await delay(650);
         }
 
         // ── Midpoint suspense break ───────────────────────────────────────────
-        const midHits = drawn.slice(0, 5).filter(n => picked.includes(n)).length;
-        const remaining = PICK_COUNT - midHits;
-        let suspenseText;
-        if (midHits === 5)     suspenseText = '🔥 **All 5 matched in the first draw!** Last 5 are gravy…';
-        else if (midHits >= 3) suspenseText = `✅ **${midHits} matched** so far — ${remaining} more to go for the jackpot!`;
-        else if (midHits === 2) suspenseText = `🎯 **2 matched** — one more for a profit…`;
-        else if (midHits === 1) suspenseText = `😬 **1 matched** — need ${remaining} of the next 5…`;
-        else                   suspenseText  = `💨 **Nothing yet** — all ${PICK_COUNT} need to come from the last 5…`;
+        if (!animState.skipped) {
+            const midHits = drawn.slice(0, 5).filter(n => picked.includes(n)).length;
+            const remaining = PICK_COUNT - midHits;
+            let suspenseText;
+            if (midHits === 5)     suspenseText = '🔥 **All 5 matched in the first draw!** Last 5 are gravy…';
+            else if (midHits >= 3) suspenseText = `✅ **${midHits} matched** so far — ${remaining} more to go for the jackpot!`;
+            else if (midHits === 2) suspenseText = `🎯 **2 matched** — one more for a profit…`;
+            else if (midHits === 1) suspenseText = `😬 **1 matched** — need ${remaining} of the next 5…`;
+            else                   suspenseText  = `💨 **Nothing yet** — all ${PICK_COUNT} need to come from the last 5…`;
 
-        const midEmbed = new EmbedBuilder()
-            .setAuthor(embedAuthor(interaction))
-            .setThumbnail(THUMB)
-            .setColor('#5865F2')
-            .setTitle('🎱 Halfway — Drawing 6 of 10…')
-            .setDescription(formatKenoGrid(picked, drawn, 5))
-            .addFields(
-                { name: '🎯 Your Picks', value: pickedStr, inline: true },
-                { name: '📊 Midpoint', value: suspenseText, inline: false },
-            )
-            .setFooter({ text: PAYTABLE_FOOTER });
-        await interaction.editReply({ embeds: [midEmbed] });
-        await delay(1200);
+            const midEmbed = new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#5865F2')
+                .setTitle('🎱 Halfway — Drawing 6 of 10…')
+                .setDescription(formatKenoGrid(picked, drawn, 5))
+                .addFields(
+                    { name: '🎯 Your Picks', value: pickedStr, inline: true },
+                    { name: '📊 Midpoint', value: suspenseText, inline: false },
+                )
+                .setFooter({ text: PAYTABLE_FOOTER });
+            await interaction.editReply({ embeds: [midEmbed], components: [skipRow] });
+            await delay(1200);
+        }
 
         // ── Phase 2: Draw numbers 6-10 one at a time ─────────────────────────
-        for (let i = 6; i <= 10; i++) {
+        for (let i = 6; i <= 10 && !animState.skipped; i++) {
             const hits = drawn.slice(0, i).filter(n => picked.includes(n)).length;
             const embed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
@@ -164,9 +193,11 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
                     { name: `🔵 Drawing (${i}/10)`, value: `${hitBar(hits)}  **${hits}** hit`, inline: true },
                 )
                 .setFooter({ text: PAYTABLE_FOOTER });
-            await interaction.editReply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed], components: [skipRow] });
             await delay(650);
         }
+
+        skipCollector?.stop();
 
         // ── Calculate result ──────────────────────────────────────────────────
         const matches    = drawn.filter(n => picked.includes(n)).length;
@@ -209,14 +240,15 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
             );
         }
         settled = true;
+        releaseLock?.();
 
         const net    = credit - bet;
         const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
         let boostNote = '';
         if (totalCoinMult > 1.0 && adjustedPayout > bet) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
-        // ── Special celebration for big wins ──────────────────────────────────
-        if (matches === 5) {
+        // ── Special celebration for big wins (skipped if animation was skipped) ─
+        if (matches === 5 && !animState.skipped) {
             await delay(400);
             const stage1 = new EmbedBuilder()
                 .setColor('#FFD700')
@@ -233,7 +265,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
                 .setAuthor(embedAuthor(interaction));
             await interaction.editReply({ embeds: [stage2] });
             await delay(1100);
-        } else if (matches === 4) {
+        } else if (matches === 4 && !animState.skipped) {
             await delay(400);
             const stage1 = new EmbedBuilder()
                 .setColor('#00FF88')
@@ -352,10 +384,10 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
                     return i.update({ content: `❌ Not enough coins for the quick reroll (need **${rerollCost.toLocaleString()}** coins).`, embeds: [], components: [] });
                 }
                 await i.deferUpdate();
-                await playKeno(interaction, rerollCost, picked, true);
+                await playKeno(interaction, rerollCost, picked, true, null);
             } else {
                 await i.deferUpdate();
-                await playKeno(interaction, bet, picked);
+                await playKeno(interaction, bet, picked, false, null);
             }
         }).on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
@@ -363,6 +395,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
 
     } catch (err) {
         console.error('[Keno] error:', err);
+        releaseLock?.();
         if (debited && !settled) {
             await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } })
                 .catch(e => console.error('[Keno] rollback failed:', e));
@@ -387,15 +420,17 @@ module.exports = {
                 .setDescription('Your 5 numbers from 1–40, space-separated (e.g. 3 12 21 33 39)')
                 .setRequired(true)),
 
-    async execute(interaction) {
+    async execute(interaction, { releaseLock } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
+            releaseLock?.();
             return interaction.reply({ content: 'Casino games are disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const bet          = interaction.options.getInteger('bet');
         const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            releaseLock?.();
             return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const numbersRaw = interaction.options.getString('numbers');
@@ -404,6 +439,7 @@ module.exports = {
         const valid  = parsed.every(n => Number.isInteger(n) && n >= 1 && n <= POOL_SIZE);
 
         if (parsed.length !== PICK_COUNT || !valid) {
+            releaseLock?.();
             return interaction.reply({
                 content: `❌ Please provide exactly **5 different numbers** between 1 and ${POOL_SIZE}.\nExample: \`3 12 21 33 39\``,
                 flags: MessageFlags.Ephemeral,
@@ -412,11 +448,13 @@ module.exports = {
 
         const uniquePicked = [...new Set(parsed)];
         if (uniquePicked.length !== PICK_COUNT) {
+            releaseLock?.();
             return interaction.reply({ content: '❌ All 5 numbers must be different.', flags: MessageFlags.Ephemeral });
         }
 
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         if ((user?.balance ?? 0) < bet) {
+            releaseLock?.();
             const currency = guildSettings?.economy?.currency || '💰';
             return interaction.reply({
                 content: `You don't have enough ${currency}. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
@@ -425,8 +463,8 @@ module.exports = {
         }
 
         const { shouldProceed: knProceed, alreadyReplied: knReplied } = await confirmBet(interaction, bet, user.balance, 'Keno', guildSettings);
-        if (!knProceed) return;
+        if (!knProceed) { releaseLock?.(); return; }
         if (!knReplied) await interaction.deferReply();
-        await playKeno(interaction, bet, uniquePicked.sort((a, b) => a - b));
+        await playKeno(interaction, bet, uniquePicked.sort((a, b) => a - b), false, releaseLock);
     },
 };

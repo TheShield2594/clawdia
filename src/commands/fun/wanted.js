@@ -1,4 +1,11 @@
-const { SlashCommandBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
+const {
+    SlashCommandBuilder,
+    AttachmentBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    MessageFlags,
+} = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
 const { applySepia } = require('../../utils/canvasFilters');
@@ -25,9 +32,13 @@ module.exports = {
         }
 
         const target = interaction.options.getUser('user') || interaction.user;
+        await interaction.deferReply();
+        await generatePoster(interaction, target);
+    },
+};
 
+async function generatePoster(interaction, target) {
         try {
-            await interaction.deferReply();
             const avatar = await loadImage(target.displayAvatarURL({ extension: 'png', size: 256 }));
 
             const canvas = createCanvas(W, H);
@@ -99,8 +110,30 @@ module.exports = {
             ctx.fillText('Contact your local sheriff', W / 2, AVATAR_Y + AVATAR_SIZE + 130);
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'wanted.png' });
-            await interaction.editReply({ files: [attachment] });
-        } catch {
+            const regenId = `wanted_regen_${interaction.id}_${Date.now()}`;
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(regenId).setLabel('🤠 Wanted: Me').setStyle(ButtonStyle.Secondary),
+            );
+            await interaction.editReply({ files: [attachment], components: [row] });
+
+            const msg = await interaction.fetchReply();
+            const collector = msg.createMessageComponentCollector({
+                filter: i => i.customId === regenId,
+                time:   60_000,
+            });
+
+            collector.on('collect', async i => {
+                const innerRl = checkImageRateLimit(i.user.id);
+                if (innerRl.limited) {
+                    return i.reply({ content: innerRl.message, flags: MessageFlags.Ephemeral }).catch(() => {});
+                }
+                await i.deferReply();
+                await generatePoster(i, i.user);
+            });
+
+            collector.on('end', () => interaction.editReply({ components: [] }).catch(() => {}));
+        } catch (err) {
+            console.error('[wanted] generation error:', err);
             const msg = '❌ Could not generate the wanted poster. Please try again.';
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply(msg);
@@ -108,5 +141,4 @@ module.exports = {
                 await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
             }
         }
-    },
-};
+}

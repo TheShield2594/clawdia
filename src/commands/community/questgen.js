@@ -104,8 +104,21 @@ module.exports = {
             });
         }
 
-        // Deduct coins
-        user.balance -= COST;
+        // Atomically claim the cost up front — the AI call below can take several
+        // seconds, so deducting in-memory and saving at the end would let two
+        // concurrent /questgen calls both pass the balance check before either
+        // write commits.
+        const debited = await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: COST } },
+            { $inc: { balance: -COST } },
+            { new: true },
+        );
+        if (!debited) {
+            return interaction.editReply({
+                content: `You need at least **${COST} coins** to forge a Legendary Quest.`,
+            });
+        }
+        user.balance = debited.balance;
 
         // Build AI prompt
         const level     = user.level ?? 0;
@@ -145,10 +158,15 @@ Create a legendary quest that feels fitting for their journey so far.`;
             parsed = JSON.parse(cleaned);
         } catch (err) {
             console.error('[QUESTGEN] AI generation failed:', err?.message || err);
-            // Refund coins on failure
-            user.balance += COST;
-            await user.save();
-            return interaction.editReply({ content: 'The quest forge misfired! Your coins have been refunded. Try again in a moment.' });
+            const refunded = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: COST } },
+            ).catch(refundErr => { console.error('[QUESTGEN] Refund failed after AI failure:', refundErr); return null; });
+            return interaction.editReply({
+                content: refunded
+                    ? 'The quest forge misfired! Your coins have been refunded. Try again in a moment.'
+                    : 'The quest forge misfired, and the refund failed to process. Please contact a server admin — your coins were not returned automatically.',
+            });
         }
 
         // Validate and sanitize
@@ -175,16 +193,42 @@ Create a legendary quest that feels fitting for their journey so far.`;
                 xpReward, coinReward,
             });
 
-            user.quests = user.quests || [];
-            user.quests.push({ questId, progress: 0, completedAt: null, expiresAt });
-            await user.save();
+            // Re-check the active-AI-quest cap atomically with the push — the earlier
+            // check read a possibly-stale user doc, so without this a second
+            // concurrent /questgen could still slip a quest past the MAX_AI_QUESTS cap.
+            const pushed = await User.findOneAndUpdate(
+                {
+                    userId: interaction.user.id,
+                    guildId: interaction.guild.id,
+                    quests: { $not: { $elemMatch: { questId: { $regex: '^ai_' }, completedAt: null, expiresAt: { $gt: now } } } },
+                },
+                { $push: { quests: { questId, progress: 0, completedAt: null, expiresAt } } },
+            );
+            if (!pushed) {
+                await AiQuest.deleteOne({ questId }).catch(() => {});
+                const refunded = await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    { $inc: { balance: COST } },
+                ).catch(refundErr => { console.error('[QUESTGEN] Refund failed after cap race:', refundErr); return null; });
+                return interaction.editReply({
+                    content: refunded
+                        ? 'You already have an active Legendary Quest — your coins have been refunded.'
+                        : 'You already have an active Legendary Quest, and the refund failed to process. Please contact a server admin.',
+                });
+            }
         } catch (err) {
             console.error('[QUESTGEN] Persistence failed:', err?.message || err);
-            // Compensate: remove the quest doc if it was created before user.save() failed
+            // Compensate: remove the quest doc if it was created before the user update failed
             await AiQuest.deleteOne({ questId }).catch(() => {});
-            user.balance += COST;
-            await user.save().catch(() => {});
-            return interaction.editReply({ content: 'The quest forge failed to save! Your coins have been refunded. Try again in a moment.' });
+            const refunded = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: COST } },
+            ).catch(refundErr => { console.error('[QUESTGEN] Refund failed after persistence failure:', refundErr); return null; });
+            return interaction.editReply({
+                content: refunded
+                    ? 'The quest forge failed to save! Your coins have been refunded. Try again in a moment.'
+                    : 'The quest forge failed to save, and the refund failed to process. Please contact a server admin — your coins were not returned automatically.',
+            });
         }
 
         const currency = guildSettings?.economy?.currency ?? '💰';

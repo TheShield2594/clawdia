@@ -22,7 +22,12 @@ const REWARDS = {
     hard:   { win: 750, lose: 150 },
 };
 
-const HARD_DAILY_LIMIT = 20;
+// Daily attempt caps per difficulty (resets midnight UTC). Easy/medium were
+// previously uncapped, making them the highest-EV uncapped coin faucet in the
+// bot at a 5-minute cooldown — capping them closes that exploit.
+const DAILY_LIMITS = { easy: 40, medium: 30, hard: 20 };
+const COUNT_FIELD = { easy: 'dailyQuizEasy', medium: 'dailyQuizMedium', hard: 'dailyQuizHard' };
+const RESET_FIELD = { easy: 'dailyQuizEasyReset', medium: 'dailyQuizMediumReset', hard: 'dailyQuizHardReset' };
 
 // Returns midnight UTC for today (used to detect daily reset)
 function todayUTC() {
@@ -191,13 +196,11 @@ module.exports = {
                 .setDescription('Question difficulty (default: random)')
                 .setRequired(false)
                 .addChoices(
-                    { name: '🟢 Easy   — Win 250, Lose 50',        value: 'easy'   },
-                    { name: '🟡 Medium — Win 500, Lose 100',       value: 'medium' },
+                    { name: '🟢 Easy   — Win 250, Lose 50 (cap 40/day)',  value: 'easy'   },
+                    { name: '🟡 Medium — Win 500, Lose 100 (cap 30/day)', value: 'medium' },
                     { name: '🔴 Hard   — Win 750, Lose 150 (cap 20/day)', value: 'hard'   },
                     { name: '⚪ Random (any difficulty)',            value: 'any'    },
                 )),
-    // 5 minutes — at 20s this was the highest uncapped coins/hour faucet in the bot
-    // (easy quizzes net ~+200 EV per attempt with no daily cap).
     cooldown: 300,
 
     async execute(interaction) {
@@ -230,27 +233,40 @@ async function runQuiz(interaction, diffChoice) {
 
     const difficulty    = raw.difficulty;
 
-    // Enforce daily hard-attempt cap (20/day, resets at midnight UTC)
-    if (difficulty === 'hard') {
-        const today = todayUTC();
-        const needsReset = !user.dailyQuizHardReset || user.dailyQuizHardReset < today;
+    // Enforce daily per-difficulty attempt cap (resets at midnight UTC). The slot is
+    // claimed atomically up front (reset-if-stale, then increment-if-under-limit in a
+    // single findOneAndUpdate) so two concurrent /quiz calls can't both pass a stale
+    // in-memory count before either write commits.
+    {
+        const countField = COUNT_FIELD[difficulty];
+        const resetField = RESET_FIELD[difficulty];
+        const limit       = DAILY_LIMITS[difficulty] ?? DAILY_LIMITS.medium;
+        const today       = todayUTC();
+        const needsReset  = !user[resetField] || user[resetField] < today;
         if (needsReset) {
-            await User.updateOne(userFilter, { $set: { dailyQuizHard: 0, dailyQuizHardReset: today } });
-            user.dailyQuizHard = 0;
+            await User.updateOne(userFilter, { $set: { [countField]: 0, [resetField]: today } });
+            user[countField] = 0;
         }
-        if (user.dailyQuizHard >= HARD_DAILY_LIMIT) {
+
+        const claimedSlot = await User.findOneAndUpdate(
+            { ...userFilter, [countField]: { $lt: limit } },
+            { $inc: { [countField]: 1 } },
+            { new: true },
+        );
+        if (!claimedSlot) {
             const tomorrow = new Date(todayUTC().getTime() + 86_400_000);
             return interaction.editReply({
                 embeds: [buildCooldownEmbed({
-                    title: '🎓 Hard Cap Reached',
-                    description: `You've answered all **${HARD_DAILY_LIMIT}** hard questions allowed today.\nYour brain deserves the rest.`,
+                    title: `🎓 ${capitalize(difficulty)} Cap Reached`,
+                    description: `You've answered all **${limit}** ${difficulty} questions allowed today.\nYour brain deserves the rest.`,
                     color: '#9b59b6',
                     nextAt: tomorrow,
-                    nextRewardPreview: `Tomorrow: ${HARD_DAILY_LIMIT} more Hard questions · 750 coins each for correct answers`,
+                    nextRewardPreview: `Tomorrow: ${limit} more ${capitalize(difficulty)} questions · ${REWARDS[difficulty]?.win ?? REWARDS.medium.win} coins each for correct answers`,
                 })],
                 components: [],
             });
         }
+        user[countField] = claimedSlot[countField];
     }
     const rewards       = REWARDS[difficulty] ?? REWARDS.medium;
     const category      = decodeHtml(raw.category);
@@ -307,10 +323,6 @@ async function runQuiz(interaction, diffChoice) {
             updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
         }
 
-        if (difficulty === 'hard') {
-            await User.updateOne(userFilter, { $inc: { dailyQuizHard: 1 } });
-        }
-
         // No replay button: quiz is a net-positive income command, so a replay
         // chain would bypass the command cooldown and become an unbounded faucet.
         await i.update({
@@ -326,10 +338,6 @@ async function runQuiz(interaction, diffChoice) {
         const freshUser = await User.findOne(userFilter);
         const penalty   = Math.min(rewards.lose, freshUser?.balance ?? 0);
         const updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
-
-        if (difficulty === 'hard') {
-            await User.updateOne(userFilter, { $inc: { dailyQuizHard: 1 } });
-        }
 
         await interaction.editReply({
             embeds:     [timeoutEmbed(interaction, question, correctAnswer, difficulty, penalty, updated?.balance ?? 0)],
