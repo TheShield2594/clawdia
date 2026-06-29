@@ -80,7 +80,10 @@ function phaseTitle(hits, total) {
     return '🎱 Drawing…';
 }
 
-async function playKeno(interaction, bet, picked, alreadyDebited = false) {
+// releaseLock is called once the draw settles into a result — replays/
+// rerolls don't need it re-held since they re-debit atomically like any
+// fresh bet.
+async function playKeno(interaction, bet, picked, alreadyDebited = false, releaseLock) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -98,6 +101,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
             );
 
             if (!debited) {
+                releaseLock?.();
                 const fresh = await User.findOne(userFilter);
                 return interaction.editReply({
                     content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
@@ -209,6 +213,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
             );
         }
         settled = true;
+        releaseLock?.();
 
         const net    = credit - bet;
         const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
@@ -352,10 +357,10 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
                     return i.update({ content: `❌ Not enough coins for the quick reroll (need **${rerollCost.toLocaleString()}** coins).`, embeds: [], components: [] });
                 }
                 await i.deferUpdate();
-                await playKeno(interaction, rerollCost, picked, true);
+                await playKeno(interaction, rerollCost, picked, true, null);
             } else {
                 await i.deferUpdate();
-                await playKeno(interaction, bet, picked);
+                await playKeno(interaction, bet, picked, false, null);
             }
         }).on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
@@ -363,6 +368,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false) {
 
     } catch (err) {
         console.error('[Keno] error:', err);
+        releaseLock?.();
         if (debited && !settled) {
             await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } })
                 .catch(e => console.error('[Keno] rollback failed:', e));
@@ -387,15 +393,17 @@ module.exports = {
                 .setDescription('Your 5 numbers from 1–40, space-separated (e.g. 3 12 21 33 39)')
                 .setRequired(true)),
 
-    async execute(interaction) {
+    async execute(interaction, { releaseLock } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
+            releaseLock?.();
             return interaction.reply({ content: 'Casino games are disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const bet          = interaction.options.getInteger('bet');
         const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            releaseLock?.();
             return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const numbersRaw = interaction.options.getString('numbers');
@@ -404,6 +412,7 @@ module.exports = {
         const valid  = parsed.every(n => Number.isInteger(n) && n >= 1 && n <= POOL_SIZE);
 
         if (parsed.length !== PICK_COUNT || !valid) {
+            releaseLock?.();
             return interaction.reply({
                 content: `❌ Please provide exactly **5 different numbers** between 1 and ${POOL_SIZE}.\nExample: \`3 12 21 33 39\``,
                 flags: MessageFlags.Ephemeral,
@@ -412,11 +421,13 @@ module.exports = {
 
         const uniquePicked = [...new Set(parsed)];
         if (uniquePicked.length !== PICK_COUNT) {
+            releaseLock?.();
             return interaction.reply({ content: '❌ All 5 numbers must be different.', flags: MessageFlags.Ephemeral });
         }
 
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         if ((user?.balance ?? 0) < bet) {
+            releaseLock?.();
             const currency = guildSettings?.economy?.currency || '💰';
             return interaction.reply({
                 content: `You don't have enough ${currency}. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
@@ -425,8 +436,8 @@ module.exports = {
         }
 
         const { shouldProceed: knProceed, alreadyReplied: knReplied } = await confirmBet(interaction, bet, user.balance, 'Keno', guildSettings);
-        if (!knProceed) return;
+        if (!knProceed) { releaseLock?.(); return; }
         if (!knReplied) await interaction.deferReply();
-        await playKeno(interaction, bet, uniquePicked.sort((a, b) => a - b));
+        await playKeno(interaction, bet, uniquePicked.sort((a, b) => a - b), false, releaseLock);
     },
 };

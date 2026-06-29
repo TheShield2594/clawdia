@@ -205,23 +205,27 @@ module.exports = {
                 .setMinValue(10)
                 .setMaxValue(1_000_000_000)
                 .setRequired(true)),
-    async execute(interaction) {
+    async execute(interaction, { releaseLock } = {}) {
         const bet           = interaction.options.getInteger('bet');
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            releaseLock?.();
             return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
         const { shouldProceed: slProceed, alreadyReplied: slReplied } = await confirmBet(interaction, bet, wallet, 'Slots');
-        if (!slProceed) return;
+        if (!slProceed) { releaseLock?.(); return; }
         if (!slReplied) await interaction.deferReply();
-        await playSlots(interaction, bet);
+        await playSlots(interaction, bet, releaseLock);
     },
 };
 
-async function playSlots(interaction, bet) {
+// releaseLock is called once the spin settles into a result — "Spin Again"
+// starts a brand-new hand with its own atomic debit, so it doesn't need the
+// lock re-held.
+async function playSlots(interaction, bet, releaseLock) {
     const userFilter  = { userId: interaction.user.id, guildId: interaction.guild.id };
     const guildFilter = { guildId: interaction.guild.id };
     try {
@@ -252,6 +256,7 @@ async function playSlots(interaction, bet) {
             { new: true }
         );
         if (!debited) {
+            releaseLock?.();
             const fresh = await User.findOne(userFilter);
             return interaction.editReply({
                 content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
@@ -342,6 +347,7 @@ async function playSlots(interaction, bet) {
             { $inc: { balance: adjustedPayout } },
             { new: true }
         );
+        releaseLock?.();
 
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
@@ -457,7 +463,7 @@ async function playSlots(interaction, bet) {
             }
             collector.stop('replay');
             await i.deferUpdate();
-            await playSlots(interaction, bet);
+            await playSlots(interaction, bet, null);
         });
 
         collector.on('end', (_, reason) => {
@@ -466,6 +472,7 @@ async function playSlots(interaction, bet) {
 
     } catch (err) {
         console.error('[Slots] error:', err);
+        releaseLock?.();
         await interaction.editReply({ content: 'An error occurred while playing slots. Please try again.', components: [] }).catch(() => {});
     }
 }
