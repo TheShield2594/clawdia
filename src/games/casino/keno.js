@@ -112,8 +112,30 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         const drawn   = drawNumbers();
         const pickedStr = picked.map(n => `**${n}**`).join('  ');
 
+        // ── Skip-animation control — lets repeat players jump straight to the
+        // result instead of sitting through the full reveal each time ────────
+        const skipId   = `keno_skip_${interaction.id}_${Date.now()}`;
+        const skipRow  = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(skipId).setLabel('⏩ Skip Animation').setStyle(ButtonStyle.Secondary),
+        );
+        const animState = { skipped: false };
+        let skipCollector = null;
+        const armSkipCollector = async () => {
+            if (skipCollector) return;
+            const msg = await interaction.fetchReply().catch(() => null);
+            if (!msg) return;
+            skipCollector = msg.createMessageComponentCollector({
+                filter: i => i.user.id === interaction.user.id && i.customId === skipId,
+                time: 8_000,
+            });
+            skipCollector.on('collect', async i => {
+                animState.skipped = true;
+                await i.deferUpdate().catch(() => {});
+            });
+        };
+
         // ── Phase 1: Draw numbers 1-5 one at a time ──────────────────────────
-        for (let i = 1; i <= 5; i++) {
+        for (let i = 1; i <= 5 && !animState.skipped; i++) {
             const hits = drawn.slice(0, i).filter(n => picked.includes(n)).length;
             const embed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
@@ -126,36 +148,39 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
                     { name: `🔵 Drawing (${i}/10)`, value: `${hitBar(hits)}  **${hits}** hit`, inline: true },
                 )
                 .setFooter({ text: PAYTABLE_FOOTER });
-            await interaction.editReply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed], components: [skipRow] });
+            if (i === 1) await armSkipCollector();
             await delay(650);
         }
 
         // ── Midpoint suspense break ───────────────────────────────────────────
-        const midHits = drawn.slice(0, 5).filter(n => picked.includes(n)).length;
-        const remaining = PICK_COUNT - midHits;
-        let suspenseText;
-        if (midHits === 5)     suspenseText = '🔥 **All 5 matched in the first draw!** Last 5 are gravy…';
-        else if (midHits >= 3) suspenseText = `✅ **${midHits} matched** so far — ${remaining} more to go for the jackpot!`;
-        else if (midHits === 2) suspenseText = `🎯 **2 matched** — one more for a profit…`;
-        else if (midHits === 1) suspenseText = `😬 **1 matched** — need ${remaining} of the next 5…`;
-        else                   suspenseText  = `💨 **Nothing yet** — all ${PICK_COUNT} need to come from the last 5…`;
+        if (!animState.skipped) {
+            const midHits = drawn.slice(0, 5).filter(n => picked.includes(n)).length;
+            const remaining = PICK_COUNT - midHits;
+            let suspenseText;
+            if (midHits === 5)     suspenseText = '🔥 **All 5 matched in the first draw!** Last 5 are gravy…';
+            else if (midHits >= 3) suspenseText = `✅ **${midHits} matched** so far — ${remaining} more to go for the jackpot!`;
+            else if (midHits === 2) suspenseText = `🎯 **2 matched** — one more for a profit…`;
+            else if (midHits === 1) suspenseText = `😬 **1 matched** — need ${remaining} of the next 5…`;
+            else                   suspenseText  = `💨 **Nothing yet** — all ${PICK_COUNT} need to come from the last 5…`;
 
-        const midEmbed = new EmbedBuilder()
-            .setAuthor(embedAuthor(interaction))
-            .setThumbnail(THUMB)
-            .setColor('#5865F2')
-            .setTitle('🎱 Halfway — Drawing 6 of 10…')
-            .setDescription(formatKenoGrid(picked, drawn, 5))
-            .addFields(
-                { name: '🎯 Your Picks', value: pickedStr, inline: true },
-                { name: '📊 Midpoint', value: suspenseText, inline: false },
-            )
-            .setFooter({ text: PAYTABLE_FOOTER });
-        await interaction.editReply({ embeds: [midEmbed] });
-        await delay(1200);
+            const midEmbed = new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#5865F2')
+                .setTitle('🎱 Halfway — Drawing 6 of 10…')
+                .setDescription(formatKenoGrid(picked, drawn, 5))
+                .addFields(
+                    { name: '🎯 Your Picks', value: pickedStr, inline: true },
+                    { name: '📊 Midpoint', value: suspenseText, inline: false },
+                )
+                .setFooter({ text: PAYTABLE_FOOTER });
+            await interaction.editReply({ embeds: [midEmbed], components: [skipRow] });
+            await delay(1200);
+        }
 
         // ── Phase 2: Draw numbers 6-10 one at a time ─────────────────────────
-        for (let i = 6; i <= 10; i++) {
+        for (let i = 6; i <= 10 && !animState.skipped; i++) {
             const hits = drawn.slice(0, i).filter(n => picked.includes(n)).length;
             const embed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
@@ -168,9 +193,11 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
                     { name: `🔵 Drawing (${i}/10)`, value: `${hitBar(hits)}  **${hits}** hit`, inline: true },
                 )
                 .setFooter({ text: PAYTABLE_FOOTER });
-            await interaction.editReply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed], components: [skipRow] });
             await delay(650);
         }
+
+        skipCollector?.stop();
 
         // ── Calculate result ──────────────────────────────────────────────────
         const matches    = drawn.filter(n => picked.includes(n)).length;
@@ -220,8 +247,8 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         let boostNote = '';
         if (totalCoinMult > 1.0 && adjustedPayout > bet) boostNote = `\n> 🚀 *${totalCoinMult.toFixed(1)}x Coin Booster applied!*`;
 
-        // ── Special celebration for big wins ──────────────────────────────────
-        if (matches === 5) {
+        // ── Special celebration for big wins (skipped if animation was skipped) ─
+        if (matches === 5 && !animState.skipped) {
             await delay(400);
             const stage1 = new EmbedBuilder()
                 .setColor('#FFD700')
@@ -238,7 +265,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
                 .setAuthor(embedAuthor(interaction));
             await interaction.editReply({ embeds: [stage2] });
             await delay(1100);
-        } else if (matches === 4) {
+        } else if (matches === 4 && !animState.skipped) {
             await delay(400);
             const stage1 = new EmbedBuilder()
                 .setColor('#00FF88')
