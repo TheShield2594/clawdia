@@ -415,24 +415,8 @@ async function handleCast(interaction) {
         });
     }
 
-    // ── Cast cooldown ──────────────────────────────────────────────────
-    // Atomically claim the cooldown slot up front — lastCast is set the moment this
-    // request is accepted (not when the catch finally resolves via the later button
-    // flow), so two concurrent /fish casts can't both pass the cooldown check before
-    // either one's write commits.
-    const fishClaimNow = new Date();
-    const fishCooldownFloor = new Date(fishClaimNow.getTime() - LIMITS.CAST_COOLDOWN_MS);
-    const claimedFish = await User.findOneAndUpdate(
-        {
-            userId: interaction.user.id,
-            guildId: interaction.guild.id,
-            $or: [{ 'fishing.lastCast': null }, { 'fishing.lastCast': { $lte: fishCooldownFloor } }],
-        },
-        { $set: { 'fishing.lastCast': fishClaimNow } },
-        { new: true },
-    );
-
-    if (!claimedFish) {
+    // ── Cast cooldown check (read-only; claimed atomically after preflight) ──
+    if (f.lastCast && Date.now() - f.lastCast.getTime() < LIMITS.CAST_COOLDOWN_MS) {
         const nextAt = new Date(f.lastCast.getTime() + LIMITS.CAST_COOLDOWN_MS);
         return interaction.reply({
             embeds: [buildCooldownEmbed({
@@ -444,7 +428,6 @@ async function handleCast(interaction) {
             flags: MessageFlags.Ephemeral,
         });
     }
-    f.lastCast = fishClaimNow;
 
     // ── Stamina check ──────────────────────────────────────────────────
     if (f.stamina <= 0) {
@@ -497,6 +480,36 @@ async function handleCast(interaction) {
         f.bait[rodData.baitType] = baitStock - 1;
         user.markModified('fishing');
     }
+
+    // Atomically claim the cooldown slot now that all preflight checks have passed —
+    // lastCast is set the moment the cast is actually accepted, not earlier, so a
+    // failed precheck (stamina/rod/bait) never burns the cooldown. The same guard
+    // still prevents two concurrent /fish casts from both slipping through.
+    const fishClaimNow = new Date();
+    const fishCooldownFloor = new Date(fishClaimNow.getTime() - LIMITS.CAST_COOLDOWN_MS);
+    const claimedFish = await User.findOneAndUpdate(
+        {
+            userId: interaction.user.id,
+            guildId: interaction.guild.id,
+            $or: [{ 'fishing.lastCast': null }, { 'fishing.lastCast': { $lte: fishCooldownFloor } }],
+        },
+        { $set: { 'fishing.lastCast': fishClaimNow } },
+        { new: true },
+    );
+
+    if (!claimedFish) {
+        const nextAt = new Date(f.lastCast.getTime() + LIMITS.CAST_COOLDOWN_MS);
+        return interaction.reply({
+            embeds: [buildCooldownEmbed({
+                title: '🎣 Line Still Settling',
+                description: 'Give your line a moment before the next cast.\nPatience is half of fishing.',
+                color: '#1e6fa5',
+                nextAt,
+            })],
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+    f.lastCast = fishClaimNow;
 
     const featured          = getDailyFeatured(interaction.guild.id);
     const isFeaturedSpot    = locationId === featured.fishSpot.id;

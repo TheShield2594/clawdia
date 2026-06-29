@@ -233,7 +233,10 @@ async function runQuiz(interaction, diffChoice) {
 
     const difficulty    = raw.difficulty;
 
-    // Enforce daily per-difficulty attempt cap (resets at midnight UTC)
+    // Enforce daily per-difficulty attempt cap (resets at midnight UTC). The slot is
+    // claimed atomically up front (reset-if-stale, then increment-if-under-limit in a
+    // single findOneAndUpdate) so two concurrent /quiz calls can't both pass a stale
+    // in-memory count before either write commits.
     {
         const countField = COUNT_FIELD[difficulty];
         const resetField = RESET_FIELD[difficulty];
@@ -244,7 +247,13 @@ async function runQuiz(interaction, diffChoice) {
             await User.updateOne(userFilter, { $set: { [countField]: 0, [resetField]: today } });
             user[countField] = 0;
         }
-        if (user[countField] >= limit) {
+
+        const claimedSlot = await User.findOneAndUpdate(
+            { ...userFilter, [countField]: { $lt: limit } },
+            { $inc: { [countField]: 1 } },
+            { new: true },
+        );
+        if (!claimedSlot) {
             const tomorrow = new Date(todayUTC().getTime() + 86_400_000);
             return interaction.editReply({
                 embeds: [buildCooldownEmbed({
@@ -257,6 +266,7 @@ async function runQuiz(interaction, diffChoice) {
                 components: [],
             });
         }
+        user[countField] = claimedSlot[countField];
     }
     const rewards       = REWARDS[difficulty] ?? REWARDS.medium;
     const category      = decodeHtml(raw.category);
@@ -313,8 +323,6 @@ async function runQuiz(interaction, diffChoice) {
             updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
         }
 
-        await User.updateOne(userFilter, { $inc: { [COUNT_FIELD[difficulty] ?? COUNT_FIELD.medium]: 1 } });
-
         // No replay button: quiz is a net-positive income command, so a replay
         // chain would bypass the command cooldown and become an unbounded faucet.
         await i.update({
@@ -330,8 +338,6 @@ async function runQuiz(interaction, diffChoice) {
         const freshUser = await User.findOne(userFilter);
         const penalty   = Math.min(rewards.lose, freshUser?.balance ?? 0);
         const updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
-
-        await User.updateOne(userFilter, { $inc: { [COUNT_FIELD[difficulty] ?? COUNT_FIELD.medium]: 1 } });
 
         await interaction.editReply({
             embeds:     [timeoutEmbed(interaction, question, correctAnswer, difficulty, penalty, updated?.balance ?? 0)],

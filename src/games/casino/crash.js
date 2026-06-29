@@ -267,7 +267,7 @@ module.exports = {
             return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const user        = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash');
+        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash', guildSettings);
         if (!shouldProceed) { releaseLock?.(); return; }
         if (!alreadyReplied) await interaction.deferReply();
         await openLobby(interaction, bet, autoCashout, releaseLock);

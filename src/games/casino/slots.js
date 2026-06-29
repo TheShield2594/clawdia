@@ -215,7 +215,7 @@ module.exports = {
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         const wallet = user?.balance ?? 0;
-        const { shouldProceed: slProceed, alreadyReplied: slReplied } = await confirmBet(interaction, bet, wallet, 'Slots');
+        const { shouldProceed: slProceed, alreadyReplied: slReplied } = await confirmBet(interaction, bet, wallet, 'Slots', guildSettings);
         if (!slProceed) { releaseLock?.(); return; }
         if (!slReplied) await interaction.deferReply();
         await playSlots(interaction, bet, releaseLock);
@@ -347,7 +347,6 @@ async function playSlots(interaction, bet, releaseLock) {
             { $inc: { balance: adjustedPayout } },
             { new: true }
         );
-        releaseLock?.();
 
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
@@ -407,6 +406,11 @@ async function playSlots(interaction, bet, releaseLock) {
             await interaction.editReply({ embeds: [scatterEmbed], components: [] });
             await delay(2000);
         }
+
+        // Lock is released only after the spin's payout (including any free-spin
+        // payouts) has fully settled, so "Spin Again" can't start a new hand for
+        // this player while a free-spin credit is still being written.
+        releaseLock?.();
 
         // ── Big win announcement ────────────────────────────────────────────────
         const winMult = adjustedPayout > 0 ? adjustedPayout / bet : 0;
