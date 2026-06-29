@@ -257,32 +257,39 @@ module.exports = {
                 .setMaxValue(99.99)
                 .setRequired(false)),
 
-    async execute(interaction) {
+    async execute(interaction, { releaseLock } = {}) {
         const bet         = interaction.options.getInteger('bet');
         const autoCashout = interaction.options.getNumber('auto_cashout') ?? null;
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            releaseLock?.();
             return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const user        = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash');
-        if (!shouldProceed) return;
+        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash', guildSettings);
+        if (!shouldProceed) { releaseLock?.(); return; }
         if (!alreadyReplied) await interaction.deferReply();
-        await openLobby(interaction, bet, autoCashout);
+        await openLobby(interaction, bet, autoCashout, releaseLock);
     },
 };
 
-async function openLobby(interaction, bet, hostAutoCashout) {
+// releaseLock is called as soon as the host's bet is committed (the lobby
+// is created and the host's debit succeeds) — the host's casino lock isn't
+// held through the lobby wait + the multiplayer game itself, since their
+// stake is already atomically deducted and can't be double-spent.
+async function openLobby(interaction, bet, hostAutoCashout, releaseLock) {
     const channelId = interaction.channel.id;
     const lobbyId   = `${channelId}_${Date.now()}`;
 
     if (getLobby(channelId)) {
+        releaseLock?.();
         return interaction.editReply({ content: 'A crash lobby is already open in this channel.', components: [] });
     }
 
     const lobby = createLobby(channelId, interaction.user.id, bet);
     if (!lobby) {
+        releaseLock?.();
         return interaction.editReply({ content: 'A crash lobby is already open in this channel.', components: [] });
     }
 
@@ -293,11 +300,13 @@ async function openLobby(interaction, bet, hostAutoCashout) {
     );
     if (!deducted) {
         deleteLobby(channelId);
+        releaseLock?.();
         return interaction.editReply({ content: `❌ Not enough coins! You need **${bet.toLocaleString()}** coins.`, components: [] });
     }
 
     // Add host with their auto cash-out preference
     addPlayer(channelId, interaction.user.id, hostAutoCashout, interaction.user.username);
+    releaseLock?.();
 
     const guildDoc     = await Guild.findOne({ guildId: interaction.guild.id }, 'casinoStats').lean().catch(() => null);
     const crashHistory = guildDoc?.casinoStats?.crashHistory ?? [];

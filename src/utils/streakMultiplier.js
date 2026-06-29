@@ -1,4 +1,6 @@
 const MULTIPLIER_LADDER = [
+    { days: 365, multiplier: 3.0  },
+    { days: 200, multiplier: 2.5  },
     { days: 100, multiplier: 2.0  },
     { days:  60, multiplier: 1.75 },
     { days:  30, multiplier: 1.5  },
@@ -10,6 +12,8 @@ const MILESTONES = [
     { days:   7, coins:  12_500, badge: 'Week Warrior'   },
     { days:  30, coins:  37_500, badge: 'Monthly Master' },
     { days: 100, coins: 125_000, badge: 'Centurion'      },
+    { days: 200, coins: 250_000, badge: 'Bicenturion'    },
+    { days: 365, coins: 500_000, badge: 'Unstoppable'    },
 ];
 
 function getStreakMultiplier(streakDays) {

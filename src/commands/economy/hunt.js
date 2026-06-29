@@ -431,6 +431,7 @@ async function executeStart(interaction) {
         });
     }
 
+    // ── Hunt cooldown check (read-only; claimed atomically after preflight) ──
     if (h.lastHunt && Date.now() - h.lastHunt.getTime() < LIMITS.HUNT_COOLDOWN_MS) {
         const nextAt = new Date(h.lastHunt.getTime() + LIMITS.HUNT_COOLDOWN_MS);
         return interaction.reply({
@@ -492,6 +493,36 @@ async function executeStart(interaction) {
         h.ammo[weaponData.ammoType] = ammoStock - 1;
         user.markModified('hunt');
     }
+
+    // Atomically claim the cooldown slot now that all preflight checks have passed —
+    // lastHunt is set the moment the hunt is actually accepted, not earlier, so a
+    // failed precheck (stamina/weapon/ammo) never burns the cooldown. The same guard
+    // still prevents two concurrent /hunt start calls from both slipping through.
+    const huntClaimNow = new Date();
+    const huntCooldownFloor = new Date(huntClaimNow.getTime() - LIMITS.HUNT_COOLDOWN_MS);
+    const claimedHunt = await User.findOneAndUpdate(
+        {
+            userId: interaction.user.id,
+            guildId: interaction.guild.id,
+            $or: [{ 'hunt.lastHunt': null }, { 'hunt.lastHunt': { $lte: huntCooldownFloor } }],
+        },
+        { $set: { 'hunt.lastHunt': huntClaimNow } },
+        { new: true },
+    );
+
+    if (!claimedHunt) {
+        const nextAt = new Date(h.lastHunt.getTime() + LIMITS.HUNT_COOLDOWN_MS);
+        return interaction.reply({
+            embeds: [buildCooldownEmbed({
+                title: '🫁 Catching Your Breath',
+                description: 'You just came back from a hunt.\nGive it a moment before heading back out.',
+                color: '#5a8a3c',
+                nextAt,
+            })],
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+    h.lastHunt = huntClaimNow;
 
     // ── Stealth Approach + Precision Aim ─────────────────────────────────────
     // Phase 1 — Stealth: player reads a behaviour hint and picks the right approach.

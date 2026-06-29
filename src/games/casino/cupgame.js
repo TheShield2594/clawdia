@@ -45,7 +45,11 @@ function buildReveal(queenPos) {
     return [0, 1, 2].map(i => i === queenPos ? QUEEN : DECOYS[di++]);
 }
 
-async function playMonte(interaction, bet, round = 1) {
+// releaseLock is held through double-or-nothing recursion (still the same
+// hand) and called once the hand truly settles — final loss/win or a cash-out
+// — but not held through "Play Again", since a replay re-debits atomically
+// just like any fresh bet.
+async function playMonte(interaction, bet, round = 1, releaseLock) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -61,6 +65,7 @@ async function playMonte(interaction, bet, round = 1) {
             );
 
             if (!debited) {
+                releaseLock?.();
                 const fresh = await User.findOne(userFilter);
                 return interaction.editReply({
                     content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
@@ -68,6 +73,7 @@ async function playMonte(interaction, bet, round = 1) {
             }
         } catch (err) {
             console.error('[Monte] debit error:', err);
+            releaseLock?.();
             return interaction.editReply({ content: 'Something went wrong. Your bet was not deducted.' }).catch(() => {});
         }
     }
@@ -148,7 +154,9 @@ async function playMonte(interaction, bet, round = 1) {
             await delay(550);
         }
 
-        const tellCard = Math.floor(Math.random() * 3);
+        // Weakly correlated "tell": right more often than chance (65%), but
+        // not reliable enough to be a guaranteed-profit signal.
+        const tellCard = Math.random() < 0.65 ? queenPos : Math.floor(Math.random() * 3);
         const tellText = Math.random() < 0.40
             ? `\n\n👁️ *You notice card **${tellCard + 1}** seems slightly warped…*`
             : '';
@@ -195,6 +203,7 @@ async function playMonte(interaction, bet, round = 1) {
             const timeoutMsg = round > 1
                 ? `⏱️ Time's up! Paid out **${timeoutRefund.toLocaleString()}** coins (your Round ${round - 1} winnings).`
                 : '⏱️ Time\'s up! Your bet was refunded.';
+            releaseLock?.();
             return interaction.editReply({ content: timeoutMsg, embeds: [], components: [] }).catch(() => {});
         }
 
@@ -293,6 +302,7 @@ async function playMonte(interaction, bet, round = 1) {
             }).on('end', (_, reason) => {
                 if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
             });
+            releaseLock?.();
 
         } else {
             // Won, and more rounds available — offer double-or-nothing
@@ -375,10 +385,11 @@ async function playMonte(interaction, bet, round = 1) {
                     }).on('end', (_, reason) => {
                         if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
                     });
+                    releaseLock?.();
 
                 } else {
                     // Double or Nothing — recurse with next round (no payout yet)
-                    await playMonte(interaction, bet, round + 1);
+                    await playMonte(interaction, bet, round + 1, releaseLock);
                 }
 
             } catch {
@@ -393,6 +404,7 @@ async function playMonte(interaction, bet, round = 1) {
                         content: `⏱️ Time's up — cashed out **${adjustedTake.toLocaleString()}** coins automatically! Balance: **${(updated?.balance ?? 0).toLocaleString()}**`,
                         embeds: [], components: [],
                     }).catch(() => {});
+                    releaseLock?.();
                 }
             }
         }
@@ -405,6 +417,7 @@ async function playMonte(interaction, bet, round = 1) {
                 .catch(e => console.error('[Monte] rollback failed:', e));
         }
         await interaction.editReply({ content: 'Something went wrong. Your wager was refunded.', components: [] }).catch(() => {});
+        releaseLock?.();
     }
 }
 
@@ -420,21 +433,24 @@ module.exports = {
                 .setMinValue(MIN_BET)
                 .setMaxValue(1_000_000_000)),
 
-    async execute(interaction) {
+    async execute(interaction, { releaseLock } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
+            releaseLock?.();
             return interaction.reply({ content: 'Casino games are disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const bet          = interaction.options.getInteger('bet');
         const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            releaseLock?.();
             return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
 
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
 
         if ((user?.balance ?? 0) < bet) {
+            releaseLock?.();
             const currency = guildSettings?.economy?.currency || '💰';
             return interaction.reply({
                 content: `You don't have enough ${currency}. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
@@ -443,8 +459,8 @@ module.exports = {
         }
 
         const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user.balance, 'Three Card Monte', guildSettings);
-        if (!shouldProceed) return;
+        if (!shouldProceed) { releaseLock?.(); return; }
         if (!alreadyReplied) await interaction.deferReply();
-        await playMonte(interaction, bet);
+        await playMonte(interaction, bet, 1, releaseLock);
     },
 };

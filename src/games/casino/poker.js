@@ -151,7 +151,10 @@ function embedAuthor(interaction) {
 
 // ── Game flow ────────────────────────────────────────────────────────────────
 
-async function playPoker(interaction, bet) {
+// releaseLock is called at every terminal point of a hand (dealer/player
+// fold at any street, showdown, or a timeout refund) — "Play Again" starts
+// a brand-new hand with its own atomic debit, so it isn't passed releaseLock.
+async function playPoker(interaction, bet, releaseLock) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -166,6 +169,7 @@ async function playPoker(interaction, bet) {
         );
 
         if (!debited) {
+            releaseLock?.();
             const fresh = await User.findOne(userFilter);
             return interaction.editReply({
                 content: `❌ Not enough coins! Your balance: **${(fresh?.balance ?? 0).toLocaleString()}** coins.`,
@@ -201,6 +205,7 @@ async function playPoker(interaction, bet) {
             if (totalMult > 1.0) winAmount = bet + Math.round((baseWin - bet) * totalMult);
 
             const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: winAmount } }, { new: true });
+            releaseLock?.();
 
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
@@ -276,6 +281,7 @@ async function playPoker(interaction, bet) {
         } catch {
             settled = true;
             await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } });
+            releaseLock?.();
             return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
         }
 
@@ -302,6 +308,7 @@ async function playPoker(interaction, bet) {
 
         if (folded) {
             settled = true;
+            releaseLock?.();
             const foldEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
@@ -336,6 +343,7 @@ async function playPoker(interaction, bet) {
             if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
 
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            releaseLock?.();
 
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
@@ -402,6 +410,7 @@ async function playPoker(interaction, bet) {
         } catch {
             settled = true;
             await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            releaseLock?.();
             return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
         }
 
@@ -431,6 +440,7 @@ async function playPoker(interaction, bet) {
 
         if (folded) {
             settled = true;
+            releaseLock?.();
             const foldEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
@@ -465,6 +475,7 @@ async function playPoker(interaction, bet) {
             let winPayout    = pot;
             if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            releaseLock?.();
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
@@ -526,6 +537,7 @@ async function playPoker(interaction, bet) {
         } catch {
             settled = true;
             await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            releaseLock?.();
             return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
         }
 
@@ -553,6 +565,7 @@ async function playPoker(interaction, bet) {
 
         if (folded) {
             settled = true;
+            releaseLock?.();
             const foldEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
@@ -587,6 +600,7 @@ async function playPoker(interaction, bet) {
             let winPayout    = pot;
             if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            releaseLock?.();
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
@@ -648,6 +662,7 @@ async function playPoker(interaction, bet) {
         } catch {
             settled = true;
             await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            releaseLock?.();
             return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
         }
 
@@ -675,6 +690,7 @@ async function playPoker(interaction, bet) {
 
         if (folded) {
             settled = true;
+            releaseLock?.();
             const foldEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
@@ -718,6 +734,7 @@ async function playPoker(interaction, bet) {
             updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: adjustedPayout } }, { new: true });
         }
         settled = true;
+        releaseLock?.();
 
         const net    = adjustedPayout - playerStake;
         const netStr = net >= 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`;
@@ -763,13 +780,14 @@ async function playPoker(interaction, bet) {
             time: 60_000,
         }).on('collect', async i => {
             await i.deferUpdate();
-            await playPoker(interaction, bet);
+            await playPoker(interaction, bet, null);
         }).on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
         });
 
     } catch (err) {
         console.error('[Poker] error:', err);
+        releaseLock?.();
         if (debited && !settled) {
             await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } })
                 .catch(e => console.error('[Poker] rollback failed:', e));
@@ -790,20 +808,23 @@ module.exports = {
                 .setMinValue(MIN_BET)
                 .setMaxValue(1_000_000_000)),
 
-    async execute(interaction) {
+    async execute(interaction, { releaseLock } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
+            releaseLock?.();
             return interaction.reply({ content: 'Casino games are disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
         const bet          = interaction.options.getInteger('bet');
         const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            releaseLock?.();
             return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
         const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
 
         if ((user?.balance ?? 0) < bet) {
+            releaseLock?.();
             const currency = guildSettings?.economy?.currency || '💰';
             return interaction.reply({
                 content: `You don't have enough ${currency}. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
@@ -812,8 +833,8 @@ module.exports = {
         }
 
         const { shouldProceed: pkProceed, alreadyReplied: pkReplied } = await confirmBet(interaction, bet, user.balance, 'Poker', guildSettings);
-        if (!pkProceed) return;
+        if (!pkProceed) { releaseLock?.(); return; }
         if (!pkReplied) await interaction.deferReply();
-        await playPoker(interaction, bet);
+        await playPoker(interaction, bet, releaseLock);
     },
 };
