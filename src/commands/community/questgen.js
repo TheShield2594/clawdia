@@ -104,8 +104,21 @@ module.exports = {
             });
         }
 
-        // Deduct coins
-        user.balance -= COST;
+        // Atomically claim the cost up front — the AI call below can take several
+        // seconds, so deducting in-memory and saving at the end would let two
+        // concurrent /questgen calls both pass the balance check before either
+        // write commits.
+        const debited = await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: COST } },
+            { $inc: { balance: -COST } },
+            { new: true },
+        );
+        if (!debited) {
+            return interaction.editReply({
+                content: `You need at least **${COST} coins** to forge a Legendary Quest.`,
+            });
+        }
+        user.balance = debited.balance;
 
         // Build AI prompt
         const level     = user.level ?? 0;
@@ -146,8 +159,10 @@ Create a legendary quest that feels fitting for their journey so far.`;
         } catch (err) {
             console.error('[QUESTGEN] AI generation failed:', err?.message || err);
             // Refund coins on failure
-            user.balance += COST;
-            await user.save();
+            await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: COST } },
+            ).catch(() => {});
             return interaction.editReply({ content: 'The quest forge misfired! Your coins have been refunded. Try again in a moment.' });
         }
 
@@ -175,15 +190,18 @@ Create a legendary quest that feels fitting for their journey so far.`;
                 xpReward, coinReward,
             });
 
-            user.quests = user.quests || [];
-            user.quests.push({ questId, progress: 0, completedAt: null, expiresAt });
-            await user.save();
+            await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $push: { quests: { questId, progress: 0, completedAt: null, expiresAt } } },
+            );
         } catch (err) {
             console.error('[QUESTGEN] Persistence failed:', err?.message || err);
-            // Compensate: remove the quest doc if it was created before user.save() failed
+            // Compensate: remove the quest doc if it was created before the user update failed
             await AiQuest.deleteOne({ questId }).catch(() => {});
-            user.balance += COST;
-            await user.save().catch(() => {});
+            await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: COST } },
+            ).catch(() => {});
             return interaction.editReply({ content: 'The quest forge failed to save! Your coins have been refunded. Try again in a moment.' });
         }
 

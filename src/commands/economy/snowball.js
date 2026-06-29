@@ -5,7 +5,6 @@ const { logTransaction } = require('../../utils/logTransaction');
 const {
     hasActiveEvent,
     getEventCurrencyId,
-    addEventCurrency,
 } = require('../../services/seasonalEventService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 
@@ -46,16 +45,33 @@ module.exports = {
             return interaction.editReply({ content: "You can't throw snowballs at bots!" });
         }
 
-        const [attacker, defender] = await Promise.all([
-            User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
-            User.findOne({ userId: target.id,           guildId: interaction.guild.id }),
-        ]);
+        // Atomically claim the cooldown + spend one snowball in a single update — the
+        // cooldown guard and inventory-availability guard both live in the filter, so two
+        // concurrent /snowball calls can't both pass before either one's write commits.
+        const claimNow = new Date();
+        const cooldownFloor = new Date(claimNow.getTime() - COOLDOWN_MS);
+        let attacker = await User.findOneAndUpdate(
+            {
+                userId: interaction.user.id,
+                guildId: interaction.guild.id,
+                $or: [{ lastSnowball: null }, { lastSnowball: { $lte: cooldownFloor } }],
+                inventory: { $elemMatch: { itemId: 'snowball', quantity: { $gte: 1 } } },
+            },
+            {
+                $set: { lastSnowball: claimNow },
+                $inc: { 'inventory.$[slot].quantity': -1 },
+            },
+            {
+                arrayFilters: [{ 'slot.itemId': 'snowball' }],
+                new: true,
+            },
+        );
 
-        // Cooldown check
-        if (attacker?.lastSnowball) {
-            const elapsed = Date.now() - new Date(attacker.lastSnowball).getTime();
-            if (elapsed < COOLDOWN_MS) {
-                const nextAt = new Date(new Date(attacker.lastSnowball).getTime() + COOLDOWN_MS);
+        if (!attacker) {
+            const fresh = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+
+            if (fresh?.lastSnowball && Date.now() - new Date(fresh.lastSnowball).getTime() < COOLDOWN_MS) {
+                const nextAt = new Date(new Date(fresh.lastSnowball).getTime() + COOLDOWN_MS);
                 return interaction.editReply({
                     embeds: [buildCooldownEmbed({
                         title: '❄️ Restocking Snowballs',
@@ -66,41 +82,63 @@ module.exports = {
                     })],
                 });
             }
-        }
 
-        // Check attacker has snowballs in inventory
-        const snowballSlot = attacker?.inventory?.find(i => i.itemId === 'snowball');
-        if (!snowballSlot || snowballSlot.quantity < 1) {
             return interaction.editReply({
                 content: `❄️ You don't have any **Snowballs** in your inventory! Buy some from \`/eventshop\`.`
             });
         }
 
+        // Best-effort cleanup of the now-empty snowball slot; doesn't affect correctness.
+        User.updateOne(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $pull: { inventory: { itemId: 'snowball', quantity: { $lte: 0 } } } },
+        ).catch(() => {});
+
         const hit = Math.random() < HIT_CHANCE;
 
-        // Deduct snowball
-        snowballSlot.quantity -= 1;
-        if (snowballSlot.quantity <= 0) {
-            attacker.inventory = attacker.inventory.filter(i => i.itemId !== 'snowball');
-        }
-
-        attacker.lastSnowball = new Date();
-
         let coinsGained = 0;
+        let stolen = 0;
+        let defender = null;
         let description = '';
 
         if (hit) {
-            const targetWallet = defender?.balance ?? 0;
-            const stolen = Math.floor(targetWallet * COIN_STEAL_RATE);
+            const defenderSnap = await User.findOne({ userId: target.id, guildId: interaction.guild.id });
+            const targetWallet = defenderSnap?.balance ?? 0;
+            stolen = Math.floor(targetWallet * COIN_STEAL_RATE);
             coinsGained = BASE_COIN_REWARD + stolen;
 
-            attacker.balance = (attacker.balance ?? 0) + coinsGained;
-            if (defender) {
-                defender.balance = Math.max(0, (defender.balance ?? 0) - stolen);
+            attacker = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: coinsGained } },
+                { new: true },
+            );
+
+            if (defenderSnap && stolen > 0) {
+                const decrement = Math.min(stolen, defenderSnap.balance ?? 0);
+                defender = await User.findOneAndUpdate(
+                    { userId: target.id, guildId: interaction.guild.id },
+                    { $inc: { balance: -decrement } },
+                    { new: true },
+                );
+            } else {
+                defender = defenderSnap;
             }
 
             const currencyId = getEventCurrencyId(guildSettings);
-            if (currencyId) addEventCurrency(attacker, currencyId, SNOWFLAKE_REWARD);
+            if (currencyId) {
+                attacker = await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': currencyId },
+                    { $inc: { 'eventCurrency.$.amount': SNOWFLAKE_REWARD } },
+                    { new: true },
+                );
+                if (!attacker) {
+                    attacker = await User.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { $push: { eventCurrency: { currencyId, amount: SNOWFLAKE_REWARD } } },
+                        { new: true },
+                    );
+                }
+            }
 
             description = [
                 `💥 **DIRECT HIT!** You nailed <@${target.id}> with a snowball!`,
@@ -119,11 +157,6 @@ module.exports = {
                 `Better luck next time — you still used one snowball.`,
             ].join('\n');
         }
-
-        await Promise.all([
-            attacker.save(),
-            defender && hit ? defender.save() : Promise.resolve(),
-        ]);
 
         const embed = new EmbedBuilder()
             .setColor(hit ? '#a8d8f0' : '#888888')

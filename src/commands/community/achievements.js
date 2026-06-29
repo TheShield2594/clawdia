@@ -164,10 +164,20 @@ module.exports = {
             }
 
             if (sub === 'claim') {
-                let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-                if (!user) {
-                    user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
-                }
+                // Atomically flip every still-unclaimed entry to claimed=true in one
+                // update, returning the pre-update document — arrayFilters only
+                // matches entries that are unclaimed AT WRITE TIME, so two concurrent
+                // /achievements claim calls can't both grant the same reward.
+                const preClaim = await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    { $set: { 'achievements.$[el].claimed': true } },
+                    {
+                        arrayFilters: [{ 'el.claimed': { $ne: true } }],
+                        new: false,
+                        upsert: true,
+                        setDefaultsOnInsert: true,
+                    },
+                );
 
                 const disabled = new Set(guildSettings.achievements?.disabledAchievements || []);
                 const customAchievements = guildSettings.achievements?.customAchievements || [];
@@ -176,7 +186,7 @@ module.exports = {
                 for (const d of ACHIEVEMENTS) defMap.set(d.id, d);
                 for (const d of customAchievements) defMap.set(d.id, d);
 
-                const unclaimed = (user.achievements || []).filter(a => !a.claimed);
+                const unclaimed = (preClaim?.achievements || []).filter(a => !a.claimed);
                 if (!unclaimed.length) {
                     return interaction.reply({ content: 'You have no unclaimed achievement rewards.', flags: MessageFlags.Ephemeral });
                 }
@@ -189,20 +199,18 @@ module.exports = {
                     if (disabled.has(entry.id)) continue;
                     const def = defMap.get(entry.id);
                     if (!def) continue;
-                    if (!def.xpReward && !def.coinReward) {
-                        entry.claimed = true;
-                        continue;
-                    }
+                    if (!def.xpReward && !def.coinReward) continue;
                     totalXp    += def.xpReward    || 0;
                     totalCoins += def.coinReward   || 0;
                     names.push(`${def.emoji} ${def.name}`);
-                    entry.claimed = true;
                 }
 
-                user.xp      = (user.xp      || 0) + totalXp;
-                user.balance = (user.balance  || 0) + totalCoins;
-                user.markModified('achievements');
-                await user.save();
+                if (totalXp || totalCoins) {
+                    await User.updateOne(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { $inc: { xp: totalXp, balance: totalCoins } },
+                    );
+                }
 
                 const lines = [];
                 if (totalXp)    lines.push(`+${totalXp} XP`);

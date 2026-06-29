@@ -416,7 +416,23 @@ async function handleCast(interaction) {
     }
 
     // ── Cast cooldown ──────────────────────────────────────────────────
-    if (f.lastCast && Date.now() - f.lastCast.getTime() < LIMITS.CAST_COOLDOWN_MS) {
+    // Atomically claim the cooldown slot up front — lastCast is set the moment this
+    // request is accepted (not when the catch finally resolves via the later button
+    // flow), so two concurrent /fish casts can't both pass the cooldown check before
+    // either one's write commits.
+    const fishClaimNow = new Date();
+    const fishCooldownFloor = new Date(fishClaimNow.getTime() - LIMITS.CAST_COOLDOWN_MS);
+    const claimedFish = await User.findOneAndUpdate(
+        {
+            userId: interaction.user.id,
+            guildId: interaction.guild.id,
+            $or: [{ 'fishing.lastCast': null }, { 'fishing.lastCast': { $lte: fishCooldownFloor } }],
+        },
+        { $set: { 'fishing.lastCast': fishClaimNow } },
+        { new: true },
+    );
+
+    if (!claimedFish) {
         const nextAt = new Date(f.lastCast.getTime() + LIMITS.CAST_COOLDOWN_MS);
         return interaction.reply({
             embeds: [buildCooldownEmbed({
@@ -428,6 +444,7 @@ async function handleCast(interaction) {
             flags: MessageFlags.Ephemeral,
         });
     }
+    f.lastCast = fishClaimNow;
 
     // ── Stamina check ──────────────────────────────────────────────────
     if (f.stamina <= 0) {
