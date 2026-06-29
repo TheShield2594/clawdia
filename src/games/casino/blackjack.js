@@ -223,7 +223,9 @@ module.exports = {
             return interaction.reply({ content: `You don't have enough ${currency}. Your balance: **${currency}${user.balance.toLocaleString()}**`, flags: MessageFlags.Ephemeral });
         }
 
-        if (!await confirmBet(interaction, bet, user.balance, 'Blackjack', guildSettings)) { releaseLock?.(); return; }
+        const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user.balance, 'Blackjack', guildSettings);
+        if (!shouldProceed) { releaseLock?.(); return; }
+        const sendInitial = (payload) => alreadyReplied ? interaction.editReply(payload) : interaction.reply(payload);
 
         // Atomic debit — re-validates balance at write time to prevent race conditions
         const debited = await User.findOneAndUpdate(
@@ -253,7 +255,7 @@ module.exports = {
                 const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, bet,
                     '🃏 Blackjack — Push', 'Both got blackjack. Bet returned.', '#f39c12', pushUser?.balance ?? user.balance);
                 releaseLock?.();
-                return interaction.reply({ embeds: [embed], components: buildButtons(gameId, true) });
+                return sendInitial({ embeds: [embed], components: buildButtons(gameId, true) });
             }
             const bjCoinMult   = getCoinMultiplier(user);
             const bjServerMult = getServerCoinMultiplier(guildSettings);
@@ -278,7 +280,7 @@ module.exports = {
                 .setFooter({ text: 'Blackjack pays 3:2 · Dealer stands on 17' })
                 .setTimestamp();
             releaseLock?.();
-            return interaction.reply({ embeds: [embed], components: buildButtons(gameId, true) });
+            return sendInitial({ embeds: [embed], components: buildButtons(gameId, true) });
         }
 
         const dealerShowsAce  = dealerHand[0].value === 'A';
@@ -294,7 +296,7 @@ module.exports = {
                     .setLabel('🛡️ Insurance')
                     .setStyle(ButtonStyle.Danger)] : []),
             );
-            await interaction.reply({
+            await sendInitial({
                 embeds: [buildEmbed(interaction, playerHand, dealerHand, bet, currency,
                     insuranceCost > 0
                         ? `🛡️ Insurance? (${currency}${insuranceCost.toLocaleString()}) — Dealer may have Blackjack`
@@ -361,7 +363,7 @@ module.exports = {
             };
         }
 
-        await interaction.reply({
+        await sendInitial({
             embeds:     [buildEmbed(interaction, playerHand, dealerHand, bet, currency, '🎲 Your turn', '#5865F2', true)],
             components: buildButtons(gameId, false, currentOpts()),
         });

@@ -196,6 +196,8 @@ async function playRollBet(interaction, guildSettings, sides, bet, call) {
     const delay = ms => new Promise(r => setTimeout(r, ms));
     const stakeLine = `Wager: **${currency}${bet.toLocaleString()}** on ${callLabel(call, sides)}`;
     for (let f = 0; f < 4; f++) {
+        // Animation frames are cosmetic — a transient editReply failure here shouldn't
+        // abort the roll and strand the bet that was already debited above.
         await interaction.editReply({
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
@@ -204,15 +206,25 @@ async function playRollBet(interaction, guildSettings, sides, bet, call) {
                 .setTitle('🎲 Dice Roll')
                 .setDescription(`🎲 **Rolling…**\n\n${stakeLine}`)
                 .setFooter({ text: `d${sides}` })],
-        });
+        }).catch(() => {});
         await delay(300);
     }
 
     const result = Math.floor(Math.random() * sides) + 1;
     const won    = callWon(call, result, sides);
 
-    // Exact-number bets pay out at sides:1 odds (minus house cut); high/low pays ~1:1.
-    const multiplier = call.type === 'exact' ? sides : 2;
+    // Exact-number bets pay out at sides:1 odds (minus house cut). High/low pays at
+    // true odds for the split (sides / winning-number-count) rather than a flat 2x —
+    // on odd-sided dice the low half has one fewer number than the high half, so a
+    // flat 2x would give "high" bettors better-than-even odds at the same payout.
+    let multiplier;
+    if (call.type === 'exact') {
+        multiplier = sides;
+    } else {
+        const half = Math.floor(sides / 2);
+        const winningCount = call.type === 'high' ? sides - half : half;
+        multiplier = sides / winningCount;
+    }
     const grossPayout = Math.floor(bet * multiplier * (1 - HOUSE_CUT));
     const profit       = grossPayout - bet;
 

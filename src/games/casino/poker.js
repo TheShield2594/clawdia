@@ -197,7 +197,6 @@ async function playPoker(interaction, bet, releaseLock) {
         // If dealer folds pre-flop (very weak hand), player wins immediately
         if (dealerPreAction === 'fold') {
             settled = true;
-            releaseLock?.();
             const coinMult   = getCoinMultiplier(debited);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
@@ -206,6 +205,7 @@ async function playPoker(interaction, bet, releaseLock) {
             if (totalMult > 1.0) winAmount = bet + Math.round((baseWin - bet) * totalMult);
 
             const updated = await User.findOneAndUpdate(userFilter, { $inc: { balance: winAmount } }, { new: true });
+            releaseLock?.();
 
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
@@ -280,8 +280,8 @@ async function playPoker(interaction, bet, releaseLock) {
             preFlopAction = r.customId.split('_')[1]; // check / raise / call / fold
         } catch {
             settled = true;
-            releaseLock?.();
             await User.findOneAndUpdate(userFilter, { $inc: { balance: bet } });
+            releaseLock?.();
             return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
         }
 
@@ -336,7 +336,6 @@ async function playPoker(interaction, bet, releaseLock) {
         if (dFlopAction === 'fold') {
             // Dealer folds on the flop — player wins the pot
             settled = true;
-            releaseLock?.();
             const coinMult   = getCoinMultiplier(debited);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
@@ -344,6 +343,7 @@ async function playPoker(interaction, bet, releaseLock) {
             if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
 
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            releaseLock?.();
 
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
@@ -409,8 +409,8 @@ async function playPoker(interaction, bet, releaseLock) {
             flopAction = r.customId.split('_')[1];
         } catch {
             settled = true;
-            releaseLock?.();
             await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            releaseLock?.();
             return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
         }
 
@@ -469,13 +469,13 @@ async function playPoker(interaction, bet, releaseLock) {
 
         if (dTurnAction === 'fold') {
             settled = true;
-            releaseLock?.();
             const coinMult   = getCoinMultiplier(debited);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
             let winPayout    = pot;
             if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            releaseLock?.();
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
@@ -536,8 +536,8 @@ async function playPoker(interaction, bet, releaseLock) {
             turnAction = r.customId.split('_')[1];
         } catch {
             settled = true;
-            releaseLock?.();
             await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            releaseLock?.();
             return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
         }
 
@@ -594,13 +594,13 @@ async function playPoker(interaction, bet, releaseLock) {
 
         if (dRiverAction === 'fold') {
             settled = true;
-            releaseLock?.();
             const coinMult   = getCoinMultiplier(debited);
             const serverMult = getServerCoinMultiplier(guildSettings);
             const totalMult  = coinMult * serverMult;
             let winPayout    = pot;
             if (totalMult > 1.0) winPayout = playerStake + Math.round((pot - playerStake) * totalMult);
             await User.findOneAndUpdate(userFilter, { $inc: { balance: winPayout } }, { new: true });
+            releaseLock?.();
             return interaction.editReply({
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
@@ -661,8 +661,8 @@ async function playPoker(interaction, bet, releaseLock) {
             riverAction = r.customId.split('_')[1];
         } catch {
             settled = true;
-            releaseLock?.();
             await User.findOneAndUpdate(userFilter, { $inc: { balance: playerStake } });
+            releaseLock?.();
             return interaction.editReply({ content: '⏱️ Time\'s up! Bet refunded.', embeds: [], components: [] }).catch(() => {});
         }
 

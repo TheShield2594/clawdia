@@ -59,10 +59,12 @@ module.exports = {
             },
             {
                 $set: { lastSnowball: claimNow },
-                $inc: { 'inventory.$[slot].quantity': -1 },
+                $inc: { 'inventory.$.quantity': -1 },
             },
             {
-                arrayFilters: [{ 'slot.itemId': 'snowball' }],
+                // Plain positional $ touches only the first matched array element —
+                // unlike arrayFilters' $[slot], which would decrement every inventory
+                // entry with itemId 'snowball' if duplicate slots ever exist.
                 new: true,
             },
         );
@@ -102,42 +104,72 @@ module.exports = {
         let description = '';
 
         if (hit) {
+            // Debit the defender first, atomically guarded against their balance
+            // having changed since the snapshot — only then credit the attacker
+            // with what was *actually* taken, so a stale snapshot can't mint coins
+            // for the attacker beyond what the defender truly lost.
             const defenderSnap = await User.findOne({ userId: target.id, guildId: interaction.guild.id });
             const targetWallet = defenderSnap?.balance ?? 0;
             stolen = Math.floor(targetWallet * COIN_STEAL_RATE);
-            coinsGained = BASE_COIN_REWARD + stolen;
 
+            if (defenderSnap && stolen > 0) {
+                defender = await User.findOneAndUpdate(
+                    { userId: target.id, guildId: interaction.guild.id, balance: { $gte: stolen } },
+                    { $inc: { balance: -stolen } },
+                    { new: true },
+                );
+                if (!defender) {
+                    const freshDefender = await User.findOne({ userId: target.id, guildId: interaction.guild.id });
+                    const fallbackSteal = Math.min(stolen, freshDefender?.balance ?? 0);
+                    if (fallbackSteal > 0) {
+                        defender = await User.findOneAndUpdate(
+                            { userId: target.id, guildId: interaction.guild.id },
+                            { $inc: { balance: -fallbackSteal } },
+                            { new: true },
+                        );
+                        stolen = fallbackSteal;
+                    } else {
+                        stolen = 0;
+                        defender = freshDefender;
+                    }
+                }
+            } else {
+                stolen = 0;
+                defender = defenderSnap;
+            }
+
+            coinsGained = BASE_COIN_REWARD + stolen;
             attacker = await User.findOneAndUpdate(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
                 { $inc: { balance: coinsGained } },
                 { new: true },
             );
 
-            if (defenderSnap && stolen > 0) {
-                const decrement = Math.min(stolen, defenderSnap.balance ?? 0);
-                defender = await User.findOneAndUpdate(
-                    { userId: target.id, guildId: interaction.guild.id },
-                    { $inc: { balance: -decrement } },
-                    { new: true },
-                );
-            } else {
-                defender = defenderSnap;
-            }
-
             const currencyId = getEventCurrencyId(guildSettings);
             if (currencyId) {
-                attacker = await User.findOneAndUpdate(
+                let creditedCurrency = await User.findOneAndUpdate(
                     { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': currencyId },
                     { $inc: { 'eventCurrency.$.amount': SNOWFLAKE_REWARD } },
                     { new: true },
                 );
-                if (!attacker) {
-                    attacker = await User.findOneAndUpdate(
-                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                if (!creditedCurrency) {
+                    // Only push a new entry if one still doesn't exist — guards against
+                    // a concurrent /snowball hit pushing a duplicate currencyId entry
+                    // between the increment attempt above and this push.
+                    creditedCurrency = await User.findOneAndUpdate(
+                        { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': { $ne: currencyId } },
                         { $push: { eventCurrency: { currencyId, amount: SNOWFLAKE_REWARD } } },
                         { new: true },
                     );
+                    if (!creditedCurrency) {
+                        creditedCurrency = await User.findOneAndUpdate(
+                            { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': currencyId },
+                            { $inc: { 'eventCurrency.$.amount': SNOWFLAKE_REWARD } },
+                            { new: true },
+                        );
+                    }
                 }
+                if (creditedCurrency) attacker = creditedCurrency;
             }
 
             description = [
