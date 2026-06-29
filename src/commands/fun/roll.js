@@ -7,8 +7,13 @@ const {
     MessageFlags,
 } = require('discord.js');
 const Guild = require('../../models/Guild');
+const User  = require('../../models/User');
+const { logTransaction } = require('../../utils/logTransaction');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b2.png';
+
+const MIN_BET   = 10;
+const HOUSE_CUT = 0.05; // 5% rake on both bet modes, matching coinflip's solo wager
 
 // Unicode die faces for d6 only
 const D6_FACES = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
@@ -77,6 +82,25 @@ module.exports = {
                 .setDescription('Number of sides (default: 6, max: 100)')
                 .setRequired(false)
                 .setMinValue(2)
+                .setMaxValue(100))
+        .addIntegerOption(opt =>
+            opt.setName('bet')
+                .setDescription('Wager coins on the roll (omit for a casual roll)')
+                .setRequired(false)
+                .setMinValue(MIN_BET))
+        .addStringOption(opt =>
+            opt.setName('guess')
+                .setDescription('High/low call for your wager (ignored if "number" is set)')
+                .setRequired(false)
+                .addChoices(
+                    { name: '⬆️ High half',  value: 'high' },
+                    { name: '⬇️ Low half',   value: 'low'  },
+                ))
+        .addIntegerOption(opt =>
+            opt.setName('number')
+                .setDescription('Bet on an exact number instead of high/low — pays out big')
+                .setRequired(false)
+                .setMinValue(1)
                 .setMaxValue(100)),
 
     async execute(interaction) {
@@ -84,9 +108,30 @@ module.exports = {
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.rollEnabled === false) {
             return interaction.reply({ content: 'Dice roll is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
-        const sides = interaction.options.getInteger('sides') || 6;
+        const sides  = interaction.options.getInteger('sides') || 6;
+        const bet    = interaction.options.getInteger('bet');
+        const guess  = interaction.options.getString('guess');
+        const number = interaction.options.getInteger('number');
+
+        if (!bet) {
+            await interaction.deferReply();
+            return playRoll(interaction, sides);
+        }
+
+        if (number != null && number > sides) {
+            return interaction.reply({ content: `Your exact-number guess must be between 1 and ${sides} for a d${sides}.`, flags: MessageFlags.Ephemeral });
+        }
+        if (number == null && !guess) {
+            return interaction.reply({ content: 'Betting requires a `guess` (high/low) or an exact `number`.', flags: MessageFlags.Ephemeral });
+        }
+
+        const maxBet = guildSettings?.economy?.duelMaxBet ?? 10_000;
+        if (bet > maxBet) {
+            return interaction.reply({ content: `The maximum roll wager here is **${maxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
+        }
+
         await interaction.deferReply();
-        await playRoll(interaction, sides);
+        return playRollBet(interaction, guildSettings, sides, bet, number != null ? { type: 'exact', number } : { type: guess });
     },
 };
 
@@ -121,4 +166,89 @@ async function playRoll(interaction, sides) {
     collector.on('end', (_, reason) => {
         if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
     });
+}
+
+function callLabel(call, sides) {
+    if (call.type === 'exact') return `exact **${call.number}**`;
+    const half = Math.floor(sides / 2);
+    return call.type === 'high' ? `**high** (${half + 1}–${sides})` : `**low** (1–${half})`;
+}
+
+function callWon(call, result, sides) {
+    if (call.type === 'exact') return result === call.number;
+    const half = Math.floor(sides / 2);
+    return call.type === 'high' ? result > half : result <= half;
+}
+
+async function playRollBet(interaction, guildSettings, sides, bet, call) {
+    const currency = guildSettings?.economy?.currency ?? '💰';
+    const guildId  = interaction.guild.id;
+
+    const debited = await User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId, balance: { $gte: bet } },
+        { $inc: { balance: -bet } },
+        { new: true }
+    );
+    if (!debited) {
+        return interaction.editReply({ content: `You don't have **${currency}${bet.toLocaleString()}** to wager.` });
+    }
+
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+    const stakeLine = `Wager: **${currency}${bet.toLocaleString()}** on ${callLabel(call, sides)}`;
+    for (let f = 0; f < 4; f++) {
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setAuthor(embedAuthor(interaction))
+                .setThumbnail(THUMB)
+                .setColor('#5865F2')
+                .setTitle('🎲 Dice Roll')
+                .setDescription(`🎲 **Rolling…**\n\n${stakeLine}`)
+                .setFooter({ text: `d${sides}` })],
+        });
+        await delay(300);
+    }
+
+    const result = Math.floor(Math.random() * sides) + 1;
+    const won    = callWon(call, result, sides);
+
+    // Exact-number bets pay out at sides:1 odds (minus house cut); high/low pays ~1:1.
+    const multiplier = call.type === 'exact' ? sides : 2;
+    const grossPayout = Math.floor(bet * multiplier * (1 - HOUSE_CUT));
+    const profit       = grossPayout - bet;
+
+    let updated = debited;
+    if (won) {
+        updated = await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId },
+            { $inc: { balance: grossPayout } },
+            { new: true }
+        );
+    }
+    logTransaction({
+        userId:  interaction.user.id,
+        guildId,
+        type:    'roll',
+        amount:  won ? profit : -bet,
+        balance: updated?.balance ?? 0,
+        note:    `Roll bet — called ${callLabel(call, sides)}, rolled ${result} on d${sides}`,
+    });
+
+    const embed = new EmbedBuilder()
+        .setAuthor(embedAuthor(interaction))
+        .setThumbnail(THUMB)
+        .setColor(won ? '#2ecc71' : '#e74c3c')
+        .setTitle(won ? `🎲 ${result}! You called it!` : `🎲 ${result}. Not your call.`)
+        .setDescription(
+            won
+                ? `You called ${callLabel(call, sides)} and rolled **${result}** on a d${sides}.\n\n💰 **+${currency}${profit.toLocaleString()}**`
+                : `You called ${callLabel(call, sides)}, but rolled **${result}** on a d${sides}.\n\n💸 **-${currency}${bet.toLocaleString()}**`
+        )
+        .addFields(
+            { name: '📈 Roll',    value: rollBar(result, sides), inline: false },
+            { name: '💰 Balance', value: `**${currency}${(updated?.balance ?? 0).toLocaleString()}**`, inline: true },
+        )
+        .setFooter({ text: won ? 'The house keeps 5% — quit while you\'re ahead?' : 'The dice hold no grudges. Probably.' })
+        .setTimestamp();
+
+    return interaction.editReply({ embeds: [embed] });
 }
