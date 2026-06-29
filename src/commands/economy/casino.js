@@ -107,6 +107,26 @@ module.exports = {
             });
         }
 
+        // The lock is released by the game itself (via releaseLock) once the
+        // hand actually resolves — win/loss/cash-out/timeout, or an early
+        // validation failure — not simply when execute() returns, since every
+        // game's interactive turns continue via button collectors well after
+        // that point. A "Play Again" follow-up doesn't need the lock re-held:
+        // it goes through the same atomic balance debit as any fresh bet, so
+        // it can't double-spend even if another casino game starts in
+        // parallel once the original hand has settled.
+        //
+        // If a game throws, or forgets to call releaseLock on some exotic
+        // early-return path, the lock's own TTL (10 min) frees the slot —
+        // worst case the player is blocked from a second casino game for
+        // that long, never permanently.
+        let released = false;
+        const releaseLock = () => {
+            if (released) return;
+            released = true;
+            release(lockKey, lockToken);
+        };
+
         try {
             // Progressive jackpot: contribute a share of each bet to the pool and check for a win.
             // Fire-and-forget — the service handles pool reset, user credit, and logging.
@@ -121,9 +141,10 @@ module.exports = {
                 }).catch(err => console.error('[CasinoJackpot] error:', err));
             }
 
-            return await game.execute(interaction);
-        } finally {
-            release(lockKey, lockToken);
+            return await game.execute(interaction, { releaseLock });
+        } catch (err) {
+            releaseLock();
+            throw err;
         }
     },
 };

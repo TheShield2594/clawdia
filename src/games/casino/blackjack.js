@@ -200,9 +200,10 @@ module.exports = {
                 .setMinValue(MIN_BET)
                 .setMaxValue(1_000_000_000)),
 
-    async execute(interaction) {
+    async execute(interaction, { releaseLock } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false || guildSettings?.economy?.blackjackEnabled === false) {
+            releaseLock?.();
             return interaction.reply({ content: 'Blackjack is disabled on this server.', flags: MessageFlags.Ephemeral });
         }
 
@@ -210,6 +211,7 @@ module.exports = {
         const bet          = interaction.options.getInteger('bet');
         const casinoMaxBet = guildSettings?.economy?.casinoMaxBet ?? 0;
         if (casinoMaxBet > 0 && bet > casinoMaxBet) {
+            releaseLock?.();
             return interaction.reply({ content: `❌ The casino bet limit on this server is **${casinoMaxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
 
@@ -217,10 +219,11 @@ module.exports = {
         if (!user) user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
 
         if (user.balance < bet) {
+            releaseLock?.();
             return interaction.reply({ content: `You don't have enough ${currency}. Your balance: **${currency}${user.balance.toLocaleString()}**`, flags: MessageFlags.Ephemeral });
         }
 
-        if (!await confirmBet(interaction, bet, user.balance, 'Blackjack', guildSettings)) return;
+        if (!await confirmBet(interaction, bet, user.balance, 'Blackjack', guildSettings)) { releaseLock?.(); return; }
 
         // Atomic debit — re-validates balance at write time to prevent race conditions
         const debited = await User.findOneAndUpdate(
@@ -229,6 +232,7 @@ module.exports = {
             { new: true },
         );
         if (!debited) {
+            releaseLock?.();
             return interaction.reply({ content: `❌ Not enough ${currency}! Your balance may have changed.`, flags: MessageFlags.Ephemeral });
         }
         user = debited;
@@ -248,6 +252,7 @@ module.exports = {
                 );
                 const embed = buildFinalEmbed(interaction, dealerHand, playerHand, null, currency, bet,
                     '🃏 Blackjack — Push', 'Both got blackjack. Bet returned.', '#f39c12', pushUser?.balance ?? user.balance);
+                releaseLock?.();
                 return interaction.reply({ embeds: [embed], components: buildButtons(gameId, true) });
             }
             const bjCoinMult   = getCoinMultiplier(user);
@@ -272,6 +277,7 @@ module.exports = {
                 )
                 .setFooter({ text: 'Blackjack pays 3:2 · Dealer stands on 17' })
                 .setTimestamp();
+            releaseLock?.();
             return interaction.reply({ embeds: [embed], components: buildButtons(gameId, true) });
         }
 
@@ -330,6 +336,7 @@ module.exports = {
                 );
             }
             const peekEmbed = buildEmbed(interaction, playerHand, dealerHand, bet, currency, peekStatus, '#e74c3c', false);
+            releaseLock?.();
             return interaction.editReply({ embeds: [peekEmbed], components: buildButtons(gameId, true) });
         }
 
@@ -539,6 +546,7 @@ module.exports = {
                         '#e74c3c', insUser?.balance ?? 0);
                     await interaction.editReply({ embeds: [embed], components: buildButtons(gameId, true) }).catch(() => {});
                 }
+                releaseLock?.();
                 return;
             }
 
@@ -666,6 +674,8 @@ module.exports = {
                     title, description, color, finalUser?.balance ?? 0);
                 await interaction.editReply({ embeds: [embed], components: buildButtons(gameId, true) }).catch(() => {});
             }
+
+            releaseLock?.();
         });
     },
 };
