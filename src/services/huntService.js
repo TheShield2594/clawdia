@@ -598,12 +598,11 @@ function activateConsumable(user, consumableId) {
         h.consumables[consumableId] -= 1;
         h.activeXpScroll = true;
     } else if (def.type === 'stamina') {
-        // Reset tonic day if needed
-        const now = Date.now();
-        const tonicWindowOk = h.lastTonicDayReset && (now - h.lastTonicDayReset.getTime() < LIMITS.DAILY_WINDOW_MS);
-        if (!tonicWindowOk) {
+        // Tonic count tracks the same rolling window as the rest of the daily
+        // counters (h.dailyWindowStart), so it can't desync from applyDailyReset.
+        if (!h.lastTonicDayReset || (h.dailyWindowStart && h.lastTonicDayReset.getTime() < h.dailyWindowStart.getTime())) {
             h.staminaTonicsToday = 0;
-            h.lastTonicDayReset  = new Date(now);
+            h.lastTonicDayReset  = h.dailyWindowStart ? new Date(h.dailyWindowStart.getTime()) : new Date();
         }
         if (h.staminaTonicsToday >= LIMITS.STAMINA_TONICS_PER_DAY) {
             return { success: false, error: `You've already used ${LIMITS.STAMINA_TONICS_PER_DAY} Stamina Tonics today.` };
@@ -1046,8 +1045,9 @@ function resolveApexPhases(apexType, choicesMade) {
  * Resolve the final apex outcome after all phases.
  * Returns { outcome, bonusPayout, durabilityLost, correctCount, phaseResults, apexType, message }
  */
-function resolveApexEncounter(user, animal, tier, choicesMade, apexType) {
-    const weapon = user.hunt?.weapons[user.hunt.equippedWeaponIndex];
+function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponIndex) {
+    const idx    = weaponIndex ?? user.hunt.equippedWeaponIndex;
+    const weapon = user.hunt?.weapons[idx];
     const at     = apexType ?? rollApexType();
     const { phaseResults, nerve } = resolveApexPhases(at, choicesMade);
 
