@@ -92,6 +92,7 @@ function ensureDefaultShopItems(guildSettings) {
     const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
     const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame']);
+    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food']);
     let changed = false;
 
     if (!guildSettings.shopDefaultsSeeded) {
@@ -112,7 +113,7 @@ function ensureDefaultShopItems(guildSettings) {
 
     // For seeded guilds, only top up categories that are new to the schema.
     for (const item of DEFAULT_SHOP_ITEMS) {
-        if (!ALWAYS_BACKFILL_CATEGORIES.has(item.category)) continue;
+        if (!ALWAYS_BACKFILL_CATEGORIES.has(item.category) && !ALWAYS_BACKFILL_ITEM_IDS.has(item.itemId)) continue;
         if (existingIds.has(item.itemId.toLowerCase()) || existingNames.has(item.name.toLowerCase())) continue;
         guildSettings.shop.push({ ...item, roleId: null, stock: -1, imageUrl: '' });
         changed = true;
