@@ -135,6 +135,51 @@ module.exports = {
                 }
             }
 
+            // "You are here" self-rank for types that didn't already compute it above
+            if (!callerRankLine && !['streaks', 'streaks_longest'].includes(type)) {
+                const callerUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+                if (callerUser) {
+                    let callerRank, callerDisplay;
+                    const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+
+                    if (type === 'levels') {
+                        callerRank = await User.countDocuments({
+                            guildId: interaction.guild.id,
+                            $or: [
+                                { level: { $gt: callerUser.level } },
+                                { level: callerUser.level, xp: { $gt: callerUser.xp } },
+                            ],
+                        }) + 1;
+                        callerDisplay = `Lv${callerUser.level} (${callerUser.xp} XP)`;
+                    } else if (type === 'economy') {
+                        const callerTotal = (callerUser.balance ?? 0) + (callerUser.bank ?? 0);
+                        callerRank = await User.countDocuments({
+                            guildId: interaction.guild.id,
+                            $expr: { $gt: [{ $add: ['$balance', '$bank'] }, callerTotal] },
+                        }) + 1;
+                        callerDisplay = `${callerTotal.toLocaleString()} coins`;
+                    } else if (type === 'duels') {
+                        const callerWins = callerUser.duelWins ?? 0;
+                        callerRank = await User.countDocuments({
+                            guildId: interaction.guild.id,
+                            duelWins: { $gt: callerWins },
+                        }) + 1;
+                        callerDisplay = `${callerWins}W / ${callerUser.duelLosses ?? 0}L`;
+                    } else if (type === 'achievements') {
+                        const callerAch = callerUser.achievementsCount ?? 0;
+                        callerRank = await User.countDocuments({
+                            guildId: interaction.guild.id,
+                            achievementsCount: { $gt: callerAch },
+                        }) + 1;
+                        callerDisplay = `${callerAch} achievement${callerAch !== 1 ? 's' : ''}`;
+                    }
+
+                    if (callerRank !== undefined) {
+                        callerRankLine = `\n${div}\n📍 You: **#${callerRank}** — ${callerDisplay}`;
+                    }
+                }
+            }
+
             embed.setDescription(description + callerRankLine);
             await interaction.reply({ embeds: [embed] });
         } catch (error) {

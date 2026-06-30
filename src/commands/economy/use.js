@@ -25,7 +25,30 @@ module.exports = {
         .addStringOption(o =>
             o.setName('item')
                 .setDescription('Name of the item to use (see /inventory for your items).')
-                .setRequired(true)),
+                .setRequired(true)
+                .setAutocomplete(true)),
+
+    async autocomplete(interaction) {
+        try {
+            const focused = interaction.options.getFocused()?.toLowerCase() ?? '';
+            const user = await User.findOne(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                'inventory'
+            ).lean();
+            const inventory = (user?.inventory ?? []).filter(e => e.quantity > 0);
+            const matches = focused
+                ? inventory.filter(e => e.itemId.toLowerCase().includes(focused))
+                : inventory;
+            await interaction.respond(
+                matches.slice(0, 25).map(e => ({
+                    name: `${e.itemId} (${e.quantity}x)`,
+                    value: e.itemId,
+                }))
+            );
+        } catch {
+            await interaction.respond([]).catch(() => {});
+        }
+    },
 
     async execute(interaction) {
         const itemName = interaction.options.getString('item').trim();

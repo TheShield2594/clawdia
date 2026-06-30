@@ -23,13 +23,18 @@ module.exports = {
         const payoutPct = Math.round(FEATURED_PAYOUT_BONUS * 100);
         const rarePct   = Math.round(FEATURED_RARE_BONUS * 100);
 
+        // Next midnight UTC
+        const nextMidnight = new Date();
+        nextMidnight.setUTCHours(24, 0, 0, 0);
+        const resetTs = Math.floor(nextMidnight.getTime() / 1000);
+
         const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
         const embed = new EmbedBuilder()
             .setColor('#FFD700')
             .setTitle(`🌟 Today's Featured Rotation`)
             .setDescription(
-                `Active until midnight UTC · **+${payoutPct}% payout** and **+${rarePct}% rare chance** on each featured pick.\n\n` +
+                `Resets <t:${resetTs}:R> · **+${payoutPct}% payout** and **+${rarePct}% rare chance** on each featured pick.\n\n` +
                 div + '\n' +
                 `${featured.crime.emoji}  **Crime — ${featured.crime.displayName}**\n` +
                 `> Use \`/crime\` — this job appears in the rotation with the featured buff.\n\n` +
@@ -42,6 +47,7 @@ module.exports = {
                 div
             )
             .setFooter({ text: `${timeBand.emoji} ${timeBand.label} • Resets daily at midnight UTC` })
+            .addFields({ name: '⏰ Resets', value: `<t:${resetTs}:R>`, inline: true })
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed] });
