@@ -672,7 +672,7 @@ async function handleDig(interaction) {
     if (result.success && result.finalPayout > 0) {
         const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
         if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
-            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'mine', details: result.ore ? `${result.ore.name} [${result.tier}]` : null });
+            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'mine', details: { itemName: result.ore?.name, rarity: result.tier }, client: interaction.client });
         }
         await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
     }

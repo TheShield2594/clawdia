@@ -7,17 +7,24 @@ const PRESTIGE_TIERS = [
     { rank: 2,  title: 'Prestige II',           bonuses: { yieldPct: 0.03, staminaRegenPct: 0.05 },                       unlocks: ['black_market', 'legendary_zones']                                                         },
     { rank: 3,  title: 'Prestige III',          bonuses: { yieldPct: 0.03, staminaRegenPct: 0.05, crimeSuccessPct: 0.05 },unlocks: ['black_market', 'legendary_zones', 'syndicate_leader']                                     },
     { rank: 4,  title: 'Prestige IV',           bonuses: { yieldPct: 0.03, staminaRegenPct: 0.05, crimeSuccessPct: 0.05, xpPct: 0.05 }, unlocks: ['black_market', 'legendary_zones', 'syndicate_leader', 'exclusive_pets']    },
-    { rank: 5,  title: 'Prestige V ⭐',          bonuses: { yieldPct: 0.08, staminaRegenPct: 0.05, crimeSuccessPct: 0.05, xpPct: 0.05 }, unlocks: ['black_market', 'legendary_zones', 'syndicate_leader', 'exclusive_pets', 'prestige_v_badge'] },
-    { rank: 10, title: 'The Ascended ✨',        bonuses: { yieldPct: 0.10, staminaRegenPct: 0.10, crimeSuccessPct: 0.10, xpPct: 0.10 }, unlocks: ['black_market', 'legendary_zones', 'syndicate_leader', 'exclusive_pets', 'prestige_v_badge', 'ascended'] },
+    { rank: 5,  title: 'Prestige V ⭐',          bonuses: { yieldPct: 0.08, staminaRegenPct: 0.05, crimeSuccessPct: 0.05, xpPct: 0.05 },                                        unlocks: ['black_market', 'legendary_zones', 'syndicate_leader', 'exclusive_pets', 'prestige_v_badge'] },
+    { rank: 6,  title: 'Prestige VI',            bonuses: { yieldPct: 0.08, staminaRegenPct: 0.08, crimeSuccessPct: 0.05, xpPct: 0.05 },                                        unlocks: ['black_market', 'legendary_zones', 'syndicate_leader', 'exclusive_pets', 'prestige_v_badge', 'daily_challenge'] },
+    { rank: 7,  title: 'Prestige VII',           bonuses: { yieldPct: 0.09, staminaRegenPct: 0.08, crimeSuccessPct: 0.08, xpPct: 0.05 },                                        unlocks: ['black_market', 'legendary_zones', 'syndicate_leader', 'exclusive_pets', 'prestige_v_badge', 'daily_challenge', 'syndicate_extra_slot'] },
+    { rank: 8,  title: 'Prestige VIII 💠',       bonuses: { yieldPct: 0.09, staminaRegenPct: 0.09, crimeSuccessPct: 0.08, xpPct: 0.08, rareTierShiftPct: 0.005 },              unlocks: ['black_market', 'legendary_zones', 'syndicate_leader', 'exclusive_pets', 'prestige_v_badge', 'daily_challenge', 'syndicate_extra_slot', 'p8_black_market'] },
+    { rank: 9,  title: 'Prestige IX 💠',         bonuses: { yieldPct: 0.10, staminaRegenPct: 0.09, crimeSuccessPct: 0.09, xpPct: 0.09, rareTierShiftPct: 0.01 },               unlocks: ['black_market', 'legendary_zones', 'syndicate_leader', 'exclusive_pets', 'prestige_v_badge', 'daily_challenge', 'syndicate_extra_slot', 'p8_black_market'] },
+    { rank: 10, title: 'The Ascended ✨',         bonuses: { yieldPct: 0.10, staminaRegenPct: 0.10, crimeSuccessPct: 0.10, xpPct: 0.10, rareTierShiftPct: 0.015 },              unlocks: ['black_market', 'legendary_zones', 'syndicate_leader', 'exclusive_pets', 'prestige_v_badge', 'daily_challenge', 'syndicate_extra_slot', 'p8_black_market', 'ascended'] },
 ];
 
 const UNLOCK_LABELS = {
-    black_market:      '🏴 Black Market shop tab',
-    legendary_zones:   '🗺️ Legendary hunt / fish / mine zones',
-    syndicate_leader:  '🕴️ Crime syndicate leadership',
-    exclusive_pets:    '🦝 Exclusive pets',
-    prestige_v_badge:  '⭐ Prestige V star + animated badge',
-    ascended:          '✨ "The Ascended" title + animated profile accent',
+    black_market:        '🏴 Black Market shop tab',
+    legendary_zones:     '🗺️ Legendary hunt / fish / mine zones',
+    syndicate_leader:    '🕴️ Crime syndicate leadership',
+    exclusive_pets:      '🦝 Exclusive pets',
+    prestige_v_badge:    '⭐ Prestige V star + animated badge',
+    daily_challenge:     '📋 Daily Challenge board (bonus coin objectives)',
+    syndicate_extra_slot:'👥 +2 syndicate member slots (12 total) for leaders',
+    p8_black_market:     '💠 P8 exclusive Black Market items + +0.5% rare tier shift',
+    ascended:            '✨ "The Ascended" title + animated profile accent',
 };
 
 const SOFT_PRESTIGE_BONUS = { yieldPct: 0.02, xpPct: 0.02 };
@@ -75,6 +82,7 @@ function getBonusMultipliers(rank) {
         xpMult:           1 + (b.xpPct           ?? 0),
         staminaRegenMult: 1 + (b.staminaRegenPct ?? 0),
         crimeSuccessMult: 1 + (b.crimeSuccessPct ?? 0),
+        rareTierShift:    b.rareTierShiftPct ?? 0,
     };
 }
 

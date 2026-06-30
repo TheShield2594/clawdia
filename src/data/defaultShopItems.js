@@ -12,6 +12,8 @@ const DEFAULT_SHOP_ITEMS = [
     { name: 'Lifesaver',          itemId: 'lifesaver',         rarity: 'Rare',     price: 15000, description: '🛟 Absorbs the next /rob fine or /crime loss — one-time use.',     lore: "Inexplicably shows up right when you need it most. Nobody knows where it comes from." },
     { name: 'Lucky Charm',        itemId: 'lucky_charm',       rarity: 'Common',   price: 2000,  description: '🍀 2-hour luck boost across games and /crime (casino saves apply to bets up to 25k).',                    lore: "Found at the bottom of a leprechaun's pocket. Still faintly smells of gold." },
     { name: 'Streak Shield',      itemId: 'streak_shield',     rarity: 'Uncommon', price: 2500,  description: '🔥🛡️ Protects your message streak from one missed day.',          lore: "A small ember that refuses to go out, no matter how bad your week gets." },
+    { name: 'Streak Freeze',      itemId: 'streak_freeze',     rarity: 'Rare',     price: 4500,  description: '🧊 Banks one streak freeze (max 2). A freeze auto-consumes when you miss a day, preserving your streak.', lore: "Time suspended in ice. One day borrowed from the future, paid in advance." },
+    { name: 'Tier Skip Token',    itemId: 'tier_skip_token',   rarity: 'Epic',     price: 50000, description: '⏭️ Instantly advance one season pass tier (use with /season tier-skip).', lore: "The battle pass waits for no one. Except you, apparently." },
     { name: '2x Coin Booster',    itemId: 'coin_booster_2x',   rarity: 'Uncommon', price: 2500,  description: '💰🚀 2x coin earnings from all sources for 1 hour.',               lore: "Temporarily rewires your brain to see money everywhere. Side effects may include greed." },
     { name: '2x XP Booster',      itemId: 'xp_booster_2x',    rarity: 'Uncommon', price: 2500,  description: '⭐🚀 2x XP from chat and activities for 1 hour.',                  lore: "A jolt of clarity disguised as a beverage. Caffeine for the soul." },
     { name: 'Lucky Streak',       itemId: 'lucky_streak',      rarity: 'Common',   price: 1500,  description: '🎯 +25% win chance on games for 30 minutes (casino saves apply to bets up to 25k).',                      lore: "The universe owes you one. This is collecting." },
@@ -92,7 +94,7 @@ function ensureDefaultShopItems(guildSettings) {
     const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
     const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame']);
-    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food']);
+    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food', 'streak_freeze', 'tier_skip_token']);
     let changed = false;
 
     if (!guildSettings.shopDefaultsSeeded) {

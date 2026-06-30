@@ -886,6 +886,56 @@ async function executeSabotage(interaction, guildDoc) {
     return interaction.reply({ embeds: [embed] });
 }
 
+// ── Syndicate upgrade tree ──────────────────────────────────────────────────
+
+const SYNDICATE_UPGRADES = {
+    extra_heist_slot:   { label: 'Extra Heist Slot',     emoji: '🎯', earningsRequired: 100_000,  description: 'Unlocks a 5th simultaneous target option during heist planning.' },
+    cooldown_reduction: { label: 'Cooldown Reduction',   emoji: '⏱️', earningsRequired: 500_000,  description: 'Reduces your heist cooldown by 1 hour (3h instead of 4h).' },
+    fourth_target:      { label: 'Fourth Target',         emoji: '🏦', earningsRequired: 1_000_000, description: 'Unlocks a fourth high-value heist target exclusive to upgraded syndicates.' },
+};
+
+async function executeUpgrade(interaction, guildDoc) {
+    const upgradeId = interaction.options.getString('id');
+    const upgrade   = SYNDICATE_UPGRADES[upgradeId];
+    if (!upgrade) {
+        return interaction.reply({ content: 'Unknown upgrade.', flags: MessageFlags.Ephemeral });
+    }
+
+    const synDoc = await Syndicate.findOne({ guildId: interaction.guild.id, leaderId: interaction.user.id });
+    if (!synDoc) {
+        return interaction.reply({ content: 'You must be the **leader** of a syndicate to purchase upgrades.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (synDoc.upgrades?.includes(upgradeId)) {
+        return interaction.reply({ content: `**${upgrade.emoji} ${upgrade.label}** is already purchased.`, flags: MessageFlags.Ephemeral });
+    }
+
+    if (synDoc.lifetimeEarnings < upgrade.earningsRequired) {
+        const need = upgrade.earningsRequired - synDoc.lifetimeEarnings;
+        return interaction.reply({
+            content: `Your syndicate needs **${upgrade.earningsRequired.toLocaleString()} lifetime earnings** for this upgrade. You have **${synDoc.lifetimeEarnings.toLocaleString()}** — **${need.toLocaleString()} more** needed.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    synDoc.upgrades = [...(synDoc.upgrades ?? []), upgradeId];
+    await synDoc.save();
+
+    const currency = guildDoc?.economy?.currency ?? '💰';
+    const embed = new EmbedBuilder()
+        .setColor('#9b59b6')
+        .setTitle(`${upgrade.emoji} Upgrade Purchased: ${upgrade.label}`)
+        .setDescription(
+            `**${synDoc.name}** has unlocked a new upgrade!\n\n` +
+            `> ${upgrade.description}\n\n` +
+            `**Lifetime Earnings:** ${currency}${synDoc.lifetimeEarnings.toLocaleString()}\n` +
+            `**Upgrades owned:** ${synDoc.upgrades.length} / ${Object.keys(SYNDICATE_UPGRADES).length}`
+        )
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
 // ── Command definition ─────────────────────────────────────────────────────
 
 module.exports = {
@@ -948,6 +998,20 @@ module.exports = {
         .addSubcommand(sub => sub
             .setName('sabotage')
             .setDescription(`Sabotage an active rival heist (costs ${SABOTAGE_HEAT_COST} heat from your syndicate).`)
+        )
+        .addSubcommand(sub => sub
+            .setName('upgrade')
+            .setDescription('Purchase a syndicate upgrade using lifetime earnings (leader only).')
+            .addStringOption(opt =>
+                opt.setName('id')
+                    .setDescription('Upgrade to purchase')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: 'Extra Heist Slot (100k earnings) — 5th simultaneous target', value: 'extra_heist_slot' },
+                        { name: 'Cooldown Reduction (500k earnings) — -1h heist cooldown', value: 'cooldown_reduction' },
+                        { name: 'Fourth Target (1M earnings) — unlock fourth heist target', value: 'fourth_target' }
+                    )
+            )
         ),
 
     cooldownKey:    (interaction) => `syndicate:${interaction.options.getSubcommand()}`,
@@ -978,6 +1042,7 @@ module.exports = {
             case 'leaderboard': return executeLeaderboard(interaction, guildDoc);
             case 'heist':       return executeHeist(interaction, guildDoc, client);
             case 'sabotage':    return executeSabotage(interaction, guildDoc);
+            case 'upgrade':     return executeUpgrade(interaction, guildDoc);
         }
     },
 

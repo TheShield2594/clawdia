@@ -125,6 +125,43 @@ module.exports = {
             return interaction.reply({ embeds: [embed] });
         }
 
+        // ── Streak Freeze ──────────────────────────────────────────────────────
+        if (canonicalId.toLowerCase() === 'streak_freeze') {
+            const MAX_FREEZES = 2;
+            const currentFreezes = preview.streak?.freezes ?? 0;
+            if (currentFreezes >= MAX_FREEZES) {
+                return interaction.reply({
+                    content: `🧊 You already have **${currentFreezes}** streak freeze${currentFreezes !== 1 ? 's' : ''} banked (max ${MAX_FREEZES}). Use some before banking more.`,
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+            const user = await User.findOneAndUpdate(
+                { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } }, 'streak.freezes': { $lt: MAX_FREEZES } },
+                { $inc: { 'inventory.$.quantity': -1, 'streak.freezes': 1 } },
+                { new: true }
+            );
+
+            if (!user) {
+                return interaction.reply({ content: `Couldn't bank the freeze — you may be at the cap already.`, flags: MessageFlags.Ephemeral });
+            }
+
+            user.inventory = user.inventory.filter(e => e.quantity > 0);
+            await user.save();
+
+            const newFreezes = user.streak?.freezes ?? 0;
+            const embed = new EmbedBuilder()
+                .setColor('#5dade2')
+                .setTitle('🧊 Streak Freeze Banked')
+                .setDescription(
+                    `One freeze is now stored. If you miss a daily, it auto-consumes to keep your streak alive.\n\n` +
+                    `**Freezes banked:** ${newFreezes} / ${MAX_FREEZES}`
+                )
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
         // ── Seasonal loot boxes ────────────────────────────────────────────────
         const lootBoxEvent = LOOT_BOX_EVENTS.get(canonicalId.toLowerCase());
         if (lootBoxEvent) {
