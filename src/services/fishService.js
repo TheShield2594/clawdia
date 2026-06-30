@@ -828,7 +828,11 @@ function assignDailyFishQuests(user) {
         (t.type !== 'location_casts' || f.unlockedLocations.includes(t.location))
     );
 
-    const shuffled  = eligible.slice().sort(() => Math.random() - 0.5);
+    const shuffled = eligible.slice();
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
     const toAssign  = shuffled.slice(0, DAILY_QUEST_COUNT);
     const expiresAt = new Date(now + LIMITS.DAILY_WINDOW_MS);
 

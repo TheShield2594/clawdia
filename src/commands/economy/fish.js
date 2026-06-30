@@ -540,10 +540,16 @@ async function handleCast(interaction) {
     const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
 
     // Snapshot pre-cast reward state so we can reverse it if the fish escapes
-    const preCastBalance      = user.balance;
-    const preCastTotalEarned  = user.fishing.totalEarned;
-    const preCastDailyCoins   = user.fishing.dailyCoins;
-    const preCastSuccessful   = user.fishing.successfulCasts;
+    const preCastBalance          = user.balance;
+    const preCastTotalEarned      = user.fishing.totalEarned;
+    const preCastDailyCoins       = user.fishing.dailyCoins;
+    const preCastSuccessful       = user.fishing.successfulCasts;
+    const preCastXp               = user.fishing.xp;
+    const preCastLevel            = user.fishing.level;
+    const preCastLegendaryCatches = user.fishing.legendaryCatches;
+    const preCastEventCatches     = user.fishing.eventCatches;
+    const preCastBestPayout       = user.fishing.bestPayout;
+    const preCastMaterials        = JSON.parse(JSON.stringify(user.fishing.materials ?? {}));
     const preCastPersonalBest = user.fishing.personalBest
         ? JSON.parse(JSON.stringify(user.fishing.personalBest))
         : null;
@@ -593,23 +599,34 @@ async function handleCast(interaction) {
 
         if (!reelPressed) {
             if (cfg.required) {
-                // Reverse all reward mutations — fish escapes, only stamina is spent
-                user.balance                  = preCastBalance;
-                user.fishing.totalEarned      = preCastTotalEarned;
-                user.fishing.dailyCoins       = preCastDailyCoins;
-                user.fishing.successfulCasts  = preCastSuccessful;
+                // Reverse all reward mutations — fish escapes, only stamina and rod durability are spent
+                user.balance                   = preCastBalance;
+                user.fishing.totalEarned       = preCastTotalEarned;
+                user.fishing.dailyCoins        = preCastDailyCoins;
+                user.fishing.successfulCasts   = preCastSuccessful;
+                user.fishing.xp                = preCastXp;
+                user.fishing.level             = preCastLevel;
+                user.fishing.legendaryCatches  = preCastLegendaryCatches;
+                user.fishing.eventCatches      = preCastEventCatches;
+                user.fishing.bestPayout        = preCastBestPayout;
+                user.fishing.materials         = preCastMaterials;
                 if (preCastPersonalBest !== null) user.fishing.personalBest = preCastPersonalBest;
+                user.markModified('fishing');
                 result.success      = false;
                 result.finalPayout  = 0;
                 result.rawPayout    = 0;
+                result.xpEarned     = 0;
+                result.levelUp      = null;
+                result.specialDrop  = null;
                 result.escaped      = true;
                 reelResult = { caught: false, icon: '💨', label: `${result.tier} fish escaped!` };
 
+                const durLine = result.durabilityLost > 0 ? ` Rod took ${result.durabilityLost} durability damage.` : '';
                 await interaction.editReply({
                     embeds: [new EmbedBuilder()
                         .setColor('#888888')
                         .setTitle('💨 It Got Away!')
-                        .setDescription(`*The ${result.fish.name} snapped the line and vanished into the depths.*\n\nStamina spent — nothing to show for it.`)
+                        .setDescription(`*The ${result.fish.name} snapped the line and vanished into the depths.*\n\nStamina spent — nothing to show for it.${durLine}`)
                         .setAuthor(authorOpts)],
                     components: [],
                 });
@@ -883,7 +900,11 @@ async function handleCast(interaction) {
         for (let i = 0; i < phaseCount; i++) {
             state = await runPhase(i, state.results, state.btn);
             if (state.timedOut) {
-                interaction.editReply({ embeds: [embed], components: [] }).catch(() => {});
+                const timeoutEmbed = new EmbedBuilder()
+                    .setColor('#1C0A00')
+                    .setTitle(`${bossType.emoji} ${bossType.name} Slipped Away`)
+                    .setDescription(`⏱️ *You hesitated too long — the ${bossType.name} broke free before you could respond.*\n\nThe base catch above still counts; no bonus boss payout was earned.`);
+                interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
                 return;
             }
         }
