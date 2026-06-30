@@ -243,7 +243,8 @@ const userSchema = new Schema({
         prestigedAt:    { type: Date,   default: null },
         unlocks:        [{ type: String }],   // ordered list of feature unlock ids
         lifetimePrestigeXp: { type: Number, default: 0 },
-        announcedRank:  { type: Number, default: 0 }   // highest rank announced server-wide
+        announcedRank:  { type: Number, default: 0 },  // highest rank announced server-wide
+        lastDailyChallengeAt: { type: Date, default: null }, // P6+ daily_challenge board claim cooldown
     },
 
     // Transient social badges (war victor, leaderboard #1, etc.) with optional expiry

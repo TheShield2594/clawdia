@@ -14,6 +14,7 @@ const {
 } = require('../data/mineData');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { hasIronWill } = require('./synergyService');
+const { getBonusMultipliers } = require('../utils/prestige');
 
 const DANGEROUS_DEPTH_IDS = new Set(['crystal_caves', 'the_abyss']);
 const MINE_DEATH_RATE = 0.08;
@@ -246,6 +247,14 @@ function rollTier(user, depth) {
     const presBoost = PRESTIGE_BONUSES[p].rarityBonus;
     if (presBoost > 0) {
         const shift = w.common * presBoost;
+        w.common = Math.max(0, w.common - shift);
+        w.rare  += shift;
+    }
+
+    // Apply account-level prestige rare-tier shift bonus (P8-P10)
+    const rareTierShift = getBonusMultipliers(user.accountPrestige?.rank ?? 0).rareTierShift;
+    if (rareTierShift > 0) {
+        const shift = w.common * rareTierShift;
         w.common = Math.max(0, w.common - shift);
         w.rare  += shift;
     }

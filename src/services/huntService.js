@@ -17,6 +17,7 @@ const {
 const { hasEffect, consumeEffect } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getHuntSynergyStaminaBonus } = require('./synergyService');
+const { getBonusMultipliers } = require('../utils/prestige');
 
 // Zones where a critical failure can destroy your weapon (death event)
 const DANGEROUS_ZONE_IDS = new Set(['desert_wastes', 'arctic_tundra', 'murky_swamp', 'legendary_peaks']);
@@ -339,6 +340,14 @@ function rollTier(user, zone) {
     const presBoost = PRESTIGE_BONUSES[p].rarityBonus;
     if (presBoost > 0) {
         const shift = w.common * presBoost;
+        w.common = Math.max(0, w.common - shift);
+        w.rare  += shift;
+    }
+
+    // Apply account-level prestige rare-tier shift bonus (P8-P10)
+    const rareTierShift = getBonusMultipliers(user.accountPrestige?.rank ?? 0).rareTierShift;
+    if (rareTierShift > 0) {
+        const shift = w.common * rareTierShift;
         w.common = Math.max(0, w.common - shift);
         w.rare  += shift;
     }

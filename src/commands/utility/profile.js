@@ -160,7 +160,7 @@ module.exports = {
             const totalMines = userData.mining?.totalMines ?? 0;
             const msgCount   = userData.messages ?? 0;
 
-            const prestigeRank   = userData.prestigeRank ?? 0;
+            const prestigeRank   = userData.accountPrestige?.rank ?? 0;
             const prestigeTitle  = titleForExactRank(prestigeRank);
             const prestigeBadge  = badgeFor(prestigeRank);
             const prestigeLine   = prestigeRank > 0
