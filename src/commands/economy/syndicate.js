@@ -441,7 +441,7 @@ async function executeCreate(interaction, guildDoc) {
         });
     } catch (err) {
         await User.updateOne(
-            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { userId: interaction.user.id, guildId: interaction.guild.id, syndicateId },
             { $inc: { balance: CREATION_COST }, $set: { syndicateId: null } },
         );
         throw err;
@@ -452,7 +452,7 @@ async function executeCreate(interaction, guildDoc) {
         guildId: interaction.guild.id,
         type:    'syndicate_create',
         amount:  -CREATION_COST,
-        balance: balance - CREATION_COST,
+        balance: debited.balance,
         note:    `Founded syndicate: ${name}`,
     });
 

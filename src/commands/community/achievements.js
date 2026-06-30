@@ -192,39 +192,31 @@ module.exports = {
                     return interaction.reply({ content: 'You have no unclaimed achievement rewards.', flags: MessageFlags.Ephemeral });
                 }
 
-                // Claim, then credit based on what was actually flipped. These are two
-                // sequential atomic single-document writes rather than a multi-document
-                // transaction, since the bot's MongoDB deployment is a standalone server
-                // (transactions require a replica set / mongos and would throw).
+                // Claim flag + reward credit happen in a single atomic single-document
+                // write (rather than a multi-document transaction, since the bot's
+                // MongoDB deployment is a standalone server and transactions require a
+                // replica set / mongos) so a crash mid-claim can't mark rewards claimed
+                // without crediting them.
                 let totalXp = 0;
                 let totalCoins = 0;
                 const names = [];
-
-                const preClaim = await User.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id },
-                    { $set: { 'achievements.$[el].claimed': true } },
-                    {
-                        arrayFilters: [{ 'el.claimed': { $ne: true }, 'el.id': { $in: claimableIds } }],
-                        new: false,
-                    },
-                );
-
-                const justClaimed = (preClaim?.achievements || []).filter(a => claimableIds.includes(a.id) && !a.claimed);
-                for (const entry of justClaimed) {
-                    const def = defMap.get(entry.id);
+                for (const id of claimableIds) {
+                    const def = defMap.get(id);
                     totalXp    += def.xpReward    || 0;
                     totalCoins += def.coinReward   || 0;
                     names.push(`${def.emoji} ${def.name}`);
                 }
 
-                if (totalXp || totalCoins) {
-                    await User.updateOne(
-                        { userId: interaction.user.id, guildId: interaction.guild.id },
-                        { $inc: { xp: totalXp, balance: totalCoins } },
-                    );
-                }
+                const claimResult = await User.updateOne(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    {
+                        $set: { 'achievements.$[el].claimed': true },
+                        $inc: { xp: totalXp, balance: totalCoins },
+                    },
+                    { arrayFilters: [{ 'el.claimed': { $ne: true }, 'el.id': { $in: claimableIds } }] },
+                );
 
-                if (!names.length) {
+                if (!claimResult.modifiedCount) {
                     return interaction.reply({ content: 'You have no unclaimed achievement rewards.', flags: MessageFlags.Ephemeral });
                 }
 
