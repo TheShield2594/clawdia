@@ -6,7 +6,7 @@ const { checkGiveaways } = require('../services/giveawayService');
 const { checkTempVoice } = require('../services/tempVoiceService');
 const { checkBirthdays } = require('../services/birthdayService');
 const { checkSeasonalEvents } = require('../services/seasonalEventService');
-const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest, postScheduledNewspapers } = require('../services/schedulerService');
+const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest, returnExpiredMarketListings, postScheduledNewspapers } = require('../services/schedulerService');
 const { runJob } = require('../utils/jobRunner');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
@@ -96,6 +96,11 @@ module.exports = {
         // Ranked duel season rollover — check every 10 minutes for expired seasons
         cron.schedule('*/10 * * * *', () =>
             runJob('schedulerService', 'resolveRankedSeasons', () => resolveRankedSeasons(client))
+        );
+
+        // Return items from expired market listings before the TTL index deletes them
+        cron.schedule('*/10 * * * *', () =>
+            runJob('schedulerService', 'returnExpiredMarketListings', () => returnExpiredMarketListings())
         );
 
         // Server Newspaper delivery — check every hour for guilds scheduled to receive their edition
