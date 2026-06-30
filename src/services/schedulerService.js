@@ -880,4 +880,48 @@ async function applyBankInterest(client) {
     }
 }
 
-module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest, postScheduledNewspapers: require('./newspaperService').postScheduledNewspapers };
+// Return expired market listings to sellers before the MongoDB TTL index deletes them.
+// TTL-deleted documents do not fire Mongoose hooks, so without this job items would
+// permanently vanish from the economy when a listing expires unclaimed.
+async function returnExpiredMarketListings() {
+    const MarketListing = require('../models/MarketListing');
+    const now = new Date();
+    let processed = 0;
+
+    // Process in batches of 50 to avoid large memory spikes
+    const expired = await MarketListing.find({ expiresAt: { $lte: now } }).limit(50).lean();
+
+    for (const listing of expired) {
+        try {
+            // Return items to seller atomically
+            const credited = await User.findOneAndUpdate(
+                {
+                    userId:  listing.sellerId,
+                    guildId: listing.guildId,
+                    'inventory.itemId': listing.itemId,
+                },
+                { $inc: { 'inventory.$.quantity': listing.quantity } }
+            );
+
+            if (!credited) {
+                // Item not in seller's inventory yet — push a new slot
+                await User.findOneAndUpdate(
+                    { userId: listing.sellerId, guildId: listing.guildId },
+                    { $push: { inventory: { itemId: listing.itemId, quantity: listing.quantity } } },
+                    { upsert: true }
+                );
+            }
+
+            await MarketListing.deleteOne({ _id: listing._id });
+            processed++;
+        } catch (err) {
+            console.error(`[scheduler] returnExpiredMarketListings failed for listing ${listing._id}:`, err.message);
+        }
+    }
+
+    if (processed > 0) {
+        console.log(`[scheduler] returnExpiredMarketListings: returned items from ${processed} expired listing(s).`);
+    }
+}
+
+module.exports = { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest, returnExpiredMarketListings, postScheduledNewspapers: require('./newspaperService').postScheduledNewspapers };

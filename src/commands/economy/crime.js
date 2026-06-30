@@ -99,6 +99,13 @@ module.exports = {
         .setDescription('Choose a crime and attempt it for coins. Higher risk = higher reward. Cooldown: 1.5h.'),
 
     async execute(interaction) {
+        const MIN_ACCOUNT_AGE_MS = 7 * 24 * 3_600_000;
+        if (Date.now() - interaction.user.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
+            return interaction.reply({
+                content: '❌ Your Discord account must be at least 7 days old to commit crimes.',
+                flags: MessageFlags.Ephemeral,
+            });
+        }
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false) {
             return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });

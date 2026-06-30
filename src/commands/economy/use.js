@@ -29,41 +29,51 @@ module.exports = {
 
     async execute(interaction) {
         const itemName = interaction.options.getString('item').trim();
+        const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
-        const [user, guildSettings] = await Promise.all([
-            User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
+        // Read first to resolve item identity (itemId casing, effect checks)
+        const [preview, guildSettings] = await Promise.all([
+            User.findOne(userFilter),
             Guild.findOne({ guildId: interaction.guild.id })
         ]);
 
-        if (!user || !user.inventory?.length) {
+        if (!preview || !preview.inventory?.length) {
             return interaction.reply({ content: "Your inventory is empty. Buy items with `/shop buy`.", flags: MessageFlags.Ephemeral });
         }
 
-        const invEntry = user.inventory.find(e => e.itemId.toLowerCase() === itemName.toLowerCase());
+        const invEntry = preview.inventory.find(e => e.itemId.toLowerCase() === itemName.toLowerCase());
         if (!invEntry || invEntry.quantity < 1) {
             return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
         }
 
-        const effectType = resolveEffectType(itemName);
-        const cfg        = effectType ? EFFECT_CONFIGS[effectType] : null;
+        const canonicalId = invEntry.itemId; // preserve original casing for DB match
+        const effectType  = resolveEffectType(itemName);
+        const cfg         = effectType ? EFFECT_CONFIGS[effectType] : null;
 
         // ── Active-effect items ───────────────────────────────────────────────
         if (cfg) {
-            if (hasEffect(user, effectType)) {
-                const existing = user.activeEffects.find(e => e.type === effectType);
+            if (hasEffect(preview, effectType)) {
+                const existing = preview.activeEffects.find(e => e.type === effectType);
                 return interaction.reply({
                     content: `**${cfg.emoji} ${cfg.label}** is already active (${timeRemaining(existing?.expiresAt)} remaining). It will refresh when it expires.`,
                     flags: MessageFlags.Ephemeral
                 });
             }
 
-            // Consume one from inventory
-            invEntry.quantity -= 1;
-            if (invEntry.quantity <= 0) {
-                user.inventory = user.inventory.filter(e => e.itemId.toLowerCase() !== itemName.toLowerCase());
+            // Atomically consume one item (quantity must be > 0)
+            const user = await User.findOneAndUpdate(
+                { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } } },
+                { $inc: { 'inventory.$.quantity': -1 } },
+                { new: true }
+            );
+
+            if (!user) {
+                return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
             }
 
             const effect = addEffect(user, effectType);
+            // Clean up zero-quantity entries and save effect
+            user.inventory = user.inventory.filter(e => e.quantity > 0);
             await user.save();
 
             const embed = new EmbedBuilder()
@@ -80,12 +90,12 @@ module.exports = {
                 activationDesc = 'Effect is permanently active until removed.';
             }
 
-            const lore = getItemLore(invEntry.itemId);
+            const lore = getItemLore(canonicalId);
             embed.setDescription(lore ? `${activationDesc}\n\n> *${lore}*` : activationDesc);
 
             embed.addFields({
                 name: 'Remaining in inventory',
-                value: `${user.inventory.find(e => e.itemId.toLowerCase() === itemName.toLowerCase())?.quantity ?? 0}x`,
+                value: `${user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 0}x`,
                 inline: true
             });
 
@@ -93,33 +103,47 @@ module.exports = {
         }
 
         // ── Seasonal loot boxes ────────────────────────────────────────────────
-        const lootBoxEvent = LOOT_BOX_EVENTS.get(invEntry.itemId.toLowerCase());
+        const lootBoxEvent = LOOT_BOX_EVENTS.get(canonicalId.toLowerCase());
         if (lootBoxEvent) {
             const won = rollLootBox(lootBoxEvent);
             if (!won) {
                 return interaction.reply({ content: `The **${lootBoxEvent.lootBox.name}** is empty. That shouldn't happen — let a mod know.`, flags: MessageFlags.Ephemeral });
             }
 
-            invEntry.quantity -= 1;
-            if (invEntry.quantity <= 0) {
-                user.inventory = user.inventory.filter(e => e.itemId.toLowerCase() !== itemName.toLowerCase());
+            // Atomically consume the loot box
+            const user = await User.findOneAndUpdate(
+                { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } } },
+                { $inc: { 'inventory.$.quantity': -1 } },
+                { new: true }
+            );
+
+            if (!user) {
+                return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
             }
 
-            if (!user.inventory) user.inventory = [];
-            const wonSlot = user.inventory.find(e => e.itemId === won.itemId);
-            if (wonSlot) {
-                wonSlot.quantity += 1;
-            } else {
-                user.inventory.push({ itemId: won.itemId, quantity: 1 });
-            }
+            // Credit the won item atomically, then clean up zeros
+            await User.findOneAndUpdate(
+                { ...userFilter, 'inventory.itemId': won.itemId },
+                { $inc: { 'inventory.$.quantity': 1 } }
+            ).then(async matched => {
+                if (!matched) {
+                    await User.findOneAndUpdate(
+                        userFilter,
+                        { $push: { inventory: { itemId: won.itemId, quantity: 1 } } }
+                    );
+                }
+            });
 
-            await user.save();
+            // Clean up zero-quantity entries
+            await User.findOneAndUpdate(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } });
+
+            const boxRemaining = (user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 1) - 1;
 
             const embed = new EmbedBuilder()
                 .setColor(RARITY_COLORS[won.rarity] ?? '#5865F2')
                 .setTitle(`${lootBoxEvent.lootBox.emoji} Opened: ${lootBoxEvent.lootBox.name}`)
                 .setDescription(`You found a **${won.rarity}** item:\n\n${won.emoji} **${won.name}**`)
-                .addFields({ name: 'Remaining in inventory', value: `${user.inventory.find(e => e.itemId === invEntry.itemId)?.quantity ?? 0}x ${lootBoxEvent.lootBox.name}`, inline: true })
+                .addFields({ name: 'Remaining in inventory', value: `${boxRemaining}x ${lootBoxEvent.lootBox.name}`, inline: true })
                 .setTimestamp();
 
             return interaction.reply({ embeds: [embed] });
@@ -137,14 +161,22 @@ module.exports = {
             }
         }
 
-        invEntry.quantity -= 1;
-        if (invEntry.quantity <= 0) {
-            user.inventory = user.inventory.filter(e => e.itemId.toLowerCase() !== itemName.toLowerCase());
-        }
-        await user.save();
+        // Atomically consume one item
+        const user = await User.findOneAndUpdate(
+            { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } } },
+            { $inc: { 'inventory.$.quantity': -1 } },
+            { new: true }
+        );
 
-        const loreText   = shopItem?.lore ?? getItemLore(itemName.toLowerCase());
-        const baseDesc   = shopItem?.description || 'Item consumed from your inventory.';
+        if (!user) {
+            return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
+        }
+
+        // Clean up zero-quantity entries
+        await User.findOneAndUpdate(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } });
+
+        const loreText    = shopItem?.lore ?? getItemLore(itemName.toLowerCase());
+        const baseDesc    = shopItem?.description || 'Item consumed from your inventory.';
         const genericDesc = loreText ? `${baseDesc}\n\n> *${loreText}*` : baseDesc;
 
         const embed = new EmbedBuilder()
@@ -157,7 +189,7 @@ module.exports = {
             embed.addFields({ name: 'Role Granted', value: `<@&${shopItem.roleId}>` });
         }
 
-        const remaining = user.inventory.find(e => e.itemId.toLowerCase() === itemName.toLowerCase())?.quantity ?? 0;
+        const remaining = (user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 1) - 1;
         embed.addFields({ name: 'Remaining', value: `${remaining}x`, inline: true });
 
         await interaction.reply({ embeds: [embed] });
