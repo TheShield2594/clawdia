@@ -26,7 +26,7 @@ const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { ensureHuntData, getMaxStamina: getHuntMaxStamina } = require('./huntService');
 const { getFishSynergyStaminaBonus } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
-const { getGatheringYieldMultiplier, consumeEffect } = require('./effectsService');
+const { getGatheringYieldEffect, consumeEffect } = require('./effectsService');
 
 const DAILY_QUEST_COUNT = 3;
 
@@ -327,9 +327,9 @@ function applyPayoutModifiers(user, rawPayout, location) {
     const f = user.fishing;
     let payout = rawPayout;
 
-    // Voidsteel Cache: 2x yield for next 10 gathers (consume 1 charge)
-    const voidsteelMult = getGatheringYieldMultiplier(user);
-    if (voidsteelMult > 1) { consumeEffect(user, 'voidsteel_cache'); payout *= voidsteelMult; }
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
 
     if (location.payoutBonus > 0) payout *= (1 + location.payoutBonus);
 

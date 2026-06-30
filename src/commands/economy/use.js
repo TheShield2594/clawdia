@@ -162,6 +162,47 @@ module.exports = {
             return interaction.reply({ embeds: [embed] });
         }
 
+        // ── Black Market Contract ──────────────────────────────────────────────
+        if (canonicalId.toLowerCase() === 'black_market_contract') {
+            const MAX_STACKS = 3;
+            const currentStacks = preview.crimeContractStacks ?? 0;
+            if (currentStacks >= MAX_STACKS) {
+                return interaction.reply({
+                    content: `📜 You already have **${currentStacks}** contract stacks (max ${MAX_STACKS}). The house won't deal further.`,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            const user = await User.findOneAndUpdate(
+                {
+                    ...userFilter,
+                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
+                    crimeContractStacks: { $lt: MAX_STACKS },
+                },
+                { $inc: { 'inventory.$.quantity': -1, crimeContractStacks: 1 } },
+                { new: true }
+            );
+
+            if (!user) {
+                return interaction.reply({ content: `Couldn't apply the contract — you may be at the max stacks already.`, flags: MessageFlags.Ephemeral });
+            }
+
+            user.inventory = user.inventory.filter(e => e.quantity > 0);
+            await user.save();
+
+            const newStacks = user.crimeContractStacks ?? 0;
+            const embed = new EmbedBuilder()
+                .setColor('#2c3e50')
+                .setTitle('📜 Black Market Contract Signed')
+                .setDescription(
+                    `A permanent +5% crime success bonus has been added to your record.\n\n` +
+                    `**Contract stacks:** ${newStacks} / ${MAX_STACKS} (+${newStacks * 5}% total bonus)`
+                )
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
         // ── Seasonal loot boxes ────────────────────────────────────────────────
         const lootBoxEvent = LOOT_BOX_EVENTS.get(canonicalId.toLowerCase());
         if (lootBoxEvent) {

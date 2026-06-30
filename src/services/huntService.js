@@ -14,7 +14,7 @@ const {
     TROPHY_QUALITIES,
     APEX_TYPES
 } = require('../data/huntData');
-const { hasEffect, consumeEffect, getGatheringYieldMultiplier } = require('./effectsService');
+const { hasEffect, consumeEffect, getGatheringYieldMultiplier, getGatheringYieldEffect } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getHuntSynergyStaminaBonus } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
@@ -422,9 +422,9 @@ function applyPayoutModifiers(user, rawPayout, zone) {
     const h = user.hunt;
     let payout = rawPayout;
 
-    // Voidsteel Cache: 2x yield for next 10 gathers (consume 1 charge)
-    const voidsteelMult = getGatheringYieldMultiplier(user);
-    if (voidsteelMult > 1) { consumeEffect(user, 'voidsteel_cache'); payout *= voidsteelMult; }
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
 
     // Zone bonus (e.g. Legendary Peaks +20%)
     if (zone.payoutBonus > 0) payout *= (1 + zone.payoutBonus);
