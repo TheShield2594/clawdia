@@ -65,17 +65,29 @@ function hungerBar(hunger) {
     return color.repeat(filled) + '⬛'.repeat(HUNGER_BAR_LENGTH - filled) + ` ${hunger}%`;
 }
 
+function getInventoryQuantity(user, itemId) {
+    return user.inventory?.find(i => i.itemId === itemId)?.quantity ?? 0;
+}
+
 function getMaterialSource(user, materialId) {
     const huntMat = user.hunt?.materials?.[materialId]   ?? 0;
     const fishMat = user.fishing?.materials?.[materialId] ?? 0;
     const mineMat = user.mining?.materials?.[materialId]  ?? 0;
-    return { huntMat, fishMat, mineMat, total: huntMat + fishMat + mineMat };
+    const invMat  = getInventoryQuantity(user, materialId);
+    return { huntMat, fishMat, mineMat, invMat, total: huntMat + fishMat + mineMat + invMat };
 }
 
 function decrementMaterial(user, materialId) {
     if ((user.hunt?.materials?.[materialId]    ?? 0) > 0) { user.hunt.materials[materialId]--;    user.markModified('hunt.materials');    return true; }
     if ((user.fishing?.materials?.[materialId] ?? 0) > 0) { user.fishing.materials[materialId]--; user.markModified('fishing.materials'); return true; }
     if ((user.mining?.materials?.[materialId]  ?? 0) > 0) { user.mining.materials[materialId]--;  user.markModified('mining.materials');  return true; }
+    const slot = user.inventory?.find(i => i.itemId === materialId);
+    if (slot && slot.quantity > 0) {
+        slot.quantity--;
+        if (slot.quantity <= 0) user.inventory = user.inventory.filter(i => i !== slot);
+        user.markModified('inventory');
+        return true;
+    }
     return false;
 }
 
@@ -918,9 +930,9 @@ module.exports = {
         .addSubcommand(sub => sub.setName('status').setDescription('View your pets and their mood.'))
         .addSubcommand(sub =>
             sub.setName('feed')
-                .setDescription('Feed a pet using a hunt/fish/mine material.')
+                .setDescription('Feed a pet using a hunt/fish/mine material, or shop-bought pet_food.')
                 .addStringOption(opt =>
-                    opt.setName('material').setDescription('Material to feed (e.g. rabbits_foot, fish_scale)').setRequired(true)
+                    opt.setName('material').setDescription('Material to feed (e.g. rabbits_foot, fish_scale, pet_food)').setRequired(true)
                 )
                 .addIntegerOption(opt =>
                     opt.setName('slot').setDescription('Pet slot number (0 = first pet, default 0)').setRequired(false).setMinValue(0).setMaxValue(9)
