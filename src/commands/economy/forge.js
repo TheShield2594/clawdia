@@ -126,7 +126,7 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
                 history: [],
                 prompt,
                 temperature: 0.95,
-                maxTokens: 150,
+                maxTokens: 500,
             });
 
             const cleaned = raw.replace(/```json|```/gi, '').trim();

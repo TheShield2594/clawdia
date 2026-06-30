@@ -150,7 +150,7 @@ Create a legendary quest that feels fitting for their journey so far.`;
                 history: [],
                 prompt,
                 temperature: 0.9,
-                maxTokens: 200,
+                maxTokens: 500,
             });
 
             // Strip any accidental markdown fences
