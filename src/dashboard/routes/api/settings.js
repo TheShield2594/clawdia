@@ -23,7 +23,8 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'dailyNews', 'dailyNewsProfiles', 'rssFeeds',
     'autoRoles', 'reactionRoles', 'analytics',
     'giveaways', 'notifications',
-    'newspaper', 'heist', 'exploration'
+    'newspaper', 'heist', 'exploration',
+    'dynamicPricing'
 ]);
 
 function isAllowedSettingKey(key) {
@@ -225,6 +226,30 @@ function validateExplorationUpdate(updates) {
     return null;
 }
 
+function validateDynamicPricingUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        if (!key.startsWith('dynamicPricing.') && key !== 'dynamicPricing') continue;
+        const field = key.split('.')[1];
+        if (field === 'enabled') {
+            if (typeof value !== 'boolean') return 'dynamicPricing.enabled must be a boolean';
+        }
+        if (field === 'volatility') {
+            if (!['low', 'medium', 'high'].includes(value)) return "dynamicPricing.volatility must be 'low', 'medium', or 'high'";
+        }
+        if (field === 'priceBand') {
+            if (typeof value !== 'number' || !Number.isFinite(value) || value < 0.05 || value > 0.9) {
+                return 'dynamicPricing.priceBand must be a number between 0.05 and 0.9';
+            }
+        }
+        if (field === 'recalcMinutes') {
+            if (typeof value !== 'number' || !Number.isInteger(value) || value < 15 || value > 1440) {
+                return 'dynamicPricing.recalcMinutes must be an integer between 15 and 1440';
+            }
+        }
+    }
+    return null;
+}
+
 function validateHeistUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         if (!key.startsWith('heist.') && key !== 'heist') continue;
@@ -267,6 +292,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkCsrfOr
 
     const newspaperError = validateNewspaperUpdate(updates);
     if (newspaperError) return res.status(400).json({ error: newspaperError });
+
+    const dynamicPricingError = validateDynamicPricingUpdate(updates);
+    if (dynamicPricingError) return res.status(400).json({ error: dynamicPricingError });
 
     const heistError = validateHeistUpdate(updates);
     if (heistError) return res.status(400).json({ error: heistError });
