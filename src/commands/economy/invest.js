@@ -195,13 +195,19 @@ module.exports = {
             note:    `district:${districtId}`,
         });
 
-        // Add to district pool and update top contributors
-        const freshGuild = await Guild.findOne({ guildId: interaction.guild.id });
-        ensureDistricts(freshGuild);
-        const distEntry = freshGuild.districts.find(x => x.districtId === districtId);
+        // Atomically increment the district pool to prevent concurrent contributions
+        // from overwriting each other. The $inc is safe against race conditions.
+        let freshGuild = await Guild.findOneAndUpdate(
+            {
+                guildId: interaction.guild.id,
+                districts: { $elemMatch: { districtId, activeUntil: { $not: { $gt: new Date() } } } },
+            },
+            { $inc: { 'districts.$.pool': amount } },
+            { new: true }
+        );
 
-        // Only allow contribution if district is not already active
-        if (distEntry && isActive(distEntry)) {
+        if (!freshGuild) {
+            // District was activated by a concurrent contribution after our pre-check — refund
             const refunded = await User.findOneAndUpdate(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
                 { $inc: { balance: amount } },
@@ -216,14 +222,15 @@ module.exports = {
                 note:    `district:${districtId} (already active — refunded)`,
             });
             return interaction.reply({
-                content: `The **${distMeta.name}** district is already active! Coins refunded.`,
+                content: `The **${distMeta.name}** district just activated! Coins refunded.`,
                 flags: MessageFlags.Ephemeral,
             });
         }
 
-        distEntry.pool = (distEntry.pool ?? 0) + amount;
+        ensureDistricts(freshGuild);
+        const distEntry = freshGuild.districts.find(x => x.districtId === districtId);
 
-        // Update top contributors
+        // Update top contributors (cosmetic — non-atomic is acceptable here)
         const existing = distEntry.topContributors.find(c => c.userId === interaction.user.id);
         if (existing) {
             existing.amount += amount;

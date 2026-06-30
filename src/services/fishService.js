@@ -25,6 +25,8 @@ const { getCurrentWeather } = require('./weatherService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { ensureHuntData, getMaxStamina: getHuntMaxStamina } = require('./huntService');
 const { getFishSynergyStaminaBonus } = require('./synergyService');
+const { getBonusMultipliers } = require('../utils/prestige');
+const { getGatheringYieldEffect, consumeEffect } = require('./effectsService');
 
 const DAILY_QUEST_COUNT = 3;
 
@@ -268,6 +270,14 @@ function rollTier(user, location, rod) {
         w.rare  += shift;
     }
 
+    // Apply account-level prestige rare-tier shift bonus (P8-P10)
+    const rareTierShift = getBonusMultipliers(user.accountPrestige?.rank ?? 0).rareTierShift;
+    if (rareTierShift > 0) {
+        const shift = w.common * rareTierShift;
+        w.common = Math.max(0, w.common - shift);
+        w.rare  += shift;
+    }
+
     // Weather bonus
     const weather = getCurrentWeather();
     const locBonus = weather.locationBonus?.[location.id] ?? {};
@@ -333,9 +343,14 @@ function applyPayoutModifiers(user, rawPayout, location) {
 
     payout = Math.round(payout);
 
+    // Hard cap: zero coins — check before consuming item charges
     if (f.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
         return { adjustedPayout: 0, cappedByHard: true };
     }
+
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
     if (f.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {
         payout = Math.round(payout * 0.50);
     }

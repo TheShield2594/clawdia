@@ -127,6 +127,13 @@ module.exports = {
         .setDescription('Claim your daily coin reward (amount set by server admins, default 100). Resets every 24 hours.'),
     cooldown: 5,
     async execute(interaction) {
+        const MIN_ACCOUNT_AGE_MS = 7 * 24 * 3_600_000;
+        if (Date.now() - interaction.user.createdTimestamp < MIN_ACCOUNT_AGE_MS) {
+            return interaction.reply({
+                content: '❌ Your Discord account must be at least 7 days old to claim daily rewards.',
+                flags: MessageFlags.Ephemeral,
+            });
+        }
         try {
             const [user, guildSettings] = await Promise.all([
                 User.findOneAndUpdate(

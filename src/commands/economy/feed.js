@@ -24,7 +24,7 @@ function relativeTime(date) {
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('feed')
+        .setName('winfeed')
         .setDescription('See the last 20 big wins in this server (50k+ coins or legendary drops).'),
 
     cooldown: 10,

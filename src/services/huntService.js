@@ -14,9 +14,10 @@ const {
     TROPHY_QUALITIES,
     APEX_TYPES
 } = require('../data/huntData');
-const { hasEffect, consumeEffect } = require('./effectsService');
+const { hasEffect, consumeEffect, getGatheringYieldMultiplier, getGatheringYieldEffect } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getHuntSynergyStaminaBonus } = require('./synergyService');
+const { getBonusMultipliers } = require('../utils/prestige');
 
 // Zones where a critical failure can destroy your weapon (death event)
 const DANGEROUS_ZONE_IDS = new Set(['desert_wastes', 'arctic_tundra', 'murky_swamp', 'legendary_peaks']);
@@ -343,6 +344,14 @@ function rollTier(user, zone) {
         w.rare  += shift;
     }
 
+    // Apply account-level prestige rare-tier shift bonus (P8-P10)
+    const rareTierShift = getBonusMultipliers(user.accountPrestige?.rank ?? 0).rareTierShift;
+    if (rareTierShift > 0) {
+        const shift = w.common * rareTierShift;
+        w.common = Math.max(0, w.common - shift);
+        w.rare  += shift;
+    }
+
     // Precision Scope permanent upgrade (+2% rarity boost)
     if (h.precisionScope) {
         const scopeShift = w.common * 0.02;
@@ -432,10 +441,14 @@ function applyPayoutModifiers(user, rawPayout, zone) {
 
     payout = Math.round(payout);
 
-    // Hard cap: zero coins
+    // Hard cap: zero coins — check before consuming item charges
     if (h.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
         return { adjustedPayout: 0, cappedByHard: true };
     }
+
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
 
     // Soft cap: 50% reduction
     if (h.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {

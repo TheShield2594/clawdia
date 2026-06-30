@@ -407,6 +407,108 @@ async function executeClaimMission(interaction) {
     });
 }
 
+async function executeClaimAll(interaction) {
+    const [user, guildSettings] = await Promise.all([
+        User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+            { upsert: true, new: true }
+        ),
+        Guild.findOne({ guildId: interaction.guild.id })
+    ]);
+
+    const season = guildSettings?.season;
+    if (!season?.enabled || !season?.seasonId) {
+        return interaction.reply({ content: 'No active season pass is running.', flags: MessageFlags.Ephemeral });
+    }
+
+    normalizeSeason(user, season.seasonId);
+    const currency = guildSettings?.economy?.currency ?? '💰';
+    const wantsPremium = interaction.options.getBoolean('premium') ?? false;
+
+    if (wantsPremium && user.season?.premium !== true) {
+        const premiumCost = season.premiumCost ?? DEFAULT_PREMIUM_COST;
+        return interaction.reply({
+            content: `You haven't unlocked the premium track. Use \`/season unlock\` for **${currency}${premiumCost.toLocaleString()}**.`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
+    if (!user.season) user.season = {};
+    if (!Array.isArray(user.season.claimedTiers))        user.season.claimedTiers = [];
+    if (!Array.isArray(user.season.claimedPremiumTiers)) user.season.claimedPremiumTiers = [];
+
+    const userXp = user.season?.xp ?? 0;
+    const unlockedTier = getTierFromXp(userXp);
+    const claimedSet = new Set(wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers);
+
+    const claimable = TIER_TABLE.filter(t => t.tier <= unlockedTier && !claimedSet.has(t.tier));
+
+    if (claimable.length === 0) {
+        return interaction.reply({
+            content: `No unclaimed ${wantsPremium ? 'premium' : 'free'} rewards available. Keep earning Season XP to unlock more tiers!`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
+    let totalCoins = 0;
+    const itemsClaimed = [];
+
+    for (const tierDef of claimable) {
+        const reward = rewardFor(tierDef.tier, wantsPremium);
+        if (!reward) continue;
+
+        if (reward.coins > 0) {
+            user.balance += reward.coins;
+            totalCoins += reward.coins;
+        }
+        if (reward.itemId) {
+            const existing = user.inventory.find(e => e.itemId === reward.itemId);
+            if (existing) {
+                existing.quantity += 1;
+            } else {
+                user.inventory.push({ itemId: reward.itemId, quantity: 1 });
+            }
+            itemsClaimed.push(reward.label);
+            user.markModified('inventory');
+        }
+
+        if (wantsPremium) {
+            user.season.claimedPremiumTiers.push(tierDef.tier);
+        } else {
+            user.season.claimedTiers.push(tierDef.tier);
+        }
+    }
+
+    user.markModified('season');
+
+    try {
+        await user.save();
+    } catch (err) {
+        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
+        throw err;
+    }
+
+    const track = wantsPremium ? '✨ Premium' : '🆓 Free';
+    const tierNums = claimable.map(t => t.tier);
+    const tierRange = tierNums.length === 1
+        ? `Tier ${tierNums[0]}`
+        : `Tiers ${tierNums[0]}–${tierNums[tierNums.length - 1]}`;
+
+    const lines = [`Claimed **${claimable.length}** reward${claimable.length !== 1 ? 's' : ''}:`];
+    if (totalCoins > 0) lines.push(`💰 +**${totalCoins.toLocaleString()} ${currency}**`);
+    if (itemsClaimed.length > 0) lines.push(`🎁 Items: ${itemsClaimed.join(', ')}`);
+
+    const embed = new EmbedBuilder()
+        .setColor(wantsPremium ? '#ffd700' : '#5865f2')
+        .setTitle(`${track} — ${tierRange} Claimed!`)
+        .setDescription(lines.join('\n'))
+        .setFooter({ text: `Balance: ${user.balance.toLocaleString()} coins` })
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
 // ── Economy season (issue #238) subcommands ───────────────────────────────────
 
 async function executeLeaderboard(interaction) {
@@ -690,6 +792,75 @@ async function executeSeasonEvent(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
+// ── Tier Skip Token ───────────────────────────────────────────────────────────
+
+const TIER_SKIP_ITEM_ID = 'tier_skip_token';
+
+async function executeTierSkip(interaction) {
+    const [user, guildSettings] = await Promise.all([
+        User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
+        Guild.findOne({ guildId: interaction.guild.id })
+    ]);
+
+    const season = guildSettings?.season;
+    if (!season?.enabled || !season?.seasonId) {
+        return interaction.reply({ content: 'No active season pass is running on this server right now.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (!user) {
+        return interaction.reply({ content: "You don't have a profile yet.", flags: MessageFlags.Ephemeral });
+    }
+
+    normalizeSeason(user, season.seasonId);
+
+    const currentTier = getTierFromXp(user.season?.xp ?? 0);
+    if (currentTier >= MAX_TIERS) {
+        return interaction.reply({ content: '✅ You\'re already at the maximum tier!', flags: MessageFlags.Ephemeral });
+    }
+
+    const invEntry = user.inventory?.find(e => e.itemId.toLowerCase() === TIER_SKIP_ITEM_ID && e.quantity > 0);
+    if (!invEntry) {
+        return interaction.reply({ content: `You don't have a **Tier Skip Token** in your inventory. Purchase one from the event shop.`, flags: MessageFlags.Ephemeral });
+    }
+
+    // Atomically consume the token and grant one full tier of XP
+    const updatedUser = await User.findOneAndUpdate(
+        {
+            userId: interaction.user.id,
+            guildId: interaction.guild.id,
+            inventory: { $elemMatch: { itemId: invEntry.itemId, quantity: { $gt: 0 } } }
+        },
+        {
+            $inc: {
+                'inventory.$.quantity': -1,
+                'season.xp': XP_PER_TIER,
+            }
+        },
+        { new: true }
+    );
+
+    if (!updatedUser) {
+        return interaction.reply({ content: 'Failed to consume the Tier Skip Token — it may have already been used.', flags: MessageFlags.Ephemeral });
+    }
+
+    updatedUser.inventory = updatedUser.inventory.filter(e => e.quantity > 0);
+    await updatedUser.save();
+
+    const newTier = getTierFromXp(updatedUser.season?.xp ?? 0);
+    const embed = new EmbedBuilder()
+        .setColor('#FFD700')
+        .setTitle('⏭️ Tier Skipped!')
+        .setDescription(
+            `Your Tier Skip Token was consumed.\n\n` +
+            `**Tier:** ${currentTier} → **${newTier}**\n` +
+            `**Tokens remaining:** ${updatedUser.inventory.find(e => e.itemId === invEntry.itemId)?.quantity ?? 0}x`
+        )
+        .setFooter({ text: 'Use /season claim to collect your new tier rewards.' })
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
 // ── Module export ─────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -720,6 +891,15 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('unlock')
                 .setDescription('Unlock the premium season-pass track for a one-time coin payment.')
+        )
+        .addSubcommand(sub =>
+            sub.setName('claim-all')
+                .setDescription('Claim all available season pass tier rewards at once.')
+                .addBooleanOption(opt =>
+                    opt.setName('premium')
+                        .setDescription('Claim premium-track rewards (requires /season unlock)')
+                        .setRequired(false)
+                )
         )
         .addSubcommand(sub =>
             sub.setName('missions')
@@ -771,6 +951,10 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('event')
                 .setDescription('View your progress in the active seasonal event with milestone rewards.')
+        )
+        .addSubcommand(sub =>
+            sub.setName('tier-skip')
+                .setDescription('Use a Tier Skip Token from your inventory to advance one season pass tier.')
         ),
 
     async execute(interaction) {
@@ -778,6 +962,7 @@ module.exports = {
         try {
             if (sub === 'view')          return await executeView(interaction);
             if (sub === 'claim')         return await executeClaim(interaction);
+            if (sub === 'claim-all')     return await executeClaimAll(interaction);
             if (sub === 'unlock')        return await executeUnlock(interaction);
             if (sub === 'missions')      return await executeMissions(interaction);
             if (sub === 'claim-mission') return await executeClaimMission(interaction);
@@ -787,6 +972,7 @@ module.exports = {
             if (sub === 'start')         return await executeAdminStart(interaction);
             if (sub === 'end')           return await executeAdminEnd(interaction);
             if (sub === 'event')         return await executeSeasonEvent(interaction);
+            if (sub === 'tier-skip')     return await executeTierSkip(interaction);
         } catch (err) {
             console.error('[season] error:', err);
             const msg = { content: 'Something went wrong with the season command.', flags: MessageFlags.Ephemeral };

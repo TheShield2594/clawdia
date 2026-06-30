@@ -43,10 +43,9 @@ module.exports = {
         const targetUser = interaction.options.getUser('user') || interaction.user;
 
         try {
-            const [user, guildSettings, allUsers] = await Promise.all([
+            const [user, guildSettings] = await Promise.all([
                 User.findOne({ userId: targetUser.id, guildId: interaction.guild.id }),
                 Guild.findOne({ guildId: interaction.guild.id }),
-                User.find({ guildId: interaction.guild.id }).sort({ level: -1, xp: -1 })
             ]);
             await attachGrind(user);
 
@@ -56,7 +55,14 @@ module.exports = {
 
             pruneEffects(user);
 
-            const rank       = allUsers.findIndex(u => u.userId === targetUser.id) + 1;
+            // Count users ranked above this user instead of fetching the full collection
+            const rank = await User.countDocuments({
+                guildId: interaction.guild.id,
+                $or: [
+                    { level: { $gt: user.level } },
+                    { level: user.level, xp: { $gt: user.xp } },
+                ],
+            }) + 1;
             const requiredXp = user.level * 100 + 100;
 
             const activeBoosters  = (user.activeEffects || []).filter(e => BOOSTER_TYPES.has(e.type));

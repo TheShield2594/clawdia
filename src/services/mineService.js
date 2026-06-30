@@ -14,6 +14,8 @@ const {
 } = require('../data/mineData');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { hasIronWill } = require('./synergyService');
+const { getBonusMultipliers } = require('../utils/prestige');
+const { getGatheringYieldEffect, consumeEffect } = require('./effectsService');
 
 const DANGEROUS_DEPTH_IDS = new Set(['crystal_caves', 'the_abyss']);
 const MINE_DEATH_RATE = 0.08;
@@ -250,6 +252,14 @@ function rollTier(user, depth) {
         w.rare  += shift;
     }
 
+    // Apply account-level prestige rare-tier shift bonus (P8-P10)
+    const rareTierShift = getBonusMultipliers(user.accountPrestige?.rank ?? 0).rareTierShift;
+    if (rareTierShift > 0) {
+        const shift = w.common * rareTierShift;
+        w.common = Math.max(0, w.common - shift);
+        w.rare  += shift;
+    }
+
     const tiers = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'event'];
     const items = tiers.map(t => ({ tier: t, weight: w[t] ?? 0 })).filter(i => i.weight > 0);
     return weightedRoll(items).tier;
@@ -306,9 +316,14 @@ function applyPayoutModifiers(user, rawPayout, depth) {
 
     payout = Math.round(payout);
 
+    // Hard cap: zero coins — check before consuming item charges
     if (m.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
         return { adjustedPayout: 0, cappedByHard: true };
     }
+
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
 
     if (m.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {
         payout = Math.round(payout * 0.50);

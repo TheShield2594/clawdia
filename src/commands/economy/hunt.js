@@ -752,7 +752,7 @@ async function executeStart(interaction) {
     if (result.success && result.finalPayout > 0) {
         const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
         if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
-            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'hunt', details: result.animal ? `${result.animal.name} [${result.tier}]` : null });
+            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'hunt', details: { itemName: result.animal?.name, rarity: result.tier }, client: interaction.client });
         }
         await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'hunt', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.animal ? `${result.animal.emoji} ${result.animal.name} (${currency}${result.finalPayout.toLocaleString()})` : null }).catch(() => null);
     }
@@ -950,7 +950,7 @@ async function executeStart(interaction) {
         if (apexResult.bonusPayout > 0) {
             const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
             if (apexResult.bonusPayout >= bigWinThreshold) {
-                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: apexResult.bonusPayout, source: 'hunt', details: `${result.apexEncounter.animal.emoji ?? ''} ${result.apexEncounter.animal.name} [apex]`.trim() });
+                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: apexResult.bonusPayout, source: 'hunt', details: { itemName: result.apexEncounter.animal.name, rarity: 'apex' }, client: interaction.client });
             }
         }
 

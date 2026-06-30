@@ -10,7 +10,7 @@ const {
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const Transaction = require('../../models/Transaction');
-const { ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, RARITY_ORDER } = require('../../data/defaultShopItems');
+const { ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, isP8BlackMarketItem, RARITY_ORDER } = require('../../data/defaultShopItems');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse } = require('../../utils/shopBrowse');
 const { logTransaction } = require('../../utils/logTransaction');
@@ -58,13 +58,15 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
     const trending = await getTrendingItemIds(guildSettings.guildId);
     const now = Date.now();
     const dynamicEnabled = !!guildSettings.dynamicPricing?.enabled;
-    const showBlackMarket = hasUnlock(viewerPrestigeRank, 'black_market');
+    const showBlackMarket   = hasUnlock(viewerPrestigeRank, 'black_market');
+    const showP8BlackMarket = hasUnlock(viewerPrestigeRank, 'p8_black_market');
 
     // Group items by rarity
     const byRarity = {};
     for (const item of guildSettings.shop) {
         // Hide black-market items from users who haven't unlocked them yet
         if (isBlackMarketItem(item.itemId) && !showBlackMarket) continue;
+        if (isP8BlackMarketItem(item.itemId) && !showP8BlackMarket) continue;
         const ep = effectivePrice(item, dynamicEnabled);
         const rarity = getItemRarity(item.itemId, ep);
         if (!byRarity[rarity]) byRarity[rarity] = [];
@@ -79,7 +81,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
         const items = byRarity[rarity];
         if (!items) continue;
         for (const item of items) {
-            if (isBlackMarketItem(item.itemId)) {
+            if (isBlackMarketItem(item.itemId) || isP8BlackMarketItem(item.itemId)) {
                 blackMarketItems.push(item);
             } else if (isPrestigeItem(item.itemId)) {
                 prestigeItems.push(item);
@@ -181,13 +183,14 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
         const pageItems = blackMarketItems.map(item => {
             const stock = item.stock === -1 ? '∞' : String(item.stock);
             const ep = effectivePrice(item, dynamicEnabled);
+            const reqLabel = isP8BlackMarketItem(item.itemId) ? 'Prestige VIII+ only' : 'Prestige I+ only';
             return {
                 name:    item.name,
                 imageId: item.itemId,
                 emoji:   extractEmoji(item.description),
                 price:   ep,
                 badge:   'BLACK MARKET',
-                subline: `Stock: ${stock} · Prestige I+ only`,
+                subline: `Stock: ${stock} · ${reqLabel}`,
             };
         });
         const listText =
@@ -302,6 +305,7 @@ module.exports = {
             }
             const movers = guildSettings.shop
                 .filter(item => !isBlackMarketItem(item.itemId) || hasUnlock(viewerPrestigeRank, 'black_market'))
+                .filter(item => !isP8BlackMarketItem(item.itemId) || hasUnlock(viewerPrestigeRank, 'p8_black_market'))
                 .map(item => {
                     const tb = trendBucket(item);
                     return { item, pct: tb.pct, arrow: tb.arrow };
@@ -344,6 +348,14 @@ module.exports = {
             if (isBlackMarketItem(item.itemId) && !hasUnlock(viewerPrestigeRank, 'black_market')) {
                 return interaction.reply({
                     content: 'That item is sold on the Black Market — reach **Prestige I** to unlock it.',
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            // Gate P8 Black Market exclusives behind the higher prestige unlock
+            if (isP8BlackMarketItem(item.itemId) && !hasUnlock(viewerPrestigeRank, 'p8_black_market')) {
+                return interaction.reply({
+                    content: 'That item is sold in the deep Black Market — reach **Prestige VIII** to unlock it.',
                     flags: MessageFlags.Ephemeral,
                 });
             }
