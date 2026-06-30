@@ -200,8 +200,7 @@ module.exports = {
         let freshGuild = await Guild.findOneAndUpdate(
             {
                 guildId: interaction.guild.id,
-                'districts.districtId': districtId,
-                'districts.activeUntil': { $not: { $gt: new Date() } }, // district must not be active
+                districts: { $elemMatch: { districtId, activeUntil: { $not: { $gt: new Date() } } } },
             },
             { $inc: { 'districts.$.pool': amount } },
             { new: true }

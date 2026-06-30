@@ -46,7 +46,7 @@ module.exports = {
                 `> Dig here with \`/mine dig depth:${featured.mineDepth.id}\` for the bonus.\n` +
                 div
             )
-            .setFooter({ text: `${timeBand.emoji} ${timeBand.label} • Resets daily at midnight UTC` })
+            .setFooter({ text: `${timeBand.emoji} ${timeBand.label}` })
             .addFields({ name: '⏰ Resets', value: `<t:${resetTs}:R>`, inline: true })
             .setTimestamp();
 
