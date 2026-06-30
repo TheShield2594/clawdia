@@ -18,7 +18,7 @@ const {
     CONSUMABLES, AMMO_PACKS,
     WEAPON_TIERS, WEAPON_BY_SLUG, WEAPON_UPGRADES,
     HUNTER_LEVELS, PRESTIGE_BONUSES, HUNT_QUEST_TEMPLATES,
-    ANIMAL_TRAITS
+    ANIMAL_TRAITS, MATERIAL_NAMES
 } = require('../../data/huntData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
@@ -130,22 +130,6 @@ const PRESTIGE_LABELS = [
     '🏆 Champion Prestige',
     '💎 Diamond Prestige'
 ];
-
-const MATERIAL_NAMES = {
-    rabbits_foot:      "Rabbit's Foot",     acorn_cache:     'Acorn Cache',
-    feather:           'Feather',            down_feather:    'Down Feather',
-    antler_fragment:   'Antler Fragment',    tusk_shard:      'Tusk Shard',
-    badger_pelt:       'Badger Pelt',        beaver_pelt:     'Beaver Pelt',
-    coyote_fang:       'Coyote Fang',        wolf_pelt:       'Wolf Pelt',
-    elk_antler:        'Grand Antler',       lynx_fang:       'Lynx Fang',
-    eagle_talon:       'Eagle Talon',        mountain_horn:   'Mountain Horn',
-    bear_claw:         'Bear Claw',          moose_rack:      'Moose Rack',
-    lion_tooth:        "Lion's Tooth",       wolverine_fur:   'Wolverine Fur',
-    spirit_pelt:       'Spirit Pelt',        megaloceros_crown:'Megaloceros Crown',
-    golden_fur:        'Golden Fur',         spirit_essence:  'Spirit Essence',
-    ancient_claw:      'Ancient Claw',       thunderfeather:  'Thunderfeather',
-    spectral_bone:     'Spectral Bone',      bandit_mask:     'Bandit Mask'
-};
 
 // ─── COMMAND DEFINITION ───────────────────────────────────────────────────────
 
@@ -697,7 +681,8 @@ async function executeStart(interaction) {
     }
 
     if (result.success && result.finalPayout > 0 && petYieldPct > 0) {
-        const bonus = Math.round(result.finalPayout * petYieldPct / 100);
+        const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins);
+        const bonus = Math.min(Math.round(result.finalPayout * petYieldPct / 100), remaining);
         if (bonus > 0) {
             user.balance           += bonus;
             user.hunt.totalEarned  += bonus;
@@ -716,7 +701,8 @@ async function executeStart(interaction) {
 
     // Featured zone bonus: +25% payout
     if (result.success && result.finalPayout > 0 && isFeaturedZone) {
-        const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
+        const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins);
+        const featBonus = Math.min(Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS), remaining);
         if (featBonus > 0) {
             user.balance              += featBonus;
             user.hunt.totalEarned     += featBonus;
@@ -846,6 +832,9 @@ async function executeStart(interaction) {
 
     // ── Apex encounter — multi-phase showdown (mirrors the fishing boss UI) ──
     if (result.apexEncounter) {
+        // Pin the weapon that was actually equipped for this encounter so durability
+        // loss can't land on a different weapon if the player re-equips mid-flow.
+        const apexWeaponIndex = user.hunt.equippedWeaponIndex;
         const apexType    = rollApexType();
         const choicesMade = [];
         const phaseCount  = apexType.phases.length;
@@ -939,7 +928,7 @@ async function executeStart(interaction) {
         }
         await attachGrind(freshUser);
         ensureHuntData(freshUser);
-        const apexResult = resolveApexEncounter(freshUser, result.apexEncounter.animal, result.apexEncounter.tier, choicesMade, apexType);
+        const apexResult = resolveApexEncounter(freshUser, result.apexEncounter.animal, result.apexEncounter.tier, choicesMade, apexType, apexWeaponIndex);
 
         if (apexResult.bonusPayout > 0) {
             const apexZone = ZONES[freshUser.hunt.activeZone] ?? zone;
