@@ -287,7 +287,10 @@ async function handleGo(interaction) {
     addJournalEntry(user, region.id, result.type, summarizeResult(result, currency));
 
     // Achievements (checked against the freshly mutated user doc)
-    const newAchievements = await checkAndAward(user, guildSettings).catch(() => []);
+    const newAchievements = await checkAndAward(user, guildSettings).catch(err => {
+        console.error('[explore] checkAndAward error:', err);
+        return [];
+    });
 
     try {
         await user.save();
@@ -300,10 +303,12 @@ async function handleGo(interaction) {
     }
 
     if (newAchievements.length) {
-        announceAchievements(interaction.client, guildSettings, user, interaction.member, newAchievements).catch(() => null);
+        announceAchievements(interaction.client, guildSettings, user, interaction.member, newAchievements)
+            .catch(err => console.error('[explore] announceAchievements error:', err));
     }
     if (leveledUp) {
-        announceLevelUp(user, guildSettings, interaction.member, interaction.guild, interaction.channel).catch(() => null);
+        announceLevelUp(user, guildSettings, interaction.member, interaction.guild, interaction.channel)
+            .catch(err => console.error('[explore] announceLevelUp error:', err));
     }
 
     // Transaction audit log
@@ -336,7 +341,7 @@ async function handleGo(interaction) {
                     `*The map has fewer blank spaces tonight. The blank spaces are taking it personally.*`
                 )
                 .setTimestamp()],
-        }).catch(() => null);
+        }).catch(err => console.error('[explore] secret announce error:', err));
     }
 }
 
