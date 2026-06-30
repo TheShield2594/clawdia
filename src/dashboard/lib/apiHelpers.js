@@ -23,7 +23,7 @@ function sanitizeMongoValue(value) {
 // swallowed so audit errors never block the main operation.
 async function logAuditEvent(req, guildId, action, details = null) {
     try {
-        const AuditLog = require('../models/AuditLog');
+        const AuditLog = require('../../models/AuditLog');
         await AuditLog.create({
             guildId,
             userId:    req.user?.id || 'unknown',
