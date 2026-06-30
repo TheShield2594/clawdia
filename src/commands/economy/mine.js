@@ -522,53 +522,9 @@ async function handleDig(interaction) {
     const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
     const result = executeMine(user, depthId, { intensity: chosenIntensity, marketplaceActive });
 
-    // Pity counter: reset on rare+ success, increment otherwise
-    if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
-        user.mining.sinceRare = 0;
-    } else {
-        user.mining.sinceRare = (user.mining.sinceRare ?? 0) + 1;
-    }
-
-    if (result.success && result.finalPayout > 0 && isFeaturedDepth) {
-        const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
-        if (featBonus > 0) {
-            user.balance               += featBonus;
-            user.mining.totalEarned    += featBonus;
-            user.mining.dailyCoins     += featBonus;
-            result.finalPayout         += featBonus;
-            result.featuredDepthBonus   = featBonus;
-        }
-    }
-    if (result.success && result.finalPayout > user.mining.bestPayout) user.mining.bestPayout = result.finalPayout;
-
-    if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
-        const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
-        if (bonus > 0) {
-            user.balance              += bonus;
-            user.mining.totalEarned   += bonus;
-            user.mining.dailyCoins    += bonus;
-            result.finalPayout        += bonus;
-            result.petYieldBonus       = bonus;
-        }
-    }
-
-    // Wilderness district: +10% mine yield (clamped to daily hard cap)
-    const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
-    if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const remaining = LIMITS.DAILY_HARD_CAP - user.mining.dailyCoins;
-        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
-        if (bonus > 0) {
-            user.balance               += bonus;
-            user.mining.totalEarned    += bonus;
-            user.mining.dailyCoins     += bonus;
-            result.finalPayout         += bonus;
-            result.wildernessBonus      = bonus;
-        }
-    }
-
     // ── Cave-in Interactive Event ─────────────────────────────────────────────
-    // If a cave-in triggered, show escape options before saving.
+    // Resolved FIRST: pity, find counters, and yield bonuses below must only
+    // apply to rewards the player actually keeps, not ore abandoned in a collapse.
     if (result.caveIn) {
         const m = user.mining;
         const equippedPickaxe = m.pickaxes?.[m.equippedPickaxeIndex];
@@ -623,16 +579,69 @@ async function handleDig(interaction) {
             }
             result.caveInEscaped = true;
         } else {
-            // Abandon: reverse the payout
+            // Abandon: reverse the payout and any tier-find counters executeMine already booked
             if (result.caveInPayout) {
                 user.balance       -= result.caveInPayout;
                 m.totalEarned      -= result.caveInPayout;
                 m.dailyCoins       -= result.caveInPayout;
                 result.finalPayout  = 0;
             }
+            if (result.tier === 'legendary') m.legendaryFinds = Math.max(0, m.legendaryFinds - 1);
+            if (result.tier === 'event')     m.eventFinds     = Math.max(0, m.eventFinds - 1);
             result.caveInAbandoned = true;
         }
     }
+
+    // Pity counter: reset only when a rare+ find was actually kept (not abandoned in a cave-in)
+    const keptRareFind = result.success && !result.caveInAbandoned && ['rare', 'epic', 'legendary', 'event'].includes(result.tier);
+    if (keptRareFind) {
+        user.mining.sinceRare = 0;
+    } else {
+        user.mining.sinceRare = (user.mining.sinceRare ?? 0) + 1;
+    }
+
+    // Yield bonuses below are gated on result.finalPayout > 0, which an abandoned
+    // cave-in resets to 0 above — so abandoning correctly forfeits these too.
+    if (result.success && result.finalPayout > 0 && isFeaturedDepth) {
+        const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
+        if (featBonus > 0) {
+            user.balance               += featBonus;
+            user.mining.totalEarned    += featBonus;
+            user.mining.dailyCoins     += featBonus;
+            result.finalPayout         += featBonus;
+            result.featuredDepthBonus   = featBonus;
+        }
+    }
+
+    if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
+        const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
+        if (bonus > 0) {
+            user.balance              += bonus;
+            user.mining.totalEarned   += bonus;
+            user.mining.dailyCoins    += bonus;
+            result.finalPayout        += bonus;
+            result.petYieldBonus       = bonus;
+        }
+    }
+
+    // Wilderness district: +10% mine yield (clamped to daily hard cap)
+    const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
+    if (result.success && result.finalPayout > 0 && wildernessActive) {
+        const remaining = LIMITS.DAILY_HARD_CAP - user.mining.dailyCoins;
+        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+        if (bonus > 0) {
+            user.balance               += bonus;
+            user.mining.totalEarned    += bonus;
+            user.mining.dailyCoins     += bonus;
+            result.finalPayout         += bonus;
+            result.wildernessBonus      = bonus;
+        }
+    }
+
+    // bestPayout must reflect what the player actually walked away with, so this
+    // runs after the cave-in resolution and all yield bonuses above.
+    if (result.success && result.finalPayout > user.mining.bestPayout) user.mining.bestPayout = result.finalPayout;
 
     updateMineQuestProgress(user, result, depthId);
 
@@ -1992,25 +2001,33 @@ async function handleRaid(interaction) {
         });
     }
 
-    // Mine Lock: defender is protected
+    // Mine Lock: defender is protected. Consume atomically so two concurrent
+    // raiders can't both read the lock as active and both bypass it.
     if (defender.mining.mineLockActive) {
-        // Consume the lock on first raid attempt; enforce cooldown on raider
-        defender.mining.mineLockActive = false;
-        defender.markModified('mining');
-        raider.mining.lastRaidSent = new Date();
-        raider.markModified('mining');
-        await Promise.all([defender.save(), raider.save()]).catch(() => null);
-        return interaction.reply({
-            embeds: [new EmbedBuilder()
-                .setColor('#e74c3c')
-                .setTitle('🔒 Mine Lock Triggered!')
-                .setDescription(
-                    `**${targetUser.username}**'s mine was protected by a **Mine Lock**.\n` +
-                    `The lock absorbed your raid attempt and has now been consumed.`
-                )
-                .setTimestamp()
-            ]
-        });
+        const lockConsumed = await GrindProfile.findOneAndUpdate(
+            { userId: defender.userId, guildId: interaction.guild.id, system: 'mining', 'data.mineLockActive': true },
+            { $set: { 'data.mineLockActive': false } },
+            { new: true }
+        ).catch(err => { console.error('[mine raid] lock consume error:', err); return null; });
+
+        if (lockConsumed) {
+            defender.mining.mineLockActive = false;
+            raider.mining.lastRaidSent = new Date();
+            raider.markModified('mining');
+            await raider.save().catch(() => null);
+            return interaction.reply({
+                embeds: [new EmbedBuilder()
+                    .setColor('#e74c3c')
+                    .setTitle('🔒 Mine Lock Triggered!')
+                    .setDescription(
+                        `**${targetUser.username}**'s mine was protected by a **Mine Lock**.\n` +
+                        `The lock absorbed your raid attempt and has now been consumed.`
+                    )
+                    .setTimestamp()
+                ]
+            });
+        }
+        // Lock was already consumed by a concurrent raid — fall through to normal raid resolution.
     }
 
     // Check if there's anything to steal
