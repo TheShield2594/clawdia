@@ -52,7 +52,7 @@ module.exports = {
         const dayKey = new Date().toISOString().slice(0, 10);
         const objective = pickObjective(interaction.user.id, dayKey);
 
-        const lastClaim = userDoc.accountPrestige?.lastDailyChallengeAt;
+        const lastClaim = userDoc?.accountPrestige?.lastDailyChallengeAt;
         const onCooldown = lastClaim && (Date.now() - lastClaim.getTime()) < CLAIM_COOLDOWN_MS;
 
         if (onCooldown) {
@@ -88,10 +88,16 @@ module.exports = {
         );
 
         if (!updated) {
-            return interaction.reply({
-                content: 'You already claimed today\'s Daily Challenge bonus.',
-                flags: MessageFlags.Ephemeral,
-            });
+            const nextAt = Math.floor((Date.now() + CLAIM_COOLDOWN_MS) / 1000);
+            const embed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setTitle('📋 Daily Challenge Board')
+                .setDescription(
+                    `**Today's Objective:** ${objective.emoji} ${objective.text}\n\n` +
+                    `✅ Already claimed. Next bonus available <t:${nextAt}:R>.`
+                )
+                .setTimestamp();
+            return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
         }
 
         logTransaction({

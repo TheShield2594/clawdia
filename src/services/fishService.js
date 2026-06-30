@@ -327,10 +327,6 @@ function applyPayoutModifiers(user, rawPayout, location) {
     const f = user.fishing;
     let payout = rawPayout;
 
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
-    const gatherEffect = getGatheringYieldEffect(user);
-    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
-
     if (location.payoutBonus > 0) payout *= (1 + location.payoutBonus);
 
     const p = Math.min(f.prestige, PRESTIGE_BONUSES.length - 1);
@@ -347,9 +343,14 @@ function applyPayoutModifiers(user, rawPayout, location) {
 
     payout = Math.round(payout);
 
+    // Hard cap: zero coins — check before consuming item charges
     if (f.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
         return { adjustedPayout: 0, cappedByHard: true };
     }
+
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
     if (f.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {
         payout = Math.round(payout * 0.50);
     }

@@ -23,7 +23,7 @@ const UNLOCK_LABELS = {
     prestige_v_badge:    '⭐ Prestige V star + animated badge',
     daily_challenge:     '📋 Daily Challenge board (bonus coin objectives)',
     syndicate_extra_slot:'👥 +2 syndicate member slots (12 total) for leaders',
-    p8_black_market:     '💠 P8 exclusive Black Market items + +0.5% rare tier shift',
+    p8_black_market:     '💠 P8+ exclusive Black Market items (Voidsteel Cache, Ghost Ledger, Obsidian Crown)',
     ascended:            '✨ "The Ascended" title + animated profile accent',
 };
 

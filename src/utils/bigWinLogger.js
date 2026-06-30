@@ -21,7 +21,7 @@ async function logBigWin({ guildId, userId, username, amount, source, details, c
     try {
         const Guild = require('../models/Guild');
         const guildSettings = await Guild.findOne({ guildId }).lean();
-        if (!guildSettings?.economy?.announceRareDrops) return;
+        if (guildSettings?.economy?.announceRareDrops === false) return;
 
         const channelId = guildSettings.economy?.announcementChannelId;
         if (!channelId) return;

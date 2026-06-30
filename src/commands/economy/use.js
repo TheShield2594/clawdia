@@ -253,16 +253,7 @@ module.exports = {
         // ── Generic (role-granting) items ─────────────────────────────────────
         const shopItem = guildSettings?.shop?.find(s => s.name.toLowerCase() === itemName.toLowerCase());
 
-        let roleGranted = false;
-        if (shopItem?.roleId) {
-            const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-            if (member && !member.roles.cache.has(shopItem.roleId)) {
-                await member.roles.add(shopItem.roleId, `Used shop item: ${shopItem.name}`);
-                roleGranted = true;
-            }
-        }
-
-        // Atomically consume one item
+        // Atomically consume one item before side-effects (role grant)
         const user = await User.findOneAndUpdate(
             { ...userFilter, inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } } },
             { $inc: { 'inventory.$.quantity': -1 } },
@@ -275,6 +266,15 @@ module.exports = {
 
         // Clean up zero-quantity entries
         await User.findOneAndUpdate(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } });
+
+        let roleGranted = false;
+        if (shopItem?.roleId) {
+            const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+            if (member && !member.roles.cache.has(shopItem.roleId)) {
+                await member.roles.add(shopItem.roleId, `Used shop item: ${shopItem.name}`);
+                roleGranted = true;
+            }
+        }
 
         const loreText    = shopItem?.lore ?? getItemLore(itemName.toLowerCase());
         const baseDesc    = shopItem?.description || 'Item consumed from your inventory.';

@@ -422,10 +422,6 @@ function applyPayoutModifiers(user, rawPayout, zone) {
     const h = user.hunt;
     let payout = rawPayout;
 
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
-    const gatherEffect = getGatheringYieldEffect(user);
-    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
-
     // Zone bonus (e.g. Legendary Peaks +20%)
     if (zone.payoutBonus > 0) payout *= (1 + zone.payoutBonus);
 
@@ -445,10 +441,14 @@ function applyPayoutModifiers(user, rawPayout, zone) {
 
     payout = Math.round(payout);
 
-    // Hard cap: zero coins
+    // Hard cap: zero coins — check before consuming item charges
     if (h.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
         return { adjustedPayout: 0, cappedByHard: true };
     }
+
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
 
     // Soft cap: 50% reduction
     if (h.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {

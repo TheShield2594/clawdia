@@ -183,13 +183,14 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
         const pageItems = blackMarketItems.map(item => {
             const stock = item.stock === -1 ? '∞' : String(item.stock);
             const ep = effectivePrice(item, dynamicEnabled);
+            const reqLabel = isP8BlackMarketItem(item.itemId) ? 'Prestige VIII+ only' : 'Prestige I+ only';
             return {
                 name:    item.name,
                 imageId: item.itemId,
                 emoji:   extractEmoji(item.description),
                 price:   ep,
                 badge:   'BLACK MARKET',
-                subline: `Stock: ${stock} · Prestige I+ only`,
+                subline: `Stock: ${stock} · ${reqLabel}`,
             };
         });
         const listText =

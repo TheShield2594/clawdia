@@ -300,10 +300,6 @@ function applyPayoutModifiers(user, rawPayout, depth) {
     const m = user.mining;
     let payout = rawPayout;
 
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
-    const gatherEffect = getGatheringYieldEffect(user);
-    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
-
     if (depth.payoutBonus > 0) payout *= (1 + depth.payoutBonus);
 
     const p = Math.min(m.prestige, PRESTIGE_BONUSES.length - 1);
@@ -320,9 +316,14 @@ function applyPayoutModifiers(user, rawPayout, depth) {
 
     payout = Math.round(payout);
 
+    // Hard cap: zero coins — check before consuming item charges
     if (m.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
         return { adjustedPayout: 0, cappedByHard: true };
     }
+
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
 
     if (m.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {
         payout = Math.round(payout * 0.50);
