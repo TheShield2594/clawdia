@@ -6,7 +6,6 @@ const {
     ButtonStyle,
     MessageFlags,
 } = require('discord.js');
-const mongoose = require('mongoose');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const Syndicate = require('../../models/Syndicate');
@@ -414,40 +413,39 @@ async function executeCreate(interaction, guildDoc) {
     const tag         = rawTag ? rawTag.toUpperCase() : null;
     const syndicateId = `${interaction.guild.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-    // Atomic: debit coins + enroll user + create syndicate in one transaction
-    const session = await mongoose.startSession();
+    // No multi-document transactions available (standalone MongoDB deployment), so
+    // debit + enroll the user atomically first, then create the syndicate. If
+    // creation fails, compensate by reverting the user's debit/enrollment.
+    const debited = await User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: CREATION_COST }, syndicateId: null },
+        { $inc: { balance: -CREATION_COST }, $set: { syndicateId } },
+        { upsert: false, new: true }
+    );
+    if (!debited) {
+        return interaction.reply({
+            content: 'Could not create the syndicate — your balance or membership status changed. Please try again.',
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
     try {
-        await session.withTransaction(async () => {
-            const updated = await User.findOneAndUpdate(
-                { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: CREATION_COST }, syndicateId: null },
-                { $inc: { balance: -CREATION_COST }, $set: { syndicateId } },
-                { upsert: false, session, new: true }
-            );
-            if (!updated) {
-                throw new Error('PRECONDITION_FAILED');
-            }
-            await Syndicate.create([{
-                syndicateId,
-                guildId: interaction.guild.id,
-                name,
-                nameLower: name.toLowerCase(),
-                tag,
-                leaderId:  interaction.user.id,
-                memberIds: [interaction.user.id],
-                openToJoin,
-            }], { session });
+        await Syndicate.create({
+            syndicateId,
+            guildId: interaction.guild.id,
+            name,
+            nameLower: name.toLowerCase(),
+            tag,
+            leaderId:  interaction.user.id,
+            memberIds: [interaction.user.id],
+            openToJoin,
         });
     } catch (err) {
-        await session.endSession();
-        if (err.message === 'PRECONDITION_FAILED') {
-            return interaction.reply({
-                content: 'Could not create the syndicate — your balance or membership status changed. Please try again.',
-                flags: MessageFlags.Ephemeral,
-            });
-        }
+        await User.updateOne(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $inc: { balance: CREATION_COST }, $set: { syndicateId: null } },
+        );
         throw err;
     }
-    await session.endSession();
 
     logTransaction({
         userId:  interaction.user.id,

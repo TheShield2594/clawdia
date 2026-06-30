@@ -1,7 +1,6 @@
 'use strict';
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
-const mongoose = require('mongoose');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS } = require('../../data/achievements');
@@ -193,42 +192,36 @@ module.exports = {
                     return interaction.reply({ content: 'You have no unclaimed achievement rewards.', flags: MessageFlags.Ephemeral });
                 }
 
-                // Claim + credit in one transaction so a payout failure can't leave
-                // achievements marked claimed without the reward having been granted.
+                // Claim, then credit based on what was actually flipped. These are two
+                // sequential atomic single-document writes rather than a multi-document
+                // transaction, since the bot's MongoDB deployment is a standalone server
+                // (transactions require a replica set / mongos and would throw).
                 let totalXp = 0;
                 let totalCoins = 0;
                 const names = [];
-                const session = await mongoose.startSession();
-                try {
-                    await session.withTransaction(async () => {
-                        const preClaim = await User.findOneAndUpdate(
-                            { userId: interaction.user.id, guildId: interaction.guild.id },
-                            { $set: { 'achievements.$[el].claimed': true } },
-                            {
-                                arrayFilters: [{ 'el.claimed': { $ne: true }, 'el.id': { $in: claimableIds } }],
-                                new: false,
-                                session,
-                            },
-                        );
 
-                        const justClaimed = (preClaim?.achievements || []).filter(a => claimableIds.includes(a.id) && !a.claimed);
-                        for (const entry of justClaimed) {
-                            const def = defMap.get(entry.id);
-                            totalXp    += def.xpReward    || 0;
-                            totalCoins += def.coinReward   || 0;
-                            names.push(`${def.emoji} ${def.name}`);
-                        }
+                const preClaim = await User.findOneAndUpdate(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    { $set: { 'achievements.$[el].claimed': true } },
+                    {
+                        arrayFilters: [{ 'el.claimed': { $ne: true }, 'el.id': { $in: claimableIds } }],
+                        new: false,
+                    },
+                );
 
-                        if (totalXp || totalCoins) {
-                            await User.updateOne(
-                                { userId: interaction.user.id, guildId: interaction.guild.id },
-                                { $inc: { xp: totalXp, balance: totalCoins } },
-                                { session },
-                            );
-                        }
-                    });
-                } finally {
-                    await session.endSession();
+                const justClaimed = (preClaim?.achievements || []).filter(a => claimableIds.includes(a.id) && !a.claimed);
+                for (const entry of justClaimed) {
+                    const def = defMap.get(entry.id);
+                    totalXp    += def.xpReward    || 0;
+                    totalCoins += def.coinReward   || 0;
+                    names.push(`${def.emoji} ${def.name}`);
+                }
+
+                if (totalXp || totalCoins) {
+                    await User.updateOne(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { $inc: { xp: totalXp, balance: totalCoins } },
+                    );
                 }
 
                 if (!names.length) {
