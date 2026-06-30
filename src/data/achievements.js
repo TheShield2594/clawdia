@@ -695,23 +695,23 @@ const ACHIEVEMENTS = [
         progress: (user) => [Math.min(user.exploration?.totalExpeditions || 0, 250), 250]
     },
     {
-        id: 'four_corners',
-        name: 'The Four Corners',
-        description: 'Set foot in all four core regions',
+        id: 'five_corners',
+        name: 'The Five Corners',
+        description: 'Set foot in all five core regions',
         emoji: '🌍',
         category: 'exploration',
         xpReward: 200,
         coinReward: 2_000,
         check: (user) => {
             const visited = (user.exploration?.regions || []).map(r => r.regionId);
-            return ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks']
+            return ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks', 'starfall_wastes']
                 .every(id => visited.includes(id));
         },
         progress: (user) => {
             const visited = (user.exploration?.regions || []).map(r => r.regionId);
-            const count = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks']
+            const count = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks', 'starfall_wastes']
                 .filter(id => visited.includes(id)).length;
-            return [count, 4];
+            return [count, 5];
         }
     },
     {
@@ -773,24 +773,24 @@ const ACHIEVEMENTS = [
     {
         id: 'the_atlas_complete',
         name: 'The Atlas Complete',
-        description: 'Uncover all 16 secrets of the four core regions',
+        description: 'Uncover all 20 secrets of the five core regions',
         emoji: '👑',
         category: 'exploration',
         xpReward: 1_000,
         coinReward: 20_000,
         check: (user) => {
-            const core = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks'];
+            const core = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks', 'starfall_wastes'];
             const found = (user.exploration?.regions || [])
                 .filter(r => core.includes(r.regionId))
                 .reduce((sum, r) => sum + (r.secretsFound?.length || 0), 0);
-            return found >= 16;
+            return found >= 20;
         },
         progress: (user) => {
-            const core = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks'];
+            const core = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks', 'starfall_wastes'];
             const found = (user.exploration?.regions || [])
                 .filter(r => core.includes(r.regionId))
                 .reduce((sum, r) => sum + (r.secretsFound?.length || 0), 0);
-            return [Math.min(found, 16), 16];
+            return [Math.min(found, 20), 20];
         }
     },
 ];

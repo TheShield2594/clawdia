@@ -43,10 +43,10 @@ function makeGuildSettings(overrides = {}) {
 }
 
 describe('exploreData integrity', () => {
-    test('has 4 core and 5 seasonal regions', () => {
+    test('has 5 core and 5 seasonal regions', () => {
         const core = REGION_LIST.filter(r => !r.seasonalEventId);
         const seasonal = REGION_LIST.filter(r => r.seasonalEventId);
-        expect(core).toHaveLength(4);
+        expect(core).toHaveLength(5);
         expect(seasonal).toHaveLength(5);
 
         const arcticTundra = REGION_LIST.find(r => r.id === 'arctic_tundra');
@@ -54,8 +54,8 @@ describe('exploreData integrity', () => {
         expect(arcticTundra.seasonalEventId).toBe('winter_hunt');
     });
 
-    test('core regions hold 16 secrets total (matches achievement target)', () => {
-        expect(TOTAL_CORE_SECRETS).toBe(16);
+    test('core regions hold 20 secrets total (matches achievement target)', () => {
+        expect(TOTAL_CORE_SECRETS).toBe(20);
     });
 
     test('every region has a complete event table', () => {
