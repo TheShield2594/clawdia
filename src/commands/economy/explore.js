@@ -210,6 +210,20 @@ async function handleGo(interaction) {
     const result = executeExplore(user, region, guildSettings, { coinMultiplier });
     const firstVisit = result.firstVisit;
 
+    // Commit stamina spend + cooldown timestamp now, before the (up to 20s)
+    // encounter prompt below. Otherwise a second /explore go fired while this
+    // one is still waiting on a button press reads stale DB state and slips
+    // past the cooldown/stamina gate.
+    try {
+        await user.save();
+    } catch (err) {
+        if (err.name === 'VersionError') {
+            return interaction.reply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', flags: MessageFlags.Ephemeral });
+        }
+        console.error('[explore] pre-encounter save error:', err);
+        return interaction.reply({ content: 'Something went wrong writing your expedition down. Try again.', flags: MessageFlags.Ephemeral });
+    }
+
     // Staged narration: the setting-out beat, then the find
     const delay = ms => new Promise(r => setTimeout(r, ms));
     await interaction.reply({

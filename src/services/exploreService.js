@@ -387,7 +387,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
             result.xp = grantXp(user, EVENT_XP.encounter_win);
         } else {
             result.outcome = 'loss';
-            const penalty = Math.min(Math.round(randInt(200, 600) * dropRate), Math.max(0, user.balance));
+            const penalty = Math.min(Math.round(randInt(200, 600) * coinMult), Math.max(0, user.balance));
             user.balance -= penalty;
             result.penalty = penalty;
             result.xp = grantXp(user, EVENT_XP.encounter_loss);
