@@ -14,6 +14,11 @@ const EFFECT_CONFIGS = {
     xp_booster_2x:      { label: '2x XP Booster',     emoji: '⭐🚀', durationMs: 1  * 3_600_000, charges: -1 },
     lucky_streak:       { label: 'Lucky Streak',       emoji: '🎯',   durationMs: 30 * 60_000,     charges: -1 },
     salary_raise:       { label: 'Salary Raise',       emoji: '📈',   durationMs: 2  * 3_600_000, charges: -1 },
+
+    // ── P8 Black Market effects ───────────────────────────────────────────────
+    obsidian_crown:     { label: 'Obsidian Crown',      emoji: '👑',   durationMs: 2  * 3_600_000, charges: -1 },
+    voidsteel_cache:    { label: 'Voidsteel Cache',     emoji: '🌌',   durationMs: null,            charges: 10 },
+    ghost_ledger:       { label: 'Ghost Ledger',        emoji: '📒',   durationMs: null,            charges: 3  },
 };
 
 // Maps item IDs (as stored in inventory) to effect type keys.
@@ -33,6 +38,9 @@ const ITEM_TO_EFFECT = {
     'xp_booster_2x':      'xp_booster_2x',
     'lucky_streak':       'lucky_streak',
     'salary_raise':       'salary_raise',
+    'obsidian_crown':     'obsidian_crown',
+    'voidsteel_cache':    'voidsteel_cache',
+    'ghost_ledger':       'ghost_ledger',
 
     // Legacy space-separated IDs (backward compat for existing inventory items)
     'lucky charm':        'lucky_charm',
@@ -120,7 +128,13 @@ function getCoinMultiplier(user) {
 
 // Returns the salary raise multiplier (applies only to /work earnings)
 function getSalaryMultiplier(user) {
+    if (hasEffect(user, 'obsidian_crown')) return 4.0;
     return hasEffect(user, 'salary_raise') ? 1.5 : 1.0;
+}
+
+// Returns gathering yield multiplier from Voidsteel Cache (consumes 1 charge per successful gather)
+function getGatheringYieldMultiplier(user) {
+    return hasEffect(user, 'voidsteel_cache') ? 2.0 : 1.0;
 }
 
 // Returns XP multiplier from personal booster
@@ -185,4 +199,5 @@ module.exports = {
     getServerCoinMultiplier,
     getServerXpMultiplier,
     getPublicProtectionStatus,
+    getGatheringYieldMultiplier,
 };

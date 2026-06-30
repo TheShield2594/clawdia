@@ -353,8 +353,28 @@ module.exports = {
                 const fine = Math.floor(robber.balance * failFineRate);
                 const paid = Math.min(fine, robber.balance);
 
+                // Ghost Ledger: absorbs the failure fine silently (3 charges)
+                if (hasEffect(robber, 'ghost_ledger')) {
+                    consumeEffect(robber, 'ghost_ledger');
+                    victim.lastRobbedAt = new Date();
+                    await robber.save();
+                    await User.updateOne(
+                        { userId: victim.userId, guildId: victim.guildId },
+                        { $set: { lastRobbedAt: victim.lastRobbedAt } }
+                    );
+                    const ghostChargesLeft = (robber.activeEffects ?? []).find(e => e.type === 'ghost_ledger')?.charges ?? 0;
+                    embed = new EmbedBuilder()
+                        .setColor('#2c3e50')
+                        .setTitle('📒 Ghost Ledger — Fine Erased')
+                        .setDescription(`**${target.username}** caught you, but the fine never made it to the books. (${ghostChargesLeft} uses left)`)
+                        .addFields(
+                            { name: 'Fine Erased',  value: `${currency}${paid.toLocaleString()}`,           inline: true },
+                            { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
+                        )
+                        .setFooter({ text: 'Cooldown: 1h' })
+                        .setTimestamp();
                 // Lifesaver: absorbs the failure fine — no coins lost
-                if (hasEffect(robber, 'lifesaver')) {
+                } else if (hasEffect(robber, 'lifesaver')) {
                     consumeEffect(robber, 'lifesaver');
                     victim.lastRobbedAt = new Date();
                     await robber.save();
