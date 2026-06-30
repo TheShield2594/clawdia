@@ -1,5 +1,7 @@
 'use strict';
 
+const { CORE_REGION_IDS, TOTAL_CORE_SECRETS } = require('./exploreData');
+
 // Built-in achievement definitions.
 // Each entry is checked server-side by achievementService against user stats.
 // `progress(user)` returns [current, max] for the locked-achievement progress bar.
@@ -695,7 +697,7 @@ const ACHIEVEMENTS = [
         progress: (user) => [Math.min(user.exploration?.totalExpeditions || 0, 250), 250]
     },
     {
-        id: 'five_corners',
+        id: 'four_corners',
         name: 'The Five Corners',
         description: 'Set foot in all five core regions',
         emoji: '🌍',
@@ -704,14 +706,12 @@ const ACHIEVEMENTS = [
         coinReward: 2_000,
         check: (user) => {
             const visited = (user.exploration?.regions || []).map(r => r.regionId);
-            return ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks', 'starfall_wastes']
-                .every(id => visited.includes(id));
+            return CORE_REGION_IDS.every(id => visited.includes(id));
         },
         progress: (user) => {
             const visited = (user.exploration?.regions || []).map(r => r.regionId);
-            const count = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks', 'starfall_wastes']
-                .filter(id => visited.includes(id)).length;
-            return [count, 5];
+            const count = CORE_REGION_IDS.filter(id => visited.includes(id)).length;
+            return [count, CORE_REGION_IDS.length];
         }
     },
     {
@@ -779,18 +779,16 @@ const ACHIEVEMENTS = [
         xpReward: 1_000,
         coinReward: 20_000,
         check: (user) => {
-            const core = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks', 'starfall_wastes'];
             const found = (user.exploration?.regions || [])
-                .filter(r => core.includes(r.regionId))
+                .filter(r => CORE_REGION_IDS.includes(r.regionId))
                 .reduce((sum, r) => sum + (r.secretsFound?.length || 0), 0);
-            return found >= 20;
+            return found >= TOTAL_CORE_SECRETS;
         },
         progress: (user) => {
-            const core = ['whispering_forest', 'crumbling_ruins', 'crystal_caves', 'sunken_docks', 'starfall_wastes'];
             const found = (user.exploration?.regions || [])
-                .filter(r => core.includes(r.regionId))
+                .filter(r => CORE_REGION_IDS.includes(r.regionId))
                 .reduce((sum, r) => sum + (r.secretsFound?.length || 0), 0);
-            return [Math.min(found, 20), 20];
+            return [Math.min(found, TOTAL_CORE_SECRETS), TOTAL_CORE_SECRETS];
         }
     },
 ];
