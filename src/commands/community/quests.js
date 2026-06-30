@@ -1,10 +1,19 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const AiQuest = require('../../models/AiQuest');
 const { ensureQuests, getDailyPool, getWeeklyPool, getCategoryEmojis, getDifficultyColors } = require('../../services/questService');
 
 const DIFFICULTY_EMBED_COLORS = { easy: 0x57F287, medium: 0xFEE75C, hard: 0xED4245 };
 const DIFFICULTY_LABELS = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
+const AI_MECHANIC_EMOJIS = {
+    hunt:    '🏹',
+    fishing: '🎣',
+    mining:  '⛏️',
+    social:  '💬',
+    economy: '💰',
+    explore: '🔍',
+};
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -37,12 +46,15 @@ module.exports = {
         const weeklyCoin  = guildSettings.quests.weeklyCoinReward  ?? 150;
         const weeklyXp    = guildSettings.quests.weeklyXpReward    ?? 300;
 
-        const dailyLines  = [];
-        const weeklyLines = [];
+        const dailyLines     = [];
+        const weeklyLines    = [];
+        const legendaryLines = [];
 
-        const activeQuests = user.quests.filter(q => q.expiresAt > now);
+        const activeQuests   = user.quests.filter(q => q.expiresAt > now);
+        const aiEntries      = activeQuests.filter(q => q.questId.startsWith('ai_'));
+        const standardEntries = activeQuests.filter(q => !q.questId.startsWith('ai_'));
 
-        for (const entry of activeQuests) {
+        for (const entry of standardEntries) {
             const def = [...dailyPool, ...weeklyPool].find(d => d.questId === entry.questId);
             if (!def) continue;
 
@@ -70,6 +82,28 @@ module.exports = {
             else         weeklyLines.push(line);
         }
 
+        if (aiEntries.length) {
+            const aiDefs = await AiQuest.find({ questId: { $in: aiEntries.map(e => e.questId) } }).lean();
+            for (const entry of aiEntries) {
+                const def = aiDefs.find(d => d.questId === entry.questId);
+                if (!def) continue;
+
+                const progress   = entry.progress ?? 0;
+                const completed  = !!entry.completedAt;
+                const bar        = buildBar(progress, def.target);
+                const mechEmoji  = AI_MECHANIC_EMOJIS[def.mechanic] ?? def.emoji ?? '⚔️';
+                const statusMark = completed ? '✅' : '🔄';
+
+                legendaryLines.push([
+                    `${statusMark} ${mechEmoji} **${def.emoji ?? '⚔️'} ${def.name}**`,
+                    `*${def.lore}*`,
+                    `${def.description}`,
+                    `${bar} **${progress}**/${def.target}`,
+                    `Reward: **+${def.xpReward} XP**, **+${def.coinReward} coins**`,
+                ].join('\n'));
+            }
+        }
+
         const completedDailyCount  = activeQuests.filter(q => q.completedAt && dailyPool.some(d => d.questId === q.questId)).length;
         const completedWeeklyCount = activeQuests.filter(q => q.completedAt && weeklyPool.some(d => d.questId === q.questId)).length;
         const totalDaily  = dailyLines.length;
@@ -86,6 +120,10 @@ module.exports = {
                 `Progress: **${completedDailyCount}/${totalDaily}** daily · **${completedWeeklyCount}/${totalWeekly}** weekly`
             )
             .addFields(
+                ...(legendaryLines.length ? [{
+                    name: '⚔️ Legendary Quest',
+                    value: legendaryLines.join('\n\n')
+                }] : []),
                 {
                     name: `📅 Daily Quests — base +${dailyXp} XP / +${dailyCoin} coins (scaled by difficulty)`,
                     value: dailyLines.join('\n\n') || '_No daily quests active._'
