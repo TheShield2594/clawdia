@@ -1148,6 +1148,15 @@
                     'heist.jailDurationMinutes':   safeInt('heist-jail', 30),
                     'heist.maxPayout':             safeInt('heist-max-payout', 10000),
                 };
+            } else if (section === 'dynamicPricing') {
+                const bandPct = parseFloat(document.getElementById('dynamic-pricing-band').value);
+                const recalc  = parseInt(document.getElementById('dynamic-pricing-recalc').value, 10);
+                data = {
+                    'dynamicPricing.enabled':       document.getElementById('dynamic-pricing-enabled').checked,
+                    'dynamicPricing.volatility':    document.getElementById('dynamic-pricing-volatility').value,
+                    'dynamicPricing.priceBand':     Number.isFinite(bandPct) ? Math.min(0.9, Math.max(0.05, bandPct / 100)) : 0.5,
+                    'dynamicPricing.recalcMinutes': Number.isFinite(recalc)  ? Math.min(1440, Math.max(15, recalc))          : 60
+                };
             } else if (section === 'exploration') {
                 const safeFloat = (id, fallback, min, max) => {
                     const v = parseFloat(document.getElementById(id).value);

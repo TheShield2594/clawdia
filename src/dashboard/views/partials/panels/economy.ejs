@@ -12,6 +12,7 @@
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-fish">🎣 Fishing</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-mine">⛏️ Mining</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-heist">🎭 Heist</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-dynamic-pricing">📈 Dynamic Pricing</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-health">📊 Economy Health</button>
                     </div>
 
@@ -160,6 +161,50 @@
 
                         <div class="actions-row">
                             <button class="btn btn-primary" onclick="saveSettings('economy')">Save changes</button>
+                        </div>
+                    </div>
+
+                    <!-- Dynamic Pricing -->
+                    <div id="eco-tab-dynamic-pricing" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>📈 Dynamic Pricing</h3>
+                            <p>Let shop item prices fluctuate automatically based on member demand. Prices drift up when items are bought and decay when idle.</p>
+                        </div>
+
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enable dynamic pricing</strong><span>Item prices adjust automatically based on purchase demand</span></span>
+                            <span class="switch"><input type="checkbox" id="dynamic-pricing-enabled" <%= settings.dynamicPricing?.enabled ? 'checked' : '' %>><span class="slider"></span></span>
+                        </label>
+
+                        <div class="field" style="margin-top:1rem">
+                            <label class="field-label" for="dynamic-pricing-volatility">Volatility</label>
+                            <select id="dynamic-pricing-volatility">
+                                <option value="low"    <%= (settings.dynamicPricing?.volatility ?? 'medium') === 'low'    ? 'selected' : '' %>>Low — gentle swings (±10%)</option>
+                                <option value="medium" <%= (settings.dynamicPricing?.volatility ?? 'medium') === 'medium' ? 'selected' : '' %>>Medium — moderate swings (±18%)</option>
+                                <option value="high"   <%= (settings.dynamicPricing?.volatility ?? 'medium') === 'high'   ? 'selected' : '' %>>High — aggressive swings (±28%)</option>
+                            </select>
+                            <small>Controls how sharply prices respond to demand changes</small>
+                        </div>
+
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.5rem">
+                            <div>
+                                <label class="field-label" for="dynamic-pricing-band">Price band <small>(5%–90%)</small></label>
+                                <input type="number" id="dynamic-pricing-band"
+                                    value="<%= Math.round((settings.dynamicPricing?.priceBand ?? 0.5) * 100) %>"
+                                    min="5" max="90" step="1">
+                                <small>Maximum % a price can deviate from its base price</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="dynamic-pricing-recalc">Recalc interval <small>(minutes, 15–1440)</small></label>
+                                <input type="number" id="dynamic-pricing-recalc"
+                                    value="<%= settings.dynamicPricing?.recalcMinutes ?? 60 %>"
+                                    min="15" max="1440">
+                                <small>How often the scheduler recalculates prices</small>
+                            </div>
+                        </div>
+
+                        <div class="actions-row">
+                            <button class="btn btn-primary" onclick="saveSettings('dynamicPricing')">Save changes</button>
                         </div>
                     </div>
 
