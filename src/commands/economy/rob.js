@@ -353,8 +353,36 @@ module.exports = {
                 const fine = Math.floor(robber.balance * failFineRate);
                 const paid = Math.min(fine, robber.balance);
 
+                // Phantom Token (1 charge) or Ghost Ledger (3 charges): absorb fine silently
+                const fineAbsorber = hasEffect(robber, 'phantom_token') ? 'phantom_token'
+                    : hasEffect(robber, 'ghost_ledger') ? 'ghost_ledger' : null;
+                if (fineAbsorber) {
+                    consumeEffect(robber, fineAbsorber);
+                    victim.lastRobbedAt = new Date();
+                    await robber.save();
+                    await User.updateOne(
+                        { userId: victim.userId, guildId: victim.guildId },
+                        { $set: { lastRobbedAt: victim.lastRobbedAt } }
+                    );
+                    const absorberCfg = fineAbsorber === 'phantom_token'
+                        ? { emoji: '👻', label: 'Phantom Token', chargesKey: null }
+                        : { emoji: '📒', label: 'Ghost Ledger',  chargesKey: 'ghost_ledger' };
+                    const chargesLeft = absorberCfg.chargesKey
+                        ? ((robber.activeEffects ?? []).find(e => e.type === absorberCfg.chargesKey)?.charges ?? 0)
+                        : 0;
+                    const chargeStr = chargesLeft > 0 ? ` (${chargesLeft} uses left)` : '';
+                    embed = new EmbedBuilder()
+                        .setColor('#2c3e50')
+                        .setTitle(`${absorberCfg.emoji} ${absorberCfg.label} — Fine Erased`)
+                        .setDescription(`**${target.username}** caught you, but the fine never made it to the books.${chargeStr}`)
+                        .addFields(
+                            { name: 'Fine Erased',  value: `${currency}${paid.toLocaleString()}`,           inline: true },
+                            { name: 'Your Balance', value: `${currency}${robber.balance.toLocaleString()}`, inline: true }
+                        )
+                        .setFooter({ text: 'Cooldown: 1h' })
+                        .setTimestamp();
                 // Lifesaver: absorbs the failure fine — no coins lost
-                if (hasEffect(robber, 'lifesaver')) {
+                } else if (hasEffect(robber, 'lifesaver')) {
                     consumeEffect(robber, 'lifesaver');
                     victim.lastRobbedAt = new Date();
                     await robber.save();

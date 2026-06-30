@@ -12,6 +12,7 @@ const MILESTONES = [
     { days:   7, coins:  12_500, badge: 'Week Warrior'   },
     { days:  30, coins:  37_500, badge: 'Monthly Master' },
     { days: 100, coins: 125_000, badge: 'Centurion'      },
+    { days: 150, coins: 175_000, badge: 'Iron Streak'    },
     { days: 200, coins: 250_000, badge: 'Bicenturion'    },
     { days: 365, coins: 500_000, badge: 'Unstoppable'    },
 ];

@@ -243,8 +243,12 @@ const userSchema = new Schema({
         prestigedAt:    { type: Date,   default: null },
         unlocks:        [{ type: String }],   // ordered list of feature unlock ids
         lifetimePrestigeXp: { type: Number, default: 0 },
-        announcedRank:  { type: Number, default: 0 }   // highest rank announced server-wide
+        announcedRank:  { type: Number, default: 0 },  // highest rank announced server-wide
+        lastDailyChallengeAt: { type: Date, default: null }, // P6+ daily_challenge board claim cooldown
     },
+
+    // Permanent crime success bonus stacks from Black Market Contract (max 3)
+    crimeContractStacks: { type: Number, default: 0, min: 0, max: 3 },
 
     // Transient social badges (war victor, leaderboard #1, etc.) with optional expiry
     badges: [{
@@ -311,6 +315,8 @@ userSchema.index({ guildId: 1, 'accountPrestige.rank': -1 });
 userSchema.index({ guildId: 1, achievementsCount: -1 });
 userSchema.index({ guildId: 1, seasonCoins: -1 }); // used by executeLeaderboard / executeSeasonMe
 userSchema.index({ guildId: 1, syndicateId: 1 });  // used by syndicate member lookups
+userSchema.index({ guildId: 1, level: -1, xp: -1 });          // leaderboard level sort + rank.js countDocuments
+userSchema.index({ guildId: 1, balance: -1, bank: -1 });      // leaderboard wealth sort
 
 userSchema.pre('save', function(next) {
     this.updatedAt = Date.now();

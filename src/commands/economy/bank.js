@@ -11,38 +11,38 @@ async function getCurrency(guildId) {
 async function handleDeposit(interaction) {
     const currency = await getCurrency(interaction.guild.id);
 
-    const userData = await User.findOneAndUpdate(
+    // Read current balance to resolve 'all' and validate, then use atomic update
+    const preview = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId: interaction.guild.id },
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
 
     const input = interaction.options.getString('amount').toLowerCase();
-    const amount = input === 'all' ? userData.balance : parseInt(input, 10);
+    const amount = input === 'all' ? preview.balance : parseInt(input, 10);
 
     if (isNaN(amount) || amount <= 0) {
         return interaction.reply({ content: 'Please enter a valid positive amount.', flags: MessageFlags.Ephemeral });
     }
-    if (amount > userData.balance) {
+
+    // Atomic transfer: only succeeds if wallet has enough
+    const updated = await User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: amount } },
+        { $inc: { balance: -amount, bank: amount } },
+        { new: true }
+    );
+
+    if (!updated) {
+        const fresh = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         return interaction.reply({
-            content: `You only have ${currency}${userData.balance} in your wallet.`,
+            content: `You only have ${currency}${(fresh?.balance ?? 0).toLocaleString()} in your wallet.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
-    userData.balance -= amount;
-    userData.bank += amount;
-
-    try {
-        await userData.save();
-    } catch (err) {
-        console.error('[bank deposit] save error:', err);
-        return interaction.reply({ content: 'Failed to save your deposit. Please try again.', flags: MessageFlags.Ephemeral });
-    }
-
     logTransaction({
         userId: interaction.user.id, guildId: interaction.guild.id, type: 'deposit',
-        amount: -amount, balance: userData.balance, bank: userData.bank,
+        amount: -amount, balance: updated.balance, bank: updated.bank,
         note: `Deposited ${amount} to bank`
     });
 
@@ -57,8 +57,8 @@ async function handleDeposit(interaction) {
         .setTitle(depositTitle)
         .addFields(
             { name: 'Deposited', value: `${currency}${amount.toLocaleString()}`, inline: true },
-            { name: 'Wallet', value: `${currency}${userData.balance.toLocaleString()}`, inline: true },
-            { name: 'Bank', value: `${currency}${userData.bank.toLocaleString()}`, inline: true }
+            { name: 'Wallet', value: `${currency}${updated.balance.toLocaleString()}`, inline: true },
+            { name: 'Bank', value: `${currency}${updated.bank.toLocaleString()}`, inline: true }
         );
 
     if (depositDesc) depositEmbed.setDescription(depositDesc);
@@ -69,38 +69,38 @@ async function handleDeposit(interaction) {
 async function handleWithdraw(interaction) {
     const currency = await getCurrency(interaction.guild.id);
 
-    const userData = await User.findOneAndUpdate(
+    // Read current bank balance to resolve 'all', then use atomic update
+    const preview = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId: interaction.guild.id },
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
 
     const input = interaction.options.getString('amount').toLowerCase();
-    const amount = input === 'all' ? userData.bank : parseInt(input, 10);
+    const amount = input === 'all' ? preview.bank : parseInt(input, 10);
 
     if (isNaN(amount) || amount <= 0) {
         return interaction.reply({ content: 'Please enter a valid positive amount.', flags: MessageFlags.Ephemeral });
     }
-    if (amount > userData.bank) {
+
+    // Atomic transfer: only succeeds if bank has enough
+    const updated = await User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id, bank: { $gte: amount } },
+        { $inc: { bank: -amount, balance: amount } },
+        { new: true }
+    );
+
+    if (!updated) {
+        const fresh = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
         return interaction.reply({
-            content: `You only have ${currency}${userData.bank} in your bank.`,
+            content: `You only have ${currency}${(fresh?.bank ?? 0).toLocaleString()} in your bank.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
-    userData.bank -= amount;
-    userData.balance += amount;
-
-    try {
-        await userData.save();
-    } catch (err) {
-        console.error('[bank withdraw] save error:', err);
-        return interaction.reply({ content: 'Failed to save your withdrawal. Please try again.', flags: MessageFlags.Ephemeral });
-    }
-
     logTransaction({
         userId: interaction.user.id, guildId: interaction.guild.id, type: 'withdraw',
-        amount, balance: userData.balance, bank: userData.bank,
+        amount, balance: updated.balance, bank: updated.bank,
         note: `Withdrew ${amount} from bank`
     });
 
@@ -109,8 +109,8 @@ async function handleWithdraw(interaction) {
         .setTitle('Withdrawal Successful')
         .addFields(
             { name: 'Withdrawn', value: `${currency}${Number(amount).toLocaleString()}`, inline: true },
-            { name: 'Wallet', value: `${currency}${Number(userData.balance).toLocaleString()}`, inline: true },
-            { name: 'Bank', value: `${currency}${Number(userData.bank).toLocaleString()}`, inline: true }
+            { name: 'Wallet', value: `${currency}${Number(updated.balance).toLocaleString()}`, inline: true },
+            { name: 'Bank', value: `${currency}${Number(updated.bank).toLocaleString()}`, inline: true }
         );
 
     await interaction.reply({ embeds: [embed] });

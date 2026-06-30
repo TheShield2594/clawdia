@@ -6,6 +6,8 @@ const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { getStreakMultiplier, MILESTONES } = require('../../utils/streakMultiplier');
+const { badgeFor, titleForExactRank, getBonusMultipliers } = require('../../utils/prestige');
+const { getActiveSynergies } = require('../../services/synergyService');
 
 const PRESTIGE_BADGES = ['', '🥉', '🥈', '🥇', '🏆', '💎'];
 
@@ -82,10 +84,13 @@ module.exports = {
 
             // ── Section 2: Leveling ───────────────────────────────────────────
             const requiredXp = userData.level * 100 + 100;
-            const allUsers   = await User.find({ guildId: interaction.guild.id })
-                .sort({ level: -1, xp: -1 })
-                .select('userId');
-            const serverRank = allUsers.findIndex(u => u.userId === targetUser.id) + 1;
+            const serverRank = await User.countDocuments({
+                guildId: interaction.guild.id,
+                $or: [
+                    { level: { $gt: userData.level } },
+                    { level: userData.level, xp: { $gt: userData.xp } },
+                ],
+            }) + 1;
 
             const levelingLines = [
                 `**Level:** ${userData.level}  ·  **Rank:** #${serverRank}`,
@@ -149,22 +154,45 @@ module.exports = {
             // ── Section 6: Stats Snapshot ─────────────────────────────────────
             const huntLevel  = userData.hunt?.level ?? 1;
             const fishLevel  = userData.fishing?.level ?? 1;
+            const mineLevel  = userData.mining?.level ?? 1;
             const totalHunts = userData.hunt?.totalHunts ?? 0;
             const totalCasts = userData.fishing?.totalCasts ?? 0;
+            const totalMines = userData.mining?.totalMines ?? 0;
             const msgCount   = userData.messages ?? 0;
+
+            const prestigeRank   = userData.accountPrestige?.rank ?? 0;
+            const prestigeTitle  = titleForExactRank(prestigeRank);
+            const prestigeBadge  = badgeFor(prestigeRank);
+            const prestigeLine   = prestigeRank > 0
+                ? `**Prestige:** ${prestigeBadge} ${prestigeTitle}`
+                : null;
+
+            const activeSynergies = getActiveSynergies(userData);
+            const synergyLine = activeSynergies.length
+                ? `**Synergies:** ${activeSynergies.map(s => `${s.emoji} ${s.name}`).join('  ·  ')}`
+                : null;
+
+            const activePet = (userData.pets ?? []).find(p => !p.starving);
+            const petLine   = activePet
+                ? `**Active Pet:** 🐾 ${activePet.name ?? activePet.petId} (Lv${activePet.level})`
+                : null;
 
             const activities = [
                 { name: 'Hunting',   count: totalHunts },
                 { name: 'Fishing',   count: totalCasts },
+                { name: 'Mining',    count: totalMines },
                 { name: 'Messaging', count: msgCount },
             ];
             const favorite = activities.reduce((a, b) => b.count > a.count ? b : a);
 
             const statsLines = [
-                `**Hunt Level:** ${huntLevel}  ·  **Fish Level:** ${fishLevel}`,
-                `**Total Hunts:** ${totalHunts.toLocaleString()}  ·  **Fish Caught:** ${totalCasts.toLocaleString()}`,
+                prestigeLine,
+                `**Hunt Lv:** ${huntLevel}  ·  **Fish Lv:** ${fishLevel}  ·  **Mine Lv:** ${mineLevel}`,
+                `**Hunts:** ${totalHunts.toLocaleString()}  ·  **Catches:** ${totalCasts.toLocaleString()}  ·  **Mines:** ${totalMines.toLocaleString()}`,
+                synergyLine,
+                petLine,
                 `**Favorite Activity:** ${favorite.name} (${favorite.count.toLocaleString()})`,
-            ].join('\n');
+            ].filter(Boolean).join('\n');
 
             // ── Build embed ───────────────────────────────────────────────────
             const embed = new EmbedBuilder()

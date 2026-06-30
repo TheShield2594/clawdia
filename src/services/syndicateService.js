@@ -31,6 +31,16 @@ const SYNDICATE_TARGETS = {
         maxPayout:         200_000,
         heatGain:          25,
     },
+    vault_breach: {
+        label:             'Vault Breach',
+        emoji:             '🔐',
+        minPlayers:        9,
+        baseSuccessChance: 0.15,
+        minPayout:         250_000,
+        maxPayout:         500_000,
+        heatGain:          35,
+        requiresUpgrade:   'fourth_target',
+    },
 };
 
 // Each role has an emoji, label, and a skillType that maps to heistService's buildSkillCheck

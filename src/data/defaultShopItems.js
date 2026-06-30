@@ -12,6 +12,8 @@ const DEFAULT_SHOP_ITEMS = [
     { name: 'Lifesaver',          itemId: 'lifesaver',         rarity: 'Rare',     price: 15000, description: '🛟 Absorbs the next /rob fine or /crime loss — one-time use.',     lore: "Inexplicably shows up right when you need it most. Nobody knows where it comes from." },
     { name: 'Lucky Charm',        itemId: 'lucky_charm',       rarity: 'Common',   price: 2000,  description: '🍀 2-hour luck boost across games and /crime (casino saves apply to bets up to 25k).',                    lore: "Found at the bottom of a leprechaun's pocket. Still faintly smells of gold." },
     { name: 'Streak Shield',      itemId: 'streak_shield',     rarity: 'Uncommon', price: 2500,  description: '🔥🛡️ Protects your message streak from one missed day.',          lore: "A small ember that refuses to go out, no matter how bad your week gets." },
+    { name: 'Streak Freeze',      itemId: 'streak_freeze',     rarity: 'Rare',     price: 4500,  description: '🧊 Banks one streak freeze (max 2). A freeze auto-consumes when you miss a day, preserving your streak.', lore: "Time suspended in ice. One day borrowed from the future, paid in advance." },
+    { name: 'Tier Skip Token',    itemId: 'tier_skip_token',   rarity: 'Epic',     price: 50000, description: '⏭️ Instantly advance one season pass tier (use with /season tier-skip).', lore: "The battle pass waits for no one. Except you, apparently." },
     { name: '2x Coin Booster',    itemId: 'coin_booster_2x',   rarity: 'Uncommon', price: 2500,  description: '💰🚀 2x coin earnings from all sources for 1 hour.',               lore: "Temporarily rewires your brain to see money everywhere. Side effects may include greed." },
     { name: '2x XP Booster',      itemId: 'xp_booster_2x',    rarity: 'Uncommon', price: 2500,  description: '⭐🚀 2x XP from chat and activities for 1 hour.',                  lore: "A jolt of clarity disguised as a beverage. Caffeine for the soul." },
     { name: 'Lucky Streak',       itemId: 'lucky_streak',      rarity: 'Common',   price: 1500,  description: '🎯 +25% win chance on games for 30 minutes (casino saves apply to bets up to 25k).',                      lore: "The universe owes you one. This is collecting." },
@@ -38,7 +40,12 @@ const DEFAULT_SHOP_ITEMS = [
     // ── Black Market (Prestige I+ only) ──────────────────────────────────────
     { name: 'Phantom Token',          itemId: 'phantom_token',           rarity: 'Mythic', price: 120000, category: 'black_market', description: '👻 Skip the next /rob fine you would owe — undetectable.',         lore: "It wasn't you. It was never you." },
     { name: 'Silvered Talisman',      itemId: 'silvered_talisman',       rarity: 'Mythic', price: 180000, category: 'black_market', description: '🪙 Doubles coin yield from your next 5 hunts, fishes, or mines.',   lore: "Pawned by a stranger. Repurchased by you. The cycle continues." },
-    { name: 'Black Market Contract',  itemId: 'black_market_contract',   rarity: 'Mythic', price: 350000, category: 'black_market', description: '📜 Grants +1 permanent crime success roll bonus (stackable ×3).',    lore: "Don't ask who signed the other side." },
+    { name: 'Black Market Contract',  itemId: 'black_market_contract',   rarity: 'Mythic', price: 350000, category: 'black_market', description: '📜 Permanently +5% /crime success chance (stackable ×3, use with /use).',    lore: "Don't ask who signed the other side." },
+
+    // ── P8 Black Market (Prestige VIII+ only) ────────────────────────────────
+    { name: 'Voidsteel Cache',        itemId: 'voidsteel_cache',         rarity: 'Mythic', price: 600000, category: 'p8_black_market', description: '🌌 Doubles coin yield from your next 10 hunts, fishes, or mines.', lore: "Forged somewhere between rumor and ruin." },
+    { name: 'Ghost Ledger',           itemId: 'ghost_ledger',            rarity: 'Mythic', price: 750000, category: 'p8_black_market', description: '📒 Skip your next 3 /rob fines — undetectable, untraceable.',       lore: "Every entry erased before the ink dries." },
+    { name: 'Obsidian Crown',         itemId: 'obsidian_crown',          rarity: 'Mythic', price: 1500000, category: 'p8_black_market', description: '👑 4x coin earnings from /work for 2 hours.', lore: "Worn only by those who stopped asking permission." },
 ];
 
 const ITEM_LORE_BY_ID = Object.fromEntries(
@@ -73,6 +80,11 @@ function isBlackMarketItem(itemId) {
     return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'black_market';
 }
 
+// Returns true if the item is a P8 Black Market exclusive (unlocked at account prestige 8+).
+function isP8BlackMarketItem(itemId) {
+    return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'p8_black_market';
+}
+
 // Returns true if the item is in the endgame cosmetics category.
 function isEndgameItem(itemId) {
     return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'endgame';
@@ -91,8 +103,8 @@ function ensureDefaultShopItems(guildSettings) {
 
     const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
-    const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame']);
-    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food']);
+    const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame', 'p8_black_market']);
+    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food', 'streak_freeze', 'tier_skip_token']);
     let changed = false;
 
     if (!guildSettings.shopDefaultsSeeded) {
@@ -121,4 +133,4 @@ function ensureDefaultShopItems(guildSettings) {
     return changed;
 }
 
-module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, isEndgameItem, RARITY_ORDER };
+module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, isP8BlackMarketItem, isEndgameItem, RARITY_ORDER };

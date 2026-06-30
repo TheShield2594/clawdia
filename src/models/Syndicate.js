@@ -12,6 +12,7 @@ const syndicateSchema = new Schema({
     lastHeistAt:      { type: Date, default: null },
     lifetimeEarnings: { type: Number, default: 0 },
     heistCount:       { type: Number, default: 0 },
+    upgrades:         [{ type: String }],  // purchased upgradeId strings
     openToJoin:       { type: Boolean, default: false },
     pendingInvites:   [{ type: String }],
     createdAt:        { type: Date, default: Date.now },

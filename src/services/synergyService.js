@@ -48,6 +48,24 @@ function getMineDeepProspectorStaminaBonus(user) {
         : 0;
 }
 
+function getArtificerMineYieldBonus(user) {
+    return hasSynergy(user, 'artificer')
+        ? (SYNERGIES.artificer?.bonuses?.mineYieldPct ?? 0)
+        : 0;
+}
+
+function getArtificerMineStaminaBonus(user) {
+    return hasSynergy(user, 'artificer')
+        ? (SYNERGIES.artificer?.bonuses?.miningStamina ?? 0)
+        : 0;
+}
+
+function getMerchantCoinBonus(user) {
+    if (!hasSynergy(user, 'merchant')) return 0;
+    const hasItems = (user.inventory ?? []).some(e => e.quantity > 0);
+    return hasItems ? (SYNERGIES.merchant?.bonuses?.workCrimeCoinPct ?? 0) : 0;
+}
+
 module.exports = {
     getActiveSynergies,
     hasSynergy,
@@ -56,4 +74,7 @@ module.exports = {
     hasIronWill,
     getFishDeepProspectorStaminaBonus,
     getMineDeepProspectorStaminaBonus,
+    getArtificerMineYieldBonus,
+    getArtificerMineStaminaBonus,
+    getMerchantCoinBonus,
 };

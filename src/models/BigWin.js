@@ -6,7 +6,7 @@ const bigWinSchema = new Schema({
     username:  { type: String, required: true },
     amount:    { type: Number, required: true },
     source:    { type: String, required: true },  // 'hunt', 'fish', 'mine', 'casino_slots', 'casino_crash', 'casino_keno', 'duel'
-    details:   { type: String, default: null },   // e.g., 'Legendary Dragon', 'Jackpot!', '7.2x multiplier'
+    details:   { type: require('mongoose').Schema.Types.Mixed, default: null },
     createdAt: { type: Date, default: Date.now },
 });
 

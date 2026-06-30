@@ -100,6 +100,24 @@ const SYNERGIES = {
         flavor: 'Patience in the depths, whether water or stone, trains the same muscle.',
         requirements: { fishing: 30, mining: 30 },
         bonuses: { fishingStamina: 1, miningStamina: 1 }
+    },
+    artificer: {
+        id: 'artificer',
+        name: 'Artificer',
+        emoji: '⚒️',
+        description: '+5% ore yield and +1 max mining stamina',
+        flavor: 'Those who forge know the earth\'s secrets better than anyone.',
+        requirements: { mining: 50 },
+        bonuses: { mineYieldPct: 0.05, miningStamina: 1 }
+    },
+    merchant: {
+        id: 'merchant',
+        name: 'Merchant',
+        emoji: '💼',
+        description: '+5% coins from /work and /crime when you have items in your inventory',
+        flavor: 'A full bag and a sharp eye — the mark of someone who knows value.',
+        requirements: { hunt: 20, fishing: 20, mining: 20 },
+        bonuses: { workCrimeCoinPct: 0.05 }
     }
 };
 

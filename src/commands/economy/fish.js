@@ -935,7 +935,7 @@ async function handleCast(interaction) {
         if (bossResult.bonusPayout > 0) {
             const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
             if (bossResult.bonusPayout >= bigWinThreshold) {
-                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: bossResult.bonusPayout, source: 'fish', details: `${result.bossEncounter.fish.emoji ?? ''} ${result.bossEncounter.fish.name} [boss]`.trim() });
+                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: bossResult.bonusPayout, source: 'fish', details: { itemName: result.bossEncounter.fish.name, rarity: 'boss' }, client: interaction.client });
             }
             // Submit boss win to active tournament with multiplier bonus
             const tournamentScore = Math.round(bossResult.bonusPayout * (bossResult.tournamentMultiplier ?? 1));
@@ -982,7 +982,7 @@ async function handleCast(interaction) {
     if (result.success) {
         const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
         if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
-            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'fish', details: result.fish ? `${result.fish.name} [${result.tier}]` : null });
+            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'fish', details: { itemName: result.fish?.name, rarity: result.tier }, client: interaction.client });
         }
     }
 

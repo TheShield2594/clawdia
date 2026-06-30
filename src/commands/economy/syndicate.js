@@ -24,10 +24,20 @@ const {
     getEffectiveHeat,
     computeSyndicateOutcome,
 } = require('../../services/syndicateService');
+const { hasUnlock } = require('../../utils/prestige');
 
 const CREATION_COST    = 50_000;
 const MAX_MEMBERS      = 10;
+const MAX_MEMBERS_P7   = 12; // syndicate_extra_slot unlock (P7+)
 const HEIST_COOLDOWN_H = 4;
+
+// Returns the effective member cap for a syndicate based on the leader's
+// account prestige rank (P7+ unlocks 2 extra slots via syndicate_extra_slot).
+async function getMaxMembers(synDoc) {
+    const leaderDoc = await User.findOne({ userId: synDoc.leaderId, guildId: synDoc.guildId }, 'accountPrestige').lean();
+    const rank = leaderDoc?.accountPrestige?.rank ?? 0;
+    return hasUnlock(rank, 'syndicate_extra_slot') ? MAX_MEMBERS_P7 : MAX_MEMBERS;
+}
 const LOBBY_DURATION_S = 60;
 const SKILL_TIMEOUT_MS = 30_000;
 const SABOTAGE_HEAT_COST = 20;
@@ -488,8 +498,9 @@ async function executeJoin(interaction) {
         return interaction.reply({ content: `No syndicate named **${name}** was found on this server.`, flags: MessageFlags.Ephemeral });
     }
 
-    if (synDoc.memberIds.length >= MAX_MEMBERS) {
-        return interaction.reply({ content: `**${synDoc.name}** is full (${MAX_MEMBERS} members).`, flags: MessageFlags.Ephemeral });
+    const memberCap = await getMaxMembers(synDoc);
+    if (synDoc.memberIds.length >= memberCap) {
+        return interaction.reply({ content: `**${synDoc.name}** is full (${memberCap} members).`, flags: MessageFlags.Ephemeral });
     }
 
     const inInvites = synDoc.pendingInvites.includes(interaction.user.id);
@@ -510,7 +521,7 @@ async function executeJoin(interaction) {
     const embed = new EmbedBuilder()
         .setColor('#9b59b6')
         .setTitle('🦹 Joined Syndicate')
-        .setDescription(`You've joined **${synDoc.name}**${synDoc.tag ? ` [${synDoc.tag}]` : ''}! You are member ${synDoc.memberIds.length} of ${MAX_MEMBERS}.`)
+        .setDescription(`You've joined **${synDoc.name}**${synDoc.tag ? ` [${synDoc.tag}]` : ''}! You are member ${synDoc.memberIds.length} of ${memberCap}.`)
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -570,8 +581,9 @@ async function executeInvite(interaction) {
     if (synDoc.pendingInvites.includes(target.id)) {
         return interaction.reply({ content: `<@${target.id}> already has a pending invite.`, flags: MessageFlags.Ephemeral });
     }
-    if (synDoc.memberIds.length >= MAX_MEMBERS) {
-        return interaction.reply({ content: `Your syndicate is full (${MAX_MEMBERS} members).`, flags: MessageFlags.Ephemeral });
+    const memberCap = await getMaxMembers(synDoc);
+    if (synDoc.memberIds.length >= memberCap) {
+        return interaction.reply({ content: `Your syndicate is full (${memberCap} members).`, flags: MessageFlags.Ephemeral });
     }
 
     const targetDoc = await User.findOne({ userId: target.id, guildId: interaction.guild.id }, 'syndicateId').lean();
@@ -660,7 +672,8 @@ async function executeInfo(interaction, guildDoc) {
     const activeHeist   = getSyndicateHeist(interaction.guild.id);
     const hasActiveHeist = activeHeist?.syndicateId === synDoc.syndicateId;
 
-    const memberLines = synDoc.memberIds.slice(0, MAX_MEMBERS).map((id, i) =>
+    const memberCap = await getMaxMembers(synDoc);
+    const memberLines = synDoc.memberIds.slice(0, memberCap).map((id, i) =>
         id === synDoc.leaderId ? `👑 <@${id}>` : `${i + 1}. <@${id}>`
     );
 
@@ -671,7 +684,7 @@ async function executeInfo(interaction, guildDoc) {
             { name: '🌡️ Heat',              value: heatBar(effectiveHeat),                                                  inline: false },
             { name: '💰 Lifetime Earnings', value: `${currency}${(synDoc.lifetimeEarnings || 0).toLocaleString()}`,         inline: true },
             { name: '🎯 Heists Pulled',     value: String(synDoc.heistCount || 0),                                          inline: true },
-            { name: '👥 Members',           value: `${synDoc.memberIds.length} / ${MAX_MEMBERS}`,                           inline: true },
+            { name: '👥 Members',           value: `${synDoc.memberIds.length} / ${memberCap}`,                           inline: true },
             { name: '🚪 Membership',        value: synDoc.openToJoin ? 'Open' : 'Invite-only',                              inline: true },
             { name: '⚡ Active Heist',      value: hasActiveHeist ? 'In progress' : 'None',                                 inline: true },
             { name: '👤 Crew',              value: memberLines.join('\n') || '*none*',                                       inline: false }
@@ -723,9 +736,18 @@ async function executeHeist(interaction, guildDoc, client) {
     if (synDoc.leaderId !== interaction.user.id) {
         return interaction.reply({ content: 'Only the syndicate leader can initiate a heist.', flags: MessageFlags.Ephemeral });
     }
-    if (synDoc.memberIds.length < target.minPlayers) {
+    if (target.requiresUpgrade && !synDoc.upgrades?.includes(target.requiresUpgrade)) {
+        const upgrade = SYNDICATE_UPGRADES[target.requiresUpgrade];
         return interaction.reply({
-            content: `**${target.label}** requires at least ${target.minPlayers} syndicate members. You only have ${synDoc.memberIds.length}.`,
+            content: `**${target.label}** requires the **${upgrade?.label ?? target.requiresUpgrade}** upgrade. Purchase it with \`/syndicate upgrade\`.`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+    const hasExtraSlot   = synDoc.upgrades?.includes('extra_heist_slot');
+    const effectiveMinPlayers = hasExtraSlot ? Math.max(2, target.minPlayers - 1) : target.minPlayers;
+    if (synDoc.memberIds.length < effectiveMinPlayers) {
+        return interaction.reply({
+            content: `**${target.label}** requires at least ${effectiveMinPlayers} syndicate members. You only have ${synDoc.memberIds.length}.`,
             flags: MessageFlags.Ephemeral,
         });
     }
@@ -733,7 +755,8 @@ async function executeHeist(interaction, guildDoc, client) {
         return interaction.reply({ content: 'A syndicate heist is already active on this server.', flags: MessageFlags.Ephemeral });
     }
 
-    const cooldownMs = HEIST_COOLDOWN_H * 60 * 60 * 1000;
+    const hasCooldownReduction = synDoc.upgrades?.includes('cooldown_reduction');
+    const cooldownMs = (hasCooldownReduction ? HEIST_COOLDOWN_H - 1 : HEIST_COOLDOWN_H) * 60 * 60 * 1000;
     if (synDoc.lastHeistAt && (Date.now() - synDoc.lastHeistAt.getTime()) < cooldownMs) {
         const ts = Math.floor((synDoc.lastHeistAt.getTime() + cooldownMs) / 1000);
         return interaction.reply({
@@ -772,12 +795,12 @@ async function executeHeist(interaction, guildDoc, client) {
         clearInterval(refreshTimer);
         if (heist.phase !== 'lobby') return;
 
-        if (heist.players.size < target.minPlayers) {
+        if (heist.players.size < effectiveMinPlayers) {
             await msg.edit({
                 embeds: [new EmbedBuilder()
                     .setColor('#e74c3c')
                     .setTitle('❌ Heist Cancelled')
-                    .setDescription(`Not enough crew joined (need ${target.minPlayers}, got ${heist.players.size}). **${synDoc.name}**'s operation is called off.`)
+                    .setDescription(`Not enough crew joined (need ${effectiveMinPlayers}, got ${heist.players.size}). **${synDoc.name}**'s operation is called off.`)
                     .setTimestamp()],
                 components: [],
             }).catch(() => {});
@@ -886,6 +909,56 @@ async function executeSabotage(interaction, guildDoc) {
     return interaction.reply({ embeds: [embed] });
 }
 
+// ── Syndicate upgrade tree ──────────────────────────────────────────────────
+
+const SYNDICATE_UPGRADES = {
+    extra_heist_slot:   { label: 'Extra Heist Slot',     emoji: '🎯', earningsRequired: 100_000,  description: 'Reduces the crew requirement for every heist target by 1 player.' },
+    cooldown_reduction: { label: 'Cooldown Reduction',   emoji: '⏱️', earningsRequired: 500_000,  description: 'Reduces your heist cooldown by 1 hour (3h instead of 4h).' },
+    fourth_target:      { label: 'Fourth Target',         emoji: '🏦', earningsRequired: 1_000_000, description: 'Unlocks the Vault Breach heist target exclusive to upgraded syndicates.' },
+};
+
+async function executeUpgrade(interaction, guildDoc) {
+    const upgradeId = interaction.options.getString('id');
+    const upgrade   = SYNDICATE_UPGRADES[upgradeId];
+    if (!upgrade) {
+        return interaction.reply({ content: 'Unknown upgrade.', flags: MessageFlags.Ephemeral });
+    }
+
+    const synDoc = await Syndicate.findOne({ guildId: interaction.guild.id, leaderId: interaction.user.id });
+    if (!synDoc) {
+        return interaction.reply({ content: 'You must be the **leader** of a syndicate to purchase upgrades.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (synDoc.upgrades?.includes(upgradeId)) {
+        return interaction.reply({ content: `**${upgrade.emoji} ${upgrade.label}** is already purchased.`, flags: MessageFlags.Ephemeral });
+    }
+
+    if (synDoc.lifetimeEarnings < upgrade.earningsRequired) {
+        const need = upgrade.earningsRequired - synDoc.lifetimeEarnings;
+        return interaction.reply({
+            content: `Your syndicate needs **${upgrade.earningsRequired.toLocaleString()} lifetime earnings** for this upgrade. You have **${synDoc.lifetimeEarnings.toLocaleString()}** — **${need.toLocaleString()} more** needed.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    synDoc.upgrades = [...(synDoc.upgrades ?? []), upgradeId];
+    await synDoc.save();
+
+    const currency = guildDoc?.economy?.currency ?? '💰';
+    const embed = new EmbedBuilder()
+        .setColor('#9b59b6')
+        .setTitle(`${upgrade.emoji} Upgrade Purchased: ${upgrade.label}`)
+        .setDescription(
+            `**${synDoc.name}** has unlocked a new upgrade!\n\n` +
+            `> ${upgrade.description}\n\n` +
+            `**Lifetime Earnings:** ${currency}${synDoc.lifetimeEarnings.toLocaleString()}\n` +
+            `**Upgrades owned:** ${synDoc.upgrades.length} / ${Object.keys(SYNDICATE_UPGRADES).length}`
+        )
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
 // ── Command definition ─────────────────────────────────────────────────────
 
 module.exports = {
@@ -941,13 +1014,28 @@ module.exports = {
                 .addChoices(
                     { name: 'Bank Job (3 players, 45% base, 10k–25k)', value: 'bank_job' },
                     { name: 'Museum Heist (5 players, 30% base, 30k–80k)', value: 'museum_heist' },
-                    { name: 'City Hall Con (7 players, 20% base, 100k–200k)', value: 'city_hall_con' }
+                    { name: 'City Hall Con (7 players, 20% base, 100k–200k)', value: 'city_hall_con' },
+                    { name: 'Vault Breach (9 players, 15% base, 250k–500k) — requires Fourth Target upgrade', value: 'vault_breach' }
                 )
             )
         )
         .addSubcommand(sub => sub
             .setName('sabotage')
             .setDescription(`Sabotage an active rival heist (costs ${SABOTAGE_HEAT_COST} heat from your syndicate).`)
+        )
+        .addSubcommand(sub => sub
+            .setName('upgrade')
+            .setDescription('Purchase a syndicate upgrade using lifetime earnings (leader only).')
+            .addStringOption(opt =>
+                opt.setName('id')
+                    .setDescription('Upgrade to purchase')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: 'Extra Heist Slot (100k earnings) — -1 crew required per target', value: 'extra_heist_slot' },
+                        { name: 'Cooldown Reduction (500k earnings) — -1h heist cooldown', value: 'cooldown_reduction' },
+                        { name: 'Fourth Target (1M earnings) — unlocks Vault Breach', value: 'fourth_target' }
+                    )
+            )
         ),
 
     cooldownKey:    (interaction) => `syndicate:${interaction.options.getSubcommand()}`,
@@ -978,6 +1066,7 @@ module.exports = {
             case 'leaderboard': return executeLeaderboard(interaction, guildDoc);
             case 'heist':       return executeHeist(interaction, guildDoc, client);
             case 'sabotage':    return executeSabotage(interaction, guildDoc);
+            case 'upgrade':     return executeUpgrade(interaction, guildDoc);
         }
     },
 
