@@ -210,6 +210,20 @@ async function handleGo(interaction) {
     const result = executeExplore(user, region, guildSettings, { coinMultiplier });
     const firstVisit = result.firstVisit;
 
+    // Commit stamina spend + cooldown timestamp now, before the (up to 20s)
+    // encounter prompt below. Otherwise a second /explore go fired while this
+    // one is still waiting on a button press reads stale DB state and slips
+    // past the cooldown/stamina gate.
+    try {
+        await user.save();
+    } catch (err) {
+        if (err.name === 'VersionError') {
+            return interaction.reply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', flags: MessageFlags.Ephemeral });
+        }
+        console.error('[explore] pre-encounter save error:', err);
+        return interaction.reply({ content: 'Something went wrong writing your expedition down. Try again.', flags: MessageFlags.Ephemeral });
+    }
+
     // Staged narration: the setting-out beat, then the find
     const delay = ms => new Promise(r => setTimeout(r, ms));
     await interaction.reply({
@@ -273,7 +287,10 @@ async function handleGo(interaction) {
     addJournalEntry(user, region.id, result.type, summarizeResult(result, currency));
 
     // Achievements (checked against the freshly mutated user doc)
-    const newAchievements = await checkAndAward(user, guildSettings).catch(() => []);
+    const newAchievements = await checkAndAward(user, guildSettings).catch(err => {
+        console.error('[explore] checkAndAward error:', err);
+        return [];
+    });
 
     try {
         await user.save();
@@ -286,10 +303,12 @@ async function handleGo(interaction) {
     }
 
     if (newAchievements.length) {
-        announceAchievements(interaction.client, guildSettings, user, interaction.member, newAchievements).catch(() => null);
+        announceAchievements(interaction.client, guildSettings, user, interaction.member, newAchievements)
+            .catch(err => console.error('[explore] announceAchievements error:', err));
     }
     if (leveledUp) {
-        announceLevelUp(user, guildSettings, interaction.member, interaction.guild, interaction.channel).catch(() => null);
+        announceLevelUp(user, guildSettings, interaction.member, interaction.guild, interaction.channel)
+            .catch(err => console.error('[explore] announceLevelUp error:', err));
     }
 
     // Transaction audit log
@@ -322,7 +341,7 @@ async function handleGo(interaction) {
                     `*The map has fewer blank spaces tonight. The blank spaces are taking it personally.*`
                 )
                 .setTimestamp()],
-        }).catch(() => null);
+        }).catch(err => console.error('[explore] secret announce error:', err));
     }
 }
 
