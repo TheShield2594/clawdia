@@ -16,6 +16,7 @@ const DEFAULT_SHOP_ITEMS = [
     { name: '2x XP Booster',      itemId: 'xp_booster_2x',    rarity: 'Uncommon', price: 2500,  description: '⭐🚀 2x XP from chat and activities for 1 hour.',                  lore: "A jolt of clarity disguised as a beverage. Caffeine for the soul." },
     { name: 'Lucky Streak',       itemId: 'lucky_streak',      rarity: 'Common',   price: 1500,  description: '🎯 +25% win chance on games for 30 minutes (casino saves apply to bets up to 25k).',                      lore: "The universe owes you one. This is collecting." },
     { name: 'Salary Raise',       itemId: 'salary_raise',      rarity: 'Rare',     price: 4000,  description: '📈 1.5x earnings on /work shifts for 2 hours.',                    lore: "A briefly forged memo your boss won't remember signing." },
+    { name: 'Pet Food',           itemId: 'pet_food',          rarity: 'Common',   price: 250,   description: '🍖 Feeds any pet, restoring 10 hunger (use with /pet feed). Not a favorite food, so no bonus XP boost.', lore: "Generic, slightly bland, and always in stock. Pets prefer their favorites, but won't say no in a pinch." },
 
     // ── Prestige / Aspiration items ──────────────────────────────────────────
     { name: 'Custom Job Title',       itemId: 'custom_job_title',        rarity: 'Epic',   price: 75000,  category: 'prestige', description: '✏️ Set a custom job title shown on your /profile for 30 days.',     lore: "The business card says whatever you want. Nobody checks." },
@@ -91,6 +92,7 @@ function ensureDefaultShopItems(guildSettings) {
     const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
     const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame']);
+    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food']);
     let changed = false;
 
     if (!guildSettings.shopDefaultsSeeded) {
@@ -111,7 +113,7 @@ function ensureDefaultShopItems(guildSettings) {
 
     // For seeded guilds, only top up categories that are new to the schema.
     for (const item of DEFAULT_SHOP_ITEMS) {
-        if (!ALWAYS_BACKFILL_CATEGORIES.has(item.category)) continue;
+        if (!ALWAYS_BACKFILL_CATEGORIES.has(item.category) && !ALWAYS_BACKFILL_ITEM_IDS.has(item.itemId)) continue;
         if (existingIds.has(item.itemId.toLowerCase()) || existingNames.has(item.name.toLowerCase())) continue;
         guildSettings.shop.push({ ...item, roleId: null, stock: -1, imageUrl: '' });
         changed = true;
