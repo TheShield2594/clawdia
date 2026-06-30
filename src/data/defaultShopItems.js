@@ -41,6 +41,11 @@ const DEFAULT_SHOP_ITEMS = [
     { name: 'Phantom Token',          itemId: 'phantom_token',           rarity: 'Mythic', price: 120000, category: 'black_market', description: '👻 Skip the next /rob fine you would owe — undetectable.',         lore: "It wasn't you. It was never you." },
     { name: 'Silvered Talisman',      itemId: 'silvered_talisman',       rarity: 'Mythic', price: 180000, category: 'black_market', description: '🪙 Doubles coin yield from your next 5 hunts, fishes, or mines.',   lore: "Pawned by a stranger. Repurchased by you. The cycle continues." },
     { name: 'Black Market Contract',  itemId: 'black_market_contract',   rarity: 'Mythic', price: 350000, category: 'black_market', description: '📜 Grants +1 permanent crime success roll bonus (stackable ×3).',    lore: "Don't ask who signed the other side." },
+
+    // ── P8 Black Market (Prestige VIII+ only) ────────────────────────────────
+    { name: 'Voidsteel Cache',        itemId: 'voidsteel_cache',         rarity: 'Mythic', price: 600000, category: 'p8_black_market', description: '🌌 Doubles coin yield from your next 10 hunts, fishes, or mines.', lore: "Forged somewhere between rumor and ruin." },
+    { name: 'Ghost Ledger',           itemId: 'ghost_ledger',            rarity: 'Mythic', price: 750000, category: 'p8_black_market', description: '📒 Skip your next 3 /rob fines — undetectable, untraceable.',       lore: "Every entry erased before the ink dries." },
+    { name: 'Obsidian Crown',         itemId: 'obsidian_crown',          rarity: 'Mythic', price: 1500000, category: 'p8_black_market', description: '👑 4x coin earnings from /work for 2 hours.', lore: "Worn only by those who stopped asking permission." },
 ];
 
 const ITEM_LORE_BY_ID = Object.fromEntries(
@@ -75,6 +80,11 @@ function isBlackMarketItem(itemId) {
     return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'black_market';
 }
 
+// Returns true if the item is a P8 Black Market exclusive (unlocked at account prestige 8+).
+function isP8BlackMarketItem(itemId) {
+    return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'p8_black_market';
+}
+
 // Returns true if the item is in the endgame cosmetics category.
 function isEndgameItem(itemId) {
     return DEFAULT_SHOP_ITEMS.find(i => i.itemId === itemId)?.category === 'endgame';
@@ -93,7 +103,7 @@ function ensureDefaultShopItems(guildSettings) {
 
     const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
-    const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame']);
+    const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame', 'p8_black_market']);
     const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food', 'streak_freeze', 'tier_skip_token']);
     let changed = false;
 
@@ -123,4 +133,4 @@ function ensureDefaultShopItems(guildSettings) {
     return changed;
 }
 
-module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, isEndgameItem, RARITY_ORDER };
+module.exports = { DEFAULT_SHOP_ITEMS, ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBlackMarketItem, isP8BlackMarketItem, isEndgameItem, RARITY_ORDER };
