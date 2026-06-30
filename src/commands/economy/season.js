@@ -792,6 +792,75 @@ async function executeSeasonEvent(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
+// ── Tier Skip Token ───────────────────────────────────────────────────────────
+
+const TIER_SKIP_ITEM_ID = 'tier_skip_token';
+
+async function executeTierSkip(interaction) {
+    const [user, guildSettings] = await Promise.all([
+        User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
+        Guild.findOne({ guildId: interaction.guild.id })
+    ]);
+
+    const season = guildSettings?.season;
+    if (!season?.enabled || !season?.seasonId) {
+        return interaction.reply({ content: 'No active season pass is running on this server right now.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (!user) {
+        return interaction.reply({ content: "You don't have a profile yet.", flags: MessageFlags.Ephemeral });
+    }
+
+    normalizeSeason(user, season.seasonId);
+
+    const currentTier = getTierFromXp(user.season?.xp ?? 0);
+    if (currentTier >= MAX_TIERS) {
+        return interaction.reply({ content: '✅ You\'re already at the maximum tier!', flags: MessageFlags.Ephemeral });
+    }
+
+    const invEntry = user.inventory?.find(e => e.itemId.toLowerCase() === TIER_SKIP_ITEM_ID && e.quantity > 0);
+    if (!invEntry) {
+        return interaction.reply({ content: `You don't have a **Tier Skip Token** in your inventory. Purchase one from the event shop.`, flags: MessageFlags.Ephemeral });
+    }
+
+    // Atomically consume the token and grant one full tier of XP
+    const updatedUser = await User.findOneAndUpdate(
+        {
+            userId: interaction.user.id,
+            guildId: interaction.guild.id,
+            inventory: { $elemMatch: { itemId: invEntry.itemId, quantity: { $gt: 0 } } }
+        },
+        {
+            $inc: {
+                'inventory.$.quantity': -1,
+                'season.xp': XP_PER_TIER,
+            }
+        },
+        { new: true }
+    );
+
+    if (!updatedUser) {
+        return interaction.reply({ content: 'Failed to consume the Tier Skip Token — it may have already been used.', flags: MessageFlags.Ephemeral });
+    }
+
+    updatedUser.inventory = updatedUser.inventory.filter(e => e.quantity > 0);
+    await updatedUser.save();
+
+    const newTier = getTierFromXp(updatedUser.season?.xp ?? 0);
+    const embed = new EmbedBuilder()
+        .setColor('#FFD700')
+        .setTitle('⏭️ Tier Skipped!')
+        .setDescription(
+            `Your Tier Skip Token was consumed.\n\n` +
+            `**Tier:** ${currentTier} → **${newTier}**\n` +
+            `**Tokens remaining:** ${updatedUser.inventory.find(e => e.itemId === invEntry.itemId)?.quantity ?? 0}x`
+        )
+        .setFooter({ text: 'Use /season claim to collect your new tier rewards.' })
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
 // ── Module export ─────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -882,6 +951,10 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('event')
                 .setDescription('View your progress in the active seasonal event with milestone rewards.')
+        )
+        .addSubcommand(sub =>
+            sub.setName('tier-skip')
+                .setDescription('Use a Tier Skip Token from your inventory to advance one season pass tier.')
         ),
 
     async execute(interaction) {
@@ -899,6 +972,7 @@ module.exports = {
             if (sub === 'start')         return await executeAdminStart(interaction);
             if (sub === 'end')           return await executeAdminEnd(interaction);
             if (sub === 'event')         return await executeSeasonEvent(interaction);
+            if (sub === 'tier-skip')     return await executeTierSkip(interaction);
         } catch (err) {
             console.error('[season] error:', err);
             const msg = { content: 'Something went wrong with the season command.', flags: MessageFlags.Ephemeral };
