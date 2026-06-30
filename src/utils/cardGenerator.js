@@ -367,16 +367,46 @@ async function generatePetSprite(petId, size = 80) {
 
 // ── Minecraft-style achievement card ─────────────────────────────────────────
 
-function _drawAchievementIcon(ctx, x, y, size) {
+function _drawAchievementIcon(ctx, x, y, size, tierColor) {
     const s = size / 18;
-    ctx.fillStyle = '#5de0e6';
-    for (const [bx, by] of [[9,1],[10,1],[8,2],[9,2],[7,3],[8,3],[6,4],[7,4],[5,5],[6,5],[4,6],[5,6],[3,7],[4,7],[2,8],[3,8]]) {
-        ctx.fillRect(x + bx * s, y + by * s, s, s);
-    }
-    ctx.fillStyle = '#8aeef2';
-    for (const [gx, gy] of [[1,8],[2,8],[3,8],[4,8],[5,8]]) ctx.fillRect(x + gx * s, y + gy * s, s, s);
-    ctx.fillStyle = '#8b5e3c';
-    for (const [hx, hy] of [[2,9],[2,10],[2,11],[2,12],[1,10],[3,10]]) ctx.fillRect(x + hx * s, y + hy * s, s, s);
+    const px = (cells, color) => {
+        ctx.fillStyle = color;
+        for (const [cx, cy] of cells) ctx.fillRect(x + cx * s, y + cy * s, s, s);
+    };
+
+    const gold      = tierColor || '#ffd700';
+    const goldDark  = '#8a6d00';
+    const goldLight = '#fff3b0';
+    const stem      = '#caa400';
+    const base      = '#7a5c00';
+
+    // Trophy cup body
+    px([
+        [6,2],[7,2],[8,2],[9,2],[10,2],[11,2],
+        [6,3],[11,3],
+        [6,4],[11,4],
+        [6,5],[11,5],
+        [7,6],[10,6],
+        [8,7],[9,7],
+    ], gold);
+
+    // Cup interior highlight
+    px([[7,2],[8,2]], goldLight);
+
+    // Handles
+    px([[4,3],[4,4],[5,5],[12,3],[12,4],[13,5]], goldDark);
+
+    // Stem
+    px([[8,8],[9,8],[8,9],[9,9]], stem);
+
+    // Base
+    px([
+        [6,10],[7,10],[8,10],[9,10],[10,10],[11,10],
+        [5,11],[6,11],[7,11],[8,11],[9,11],[10,11],[11,11],[12,11],
+    ], base);
+
+    // Star sparkle accent
+    px([[13,1],[14,2],[13,3],[12,2]], goldLight);
 }
 
 function _achTier(xpReward) {
@@ -413,7 +443,7 @@ async function createAchievementCard(text, description, xpReward) {
     ctx.fillRect(iconX, iconY, ICON_SIZE, ICON_SIZE);
     ctx.strokeStyle = '#111111'; ctx.lineWidth = 2; ctx.strokeRect(iconX, iconY, ICON_SIZE, ICON_SIZE);
     ctx.strokeStyle = '#555555'; ctx.lineWidth = 1; ctx.strokeRect(iconX + 2, iconY + 2, ICON_SIZE - 4, ICON_SIZE - 4);
-    _drawAchievementIcon(ctx, iconX + 2, iconY + 2, ICON_SIZE - 4);
+    _drawAchievementIcon(ctx, iconX + 2, iconY + 2, ICON_SIZE - 4, tier.color);
 
     // Text
     const textX      = iconX + ICON_SIZE + 14;
