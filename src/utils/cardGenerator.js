@@ -367,6 +367,15 @@ async function generatePetSprite(petId, size = 80) {
 
 // ── Minecraft-style achievement card ─────────────────────────────────────────
 
+function _shadeHex(hex, percent) {
+    const n = parseInt(hex.slice(1), 16);
+    const clamp = v => Math.max(0, Math.min(255, v));
+    const r = clamp(((n >> 16) & 0xff) + Math.round(255 * percent));
+    const g = clamp(((n >> 8) & 0xff) + Math.round(255 * percent));
+    const b = clamp((n & 0xff) + Math.round(255 * percent));
+    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
 function _drawAchievementIcon(ctx, x, y, size, tierColor) {
     const s = size / 18;
     const px = (cells, color) => {
@@ -375,10 +384,10 @@ function _drawAchievementIcon(ctx, x, y, size, tierColor) {
     };
 
     const gold      = tierColor || '#ffd700';
-    const goldDark  = '#8a6d00';
-    const goldLight = '#fff3b0';
-    const stem      = '#caa400';
-    const base      = '#7a5c00';
+    const goldDark  = _shadeHex(gold, -0.45);
+    const goldLight = _shadeHex(gold, 0.45);
+    const stem      = _shadeHex(gold, -0.15);
+    const base      = _shadeHex(gold, -0.5);
 
     // Trophy cup body
     px([
