@@ -15,6 +15,7 @@ const {
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { hasIronWill } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
+const { getGatheringYieldMultiplier, consumeEffect } = require('./effectsService');
 
 const DANGEROUS_DEPTH_IDS = new Set(['crystal_caves', 'the_abyss']);
 const MINE_DEATH_RATE = 0.08;
@@ -298,6 +299,10 @@ function rollFailureSeverity() {
 function applyPayoutModifiers(user, rawPayout, depth) {
     const m = user.mining;
     let payout = rawPayout;
+
+    // Voidsteel Cache: 2x yield for next 10 gathers (consume 1 charge)
+    const voidsteelMult = getGatheringYieldMultiplier(user);
+    if (voidsteelMult > 1) { consumeEffect(user, 'voidsteel_cache'); payout *= voidsteelMult; }
 
     if (depth.payoutBonus > 0) payout *= (1 + depth.payoutBonus);
 
