@@ -289,6 +289,10 @@ module.exports = {
             ? Math.min(0.95, 0.15 + Math.random() * 0.60 + masteryBonus)
             : execMethod.successRate + masteryBonus;
 
+        // Black Market Contract: +5% per permanent stack (max 3 stacks = +15%)
+        const contractBonus = (user.crimeContractStacks ?? 0) * 0.05;
+        if (contractBonus > 0) successChance = Math.min(0.95, successChance + contractBonus);
+
         const luckyActive = hasEffect(user, 'lucky_charm');
         if (luckyActive) successChance = Math.min(0.95, successChance + 0.20);
 

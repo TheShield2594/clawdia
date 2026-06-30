@@ -40,7 +40,7 @@ const DEFAULT_SHOP_ITEMS = [
     // ── Black Market (Prestige I+ only) ──────────────────────────────────────
     { name: 'Phantom Token',          itemId: 'phantom_token',           rarity: 'Mythic', price: 120000, category: 'black_market', description: '👻 Skip the next /rob fine you would owe — undetectable.',         lore: "It wasn't you. It was never you." },
     { name: 'Silvered Talisman',      itemId: 'silvered_talisman',       rarity: 'Mythic', price: 180000, category: 'black_market', description: '🪙 Doubles coin yield from your next 5 hunts, fishes, or mines.',   lore: "Pawned by a stranger. Repurchased by you. The cycle continues." },
-    { name: 'Black Market Contract',  itemId: 'black_market_contract',   rarity: 'Mythic', price: 350000, category: 'black_market', description: '📜 Grants +1 permanent crime success roll bonus (stackable ×3).',    lore: "Don't ask who signed the other side." },
+    { name: 'Black Market Contract',  itemId: 'black_market_contract',   rarity: 'Mythic', price: 350000, category: 'black_market', description: '📜 Permanently +5% /crime success chance (stackable ×3, use with /use).',    lore: "Don't ask who signed the other side." },
 
     // ── P8 Black Market (Prestige VIII+ only) ────────────────────────────────
     { name: 'Voidsteel Cache',        itemId: 'voidsteel_cache',         rarity: 'Mythic', price: 600000, category: 'p8_black_market', description: '🌌 Doubles coin yield from your next 10 hunts, fishes, or mines.', lore: "Forged somewhere between rumor and ruin." },

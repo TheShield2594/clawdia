@@ -247,6 +247,9 @@ const userSchema = new Schema({
         lastDailyChallengeAt: { type: Date, default: null }, // P6+ daily_challenge board claim cooldown
     },
 
+    // Permanent crime success bonus stacks from Black Market Contract (max 3)
+    crimeContractStacks: { type: Number, default: 0, min: 0, max: 3 },
+
     // Transient social badges (war victor, leaderboard #1, etc.) with optional expiry
     badges: [{
         id:        { type: String, required: true },

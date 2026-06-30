@@ -19,6 +19,11 @@ const EFFECT_CONFIGS = {
     obsidian_crown:     { label: 'Obsidian Crown',      emoji: '👑',   durationMs: 2  * 3_600_000, charges: -1 },
     voidsteel_cache:    { label: 'Voidsteel Cache',     emoji: '🌌',   durationMs: null,            charges: 10 },
     ghost_ledger:       { label: 'Ghost Ledger',        emoji: '📒',   durationMs: null,            charges: 3  },
+
+    // ── Black Market effects (P1+) ────────────────────────────────────────────
+    silvered_talisman:  { label: 'Silvered Talisman',   emoji: '🪙',   durationMs: null,            charges: 5  },
+    phantom_token:      { label: 'Phantom Token',       emoji: '👻',   durationMs: null,            charges: 1  },
+    // black_market_contract is permanent (stored on user.crimeContractStacks) — no activeEffects entry
 };
 
 // Maps item IDs (as stored in inventory) to effect type keys.
@@ -41,6 +46,8 @@ const ITEM_TO_EFFECT = {
     'obsidian_crown':     'obsidian_crown',
     'voidsteel_cache':    'voidsteel_cache',
     'ghost_ledger':       'ghost_ledger',
+    'silvered_talisman':  'silvered_talisman',
+    'phantom_token':      'phantom_token',
 
     // Legacy space-separated IDs (backward compat for existing inventory items)
     'lucky charm':        'lucky_charm',
@@ -132,9 +139,17 @@ function getSalaryMultiplier(user) {
     return hasEffect(user, 'salary_raise') ? 1.5 : 1.0;
 }
 
-// Returns gathering yield multiplier from Voidsteel Cache (consumes 1 charge per successful gather)
+// Returns gathering yield multiplier from Silvered Talisman (5-charge, P1+) or Voidsteel Cache
+// (10-charge, P8+). Voidsteel Cache takes priority if both are active. Returns the effect key
+// that should be consumed, or null if neither is active, so callers can consumeEffect correctly.
+function getGatheringYieldEffect(user) {
+    if (hasEffect(user, 'voidsteel_cache'))   return 'voidsteel_cache';
+    if (hasEffect(user, 'silvered_talisman')) return 'silvered_talisman';
+    return null;
+}
+
 function getGatheringYieldMultiplier(user) {
-    return hasEffect(user, 'voidsteel_cache') ? 2.0 : 1.0;
+    return getGatheringYieldEffect(user) ? 2.0 : 1.0;
 }
 
 // Returns XP multiplier from personal booster
@@ -200,4 +215,5 @@ module.exports = {
     getServerXpMultiplier,
     getPublicProtectionStatus,
     getGatheringYieldMultiplier,
+    getGatheringYieldEffect,
 };
