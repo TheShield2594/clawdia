@@ -58,7 +58,7 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
-const { ensureQuests, onFish, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { ensureQuests, onFish, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { hasActiveEvent, getEventCrossSystemType } = require('../../services/seasonalEventService');
 
@@ -729,6 +729,11 @@ async function handleCast(interaction) {
     updateFishQuestProgress(user, result, locationId);
     await ensureQuests(user, guildSettings);
     const { completed: questsDone, nearComplete: questsNear } = await onFish(user, guildSettings);
+    if (result.success && result.finalPayout > 0) {
+        const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
+        questsDone.push(...earn.completed);
+        questsNear.push(...earn.nearComplete);
+    }
 
     const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
@@ -915,6 +920,7 @@ async function handleCast(interaction) {
         ensureFishingData(freshUser);
         const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choicesMade, bossType);
 
+        let bossQuestsDone = [], bossQuestsNear = [];
         if (bossResult.bonusPayout > 0) {
             const bossLocation = LOCATIONS[freshUser.fishing.activeLocation] ?? location;
             const { adjustedPayout } = applyPayoutModifiers(freshUser, bossResult.bonusPayout, bossLocation);
@@ -923,10 +929,19 @@ async function handleCast(interaction) {
             freshUser.fishing.totalEarned     += adjustedPayout;
             freshUser.fishing.dailyCoins      += adjustedPayout;
             if (adjustedPayout > freshUser.fishing.bestPayout) freshUser.fishing.bestPayout = adjustedPayout;
+
+            await ensureQuests(freshUser, guildSettings);
+            const earn = await onEconomyEarn(freshUser, guildSettings, adjustedPayout);
+            bossQuestsDone = earn.completed;
+            bossQuestsNear = earn.nearComplete;
         }
         freshUser.markModified('fishing');
         try {
             await freshUser.save();
+            if (bossQuestsDone.length || bossQuestsNear.length) {
+                notifyQuestComplete(guildSettings, interaction.member, bossQuestsDone, interaction.channel, freshUser).catch(() => null);
+                notifyQuestNearComplete(guildSettings, interaction.member, bossQuestsNear, interaction.channel).catch(() => null);
+            }
         } catch (saveErr) {
             console.error('[fish boss] save error:', saveErr);
             return state.btn.update({ content: 'Something went wrong saving your boss result. Please try again.', embeds: [], components: [] });
