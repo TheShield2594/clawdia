@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const { computeRetention } = require('../lib/apiHelpers');
 
-router.use(require('./api/settings'));
+const settingsRouter = require('./api/settings');
+router.use(settingsRouter);
 router.use(require('./api/stats'));
 router.use(require('./api/autorole'));
 router.use(require('./api/reactionRoles'));
@@ -18,3 +20,5 @@ router.use(require('./api/economy'));
 router.use(require('./api/leveling'));
 
 module.exports = router;
+module.exports.computeRetention = computeRetention;
+module.exports.validateEventLogUpdate = settingsRouter.validateEventLogUpdate;
