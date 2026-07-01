@@ -75,8 +75,8 @@ describe('applyVariables', () => {
         expect(_applyVariables('{username}', m)).toBe('testuser');
     });
 
-    test('replaces {tag} with user tag', () => {
-        expect(_applyVariables('{tag}', mockMember)).toBe('testuser#0');
+    test('replaces {tag} with username (not deprecated .tag)', () => {
+        expect(_applyVariables('{tag}', mockMember)).toBe('testuser');
     });
 
     test('replaces {server} with guild name', () => {

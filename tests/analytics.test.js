@@ -5,6 +5,11 @@
 // ---------------------------------------------------------------------------
 
 jest.mock('discord.js', () => {
+    // Only EmbedBuilder/AttachmentBuilder/etc. need stubbing for assertions below.
+    // Everything else (SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
+    // MessageFlags, ...) comes from the real module so command files transitively
+    // required via interactionCreate.js (e.g. heist.js, syndicate.js) still load.
+    const actual = jest.requireActual('discord.js');
     const EmbedBuilder = jest.fn().mockImplementation(() => {
         const self = {
             setColor: jest.fn().mockReturnThis(),
@@ -19,6 +24,7 @@ jest.mock('discord.js', () => {
         return self;
     });
     return {
+        ...actual,
         EmbedBuilder,
         AttachmentBuilder: jest.fn(),
         PermissionFlagsBits: { SendMessages: 1n << 11n, AttachFiles: 1n << 15n },
@@ -55,10 +61,10 @@ jest.mock('../src/services/dailyBibleService', () => ({ rescheduleBibleVerse: je
 jest.mock('rss-parser', () => jest.fn().mockImplementation(() => ({})));
 jest.mock('express', () => {
     const fn = jest.fn(() => ({
-        use: jest.fn(), get: jest.fn(), post: jest.fn(), delete: jest.fn(), put: jest.fn(),
+        use: jest.fn(), get: jest.fn(), post: jest.fn(), delete: jest.fn(), put: jest.fn(), patch: jest.fn(),
     }));
     fn.Router = () => ({
-        use: jest.fn(), get: jest.fn(), post: jest.fn(), delete: jest.fn(), put: jest.fn(),
+        use: jest.fn(), get: jest.fn(), post: jest.fn(), delete: jest.fn(), put: jest.fn(), patch: jest.fn(),
     });
     return fn;
 });
@@ -233,6 +239,7 @@ describe('logCommandMetric (interactionCreate)', () => {
         return {
             isChatInputCommand: () => true,
             isButton: () => false,
+            isAutocomplete: () => false,
             commandName: 'ping',
             guildId: '111111111111111111',
             guild: { id: '111111111111111111', name: 'Test Guild' },

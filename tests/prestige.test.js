@@ -6,7 +6,7 @@ describe('prestige', () => {
         expect(tierFor(1).rank).toBe(1);
         expect(tierFor(2).rank).toBe(2);
         expect(tierFor(5).rank).toBe(5);
-        expect(tierFor(6).rank).toBe(5);  // between P5 and P10 → uses P5 tier definition
+        expect(tierFor(6).rank).toBe(6);  // P6 has its own explicit tier definition
         expect(tierFor(10).rank).toBe(10);
         expect(tierFor(15).rank).toBe(10); // above max defined tier
     });
@@ -65,12 +65,17 @@ describe('prestige', () => {
         expect(ranks).toEqual(expect.arrayContaining([0, 1, 2, 3, 4, 5, 10]));
     });
 
-    test('titleForExactRank renders explicit tiers verbatim and synthesizes P6-P9', () => {
+    test('titleForExactRank renders explicit tiers verbatim (P0-P10 all have their own entry)', () => {
         expect(titleForExactRank(0)).toBeNull();
         expect(titleForExactRank(1)).toBe('Prestige I');
         expect(titleForExactRank(5)).toBe('Prestige V ⭐');
-        expect(titleForExactRank(6)).toBe('Prestige VI');   // synthesized, NOT "Prestige V ⭐"
-        expect(titleForExactRank(9)).toBe('Prestige IX');
+        expect(titleForExactRank(6)).toBe('Prestige VI');
+        expect(titleForExactRank(9)).toBe('Prestige IX 💠');
         expect(titleForExactRank(10)).toBe('The Ascended ✨');
+    });
+
+    test('titleForExactRank synthesizes a title beyond the max defined tier (P10)', () => {
+        expect(titleForExactRank(11)).toBe('Prestige XI');
+        expect(titleForExactRank(14)).toBe('Prestige XIV');
     });
 });

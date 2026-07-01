@@ -359,3 +359,4 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkCsrfOr
 });
 
 module.exports = router;
+module.exports.validateEventLogUpdate = validateEventLogUpdate;
