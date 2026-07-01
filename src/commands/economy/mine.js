@@ -48,7 +48,7 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
-const { ensureQuests, onMine, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { ensureQuests, onMine, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { CROSS_CONSUMABLES } = require('../../data/crossSystemData');
 
@@ -650,6 +650,11 @@ async function handleDig(interaction) {
 
     await ensureQuests(user, guildSettings);
     const { completed: questsDone, nearComplete: questsNear } = await onMine(user, guildSettings);
+    if (result.success && result.finalPayout > 0) {
+        const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
+        questsDone.push(...earn.completed);
+        questsNear.push(...earn.nearComplete);
+    }
 
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 

@@ -52,7 +52,7 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
-const { ensureQuests, onHunt, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { ensureQuests, onHunt, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { getActiveSynergies } = require('../../services/synergyService');
 
 const WILDERNESS_YIELD_BONUS = 0.10;
@@ -730,6 +730,11 @@ async function executeStart(interaction) {
     updateHuntQuestProgress(user, result, zoneId);
     await ensureQuests(user, guildSettings);
     const { completed: questsDone, nearComplete: questsNear } = await onHunt(user, guildSettings);
+    if (result.success && result.finalPayout > 0) {
+        const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
+        questsDone.push(...earn.completed);
+        questsNear.push(...earn.nearComplete);
+    }
 
     const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 

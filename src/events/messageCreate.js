@@ -4,7 +4,7 @@ const Case = require('../models/Case');
 const Reminder = require('../models/Reminder');
 const { handleAIChat } = require('../services/aiService');
 const { logModeration } = require('../utils/logger');
-const { ensureQuests, onMessage, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset } = require('../services/questService');
+const { ensureQuests, onMessage, onStreakUpdate, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset } = require('../services/questService');
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
 const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = require('../services/effectsService');
 const { checkRivalry } = require('../services/rivalryService');
@@ -188,6 +188,9 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
         // Quest progress
         const { assignedNewDaily } = await ensureQuests(user, guildSettings);
         const { completed: completedQuests, nearComplete: nearCompleteQuests } = await onMessage(user, guildSettings);
+        const streakQuests = await onStreakUpdate(user, guildSettings);
+        completedQuests.push(...streakQuests.completed);
+        nearCompleteQuests.push(...streakQuests.nearComplete);
 
         const newlyEarned = await checkAndAward(user, guildSettings).catch(() => []);
 

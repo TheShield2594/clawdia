@@ -58,7 +58,7 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
-const { ensureQuests, onFish, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { ensureQuests, onFish, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { hasActiveEvent, getEventCrossSystemType } = require('../../services/seasonalEventService');
 
@@ -729,6 +729,11 @@ async function handleCast(interaction) {
     updateFishQuestProgress(user, result, locationId);
     await ensureQuests(user, guildSettings);
     const { completed: questsDone, nearComplete: questsNear } = await onFish(user, guildSettings);
+    if (result.success && result.finalPayout > 0) {
+        const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
+        questsDone.push(...earn.completed);
+        questsNear.push(...earn.nearComplete);
+    }
 
     const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
