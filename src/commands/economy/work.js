@@ -335,9 +335,10 @@ module.exports = {
                         exceptionalChallenge = elapsed <= 5000;
                         const bonusRate = exceptionalChallenge ? 0.55 : 0.40;
                         bonusEarned = Math.round(earned * bonusRate);
-                        await User.findOneAndUpdate(
+                        const bonusUpdated = await User.findOneAndUpdate(
                             { userId: interaction.user.id, guildId: interaction.guild.id },
-                            { $inc: { balance: bonusEarned } }
+                            { $inc: { balance: bonusEarned } },
+                            { new: true }
                         );
                         logTransaction({
                             userId: interaction.user.id,
@@ -347,6 +348,20 @@ module.exports = {
                             balance: updated.balance + bonusEarned,
                             note: `work challenge bonus (${challenge.type}${exceptionalChallenge ? ', fast' : ''}) for ${job.name}`,
                         });
+
+                        if (bonusUpdated && bonusEarned > 0) {
+                            try {
+                                await ensureQuests(bonusUpdated, guildSettings);
+                                const earn = await onEconomyEarn(bonusUpdated, guildSettings, bonusEarned);
+                                await bonusUpdated.save();
+                                if (earn.completed.length || earn.nearComplete.length) {
+                                    notifyQuestComplete(guildSettings, interaction.member, earn.completed, interaction.channel, bonusUpdated).catch(() => null);
+                                    notifyQuestNearComplete(guildSettings, interaction.member, earn.nearComplete, interaction.channel).catch(() => null);
+                                }
+                            } catch (err) {
+                                console.error('[work] challenge bonus quest save error:', err);
+                            }
+                        }
                     }
                 } catch {
                     // timed out — base payout already secured

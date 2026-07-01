@@ -353,14 +353,14 @@ module.exports = {
             });
 
             // Quest progress for coins earned from today's claim
-            await ensureQuests(updated, guildSettings);
-            let questsDone = [], questsNear = [];
-            if (actualAmount > 0) {
-                const earn = await onEconomyEarn(updated, guildSettings, actualAmount);
-                questsDone = earn.completed;
-                questsNear = earn.nearComplete;
-            }
             try {
+                await ensureQuests(updated, guildSettings);
+                let questsDone = [], questsNear = [];
+                if (actualAmount > 0) {
+                    const earn = await onEconomyEarn(updated, guildSettings, actualAmount);
+                    questsDone = earn.completed;
+                    questsNear = earn.nearComplete;
+                }
                 await updated.save();
                 if (questsDone.length || questsNear.length) {
                     notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, updated).catch(() => null);

@@ -920,6 +920,7 @@ async function handleCast(interaction) {
         ensureFishingData(freshUser);
         const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choicesMade, bossType);
 
+        let bossQuestsDone = [], bossQuestsNear = [];
         if (bossResult.bonusPayout > 0) {
             const bossLocation = LOCATIONS[freshUser.fishing.activeLocation] ?? location;
             const { adjustedPayout } = applyPayoutModifiers(freshUser, bossResult.bonusPayout, bossLocation);
@@ -928,10 +929,19 @@ async function handleCast(interaction) {
             freshUser.fishing.totalEarned     += adjustedPayout;
             freshUser.fishing.dailyCoins      += adjustedPayout;
             if (adjustedPayout > freshUser.fishing.bestPayout) freshUser.fishing.bestPayout = adjustedPayout;
+
+            await ensureQuests(freshUser, guildSettings);
+            const earn = await onEconomyEarn(freshUser, guildSettings, adjustedPayout);
+            bossQuestsDone = earn.completed;
+            bossQuestsNear = earn.nearComplete;
         }
         freshUser.markModified('fishing');
         try {
             await freshUser.save();
+            if (bossQuestsDone.length || bossQuestsNear.length) {
+                notifyQuestComplete(guildSettings, interaction.member, bossQuestsDone, interaction.channel, freshUser).catch(() => null);
+                notifyQuestNearComplete(guildSettings, interaction.member, bossQuestsNear, interaction.channel).catch(() => null);
+            }
         } catch (saveErr) {
             console.error('[fish boss] save error:', saveErr);
             return state.btn.update({ content: 'Something went wrong saving your boss result. Please try again.', embeds: [], components: [] });
