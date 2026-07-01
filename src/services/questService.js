@@ -411,17 +411,22 @@ async function onStreakUpdate(user, guildSettings) {
         if (!def) continue;
         const entry = user.quests?.find(q => q.questId === questId && !q.completedAt && q.expiresAt > new Date());
         if (!entry) continue;
-        if (streak >= def.target) {
-            if (entry.progress < def.target) {
-                entry.progress    = def.target;
-                entry.completedAt = new Date();
-                completed.push(await awardQuest(user, def, guildSettings));
-            }
-        } else {
-            const threshold = Math.ceil(def.target * 0.8);
-            if (streak >= threshold && entry.progress < def.target) {
-                nearComplete.push(def);
-            }
+
+        const prevProgress = entry.progress || 0;
+        entry.progress = Math.min(streak, def.target);
+
+        if (entry.progress >= def.target) {
+            entry.completedAt = new Date();
+            completed.push(await awardQuest(user, def, guildSettings));
+            continue;
+        }
+
+        // Fire near-complete exactly once: when crossing the 80% threshold.
+        // Clamped below target so small targets (e.g. 3) can't make the
+        // threshold equal the target, which would make this branch unreachable.
+        const threshold = Math.min(Math.ceil(def.target * 0.8), def.target - 1);
+        if (entry.progress >= threshold && prevProgress < threshold) {
+            nearComplete.push(def);
         }
     }
     return { completed, nearComplete };

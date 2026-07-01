@@ -12,6 +12,7 @@ const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, WORK_ROUGH_LINES, WORK_EXCEPTIONAL_LINES } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -254,6 +255,24 @@ module.exports = {
                 note: `${job.name} (${performance.label})${capActive ? ', mult capped' : ''}${challengeFires ? ', challenge' : ''}`
             });
 
+            // Quest progress for coins earned this shift
+            let questsDone = [], questsNear = [];
+            await ensureQuests(updated, guildSettings);
+            if (finalEarned > 0) {
+                const earn = await onEconomyEarn(updated, guildSettings, finalEarned);
+                questsDone = earn.completed;
+                questsNear = earn.nearComplete;
+            }
+            try {
+                await updated.save();
+                if (questsDone.length || questsNear.length) {
+                    notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, updated).catch(() => null);
+                    notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
+                }
+            } catch (err) {
+                console.error('[work] quest save error:', err);
+            }
+
             const nextTier = tierInfo.find(t => t.minShifts > updated.shiftsWorked);
             const promotedTo = tierInfo.find(t => t.minShifts === updated.shiftsWorked);
             const currency = guildSettings?.economy?.currency || '💰';
@@ -316,9 +335,10 @@ module.exports = {
                         exceptionalChallenge = elapsed <= 5000;
                         const bonusRate = exceptionalChallenge ? 0.55 : 0.40;
                         bonusEarned = Math.round(earned * bonusRate);
-                        await User.findOneAndUpdate(
+                        const bonusUpdated = await User.findOneAndUpdate(
                             { userId: interaction.user.id, guildId: interaction.guild.id },
-                            { $inc: { balance: bonusEarned } }
+                            { $inc: { balance: bonusEarned } },
+                            { new: true }
                         );
                         logTransaction({
                             userId: interaction.user.id,
@@ -328,6 +348,20 @@ module.exports = {
                             balance: updated.balance + bonusEarned,
                             note: `work challenge bonus (${challenge.type}${exceptionalChallenge ? ', fast' : ''}) for ${job.name}`,
                         });
+
+                        if (bonusUpdated && bonusEarned > 0) {
+                            try {
+                                await ensureQuests(bonusUpdated, guildSettings);
+                                const earn = await onEconomyEarn(bonusUpdated, guildSettings, bonusEarned);
+                                await bonusUpdated.save();
+                                if (earn.completed.length || earn.nearComplete.length) {
+                                    notifyQuestComplete(guildSettings, interaction.member, earn.completed, interaction.channel, bonusUpdated).catch(() => null);
+                                    notifyQuestNearComplete(guildSettings, interaction.member, earn.nearComplete, interaction.channel).catch(() => null);
+                                }
+                            } catch (err) {
+                                console.error('[work] challenge bonus quest save error:', err);
+                            }
+                        }
                     }
                 } catch {
                     // timed out — base payout already secured
