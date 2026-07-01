@@ -79,11 +79,16 @@ test('mine shop pickaxe -> confirm purchase does not throw, even with a colon-ke
             getString: (name) => name === 'type' ? 'iron_pickaxe' : null,
             getBoolean: () => true,
         },
-        reply: jest.fn(async () => fakeReply),
+        reply: jest.fn(async () => ({ resource: { message: fakeReply } })),
         editReply: jest.fn(async (payload) => { editReplyCalls.push(payload); }),
     };
 
-    await mineCommand.execute(interaction);
+    // execute() intentionally stays pending until the collector's 'end' event
+    // fires (which only happens once the button click below runs
+    // collector.stop()), so don't await it here — just wait for the collector
+    // setup (collectHandler) to land.
+    mineCommand.execute(interaction);
+    await new Promise(resolve => setImmediate(resolve));
     expect(collectHandler).toBeDefined();
 
     const btn = {
@@ -94,7 +99,10 @@ test('mine shop pickaxe -> confirm purchase does not throw, even with a colon-ke
         update: jest.fn(async (payload) => { editReplyCalls.push(payload); }),
     };
 
-    await collectHandler(btn);
+    // The 'collect' handler kicks off the purchase as a fire-and-forget async
+    // chain, so wait a tick for it to settle before asserting on editReply calls.
+    collectHandler(btn);
+    await new Promise(resolve => setImmediate(resolve));
 
     const failureMsg = editReplyCalls.find(c => c.content === 'Something went wrong. Please try again.');
     expect(failureMsg).toBeUndefined();
