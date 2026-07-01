@@ -935,6 +935,7 @@ async function executeStart(interaction) {
         ensureHuntData(freshUser);
         const apexResult = resolveApexEncounter(freshUser, result.apexEncounter.animal, result.apexEncounter.tier, choicesMade, apexType, apexWeaponIndex);
 
+        let apexQuestsDone = [], apexQuestsNear = [];
         if (apexResult.bonusPayout > 0) {
             const apexZone = ZONES[freshUser.hunt.activeZone] ?? zone;
             const { adjustedPayout } = applyPayoutModifiers(freshUser, apexResult.bonusPayout, apexZone);
@@ -943,10 +944,19 @@ async function executeStart(interaction) {
             freshUser.hunt.totalEarned += adjustedPayout;
             freshUser.hunt.dailyCoins  += adjustedPayout;
             if (adjustedPayout > freshUser.hunt.bestPayout) freshUser.hunt.bestPayout = adjustedPayout;
+
+            await ensureQuests(freshUser, guildSettings);
+            const earn = await onEconomyEarn(freshUser, guildSettings, adjustedPayout);
+            apexQuestsDone = earn.completed;
+            apexQuestsNear = earn.nearComplete;
         }
         freshUser.markModified('hunt');
         try {
             await freshUser.save();
+            if (apexQuestsDone.length || apexQuestsNear.length) {
+                notifyQuestComplete(guildSettings, interaction.member, apexQuestsDone, interaction.channel, freshUser).catch(() => null);
+                notifyQuestNearComplete(guildSettings, interaction.member, apexQuestsNear, interaction.channel).catch(() => null);
+            }
         } catch (saveErr) {
             console.error('[hunt apex] save error:', saveErr);
             return state.btn.update({ content: 'Something went wrong saving your apex result — the encounter is lost and cannot be retried. Your original hunt rewards were already saved.', embeds: [], components: [] }).catch(() => {});

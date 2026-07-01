@@ -421,8 +421,10 @@ async function onStreakUpdate(user, guildSettings) {
             continue;
         }
 
-        // Fire near-complete exactly once: when crossing the 80% threshold
-        const threshold = Math.ceil(def.target * 0.8);
+        // Fire near-complete exactly once: when crossing the 80% threshold.
+        // Clamped below target so small targets (e.g. 3) can't make the
+        // threshold equal the target, which would make this branch unreachable.
+        const threshold = Math.min(Math.ceil(def.target * 0.8), def.target - 1);
         if (entry.progress >= threshold && prevProgress < threshold) {
             nearComplete.push(def);
         }
