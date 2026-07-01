@@ -28,6 +28,7 @@ const {
     formatMs,
 } = require('../../services/exploreService');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
+const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
 const {
     getEventXpMultiplier, getEventCoinMultiplier,
@@ -292,6 +293,14 @@ async function handleGo(interaction) {
         return [];
     });
 
+    await ensureQuests(user, guildSettings);
+    let questsDone = [], questsNear = [];
+    if (result.payout > 0) {
+        const earn = await onEconomyEarn(user, guildSettings, result.payout);
+        questsDone = earn.completed;
+        questsNear = earn.nearComplete;
+    }
+
     try {
         await user.save();
     } catch (err) {
@@ -305,6 +314,10 @@ async function handleGo(interaction) {
     if (newAchievements.length) {
         announceAchievements(interaction.client, guildSettings, user, interaction.member, newAchievements)
             .catch(err => console.error('[explore] announceAchievements error:', err));
+    }
+    if (questsDone.length || questsNear.length) {
+        notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+        notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
     }
     if (leveledUp) {
         announceLevelUp(user, guildSettings, interaction.member, interaction.guild, interaction.channel)

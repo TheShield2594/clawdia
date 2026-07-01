@@ -12,6 +12,7 @@ const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, WORK_ROUGH_LINES, WORK_EXCEPTIONAL_LINES } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -253,6 +254,24 @@ module.exports = {
                 balance: updated.balance,
                 note: `${job.name} (${performance.label})${capActive ? ', mult capped' : ''}${challengeFires ? ', challenge' : ''}`
             });
+
+            // Quest progress for coins earned this shift
+            let questsDone = [], questsNear = [];
+            await ensureQuests(updated, guildSettings);
+            if (finalEarned > 0) {
+                const earn = await onEconomyEarn(updated, guildSettings, finalEarned);
+                questsDone = earn.completed;
+                questsNear = earn.nearComplete;
+            }
+            try {
+                await updated.save();
+                if (questsDone.length || questsNear.length) {
+                    notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, updated).catch(() => null);
+                    notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
+                }
+            } catch (err) {
+                console.error('[work] quest save error:', err);
+            }
 
             const nextTier = tierInfo.find(t => t.minShifts > updated.shiftsWorked);
             const promotedTo = tierInfo.find(t => t.minShifts === updated.shiftsWorked);

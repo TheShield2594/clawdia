@@ -11,6 +11,7 @@ const { stackBar } = require('../../utils/rewardReveal');
 const { buildCooldownEmbed, getNextStreakMilestone } = require('../../utils/cooldownEmbed');
 const { getTimeBand } = require('../../utils/timeBand');
 const { claimStarterKit } = require('../../utils/starterKit');
+const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -351,6 +352,24 @@ module.exports = {
                 note: `streak ${user.streak?.current ?? 0}, mult ${combined.toFixed(2)}${capActive ? ' (capped)' : ''}`
             });
 
+            // Quest progress for coins earned from today's claim
+            await ensureQuests(updated, guildSettings);
+            let questsDone = [], questsNear = [];
+            if (actualAmount > 0) {
+                const earn = await onEconomyEarn(updated, guildSettings, actualAmount);
+                questsDone = earn.completed;
+                questsNear = earn.nearComplete;
+            }
+            try {
+                await updated.save();
+                if (questsDone.length || questsNear.length) {
+                    notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, updated).catch(() => null);
+                    notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
+                }
+            } catch (err) {
+                console.error('[daily] quest save error:', err);
+            }
+
             // ── Item Drop Check ───────────────────────────────────────────────────
             const streakCurrent = user.streak?.current ?? 0;
             const claimedDropMilestones = new Set(user.streak?.claimedDropMilestones ?? []);
@@ -531,6 +550,20 @@ module.exports = {
                         balance: bonusUpdated?.balance ?? updated.balance + bonusAmount,
                         note: `daily challenge bonus (${challenge.type})`,
                     });
+
+                    if (bonusUpdated && bonusAmount > 0) {
+                        await ensureQuests(bonusUpdated, guildSettings);
+                        const bonusEarn = await onEconomyEarn(bonusUpdated, guildSettings, bonusAmount);
+                        try {
+                            await bonusUpdated.save();
+                            if (bonusEarn.completed.length || bonusEarn.nearComplete.length) {
+                                notifyQuestComplete(guildSettings, interaction.member, bonusEarn.completed, interaction.channel, bonusUpdated).catch(() => null);
+                                notifyQuestNearComplete(guildSettings, interaction.member, bonusEarn.nearComplete, interaction.channel).catch(() => null);
+                            }
+                        } catch (err) {
+                            console.error('[daily] challenge bonus quest save error:', err);
+                        }
+                    }
 
                     const finalBalance = bonusUpdated?.balance ?? updated.balance + bonusAmount;
                     rewardEmbed.setDescription(
