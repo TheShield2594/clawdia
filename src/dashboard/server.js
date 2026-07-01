@@ -3,7 +3,7 @@ const express = require('express');
 const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const passport = require('passport');
-const DiscordStrategy = require('passport-discord').Strategy;
+const { Strategy: DiscordStrategy, DiscordScope } = require('discord-strategy');
 const path = require('path');
 const { getStatus } = require('../health');
 
@@ -45,22 +45,30 @@ function setupPassport() {
         clientID: process.env.CLIENT_ID,
         clientSecret: process.env.CLIENT_SECRET,
         callbackURL,
-        scope: ['identify', 'guilds']
-    }, (accessToken, refreshToken, profile, done) => {
-        if (!profile || !profile.id || !profile.username) {
-            return done(new Error('Invalid Discord profile returned from OAuth'));
+        scope: [DiscordScope.Identify, DiscordScope.Guilds]
+    }, async (accessToken, refreshToken, profile, done, consumable) => {
+        try {
+            if (!profile || !profile.id || !profile.username) {
+                return done(new Error('Invalid Discord profile returned from OAuth'));
+            }
+            // discord-strategy only fetches basic identity by default; guilds must
+            // be pulled in explicitly, which populates profile.guilds in place.
+            await consumable.guilds();
+
+            // Store only what the dashboard needs — never persist raw OAuth tokens or full profile
+            const safeProfile = {
+                id: profile.id,
+                username: profile.username,
+                discriminator: profile.discriminator || '0',
+                avatar: profile.avatar || null,
+                guilds: Array.isArray(profile.guilds)
+                    ? profile.guilds.map(g => ({ id: g.id, name: g.name, icon: g.icon, permissions: g.permissions }))
+                    : []
+            };
+            done(null, safeProfile);
+        } catch (err) {
+            done(err);
         }
-        // Store only what the dashboard needs — never persist raw OAuth tokens or full profile
-        const safeProfile = {
-            id: profile.id,
-            username: profile.username,
-            discriminator: profile.discriminator || '0',
-            avatar: profile.avatar || null,
-            guilds: Array.isArray(profile.guilds)
-                ? profile.guilds.map(g => ({ id: g.id, name: g.name, icon: g.icon, permissions: g.permissions }))
-                : []
-        };
-        process.nextTick(() => done(null, safeProfile));
     }));
 }
 
