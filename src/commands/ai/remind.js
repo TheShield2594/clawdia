@@ -2,7 +2,7 @@ const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const Reminder = require('../../models/Reminder');
 const User = require('../../models/User');
 const { parseAtOption } = require('../../utils/timezones');
-const { MAX_REMINDER_MINUTES: MAX_MINUTES, MAX_OPEN_REMINDERS } = require('../../utils/reminderLimits');
+const { MAX_REMINDER_MINUTES: MAX_MINUTES, MAX_OPEN_REMINDERS, MAX_REMINDER_MESSAGE_LENGTH } = require('../../utils/reminderLimits');
 
 module.exports = {
     cooldown: 5,
@@ -11,8 +11,8 @@ module.exports = {
         .setDescription('Set a reminder — posted in this channel when it fires. Combine minutes, hours, and/or days.')
         .addStringOption(option =>
             option.setName('message')
-                .setDescription('What to remind you about. Max 500 characters.')
-                .setMaxLength(500)
+                .setDescription(`What to remind you about. Max ${MAX_REMINDER_MESSAGE_LENGTH} characters.`)
+                .setMaxLength(MAX_REMINDER_MESSAGE_LENGTH)
                 .setRequired(true))
         .addIntegerOption(option =>
             option.setName('minutes')
@@ -48,6 +48,13 @@ module.exports = {
         const days = interaction.options.getInteger('days') || 0;
         const at = interaction.options.getString('at');
         const every = interaction.options.getString('every');
+
+        if (message.length > MAX_REMINDER_MESSAGE_LENGTH) {
+            return interaction.reply({
+                content: `Reminder message must be ${MAX_REMINDER_MESSAGE_LENGTH} characters or fewer.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
 
         const hasRelative = minutes !== 0 || hours !== 0 || days !== 0;
         if (hasRelative && at) {
@@ -99,7 +106,8 @@ module.exports = {
                 channelId: interaction.channel.id,
                 message: message,
                 remindAt: remindAt,
-                repeatInterval: every || null
+                repeatInterval: every || null,
+                timezone
             });
 
             const epoch = Math.floor(remindAt.getTime() / 1000);

@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
-const { isValidTimezone, formatLocalTime } = require('../../utils/timezones');
+const { isValidTimezone, canonicalizeTimezone, formatLocalTime } = require('../../utils/timezones');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -23,13 +23,14 @@ module.exports = {
         const sub = interaction.options.getSubcommand();
 
         if (sub === 'set') {
-            const tz = interaction.options.getString('timezone', true).trim();
-            if (!isValidTimezone(tz)) {
+            const rawTz = interaction.options.getString('timezone', true).trim();
+            if (!isValidTimezone(rawTz)) {
                 return interaction.reply({
-                    content: `"${tz}" isn't a valid IANA timezone. Examples: \`America/New_York\`, \`Europe/London\`, \`Asia/Tokyo\`.`,
+                    content: `"${rawTz}" isn't a valid IANA timezone. Examples: \`America/New_York\`, \`Europe/London\`, \`Asia/Tokyo\`.`,
                     flags: MessageFlags.Ephemeral
                 });
             }
+            const tz = canonicalizeTimezone(rawTz);
 
             let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             if (!user) user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });

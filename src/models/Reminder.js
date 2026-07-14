@@ -10,7 +10,10 @@ const reminderSchema = new Schema({
     completed: { type: Boolean, default: false },
     // Recurring cadence — null means one-time. When set, checkReminders reschedules
     // remindAt to the next occurrence instead of marking the reminder completed.
-    repeatInterval: { type: String, enum: ['daily', 'weekly', null], default: null }
+    repeatInterval: { type: String, enum: ['daily', 'weekly', null], default: null },
+    // IANA timezone snapshotted at creation time, used to reschedule recurring
+    // reminders on calendar days (DST-safe) rather than fixed millisecond offsets.
+    timezone: { type: String, default: null }
 });
 
 // Index for per-user open-reminder lookups (/reminders list, open-reminder cap check)
