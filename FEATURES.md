@@ -290,12 +290,20 @@ Automatically assign roles to new members:
 
 ### Reminders
 
-Set personal reminders using separate time options:
+Set personal reminders using relative time options, or an absolute time:
 ```
 /remind minutes:30 message:Check the oven
 /remind hours:2 message:Meeting at 9am
 /remind days:2 message:Submit report
+/remind at:17:00 message:Log off
+/remind at:"2026-07-20 09:00" message:Submit report
+/remind message:Standup every:daily at:9:00
 ```
+Reminders post in the channel where they were set; if that channel is no longer
+reachable, the bot DMs the user instead. Set `/timezone set` so absolute times
+(and the AI's natural-language reminders — e.g. "remind me at 5pm") resolve to
+your local time instead of UTC. Use `/reminders list` to see your open
+reminders and `/reminders cancel` to remove one.
 
 The slash command accepts `minutes`, `hours`, and `days` as individual integer options (combine as needed).
 

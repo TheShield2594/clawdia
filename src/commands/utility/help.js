@@ -103,6 +103,7 @@ const CATEGORIES = [
             { name: 'suggest',    description: 'Submit a suggestion to the server' },
             { name: 'role',       description: 'Self-assign or remove a role from reaction role panels' },
             { name: 'vc',         description: 'Manage your temporary voice channel' },
+            { name: 'timezone',   description: 'Set your timezone so reminders and times are computed correctly for you' },
         ],
     },
     {
@@ -111,7 +112,8 @@ const CATEGORIES = [
         label: 'AI',
         preview: 'AI chat & reminders',
         commands: [
-            { name: 'remind',   description: 'Set a reminder — bot will DM you after the specified time' },
+            { name: 'remind',   description: 'Set a reminder — posted in this channel (or DMed if that channel is no longer reachable), optionally recurring' },
+            { name: 'reminders', description: 'List or cancel your open reminders' },
             { name: '@Clawdia', description: 'Mention or ping the bot to start an AI conversation', mention: true },
         ],
     },
