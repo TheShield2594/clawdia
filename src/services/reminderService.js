@@ -1,8 +1,9 @@
 const Reminder = require('../models/Reminder');
+const { addCalendarDays } = require('../utils/timezones');
 
-const REPEAT_INTERVAL_MS = {
-    daily: 24 * 60 * 60 * 1000,
-    weekly: 7 * 24 * 60 * 60 * 1000
+const REPEAT_INTERVAL_DAYS = {
+    daily: 1,
+    weekly: 7
 };
 
 async function getChannel(client, channelId) {
@@ -50,17 +51,19 @@ async function checkReminders(client) {
             try {
                 await deliver(client, reminder);
 
-                const intervalMs = REPEAT_INTERVAL_MS[reminder.repeatInterval];
-                if (intervalMs) {
-                    reminder.remindAt = new Date(reminder.remindAt.getTime() + intervalMs);
+                const intervalDays = REPEAT_INTERVAL_DAYS[reminder.repeatInterval];
+                if (intervalDays) {
+                    reminder.remindAt = addCalendarDays(reminder.remindAt, intervalDays, reminder.timezone || 'Etc/UTC');
                 } else {
                     reminder.completed = true;
                 }
                 await reminder.save();
             } catch (error) {
+                // Don't retry the save here — a persistent failure (not just this one
+                // reminder's) would throw again and abort the whole loop, silently
+                // dropping every reminder after it. Leaving this one unmarked means
+                // it's picked up again next tick instead of being lost.
                 console.error('Error processing reminder:', error);
-                reminder.completed = true;
-                await reminder.save();
             }
         }
     } catch (error) {

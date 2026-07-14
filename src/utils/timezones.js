@@ -17,6 +17,11 @@ function isValidTimezone(tz) {
     }
 }
 
+/** Resolves a timezone string to its canonical IANA casing (e.g. "america/new_york" -> "America/New_York"). */
+function canonicalizeTimezone(tz) {
+    return new Intl.DateTimeFormat(undefined, { timeZone: tz }).resolvedOptions().timeZone;
+}
+
 function formatToParts(date, timeZone) {
     const dtf = new Intl.DateTimeFormat('en-US', {
         timeZone,
@@ -115,4 +120,24 @@ function parseAtOption(input, timeZone, now = new Date()) {
     return null;
 }
 
-module.exports = { isValidTimezone, zonedTimeToUtc, nowInTimezone, formatLocalTime, parseAtOption };
+/**
+ * Adds `days` calendar days to `date` as measured in `timeZone`, preserving the
+ * same local wall-clock hour/minute across the shift (DST-safe — unlike adding
+ * a fixed number of milliseconds, this keeps a "9am daily" reminder at 9am
+ * local time even when the zone's UTC offset changes in between).
+ */
+function addCalendarDays(date, days, timeZone) {
+    const { year, month, day, hour, minute } = nowInTimezone(timeZone, date);
+    const shifted = new Date(Date.UTC(year, month - 1, day + days));
+    return zonedTimeToUtc(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate(), hour, minute, timeZone);
+}
+
+module.exports = {
+    isValidTimezone,
+    canonicalizeTimezone,
+    zonedTimeToUtc,
+    nowInTimezone,
+    formatLocalTime,
+    parseAtOption,
+    addCalendarDays
+};

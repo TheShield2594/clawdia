@@ -19,12 +19,12 @@ function makeReminder(overrides = {}) {
     };
 }
 
-function makeClient({ channel = undefined, channelFetchThrows = false, dmUser = undefined, dmSendThrows = false } = {}) {
+function makeClient({ channel = undefined, dmUser = undefined } = {}) {
     return {
         channels: {
             cache: { get: jest.fn().mockReturnValue(channel) },
             fetch: jest.fn().mockImplementation(async () => {
-                if (channelFetchThrows || !channel) throw new Error('Unknown channel');
+                if (!channel) throw new Error('Unknown channel');
                 return channel;
             })
         },
@@ -130,6 +130,36 @@ describe('checkReminders recurrence', () => {
         expect(reminder.completed).toBe(false);
         expect(reminder.remindAt.getTime()).toBe(originalTime + 7 * 24 * 60 * 60 * 1000);
     });
+
+    test('daily reminders preserve local wall-clock time across a DST transition', async () => {
+        // 9am EST on 2026-03-07 — the day before America/New_York springs forward.
+        const reminder = makeReminder({
+            repeatInterval: 'daily',
+            timezone: 'America/New_York',
+            remindAt: new Date('2026-03-07T14:00:00.000Z')
+        });
+        Reminder.find.mockResolvedValue([reminder]);
+        const channel = { send: jest.fn().mockResolvedValue(undefined) };
+        const client = makeClient({ channel });
+
+        await checkReminders(client);
+
+        // Naive +24h would land at 14:00Z (10am EDT); the correct next occurrence
+        // is still 9am local, which is 13:00Z once EDT (UTC-4) is in effect.
+        expect(reminder.remindAt.toISOString()).toBe('2026-03-08T13:00:00.000Z');
+    });
+
+    test('recurring reminders with no stored timezone fall back to UTC', async () => {
+        const originalTime = new Date('2026-07-14T12:00:00Z').getTime();
+        const reminder = makeReminder({ repeatInterval: 'daily', timezone: null });
+        Reminder.find.mockResolvedValue([reminder]);
+        const channel = { send: jest.fn().mockResolvedValue(undefined) };
+        const client = makeClient({ channel });
+
+        await checkReminders(client);
+
+        expect(reminder.remindAt.getTime()).toBe(originalTime + 24 * 60 * 60 * 1000);
+    });
 });
 
 describe('checkReminders query', () => {
@@ -147,11 +177,10 @@ describe('checkReminders query', () => {
         }));
     });
 
-    test('a transient save failure is retried via the catch path and does not stop later reminders', async () => {
+    test('a save failure is logged (not retried) and does not stop later reminders', async () => {
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
         const failing = makeReminder({ _id: 'r1' });
-        failing.save = jest.fn()
-            .mockRejectedValueOnce(new Error('transient db error'))
-            .mockResolvedValueOnce(undefined);
+        failing.save = jest.fn().mockRejectedValue(new Error('db down'));
         const healthy = makeReminder({ _id: 'r2' });
         Reminder.find.mockResolvedValue([failing, healthy]);
         const channel = { send: jest.fn().mockResolvedValue(undefined) };
@@ -159,9 +188,11 @@ describe('checkReminders query', () => {
 
         await checkReminders(client);
 
-        expect(failing.completed).toBe(true);
-        expect(failing.save).toHaveBeenCalledTimes(2);
+        expect(failing.save).toHaveBeenCalledTimes(1);
+        expect(consoleSpy).toHaveBeenCalledWith('Error processing reminder:', expect.any(Error));
         expect(healthy.completed).toBe(true);
         expect(healthy.save).toHaveBeenCalled();
+
+        consoleSpy.mockRestore();
     });
 });

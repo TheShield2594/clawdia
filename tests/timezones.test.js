@@ -2,10 +2,12 @@
 
 const {
     isValidTimezone,
+    canonicalizeTimezone,
     zonedTimeToUtc,
     nowInTimezone,
     formatLocalTime,
-    parseAtOption
+    parseAtOption,
+    addCalendarDays
 } = require('../src/utils/timezones');
 
 describe('isValidTimezone', () => {
@@ -21,6 +23,29 @@ describe('isValidTimezone', () => {
         expect(isValidTimezone(null)).toBe(false);
         expect(isValidTimezone(undefined)).toBe(false);
         expect(isValidTimezone(123)).toBe(false);
+    });
+});
+
+describe('canonicalizeTimezone', () => {
+    test('normalizes casing to the canonical IANA form', () => {
+        expect(canonicalizeTimezone('america/new_york')).toBe('America/New_York');
+        expect(canonicalizeTimezone('AMERICA/NEW_YORK')).toBe('America/New_York');
+        expect(canonicalizeTimezone('America/New_York')).toBe('America/New_York');
+    });
+});
+
+describe('addCalendarDays', () => {
+    test('preserves local wall-clock time across a spring-forward DST transition', () => {
+        // 9am EST on 2026-03-07 -> 9am EDT on 2026-03-08 (offset shifts from -5 to -4)
+        const start = zonedTimeToUtc(2026, 3, 7, 9, 0, 'America/New_York');
+        const next = addCalendarDays(start, 1, 'America/New_York');
+        expect(next.toISOString()).toBe('2026-03-08T13:00:00.000Z');
+    });
+
+    test('matches simple UTC day addition when the timezone has no DST', () => {
+        const start = new Date('2026-07-14T12:00:00.000Z');
+        const next = addCalendarDays(start, 7, 'Etc/UTC');
+        expect(next.toISOString()).toBe('2026-07-21T12:00:00.000Z');
     });
 });
 
