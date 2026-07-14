@@ -140,6 +140,10 @@ const userSchema = new Schema({
         channelId: { type: String, default: null }
     }],
 
+    // Self-declared IANA timezone (e.g. "America/New_York") — Discord's API doesn't
+    // expose one, so this powers timezone-aware reminders (/timezone, /remind, AI reminders).
+    timezone: { type: String, default: null },
+
     // Per-user notification preferences
     notifications: {
         leaderboard: {
