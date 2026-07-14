@@ -105,7 +105,9 @@ npm start
 - `/setlevel` - Set a user's level (admin)
 
 ### Community
-- `/remind` - Set a reminder
+- `/remind` - Set a reminder (relative or absolute time, optionally recurring)
+- `/reminders` - List or cancel your open reminders
+- `/timezone` - Set your timezone for accurate reminder times
 - `/streak` - View your activity streak
 - `/quests` - View active quests
 - `/achievements` - View achievements
