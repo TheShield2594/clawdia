@@ -93,6 +93,49 @@ describe('resolveAndPin', () => {
         await expect(resolveAndPin('metadata.example')).rejects.toThrow(/private or reserved/);
     });
 
+    it('gives up on a DNS lookup that never calls back', async () => {
+        // dns.lookup has no timeout of its own and getaddrinfo is not
+        // cancellable, so an unreachable nameserver would otherwise stall the hop
+        // indefinitely — before the request deadline is even armed — while
+        // holding one of libuv's four default threadpool slots.
+        jest.useFakeTimers();
+        try {
+            jest.spyOn(dns, 'lookup').mockImplementation(() => { /* never calls back */ });
+
+            const pending = resolveAndPin('blackhole.example');
+            const assertion = expect(pending).rejects.toThrow(/DNS lookup for "blackhole.example" exceeded/);
+            await jest.advanceTimersByTimeAsync(8_001);
+            await assertion;
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it('does not leave the deadline pending after a successful lookup', async () => {
+        jest.useFakeTimers();
+        try {
+            mockLookup(null, [{ address: '93.184.216.34' }]);
+            await expect(resolveAndPin('example.com')).resolves.toBe('93.184.216.34');
+
+            // The deadline timer must have been cleared; if it were still armed it
+            // would fire here with no handler attached.
+            expect(jest.getTimerCount()).toBe(0);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it('does not leave the deadline pending after a rejected lookup', async () => {
+        jest.useFakeTimers();
+        try {
+            mockLookup(new Error('ENOTFOUND'), null);
+            await expect(resolveAndPin('nope.example')).rejects.toThrow(/DNS lookup failed/);
+            expect(jest.getTimerCount()).toBe(0);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     it('rejects when DNS fails', async () => {
         mockLookup(new Error('ENOTFOUND'), null);
         await expect(resolveAndPin('nope.example')).rejects.toThrow(/DNS lookup failed/);

@@ -60,16 +60,39 @@ function isPrivateIp(ip) {
     return true; // unknown format — block by default
 }
 
+// Rejects if `promise` has not settled within `ms`.
+//
+// The timer is unref'd so a pending deadline never by itself holds the process
+// open; whatever operation is being raced keeps the event loop alive on its own.
+function withDeadline(promise, ms, message) {
+    let timer;
+    const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+        timer.unref?.();
+    });
+    return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
 // Resolves a hostname to all its IP addresses, validates none are private, and returns
 // the first address to use as a pinned IP for the actual TCP connection.
 // Pinning prevents DNS rebinding: the IP checked here is the IP we connect to.
 async function resolveAndPin(hostname) {
-    const addrs = await new Promise((resolve, reject) => {
+    // dns.lookup has no timeout of its own — it calls getaddrinfo on the libuv
+    // threadpool and waits for the system resolver, which against an unreachable
+    // nameserver can mean tens of seconds. That happens before the request
+    // deadline below is armed, so without this a hop could stall well past its
+    // budget, and a chain of redirects multiplies it. The blocked threadpool slot
+    // is the worse half: there are four by default, shared with fs and crypto.
+    //
+    // getaddrinfo is not cancellable, so this only unblocks the caller — the
+    // underlying lookup runs to completion in the background.
+    const addrs = await withDeadline(new Promise((resolve, reject) => {
         dns.lookup(hostname, { all: true }, (err, results) => {
             if (err) reject(new Error(`DNS lookup failed: ${err.message}`));
             else resolve(results);
         });
-    });
+    }), HOP_DEADLINE_MS, `DNS lookup for "${hostname}" exceeded ${HOP_DEADLINE_MS}ms.`);
+
     if (!addrs.length) throw new Error('Hostname resolved to no addresses.');
     for (const { address } of addrs) {
         if (isPrivateIp(address)) throw new Error('Feed URL resolves to a private or reserved IP address.');
