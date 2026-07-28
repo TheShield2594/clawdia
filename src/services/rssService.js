@@ -3,7 +3,19 @@ const Guild = require('../models/Guild');
 const { EmbedBuilder } = require('discord.js');
 const cron = require('node-cron');
 
+const { safeFetchFeed } = require('../utils/safeFeedFetch');
+
 const parser = new Parser();
+
+// Feed URLs are operator-supplied, so every poll is an outbound request to a
+// destination a guild admin chose. Route them through the SSRF-safe fetcher
+// (private/reserved IPs blocked, DNS pinned against rebinding, redirects and
+// body size bounded) rather than rss-parser's own parseURL, which would happily
+// fetch the cloud metadata endpoint or the internal MongoDB host and relay the
+// response into a Discord channel.
+async function parseFeedUrl(url) {
+    return parser.parseString(await safeFetchFeed(url));
+}
 let dailyNewsJobs = new Map();
 const runtimeTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -109,7 +121,7 @@ async function checkRssFeeds(client) {
         for (const guild of guilds) {
             for (const feed of guild.rssFeeds) {
                 try {
-                    const parsedFeed = await parser.parseURL(feed.url);
+                    const parsedFeed = await parseFeedUrl(feed.url);
                     
                     if (parsedFeed.items.length === 0) continue;
 
@@ -169,7 +181,7 @@ async function sendDailyNewsForProfile(client, guild, profile) {
         }
 
         try {
-            const parsedFeed = await parser.parseURL(feedUrl);
+            const parsedFeed = await parseFeedUrl(feedUrl);
             feedFailCounts.delete(feedUrl);
             feedLastFailTime.delete(feedUrl);
             const feedItems = parsedFeed.items

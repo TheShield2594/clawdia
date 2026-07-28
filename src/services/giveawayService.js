@@ -1,11 +1,16 @@
 const Guild = require('../models/Guild');
 const { endGiveaway } = require('../commands/utility/giveaway');
 
+// Ended giveaways are kept around so `/giveaway reroll` still works, but not
+// forever: each one carries a full entrant list, and nothing else prunes the
+// array, so a busy server would grow its Guild document without bound.
+const GIVEAWAY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 async function checkGiveaways(client) {
     const now = new Date();
 
     try {
-        const guilds = await Guild.find({ 'giveaways.ended': false });
+        const guilds = await Guild.find({ 'giveaways.0': { $exists: true } });
 
         for (const guildSettings of guilds) {
             let dirty = false;
@@ -16,6 +21,15 @@ async function checkGiveaways(client) {
                     await endGiveaway(client, guildSettings, ga);
                     dirty = true;
                 }
+            }
+
+            const cutoff = now.getTime() - GIVEAWAY_RETENTION_MS;
+            const keep = guildSettings.giveaways.filter(
+                ga => !ga.ended || !ga.endsAt || ga.endsAt.getTime() > cutoff
+            );
+            if (keep.length !== guildSettings.giveaways.length) {
+                guildSettings.giveaways = keep;
+                dirty = true;
             }
 
             if (dirty) await guildSettings.save();

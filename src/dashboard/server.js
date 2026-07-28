@@ -96,6 +96,26 @@ function start(client) {
     const isProduction = process.env.NODE_ENV === 'production';
     if (isProduction) app.set('trust proxy', 1);
 
+    // Serializes a value for embedding inside an inline <script> block.
+    //
+    // A bare JSON.stringify is NOT safe here: any string in the data containing
+    // "</script>" closes the block early, and the remainder is parsed as HTML.
+    // Guild settings are full of operator-controlled strings (shop item names,
+    // job titles, command-policy entries), so that is a stored XSS vector.
+    // Escaping < > & as unicode escapes keeps the value valid JSON while making
+    // a tag breakout impossible; U+2028/U+2029 are escaped because they are raw
+    // line terminators in JS source but legal inside a JSON string.
+    //
+    // Always use this instead of JSON.stringify in a <script> context.
+    function jsonForScript(value) {
+        return JSON.stringify(value === undefined ? null : value)
+            .replace(/</g, '\\u003c')
+            .replace(/>/g, '\\u003e')
+            .replace(/&/g, '\\u0026')
+            .replace(/\u2028/g, '\\u2028')
+            .replace(/\u2029/g, '\\u2029');
+    }
+
     // L3: Baseline security response headers for all routes.
     // A fresh nonce is generated per request and made available to EJS templates
     // via res.locals.cspNonce so inline <script> tags can opt in safely.
@@ -105,6 +125,7 @@ function start(client) {
     app.use((req, res, next) => {
         const nonce = crypto.randomBytes(16).toString('base64');
         res.locals.cspNonce = nonce;
+        res.locals.jsonForScript = jsonForScript;
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('X-Frame-Options', 'DENY');
         res.setHeader('X-XSS-Protection', '1; mode=block');
@@ -154,8 +175,13 @@ function start(client) {
     app.use('/dashboard', dashboardRoutes);
     app.use('/api', apiRoutes);
 
+    // Unauthenticated callers get status + uptime only — enough for the compose
+    // healthcheck and any external uptime monitor. The detailed payload (service
+    // names, last error strings, memory) is reserved for logged-in guild admins,
+    // since this port can be reachable beyond the container.
     app.get('/health', (req, res) => {
-        const status = getStatus();
+        const detailed = req.isAuthenticated?.() === true;
+        const status = getStatus({ detailed });
         res.status(status.status === 'unhealthy' ? 503 : 200).json(status);
     });
 

@@ -158,8 +158,6 @@ SESSION_SECRET=random_string_here_32_characters_min
 OPENAI_API_KEY=sk-your_openai_key_here
 GEMINI_API_KEY=AIza_your_gemini_key_here
 
-# Music (Optional)
-YOUTUBE_COOKIE=your_youtube_cookie_if_needed
 
 # Meme Generation (Optional — required for /meme command)
 # Free account at https://imgflip.com/api
@@ -267,13 +265,6 @@ docker exec ultrabot-mongodb mongorestore /data/backup
 4. Test with `/dailynews` command
 5. Check bot has permission to post in channel
 
-### Music Not Playing
-
-1. Verify bot has voice permissions
-2. Check YouTube cookies if videos are restricted
-3. Verify ffmpeg is installed (included in Docker)
-4. Try different video sources
-
 ## Best Practices
 
 ### Security
@@ -319,8 +310,7 @@ After basic setup:
 2. Set up leveling and economy systems
 3. Add RSS feeds for your community's interests
 4. Configure auto-moderation rules
-5. Set up music for 24/7 streaming
-6. Create custom commands in dashboard
-7. Set up auto-roles for new members
+5. Create custom commands in dashboard
+6. Set up auto-roles for new members
 
 Enjoy your fully-featured Discord bot! 🚀

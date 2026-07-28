@@ -7,3 +7,6 @@ logs
 .git
 .gitignore
 *.md
+tests
+.github
+backups

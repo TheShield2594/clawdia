@@ -373,7 +373,6 @@ Commands respect Discord's built-in permissions:
 
 - Reduce XP rate to prevent spam
 - Enable auto-mod for spam protection
-- Limit queue size for music
 - Use per-server API keys for AI
 
 ### Resource Optimization

@@ -6,6 +6,50 @@ const { handleHeistButton } = require('../commands/economy/heist');
 const { handleSyndicateButton } = require('../commands/economy/syndicate');
 const { handleDmButton } = require('../services/dmService');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
+// Giveaway entry/withdrawal.
+//
+// Entrants are toggled directly in the Guild document with $addToSet/$pull
+// rather than being accumulated on interaction.message. Two reasons: the
+// in-memory copy is lost on every restart (giveaways that outlive a deploy
+// would draw from an empty pool), and a burst of simultaneous clicks on a
+// read-modify-write array loses entries.
+async function handleGiveawayEntry(interaction) {
+    if (!interaction.guild) {
+        return interaction.reply({ content: 'Giveaways can only be entered inside a server.', flags: MessageFlags.Ephemeral });
+    }
+
+    const guildId = interaction.guild.id;
+    const messageId = interaction.message.id;
+    const userId = interaction.user.id;
+
+    const alreadyEntered = await Guild.exists({
+        guildId,
+        giveaways: { $elemMatch: { messageId, entrantIds: userId } }
+    });
+
+    if (alreadyEntered) {
+        await Guild.updateOne(
+            { guildId, giveaways: { $elemMatch: { messageId } } },
+            { $pull: { 'giveaways.$.entrantIds': userId } }
+        );
+        return interaction.reply({ content: 'You have left the giveaway.', flags: MessageFlags.Ephemeral });
+    }
+
+    const result = await Guild.updateOne(
+        { guildId, giveaways: { $elemMatch: { messageId, ended: false } } },
+        { $addToSet: { 'giveaways.$.entrantIds': userId } }
+    );
+
+    if (!result.matchedCount) {
+        return interaction.reply({ content: 'This giveaway is no longer accepting entries.', flags: MessageFlags.Ephemeral });
+    }
+
+    return interaction.reply({
+        content: `${interaction.user}, you have entered the giveaway! Good luck!`,
+        flags: MessageFlags.Ephemeral
+    });
+}
+
 async function logCommandMetric(interaction, success, reason = null) {
     try {
         const entry = {
@@ -143,16 +187,10 @@ module.exports = {
             }
 
             if (interaction.customId === 'giveaway_enter') {
-                const msg = interaction.message;
-                if (!msg.giveawayEntrants) msg.giveawayEntrants = [];
-
-                if (msg.giveawayEntrants.includes(interaction.user.id)) {
-                    msg.giveawayEntrants = msg.giveawayEntrants.filter(id => id !== interaction.user.id);
-                    await interaction.reply({ content: 'You have left the giveaway.', flags: MessageFlags.Ephemeral });
-                } else {
-                    msg.giveawayEntrants.push(interaction.user.id);
-                    await interaction.reply({ content: `${interaction.user}, you have entered the giveaway! Good luck!`, flags: MessageFlags.Ephemeral });
-                }
+                await handleGiveawayEntry(interaction).catch(err => {
+                    console.error('[giveaway] entry handler error:', err);
+                });
+                return;
             }
 
             if (interaction.customId.startsWith('poll_')) {
@@ -189,6 +227,20 @@ module.exports = {
         }
 
         if (!interaction.isChatInputCommand()) return;
+
+        // Commands are registered globally, and only a handful opt out of DMs
+        // explicitly, so Discord will happily deliver most of them with no guild
+        // attached. Everything below (settings lookup, metrics, quests) assumes
+        // interaction.guild exists — bail out here rather than dereferencing null.
+        // Checked against .guild rather than .inGuild() because guildId can be
+        // populated while the guild itself is unavailable.
+        if (!interaction.guild) {
+            return interaction.reply({
+                content: 'This command only works inside a server.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
         const command = client.commands.get(interaction.commandName);
@@ -246,11 +298,18 @@ module.exports = {
             console.error(`Error executing ${interaction.commandName}:`, error);
             await logCommandMetric(interaction, false, error.name || 'execution_error');
             const errorMessage = { content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral };
-            
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp(errorMessage);
-            } else {
-                await interaction.reply(errorMessage);
+
+            // The apology itself can fail (expired token, already-acked interaction).
+            // Swallow that — the original error is already logged, and letting this
+            // throw would turn a handled command failure into an unhandled rejection.
+            try {
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp(errorMessage);
+                } else {
+                    await interaction.reply(errorMessage);
+                }
+            } catch (replyError) {
+                console.error(`Failed to report command error to user for ${interaction.commandName}:`, replyError.message);
             }
         }
     }

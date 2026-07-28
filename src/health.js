@@ -20,7 +20,15 @@ function recordServiceRun(serviceName, { success, error = null, durationMs = nul
     };
 }
 
-function getStatus() {
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.detailed] Include per-service diagnostics, memory
+ *   figures and raw error strings. Only for authenticated callers — the full
+ *   payload leaks internal service names, failure messages (which can quote
+ *   database errors or upstream API responses) and process memory to anyone who
+ *   can reach the port.
+ */
+function getStatus({ detailed = true } = {}) {
     const mongoState = mongoose.connection.readyState;
     // 0=disconnected, 1=connected, 2=connecting, 3=disconnecting
     const mongoLabels = ['disconnected', 'connected', 'connecting', 'disconnecting'];
@@ -39,6 +47,11 @@ function getStatus() {
 
     const allServicesHealthy = Object.values(serviceStatuses).every(s => s.healthy);
     const overall = mongoHealthy && allServicesHealthy ? 'healthy' : !mongoHealthy ? 'unhealthy' : 'degraded';
+
+    // Enough for a container orchestrator's liveness probe, and nothing more.
+    if (!detailed) {
+        return { status: overall, uptime: uptimeSeconds };
+    }
 
     return {
         status: overall,

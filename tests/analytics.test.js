@@ -263,6 +263,22 @@ describe('logCommandMetric (interactionCreate)', () => {
         mockClient.cooldowns.clear();
     });
 
+    it('does not crash when a globally-registered command is used in a DM', async () => {
+        // Only a handful of the ~100 command files call .setDMPermission(false),
+        // and all of them are registered globally, so Discord delivers most of
+        // them with interaction.guild === null. Everything downstream reads
+        // interaction.guild.id, so this must short-circuit rather than throw.
+        const interaction = makeInteraction({ guild: null, guildId: null });
+
+        await expect(interactionCreate.execute(interaction, mockClient)).resolves.not.toThrow();
+
+        expect(interaction.reply).toHaveBeenCalledWith(
+            expect.objectContaining({ content: expect.stringContaining('only works inside a server') })
+        );
+        expect(mockCommand.execute).not.toHaveBeenCalled();
+        expect(mockGuild.updateOne).not.toHaveBeenCalled();
+    });
+
     it('logs a success metric after successful command execution', async () => {
         const interaction = makeInteraction();
         await interactionCreate.execute(interaction, mockClient);

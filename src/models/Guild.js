@@ -584,7 +584,11 @@ const guildSchema = new Schema({
         endsAt: { type: Date, required: true },
         hostId: { type: String, required: true },
         ended: { type: Boolean, default: false },
-        winnerIds: [{ type: String }]
+        winnerIds: [{ type: String }],
+        // Entrant user IDs. Persisted rather than kept on the in-memory Message
+        // object so a restart (or a Discord.js message-cache eviction) between
+        // the giveaway opening and closing does not silently empty the pool.
+        entrantIds: [{ type: String }]
     }],
 
     tempVoice: {

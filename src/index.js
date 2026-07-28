@@ -64,10 +64,25 @@ async function loadEvents() {
         const filePath = path.join(eventsPath, file);
         const event = require(filePath);
 
+        // Wrap every handler so a rejection inside one becomes a logged error
+        // rather than an unhandled rejection. Without this a single throwing
+        // handler counts toward the REJECTION_LIMIT guard below, so a user who
+        // can reliably trigger one can force the process to exit.
+        const invoke = (...args) => {
+            try {
+                const result = event.execute(...args, client);
+                if (result && typeof result.then === 'function') {
+                    result.catch(err => console.error(`[EVENT] Unhandled error in ${event.name} handler:`, err));
+                }
+            } catch (err) {
+                console.error(`[EVENT] Unhandled error in ${event.name} handler:`, err);
+            }
+        };
+
         if (event.once) {
-            client.once(event.name, (...args) => event.execute(...args, client));
+            client.once(event.name, invoke);
         } else {
-            client.on(event.name, (...args) => event.execute(...args, client));
+            client.on(event.name, invoke);
         }
         console.log(`[EVENT] Loaded ${event.name}`);
     }
@@ -103,7 +118,7 @@ async function shutdown(signal) {
     console.log(`[SHUTDOWN] Received ${signal}. Shutting down gracefully...`);
     if (presenceInterval) clearInterval(presenceInterval);
     try {
-        client.destroy();
+        await client.destroy();
         await connection.close();
         console.log('[SHUTDOWN] Clean exit.');
     } catch (err) {
@@ -173,7 +188,11 @@ async function startBot() {
         presenceInterval = setInterval(setPresence, 5 * 60_000);
     });
 
-    client.login(process.env.DISCORD_TOKEN);
+    // Await the login so a bad/revoked token is a hard startup failure. Left
+    // unawaited it rejects into the unhandledRejection handler, which just logs
+    // once — leaving a half-alive process serving the dashboard with no gateway
+    // connection and a "healthy" status.
+    await client.login(process.env.DISCORD_TOKEN);
 }
 
 // --- Process-level reliability guards ---
