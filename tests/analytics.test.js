@@ -256,6 +256,11 @@ describe('logCommandMetric (interactionCreate)', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        // interactionCreate reads settings through the guild settings cache,
+        // which is module-level state. Without this reset a later test would
+        // silently reuse the previous test's settings and never consult its
+        // own findOne mock.
+        require('../src/utils/guildSettingsCache').clearGuildSettingsCache();
         mockGuild.updateOne.mockResolvedValue({});
         mockGuild.findOne.mockResolvedValue(makeGuildSettings());
         mockCommand.execute.mockResolvedValue(undefined);

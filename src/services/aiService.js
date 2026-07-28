@@ -10,6 +10,7 @@ const AIUsage = require('../models/AIUsage');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { formatLocalTime } = require('../utils/timezones');
 const { MAX_REMINDER_MINUTES, MAX_OPEN_REMINDERS, MAX_REMINDER_MESSAGE_LENGTH } = require('../utils/reminderLimits');
+const { BoundedRateLimiter } = require('../utils/boundedRateLimiter');
 
 const DEFAULT_MODELS = {
     openai: 'gpt-4o-mini',
@@ -24,47 +25,31 @@ const STREAM_EDIT_INTERVAL_MS = 800;
 // Discord typing indicator expires after 10s — refresh every 8s during long generations
 const TYPING_REFRESH_INTERVAL_MS = 8000;
 
-// userId -> [timestamps] and channelId -> [timestamps] for sliding-window rate limiting (in-memory)
-const rateLimits = new Map();
-const channelRateLimits = new Map();
+// Sliding-window AI rate limiting, per user and per channel.
+//
+// These were plain Maps swept every 15 minutes, which meant they grew with every
+// distinct user and channel the bot ever saw and only shrank long after entries
+// expired. Bounded now, same as the dashboard's write limiter: a hard ceiling on
+// tracked keys, with the oldest evicted first.
+const AI_RL_MAX_KEYS = 10_000;
+const AI_RL_SWEEP_WINDOW_MS = 2 * 60 * 60 * 1000; // widest window the settings allow
 
-// Periodically remove entries whose timestamps have all expired (2-hour max window)
+const rateLimits = new BoundedRateLimiter(AI_RL_MAX_KEYS);
+const channelRateLimits = new BoundedRateLimiter(AI_RL_MAX_KEYS);
+
 setInterval(() => {
-    const cutoff = Date.now() - 2 * 60 * 60 * 1000;
-    for (const [userId, timestamps] of rateLimits) {
-        if (timestamps.every(t => t < cutoff)) rateLimits.delete(userId);
-    }
-    for (const [channelId, timestamps] of channelRateLimits) {
-        if (timestamps.every(t => t < cutoff)) channelRateLimits.delete(channelId);
-    }
+    rateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
+    channelRateLimits.cleanup(AI_RL_SWEEP_WINDOW_MS);
 }, 15 * 60 * 1000).unref();
 
 function checkRateLimit(userId, limit, windowMin) {
     if (!limit || limit <= 0) return true;
-    const now = Date.now();
-    const windowMs = (windowMin || 10) * 60 * 1000;
-    const arr = (rateLimits.get(userId) || []).filter(t => now - t < windowMs);
-    if (arr.length >= limit) {
-        rateLimits.set(userId, arr);
-        return false;
-    }
-    arr.push(now);
-    rateLimits.set(userId, arr);
-    return true;
+    return rateLimits.check(userId, (windowMin || 10) * 60 * 1000, limit);
 }
 
 function checkChannelRateLimit(channelId, limit, windowMin) {
     if (!limit || limit <= 0) return true;
-    const now = Date.now();
-    const windowMs = (windowMin || 10) * 60 * 1000;
-    const arr = (channelRateLimits.get(channelId) || []).filter(t => now - t < windowMs);
-    if (arr.length >= limit) {
-        channelRateLimits.set(channelId, arr);
-        return false;
-    }
-    arr.push(now);
-    channelRateLimits.set(channelId, arr);
-    return true;
+    return channelRateLimits.check(channelId, (windowMin || 10) * 60 * 1000, limit);
 }
 
 async function loadHistory(guildId, channelId, userId, max) {

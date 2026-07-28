@@ -348,7 +348,11 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkCsrfOr
             rescheduleBibleVerse(req.client, guildId);
         }
 
-        res.json({ success: true, settings: guildSettings });
+        // Deliberately does not echo the saved document. It carries every shop
+        // item's imageData Buffer (base64-inflated in JSON) plus up to 3000
+        // analytics.commandUsage entries, and the client only ever reads this
+        // body on a non-2xx response.
+        res.json({ success: true });
     } catch (error) {
         if (error.name === 'ValidationError') {
             return res.status(400).json({ error: error.message });

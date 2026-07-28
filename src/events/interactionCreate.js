@@ -6,6 +6,7 @@ const { handleHeistButton } = require('../commands/economy/heist');
 const { handleSyndicateButton } = require('../commands/economy/syndicate');
 const { handleDmButton } = require('../services/dmService');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 // Giveaway entry/withdrawal.
 //
 // Entrants are toggled directly in the Guild document with $addToSet/$pull
@@ -81,7 +82,9 @@ async function logCommandMetric(interaction, success, reason = null) {
 }
 
 async function trackQuestCommandUse(interaction) {
-    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    // Cached: this ran a second full guild document read after every command,
+    // on top of the one in execute(). Quest tracking only reads from it.
+    const guildSettings = await getGuildSettings(interaction.guild.id);
     if (!guildSettings?.quests?.enabled) return;
 
     let user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
@@ -241,7 +244,9 @@ module.exports = {
             });
         }
 
-        const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+        // Cached read: fires on every slash command, and nothing below mutates
+        // or persists the settings object. See utils/guildSettingsCache.
+        const guildSettings = await getGuildSettings(interaction.guild.id);
 
         const command = client.commands.get(interaction.commandName);
 
