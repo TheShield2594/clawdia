@@ -42,6 +42,11 @@ const MAX_ENTRIES = 5_000;
 const cache = new Map();   // guildId -> { expiresAt, settings }
 const inFlight = new Map(); // guildId -> Promise, collapses concurrent misses
 
+// Guilds invalidated while a read for them was still in flight. Bounded by
+// inFlight: an id is only ever added when a read is outstanding, and is removed
+// when that read resolves. See the check in getGuildSettings for why.
+const staleInFlight = new Set();
+
 let ttlMs = DEFAULT_TTL_MS;
 let hits = 0;
 let misses = 0;
@@ -83,6 +88,15 @@ async function getGuildSettings(guildId) {
         // object too, so a lean() read introduced later degrades to a working
         // cache rather than a crash on every message.
         const settings = typeof doc.toObject === 'function' ? doc.toObject() : doc;
+
+        // A write that landed while this read was in flight has already been
+        // applied to the database but is not reflected in `settings`. Deleting a
+        // cache entry cannot undo a read that has not stored one yet, so without
+        // this check the pre-write snapshot would be installed *after* the
+        // invalidation and served for a full TTL. Hand the value to the callers
+        // that are waiting on it, but do not cache it.
+        if (staleInFlight.delete(guildId)) return settings;
+
         if (cache.size >= MAX_ENTRIES && !cache.has(guildId)) {
             cache.delete(cache.keys().next().value);
         }
@@ -95,17 +109,23 @@ async function getGuildSettings(guildId) {
         return await promise;
     } finally {
         inFlight.delete(guildId);
+        staleInFlight.delete(guildId);
     }
 }
 
 /** Drops one guild's entry. Called by the model's write hooks. */
 function invalidateGuildSettings(guildId) {
-    if (guildId) cache.delete(guildId);
+    if (!guildId) return;
+    cache.delete(guildId);
+    // Also poison any read already in flight, which would otherwise install a
+    // snapshot taken before this write.
+    if (inFlight.has(guildId)) staleInFlight.add(guildId);
 }
 
 /** Drops every entry — used when a write's scope cannot be determined. */
 function clearGuildSettingsCache() {
     cache.clear();
+    for (const guildId of inFlight.keys()) staleInFlight.add(guildId);
 }
 
 /**

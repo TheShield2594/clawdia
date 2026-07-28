@@ -52,6 +52,14 @@ ENV NODE_ENV=production
 
 EXPOSE 3000
 
+# Declared on the image itself, not only in compose, so `docker run` and any
+# orchestrator that reads image metadata can report health without repeating
+# this. /health returns 503 when MongoDB is down; the unauthenticated payload is
+# just {status, uptime}, which is all this needs to parse.
+# start-period matches compose: migrations run before the port opens.
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=90s \
+    CMD node -e "require('http').get('http://127.0.0.1:3000/health', r => { let b=''; r.on('data', d => b += d); r.on('end', () => { try { process.exit(JSON.parse(b).status === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"
+
 # tini as PID 1 reaps zombies and forwards signals. Exec'ing node directly
 # (rather than `npm start`) means SIGTERM reaches the process that installed
 # the SIGTERM handler in src/index.js, so the graceful shutdown there actually

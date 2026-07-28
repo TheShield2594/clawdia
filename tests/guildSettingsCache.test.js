@@ -130,6 +130,50 @@ describe('invalidation', () => {
         expect((await getGuildSettings('g1')).leveling.xpRate).toBe(5);
     });
 
+    it('does not cache a read that a write overtook while it was in flight', async () => {
+        // The read starts, a write lands and invalidates, then the read resolves
+        // holding a pre-write snapshot. Deleting a cache entry cannot undo a read
+        // that has not stored one yet, so without explicit handling the stale
+        // snapshot is installed after the invalidation and served for a full TTL.
+        let resolveFind;
+        Guild.findOne.mockReturnValue(new Promise(res => { resolveFind = res; }));
+
+        const reading = getGuildSettings('g1');
+        invalidateGuildSettings('g1');           // write lands mid-flight
+        resolveFind(makeDoc('g1', { leveling: { enabled: true, xpRate: 1 } }));
+
+        // Waiters still get a value rather than an error.
+        expect((await reading).leveling.xpRate).toBe(1);
+        // ...but it must not have been cached.
+        expect(getGuildSettingsCacheStats().size).toBe(0);
+
+        Guild.findOne.mockResolvedValue(makeDoc('g1', { leveling: { enabled: true, xpRate: 9 } }));
+        expect((await getGuildSettings('g1')).leveling.xpRate).toBe(9);
+    });
+
+    it('does not cache an in-flight read overtaken by a full clear', async () => {
+        let resolveFind;
+        Guild.findOne.mockReturnValue(new Promise(res => { resolveFind = res; }));
+
+        const reading = getGuildSettings('g1');
+        clearGuildSettingsCache();
+        resolveFind(makeDoc('g1'));
+        await reading;
+
+        expect(getGuildSettingsCacheStats().size).toBe(0);
+    });
+
+    it('still caches normally when no write intervenes', async () => {
+        let resolveFind;
+        Guild.findOne.mockReturnValue(new Promise(res => { resolveFind = res; }));
+
+        const reading = getGuildSettings('g1');
+        resolveFind(makeDoc('g1'));
+        await reading;
+
+        expect(getGuildSettingsCacheStats().size).toBe(1);
+    });
+
     it('clearGuildSettingsCache drops every entry', async () => {
         Guild.findOne.mockResolvedValue(makeDoc('g1'));
         await getGuildSettings('g1');

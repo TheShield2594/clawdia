@@ -3,7 +3,7 @@
 // discord.js and the Guild model both load fine without a gateway or DB
 // connection, so this suite exercises the real command module.
 
-const { parseDuration } = require('../src/commands/utility/giveaway');
+const { parseDuration, pickWinners, getEntrants } = require('../src/commands/utility/giveaway');
 
 describe('parseDuration', () => {
     it('parses each supported unit', () => {
@@ -21,18 +21,6 @@ describe('parseDuration', () => {
 });
 
 describe('winner selection fairness', () => {
-    // Re-implementation guard: the shipped pickWinners must be a uniform
-    // shuffle. `.sort(() => Math.random() - 0.5)` fails this test because it
-    // leaves entrants near their original index far more often than chance.
-    function pickWinners(entrants, count) {
-        const src = require('fs').readFileSync(
-            require('path').join(__dirname, '../src/commands/utility/giveaway.js'), 'utf8');
-        const start = src.indexOf('function pickWinners(');
-        const end = src.indexOf('\n}', start) + 2;
-        // eslint-disable-next-line no-new-func
-        return new Function(`${src.slice(start, end)}; return pickWinners;`)()(entrants, count);
-    }
-
     it('picks the requested number of distinct winners', () => {
         const entrants = Array.from({ length: 50 }, (_, i) => `user${i}`);
         const winners = pickWinners(entrants, 5);

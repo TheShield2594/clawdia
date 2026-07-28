@@ -2,20 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const ejs = require('ejs');
 
-// jsonForScript is defined inside dashboard/server.js's start() closure, which
-// needs a live Discord client and Mongo URL to run. Rather than booting the
-// dashboard, lift the function out of the source so the test exercises exactly
-// the shipped implementation.
-function loadJsonForScript() {
-    const src = fs.readFileSync(path.join(__dirname, '../src/dashboard/server.js'), 'utf8');
-    const start = src.indexOf('function jsonForScript(value) {');
-    const end = src.indexOf('\n    }', start) + '\n    }'.length;
-    if (start === -1 || end < start) throw new Error('jsonForScript not found in server.js');
-    // eslint-disable-next-line no-new-func
-    return new Function(`${src.slice(start, end)}; return jsonForScript;`)();
-}
-
-const jsonForScript = loadJsonForScript();
+const { jsonForScript } = require('../src/dashboard/lib/jsonForScript');
 
 describe('jsonForScript', () => {
     it('neutralises a </script> breakout in operator-supplied strings', () => {

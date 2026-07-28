@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Guild = require('../../../models/Guild');
-const { checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { rescheduleDailyNews } = require('../../../services/rssService');
 const { rescheduleBibleVerse } = require('../../../services/dailyBibleService');
@@ -262,7 +262,7 @@ function validateHeistUpdate(updates) {
     return null;
 }
 
-router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
+router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
 

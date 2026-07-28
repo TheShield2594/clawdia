@@ -10,7 +10,16 @@ async function checkGiveaways(client) {
     const now = new Date();
 
     try {
-        const guilds = await Guild.find({ 'giveaways.0': { $exists: true } });
+        // Projected: this sweep runs on a schedule across every guild holding a
+        // giveaway, and it only ever touches the giveaways array. Without this it
+        // pulls whole guild documents — analytics history and inline shop item
+        // image Buffers included — to read one field.
+        //
+        // guildId is selected because endGiveaway resolves the channel through it.
+        // Mongoose skips required-validators for paths a projection excluded, so
+        // saving these partial documents is safe.
+        const guilds = await Guild.find({ 'giveaways.0': { $exists: true } })
+            .select('guildId giveaways');
 
         for (const guildSettings of guilds) {
             let dirty = false;

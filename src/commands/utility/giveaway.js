@@ -141,6 +141,14 @@ function pickWinners(entrants, count) {
 async function endGiveaway(client, guildSettings, ga) {
     ga.ended = true;
 
+    // Draw before looking anything up. The caller persists the giveaway either
+    // way, so bailing out early on a deleted channel or message used to mark it
+    // ended with an empty winnerIds — the entrants were still there, but the
+    // result was never recorded. Announcing is best-effort; deciding is not.
+    const entrants = getEntrants(ga);
+    const winners = pickWinners(entrants, ga.winners);
+    ga.winnerIds = winners;
+
     const channel = client.guilds.cache
         .get(guildSettings.guildId)
         ?.channels.cache.get(ga.channelId);
@@ -149,10 +157,6 @@ async function endGiveaway(client, guildSettings, ga) {
 
     const msg = await channel.messages.fetch(ga.messageId).catch(() => null);
     if (!msg) return;
-
-    const entrants = getEntrants(ga);
-    const winners = pickWinners(entrants, ga.winners);
-    ga.winnerIds = winners;
 
     const winnerText = winners.length
         ? winners.map(id => `<@${id}>`).join(', ')
@@ -174,3 +178,7 @@ async function endGiveaway(client, guildSettings, ga) {
 
 module.exports.endGiveaway = endGiveaway;
 module.exports.parseDuration = parseDuration;
+// Exported for tests: winner selection has to stay a uniform shuffle, and that
+// is only assertable against the real implementation.
+module.exports.pickWinners = pickWinners;
+module.exports.getEntrants = getEntrants;

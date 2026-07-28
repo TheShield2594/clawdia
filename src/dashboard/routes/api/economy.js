@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Guild = require('../../../models/Guild');
 const User = require('../../../models/User');
-const { checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
 
 router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (req, res) => {
@@ -64,7 +64,7 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
     }
 });
 
-router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
+router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { userId, action, amount } = req.body;
 

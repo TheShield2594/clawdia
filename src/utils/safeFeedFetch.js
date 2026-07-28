@@ -13,6 +13,12 @@
  * rss-parser's own `parseURL`) bypasses every check below.
  */
 
+// Two independent limits per hop. SOCKET_IDLE_MS is Node's inactivity timeout,
+// which a server can reset indefinitely by trickling bytes; HOP_DEADLINE_MS is
+// the wall-clock ceiling that a trickle cannot extend.
+const SOCKET_IDLE_MS = 8000;
+const HOP_DEADLINE_MS = 8000;
+
 const dns = require('dns');
 const net = require('net');
 const http = require('http');
@@ -88,6 +94,25 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
         const FEED_MAX_BYTES = 5 * 1024 * 1024; // 5 MB — enough for any real RSS feed
 
         const result = await new Promise((resolve, reject) => {
+            // `timeout` below is a socket *inactivity* timeout: it only fires
+            // when nothing arrives for that long. A server that drips a byte
+            // every few seconds resets it forever, so a hop needs a hard
+            // wall-clock deadline on top of it. Both are armed; whichever trips
+            // first ends the hop.
+            let settled = false;
+            let deadlineTimer = null;
+            const finish = (fn) => (value) => {
+                if (settled) return;
+                settled = true;
+                if (deadlineTimer) {
+                    clearTimeout(deadlineTimer);
+                    deadlineTimer = null;
+                }
+                fn(value);
+            };
+            const succeed = finish(resolve);
+            const fail = finish(reject);
+
             const commonHeaders = {
                 'User-Agent': 'Clawdia-FeedValidator/1.0',
                 Accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*',
@@ -104,7 +129,7 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
                     path: current.pathname + current.search,
                     method: 'GET',
                     headers: commonHeaders,
-                    timeout: 8000,
+                    timeout: SOCKET_IDLE_MS,
                     createConnection: (opts, cb) => tls.connect({
                         host: pinnedIp,
                         port,
@@ -119,7 +144,7 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
                     path: current.pathname + current.search,
                     method: 'GET',
                     headers: commonHeaders,
-                    timeout: 8000,
+                    timeout: SOCKET_IDLE_MS,
                 }, handleResponse);
             }
 
@@ -127,7 +152,7 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
                 if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
                     const loc = res.headers.location;
                     res.destroy();
-                    return resolve({ redirect: loc });
+                    return succeed({ redirect: loc });
                 }
                 const chunks = [];
                 let totalBytes = 0;
@@ -135,20 +160,30 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
                     totalBytes += c.length;
                     if (totalBytes > FEED_MAX_BYTES) {
                         res.destroy();
-                        return reject(new Error('Feed response exceeds maximum allowed size (5 MB).'));
+                        return fail(new Error('Feed response exceeds maximum allowed size (5 MB).'));
                     }
                     chunks.push(c);
                 });
-                res.on('end', () => resolve({ body: Buffer.concat(chunks).toString('utf8') }));
-                res.on('error', reject);
+                res.on('end', () => succeed({ body: Buffer.concat(chunks).toString('utf8') }));
+                res.on('error', fail);
             }
 
-            req.on('timeout', () => { req.destroy(); reject(new Error('Feed request timed out.')); });
-            req.on('error', reject);
+            deadlineTimer = setTimeout(() => {
+                req.destroy();
+                fail(new Error(`Feed request exceeded the ${HOP_DEADLINE_MS}ms time limit.`));
+            }, HOP_DEADLINE_MS);
+
+            req.on('timeout', () => { req.destroy(); fail(new Error('Feed request timed out.')); });
+            req.on('error', fail);
             req.end();
         });
 
-        if (result.redirect) {
+        // Tested for presence, not truthiness: a 3xx with no Location header
+        // resolves to { redirect: undefined }, which a truthiness check treats as
+        // "not a redirect" and falls through to `return result.body` — handing
+        // back undefined instead of raising, and leaving the guard below
+        // unreachable.
+        if ('redirect' in result) {
             if (typeof result.redirect !== 'string' || !result.redirect.trim()) {
                 throw new Error('Redirect with empty Location header.');
             }
