@@ -32,7 +32,7 @@
     "mongoose": "^8.0.3",
     "multer": "^2.1.1",
     "node-cron": "^4.6.0",
-    "openai": "^4.24.1",
+    "openai": "^7.1.0",
     "passport": "^0.7.0",
     "rss-parser": "^3.13.0"
   },
