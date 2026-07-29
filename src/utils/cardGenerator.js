@@ -1,16 +1,7 @@
-const { createCanvas, loadImage, registerFont } = require('canvas');
+const { createCanvas, loadImage } = require('canvas');
+const { ensureFontsRegistered } = require('./registerFonts');
 
-try {
-    registerFont('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', { family: 'DejaVu Sans' });
-    registerFont('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', { family: 'DejaVu Sans', weight: 'bold' });
-} catch {
-    // DejaVu not present; canvas falls back to its built-in default
-}
-try {
-    registerFont('/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', { family: 'Noto Color Emoji' });
-} catch {
-    // Emoji font unavailable; emoji characters will fall back to replacement glyphs
-}
+ensureFontsRegistered();
 
 const EMOJI_FONT = '"DejaVu Sans", "Noto Color Emoji"';
 

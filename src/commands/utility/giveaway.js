@@ -96,11 +96,7 @@ module.exports = {
 
             if (!ga) return interaction.reply({ content: 'Ended giveaway not found.', flags: MessageFlags.Ephemeral });
 
-            const channel = interaction.guild.channels.cache.get(ga.channelId);
-            const msg = await channel?.messages.fetch(ga.messageId).catch(() => null);
-            if (!msg) return interaction.reply({ content: 'Original giveaway message not found.', flags: MessageFlags.Ephemeral });
-
-            const entrants = await getEntrants(msg);
+            const entrants = getEntrants(ga);
             if (!entrants.length) return interaction.reply({ content: 'No valid entrants to reroll from.', flags: MessageFlags.Ephemeral });
 
             const newWinners = pickWinners(entrants, ga.winners);
@@ -123,35 +119,44 @@ function parseDuration(str) {
     return amount * multipliers[unit];
 }
 
-async function getEntrants(message) {
-    const row = message.components[0];
-    if (!row) return [];
-    // Entrants tracked via button interaction collector stored in winnerIds during the giveaway
-    // For reroll we use the stored entrant list from the message reactions fallback
-    // The live list is maintained by the button handler below
-    return message.giveawayEntrants ?? [];
+// Entrants are persisted on the giveaway subdocument by the giveaway_enter
+// button handler in events/interactionCreate.js, so they survive restarts.
+function getEntrants(ga) {
+    return Array.isArray(ga?.entrantIds) ? [...ga.entrantIds] : [];
 }
 
+// Fisher-Yates. The previous `.sort(() => Math.random() - 0.5)` is not a
+// uniform shuffle — comparison sorts with an inconsistent comparator leave
+// elements strongly biased toward their original positions, so entrants who
+// clicked first were measurably more likely to win.
 function pickWinners(entrants, count) {
-    const shuffled = [...entrants].sort(() => Math.random() - 0.5);
+    const shuffled = [...entrants];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
     return shuffled.slice(0, Math.min(count, shuffled.length));
 }
 
 async function endGiveaway(client, guildSettings, ga) {
     ga.ended = true;
 
+    // Draw before looking anything up. The caller persists the giveaway either
+    // way, so bailing out early on a deleted channel or message used to mark it
+    // ended with an empty winnerIds — the entrants were still there, but the
+    // result was never recorded. Announcing is best-effort; deciding is not.
+    const entrants = getEntrants(ga);
+    const winners = pickWinners(entrants, ga.winners);
+    ga.winnerIds = winners;
+
     const channel = client.guilds.cache
-        .find(g => guildSettings.guildId === g.id)
+        .get(guildSettings.guildId)
         ?.channels.cache.get(ga.channelId);
 
     if (!channel) return;
 
     const msg = await channel.messages.fetch(ga.messageId).catch(() => null);
     if (!msg) return;
-
-    const entrants = msg.giveawayEntrants ?? [];
-    const winners = pickWinners(entrants, ga.winners);
-    ga.winnerIds = winners;
 
     const winnerText = winners.length
         ? winners.map(id => `<@${id}>`).join(', ')
@@ -173,3 +178,7 @@ async function endGiveaway(client, guildSettings, ga) {
 
 module.exports.endGiveaway = endGiveaway;
 module.exports.parseDuration = parseDuration;
+// Exported for tests: winner selection has to stay a uniform shuffle, and that
+// is only assertable against the real implementation.
+module.exports.pickWinners = pickWinners;
+module.exports.getEntrants = getEntrants;

@@ -1,0 +1,39 @@
+version: 2
+
+# Without this, dependency drift is invisible until someone happens to run
+# `npm audit`. Security updates are raised as soon as an advisory lands;
+# everything else is batched weekly so the PR queue stays readable.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch/minor bumps are almost always safe and reviewing them one PR at a
+      # time is what causes them to be ignored. Majors stay separate so they get
+      # read properly — discord.js, mongoose and canvas majors all carry real
+      # migration work.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+
+  # Pin drift in the workflow actions themselves. ci.yml pins actions by commit
+  # SHA, which is the right call for supply-chain safety but means nothing ever
+  # updates them without this.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies

@@ -28,10 +28,11 @@ jobs:
           node-version-file: '.nvmrc'
           cache: 'npm'
 
-      # canvas has no prebuilt binary for every Node ABI and falls back to
-      # compiling from source, which needs these native headers (same libs
-      # the Dockerfile installs via apk for the Alpine image).
-      - name: Install native build dependencies for canvas
+      # canvas 3.x ships prebuilt binaries covering this runner, so the install
+      # normally needs no toolchain. These headers are kept as a fallback: if a
+      # future Node ABI or platform has no prebuild, node-gyp compiles from
+      # source and needs them, and a missing header here is a confusing failure.
+      - name: Install native build dependencies for canvas (fallback path)
         run: |
           sudo apt-get update
           sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev

@@ -256,11 +256,32 @@ describe('logCommandMetric (interactionCreate)', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        // interactionCreate reads settings through the guild settings cache,
+        // which is module-level state. Without this reset a later test would
+        // silently reuse the previous test's settings and never consult its
+        // own findOne mock.
+        require('../src/utils/guildSettingsCache').clearGuildSettingsCache();
         mockGuild.updateOne.mockResolvedValue({});
         mockGuild.findOne.mockResolvedValue(makeGuildSettings());
         mockCommand.execute.mockResolvedValue(undefined);
         // Reset cooldown state so tests don't block each other via the 3s cooldown.
         mockClient.cooldowns.clear();
+    });
+
+    it('does not crash when a globally-registered command is used in a DM', async () => {
+        // Only a handful of the ~100 command files call .setDMPermission(false),
+        // and all of them are registered globally, so Discord delivers most of
+        // them with interaction.guild === null. Everything downstream reads
+        // interaction.guild.id, so this must short-circuit rather than throw.
+        const interaction = makeInteraction({ guild: null, guildId: null });
+
+        await expect(interactionCreate.execute(interaction, mockClient)).resolves.not.toThrow();
+
+        expect(interaction.reply).toHaveBeenCalledWith(
+            expect.objectContaining({ content: expect.stringContaining('only works inside a server') })
+        );
+        expect(mockCommand.execute).not.toHaveBeenCalled();
+        expect(mockGuild.updateOne).not.toHaveBeenCalled();
     });
 
     it('logs a success metric after successful command execution', async () => {

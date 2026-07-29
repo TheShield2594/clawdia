@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Deploy this file via Portainer > Stacks > Add Stack > Web Editor.
 #
 # BEFORE DEPLOYING:
@@ -15,6 +13,13 @@ version: '3.8'
 #
 #   3. Set all required variables in the Portainer Stack "Environment variables"
 #      section before clicking Deploy.
+#
+#      DASHBOARD_URL has no default on purpose. With NODE_ENV=production the bot
+#      refuses to start unless it is an https:// URL (see resolveDashboardUrl in
+#      src/dashboard/server.js), so a placeholder default would only produce a
+#      crash-loop on first deploy. Set it to the public HTTPS address of your
+#      reverse proxy, and register that exact URL + "/auth/callback" under
+#      OAuth2 > Redirects in the Discord Developer Portal.
 
 services:
   mongodb:
@@ -24,7 +29,7 @@ services:
     volumes:
       - mongodb_data:/data/db
     networks:
-      - ultrabot-network
+      - db-network   # internal-only: no external routing, no published ports
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
@@ -42,36 +47,59 @@ services:
       - CLIENT_ID=${CLIENT_ID}
       - CLIENT_SECRET=${CLIENT_SECRET}
       - SESSION_SECRET=${SESSION_SECRET}
-      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:7001}
-      # --- Optional: AI ---
+      - DASHBOARD_URL=${DASHBOARD_URL}
+      # --- Optional: AI providers ---
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      # --- Optional: Music ---
-      - YOUTUBE_COOKIE=${YOUTUBE_COOKIE}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      # --- Optional: meme generation (/meme) ---
+      - IMGFLIP_USERNAME=${IMGFLIP_USERNAME}
+      - IMGFLIP_PASSWORD=${IMGFLIP_PASSWORD}
       # --- Defaults (override if needed) ---
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
       - DASHBOARD_PORT=7001
+      - AUDIT_LOG_RETENTION_DAYS=${AUDIT_LOG_RETENTION_DAYS:-90}
       - NODE_ENV=${NODE_ENV:-production}
+    # Loopback only — put your reverse proxy in front of this. Publish on
+    # 0.0.0.0 only if TLS is terminated elsewhere on the host network.
     ports:
-      - "7001:7001"
+      - "127.0.0.1:7001:7001"
     depends_on:
       mongodb:
         condition: service_healthy
-    volumes:
-      - ultrabot_logs:/app/logs
     networks:
-      - ultrabot-network
+      - db-network       # reaches MongoDB
+      - ultrabot-network # reaches the internet (Discord API, AI APIs, etc.)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    # Hit /health, not /. The root route returns 200 even when MongoDB is down,
+    # so it would report a bot that cannot read or write anything as healthy.
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:7001', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e",
+        "require('http').get('http://localhost:7001/health', (r) => { let b=''; r.on('data', d => b+=d); r.on('end', () => { try { const s = JSON.parse(b).status; process.exit(s === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    stop_grace_period: 30s
 
 volumes:
   mongodb_data:
-  ultrabot_logs:
 
 networks:
   ultrabot-network:
     driver: bridge
+  db-network:
+    driver: bridge
+    internal: true  # no external gateway — MongoDB cannot initiate outbound connections

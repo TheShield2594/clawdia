@@ -1,6 +1,6 @@
 # Clawdia
 
-A chill, self-hosted Discord bot with serious teeth. Clawdia brings moderation, music, AI chat, leveling, economy, RSS feeds, and a full-featured web dashboard to your community — without any cloud lock-in.
+A chill, self-hosted Discord bot with serious teeth. Clawdia brings moderation, AI chat, leveling, economy, RSS feeds, and a full-featured web dashboard to your community — without any cloud lock-in.
 
 ## Features
 

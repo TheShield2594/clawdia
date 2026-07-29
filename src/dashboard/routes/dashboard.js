@@ -17,19 +17,7 @@ function checkAuth(req, res, next) {
     res.redirect('/auth/login');
 }
 
-const MANAGE_GUILD = 0x20n;
-const ADMINISTRATOR = 0x8n;
-
-function hasManagePermission(guild) {
-    if (guild.owner === true) return true;
-    try {
-        const perms = BigInt(guild.permissions ?? 0);
-        return (perms & ADMINISTRATOR) === ADMINISTRATOR
-            || (perms & MANAGE_GUILD) === MANAGE_GUILD;
-    } catch {
-        return false;
-    }
-}
+const { hasManagePermission } = require('../lib/permissions');
 
 function getManageableGuilds(req) {
     const botGuilds = req.client.guilds.cache;

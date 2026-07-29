@@ -1,9 +1,9 @@
 'use strict';
 
-const { createCanvas, loadImage, registerFont } = require('canvas');
+const { createCanvas, loadImage } = require('canvas');
+const { ensureFontsRegistered } = require('./registerFonts');
 
-try { registerFont('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',      { family: 'DejaVu Sans' }); } catch {}
-try { registerFont('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', { family: 'DejaVu Sans', weight: 'bold' }); } catch {}
+ensureFontsRegistered();
 
 const TILE_W   = 220;
 const TILE_H   = 260;

@@ -6,6 +6,8 @@ const passport = require('passport');
 const { Strategy: DiscordStrategy, DiscordScope } = require('discord-strategy');
 const path = require('path');
 const { getStatus } = require('../health');
+const { hasManagePermission } = require('./lib/permissions');
+const { jsonForScript } = require('./lib/jsonForScript');
 
 const app = express();
 
@@ -105,6 +107,7 @@ function start(client) {
     app.use((req, res, next) => {
         const nonce = crypto.randomBytes(16).toString('base64');
         res.locals.cspNonce = nonce;
+        res.locals.jsonForScript = jsonForScript;
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('X-Frame-Options', 'DENY');
         res.setHeader('X-XSS-Protection', '1; mode=block');
@@ -154,8 +157,18 @@ function start(client) {
     app.use('/dashboard', dashboardRoutes);
     app.use('/api', apiRoutes);
 
+    // Everyone gets status + uptime — enough for the compose healthcheck and any
+    // external uptime monitor. The detailed payload (service names, last error
+    // strings, memory) goes only to users who administer a guild the bot is in.
+    //
+    // Merely being logged in is not enough: Discord OAuth is open to any account,
+    // so authentication alone conveys no privilege here.
     app.get('/health', (req, res) => {
-        const status = getStatus();
+        const detailed = req.isAuthenticated?.() === true
+            && Array.isArray(req.user?.guilds)
+            && req.user.guilds.some(g => hasManagePermission(g) && client.guilds.cache.has(g.id));
+
+        const status = getStatus({ detailed });
         res.status(status.status === 'unhealthy' ? 503 : 200).json(status);
     });
 

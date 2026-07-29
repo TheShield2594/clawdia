@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Guild = require('../../../models/Guild');
-const { checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { rescheduleDailyNews } = require('../../../services/rssService');
 const { rescheduleBibleVerse } = require('../../../services/dailyBibleService');
@@ -262,7 +262,7 @@ function validateHeistUpdate(updates) {
     return null;
 }
 
-router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
+router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;
 
@@ -348,7 +348,11 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkCsrfOr
             rescheduleBibleVerse(req.client, guildId);
         }
 
-        res.json({ success: true, settings: guildSettings });
+        // Deliberately does not echo the saved document. It carries every shop
+        // item's imageData Buffer (base64-inflated in JSON) plus up to 3000
+        // analytics.commandUsage entries, and the client only ever reads this
+        // body on a non-2xx response.
+        res.json({ success: true });
     } catch (error) {
         if (error.name === 'ValidationError') {
             return res.status(400).json({ error: error.message });

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Case = require('../../../models/Case');
-const { checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
 
 router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res) => {
@@ -45,7 +45,7 @@ router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res
     }
 });
 
-router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
+router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, caseId } = req.params;
     const { action, note, resolution } = req.body;
 
@@ -127,7 +127,7 @@ router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, asyn
     }
 });
 
-router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
+router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
     try {
@@ -142,7 +142,7 @@ router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAcce
     }
 });
 
-router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuildAccess, checkCsrfOrigin, checkWriteRateLimit, async (req, res) => {
+router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
     try {

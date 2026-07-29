@@ -263,15 +263,15 @@
     </datalist>
 
     <script nonce="<%= locals.cspNonce %>">
-        const DAILY_NEWS_INITIAL_PROFILES = <%- JSON.stringify(settings.dailyNewsProfiles || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
-        const DAILY_NEWS_CHANNELS = <%- JSON.stringify(channels || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        const DAILY_NEWS_INITIAL_PROFILES = <%- jsonForScript(settings.dailyNewsProfiles || []) %>;
+        const DAILY_NEWS_CHANNELS = <%- jsonForScript(channels || []) %>;
         const ESCALATION_DEFAULTS = [
             { threshold: 3,  action: 'mute', durationMinutes: 10,   dmUser: true, reason: 'Automatic escalation: {count} warnings reached' },
             { threshold: 5,  action: 'mute', durationMinutes: 60,   dmUser: true, reason: 'Automatic escalation: {count} warnings reached' },
             { threshold: 7,  action: 'kick', durationMinutes: null, dmUser: true, reason: 'Automatic escalation: {count} warnings reached' },
             { threshold: 10, action: 'ban',  durationMinutes: null, dmUser: true, reason: 'Automatic escalation: {count} warnings reached' }
         ];
-        let ESCALATION_LADDER = <%- JSON.stringify(settings.moderation?.escalation?.ladder || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        let ESCALATION_LADDER = <%- jsonForScript(settings.moderation?.escalation?.ladder || []) %>;
 
         // Sidebar tab navigation
         const navItems = document.querySelectorAll('.nav-item');
@@ -1376,8 +1376,8 @@
 
         // ── Economy Store & Jobs ───────────────────────────────────────────────
         // Command Policies state
-        var _cpRules     = <%- JSON.stringify(settings.commandPolicies?.rules || []) %>;
-        var _cpCooldowns = <%- JSON.stringify(settings.commandPolicies?.cooldownOverrides || []) %>;
+        var _cpRules     = <%- jsonForScript(settings.commandPolicies?.rules || []) %>;
+        var _cpCooldowns = <%- jsonForScript(settings.commandPolicies?.cooldownOverrides || []) %>;
         var _cpRuleIdx = -1;
         var _cpCdIdx   = -1;
 
@@ -1473,7 +1473,7 @@
                     '<button class="btn btn-sm" style="color:#e74c3c" onclick="_cpRules.splice(' + i + ',1);renderCpRules()">✕</button></div>';
             }).join('');
         }
-        var _cpRoleMap = <%- JSON.stringify(Object.fromEntries((roles||[]).map(r => [r.id, r.name]))).replace(/</g,'\\u003c').replace(/>/g,'\\u003e') %>;
+        var _cpRoleMap = <%- jsonForScript(Object.fromEntries((roles||[]).map(r => [r.id, r.name]))) %>;
         function renderCpCooldowns() {
             var list = document.getElementById('cp-cooldowns-list');
             if (!_cpCooldowns.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;">No cooldown overrides — click <strong>+ Add override</strong>.</p>'; return; }
@@ -1560,14 +1560,14 @@
         renderCpRules();
         renderCpCooldowns();
 
-        var storeItems = <%- JSON.stringify(settings.shop || []) %>;
-        var _serverJobs = <%- JSON.stringify(settings.jobs || []) %>;
-        var jobsList = _serverJobs.length > 0 ? _serverJobs.slice() : <%- JSON.stringify(defaultJobs) %>;
+        var storeItems = <%- jsonForScript(settings.shop || []) %>;
+        var _serverJobs = <%- jsonForScript(settings.jobs || []) %>;
+        var jobsList = _serverJobs.length > 0 ? _serverJobs.slice() : <%- jsonForScript(defaultJobs) %>;
 
-        var _savedTiers = <%- JSON.stringify(settings.jobTiers || []) %>;
+        var _savedTiers = <%- jsonForScript(settings.jobTiers || []) %>;
         var jobTiersList = _savedTiers.length === 4
             ? _savedTiers.slice().sort(function(a,b){return a.tier-b.tier;})
-            : <%- JSON.stringify(defaultTiers) %>;
+            : <%- jsonForScript(defaultTiers) %>;
 
         var _roleMap = {};
         <% roles.forEach(r => { %>_roleMap['<%= r.id %>'] = '<%= r.name.replace(/'/g, "\\'") %>';<% }); %>
@@ -1879,9 +1879,9 @@
         });
 
         // ── Achievements ───────────────────────────────────────────────────────────
-        var _BUILTIN_ACHS = <%- JSON.stringify(builtinAchievements || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
-        var _disabledAchievements = <%- JSON.stringify(settings.achievements?.disabledAchievements || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
-        var _customAchievements   = <%- JSON.stringify(settings.achievements?.customAchievements || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        var _BUILTIN_ACHS = <%- jsonForScript(builtinAchievements || []) %>;
+        var _disabledAchievements = <%- jsonForScript(settings.achievements?.disabledAchievements || []) %>;
+        var _customAchievements   = <%- jsonForScript(settings.achievements?.customAchievements || []) %>;
         var _editingAchIdx = -1;
 
         var ACH_CAT_LABELS = { economy:'Economy', leveling:'Leveling', hunt:'Hunt', fishing:'Fishing', community:'Community', moderation:'Moderation', custom:'Custom' };
@@ -2178,7 +2178,7 @@
         }
 
         // ── Reaction Roles ─────────────────────────────────────────────────────────
-        var rrRoles = <%- JSON.stringify(roles || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        var rrRoles = <%- jsonForScript(roles || []) %>;
 
         function addRrMapping() {
             var list = document.getElementById('rr-mappings-list');
@@ -2432,7 +2432,7 @@
 
         // ── AI Summaries ──────────────────────────────────────────────────────────
         var summaryJobsLoaded = false;
-        var _channelNameMap = <%- JSON.stringify(Object.fromEntries(channels.map(c => [c.id, c.name]))).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        var _channelNameMap = <%- jsonForScript(Object.fromEntries(channels.map(c => [c.id, c.name]))) %>;
 
         async function loadSummaryJobs() {
             if (summaryJobsLoaded) return;
@@ -2571,7 +2571,7 @@
         }
 
         // ── AI Personas ───────────────────────────────────────────────────────────
-        var _personas = <%- JSON.stringify((settings.ai && settings.ai.channelPersonas) || []).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') %>;
+        var _personas = <%- jsonForScript((settings.ai && settings.ai.channelPersonas) || []) %>;
 
         function updatePersonaChannelWarning() {
             var aiChannel = document.getElementById('ai-channel');

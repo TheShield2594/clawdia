@@ -13,6 +13,7 @@ const { checkAndBroadcastWealthMilestone } = require('../utils/wealthMilestone')
 const { maybeTriggerChatEvent } = require('../services/chatEventService');
 const { applyXpGain, announceLevelUp } = require('../utils/applyXpGain');
 const BASE_BAD_WORDS = require('../data/profanityList');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 
 // Pre-compile base word regexes once at module load — avoids per-message regex construction
 const BASE_BAD_WORD_REGEXES = BASE_BAD_WORDS.map(word => {
@@ -50,7 +51,10 @@ module.exports = {
         if (message.author.bot || !message.guild) return;
 
         try {
-            const guildSettings = await Guild.findOne({ guildId: message.guild.id });
+            // Cached read: this fires on every message, and the handlers below
+            // only ever read from the settings object. See utils/guildSettingsCache
+            // — the returned object is shared and must not be mutated.
+            const guildSettings = await getGuildSettings(message.guild.id);
 
             if (!guildSettings) {
                 await Guild.create({ guildId: message.guild.id, name: message.guild.name });

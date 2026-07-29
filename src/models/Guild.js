@@ -584,7 +584,11 @@ const guildSchema = new Schema({
         endsAt: { type: Date, required: true },
         hostId: { type: String, required: true },
         ended: { type: Boolean, default: false },
-        winnerIds: [{ type: String }]
+        winnerIds: [{ type: String }],
+        // Entrant user IDs. Persisted rather than kept on the in-memory Message
+        // object so a restart (or a Discord.js message-cache eviction) between
+        // the giveaway opening and closing does not silently empty the pool.
+        entrantIds: [{ type: String }]
     }],
 
     tempVoice: {
@@ -771,5 +775,37 @@ guildSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
     next();
 });
+
+// --- Guild settings cache invalidation ---------------------------------------
+//
+// utils/guildSettingsCache serves guild configuration to the per-message and
+// per-command read paths. Invalidating from here rather than from each write
+// site means a newly added writer is covered automatically; middleware also has
+// to be attached before model() compiles the schema, which is why it lives in
+// this file rather than in the cache module.
+//
+// Required lazily to avoid a circular import at load time; the handlers
+// themselves live beside the cache so they can be unit tested without driving
+// Mongoose middleware.
+function cacheHook(name, arg) {
+    try {
+        require('../utils/guildSettingsCache')[name](arg);
+    } catch (err) {
+        console.error(`[GUILD] Settings cache ${name} failed:`, err.message);
+    }
+}
+
+// Document writes: Model.create() routes through save(), so this covers both.
+guildSchema.post('save', function (doc) {
+    cacheHook('onGuildDocumentSaved', doc);
+});
+
+// Query writes.
+guildSchema.post(
+    ['findOneAndUpdate', 'updateOne', 'updateMany', 'findOneAndDelete', 'deleteOne', 'deleteMany', 'replaceOne'],
+    function () {
+        cacheHook('onGuildQueryWrite', this);
+    }
+);
 
 module.exports = model('Guild', guildSchema);

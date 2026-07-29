@@ -1,6 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const { computeRetention } = require('../lib/apiHelpers');
+const { checkCsrfOrigin } = require('../lib/middleware');
+
+// Origin validation for every state-changing API request, applied once here
+// rather than per-route. It was previously listed on a handful of routes and
+// silently missing from the rest (autorole, knowledge base, reaction roles,
+// RSS, summary jobs, leveling, achievements, personas, item images), which is
+// exactly the kind of gap a per-route opt-in produces. Mounting it centrally
+// means a newly added route is covered by default.
+router.use((req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+    return checkCsrfOrigin(req, res, next);
+});
 
 const settingsRouter = require('./api/settings');
 router.use(settingsRouter);
