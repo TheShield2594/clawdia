@@ -3,7 +3,7 @@
 # source and needs a full toolchain plus cairo/pango headers. None of that
 # belongs in the runtime image, so the compile happens here and only the
 # resulting node_modules is carried forward.
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 
 RUN apk add --no-cache \
     cairo-dev \
@@ -25,7 +25,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 # ---- runtime stage -----------------------------------------------------------
-FROM node:22-alpine
+FROM node:26-alpine
 
 # Shared libraries canvas links against at runtime (the -dev headers and the
 # compiler are deliberately left behind in the build stage), plus the DejaVu
