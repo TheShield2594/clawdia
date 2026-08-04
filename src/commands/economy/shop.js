@@ -20,6 +20,10 @@ const { hasUnlock } = require('../../utils/prestige');
 const CONFIRM_THRESHOLD = 500;
 const NEW_ITEM_TTL_MS   = 48 * 3_600_000; // 48 hours
 
+// Upper bound on a single /shop buy. Matches the cap the hunt shop uses so the
+// two storefronts behave the same way.
+const MAX_BUY_QUANTITY = 20;
+
 const RARITY_EMOJIS = {
     Common:   '⚪',
     Uncommon: '🟢',
@@ -125,7 +129,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
             const ep = effectivePrice(item, dynamicEnabled);
             const trendStr = dynamicEnabled ? ` ${trendBucket(item).arrow}` : '';
             return `**${i + 1}. ${item.name}** — ${currency}${ep.toLocaleString()}${trendStr} (Stock: ${stock})`;
-        }).join('\n') + `\n\n*Use /shop buy <item name> to purchase*`;
+        }).join('\n') + `\n\n*Use /shop buy <item name> [quantity] to purchase*`;
 
         pages.push({
             id:       `rarity_${rarity.toLowerCase()}`,
@@ -166,7 +170,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
                 const ep = effectivePrice(item, dynamicEnabled);
                 return `**${i + 1}. ${item.name}** — ${currency}${ep.toLocaleString()} (Stock: ${stock})`;
             }).join('\n') +
-            `\n\n*Use /shop buy <item name> to purchase*`;
+            `\n\n*Use /shop buy <item name> [quantity] to purchase*`;
 
         pages.push({
             id:       'prestige',
@@ -201,7 +205,7 @@ async function buildShopPages(guildSettings, currency, viewerPrestigeRank = 0) {
                 const ep = effectivePrice(item, dynamicEnabled);
                 return `**${i + 1}. ${item.name}** — ${currency}${ep.toLocaleString()} (Stock: ${stock})`;
             }).join('\n') +
-            `\n\n*Use /shop buy <item name> to purchase*`;
+            `\n\n*Use /shop buy <item name> [quantity] to purchase*`;
 
         pages.push({
             id:       'black_market',
@@ -226,7 +230,13 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('buy')
                 .setDescription('Purchase an item from the shop')
-                .addStringOption(o => o.setName('item').setDescription('Item to buy').setRequired(true).setAutocomplete(true)))
+                .addStringOption(o => o.setName('item').setDescription('Item to buy').setRequired(true).setAutocomplete(true))
+                .addIntegerOption(o =>
+                    o.setName('quantity')
+                        .setDescription(`How many to buy (default: 1, max: ${MAX_BUY_QUANTITY})`)
+                        .setRequired(false)
+                        .setMinValue(1)
+                        .setMaxValue(MAX_BUY_QUANTITY)))
         .addSubcommand(sub =>
             sub.setName('trends')
                 .setDescription('Show price movement on shop items (dynamic pricing must be enabled).'))
@@ -235,13 +245,48 @@ module.exports = {
     async autocomplete(interaction) {
         try {
             const focused = interaction.options.getFocused()?.toLowerCase() ?? '';
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'shop').lean();
-            const items = guildSettings?.shop ?? [];
+            const [guildSettings, viewer] = await Promise.all([
+                Guild.findOne({ guildId: interaction.guild.id }, 'shop economy dynamicPricing').lean(),
+                User.findOne(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    'accountPrestige'
+                ).lean(),
+            ]);
+
+            const rank = viewer?.accountPrestige?.rank ?? 0;
+            const currency = guildSettings?.economy?.currency ?? '';
+            const dynamicEnabled = !!guildSettings?.dynamicPricing?.enabled;
+
+            // Don't advertise items the buyer can't purchase yet.
+            const items = (guildSettings?.shop ?? []).filter(i => {
+                if (isBlackMarketItem(i.itemId)   && !hasUnlock(rank, 'black_market'))    return false;
+                if (isP8BlackMarketItem(i.itemId) && !hasUnlock(rank, 'p8_black_market')) return false;
+                return true;
+            });
+
             const matches = focused
                 ? items.filter(i => i.name.toLowerCase().includes(focused))
                 : items;
+
+            // Prefix matches first, then substring matches, so typing "pet" surfaces
+            // "Pet Food" ahead of "Carpet".
+            const ranked = focused
+                ? [...matches].sort((a, b) => {
+                    const aPre = a.name.toLowerCase().startsWith(focused) ? 0 : 1;
+                    const bPre = b.name.toLowerCase().startsWith(focused) ? 0 : 1;
+                    return aPre - bPre || a.name.localeCompare(b.name);
+                })
+                : matches;
+
             await interaction.respond(
-                matches.slice(0, 25).map(i => ({ name: i.name, value: i.name }))
+                ranked.slice(0, 25).map(i => {
+                    const price = effectivePrice(i, dynamicEnabled);
+                    const stock = i.stock === 0 ? ' · out of stock' : (i.stock > 0 ? ` · ${i.stock} left` : '');
+                    return {
+                        name:  `${i.name} — ${currency}${price.toLocaleString()}${stock}`.slice(0, 100),
+                        value: i.name,
+                    };
+                })
             );
         } catch (err) {
             console.error('[shop] autocomplete error:', err);
@@ -286,7 +331,7 @@ module.exports = {
 
             const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             const userBalance = userData?.balance ?? 0;
-            const balanceFooter = `Balance: ${currency}${userBalance.toLocaleString()} · Use /shop buy <item name>`;
+            const balanceFooter = `Balance: ${currency}${userBalance.toLocaleString()} · Use /shop buy <item name> [quantity]`;
 
             return runShopBrowse(interaction, {
                 activity: pages[0].id.replace('rarity_', 'shop_'),
@@ -337,12 +382,25 @@ module.exports = {
 
         // ── BUY ───────────────────────────────────────────────────────────────
         if (sub === 'buy') {
-            const itemName = interaction.options.getString('item').toLowerCase();
-            const item = guildSettings.shop.find(i => i.name.toLowerCase() === itemName);
+            const rawName  = interaction.options.getString('item');
+            const itemName = rawName.toLowerCase();
+            const quantity = interaction.options.getInteger('quantity') ?? 1;
+
+            // Exact matches win — display name first (what autocomplete sends), then
+            // canonical itemId. Only then fall back to a partial name match, so a
+            // hand-typed itemId can never be shadowed by some other item that merely
+            // contains it in its display name.
+            const item = guildSettings.shop.find(i => i.name.toLowerCase() === itemName)
+                ?? guildSettings.shop.find(i => (i.itemId ?? '').toLowerCase() === itemName)
+                ?? guildSettings.shop.find(i => i.name.toLowerCase().includes(itemName));
 
             if (!item) {
-                return interaction.reply({ content: `Item \`${itemName}\` not found. Use \`/shop view\` to see available items.`, flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: `Item \`${rawName}\` not found. Use \`/shop view\` to see available items.`, flags: MessageFlags.Ephemeral });
             }
+
+            // Resolved name is what every later lookup keys off, so a partial match
+            // can't drift onto a different item mid-purchase.
+            const matchedName = item.name.toLowerCase();
 
             // Gate Black Market behind prestige unlock
             if (isBlackMarketItem(item.itemId) && !hasUnlock(viewerPrestigeRank, 'black_market')) {
@@ -364,8 +422,25 @@ module.exports = {
                 return interaction.reply({ content: 'That item is out of stock!', flags: MessageFlags.Ephemeral });
             }
 
+            // A role reward is granted once — buying ten of them would just charge
+            // ten times for the same role.
+            if (item.roleId && quantity > 1) {
+                return interaction.reply({
+                    content: `**${item.name}** grants a role, so it can only be bought one at a time.`,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            if (item.stock > 0 && item.stock < quantity) {
+                return interaction.reply({
+                    content: `Only **${item.stock}× ${item.name}** left in stock — you asked for ${quantity}.`,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
             const dynamicEnabled = !!guildSettings.dynamicPricing?.enabled;
             const itemPrice = effectivePrice(item, dynamicEnabled);
+            const totalCost = itemPrice * quantity;
 
             const userData = await User.findOneAndUpdate(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
@@ -373,9 +448,16 @@ module.exports = {
                 { upsert: true, new: true }
             );
 
-            if (userData.balance < itemPrice) {
+            if (userData.balance < totalCost) {
+                // With dynamic pricing the unit price isn't obvious from /shop view,
+                // so spell out how many they could actually afford.
+                const affordable = itemPrice > 0 ? Math.floor(userData.balance / itemPrice) : 0;
+                const hint = quantity > 1 && affordable > 0
+                    ? ` You can afford **${affordable}** at ${currency}${itemPrice.toLocaleString()} each.`
+                    : '';
+                const wanted = quantity > 1 ? ` for ${quantity}× **${item.name}**` : '';
                 return interaction.reply({
-                    content: `You need ${currency}${itemPrice.toLocaleString()} but only have ${currency}${userData.balance.toLocaleString()}.`,
+                    content: `You need ${currency}${totalCost.toLocaleString()}${wanted} but only have ${currency}${userData.balance.toLocaleString()}.${hint}`,
                     flags: MessageFlags.Ephemeral
                 });
             }
@@ -387,22 +469,47 @@ module.exports = {
                     User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id })
                 ]);
 
-                const freshItem = freshGuild?.shop.find(i => i.name.toLowerCase() === itemName);
+                const freshItem = freshGuild?.shop.find(i => i.name.toLowerCase() === matchedName);
                 if (!freshItem || freshItem.stock === 0) {
                     return reply({ content: 'That item is no longer available.', embeds: [], components: [] });
                 }
-                const freshPrice = effectivePrice(freshItem, !!freshGuild.dynamicPricing?.enabled);
-                if (!freshUser || freshUser.balance < freshPrice) {
+                if (freshItem.stock > 0 && freshItem.stock < quantity) {
                     return reply({
-                        content: `You need ${currency}${freshPrice.toLocaleString()} but only have ${currency}${(freshUser?.balance ?? 0).toLocaleString()}.`,
+                        content: `Only **${freshItem.stock}× ${freshItem.name}** left in stock — you asked for ${quantity}. Nothing was charged.`,
+                        embeds: [], components: []
+                    });
+                }
+                const freshPrice = effectivePrice(freshItem, !!freshGuild.dynamicPricing?.enabled);
+                const freshTotal = freshPrice * quantity;
+
+                // A dynamic-pricing recalc can land between the quote and the charge.
+                // Never debit more than the buyer was shown — bail out and make them
+                // re-run so the new total gets quoted (and re-checked against
+                // CONFIRM_THRESHOLD) before any coins move. A price *drop* is safe to
+                // honour: they pay less than they agreed to.
+                if (freshTotal > totalCost) {
+                    return reply({
+                        content:
+                            `The price of **${freshItem.name}** changed while you were deciding — ` +
+                            `${quantity > 1 ? `${quantity}× ` : ''}now costs ${currency}${freshTotal.toLocaleString()}, ` +
+                            `not ${currency}${totalCost.toLocaleString()}. Nothing was charged; ` +
+                            `run \`/shop buy\` again to accept the new price.`,
+                        embeds: [], components: []
+                    });
+                }
+
+                if (!freshUser || freshUser.balance < freshTotal) {
+                    const wanted = quantity > 1 ? ` for ${quantity}× **${freshItem.name}**` : '';
+                    return reply({
+                        content: `You need ${currency}${freshTotal.toLocaleString()}${wanted} but only have ${currency}${(freshUser?.balance ?? 0).toLocaleString()}.`,
                         embeds: [], components: []
                     });
                 }
 
                 // Atomically deduct balance — prevents double-spend if balance changed between checks
                 const chargedUser = await User.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: freshPrice } },
-                    { $inc: { balance: -freshPrice } },
+                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: freshTotal } },
+                    { $inc: { balance: -freshTotal } },
                     { new: true }
                 );
                 if (!chargedUser) {
@@ -413,21 +520,28 @@ module.exports = {
                 // $elemMatch binds both predicates to the SAME array element so
                 // the positional update can't accidentally decrement a different
                 // item just because some other item happens to have stock > 0.
+                // Guarding on `>= quantity` makes the whole batch all-or-nothing —
+                // a concurrent buyer can't leave this one partially filled.
                 if (freshItem.stock > 0) {
                     const stockResult = await Guild.findOneAndUpdate(
                         {
                             guildId: interaction.guild.id,
-                            shop: { $elemMatch: { _id: freshItem._id, stock: { $gt: 0 } } },
+                            shop: { $elemMatch: { _id: freshItem._id, stock: { $gte: quantity } } },
                         },
-                        { $inc: { 'shop.$.stock': -1 } }
+                        { $inc: { 'shop.$.stock': -quantity } }
                     );
                     if (!stockResult) {
                         try {
                             await User.findOneAndUpdate(
                                 { userId: interaction.user.id, guildId: interaction.guild.id },
-                                { $inc: { balance: freshPrice } }
+                                { $inc: { balance: freshTotal } }
                             );
-                            return reply({ content: 'That item just sold out. Your coins have been refunded.', embeds: [], components: [] });
+                            return reply({
+                                content: quantity > 1
+                                    ? `There aren't ${quantity} left in stock anymore. Your coins have been refunded.`
+                                    : 'That item just sold out. Your coins have been refunded.',
+                                embeds: [], components: []
+                            });
                         } catch (refundErr) {
                             console.error('[shop] refund failed after sell-out:', refundErr);
                             return reply({ content: 'That item just sold out and the automatic refund failed — please contact support.', embeds: [], components: [] });
@@ -436,10 +550,12 @@ module.exports = {
                 }
 
                 // Bump demand score so the next price recalc moves this item's price up.
+                // Scaled by quantity so a bulk buy moves the market like the same
+                // number of single buys would.
                 if (freshGuild.dynamicPricing?.enabled) {
                     await Guild.updateOne(
                         { guildId: interaction.guild.id, 'shop._id': freshItem._id },
-                        { $inc: { 'shop.$.demandScore': 1 } }
+                        { $inc: { 'shop.$.demandScore': quantity } }
                     ).catch(err => console.error('[shop] demand bump failed:', err));
                 }
 
@@ -447,10 +563,11 @@ module.exports = {
                 const inventoryId = freshItem.itemId || freshItem.name;
 
                 // Inventory upsert in a single atomic aggregation-pipeline update:
-                // when the itemId exists, bump its quantity by 1; otherwise append
-                // a new entry. Done in one call so concurrent buys can't race
-                // between an unsuccessful $inc and a guarded $push and lose a unit.
-                await User.updateOne(
+                // when the itemId exists, bump its quantity by the amount bought;
+                // otherwise append a new entry. Done in one call so concurrent buys
+                // can't race between an unsuccessful $inc and a guarded $push and
+                // lose units.
+                const stockedUser = await User.findOneAndUpdate(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
                     [{
                         $set: {
@@ -464,7 +581,7 @@ module.exports = {
                                             in: {
                                                 $cond: [
                                                     { $eq: ['$$slot.itemId', inventoryId] },
-                                                    { itemId: '$$slot.itemId', quantity: { $add: ['$$slot.quantity', 1] } },
+                                                    { itemId: '$$slot.itemId', quantity: { $add: ['$$slot.quantity', quantity] } },
                                                     '$$slot'
                                                 ]
                                             }
@@ -473,14 +590,36 @@ module.exports = {
                                     else: {
                                         $concatArrays: [
                                             { $ifNull: ['$inventory', []] },
-                                            [{ itemId: inventoryId, quantity: 1 }]
+                                            [{ itemId: inventoryId, quantity }]
                                         ]
                                     }
                                 }
                             }
                         }
-                    }]
-                );
+                    }],
+                    { new: true }
+                ).catch(err => {
+                    console.error('[shop] inventory grant failed:', err);
+                    return null;
+                });
+
+                if (!stockedUser) {
+                    // Roll back the charge and the stock we just took so the buyer
+                    // isn't left paying for items they never received.
+                    await User.updateOne(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        { $inc: { balance: freshTotal } }
+                    ).catch(err => console.error('[shop] refund after failed grant:', err));
+                    if (freshItem.stock > 0) {
+                        await Guild.updateOne(
+                            { guildId: interaction.guild.id, 'shop._id': freshItem._id },
+                            { $inc: { 'shop.$.stock': quantity } }
+                        ).catch(err => console.error('[shop] stock restore after failed grant:', err));
+                    }
+                    return reply({ content: 'Purchase failed — your coins have been refunded. Please try again.', embeds: [], components: [] });
+                }
+
+                const ownedNow = stockedUser.inventory?.find(s => s.itemId === inventoryId)?.quantity ?? quantity;
 
                 if (freshItem.roleId) {
                     await interaction.member.roles.add(freshItem.roleId).catch(console.error);
@@ -490,20 +629,26 @@ module.exports = {
                     userId:  interaction.user.id,
                     guildId: interaction.guild.id,
                     type:    'shop_buy',
-                    amount:  -freshPrice,
+                    amount:  -freshTotal,
                     balance: chargedUser.balance,
                     note:    inventoryId,
                 });
 
+                const boughtLabel = quantity > 1 ? `${quantity}× **${freshItem.name}**` : `**${freshItem.name}**`;
                 const successLore = getItemLore(freshItem.itemId);
                 const successDesc = successLore
-                    ? `You bought **${freshItem.name}** for ${currency}${freshPrice.toLocaleString()}.\n\n*${successLore}*`
-                    : `You bought **${freshItem.name}** for ${currency}${freshPrice.toLocaleString()}.`;
+                    ? `You bought ${boughtLabel} for ${currency}${freshTotal.toLocaleString()}.\n\n*${successLore}*`
+                    : `You bought ${boughtLabel} for ${currency}${freshTotal.toLocaleString()}.`;
                 const successEmbed = new EmbedBuilder()
                     .setColor('#00ff00')
                     .setTitle('Purchase Successful')
                     .setDescription(successDesc)
                     .addFields({ name: 'New Balance', value: `${currency}${chargedUser.balance.toLocaleString()}`, inline: true });
+
+                if (quantity > 1) {
+                    successEmbed.addFields({ name: 'Unit Price', value: `${currency}${freshPrice.toLocaleString()}`, inline: true });
+                }
+                successEmbed.addFields({ name: 'In Inventory', value: `${ownedNow.toLocaleString()}× ${freshItem.name}`, inline: true });
 
                 if (freshItem.roleId) {
                     successEmbed.addFields({ name: 'Role Granted', value: `<@&${freshItem.roleId}>`, inline: true });
@@ -516,23 +661,36 @@ module.exports = {
                 return reply(successPayload);
             };
 
-            if (itemPrice >= CONFIRM_THRESHOLD) {
+            // Threshold is checked against the total, so a bulk buy of cheap items
+            // still asks for confirmation before it drains a wallet.
+            if (totalCost >= CONFIRM_THRESHOLD) {
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId('shop_confirm').setLabel('Confirm Purchase').setStyle(ButtonStyle.Success),
                     new ButtonBuilder().setCustomId('shop_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
                 );
 
+                const buyLabel = quantity > 1 ? `${quantity}× **${item.name}**` : `**${item.name}**`;
                 const confirmLore = getItemLore(item.itemId);
                 const confirmDesc = confirmLore
-                    ? `Buy **${item.name}** for **${currency}${itemPrice.toLocaleString()}**?\n\n*${confirmLore}*`
-                    : `Buy **${item.name}** for **${currency}${itemPrice.toLocaleString()}**?`;
+                    ? `Buy ${buyLabel} for **${currency}${totalCost.toLocaleString()}**?\n\n*${confirmLore}*`
+                    : `Buy ${buyLabel} for **${currency}${totalCost.toLocaleString()}**?`;
                 const confirmEmbed = new EmbedBuilder()
                     .setColor('#f39c12')
                     .setTitle('Confirm Purchase')
-                    .setDescription(confirmDesc)
+                    .setDescription(confirmDesc);
+
+                if (quantity > 1) {
+                    confirmEmbed.addFields(
+                        { name: 'Quantity',   value: `${quantity}× ${item.name}`,                  inline: true },
+                        { name: 'Unit Price', value: `${currency}${itemPrice.toLocaleString()}`,   inline: true },
+                        { name: 'Total Cost', value: `${currency}${totalCost.toLocaleString()}`,   inline: true }
+                    );
+                }
+
+                confirmEmbed
                     .addFields(
                         { name: 'Your Balance', value: `${currency}${userData.balance.toLocaleString()}`, inline: true },
-                        { name: 'After Purchase', value: `${currency}${(userData.balance - itemPrice).toLocaleString()}`, inline: true }
+                        { name: 'After Purchase', value: `${currency}${(userData.balance - totalCost).toLocaleString()}`, inline: true }
                     )
                     .setFooter({ text: 'This confirmation expires in 30 seconds' });
 
