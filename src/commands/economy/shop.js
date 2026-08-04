@@ -386,11 +386,13 @@ module.exports = {
             const itemName = rawName.toLowerCase();
             const quantity = interaction.options.getInteger('quantity') ?? 1;
 
-            // Exact name match first (what autocomplete sends), then fall back to a
-            // partial match so a hand-typed "pet food" or "padlock" still resolves.
+            // Exact matches win — display name first (what autocomplete sends), then
+            // canonical itemId. Only then fall back to a partial name match, so a
+            // hand-typed itemId can never be shadowed by some other item that merely
+            // contains it in its display name.
             const item = guildSettings.shop.find(i => i.name.toLowerCase() === itemName)
-                ?? guildSettings.shop.find(i => i.name.toLowerCase().includes(itemName))
-                ?? guildSettings.shop.find(i => (i.itemId ?? '').toLowerCase() === itemName);
+                ?? guildSettings.shop.find(i => (i.itemId ?? '').toLowerCase() === itemName)
+                ?? guildSettings.shop.find(i => i.name.toLowerCase().includes(itemName));
 
             if (!item) {
                 return interaction.reply({ content: `Item \`${rawName}\` not found. Use \`/shop view\` to see available items.`, flags: MessageFlags.Ephemeral });
@@ -479,6 +481,23 @@ module.exports = {
                 }
                 const freshPrice = effectivePrice(freshItem, !!freshGuild.dynamicPricing?.enabled);
                 const freshTotal = freshPrice * quantity;
+
+                // A dynamic-pricing recalc can land between the quote and the charge.
+                // Never debit more than the buyer was shown — bail out and make them
+                // re-run so the new total gets quoted (and re-checked against
+                // CONFIRM_THRESHOLD) before any coins move. A price *drop* is safe to
+                // honour: they pay less than they agreed to.
+                if (freshTotal > totalCost) {
+                    return reply({
+                        content:
+                            `The price of **${freshItem.name}** changed while you were deciding — ` +
+                            `${quantity > 1 ? `${quantity}× ` : ''}now costs ${currency}${freshTotal.toLocaleString()}, ` +
+                            `not ${currency}${totalCost.toLocaleString()}. Nothing was charged; ` +
+                            `run \`/shop buy\` again to accept the new price.`,
+                        embeds: [], components: []
+                    });
+                }
+
                 if (!freshUser || freshUser.balance < freshTotal) {
                     const wanted = quantity > 1 ? ` for ${quantity}× **${freshItem.name}**` : '';
                     return reply({

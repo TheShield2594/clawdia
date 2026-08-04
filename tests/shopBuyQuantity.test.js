@@ -87,17 +87,21 @@ jest.mock('../src/utils/itemImageHelper', () => ({
 
 const shopCommand = require('../src/commands/economy/shop.js');
 
-function buildWorld({ petFoodStock = -1, balance = 100_000 } = {}) {
+function buildWorld({ petFoodStock = -1, balance = 100_000, dynamicPricing = false } = {}) {
     return {
         guild: {
             guildId: 'g1',
             name: 'Test Guild',
             shopDefaultsSeeded: true,
             economy: { currency: '💰' },
-            dynamicPricing: { enabled: false },
+            dynamicPricing: { enabled: dynamicPricing },
             shop: [
                 { _id: 'oid_petfood', name: 'Pet Food', itemId: 'pet_food', description: '🍖 Feeds any pet.', price: PET_FOOD_PRICE, stock: petFoodStock, roleId: null, demandScore: 0 },
                 { _id: 'oid_vip',     name: 'VIP Pass', itemId: 'vip_pass',  description: '💎 A role.',       price: 1000,           stock: -1,           roleId: 'role_vip', demandScore: 0 },
+                // Listed before the item whose itemId is 'padlock' so a
+                // partial-name match would grab the wrong one.
+                { _id: 'oid_kit',     name: 'Padlock Repair Kit',  itemId: 'repair_kit', description: '🔧 Fixes locks.', price: 100, stock: -1, roleId: null, demandScore: 0 },
+                { _id: 'oid_padlock', name: 'Reinforced Padlock',  itemId: 'padlock',    description: '🔒 Locks up.',    price: 100, stock: -1, roleId: null, demandScore: 0 },
             ],
             save: jest.fn().mockResolvedValue(true),
         },
@@ -224,4 +228,49 @@ test('omitting quantity still buys exactly one', async () => {
     expect(success.description).toContain('**Pet Food**');
     expect(success.description).not.toContain('1× **Pet Food**');
     expect(success.fields.find(f => f.name === 'Unit Price')).toBeUndefined();
+});
+
+test('an exact itemId wins over another item whose name contains it', async () => {
+    const { interaction } = buildInteraction({ item: 'padlock' });
+    await shopCommand.execute(interaction);
+
+    // 'Padlock Repair Kit' contains "padlock" and comes first in the shop array,
+    // but the exact itemId match must win.
+    expect(mockWorld.user.inventory).toEqual([{ itemId: 'padlock', quantity: 1 }]);
+});
+
+test('a partial name still resolves when nothing matches exactly', async () => {
+    const { interaction } = buildInteraction({ item: 'repair kit' });
+    await shopCommand.execute(interaction);
+
+    expect(mockWorld.user.inventory).toEqual([{ itemId: 'repair_kit', quantity: 1 }]);
+});
+
+test('a price rise between quote and confirm cancels the purchase', async () => {
+    mockWorld = buildWorld({ dynamicPricing: true });
+    const { interaction, state } = buildInteraction({ item: 'Pet Food', quantity: 10 });
+    await shopCommand.execute(interaction);
+
+    expect(state.replies[0].embeds[0].data.description).toContain('2,500');
+
+    // Dynamic pricing recalculates while the confirmation is still open.
+    mockWorld.guild.shop.find(i => i.itemId === 'pet_food').currentPrice = 400;
+    await confirm(state);
+
+    expect(state.editReplies.at(-1).content).toContain('price of **Pet Food** changed');
+    expect(mockWorld.balanceWrites).toEqual([]);
+    expect(mockWorld.user.inventory).toEqual([]);
+    expect(mockWorld.transactions).toEqual([]);
+});
+
+test('a price drop between quote and confirm is honoured at the lower total', async () => {
+    mockWorld = buildWorld({ dynamicPricing: true });
+    const { interaction, state } = buildInteraction({ item: 'Pet Food', quantity: 10 });
+    await shopCommand.execute(interaction);
+
+    mockWorld.guild.shop.find(i => i.itemId === 'pet_food').currentPrice = 200;
+    await confirm(state);
+
+    expect(mockWorld.balanceWrites).toEqual([-2000]);
+    expect(mockWorld.user.inventory).toEqual([{ itemId: 'pet_food', quantity: 10 }]);
 });
