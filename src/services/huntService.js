@@ -14,8 +14,9 @@ const {
     TROPHY_QUALITIES,
     APEX_TYPES
 } = require('../data/huntData');
-const { hasEffect, consumeEffect, getGatheringYieldMultiplier, getGatheringYieldEffect } = require('./effectsService');
+const { hasEffect, consumeEffect, getGatheringYieldEffect } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
+const { getPityBonus } = require('../utils/pityBonus');
 const { getHuntSynergyStaminaBonus } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
 
@@ -191,10 +192,7 @@ function calculateSuccessChance(user, weapon, zone) {
     }
 
     // Pity system: consecutive failure streak bonus
-    const pityStacks = Math.min(h.consecutiveFails, LIMITS.PITY_CONSECUTIVE_FAILS);
-    if (pityStacks > 0) {
-        chance += pityStacks * LIMITS.PITY_BONUS_PER_STACK;
-    }
+    chance += getPityBonus(h.consecutiveFails, LIMITS);
 
     return Math.min(0.95, Math.max(0.10, chance));
 }
@@ -235,13 +233,18 @@ function rollTrophyQuality(user, weapon, isCrit) {
     // Base weights: [poor, normal, good, pristine, mythic]
     const w = [25, 45, 18, 9, 3];
 
-    // Weapon tier: each tier above 1 shifts weight from poor/normal toward good+
-    const tierBonus = weapon.tier - 1; // 0–4
-    w[0] = Math.max(0, w[0] - tierBonus * 2);
-    w[1] = Math.max(0, w[1] - tierBonus);
-    w[2] += Math.floor(tierBonus * 1.5);
-    w[3] += tierBonus;
-    w[4] += Math.floor(tierBonus * 0.5);
+    // Weapon tier shifts weight off poor/normal and onto good+. Scaled by progress
+    // along the whole tier ladder rather than by raw tier number, so the curve keeps
+    // its shape if tiers are ever added — the previous per-tier steps were tuned for
+    // a 5-tier ladder and would drive `poor` to 0 past T13.
+    const tierProgress = WEAPON_TIERS.length > 1
+        ? (weapon.tier - 1) / (WEAPON_TIERS.length - 1)   // 0 at T1 → 1 at max tier
+        : 0;
+    w[0] = Math.max(0, w[0] - Math.round(tierProgress * 18));
+    w[1] = Math.max(0, w[1] - Math.round(tierProgress * 10));
+    w[2] += Math.round(tierProgress * 14);
+    w[3] += Math.round(tierProgress * 10);
+    w[4] += Math.round(tierProgress * 4);
 
     // Critical hit: significant quality boost
     if (isCrit) {

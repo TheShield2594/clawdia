@@ -823,7 +823,7 @@ const LIMITS = {
     DIM_RETURNS_THRESHOLD_3: 120,           // after 120 → ×0.55
     MAX_CRIT_CHANCE:         0.25,          // 25% hard cap on crit
     STAMINA_TONICS_PER_DAY:  2,
-    PITY_CONSECUTIVE_FAILS:  4,             // after N fails, +15% success (stacks 4×)
+    PITY_CONSECUTIVE_FAILS:  4,             // pity starts on the Nth straight fail, +15% per further fail, max 4 stacks
     PITY_BONUS_PER_STACK:    0.15,
     RARE_PITY_GUARANTEE:     50             // sinceRare threshold for guaranteed rare+
 };

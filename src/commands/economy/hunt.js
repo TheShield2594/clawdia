@@ -1163,7 +1163,13 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             embed.addFields({ name: '🛟 Lifesaver Activated!', value: `A severe injury would have destroyed your **${result.deathEvent.weaponName}**, but your Lifesaver absorbed it! (consumed)`, inline: false });
         } else {
             embed.setColor('#8B0000');
-            embed.addFields({ name: '💀 Severe Injury!', value: `The encounter was catastrophic — your **${result.deathEvent.weaponName}** was completely destroyed! Use \`/hunt shop repair\` to fix it.`, inline: false });
+            embed.addFields({
+                name: '💀 Severe Injury!',
+                value: isCondemned(weapon)
+                    ? `The encounter was catastrophic — your **${result.deathEvent.weaponName}** was wrecked outright, and it's condemned: too many shop repairs have worn it out, so it can't be fixed. Replace it with \`/hunt shop weapon\`.`
+                    : `The encounter was catastrophic — your **${result.deathEvent.weaponName}** was wrecked outright! Use \`/hunt shop repair\` to fix it.`,
+                inline: false
+            });
         }
     }
 
@@ -2558,22 +2564,28 @@ async function handleUnlock(interaction, user, currency) {
         .map(([t, w]) => `${t}: ${w}%`)
         .join(' · ');
 
-    return interaction.reply({
-        embeds: [
-            new EmbedBuilder()
-                .setColor('#f39c12')
-                .setTitle(`${zone.emoji} Zone Unlocked: ${zone.name}!`)
-                .setDescription(zone.description)
-                .addFields(
-                    { name: 'Loot Table',   value: tierStr,                                                                                                        inline: false },
-                    { name: 'Difficulty',   value: zone.difficultyMod < 0 ? `${Math.round(zone.difficultyMod * 100)}% success` : 'No penalty',                    inline: true },
-                    { name: 'Payout Bonus', value: zone.payoutBonus > 0 ? `+${Math.round(zone.payoutBonus * 100)}%` : 'Standard',                                 inline: true },
-                    { name: 'Unlock Cost',  value: `${currency}${zone.unlockCost.toLocaleString()}`,                                                              inline: true },
-                    { name: 'New Balance',  value: `${currency}${user.balance.toLocaleString()}`,                                                                  inline: true }
-                )
-                .setFooter({ text: `Switch to it with /hunt zone set ${zoneId}` })
-        ]
-    });
+    const materialStr = (zone.zoneMaterials ?? [])
+        .map(id => MATERIAL_NAMES[id] ?? id)
+        .join(' · ');
+
+    const unlockEmbed = new EmbedBuilder()
+        .setColor('#f39c12')
+        .setTitle(`${zone.emoji} Zone Unlocked: ${zone.name}!`)
+        .setDescription(zone.description)
+        .addFields(
+            { name: 'Loot Table',   value: tierStr,                                                                                             inline: false },
+            { name: 'Difficulty',   value: zone.difficultyMod < 0 ? `${Math.round(zone.difficultyMod * 100)}% success` : 'No penalty',           inline: true },
+            { name: 'Payout Bonus', value: zone.payoutBonus > 0 ? `+${Math.round(zone.payoutBonus * 100)}%` : 'Standard',                        inline: true },
+            { name: 'Unlock Cost',  value: `${currency}${zone.unlockCost.toLocaleString()}`,                                                     inline: true },
+            { name: 'New Balance',  value: `${currency}${user.balance.toLocaleString()}`,                                                        inline: true }
+        )
+        .setFooter({ text: `Switch to it with /hunt zone set ${zoneId}` });
+
+    if (materialStr) {
+        unlockEmbed.addFields({ name: '🪨 Materials Found Here', value: materialStr, inline: false });
+    }
+
+    return interaction.reply({ embeds: [unlockEmbed] });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
