@@ -217,9 +217,9 @@ async function syncHungerAndRunaway(user, interaction) {
             ? `💀 **${interaction.user.username}**'s pet ${names[0]} passed away from starvation...`
             : `💀 **${interaction.user.username}**'s pets ${names.join(', ')} passed away from starvation...`;
         interaction.channel?.send({ content: deathMsg }).catch(() => {});
-        // followUp only works once the interaction has been answered — /pet battle
-        // syncs before replying, and silently dropping the notice there would
-        // leave the owner with no explanation for the missing pet.
+        // followUp only works once the interaction has been answered. /pet battle
+        // syncs before it replies, so on that path the public channel message
+        // above is the only notice the owner gets — which is why it names them.
         if (interaction.replied || interaction.deferred) {
             await interaction.followUp({
                 content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` for a new companion, or a Revive Scroll from \`/shop\` to bring one back with its level and bond intact.*`,
@@ -346,8 +346,12 @@ async function slotAutocomplete(interaction, focused) {
  * typing exact snake_case ids like `rabbits_foot` from memory.
  */
 async function materialAutocomplete(interaction, focused) {
-    // Read-only: resolveUser() upserts, and autocomplete fires on every keystroke.
-    const found = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+    // Read-only and projected: resolveUser() upserts, and Discord fires an
+    // autocomplete event per keystroke with a 3s budget.
+    const found = await User.findOne(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        'pets inventory guildId userId'
+    );
     if (!found) return interaction.respond([]);
     const user = await attachGrind(found);
 
@@ -976,6 +980,7 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
     if (won) myPet.battleWins   = (myPet.battleWins ?? 0) + 1;
     else     myPet.battleLosses = (myPet.battleLosses ?? 0) + 1;
     user.markModified('pets');
+    await creditPetCare(interaction, user, guildSettings);
     const earned = await collectPetAchievements(user, guildSettings);
     try {
         await user.save();
@@ -1111,6 +1116,8 @@ async function pvpBattle(interaction, ctx) {
                 (houseCut > 0 ? `  *(house kept ${Math.round(houseCut * 100)}%)*` : '');
         }
 
+        await creditPetCare(interaction, chUser, guildSettings);
+        await creditPetCare(interaction, opUser, guildSettings);
         const [earnedA, earnedB] = await Promise.all([
             collectPetAchievements(chUser, guildSettings),
             collectPetAchievements(opUser, guildSettings),

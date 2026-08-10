@@ -182,6 +182,31 @@ describe('starvation clock', () => {
         expect(pet.starvingStartAt).toBeNull();
     });
 
+    test('a pet already at zero hunger still gets a clock', () => {
+        // The state migration 008 leaves behind: stored hunger 0, clock cleared.
+        // Without a clock checkRunaway can never remove the pet, so it would sit
+        // starving forever.
+        const migrated = petAged(5 * MS_PER_DAY, { hunger: 0, starvingStartAt: null });
+        const pet = applyHungerDecay([migrated], NOW)[0];
+        expect(pet.hunger).toBe(0);
+        expect(pet.starvingStartAt).not.toBeNull();
+        // Dated from the start of the window, not from "now", so the grace period
+        // is not silently restarted every time a /pet command runs.
+        expect(new Date(pet.starvingStartAt).getTime()).toBe(NOW - 5 * MS_PER_DAY);
+    });
+
+    test('a pet migrated at zero hunger still runs away on schedule', () => {
+        const migrated = petAged((RUNAWAY_DAYS + 1) * MS_PER_DAY, { hunger: 0, starvingStartAt: null });
+        const pet = applyHungerDecay([migrated], NOW)[0];
+        expect(checkRunaway([pet], NOW).ranAwayPets).toHaveLength(1);
+    });
+
+    test('an existing clock is never pushed forward by a later decay pass', () => {
+        const onset = new Date(NOW - 2 * MS_PER_DAY);
+        const pet = applyHungerDecay([petAged(MS_PER_DAY, { hunger: 0, starvingStartAt: onset })], NOW)[0];
+        expect(new Date(pet.starvingStartAt).getTime()).toBe(onset.getTime());
+    });
+
     test('runaway needs a full RUNAWAY_DAYS at zero hunger', () => {
         const dying    = { ...petAged(0), hunger: 0, starvingStartAt: new Date(NOW - (RUNAWAY_DAYS + 1) * MS_PER_DAY) };
         const clinging = { ...petAged(0), hunger: 0, starvingStartAt: new Date(NOW - (RUNAWAY_DAYS - 1) * MS_PER_DAY) };

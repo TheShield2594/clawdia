@@ -508,7 +508,9 @@ const ACHIEVEMENTS = [
         xpReward: 500,
         coinReward: 5_000,
         check: (user) => (user.pets || []).some(p => (p.evolutionStage || 1) >= 3),
-        progress: (user) => [Math.min(Math.max(0, ...(user.pets || []).map(p => p.level || 1)), 20), 20]
+        // Reports the same field the check gates on, so a pet cannot show full
+        // progress while the achievement stays locked.
+        progress: (user) => [Math.min(Math.max(0, ...(user.pets || []).map(p => p.evolutionStage || 1)), 3), 3]
     },
     {
         id: 'pet_champion',

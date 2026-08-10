@@ -10,7 +10,7 @@ const {
 } = require('../../services/effectsService');
 const { getItemLore } = require('../../data/defaultShopItems');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
-const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity } = require('../../services/petService');
+const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../services/petService');
 
 // itemId of a seasonal loot box -> the event definition that owns it
 const LOOT_BOX_EVENTS = new Map(
@@ -255,6 +255,17 @@ module.exports = {
                 const def = PET_DEFINITIONS[fallen.petId];
                 return interaction.reply({
                     content: `📜 You already have another ${def?.emoji ?? '🐾'} **${def?.name ?? fallen.petId}**, and the scroll won't make a second. Release it first if you want this one back.`,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            // Same capacity rule /pet adopt enforces — otherwise a player whose pet
+            // starved, who then adopted a replacement, could revive above capacity.
+            // Rare companions are exempt from slots, so they are exempt here too.
+            if (PET_DEFINITIONS[fallen.petId]?.purchasable && !hasFreePetSlot(preview)) {
+                return interaction.reply({
+                    content: `📜 No free pet slot (${countSlotPets(preview.pets)} / ${petCapacity(preview)}). `
+                           + `Release a pet or buy a **Pet Slot Expansion** before using this.`,
                     flags: MessageFlags.Ephemeral,
                 });
             }

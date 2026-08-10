@@ -4,8 +4,10 @@ const { Schema, model } = require('mongoose');
 const DECEASED_PET_LIMIT = 5;
 
 // Shared between `pets` and `deceasedPets` so a revived pet round-trips with
-// every field intact.
-const PET_FIELDS = {
+// every field intact. A factory rather than a constant: Mongoose normalises
+// definition objects in place, so handing the same one to two paths risks
+// them sharing mutated SchemaType options.
+const petFields = () => ({
     petId:              { type: String,  required: true },
     name:               { type: String,  default: null },
     hunger:             { type: Number,  default: 100, min: 0, max: 100 },
@@ -30,7 +32,7 @@ const PET_FIELDS = {
     battleWins:         { type: Number,  default: 0 },
     battleLosses:       { type: Number,  default: 0 },
     lastBattle:         { type: Date,    default: null },
-};
+});
 
 const userSchema = new Schema({
     userId: { type: String, required: true },
@@ -193,12 +195,12 @@ const userSchema = new Schema({
     // Pet system
     // Extra pet slots bought with the Pet Slot Expansion item (capped in petService).
     petSlots: { type: Number, default: 0, min: 0 },
-    pets: [PET_FIELDS],
+    pets: [petFields()],
 
     // Pets lost to starvation, most recent first. Retained so a Revive Scroll
     // can restore one with its level, bond and battle record intact; capped at
     // DECEASED_PET_LIMIT so the array can't grow without bound.
-    deceasedPets: [{ ...PET_FIELDS, diedAt: { type: Date, default: Date.now } }],
+    deceasedPets: [{ ...petFields(), diedAt: { type: Date, default: Date.now } }],
 
     // Pet of the Week tracking
     petInteractionLog: { type: Date,    default: null },

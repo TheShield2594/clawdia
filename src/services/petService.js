@@ -193,7 +193,7 @@ function getMoodBand(hunger) {
 function getMoodLine(pet, now = Date.now()) {
     const band = getMoodBand(effectiveHunger(pet, now));
     const lines = MOOD_LINES[band];
-    const dayIndex = Math.floor(Date.now() / 86400000);
+    const dayIndex = Math.floor(now / MS_PER_DAY);
     const petHash  = (pet.petId  || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
     const nameHash = (pet.name   || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
     return lines[(petHash + nameHash + dayIndex) % lines.length];
@@ -349,19 +349,23 @@ function applyHungerDecay(pets, now = Date.now()) {
         const nowAtZero  = newHunger === 0;
 
         let starvingStartAt = pet.starvingStartAt ?? null;
-        if (nowAtZero && !wasAtZero) {
-            // Back-date the runaway clock to when hunger actually hit zero, using
-            // the window's average decay rate. Without this the clock would start
-            // whenever the owner next happened to run a /pet command, so a pet
-            // left alone for a month would still get a 3-day grace period from
-            // the moment it was noticed.
-            const ratePerMs = decay / windowMs;
-            const crossedAt = ratePerMs > 0
-                ? from + Math.min(windowMs, prevHunger / ratePerMs)
-                : now;
-            starvingStartAt = new Date(Math.round(crossedAt));
-        } else if (!nowAtZero) {
+        if (!nowAtZero) {
             starvingStartAt = null;
+        } else if (!starvingStartAt) {
+            // Start the runaway clock for any pet sitting at zero without one. That
+            // covers both the fresh transition and a pet that entered the window
+            // already empty — migration 008 clears the clock for every existing pet,
+            // so without this branch a pet stored at zero hunger would keep a null
+            // clock forever and checkRunaway could never remove it.
+            //
+            // On a fresh transition, back-date to when hunger actually ran out using
+            // the window's average decay rate, so a pet left alone for a month is not
+            // handed a fresh grace period from the moment it happens to be noticed.
+            const ratePerMs = decay / windowMs;
+            const crossedAt = (!wasAtZero && ratePerMs > 0)
+                ? from + Math.min(windowMs, prevHunger / ratePerMs)
+                : from;
+            starvingStartAt = new Date(Math.round(crossedAt));
         }
 
         return {

@@ -531,9 +531,13 @@ async function selectPetOfTheWeek(client) {
                     `_${bestCount} interaction${bestCount !== 1 ? 's' : ''} this week_`
                 )
                 .addFields({ name: '❤️ Bond', value: `${heartBar(bondDays)} ${bondDays} days`, inline: true })
-                .addFields({ name: '🏆 Prize', value: `${potwCoins.toLocaleString()} coins`, inline: true })
                 .setFooter({ text: 'Earn the ribbon by feeding, playing with, or resting your pet!' })
                 .setTimestamp();
+
+            // Only advertise a prize when one is actually paid; potwReward can be 0.
+            if (potwCoins > 0) {
+                embed.addFields({ name: '🏆 Prize', value: `${potwCoins.toLocaleString()} coins`, inline: true });
+            }
 
             let files = [];
             try {

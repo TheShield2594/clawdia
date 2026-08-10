@@ -658,7 +658,12 @@ async function handleDig(interaction) {
 
     // Rare companions are found, not bought: a legendary result is the only
     // thing that can turn one up. Rolled before the save below persists it.
-    const rarePetDrop = result.success ? tryGrantRarePet(user, 'mine', result.tier) : null;
+    // Mirrors the keptRareFind predicate above: a cave-in the player fled leaves
+    // result.success true while revoking the find, and an abandoned haul must not
+    // hand out a companion either.
+    const rarePetDrop = result.success && !result.caveInAbandoned
+        ? tryGrantRarePet(user, 'mine', result.tier)
+        : null;
     if (rarePetDrop) user.markModified('pets');
 
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
