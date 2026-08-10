@@ -9,7 +9,15 @@ const {
     getLevelData,
     isRegionInSeason,
     isRegionEnabled,
+    isRegionFullyCharted,
     getAvailableRegions,
+    resolveActiveRegion,
+    getRelicCollection,
+    getRelicBonus,
+    buildEventWeights,
+    getSecretOdds,
+    getPayoutMultiplier,
+    getPenaltyMultiplier,
     executeExplore,
     resolveEncounter,
     addJournalEntry,
@@ -20,8 +28,14 @@ const {
     LIMITS,
     REGIONS,
     REGION_LIST,
+    RELIC_LIST,
+    RELIC_INDEX,
+    RELIC_VALUES,
+    RELIC_EMOJI,
+    RELIC_RARITY_ORDER,
     TOTAL_CORE_SECRETS,
     EXPLORER_LEVELS,
+    getRelicMeta,
 } = require('../src/data/exploreData');
 
 function makeUser(overrides = {}) {
@@ -40,6 +54,32 @@ function makeGuildSettings(overrides = {}) {
         exploration: { enabled: true, dropRateMultiplier: 1, rareEventBonus: 0, disabledRegions: [] },
         ...overrides,
     };
+}
+
+// Marks a region as fully explored on the user's progress record.
+function chartRegion(user, region, { landmarks = true, lore = true, secrets = true } = {}) {
+    const rec = {
+        regionId: region.id,
+        discoveredAt: new Date(),
+        expeditions: 1,
+        landmarksFound: landmarks ? region.landmarks.map(l => l.id) : [],
+        loreFound:      lore     ? region.lore.map(l => l.id)       : [],
+        secretsFound:   secrets  ? region.secrets.map(s => s.id)    : [],
+    };
+    user.exploration.regions.push(rec);
+    return rec;
+}
+
+// Math.random replacement that plays a fixed script, then holds the last value.
+function scriptRandom(values) {
+    let i = 0;
+    return () => values[Math.min(i++, values.length - 1)];
+}
+
+function withRandom(fn, impl) {
+    const original = Math.random;
+    Math.random = impl;
+    try { return fn(); } finally { Math.random = original; }
 }
 
 describe('exploreData integrity', () => {
@@ -171,10 +211,13 @@ describe('region availability', () => {
 describe('executeExplore', () => {
     test('consumes stamina and records the expedition', () => {
         const user = makeUser();
-        const result = executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {});
-        if (result.pendingChoice) {
-            resolveEncounter(user, REGIONS.whispering_forest, makeGuildSettings(), result, 'observe');
-        }
+        // 0.6 pins the roll to the treasure slot — a quiet roll refunds the
+        // stamina point and would make this assertion a coin flip.
+        const result = withRandom(
+            () => executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {}),
+            () => 0.6,
+        );
+        expect(result.type).toBe('treasure');
         expect(user.exploration.stamina).toBe(LIMITS.MAX_STAMINA - 1);
         expect(user.exploration.totalExpeditions).toBe(1);
         expect(result.firstVisit).toBe(true);
@@ -310,5 +353,431 @@ describe('map rendering', () => {
         const user = makeUser();
         const lines = renderMap(user, makeGuildSettings());
         expect(lines.join('\n')).not.toContain('Frostveil');
+    });
+
+    test('a fully surveyed region is flagged on the map', () => {
+        const user = makeUser();
+        chartRegion(user, REGIONS.whispering_forest);
+        expect(renderMap(user, makeGuildSettings()).join('\n')).toContain('fully surveyed');
+    });
+});
+
+describe('ensureExploreData idempotence', () => {
+    test('reports a write on first seed and nothing on the second pass', () => {
+        const user = { balance: 0, inventory: [], markModified: jest.fn() };
+        expect(ensureExploreData(user)).toBe(true);
+        expect(ensureExploreData(user)).toBe(false);
+    });
+
+    test('leaves null-by-default timestamps alone instead of rewriting them', () => {
+        const user = makeUser();
+        user.exploration.lastExplore = null;
+        expect(ensureExploreData(user)).toBe(false);
+    });
+});
+
+describe('stamina and daily reset report their writes', () => {
+    test('a full, freshly anchored stamina bar is not rewritten', () => {
+        const user = makeUser();
+        user.exploration.staminaLastRegen = new Date();
+        expect(applyStaminaRegen(user)).toBe(false);
+    });
+
+    test('a stale anchor at full stamina is refreshed once', () => {
+        const user = makeUser();
+        user.exploration.staminaLastRegen = new Date(Date.now() - 10 * LIMITS.STAMINA_REGEN_MS);
+        expect(applyStaminaRegen(user)).toBe(true);
+        expect(applyStaminaRegen(user)).toBe(false);
+    });
+
+    test('daily reset only reports the rollover', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date(Date.now() - LIMITS.DAILY_WINDOW_MS - 1);
+        expect(applyDailyReset(user)).toBe(true);
+        expect(applyDailyReset(user)).toBe(false);
+    });
+});
+
+describe('active region fallback', () => {
+    test('keeps a region that is still open', () => {
+        const user = makeUser();
+        const resolved = resolveActiveRegion(user, makeGuildSettings());
+        expect(resolved.region.id).toBe('whispering_forest');
+        expect(resolved.switched).toBe(false);
+    });
+
+    test('reroutes off a seasonal region once its event ends', () => {
+        const user = makeUser();
+        user.exploration.activeRegion = 'frostveil_pass';
+        const resolved = resolveActiveRegion(user, makeGuildSettings());
+        expect(resolved.switched).toBe(true);
+        expect(resolved.from.id).toBe('frostveil_pass');
+        expect(resolved.region.id).toBe('whispering_forest');
+        expect(user.exploration.activeRegion).toBe('whispering_forest');
+    });
+
+    test('reroutes off a region an admin switched off', () => {
+        const user = makeUser();
+        user.exploration.unlockedRegions.push('crumbling_ruins');
+        user.exploration.level = 10;
+        user.exploration.activeRegion = 'crumbling_ruins';
+        const settings = makeGuildSettings();
+        settings.exploration.disabledRegions = ['crumbling_ruins'];
+        expect(resolveActiveRegion(user, settings).region.id).toBe('whispering_forest');
+    });
+
+    test('prefers the richest core region the player has actually earned', () => {
+        const user = makeUser();
+        user.exploration.level = 12;
+        user.exploration.unlockedRegions.push('crumbling_ruins', 'crystal_caves');
+        user.exploration.activeRegion = 'frostveil_pass';
+        expect(resolveActiveRegion(user, makeGuildSettings()).region.id).toBe('crystal_caves');
+    });
+
+    test('an unlocked region below its level requirement is not a fallback', () => {
+        const user = makeUser();
+        user.exploration.level = 4;
+        user.exploration.unlockedRegions.push('crumbling_ruins');
+        user.exploration.activeRegion = 'frostveil_pass';
+        expect(resolveActiveRegion(user, makeGuildSettings()).region.id).toBe('whispering_forest');
+    });
+});
+
+describe('losses do not scale with generosity', () => {
+    function forceLoss(user, region, settings) {
+        let guard = 2_000;
+        while (guard-- > 0) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            user.exploration.dailyCoins = 0;
+            const r = executeExplore(user, region, settings, { coinMultiplier: settings.__coinMult ?? 1 });
+            if (!r.pendingChoice) continue;
+            // rand = 1 loses the encounter, maxes the penalty roll, dodges injury
+            return withRandom(() => resolveEncounter(user, region, settings, r, 'approach'), () => 0.999999);
+        }
+        throw new Error('no encounter rolled');
+    }
+
+    test('an encounter loss ignores the event coin bonus and the drop-rate knob', () => {
+        const region = REGIONS.whispering_forest;
+
+        const plain = makeUser();
+        const plainSettings = makeGuildSettings();
+        const plainLoss = forceLoss(plain, region, plainSettings);
+
+        const boosted = makeUser();
+        const boostedSettings = makeGuildSettings();
+        boostedSettings.exploration.dropRateMultiplier = 5;
+        boostedSettings.__coinMult = 3;
+        const boostedLoss = forceLoss(boosted, region, boostedSettings);
+
+        expect(plainLoss.outcome).toBe('loss');
+        expect(boostedLoss.outcome).toBe('loss');
+        expect(boostedLoss.penalty).toBe(plainLoss.penalty);
+        expect(plainLoss.penalty).toBe(600); // max roll × 1.0 region multiplier
+    });
+
+    test('a deeper region still costs more to fail in', () => {
+        expect(getPenaltyMultiplier(REGIONS.starfall_wastes))
+            .toBeGreaterThan(getPenaltyMultiplier(REGIONS.whispering_forest));
+        expect(getPenaltyMultiplier(REGIONS.whispering_forest)).toBe(1.0);
+    });
+
+    test('trap penalties stay inside their hand-tuned range', () => {
+        const user = makeUser({ balance: 10_000_000 });
+        const region = REGIONS.starfall_wastes;
+        const settings = makeGuildSettings();
+        settings.exploration.dropRateMultiplier = 5;
+        const worst = Math.max(...region.traps.map(t => t.penalty.max));
+        for (let i = 0; i < 400; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            user.exploration.dailyCoins = 0;
+            const r = executeExplore(user, region, settings, { coinMultiplier: 3 });
+            if (r.type === 'trap') expect(r.penalty).toBeLessThanOrEqual(worst);
+        }
+    });
+});
+
+describe('daily cap visibility', () => {
+    test('a capped payout reports the gross amount it was trimmed from', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+        user.exploration.dailyCoins = LIMITS.DAILY_HARD_CAP;
+
+        let capped = null;
+        for (let i = 0; i < 400 && !capped; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            const r = executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {});
+            if (r.pendingChoice) resolveEncounter(user, REGIONS.whispering_forest, makeGuildSettings(), r, 'observe');
+            if (r.cappedByDailyCap) capped = r;
+        }
+
+        expect(capped).not.toBeNull();
+        expect(capped.payout).toBe(0);
+        expect(capped.grossPayout).toBeGreaterThan(0);
+    });
+
+    test('a partially capped payout still records what it would have been', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+        user.exploration.dailyCoins = LIMITS.DAILY_HARD_CAP - 50;
+
+        let capped = null;
+        for (let i = 0; i < 400 && !capped; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            const r = executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {});
+            if (r.pendingChoice) resolveEncounter(user, REGIONS.whispering_forest, makeGuildSettings(), r, 'observe');
+            if (r.cappedByDailyCap && r.payout > 0) capped = r;
+        }
+
+        expect(capped).not.toBeNull();
+        expect(capped.grossPayout).toBeGreaterThan(capped.payout);
+        expect(user.exploration.dailyCoins).toBe(LIMITS.DAILY_HARD_CAP);
+    });
+});
+
+describe('secret pity tells the truth', () => {
+    test('an uncovered region never rolls a secret and never builds pity', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        chartRegion(user, region);
+        const settings = makeGuildSettings();
+
+        for (let i = 0; i < 400; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            user.exploration.dailyCoins = 0;
+            const r = executeExplore(user, region, settings, {});
+            if (r.pendingChoice) resolveEncounter(user, region, settings, r, 'observe');
+            expect(r.type).not.toBe('secret');
+        }
+        expect(user.exploration.sinceSecret).toBe(0);
+    });
+
+    test('getSecretOdds reports exhaustion instead of a chance', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        const progress = chartRegion(user, region);
+        expect(getSecretOdds(user, region, progress).exhausted).toBe(true);
+    });
+
+    test('the quoted odds use the same table the roll does', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        const progress = chartRegion(user, region, { secrets: false });
+
+        const plain = makeGuildSettings();
+        const boosted = makeGuildSettings();
+        boosted.exploration.rareEventBonus = 0.25;
+
+        // rareEventBonus shifts weight into the secret slot; the display must
+        // move with it or it quotes a chance the roll never uses.
+        expect(buildEventWeights(region, boosted).secret)
+            .toBeGreaterThan(buildEventWeights(region, plain).secret);
+        expect(getSecretOdds(user, region, progress, boosted).baseChance)
+            .toBeGreaterThan(getSecretOdds(user, region, progress, plain).baseChance);
+    });
+
+    test('pity lifts the secret chance above its base rate', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        const progress = chartRegion(user, region, { secrets: false });
+
+        const cold = getSecretOdds(user, region, progress);
+        user.exploration.sinceSecret = 60;
+        const hot = getSecretOdds(user, region, progress);
+
+        expect(cold.chance).toBeCloseTo(cold.baseChance, 10);
+        expect(hot.chance).toBeGreaterThan(hot.baseChance);
+        expect(hot.pity).toBe(LIMITS.SECRET_PITY_MAX);
+    });
+
+    test('expeditions into a region with secrets left do build pity', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        const settings = makeGuildSettings();
+        for (let i = 0; i < 20; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            user.exploration.dailyCoins = 0;
+            const r = executeExplore(user, region, settings, {});
+            if (r.pendingChoice) resolveEncounter(user, region, settings, r, 'observe');
+        }
+        expect(user.exploration.sinceSecret).toBeGreaterThan(0);
+    });
+});
+
+describe('surveying a region', () => {
+    test('a fully charted region pays a standing bonus', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        const settings = makeGuildSettings();
+        const bare = getPayoutMultiplier(user, region, settings, 1, null);
+        const progress = chartRegion(user, region);
+        const surveyed = getPayoutMultiplier(user, region, settings, 1, progress);
+        expect(surveyed / bare).toBeCloseTo(1 + LIMITS.SURVEY_BONUS, 10);
+    });
+
+    test('completing the last landmark fires the survey once', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        const progress = chartRegion(user, region);
+        progress.landmarksFound = region.landmarks.slice(1).map(l => l.id);
+        expect(isRegionFullyCharted(region, progress)).toBe(false);
+
+        // 0.3 lands the event roll on the discovery slot
+        const result = withRandom(
+            () => executeExplore(user, region, makeGuildSettings(), {}),
+            () => 0.3,
+        );
+
+        expect(result.type).toBe('discovery');
+        expect(result.regionCompleted).toBe(true);
+        expect(progress.completedAt).toBeInstanceOf(Date);
+        expect(user.exploration.regionsSurveyed).toBe(1);
+
+        // A later expedition into the same region doesn't re-announce it
+        user.exploration.stamina = LIMITS.MAX_STAMINA;
+        const next = executeExplore(user, region, makeGuildSettings(), {});
+        if (next.pendingChoice) resolveEncounter(user, region, makeGuildSettings(), next, 'observe');
+        expect(next.regionCompleted).toBeUndefined();
+        expect(user.exploration.regionsSurveyed).toBe(1);
+    });
+});
+
+describe('exhausted slots still pay properly', () => {
+    test('a fallback treasure caps at rare but keeps its relic roll', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        const progress = chartRegion(user, region, { secrets: false });
+        progress.landmarksFound = region.landmarks.map(l => l.id);
+
+        // event roll → discovery · intro · tier roll (legendary) · line · amount
+        // · relic check · relic pick
+        const result = withRandom(
+            () => executeExplore(user, region, makeGuildSettings(), {}),
+            scriptRandom([0.3, 0.5, 0.99, 0.5, 0.5, 0, 0]),
+        );
+
+        expect(result.type).toBe('treasure');
+        expect(result.fallbackTreasure).toBe(true);
+        expect(result.treasureTier.tier).toBe('rare');
+        expect(result.relic).toBeDefined();
+        expect(user.exploration.relicsRecovered).toBe(1);
+    });
+
+    test('a normal treasure is still allowed to be legendary', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        // 0.6 lands the event roll on the treasure slot
+        const result = withRandom(
+            () => executeExplore(user, region, makeGuildSettings(), {}),
+            scriptRandom([0.6, 0.5, 0.995, 0.5, 0.5, 0, 0]),
+        );
+        expect(result.type).toBe('treasure');
+        expect(result.fallbackTreasure).toBe(false);
+        expect(result.treasureTier.tier).toBe('legendary');
+    });
+});
+
+describe('quiet expeditions', () => {
+    test('cost the cooldown but not a stamina point', () => {
+        const user = makeUser();
+        const result = withRandom(
+            () => executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {}),
+            () => 0.999999,
+        );
+        expect(result.type).toBe('quiet');
+        expect(result.staminaSpared).toBe(true);
+        expect(user.exploration.stamina).toBe(LIMITS.MAX_STAMINA);
+        expect(user.exploration.totalExpeditions).toBe(1);
+        expect(user.exploration.lastExplore).toBeInstanceOf(Date);
+    });
+
+    test('a refund never pushes stamina over the cap', () => {
+        const user = makeUser();
+        user.exploration.stamina = LIMITS.MAX_STAMINA;
+        withRandom(() => executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {}), () => 0.999999);
+        expect(user.exploration.stamina).toBe(LIMITS.MAX_STAMINA);
+    });
+});
+
+describe('relic collection', () => {
+    test('every relic in the data tables is indexed with a value', () => {
+        expect(RELIC_LIST.length).toBeGreaterThan(0);
+        for (const relic of RELIC_LIST) {
+            expect(getRelicMeta(relic.itemId)).toBe(RELIC_INDEX[relic.itemId]);
+            expect(relic.value).toBeGreaterThan(0);
+            expect(relic.regionName).toBeTruthy();
+        }
+    });
+
+    test('every relic rarity is on the ladder, priced and iconned', () => {
+        // An off-ladder rarity would fall through to value 0 and still raise the
+        // collection bonus — a relic that pays a bonus and shows a price of zero.
+        for (const relic of RELIC_LIST) {
+            expect(RELIC_RARITY_ORDER).toContain(relic.rarity);
+            expect(RELIC_VALUES[relic.rarity]).toBeGreaterThan(0);
+            expect(RELIC_EMOJI[relic.rarity]).toBeTruthy();
+        }
+    });
+
+    test('every region defines a relic pool, and a region without one still pays out', () => {
+        for (const region of REGION_LIST) {
+            expect(Array.isArray(region.relics)).toBe(true);
+        }
+        // Guard the future case: a hand-added region with no relics must degrade
+        // to a plain treasure rather than throwing mid-expedition.
+        const user = makeUser();
+        const barren = { ...REGIONS.whispering_forest, id: 'barren_test', relics: undefined };
+        const result = withRandom(
+            () => executeExplore(user, barren, makeGuildSettings(), {}),
+            scriptRandom([0.6, 0.5, 0.995, 0.5, 0.5, 0, 0]),
+        );
+        expect(result.type).toBe('treasure');
+        expect(result.relic).toBeUndefined();
+        expect(result.payout).toBeGreaterThan(0);
+    });
+
+    test('relic itemIds are unique across every region', () => {
+        const ids = REGION_LIST.flatMap(r => (r.relics ?? []).map(x => x.itemId));
+        expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    test('the bonus counts distinct relics, not duplicates', () => {
+        const first = RELIC_LIST[0].itemId;
+        const user = makeUser({ inventory: [{ itemId: first, quantity: 40 }] });
+        expect(getRelicCollection(user)).toHaveLength(1);
+        expect(getRelicBonus(user)).toBeCloseTo(LIMITS.RELIC_BONUS_PER, 10);
+    });
+
+    test('the bonus is capped and ignores non-relic inventory', () => {
+        const user = makeUser({
+            inventory: [
+                ...RELIC_LIST.map(r => ({ itemId: r.itemId, quantity: 1 })),
+                { itemId: 'lockpick', quantity: 9 },
+            ],
+        });
+        expect(getRelicCollection(user)).toHaveLength(RELIC_LIST.length);
+        expect(getRelicBonus(user)).toBe(LIMITS.RELIC_BONUS_MAX);
+    });
+
+    test('the collection bonus lifts payouts', () => {
+        const region = REGIONS.whispering_forest;
+        const settings = makeGuildSettings();
+        const empty = makeUser();
+        const collector = makeUser({ inventory: RELIC_LIST.slice(0, 5).map(r => ({ itemId: r.itemId, quantity: 1 })) });
+        expect(getPayoutMultiplier(collector, region, settings, 1, null))
+            .toBeGreaterThan(getPayoutMultiplier(empty, region, settings, 1, null));
+    });
+
+    test('treasure prefers relics the collector is missing', () => {
+        const region = REGIONS.whispering_forest;
+        const owned = region.relics[0];
+        const user = makeUser({ inventory: [{ itemId: owned.itemId, quantity: 1 }] });
+        // Legendary treasure: relicChance 1.0, whole regional pool eligible
+        const result = withRandom(
+            () => executeExplore(user, region, makeGuildSettings(), {}),
+            scriptRandom([0.6, 0.5, 0.995, 0.5, 0.5, 0, 0]),
+        );
+        expect(result.relic.itemId).not.toBe(owned.itemId);
+        expect(result.relicIsNew).toBe(true);
     });
 });

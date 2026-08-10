@@ -189,16 +189,25 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 /explore travel        - Unlock and move between regions
 /explore regions       - Browse every region, requirements, and progress
 /explore journal       - Reread your most recent finds
+/explore relics        - Open your relic case and see what it earns you
 /explore profile       - Explorer level, stamina, and field record
 /explore map  or  /map - Unroll your persistent Explorer's Map
 ```
 
 **Regions:**
-- Core: Whispering Forest → Crumbling Ruins → Crystal Caves → Sunken Docks (level + coin gated, rising payouts)
-- Seasonal: Frostveil Pass (winter), Hollowgrave Lane (spooky), Scorchglass Shore (summer), The Velvet Arcade (Valentine's) — open only while their seasonal event runs and they drop event currency for the event shop
+- Core: Whispering Forest → Crumbling Ruins → Crystal Caves → Sunken Docks → Starfall Wastes (level + coin gated, rising payouts)
+- Seasonal: Frostveil Pass (winter), Hollowgrave Lane (spooky), Scorchglass Shore (summer), The Velvet Arcade (Valentine's), Arctic Tundra (winter hunt) — open only while their seasonal event runs, and they drop event currency for the event shop
+- A bare `/explore go` follows your active region, and reroutes itself if that region has gone out of season or been switched off
+
+**Progression:**
+- **Secret pity** — every expedition into a region that still hides a secret lifts the odds of finding one, shown as a live chance on the result embed. Regions you have fully uncovered stop building pity instead of promising a secret they can't deliver
+- **Fully surveyed** — chart every landmark, lore fragment and secret in a region and everything it pays you afterwards carries a standing +15%
+- **Relic case** — each distinct relic is worth +1% on exploration coins, up to +10%. Treasure prefers relics you don't own yet, so the case fills instead of stacking duplicates
+- **Quiet expeditions** cost the cooldown but refund the stamina point — a blank walk isn't charged for
+- Losses scale with how deep the region is, and deliberately *not* with the seasonal coin bonus or the admin drop-rate knob
 
 **Integration:**
-- Treasure coins feed the economy (transaction-logged, daily-capped); relics land in `/inventory`
+- Treasure coins feed the economy (transaction-logged, daily-capped — and the embed says so when the cap trims a haul); relics land in `/inventory` under their own section
 - Expeditions grant Explorer XP and mirror guild leveling XP
 - Rare finds unlock exploration achievements (including secret ones)
 - The Explorer's Map persists per player: landmarks, lore, and secrets charted per region

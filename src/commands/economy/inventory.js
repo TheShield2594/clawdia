@@ -6,6 +6,8 @@ const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
 const { getItemLore } = require('../../data/defaultShopItems');
+const { getRelicMeta } = require('../../data/exploreData');
+const { packFields } = require('../../utils/embedFields');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
 
@@ -81,10 +83,21 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
     let hasContent = false;
 
     if (inventory.length) {
-        const shopLines = [];
-        const aiLines   = [];
+        const shopLines  = [];
+        const aiLines    = [];
+        const relicLines = [];
         for (const entry of inventory) {
-            if (entry.itemId.startsWith('ai_') && aiItemMap[entry.itemId]) {
+            const relic = getRelicMeta(entry.itemId);
+            if (relic) {
+                // Relics come out of /explore, not the shop — without their own
+                // section they render as a bare name with no worth and no story.
+                // The lore stays in `/explore relics`: 25 relics' worth of it
+                // would blow the 1024-char field limit and take the embed down.
+                relicLines.push(
+                    `${relic.emoji} **${relic.itemId}**${entry.quantity > 1 ? ` ×${entry.quantity}` : ''} `
+                    + `*(${relic.rarity} · ${relic.regionName} · ${currency}${relic.value.toLocaleString()})*`
+                );
+            } else if (entry.itemId.startsWith('ai_') && aiItemMap[entry.itemId]) {
                 const ai = aiItemMap[entry.itemId];
                 const rarityLine = ai.rarity ? ` *(${ai.rarity})*` : '';
                 const loreLine   = ai.lore    ? `\n*${ai.lore}*`   : '';
@@ -107,6 +120,16 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
         }
         if (aiLines.length) {
             embed.addFields({ name: '⚒️ Forged Items', value: aiLines.join('\n'), inline: false });
+            hasContent = true;
+        }
+        if (relicLines.length) {
+            // A full collection is 25 relics — well past one field's budget.
+            embed.addFields(...packFields('🏺 Relics', relicLines));
+            embed.addFields({
+                name: '​',
+                value: '*Every distinct relic pays a standing bonus on exploration coins — see `/explore relics`.*',
+                inline: false,
+            });
             hasContent = true;
         }
     }
