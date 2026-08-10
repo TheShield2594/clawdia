@@ -2,10 +2,11 @@
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
-const { attachGrind } = require('../../utils/grindProfile');
+const { attachGrind, saveGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const {
     LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST,
+    RELIC_LIST, RELIC_RARITY_ORDER, TOTAL_CORE_RELICS,
     FOOTER_LINES, INJURY_LINES,
 } = require('../../data/exploreData');
 const {
@@ -18,7 +19,11 @@ const {
     getRegionProgress,
     isRegionInSeason,
     isRegionEnabled,
-    getAvailableRegions,
+    isRegionFullyCharted,
+    resolveActiveRegion,
+    getRelicCollection,
+    getRelicBonus,
+    getSecretOdds,
     executeExplore,
     resolveEncounter,
     addJournalEntry,
@@ -82,6 +87,13 @@ module.exports = {
             sub.setName('journal')
                 .setDescription('Reread your expedition journal — your most recent finds, in order.'))
         .addSubcommand(sub =>
+            sub.setName('relics')
+                .setDescription('Open your relic case — everything the wilds let you keep, and what it earns you.')
+                .addUserOption(o =>
+                    o.setName('user')
+                        .setDescription('Collector to inspect')
+                        .setRequired(false)))
+        .addSubcommand(sub =>
             sub.setName('profile')
                 .setDescription("View your or another wanderer's explorer profile")
                 .addUserOption(o =>
@@ -96,6 +108,7 @@ module.exports = {
         if (sub === 'travel')  return handleTravel(interaction);
         if (sub === 'regions') return handleRegions(interaction);
         if (sub === 'journal') return handleJournal(interaction);
+        if (sub === 'relics')  return handleRelics(interaction);
         if (sub === 'profile') return handleProfile(interaction);
     },
 
@@ -105,7 +118,8 @@ module.exports = {
 
 // ─── Shared guards ────────────────────────────────────────────────────────────
 
-async function loadContext(interaction) {
+// Returns the guild doc, or null after replying if exploration is switched off.
+async function loadGuildOrReply(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
         await interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
@@ -115,13 +129,31 @@ async function loadContext(interaction) {
         await interaction.reply({ content: 'Exploration is switched off on this server. The wilds will wait — they\'re good at it.', flags: MessageFlags.Ephemeral });
         return null;
     }
+    return guildSettings ?? {};
+}
+
+async function loadContext(interaction) {
+    const guildSettings = await loadGuildOrReply(interaction);
+    if (!guildSettings) return null;
     const user = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId: interaction.guild.id },
         { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
         { upsert: true, new: true }
     );
     await attachGrind(user);
-    ensureExploreData(user);
+    const seeded = ensureExploreData(user);
+    return { guildSettings, user, seeded, currency: guildSettings?.economy?.currency ?? '💰' };
+}
+
+/**
+ * Read-only loader for map/journal/relics/profile: honours the same enable
+ * switches as the write paths, and loads whichever user is being inspected.
+ */
+async function loadReadContext(interaction, target = interaction.user) {
+    const guildSettings = await loadGuildOrReply(interaction);
+    if (!guildSettings) return null;
+    const user = await User.findOne({ userId: target.id, guildId: interaction.guild.id });
+    await attachGrind(user);
     return { guildSettings, user, currency: guildSettings?.economy?.currency ?? '💰' };
 }
 
@@ -153,15 +185,31 @@ async function handleGo(interaction) {
     if (!ctx) return;
     const { guildSettings, user, currency } = ctx;
 
-    applyStaminaRegen(user);
-    applyDailyReset(user);
-    if (user.isModified()) {
-        await user.save().catch(e => console.error('[explore] pre-check save error:', e));
+    const e = user.exploration;
+    let dirty = ctx.seeded;
+    dirty = applyStaminaRegen(user) || dirty;
+    dirty = applyDailyReset(user)   || dirty;
+
+    // A bare /explore go follows your active region — unless that region has
+    // gone out of season or been switched off underneath you, in which case
+    // resolveActiveRegion moves you somewhere you can actually walk.
+    const explicitRegionId = interaction.options.getString('region');
+    let region, rerouted = null;
+    if (explicitRegionId) {
+        region = REGIONS[explicitRegionId];
+    } else {
+        const resolved = resolveActiveRegion(user, guildSettings);
+        region = resolved.region;
+        if (resolved.switched) {
+            rerouted = resolved.from;
+            dirty = true;
+        }
     }
 
-    const e = user.exploration;
-    const regionId = interaction.options.getString('region') ?? e.activeRegion;
-    const region = REGIONS[regionId];
+    if (dirty) {
+        // exploration lives in GrindProfile, so user.isModified() never sees it
+        await saveGrind(user, ['exploration']).catch(err => console.error('[explore] pre-check save error:', err));
+    }
 
     const gateError = regionGateError(user, region, guildSettings);
     if (gateError) return interaction.reply({ content: gateError, flags: MessageFlags.Ephemeral });
@@ -185,9 +233,7 @@ async function handleGo(interaction) {
                 description: 'You just got back. Shake the dust off, check your boots for stowaways, then go again.',
                 color: '#2e7d32',
                 nextAt: new Date(e.lastExplore.getTime() + LIMITS.EXPLORE_COOLDOWN_MS),
-                nextRewardPreview: e.sinceSecret >= 10
-                    ? `It's been ${e.sinceSecret} expeditions since your last secret. Something is overdue to find you.`
-                    : 'The map never fills itself in.',
+                nextRewardPreview: secretTeaser(user, region),
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -227,11 +273,14 @@ async function handleGo(interaction) {
 
     // Staged narration: the setting-out beat, then the find
     const delay = ms => new Promise(r => setTimeout(r, ms));
+    const reroutedLine = rerouted
+        ? `\n\n🧭 **${rerouted.emoji} ${rerouted.name}** is closed to you right now, so your compass reset to **${region.emoji} ${region.name}**. It'll wait.`
+        : '';
     await interaction.reply({
         embeds: [new EmbedBuilder()
             .setColor(region.color)
             .setTitle(`${region.emoji} Setting out — ${region.name}`)
-            .setDescription(`*${result.intro}*`)
+            .setDescription(`*${result.intro}*${reroutedLine}`)
             .setFooter({ text: region.tagline })],
     });
     await delay(2000);
@@ -361,11 +410,17 @@ async function handleGo(interaction) {
 }
 
 function summarizeResult(result, currency) {
+    // Once the daily cap bites, payouts land at zero — say so rather than
+    // logging a triumphant haul of nothing.
+    const haul = result.payout > 0
+        ? `${currency}${result.payout.toLocaleString()}`
+        : result.cappedByDailyCap ? 'nothing the daily cap would let you keep' : `${currency}0`;
+
     switch (result.type) {
         case 'discovery': return `Charted ${result.landmark.name}`;
         case 'lore':      return `Recovered a lore fragment`;
         case 'secret':    return `Uncovered the secret: ${result.secret.name}`;
-        case 'treasure':  return `${result.relic ? `Recovered ${result.relic.itemId} and ` : ''}hauled ${currency}${result.payout.toLocaleString()} in treasure`;
+        case 'treasure':  return `${result.relic ? `Recovered ${result.relic.itemId} and ` : ''}hauled ${haul} in treasure`;
         case 'trap':      return `Sprang ${result.trap.name} (−${currency}${(result.penalty ?? 0).toLocaleString()})`;
         case 'encounter': return result.outcome === 'win'
             ? `Faced ${result.encounter.name} and came out ahead`
@@ -374,6 +429,53 @@ function summarizeResult(result, currency) {
                 : `Faced ${result.encounter.name} and paid the tuition`;
         default:          return 'A long, quiet walk';
     }
+}
+
+/**
+ * "It's been N expeditions since your last secret" is only true while the
+ * region still HAS a secret to give. Once it's fully uncovered, saying it is
+ * a promise nothing can keep, so say something honest instead.
+ */
+function secretTeaser(user, region) {
+    if (!region) return 'The map never fills itself in.';
+    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id));
+    if (odds.exhausted) {
+        return `${region.name} has nothing left to hide from you. Other maps still do.`;
+    }
+    if (odds.sinceSecret >= 10) {
+        return `It's been ${odds.sinceSecret} expeditions since your last secret — the odds are up to ${(odds.chance * 100).toFixed(1)}% and still climbing.`;
+    }
+    return 'The map never fills itself in.';
+}
+
+/**
+ * Where the player sits on the secret curve. Without it the pity system is
+ * invisible and a dry run just looks like bad luck with no reason to believe
+ * it lets up — the same reason hunt, fishing and mining grew a streak field.
+ */
+function buildSecretPityField(user, region) {
+    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id));
+    if (odds.exhausted) return null;
+
+    const barLen = 16;
+    const ratio  = Math.min(1, odds.pity / LIMITS.SECRET_PITY_MAX);
+    const bar    = '█'.repeat(Math.round(ratio * barLen)) + '░'.repeat(barLen - Math.round(ratio * barLen));
+    const maxed  = odds.pity >= LIMITS.SECRET_PITY_MAX;
+    const lift   = odds.chance / odds.baseChance;
+
+    if (odds.pity <= 0) {
+        return {
+            name: `✨ Secret Odds — ${(odds.chance * 100).toFixed(1)}%`,
+            value: `\`${bar}\`\nEvery expedition here without a secret nudges these odds up.`,
+            inline: false,
+        };
+    }
+    return {
+        name: `✨ Something's Overdue — ${odds.sinceSecret} expeditions dry`,
+        value: `\`${bar}\`\n**${(odds.chance * 100).toFixed(1)}% secret chance** next time out `
+             + `— ×${lift.toFixed(2)} the base rate${maxed ? ' *(max)*' : ', climbing with every dry run'}.`,
+        inline: false,
+    };
 }
 
 function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit) {
@@ -400,7 +502,12 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
                 .setTitle(`🪙 Treasure — ${tier.tier.charAt(0).toUpperCase() + tier.tier.slice(1)} ${tier.stars}`);
             lines.push(`*${result.treasureLine}*`);
             if (result.relic) {
-                lines.push('', `🏺 **Relic recovered: ${result.relic.itemId}**`, `> *${result.relic.lore}*`, `> It's in your \`/inventory\` now. It was always going to end up there.`);
+                lines.push(
+                    '',
+                    `🏺 **Relic recovered: ${result.relic.itemId}**${result.relicIsNew ? ' — *new to your case*' : ''}`,
+                    `> *${result.relic.lore}*`,
+                    `> It's in your \`/inventory\` now, and in \`/explore relics\`, where it earns its keep.`,
+                );
             }
             break;
         }
@@ -434,10 +541,27 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
         lines.push('', `🗺️ **New region charted: ${region.emoji} ${region.name}** — it has a place on your map now. So do its blank spaces.`);
     }
 
+    if (result.regionCompleted) {
+        lines.push(
+            '',
+            `🏅 **${region.emoji} ${region.name} — fully surveyed.**`,
+            `Every landmark, every fragment, every secret. There is nothing left in this region that you haven't stood in front of.`,
+            `Everything it pays you from here carries a standing **+${Math.round(result.surveyBonus * 100)}%**. The map keeps its debts.`,
+        );
+    }
+
     embed.setDescription(lines.join('\n'));
 
     const gains = [];
-    if (result.payout > 0)  gains.push(`+${currency}${result.payout.toLocaleString()}`);
+    if (result.payout > 0) {
+        gains.push(`+${currency}${result.payout.toLocaleString()}`);
+    } else if (result.cappedByDailyCap && result.grossPayout > 0) {
+        // Don't render a legendary haul with a blank coin line and no reason.
+        gains.push(`~~+${currency}${result.grossPayout.toLocaleString()}~~ *(daily cap)*`);
+    }
+    if (result.payout > 0 && result.cappedByDailyCap) {
+        gains.push(`*(trimmed from ${currency}${result.grossPayout.toLocaleString()} — daily cap)*`);
+    }
     if (result.penalty > 0) gains.push(`−${currency}${result.penalty.toLocaleString()}`);
     if (result.xp > 0)      gains.push(`+${result.xp} Explorer XP`);
     if (mainXp > 0)         gains.push(`+${mainXp} XP`);
@@ -447,18 +571,41 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     }
     if (gains.length) embed.addFields({ name: '🎒 The Haul', value: gains.join('  ·  '), inline: false });
 
-    embed.setFooter({ text: `⚡ ${e.stamina}/${LIMITS.MAX_STAMINA} stamina · ${randomFrom(FOOTER_LINES)}` });
+    if (result.cappedByDailyCap) {
+        embed.addFields({
+            name: '🧾 Daily Cap Reached',
+            value: `You've banked ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()} from exploring in the last 24 hours, which is where the coins stop. `
+                 + `Expeditions still chart the map and still pay Explorer XP — the wilds just stop paying cash until the window rolls over.`,
+            inline: false,
+        });
+    }
+
+    // Standing bonuses, shown once they're actually doing something
+    const boosts = [];
+    if (result.surveyed) boosts.push(`🏅 Fully surveyed +${Math.round(LIMITS.SURVEY_BONUS * 100)}%`);
+    const relicBonus = getRelicBonus(user);
+    if (relicBonus > 0) boosts.push(`🏺 Relic case +${Math.round(relicBonus * 100)}%`);
+    if (boosts.length) {
+        embed.addFields({ name: '📈 Standing Bonuses', value: boosts.join('  ·  '), inline: false });
+    }
+
+    // Pity curve — only on runs that didn't turn up the secret
+    if (result.type !== 'secret') {
+        const pityField = buildSecretPityField(user, region);
+        if (pityField) embed.addFields(pityField);
+    }
+
+    const staminaNote = result.staminaSpared ? ' *(a blank walk costs no stamina)*' : '';
+    embed.setFooter({ text: `⚡ ${e.stamina}/${LIMITS.MAX_STAMINA} stamina${staminaNote} · ${randomFrom(FOOTER_LINES)}` });
     return embed;
 }
 
 // ─── MAP ──────────────────────────────────────────────────────────────────────
 
 async function handleMap(interaction) {
-    const [userData, guildSettings] = await Promise.all([
-        User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
-        Guild.findOne({ guildId: interaction.guild.id }),
-    ]);
-    await attachGrind(userData);
+    const ctx = await loadReadContext(interaction);
+    if (!ctx) return;
+    const { user: userData, guildSettings } = ctx;
 
     if (!userData?.exploration?.totalExpeditions) {
         return interaction.reply({
@@ -484,7 +631,7 @@ async function handleMap(interaction) {
             value: [
                 `**${levelData.title}** — Explorer Lv ${e.level}`,
                 `🗿 ${e.landmarksDiscovered} landmarks · 📜 ${e.loreCollected} lore · ✨ ${e.secretsFound} secrets · 🏺 ${e.relicsRecovered} relics`,
-                `${e.totalExpeditions.toLocaleString()} expeditions logged`,
+                `${e.totalExpeditions.toLocaleString()} expeditions logged · 🏅 ${surveyedCount(userData, guildSettings)} regions fully surveyed`,
             ].join('\n'),
             inline: false,
         })
@@ -492,6 +639,15 @@ async function handleMap(interaction) {
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
+}
+
+// How many regions the player has charted end to end.
+function surveyedCount(user, guildSettings) {
+    return REGION_LIST.filter(region => {
+        if (!isRegionEnabled(region, guildSettings)) return false;
+        const progress = user.exploration.regions.find(r => r.regionId === region.id);
+        return isRegionFullyCharted(region, progress);
+    }).length;
 }
 
 // ─── TRAVEL ───────────────────────────────────────────────────────────────────
@@ -592,8 +748,9 @@ async function handleRegions(interaction) {
 // ─── JOURNAL ──────────────────────────────────────────────────────────────────
 
 async function handleJournal(interaction) {
-    const userData = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-    await attachGrind(userData);
+    const ctx = await loadReadContext(interaction);
+    if (!ctx) return;
+    const { user: userData } = ctx;
 
     const journal = userData?.exploration?.journal ?? [];
     if (!journal.length) {
@@ -603,7 +760,7 @@ async function handleJournal(interaction) {
         });
     }
 
-    const lines = journal.slice(0, 12).map(entry => {
+    const lines = journal.slice(0, LIMITS.JOURNAL_CAP).map(entry => {
         const region = REGIONS[entry.regionId];
         const stamp = `<t:${Math.floor(new Date(entry.at).getTime() / 1000)}:R>`;
         return `${EVENT_TYPE_EMOJI[entry.eventType] ?? '🥾'} ${region?.emoji ?? ''} **${region?.name ?? entry.regionId}** — ${entry.summary} *(${stamp})*`;
@@ -613,7 +770,69 @@ async function handleJournal(interaction) {
         .setColor('#8d6e63')
         .setTitle(`📔 Expedition Journal — ${interaction.user.username}`)
         .setDescription(lines.join('\n'))
-        .setFooter({ text: 'The last 20 entries are kept. The rest live in the retelling.' })
+        .setFooter({ text: `The last ${LIMITS.JOURNAL_CAP} entries are kept. The rest live in the retelling.` })
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
+// ─── RELICS ───────────────────────────────────────────────────────────────────
+
+async function handleRelics(interaction) {
+    const target = interaction.options.getUser('user') ?? interaction.user;
+    const isSelf = target.id === interaction.user.id;
+
+    const ctx = await loadReadContext(interaction, target);
+    if (!ctx) return;
+    const { user: userData, currency } = ctx;
+
+    const collection = userData ? getRelicCollection(userData) : [];
+    if (!collection.length) {
+        return interaction.reply({
+            content: isSelf
+                ? 'Your relic case is a shelf and a hopeful expression. Rare treasure carries relics out of the wilds — `/explore go` is the only supplier.'
+                : `${target.username} hasn't brought anything home worth a shelf yet.`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
+    // Grouped by rarity, rarest first — the case should read like a case.
+    const byRarity = [...RELIC_RARITY_ORDER].reverse().map(rarity => {
+        const held = collection.filter(r => r.rarity === rarity);
+        if (!held.length) return null;
+        const rows = held.map(r =>
+            `${r.emoji} **${r.itemId}**${r.quantity > 1 ? ` ×${r.quantity}` : ''} — *${r.regionName}* · ${currency}${r.value.toLocaleString()}\n> *${r.lore}*`
+        );
+        return `**${rarity.charAt(0).toUpperCase() + rarity.slice(1)}**\n${rows.join('\n')}`;
+    }).filter(Boolean);
+
+    const distinct = collection.length;
+    const bonus = getRelicBonus(userData);
+    const atCap = bonus >= LIMITS.RELIC_BONUS_MAX;
+    const caseValue = collection.reduce((sum, r) => sum + r.value * r.quantity, 0);
+
+    const embed = new EmbedBuilder()
+        .setColor('#c9a227')
+        .setTitle(`🏺 The Relic Case — ${target.username}`)
+        .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+        .setDescription(byRarity.join('\n\n'))
+        .addFields(
+            {
+                name: '📚 The Collection',
+                value: `**${distinct}** distinct of **${RELIC_LIST.length}** known *(${TOTAL_CORE_RELICS} from the core regions, the rest only turn up in season)*\n`
+                     + `Case value: **${currency}${caseValue.toLocaleString()}**`,
+                inline: false,
+            },
+            {
+                name: '📈 What It Earns You',
+                value: `**+${Math.round(bonus * 100)}%** on every coin exploration pays you`
+                     + (atCap
+                         ? ' — *the case is as persuasive as it gets.*'
+                         : `\n*+${Math.round(LIMITS.RELIC_BONUS_PER * 100)}% per distinct relic, up to +${Math.round(LIMITS.RELIC_BONUS_MAX * 100)}%. Duplicates are for trading, not for stacking.*`),
+                inline: false,
+            },
+        )
+        .setFooter({ text: 'Relics have no buyer — nothing out there is qualified. Trade them on the /market if someone disagrees.' })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -625,11 +844,9 @@ async function handleProfile(interaction) {
     const target = interaction.options.getUser('user') ?? interaction.user;
     const isSelf = target.id === interaction.user.id;
 
-    const [userData, guildSettings] = await Promise.all([
-        User.findOne({ userId: target.id, guildId: interaction.guild.id }),
-        Guild.findOne({ guildId: interaction.guild.id }),
-    ]);
-    await attachGrind(userData);
+    const ctx = await loadReadContext(interaction, target);
+    if (!ctx) return;
+    const { user: userData, guildSettings, currency } = ctx;
 
     if (!userData?.exploration?.totalExpeditions) {
         return interaction.reply({
@@ -642,9 +859,11 @@ async function handleProfile(interaction) {
 
     ensureExploreData(userData);
     if (isSelf) applyStaminaRegen(userData);
+    // Read-only, but the daily footer should reflect a window that has already
+    // rolled over rather than yesterday's numbers.
+    applyDailyReset(userData);
 
     const e = userData.exploration;
-    const currency = guildSettings?.economy?.currency ?? '💰';
     const levelData = getLevelData(e.level);
     const toNext = xpToNextLevel(e.level, e.xp);
     const activeRegion = REGIONS[e.activeRegion];
@@ -693,12 +912,22 @@ async function handleProfile(interaction) {
                     `Best Haul:       **${currency}${e.bestHaul.toLocaleString()}**`,
                     `Secrets Found:   **${e.secretsFound}**`,
                     `Relics:          **${e.relicsRecovered}**`,
+                    `Regions Surveyed:**${surveyedCount(userData, guildSettings)}**`,
                     `Traps Sprung:    **${e.trapsSprung}** *(we don't judge here. much.)*`,
                 ].join('\n'),
                 inline: false,
             }
         )
         .setTimestamp();
+
+    const relicBonus = getRelicBonus(userData);
+    const surveyed = surveyedCount(userData, guildSettings);
+    if (relicBonus > 0 || surveyed > 0) {
+        const boosts = [];
+        if (surveyed > 0)   boosts.push(`🏅 **+${Math.round(LIMITS.SURVEY_BONUS * 100)}%** in ${surveyed} fully surveyed region${surveyed === 1 ? '' : 's'}`);
+        if (relicBonus > 0) boosts.push(`🏺 **+${Math.round(relicBonus * 100)}%** everywhere, from the relic case`);
+        embed.addFields({ name: '📈 Standing Bonuses', value: boosts.join('\n'), inline: false });
+    }
 
     if (isSelf) {
         embed.setFooter({ text: `Daily: ${e.dailyExpeditions} expeditions · ${currency}${e.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });

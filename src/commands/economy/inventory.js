@@ -6,6 +6,7 @@ const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
 const { getItemLore } = require('../../data/defaultShopItems');
+const { getRelicMeta } = require('../../data/exploreData');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
 
@@ -81,10 +82,19 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
     let hasContent = false;
 
     if (inventory.length) {
-        const shopLines = [];
-        const aiLines   = [];
+        const shopLines  = [];
+        const aiLines    = [];
+        const relicLines = [];
         for (const entry of inventory) {
-            if (entry.itemId.startsWith('ai_') && aiItemMap[entry.itemId]) {
+            const relic = getRelicMeta(entry.itemId);
+            if (relic) {
+                // Relics come out of /explore, not the shop — without their own
+                // section they render as a bare name with no worth and no story.
+                relicLines.push(
+                    `${relic.emoji} **${relic.itemId}**${entry.quantity > 1 ? ` ×${entry.quantity}` : ''} `
+                    + `*(${relic.rarity} · ${relic.regionName} · worth ${currency}${relic.value.toLocaleString()})*\n*${relic.lore}*`
+                );
+            } else if (entry.itemId.startsWith('ai_') && aiItemMap[entry.itemId]) {
                 const ai = aiItemMap[entry.itemId];
                 const rarityLine = ai.rarity ? ` *(${ai.rarity})*` : '';
                 const loreLine   = ai.lore    ? `\n*${ai.lore}*`   : '';
@@ -107,6 +117,14 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
         }
         if (aiLines.length) {
             embed.addFields({ name: '⚒️ Forged Items', value: aiLines.join('\n'), inline: false });
+            hasContent = true;
+        }
+        if (relicLines.length) {
+            embed.addFields({
+                name: '🏺 Relics',
+                value: `${relicLines.join('\n')}\n\n*Every distinct relic pays a standing bonus on exploration coins — see \`/explore relics\`.*`,
+                inline: false,
+            });
             hasContent = true;
         }
     }

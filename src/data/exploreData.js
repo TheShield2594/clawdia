@@ -16,9 +16,17 @@ const LIMITS = {
     DAILY_HARD_CAP:       100_000,
     JOURNAL_CAP:          20,
     // Secret pity: each expedition without a secret adds bonus weight to the
-    // secret slot, so long droughts self-correct.
+    // secret slot, so long droughts self-correct. Only expeditions into a
+    // region that still HAS an unfound secret count toward it.
     SECRET_PITY_PER_RUN:  0.15,
     SECRET_PITY_MAX:      6,
+    // Charting a region to 100% pays a standing bonus on everything it drops,
+    // so finishing a map is a reward rather than a retirement.
+    SURVEY_BONUS:         0.15,
+    // Each DISTINCT relic in your collection is worth a small standing payout
+    // bonus, capped so a full set is a nice edge and not a second economy.
+    RELIC_BONUS_PER:      0.01,
+    RELIC_BONUS_MAX:      0.10,
 };
 
 // ─── EXPLORER PROGRESSION ────────────────────────────────────────────────────
@@ -68,6 +76,8 @@ const EVENT_XP = {
     trap:             10,
     secret:           100,
     quiet:            8,
+    // One-off, the first time a region has nothing left to hide from you
+    survey:           250,
 };
 
 // Treasure rarity roll: weight + coin range (before region/guild multipliers)
@@ -922,6 +932,48 @@ const TOTAL_CORE_SECRETS = REGION_LIST
     .filter(r => !r.seasonalEventId)
     .reduce((sum, r) => sum + r.secrets.length, 0);
 
+// ─── RELICS ──────────────────────────────────────────────────────────────────
+// Relics live in the shared /inventory as bare itemIds. This index is what
+// lets everything else — the display case, /inventory, the collection bonus —
+// know what a relic is worth and where it came from.
+
+const RELIC_RARITY_ORDER = ['rare', 'epic', 'legendary'];
+
+// Indicative worth, used for display and for pricing a market listing. Relics
+// are not sold to the bot: exploration already has a daily coin cap, and a
+// bot-side buyback would be an uncapped faucet straight around it.
+const RELIC_VALUES = {
+    rare:      3_000,
+    epic:      7_500,
+    legendary: 20_000,
+};
+
+const RELIC_EMOJI = {
+    rare:      '🏺',
+    epic:      '⚱️',
+    legendary: '👑',
+};
+
+// itemId → { itemId, rarity, lore, regionId, regionName, emoji, value }
+const RELIC_INDEX = Object.fromEntries(
+    REGION_LIST.flatMap(region =>
+        (region.relics ?? []).map(relic => [relic.itemId, {
+            ...relic,
+            regionId:   region.id,
+            regionName: region.name,
+            emoji:      RELIC_EMOJI[relic.rarity] ?? '🏺',
+            value:      RELIC_VALUES[relic.rarity] ?? 0,
+        }])
+    )
+);
+
+const RELIC_LIST = Object.values(RELIC_INDEX);
+const TOTAL_CORE_RELICS = RELIC_LIST.filter(r => !REGIONS[r.regionId].seasonalEventId).length;
+
+function getRelicMeta(itemId) {
+    return RELIC_INDEX[itemId] ?? null;
+}
+
 // ─── SHARED VOICE LINES ──────────────────────────────────────────────────────
 
 // Quiet runs — nothing happened, in an atmospheric way
@@ -960,6 +1012,13 @@ module.exports = {
     CORE_REGION_IDS,
     SEASONAL_REGION_IDS,
     TOTAL_CORE_SECRETS,
+    RELIC_INDEX,
+    RELIC_LIST,
+    RELIC_VALUES,
+    RELIC_EMOJI,
+    RELIC_RARITY_ORDER,
+    TOTAL_CORE_RELICS,
+    getRelicMeta,
     QUIET_LINES,
     FOOTER_LINES,
     INJURY_LINES,
