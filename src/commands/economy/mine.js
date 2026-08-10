@@ -17,7 +17,7 @@ const {
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
 const { randomFrom, MINE_CAVE_LINES } = require('../../utils/copyLines');
-const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
+const { getPityBonus, buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const {
     ensureMineData,
     applyStaminaRegen,
@@ -345,10 +345,18 @@ async function handleDig(interaction) {
     if (m.stamina <= 0) {
         const regenMs   = msUntilNextStamina(user);
         const nextAt    = new Date(Date.now() + regenMs);
+        // Report the fail-streak pity that actually exists, through the shared curve
+        // so this cannot drift from what calculateSuccessChance applies. Mining has
+        // no rare-material guarantee — only hunting implements one
+        // (LIMITS.RARE_PITY_GUARANTEE) — so sinceRare is reported as the stat it is.
         const sinceRare = m.sinceRare ?? 0;
-        const pityStat  = sinceRare >= 5
-            ? `🎯 ${sinceRare} mines since last Rare+ material • rare guaranteed around mine ~40`
-            : null;
+        const pityBonus = getPityBonus(m.consecutiveFails ?? 0, LIMITS);
+        const pityBits  = [];
+        if (pityBonus > 0) {
+            pityBits.push(`🎯 ${m.consecutiveFails} ${PITY_COPY.mining.streakNoun} • +${Math.round(pityBonus * 100)}% success on your next dig`);
+        }
+        if (sinceRare >= 5) pityBits.push(`⛏️ ${sinceRare} digs since your last Rare+ material`);
+        const pityStat = pityBits.length ? pityBits.join('\n') : null;
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '😮‍💨 Out of Stamina',
