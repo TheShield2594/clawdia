@@ -17,7 +17,7 @@ const {
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
 const { randomFrom, MINE_CAVE_LINES } = require('../../utils/copyLines');
-const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
+const { getPityBonus, buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const {
     ensureMineData,
     applyStaminaRegen,
@@ -345,10 +345,18 @@ async function handleDig(interaction) {
     if (m.stamina <= 0) {
         const regenMs   = msUntilNextStamina(user);
         const nextAt    = new Date(Date.now() + regenMs);
+        // Report the fail-streak pity that actually exists, through the shared curve
+        // so this cannot drift from what calculateSuccessChance applies. Mining has
+        // no rare-material guarantee — only hunting implements one
+        // (LIMITS.RARE_PITY_GUARANTEE) — so sinceRare is reported as the stat it is.
         const sinceRare = m.sinceRare ?? 0;
-        const pityStat  = sinceRare >= 5
-            ? `🎯 ${sinceRare} mines since last Rare+ material • rare guaranteed around mine ~40`
-            : null;
+        const pityBonus = getPityBonus(m.consecutiveFails ?? 0, LIMITS);
+        const pityBits  = [];
+        if (pityBonus > 0) {
+            pityBits.push(`🎯 ${m.consecutiveFails} ${PITY_COPY.mining.streakNoun} • +${Math.round(pityBonus * 100)}% success on your next dig`);
+        }
+        if (sinceRare >= 5) pityBits.push(`⛏️ ${sinceRare} digs since your last Rare+ material`);
+        const pityStat = pityBits.length ? pityBits.join('\n') : null;
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '😮‍💨 Out of Stamina',
@@ -378,407 +386,476 @@ async function handleDig(interaction) {
         });
     }
 
+    // ── Charge check (read-only; the stock is spent after the claim below) ──
     const pickaxeData = PICKAXE_BY_TIER[pickaxe.tier];
-    if (pickaxeData.requiresCharge) {
-        const chargeStock = m.charges[pickaxeData.chargeType] ?? 0;
-        if (chargeStock <= 0) {
-            return interaction.reply({
-                content: `You're out of **${pickaxeData.chargeType.replace(/_/g, ' ')}**! Buy more with \`/mine shop buy\`.`,
-                flags: MessageFlags.Ephemeral
-            });
-        }
-        m.charges[pickaxeData.chargeType] = chargeStock - 1;
-        user.markModified('mining');
-    }
-
-    // ── Vein-Following Puzzle ──────────────────────────────────────────────────
-    // 3 rounds of directional navigation through a mine tunnel.
-    // Each round: a 3×3 emoji grid shows the current position (⛏️) and a mineral
-    // trace in one of the 4 adjacent cells. Player picks the matching direction.
-    // Correct directions accumulate depth; final depth maps to intensity level.
-    //   0/3 correct → Surface  (0.7×, 0% cave-in)
-    //   1/3 correct → Shallow  (1.0×, 5% cave-in)
-    //   2/3 correct → Mid      (1.4×, 12% cave-in)
-    //   3/3 correct → Deep     (2.0×, 20% cave-in)
-    //   3/3 + lucky → Abyss    (3.0×, 30% cave-in)  10% chance on a perfect run
-
-    const featured         = getDailyFeatured(interaction.guild.id);
-    const isFeaturedDepth  = depthId === featured.mineDepth.id;
-    const timeBand         = getTimeBand();
-    const delay = ms => new Promise(r => setTimeout(r, ms));
-
-    const DIRS = [
-        { id: 'N', label: '⬆️ North', row: 0, col: 1 },
-        { id: 'S', label: '⬇️ South', row: 2, col: 1 },
-        { id: 'W', label: '⬅️ West',  row: 1, col: 0 },
-        { id: 'E', label: '➡️ East',  row: 1, col: 2 },
-    ];
-
-    // Build a 3×3 grid string highlighting the ore direction
-    function buildGrid(oreDir) {
-        const grid = [
-            ['🪨', '🪨', '🪨'],
-            ['🪨', '⛏️', '🪨'],
-            ['🪨', '🪨', '🪨'],
-        ];
-        const d = DIRS.find(d => d.id === oreDir);
-        grid[d.row][d.col] = '✨';
-        return grid.map(row => row.join(' ')).join('\n');
-    }
-
-    const featuredDepthNote = isFeaturedDepth
-        ? `\n🌟 **Featured Depth!** +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout active.`
-        : '';
-
-    await interaction.reply({
-        embeds: [new EmbedBuilder()
-            .setColor(isFeaturedDepth ? '#FFD700' : '#8B4513')
-            .setTitle(`⛏️ Entering ${depth.emoji} ${depth.name}…`)
-            .setDescription(
-                `*You lower yourself into the shaft. Dust settles. Your lamp catches a glint…*\n\n` +
-                `**Follow the vein** — 3 rounds of directional choices. The deeper you follow it, the richer the haul.${featuredDepthNote}`
-            )
-            .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · 15 seconds per choice — miss a round and you stop there.` })],
-        components: [],
-    });
-    const mineMsg = await interaction.fetchReply();
-    await delay(1500);
-
-    let veinDepth = 0;
-    const roundLog = [];
-
-    for (let round = 0; round < 3; round++) {
-        const oreDir  = DIRS[Math.floor(Math.random() * DIRS.length)];
-        const grid    = buildGrid(oreDir.id);
-        const prevLog = roundLog.map((r, i) => r ? `✅` : `❌`).join(' ');
-
-        const veinEmbed = new EmbedBuilder()
-            .setColor('#B8860B')
-            .setTitle(`⛏️ Vein Read — Round ${round + 1}/3`)
-            .setDescription(
-                `${prevLog ? prevLog + '\n\n' : ''}` +
-                `*Mineral trace spotted — which way does the vein run?*\n\n` +
-                `\`\`\`\n${grid}\n\`\`\``
-            )
-            .setFooter({ text: '15 seconds to choose a direction.' });
-
-        const dirRow = new ActionRowBuilder().addComponents(
-            ...DIRS.map(d => new ButtonBuilder()
-                .setCustomId(`vein_${d.id}`)
-                .setLabel(d.label)
-                .setStyle(ButtonStyle.Primary)
-            )
-        );
-
-        await interaction.editReply({ embeds: [veinEmbed], components: [dirRow] });
-
-        const picked = await new Promise(resolve => {
-            const col = mineMsg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId.startsWith('vein_'),
-                time: 15_000,
-                max: 1,
-            });
-            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('vein_', '')); });
-            col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+    if (pickaxeData.requiresCharge && (m.charges[pickaxeData.chargeType] ?? 0) <= 0) {
+        return interaction.reply({
+            content: `You're out of **${pickaxeData.chargeType.replace(/_/g, ' ')}**! Buy more with \`/mine shop buy\`.`,
+            flags: MessageFlags.Ephemeral
         });
-
-        const correct = picked === oreDir.id;
-        roundLog.push(correct);
-        if (correct) veinDepth++;
-
-        const roundResult = new EmbedBuilder()
-            .setColor(correct ? '#00CC55' : picked ? '#CC4400' : '#888888')
-            .setTitle(correct ? '✅ Vein found!' : picked ? '❌ Dead end — rubble.' : '⏰ Hesitated…')
-            .setDescription(
-                correct
-                    ? `You followed the vein **${oreDir.label}**. It runs deeper here.`
-                    : picked
-                    ? `The vein ran **${oreDir.label}** — you hit rubble instead.`
-                    : `The vein ran **${oreDir.label}** — you didn't move in time.`
-            );
-        await interaction.editReply({ embeds: [roundResult], components: [] });
-        if (round < 2) await delay(900);
     }
 
-    // Map vein depth to intensity level
-    let intensityIndex = veinDepth; // 0→L1, 1→L2, 2→L3, 3→L4
-    if (veinDepth === 3 && Math.random() < 0.10) intensityIndex = 4; // lucky Abyss
-    const chosenIntensity = INTENSITY_LEVELS[intensityIndex];
+    // Atomically claim the cooldown slot now that all preflight checks have passed —
+    // lastMine is set the moment the dig is actually accepted, not earlier, so a
+    // failed precheck (stamina/pickaxe/charge) never burns the cooldown. The same
+    // guard stops two concurrent /mine dig calls from both slipping through.
+    //
+    // The claim targets GrindProfile, not User: mining state lives in its own
+    // collection (see src/models/User.js), so a User-level guard would match every
+    // document on the missing `mining` field and never reject anything.
+    const mineClaimNow = new Date();
+    const mineCooldownFloor = new Date(mineClaimNow.getTime() - LIMITS.MINE_COOLDOWN_MS);
+    const priorLastMine = m.lastMine ?? null;
+    await persistGrindIfNew(user, 'mining');
+    const mineClaimQuery = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'mining' };
+    const claimedMine = await GrindProfile.findOneAndUpdate(
+        {
+            ...mineClaimQuery,
+            $or: [{ 'data.lastMine': null }, { 'data.lastMine': { $lte: mineCooldownFloor } }],
+        },
+        { $set: { 'data.lastMine': mineClaimNow } },
+        { new: true },
+    );
 
-    const finalIcons = roundLog.map(r => r ? '✅' : '❌').join(' ');
-    const confirmEmbed = new EmbedBuilder()
-        .setColor(chosenIntensity.level >= 4 ? '#FF4444' : chosenIntensity.level >= 3 ? '#FFA500' : '#00AA55')
-        .setTitle(`${chosenIntensity.emoji} Digging ${chosenIntensity.name}…`)
-        .setDescription(
-            `${finalIcons}\n\n` +
-            `Vein depth reached: **${veinDepth}/3 correct**\n` +
-            `**${chosenIntensity.multiplier}×** payout  |  **${(chosenIntensity.caveInRisk * 100).toFixed(0)}%** cave-in risk`
-        );
-    await interaction.editReply({ embeds: [confirmEmbed], components: [] });
-
-    // Crystal Fox pet: +15% mine yield (only if hunger >= 30)
-    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
-    const petMineYieldPct = getTotalBonus(user.pets || [], 'mine_yield');
-
-    const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
-    const result = executeMine(user, depthId, { intensity: chosenIntensity, marketplaceActive });
-
-    // ── Cave-in Interactive Event ─────────────────────────────────────────────
-    // Resolved FIRST: pity, find counters, and yield bonuses below must only
-    // apply to rewards the player actually keeps, not ore abandoned in a collapse.
-    if (result.caveIn) {
-        const m = user.mining;
-        const equippedPickaxe = m.pickaxes?.[m.equippedPickaxeIndex];
-        const pickaxeStaticData = equippedPickaxe ? PICKAXE_BY_TIER[equippedPickaxe.tier] : null;
-        const chargeType = pickaxeStaticData?.chargeType;
-        const chargesAvailable = chargeType ? (m.charges?.[chargeType] ?? 0) : 0;
-
-        const caveInEmbed = new EmbedBuilder()
-            .setColor('#8B0000')
-            .setTitle('🌑 CAVE-IN!')
-            .setDescription(
-                `━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `The tunnel is collapsing around you. Dust fills the air.\n` +
-                `You have seconds to decide.\n\n` +
-                `⚡ **Ore at stake:** ${(result.caveInPayout ?? 0).toLocaleString()} coins\n\n` +
-                (chargesAvailable > 0
-                    ? `💥 You have **${chargesAvailable}** blast charge${chargesAvailable !== 1 ? 's' : ''} — enough to blow an escape route.`
-                    : `⚠️ You have no blast charges — you'll have to run.`)
-            )
-            .setFooter({ text: 'You have 20 seconds to decide.' });
-
-        const caveInId = `cavein_${interaction.id}`;
-        const blastBtn = new ButtonBuilder()
-            .setCustomId(`${caveInId}_blast`)
-            .setLabel('💥 Use a Blast Charge — save your ore')
-            .setStyle(ButtonStyle.Success)
-            .setDisabled(chargesAvailable <= 0);
-        const abandonBtn = new ButtonBuilder()
-            .setCustomId(`${caveInId}_abandon`)
-            .setLabel('🏃 Abandon the Dig — flee empty-handed')
-            .setStyle(ButtonStyle.Danger);
-        const caveInRow = new ActionRowBuilder().addComponents(blastBtn, abandonBtn);
-
-        await interaction.editReply({ embeds: [caveInEmbed], components: [caveInRow] });
-        const caveInMsg = await interaction.fetchReply();
-
-        const caveInChoice = await new Promise(resolve => {
-            const col = caveInMsg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId.startsWith(caveInId),
-                time: 20_000,
-                max: 1,
-            });
-            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.endsWith('_blast') ? 'blast' : 'abandon'); });
-            col.on('end', (_, reason) => { if (reason !== 'limit') resolve('abandon'); });
+    if (!claimedMine) {
+        // Losing the claim means another dig already took the slot, so the
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the dig that actually happened. If that read fails,
+        // fall back to now rather than the snapshot: reaching the claim at all
+        // means the snapshot was already past the cooldown floor, so it would
+        // render a countdown in the past and tell the player they can dig again.
+        const current = await GrindProfile.findOne(mineClaimQuery).catch(() => null);
+        const lastAt  = current?.data?.lastMine ?? mineClaimNow;
+        const nextAt  = new Date(new Date(lastAt).getTime() + LIMITS.MINE_COOLDOWN_MS);
+        return interaction.reply({
+            embeds: [buildCooldownEmbed({
+                title: '⛏️ Catching Your Breath',
+                description: 'You just came up from a dig.\nTake a short break before heading back down.',
+                color: '#b5651d',
+                nextAt,
+            })],
+            flags: MessageFlags.Ephemeral,
         });
-
-        if (caveInChoice === 'blast' && chargesAvailable > 0) {
-            // Deduct one blast charge and keep the payout
-            if (chargeType) {
-                m.charges[chargeType] = chargesAvailable - 1;
-                user.markModified('mining');
-            }
-            result.caveInEscaped = true;
-        } else {
-            // Abandon: reverse the payout and any tier-find counters executeMine already booked
-            if (result.caveInPayout) {
-                user.balance       -= result.caveInPayout;
-                m.totalEarned      -= result.caveInPayout;
-                m.dailyCoins       -= result.caveInPayout;
-                result.finalPayout  = 0;
-            }
-            if (result.tier === 'legendary') m.legendaryFinds = Math.max(0, m.legendaryFinds - 1);
-            if (result.tier === 'event')     m.eventFinds     = Math.max(0, m.eventFinds - 1);
-            result.caveInAbandoned = true;
-        }
     }
+    m.lastMine = mineClaimNow;
 
-    // Pity counter: reset only when a rare+ find was actually kept (not abandoned in a cave-in)
-    const keptRareFind = result.success && !result.caveInAbandoned && ['rare', 'epic', 'legendary', 'event'].includes(result.tier);
-    if (keptRareFind) {
-        user.mining.sinceRare = 0;
-    } else {
-        user.mining.sinceRare = (user.mining.sinceRare ?? 0) + 1;
-    }
+    // The claim is a real write now, so a dig that dies before its result is
+    // saved would otherwise cost the player a full cooldown for nothing. Hand the
+    // slot back — but only while it is still ours, so a newer claim isn't undone.
+    const releaseMineClaim = () => GrindProfile.updateOne(
+        { ...mineClaimQuery, 'data.lastMine': mineClaimNow },
+        { $set: { 'data.lastMine': priorLastMine } },
+    ).catch(() => null);
 
-    // Yield bonuses below are gated on result.finalPayout > 0, which an abandoned
-    // cave-in resets to 0 above — so abandoning correctly forfeits these too.
-    if (result.success && result.finalPayout > 0 && isFeaturedDepth) {
-        const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
-        if (featBonus > 0) {
-            user.balance               += featBonus;
-            user.mining.totalEarned    += featBonus;
-            user.mining.dailyCoins     += featBonus;
-            result.finalPayout         += featBonus;
-            result.featuredDepthBonus   = featBonus;
-        }
-    }
-
-    if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
-        const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
-        if (bonus > 0) {
-            user.balance              += bonus;
-            user.mining.totalEarned   += bonus;
-            user.mining.dailyCoins    += bonus;
-            result.finalPayout        += bonus;
-            result.petYieldBonus       = bonus;
-        }
-    }
-
-    // Wilderness district: +10% mine yield (clamped to daily hard cap)
-    const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
-    if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const remaining = LIMITS.DAILY_HARD_CAP - user.mining.dailyCoins;
-        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
-        if (bonus > 0) {
-            user.balance               += bonus;
-            user.mining.totalEarned    += bonus;
-            user.mining.dailyCoins     += bonus;
-            result.finalPayout         += bonus;
-            result.wildernessBonus      = bonus;
-        }
-    }
-
-    // bestPayout must reflect what the player actually walked away with, so this
-    // runs after the cave-in resolution and all yield bonuses above.
-    if (result.success && result.finalPayout > user.mining.bestPayout) user.mining.bestPayout = result.finalPayout;
-
-    updateMineQuestProgress(user, result, depthId);
-
-    // Update the persistent mine map with this dig's result
-    updateMineMap(user, result);
-
-    await ensureQuests(user, guildSettings);
-    const { completed: questsDone, nearComplete: questsNear } = await onMine(user, guildSettings);
-    if (result.success && result.finalPayout > 0) {
-        const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
-        questsDone.push(...earn.completed);
-        questsNear.push(...earn.nearComplete);
-    }
-
-    // Rare companions are found, not bought: a legendary result is the only
-    // thing that can turn one up. Rolled before the save below persists it.
-    // Mirrors the keptRareFind predicate above: a cave-in the player fled leaves
-    // result.success true while revoking the find, and an abandoned haul must not
-    // hand out a companion either.
-    const rarePetDrop = result.success && !result.caveInAbandoned
-        ? tryGrantRarePet(user, 'mine', result.tier)
-        : null;
-    if (rarePetDrop) user.markModified('pets');
-
-    const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
-
+    // Everything between here and the save can still fail — a Discord API error
+    // while collecting the vein prompts, a service throwing — and until the result
+    // is persisted the player has nothing to show for the cooldown they just paid
+    // for. Hand the slot back on the way out unless the dig committed.
+    let mineCommitted = false;
     try {
-        await user.save();
-        if (mineAchievements.length) {
-            announceAchievements(interaction.client, guildSettings, user, interaction.member, mineAchievements).catch(() => null);
+
+        // The charge comes out only once the cooldown slot is ours, so a lost race
+        // never costs the player a charge.
+        if (pickaxeData.requiresCharge) {
+            m.charges[pickaxeData.chargeType] = (m.charges[pickaxeData.chargeType] ?? 0) - 1;
+            user.markModified('mining');
         }
-        notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
-        notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
-    } catch (err) {
-        if (err.name === 'VersionError') {
-            return interaction.editReply({ content: 'A simultaneous request conflicted with your mine. Please try `/mine dig` again.' });
+
+        // ── Vein-Following Puzzle ──────────────────────────────────────────────────
+        // 3 rounds of directional navigation through a mine tunnel.
+        // Each round: a 3×3 emoji grid shows the current position (⛏️) and a mineral
+        // trace in one of the 4 adjacent cells. Player picks the matching direction.
+        // Correct directions accumulate depth; final depth maps to intensity level.
+        //   0/3 correct → Surface  (0.7×, 0% cave-in)
+        //   1/3 correct → Shallow  (1.0×, 5% cave-in)
+        //   2/3 correct → Mid      (1.4×, 12% cave-in)
+        //   3/3 correct → Deep     (2.0×, 20% cave-in)
+        //   3/3 + lucky → Abyss    (3.0×, 30% cave-in)  10% chance on a perfect run
+
+        const featured         = getDailyFeatured(interaction.guild.id);
+        const isFeaturedDepth  = depthId === featured.mineDepth.id;
+        const timeBand         = getTimeBand();
+        const delay = ms => new Promise(r => setTimeout(r, ms));
+
+        const DIRS = [
+            { id: 'N', label: '⬆️ North', row: 0, col: 1 },
+            { id: 'S', label: '⬇️ South', row: 2, col: 1 },
+            { id: 'W', label: '⬅️ West',  row: 1, col: 0 },
+            { id: 'E', label: '➡️ East',  row: 1, col: 2 },
+        ];
+
+        // Build a 3×3 grid string highlighting the ore direction
+        function buildGrid(oreDir) {
+            const grid = [
+                ['🪨', '🪨', '🪨'],
+                ['🪨', '⛏️', '🪨'],
+                ['🪨', '🪨', '🪨'],
+            ];
+            const d = DIRS.find(d => d.id === oreDir);
+            grid[d.row][d.col] = '✨';
+            return grid.map(row => row.join(' ')).join('\n');
         }
-        console.error('[mine] save error:', err);
-        return interaction.editReply({ content: 'Something went wrong saving your mine. Please try again.' });
-    }
 
-    // Log big win, then await hourly leader update and re-fetch for accurate footer
-    if (result.success && result.finalPayout > 0) {
-        const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-        if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
-            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'mine', details: { itemName: result.ore?.name, rarity: result.tier }, client: interaction.client });
-        }
-        await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
-    }
-    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'mine').catch(() => null);
+        const featuredDepthNote = isFeaturedDepth
+            ? `\n🌟 **Featured Depth!** +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout active.`
+            : '';
 
-    const embed = buildMineEmbed(result, user, depth, pickaxe, currency, interaction.user);
-    {
-        const desc = embed.data.description ?? '';
-        const lines = [`> ⛏️ *${finalIcons} — Vein depth ${veinDepth}/3 → ${chosenIntensity.emoji} ${chosenIntensity.name} (${chosenIntensity.multiplier}×)*`];
-        if (result.caveIn && result.caveInEscaped) lines.push(`> 💥 *Cave-in! You used a blast charge — ore saved.*`);
-        else if (result.caveIn) lines.push(`> 💥 *${randomFrom(MINE_CAVE_LINES)}*`);
-        embed.setDescription(desc + '\n' + lines.join('\n'));
-    }
-    if (result.featuredDepthBonus > 0) {
-        embed.addFields({ name: '🌟 Featured Depth Bonus', value: `+${result.featuredDepthBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
-    }
-    if (result.petYieldBonus > 0) {
-        embed.addFields({ name: '💎 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petMineYieldPct}% yield)`, inline: true });
-    }
-    if (result.wildernessBonus > 0) {
-        embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
-    }
-
-    // Hourly leader footer
-    const leaderNote = hourlyLeader
-        ? `🏆 Biggest dig this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
-        : '🏆 No hourly leader yet — be the first!';
-    const existingFooter = embed.data.footer?.text ?? '';
-    embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
-
-    // Rare companion drop — announced prominently; this is the only way to get one.
-    if (rarePetDrop) {
-        embed.addFields({
-            name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
-            value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
-                 + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
-                 + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
-            inline: false,
+        await interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setColor(isFeaturedDepth ? '#FFD700' : '#8B4513')
+                .setTitle(`⛏️ Entering ${depth.emoji} ${depth.name}…`)
+                .setDescription(
+                    `*You lower yourself into the shaft. Dust settles. Your lamp catches a glint…*\n\n` +
+                    `**Follow the vein** — 3 rounds of directional choices. The deeper you follow it, the richer the haul.${featuredDepthNote}`
+                )
+                .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · 15 seconds per choice — miss a round and you stop there.` })],
+            components: [],
         });
-    }
+        const mineMsg = await interaction.fetchReply();
+        await delay(1500);
 
-    // Pet narrative: show active pet's personality flavor in description
-    if (result.success) {
-        const activePet = (user.pets || []).find(p => isPetActive(p));
-        if (activePet) {
-            const petDef = PET_DEFS[activePet.petId];
-            const petName = activePet.name || petDef?.name || activePet.petId;
-            const flavorFn = TRAIT_FLAVOR[activePet.personality]?.mine;
-            if (flavorFn && petDef) {
-                const desc = embed.data.description ?? '';
-                embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
+        let veinDepth = 0;
+        const roundLog = [];
+
+        for (let round = 0; round < 3; round++) {
+            const oreDir  = DIRS[Math.floor(Math.random() * DIRS.length)];
+            const grid    = buildGrid(oreDir.id);
+            const prevLog = roundLog.map((r, i) => r ? `✅` : `❌`).join(' ');
+
+            const veinEmbed = new EmbedBuilder()
+                .setColor('#B8860B')
+                .setTitle(`⛏️ Vein Read — Round ${round + 1}/3`)
+                .setDescription(
+                    `${prevLog ? prevLog + '\n\n' : ''}` +
+                    `*Mineral trace spotted — which way does the vein run?*\n\n` +
+                    `\`\`\`\n${grid}\n\`\`\``
+                )
+                .setFooter({ text: '15 seconds to choose a direction.' });
+
+            const dirRow = new ActionRowBuilder().addComponents(
+                ...DIRS.map(d => new ButtonBuilder()
+                    .setCustomId(`vein_${d.id}`)
+                    .setLabel(d.label)
+                    .setStyle(ButtonStyle.Primary)
+                )
+            );
+
+            await interaction.editReply({ embeds: [veinEmbed], components: [dirRow] });
+
+            const picked = await new Promise(resolve => {
+                const col = mineMsg.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith('vein_'),
+                    time: 15_000,
+                    max: 1,
+                });
+                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('vein_', '')); });
+                col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+            });
+
+            const correct = picked === oreDir.id;
+            roundLog.push(correct);
+            if (correct) veinDepth++;
+
+            const roundResult = new EmbedBuilder()
+                .setColor(correct ? '#00CC55' : picked ? '#CC4400' : '#888888')
+                .setTitle(correct ? '✅ Vein found!' : picked ? '❌ Dead end — rubble.' : '⏰ Hesitated…')
+                .setDescription(
+                    correct
+                        ? `You followed the vein **${oreDir.label}**. It runs deeper here.`
+                        : picked
+                        ? `The vein ran **${oreDir.label}** — you hit rubble instead.`
+                        : `The vein ran **${oreDir.label}** — you didn't move in time.`
+                );
+            await interaction.editReply({ embeds: [roundResult], components: [] });
+            if (round < 2) await delay(900);
+        }
+
+        // Map vein depth to intensity level
+        let intensityIndex = veinDepth; // 0→L1, 1→L2, 2→L3, 3→L4
+        if (veinDepth === 3 && Math.random() < 0.10) intensityIndex = 4; // lucky Abyss
+        const chosenIntensity = INTENSITY_LEVELS[intensityIndex];
+
+        const finalIcons = roundLog.map(r => r ? '✅' : '❌').join(' ');
+        const confirmEmbed = new EmbedBuilder()
+            .setColor(chosenIntensity.level >= 4 ? '#FF4444' : chosenIntensity.level >= 3 ? '#FFA500' : '#00AA55')
+            .setTitle(`${chosenIntensity.emoji} Digging ${chosenIntensity.name}…`)
+            .setDescription(
+                `${finalIcons}\n\n` +
+                `Vein depth reached: **${veinDepth}/3 correct**\n` +
+                `**${chosenIntensity.multiplier}×** payout  |  **${(chosenIntensity.caveInRisk * 100).toFixed(0)}%** cave-in risk`
+            );
+        await interaction.editReply({ embeds: [confirmEmbed], components: [] });
+
+        // Crystal Fox pet: +15% mine yield (only if hunger >= 30)
+        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
+        const petMineYieldPct = getTotalBonus(user.pets || [], 'mine_yield');
+
+        const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
+        const result = executeMine(user, depthId, { intensity: chosenIntensity, marketplaceActive });
+
+        // ── Cave-in Interactive Event ─────────────────────────────────────────────
+        // Resolved FIRST: pity, find counters, and yield bonuses below must only
+        // apply to rewards the player actually keeps, not ore abandoned in a collapse.
+        if (result.caveIn) {
+            const m = user.mining;
+            const equippedPickaxe = m.pickaxes?.[m.equippedPickaxeIndex];
+            const pickaxeStaticData = equippedPickaxe ? PICKAXE_BY_TIER[equippedPickaxe.tier] : null;
+            const chargeType = pickaxeStaticData?.chargeType;
+            const chargesAvailable = chargeType ? (m.charges?.[chargeType] ?? 0) : 0;
+
+            const caveInEmbed = new EmbedBuilder()
+                .setColor('#8B0000')
+                .setTitle('🌑 CAVE-IN!')
+                .setDescription(
+                    `━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `The tunnel is collapsing around you. Dust fills the air.\n` +
+                    `You have seconds to decide.\n\n` +
+                    `⚡ **Ore at stake:** ${(result.caveInPayout ?? 0).toLocaleString()} coins\n\n` +
+                    (chargesAvailable > 0
+                        ? `💥 You have **${chargesAvailable}** blast charge${chargesAvailable !== 1 ? 's' : ''} — enough to blow an escape route.`
+                        : `⚠️ You have no blast charges — you'll have to run.`)
+                )
+                .setFooter({ text: 'You have 20 seconds to decide.' });
+
+            const caveInId = `cavein_${interaction.id}`;
+            const blastBtn = new ButtonBuilder()
+                .setCustomId(`${caveInId}_blast`)
+                .setLabel('💥 Use a Blast Charge — save your ore')
+                .setStyle(ButtonStyle.Success)
+                .setDisabled(chargesAvailable <= 0);
+            const abandonBtn = new ButtonBuilder()
+                .setCustomId(`${caveInId}_abandon`)
+                .setLabel('🏃 Abandon the Dig — flee empty-handed')
+                .setStyle(ButtonStyle.Danger);
+            const caveInRow = new ActionRowBuilder().addComponents(blastBtn, abandonBtn);
+
+            await interaction.editReply({ embeds: [caveInEmbed], components: [caveInRow] });
+            const caveInMsg = await interaction.fetchReply();
+
+            const caveInChoice = await new Promise(resolve => {
+                const col = caveInMsg.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith(caveInId),
+                    time: 20_000,
+                    max: 1,
+                });
+                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.endsWith('_blast') ? 'blast' : 'abandon'); });
+                col.on('end', (_, reason) => { if (reason !== 'limit') resolve('abandon'); });
+            });
+
+            if (caveInChoice === 'blast' && chargesAvailable > 0) {
+                // Deduct one blast charge and keep the payout
+                if (chargeType) {
+                    m.charges[chargeType] = chargesAvailable - 1;
+                    user.markModified('mining');
+                }
+                result.caveInEscaped = true;
+            } else {
+                // Abandon: reverse the payout and any tier-find counters executeMine already booked
+                if (result.caveInPayout) {
+                    user.balance       -= result.caveInPayout;
+                    m.totalEarned      -= result.caveInPayout;
+                    m.dailyCoins       -= result.caveInPayout;
+                    result.finalPayout  = 0;
+                }
+                if (result.tier === 'legendary') m.legendaryFinds = Math.max(0, m.legendaryFinds - 1);
+                if (result.tier === 'event')     m.eventFinds     = Math.max(0, m.eventFinds - 1);
+                result.caveInAbandoned = true;
             }
         }
-    }
 
-    // Staged loot reveal for rare+ drops
-    await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+        // Pity counter: reset only when a rare+ find was actually kept (not abandoned in a cave-in)
+        const keptRareFind = result.success && !result.caveInAbandoned && ['rare', 'epic', 'legendary', 'event'].includes(result.tier);
+        if (keptRareFind) {
+            user.mining.sinceRare = 0;
+        } else {
+            user.mining.sinceRare = (user.mining.sinceRare ?? 0) + 1;
+        }
 
-    if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
-        const announceChannelId = guildSettings?.economy?.announcementChannelId;
-        const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
-        const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-        const isLeg = result.tier === 'legendary';
-        const announcementEmbed = new EmbedBuilder()
-            .setColor(isLeg ? '#ff9800' : '#9c27b0')
-            .setTitle(isLeg ? '✨ Legendary Strike! ✨' : '🔮 Epic Ore Unearthed!')
-            .setDescription(
-                `<@${interaction.user.id}> just unearthed ${result.ore.emoji} **${result.ore.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
-                `at the **${depth.name}** depth.\n\n` +
-                (isLeg ? `That vein runs deep — and dangerous.` : `A rare find in these tunnels.`)
-            )
-            .setTimestamp();
-        announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
-    }
+        // Yield bonuses below are gated on result.finalPayout > 0, which an abandoned
+        // cave-in resets to 0 above — so abandoning correctly forfeits these too.
+        if (result.success && result.finalPayout > 0 && isFeaturedDepth) {
+            const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
+            if (featBonus > 0) {
+                user.balance               += featBonus;
+                user.mining.totalEarned    += featBonus;
+                user.mining.dailyCoins     += featBonus;
+                result.finalPayout         += featBonus;
+                result.featuredDepthBonus   = featBonus;
+            }
+        }
 
-    // Catastrophic cave-in server announcement (Deep or Abyss intensity, pickaxe destroyed)
-    if (result.caveIn && result.pickaxeBroke && chosenIntensity.level >= 4 && guildSettings?.economy?.announceRareDrops !== false) {
-        const announceChannelId = guildSettings?.economy?.announcementChannelId;
-        const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
-        const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-        const caveEmbed = new EmbedBuilder()
-            .setColor('#b5651d')
-            .setTitle('💥 Catastrophic Cave-in!')
-            .setDescription(
-                `<@${interaction.user.id}> just suffered a **catastrophic cave-in** at Depth **${chosenIntensity.name}** (${depth.name})!\n` +
-                `Their **${pickaxe.name}** has been destroyed.\n\n` +
-                `*Others are warned: the tunnel grows less stable the deeper you go.*`
-            )
-            .setTimestamp();
-        announceChannel.send({ embeds: [caveEmbed] }).catch(() => null);
+        if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
+            const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
+            if (bonus > 0) {
+                user.balance              += bonus;
+                user.mining.totalEarned   += bonus;
+                user.mining.dailyCoins    += bonus;
+                result.finalPayout        += bonus;
+                result.petYieldBonus       = bonus;
+            }
+        }
+
+        // Wilderness district: +10% mine yield (clamped to daily hard cap)
+        const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
+        if (result.success && result.finalPayout > 0 && wildernessActive) {
+            const remaining = LIMITS.DAILY_HARD_CAP - user.mining.dailyCoins;
+            const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+            const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+            if (bonus > 0) {
+                user.balance               += bonus;
+                user.mining.totalEarned    += bonus;
+                user.mining.dailyCoins     += bonus;
+                result.finalPayout         += bonus;
+                result.wildernessBonus      = bonus;
+            }
+        }
+
+        // bestPayout must reflect what the player actually walked away with, so this
+        // runs after the cave-in resolution and all yield bonuses above.
+        if (result.success && result.finalPayout > user.mining.bestPayout) user.mining.bestPayout = result.finalPayout;
+
+        updateMineQuestProgress(user, result, depthId);
+
+        // Update the persistent mine map with this dig's result
+        updateMineMap(user, result);
+
+        await ensureQuests(user, guildSettings);
+        const { completed: questsDone, nearComplete: questsNear } = await onMine(user, guildSettings);
+        if (result.success && result.finalPayout > 0) {
+            const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
+            questsDone.push(...earn.completed);
+            questsNear.push(...earn.nearComplete);
+        }
+
+        // Rare companions are found, not bought: a legendary result is the only
+        // thing that can turn one up. Rolled before the save below persists it.
+        // Mirrors the keptRareFind predicate above: a cave-in the player fled leaves
+        // result.success true while revoking the find, and an abandoned haul must not
+        // hand out a companion either.
+        const rarePetDrop = result.success && !result.caveInAbandoned
+            ? tryGrantRarePet(user, 'mine', result.tier)
+            : null;
+        if (rarePetDrop) user.markModified('pets');
+
+        const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
+
+        try {
+            await user.save();
+            mineCommitted = true;
+            if (mineAchievements.length) {
+                announceAchievements(interaction.client, guildSettings, user, interaction.member, mineAchievements).catch(() => null);
+            }
+            notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+            notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
+        } catch (err) {
+            // Nothing was saved, so give the cooldown slot back before telling them to retry.
+            await releaseMineClaim();
+            if (err.name === 'VersionError') {
+                return interaction.editReply({ content: 'A simultaneous request conflicted with your mine. Please try `/mine dig` again.' });
+            }
+            console.error('[mine] save error:', err);
+            return interaction.editReply({ content: 'Something went wrong saving your mine. Please try again.' });
+        }
+
+        // Log big win, then await hourly leader update and re-fetch for accurate footer
+        if (result.success && result.finalPayout > 0) {
+            const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+            if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'mine', details: { itemName: result.ore?.name, rarity: result.tier }, client: interaction.client });
+            }
+            await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
+        }
+        const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'mine').catch(() => null);
+
+        const embed = buildMineEmbed(result, user, depth, pickaxe, currency, interaction.user);
+        {
+            const desc = embed.data.description ?? '';
+            const lines = [`> ⛏️ *${finalIcons} — Vein depth ${veinDepth}/3 → ${chosenIntensity.emoji} ${chosenIntensity.name} (${chosenIntensity.multiplier}×)*`];
+            if (result.caveIn && result.caveInEscaped) lines.push(`> 💥 *Cave-in! You used a blast charge — ore saved.*`);
+            else if (result.caveIn) lines.push(`> 💥 *${randomFrom(MINE_CAVE_LINES)}*`);
+            embed.setDescription(desc + '\n' + lines.join('\n'));
+        }
+        if (result.featuredDepthBonus > 0) {
+            embed.addFields({ name: '🌟 Featured Depth Bonus', value: `+${result.featuredDepthBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
+        }
+        if (result.petYieldBonus > 0) {
+            embed.addFields({ name: '💎 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petMineYieldPct}% yield)`, inline: true });
+        }
+        if (result.wildernessBonus > 0) {
+            embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
+        }
+
+        // Hourly leader footer
+        const leaderNote = hourlyLeader
+            ? `🏆 Biggest dig this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
+            : '🏆 No hourly leader yet — be the first!';
+        const existingFooter = embed.data.footer?.text ?? '';
+        embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
+
+        // Rare companion drop — announced prominently; this is the only way to get one.
+        if (rarePetDrop) {
+            embed.addFields({
+                name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
+                value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
+                     + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                     + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
+                inline: false,
+            });
+        }
+
+        // Pet narrative: show active pet's personality flavor in description
+        if (result.success) {
+            const activePet = (user.pets || []).find(p => isPetActive(p));
+            if (activePet) {
+                const petDef = PET_DEFS[activePet.petId];
+                const petName = activePet.name || petDef?.name || activePet.petId;
+                const flavorFn = TRAIT_FLAVOR[activePet.personality]?.mine;
+                if (flavorFn && petDef) {
+                    const desc = embed.data.description ?? '';
+                    embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
+                }
+            }
+        }
+
+        // Staged loot reveal for rare+ drops
+        await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+
+        if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
+            const announceChannelId = guildSettings?.economy?.announcementChannelId;
+            const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
+            const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
+            const isLeg = result.tier === 'legendary';
+            const announcementEmbed = new EmbedBuilder()
+                .setColor(isLeg ? '#ff9800' : '#9c27b0')
+                .setTitle(isLeg ? '✨ Legendary Strike! ✨' : '🔮 Epic Ore Unearthed!')
+                .setDescription(
+                    `<@${interaction.user.id}> just unearthed ${result.ore.emoji} **${result.ore.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
+                    `at the **${depth.name}** depth.\n\n` +
+                    (isLeg ? `That vein runs deep — and dangerous.` : `A rare find in these tunnels.`)
+                )
+                .setTimestamp();
+            announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
+        }
+
+        // Catastrophic cave-in server announcement (Deep or Abyss intensity, pickaxe destroyed)
+        if (result.caveIn && result.pickaxeBroke && chosenIntensity.level >= 4 && guildSettings?.economy?.announceRareDrops !== false) {
+            const announceChannelId = guildSettings?.economy?.announcementChannelId;
+            const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
+            const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
+            const caveEmbed = new EmbedBuilder()
+                .setColor('#b5651d')
+                .setTitle('💥 Catastrophic Cave-in!')
+                .setDescription(
+                    `<@${interaction.user.id}> just suffered a **catastrophic cave-in** at Depth **${chosenIntensity.name}** (${depth.name})!\n` +
+                    `Their **${pickaxe.name}** has been destroyed.\n\n` +
+                    `*Others are warned: the tunnel grows less stable the deeper you go.*`
+                )
+                .setTimestamp();
+            announceChannel.send({ embeds: [caveEmbed] }).catch(() => null);
+        }
+    } catch (err) {
+        if (!mineCommitted) await releaseMineClaim();
+        throw err;
     }
 }
 
