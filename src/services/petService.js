@@ -108,6 +108,35 @@ function tryGrantRarePet(user, source, tier, rng = Math.random) {
     return def;
 }
 
+// ── Pet slots ─────────────────────────────────────────────────────────────────
+//
+// The shop has always sold a Pet Slot Expansion, but nothing enforced a limit,
+// so the item did nothing. Only *purchasable* pets consume a slot: the three
+// rare companions can each drop at most once ever and are exempt, so they can
+// never be locked out by a full roster.
+//
+// Existing rosters are grandfathered — being over capacity blocks further
+// adoptions and never removes a pet.
+
+const BASE_PET_SLOTS      = 3;
+const MAX_SLOT_EXPANSIONS = 3;
+
+/** How many purchasable pets this player may own. */
+function petCapacity(user) {
+    const bought = Math.min(Math.max(0, user?.petSlots ?? 0), MAX_SLOT_EXPANSIONS);
+    return BASE_PET_SLOTS + bought;
+}
+
+/** Purchasable pets currently owned — the ones that occupy a slot. */
+function countSlotPets(pets) {
+    return (pets ?? []).filter(p => PET_DEFINITIONS[p.petId]?.purchasable).length;
+}
+
+/** Whether the player has room to adopt another pet from the shop. */
+function hasFreePetSlot(user) {
+    return countSlotPets(user?.pets) < petCapacity(user);
+}
+
 const HUNGER_DECAY_PER_DAY = 10;
 const HUNGER_DECAY_RESTING  = 5;   // half-speed decay while resting
 const HUNGER_RESTORE_FAVORITE = 25;
@@ -281,6 +310,25 @@ function isPetActive(pet, now = Date.now()) {
 }
 
 /**
+ * Pick which of a defender's pets answers a challenge.
+ *
+ * Previously this was `pets.find(isPetActive)` — whichever battle-ready pet
+ * happened to sit first in the array, which is arbitrary and could throw a
+ * level 1 pet at a level 30 challenger. Prefer the closest level match, then
+ * the stronger pet.
+ */
+function pickDefenderPet(pets, challengerLevel = 1, now = Date.now()) {
+    const ready = (pets ?? []).filter(p => isPetActive(p, now));
+    if (ready.length === 0) return null;
+    return ready.reduce((best, pet) => {
+        const gap     = Math.abs((pet.level ?? 1) - challengerLevel);
+        const bestGap = Math.abs((best.level ?? 1) - challengerLevel);
+        if (gap !== bestGap) return gap < bestGap ? pet : best;
+        return (pet.level ?? 1) > (best.level ?? 1) ? pet : best;
+    });
+}
+
+/**
  * Apply accrued hunger decay to all pets. Call lazily on pet commands.
  * Returns a new array; entries with no elapsed time are returned untouched.
  *
@@ -371,8 +419,15 @@ function getPetBonus(pet, now = Date.now()) {
     return PET_DEFINITIONS[pet.petId] ?? null;
 }
 
+// Ceiling on the combined passive of one bonus type across every pet a player
+// owns. Two pets can share a bonus type (Fish + Shark both give fish_yield),
+// and fully invested that stacked to 50%. The cap sits above the best single
+// pet can reach on its own (a rare pet at level 30 is 37.5%) so maxing one pet
+// is never wasted — it only takes the edge off stacking duplicates.
+const MAX_STACKED_BONUS_PCT = 40;
+
 /**
- * Get total bonus of a given type from all active pets.
+ * Get total bonus of a given type from all active pets, capped.
  * Uses each pet's *effective* bonus (scaled by evolution + level), so investing
  * in a pet meaningfully improves its passive.
  */
@@ -384,7 +439,7 @@ function getTotalBonus(pets, bonusType, now = Date.now()) {
             total += getEffectiveBonusPct(pet);
         }
     }
-    return total;
+    return Math.min(total, MAX_STACKED_BONUS_PCT);
 }
 
 // ── Progression: leveling & evolution ───────────────────────────────────────
@@ -579,6 +634,11 @@ module.exports = {
     createPet,
     resolvePetRef,
     rollRarePet,
+    BASE_PET_SLOTS,
+    MAX_SLOT_EXPANSIONS,
+    petCapacity,
+    countSlotPets,
+    hasFreePetSlot,
     tryGrantRarePet,
     HUNGER_DECAY_PER_DAY,
     HUNGER_DECAY_RESTING,
@@ -591,6 +651,8 @@ module.exports = {
     decaySince,
     effectiveHunger,
     isPetActive,
+    pickDefenderPet,
+    MAX_STACKED_BONUS_PCT,
     checkRunaway,
     feedPet,
     getPetBonus,

@@ -10,7 +10,7 @@ const {
 } = require('../../services/effectsService');
 const { getItemLore } = require('../../data/defaultShopItems');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
-const { PET_DEFINITIONS } = require('../../services/petService');
+const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity } = require('../../services/petService');
 
 // itemId of a seasonal loot box -> the event definition that owns it
 const LOOT_BOX_EVENTS = new Map(
@@ -198,6 +198,44 @@ module.exports = {
                 .setDescription(
                     `A permanent +5% crime success bonus has been added to your record.\n\n` +
                     `**Contract stacks:** ${newStacks} / ${MAX_STACKS} (+${newStacks * 5}% total bonus)`
+                )
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        // ── Pet Slot Expansion ─────────────────────────────────────────────────
+        if (canonicalId.toLowerCase() === 'pet_slot_expansion') {
+            if ((preview.petSlots ?? 0) >= MAX_SLOT_EXPANSIONS) {
+                return interaction.reply({
+                    content: `🐾 You already have all **${MAX_SLOT_EXPANSIONS}** expansions (${petCapacity(preview)} pet slots). There's no more room to make.`,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            const user = await User.findOneAndUpdate(
+                {
+                    ...userFilter,
+                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
+                    petSlots: { $lt: MAX_SLOT_EXPANSIONS },
+                },
+                { $inc: { 'inventory.$.quantity': -1, petSlots: 1 } },
+                { new: true }
+            );
+            if (!user) {
+                return interaction.reply({ content: "Couldn't add the slot — you may be at the cap already.", flags: MessageFlags.Ephemeral });
+            }
+
+            user.inventory = user.inventory.filter(e => e.quantity > 0);
+            await user.save();
+
+            const embed = new EmbedBuilder()
+                .setColor('#8e44ad')
+                .setTitle('🐾 Pet Slot Added')
+                .setDescription(
+                    `Room for one more companion.\n\n` +
+                    `**Slots:** ${petCapacity(user)} (${user.petSlots} / ${MAX_SLOT_EXPANSIONS} expansions used)\n` +
+                    `*Rare companions found while hunting, fishing or mining don't take up a slot.*`
                 )
                 .setTimestamp();
 

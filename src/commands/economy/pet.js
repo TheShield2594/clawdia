@@ -16,6 +16,7 @@ const {
     applyHungerDecay,
     effectiveHunger,
     isPetActive,
+    pickDefenderPet,
     REST_DURATION_MS,
     checkRunaway,
     feedPet,
@@ -38,6 +39,9 @@ const {
     makeWildPet,
     createPet,
     resolvePetRef,
+    hasFreePetSlot,
+    petCapacity,
+    countSlotPets,
     RARE_PET_DROP_CHANCE,
 } = require('../../services/petService');
 const { generatePetSprite } = require('../../utils/cardGenerator');
@@ -50,6 +54,9 @@ const HUNGER_BAR_LENGTH = 10;
 const BATTLE_COOLDOWN_MS  = 10 * 60 * 1000;    // per-pet battle cooldown
 const BATTLE_MIN_ACCOUNT_AGE_MS = 7 * 24 * 3_600_000; // wagered battles only
 const BATTLE_RAKE = 0.05;
+// Wagered battles only: pet stats scale hard with level, so an unbounded
+// matchup let a maxed pet farm newcomers for coins on a near-certain win.
+const BATTLE_MAX_LEVEL_GAP = 5;
 const _delay = ms => new Promise(r => setTimeout(r, ms));
 
 function hpBar(current, max, length = 10) {
@@ -354,6 +361,13 @@ async function executeAdopt(interaction) {
 
     if (guildSettings?.economy?.enabled === false) return interaction.reply({ content: 'The economy is disabled in this server.', flags: MessageFlags.Ephemeral });
     if ((user.pets ?? []).some(p => p.petId === petId)) return interaction.reply({ content: `You already own a ${def.emoji} **${def.name}**!`, flags: MessageFlags.Ephemeral });
+    if (!hasFreePetSlot(user)) {
+        return interaction.reply({
+            content: `🐾 You're caring for **${countSlotPets(user.pets)}** pets and have room for **${petCapacity(user)}**. `
+                   + `Release one with \`/pet release\`, or buy a **Pet Slot Expansion** from \`/shop\` for another slot.`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
 
     const currency = guildSettings?.economy?.currency ?? '💰';
     if (user.balance < def.cost) {
@@ -790,9 +804,21 @@ async function executeBattle(interaction) {
     }
 
     const oppUser = await User.findOne({ userId: opponent.id, guildId: interaction.guild.id });
-    const oppPet  = oppUser?.pets?.find(p => isPetActive(p));
+    const oppPet  = pickDefenderPet(oppUser?.pets, myPet.level ?? 1);
     if (!oppPet) {
         return interaction.reply({ content: `${opponent.username} has no battle-ready pet (they need a fed pet).`, flags: MessageFlags.Ephemeral });
+    }
+
+    if (bet > 0) {
+        const gap = Math.abs((myPet.level ?? 1) - (oppPet.level ?? 1));
+        if (gap > BATTLE_MAX_LEVEL_GAP) {
+            return interaction.reply({
+                content: `⚖️ Wagered battles are limited to a **${BATTLE_MAX_LEVEL_GAP}-level** gap, and the closest match ${opponent.username} can field is `
+                       + `**Lv.${oppPet.level ?? 1}** against your **Lv.${myPet.level ?? 1}** — too lopsided to bet on. `
+                       + `You can still fight a friendly match by leaving out the wager.`,
+                flags: MessageFlags.Ephemeral,
+            });
+        }
     }
 
     return pvpBattle(interaction, { user, myPet, myPetId, opponent, oppUser, oppPet, bet, currency, guildSettings });
@@ -838,9 +864,10 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
 }
 
 async function pvpBattle(interaction, ctx) {
-    const { myPet, myPetId, opponent, bet, currency, guildSettings } = ctx;
+    const { myPet, myPetId, opponent, oppPet, bet, currency, guildSettings } = ctx;
     const guildId = interaction.guild.id;
     const da = getPetDisplay(myPet);
+    const db = oppPet ? getPetDisplay(oppPet) : null;
 
     const acceptId  = `petb_accept_${interaction.id}`;
     const declineId = `petb_decline_${interaction.id}`;
@@ -850,6 +877,9 @@ async function pvpBattle(interaction, ctx) {
         .setDescription(
             `${da.emoji} **${interaction.member?.displayName ?? interaction.user.username}'s ${da.titledName}** (Lv.${myPet.level ?? 1}) ` +
             `challenges ${opponent} to a battle!` +
+            // Name the defending pet up front — it is chosen automatically as the
+            // closest level match, and accepting blind to which pet fights is unfair.
+            (db ? `\n\n${db.emoji} **${db.titledName}** (Lv.${oppPet.level ?? 1}) will answer the call.` : '') +
             (bet > 0 ? `\n\n💰 Wager: **${currency}${bet.toLocaleString()}** each — winner takes the pot.` : '\n\n*Friendly match — pet XP only.*')
         )
         .setFooter({ text: 'Accept within 60 seconds' });
@@ -891,7 +921,7 @@ async function pvpBattle(interaction, ctx) {
             User.findOne({ userId: opponent.id, guildId }),
         ]);
         const aPet = resolvePetRef(chUser?.pets, myPetId)?.pet;
-        const bPet = opUser?.pets?.find(p => isPetActive(p));
+        const bPet = pickDefenderPet(opUser?.pets, aPet?.level ?? 1);
 
         // If a fighter is gone, no longer battle-ready, or went on cooldown
         // between the challenge and acceptance, refund and abort.

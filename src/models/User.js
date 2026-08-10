@@ -191,6 +191,8 @@ const userSchema = new Schema({
     },
 
     // Pet system
+    // Extra pet slots bought with the Pet Slot Expansion item (capped in petService).
+    petSlots: { type: Number, default: 0, min: 0 },
     pets: [PET_FIELDS],
 
     // Pets lost to starvation, most recent first. Retained so a Revive Scroll
