@@ -1238,7 +1238,13 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
             { name: 'Reward',   value: 'Nothing',                             inline: true },
             { name: 'XP',       value: xpEarned > 0 ? `+${xpEarned} XP` : 'None', inline: true },
             { name: 'Rod',      value: buildRodLine(rod),                     inline: true },
-            { name: 'Stamina',  value: buildStaminaLine(user),                inline: true }
+            {
+                name: 'Stamina',
+                value: result.staminaSpared
+                    ? `${buildStaminaLine(user)}\n*Slack line — no stamina spent*`
+                    : buildStaminaLine(user),
+                inline: true
+            }
         );
 
     if ((user.fishing.consecutiveFails ?? 0) > 0) {

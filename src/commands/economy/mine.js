@@ -1819,7 +1819,13 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
             { name: 'Reward',  value: 'Nothing',                        inline: true },
             { name: 'XP',      value: xpEarned > 0 ? `+${xpEarned} XP` : 'None', inline: true },
             { name: 'Pickaxe', value: `${pickaxe.name} ${pickaxeStatusEmoji(pickaxe.status)}\n${durabilityBar(pickaxe.currentDurability, pickaxe.maxDurability)} ${pickaxe.currentDurability}/${pickaxe.maxDurability}`, inline: true },
-            { name: 'Stamina', value: buildStaminaLine(user), inline: true }
+            {
+                name: 'Stamina',
+                value: result.staminaSpared
+                    ? `${buildStaminaLine(user)}\n*Empty vein — no stamina spent*`
+                    : buildStaminaLine(user),
+                inline: true
+            }
         );
 
     if ((user.mining.consecutiveFails ?? 0) > 0) {

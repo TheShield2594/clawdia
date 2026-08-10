@@ -647,9 +647,15 @@ function executeMine(user, depthId, options = {}) {
         }
     }
 
+    // An empty vein costs time and pickaxe wear but no stamina: a dry run should
+    // burn your afternoon, not your ability to keep playing. Every harsher tier
+    // still costs a point.
+    const staminaSpared = !success && result.failure?.severity?.id === 'clean_miss';
+    result.staminaSpared = staminaSpared;
+
     m.totalMines  += 1;
     m.dailyMines  += 1;
-    m.stamina     -= 1;
+    if (!staminaSpared) m.stamina -= 1;
     m.lastMine     = new Date();
 
     tickConsumables(user);

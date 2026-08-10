@@ -811,9 +811,15 @@ function executeCast(user, locationId, options = {}) {
     }
 
     // Common post-cast updates
+    // A slack line costs time and rod wear but no stamina: a dry run should burn
+    // your afternoon, not your ability to keep playing. Every harsher tier — and
+    // the trait-driven escape above, which still pays XP — costs a point.
+    const staminaSpared = !success && result.failure?.severity?.id === 'line_slack';
+    result.staminaSpared = staminaSpared;
+
     f.totalCasts += 1;
     f.dailyCasts += 1;
-    f.stamina    -= 1;
+    if (!staminaSpared) f.stamina -= 1;
     f.lastCast    = new Date();
 
     tickConsumables(user);
