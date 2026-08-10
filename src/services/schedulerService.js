@@ -482,11 +482,14 @@ async function selectPetOfTheWeek(client) {
             }
 
             // Clear last week's ribbons and counters, leaving the new winner's flag.
+            // Two writes rather than one: mixing $[] and $[old] over the same array
+            // in a single $set is a path conflict MongoDB can reject.
             await User.updateMany(
                 { guildId },
-                { $set: { 'pets.$[old].potw': false, 'pets.$[].weeklyInteractions': 0 } },
+                { $set: { 'pets.$[old].potw': false } },
                 { arrayFilters: [{ 'old._id': { $ne: top?.pet?._id ?? null } }] }
             );
+            await User.updateMany({ guildId }, { $set: { 'pets.$[].weeklyInteractions': 0 } });
 
             if (!top?.pet) continue;
             const bestUser  = { userId: top.userId };
