@@ -34,6 +34,8 @@ const DAILY_QUEST_POOL = [
       target: 6, difficulty: 'hard', category: 'joint' },
     { questId: 'daily_mine_3',          name: 'Rock Solid',         description: 'Mine 3 times',
       target: 3, difficulty: 'medium', category: 'mining' },
+    { questId: 'daily_pet_care_3',      name: 'Good Owner',         description: 'Feed, play with or rest your pets 3 times',
+      target: 3, difficulty: 'easy', category: 'pets' },
 ];
 
 const WEEKLY_QUEST_POOL = [
@@ -61,6 +63,8 @@ const WEEKLY_QUEST_POOL = [
       target: 25, difficulty: 'hard', category: 'joint' },
     { questId: 'weekly_mine_15',              name: 'Deep Dive',      description: 'Mine 15 times this week',
       target: 15, difficulty: 'medium', category: 'mining' },
+    { questId: 'weekly_pet_care_15',          name: 'Devoted Owner',  description: 'Care for your pets 15 times this week',
+      target: 15, difficulty: 'medium', category: 'pets' },
 ];
 
 const CATEGORY_EMOJIS = {
@@ -71,6 +75,7 @@ const CATEGORY_EMOJIS = {
     fishing: '🎣',
     mining:  '⛏️',
     joint:   '🔗',
+    pets:    '🐾',
     streak:  '🔥',
 };
 
@@ -401,6 +406,18 @@ async function onMine(user, guildSettings) {
     return { completed, nearComplete };
 }
 
+/** Any pet interaction: feeding, playing, resting or battling. */
+async function onPetCare(user, guildSettings) {
+    if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
+    const completed = [], nearComplete = [];
+    for (const questId of ['daily_pet_care_3', 'weekly_pet_care_15']) {
+        const { completed: def, nearComplete: nearDef } = await incrementQuest(user, questId);
+        if (def)     completed.push(await awardQuest(user, def, guildSettings));
+        if (nearDef) nearComplete.push(nearDef);
+    }
+    return { completed, nearComplete };
+}
+
 async function onStreakUpdate(user, guildSettings) {
     if (!guildSettings?.quests?.enabled) return { completed: [], nearComplete: [] };
     const streak       = user.streak?.current || 0;
@@ -549,7 +566,7 @@ function startQuestService() {
 module.exports = {
     ensureQuests, getQuestDefs, getDailyPool, getWeeklyPool,
     getCategoryEmojis, getDifficultyColors,
-    onMessage, onReaction, onCommandUse, onEconomyEarn, onHunt, onFish, onMine, onStreakUpdate,
+    onMessage, onReaction, onCommandUse, onEconomyEarn, onHunt, onFish, onMine, onPetCare, onStreakUpdate,
     awardSeasonXp, awardQuest, incrementAiQuestsForMechanic,
     notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset,
     startQuestService,

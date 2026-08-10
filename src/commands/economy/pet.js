@@ -48,6 +48,8 @@ const { generatePetSprite } = require('../../utils/cardGenerator');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
 const { logTransaction } = require('../../utils/logTransaction');
 const { MATERIAL_RARITY } = require('../../data/materialRarity');
+const { checkAndAward, announceAchievements } = require('../../services/achievementService');
+const { onPetCare, notifyQuestComplete } = require('../../services/questService');
 
 const NO_SUCH_PET = "Couldn't find that pet — pick one from the list `/pet status` shows, or start typing to choose from your pets.";
 const HUNGER_BAR_LENGTH = 10;
@@ -134,6 +136,36 @@ function petChoiceLabel(pet) {
     const hunger = Math.round(effectiveHunger(pet));
     const fed    = hunger >= STARVING_THRESHOLD ? '' : ' · hungry!';
     return `${name} — ${def?.name ?? pet.petId} Lv${pet.level ?? 1} · ${hunger}% fed${fed}`.slice(0, 100);
+}
+
+/**
+ * Evaluate achievements against the freshly mutated user. Pet achievements would
+ * otherwise only fire the next time the player happened to hunt, fish or mine,
+ * since those were the only commands running this check.
+ *
+ * Call before saving so one write persists the pet change and the unlock.
+ */
+/** Advance pet-care quest progress and surface any completions. */
+async function creditPetCare(interaction, user, guildSettings) {
+    const { completed } = await onPetCare(user, guildSettings).catch(err => {
+        console.error('[pet] quest progress failed:', err);
+        return { completed: [] };
+    });
+    if (completed.length) {
+        notifyQuestComplete(guildSettings, interaction.member, completed, interaction.channel, user).catch(() => {});
+    }
+}
+
+function collectPetAchievements(user, guildSettings) {
+    return checkAndAward(user, guildSettings).catch(err => {
+        console.error('[pet] achievement check failed:', err);
+        return [];
+    });
+}
+
+function announcePetAchievements(interaction, user, guildSettings, earned) {
+    if (!earned?.length) return;
+    announceAchievements(interaction.client, guildSettings, user, interaction.member, earned).catch(() => {});
 }
 
 async function resolveUser(interaction) {
@@ -395,12 +427,15 @@ async function executeAdopt(interaction) {
     user.markModified('pets');
     const personality = newPet.personality;
 
+    const earned = await collectPetAchievements(user, guildSettings);
+
     try {
         await user.save();
     } catch (err) {
         if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
+    announcePetAchievements(interaction, user, guildSettings, earned);
 
     const personalityDef = PERSONALITY_TRAITS[personality];
     const displayName = petName || def.name;
@@ -500,6 +535,7 @@ async function executeStatus(interaction) {
             freshUser.pets[idx].lastPlay           = new Date();
             freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
+            await creditPetCare(interaction, freshUser, guildSettings);
 
             try {
                 await freshUser.save();
@@ -540,6 +576,7 @@ async function executeStatus(interaction) {
             freshUser.pets[idx].restUntil           = new Date(Date.now() + REST_DURATION_MS);
             freshUser.pets[idx].weeklyInteractions  = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
+            await creditPetCare(interaction, freshUser, guildSettings);
 
             try {
                 await freshUser.save();
@@ -622,7 +659,7 @@ async function executeFeed(interaction) {
 
     await interaction.deferReply();
 
-    const user = await resolveUser(interaction);
+    const [user, guildSettings] = await Promise.all([resolveUser(interaction), Guild.findOne({ guildId: interaction.guild.id })]);
     await syncHungerAndRunaway(user, interaction);
 
     if (!user.pets || user.pets.length === 0) return interaction.editReply('You have no pets to feed!');
@@ -667,12 +704,16 @@ async function executeFeed(interaction) {
     const feedXp = applyPetXp(user.pets[petIndex], result.isFavorite ? XP_FEED_FAVORITE : XP_FEED_OTHER);
     user.markModified('pets');
 
+    await creditPetCare(interaction, user, guildSettings);
+    const earned = await collectPetAchievements(user, guildSettings);
+
     try {
         await user.save();
     } catch (err) {
         if (err.name === 'VersionError') return interaction.editReply('Edit conflict — please try again.');
         throw err;
     }
+    announcePetAchievements(interaction, user, guildSettings, earned);
 
     const displayName  = pet.name || def?.name || pet.petId;
     const favoriteNote = result.isFavorite ? ' *(favorite food — +25 hunger!)*' : ' *(not favorite — +10 hunger)*';
@@ -935,12 +976,14 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
     if (won) myPet.battleWins   = (myPet.battleWins ?? 0) + 1;
     else     myPet.battleLosses = (myPet.battleLosses ?? 0) + 1;
     user.markModified('pets');
+    const earned = await collectPetAchievements(user, guildSettings);
     try {
         await user.save();
     } catch (err) {
         if (err.name === 'VersionError') return interaction.editReply({ content: 'Edit conflict — please try again.', embeds: [] });
         throw err;
     }
+    announcePetAchievements(interaction, user, guildSettings, earned);
 
     return interaction.editReply({
         embeds: [battleResultEmbed({
@@ -1068,11 +1111,17 @@ async function pvpBattle(interaction, ctx) {
                 (houseCut > 0 ? `  *(house kept ${Math.round(houseCut * 100)}%)*` : '');
         }
 
+        const [earnedA, earnedB] = await Promise.all([
+            collectPetAchievements(chUser, guildSettings),
+            collectPetAchievements(opUser, guildSettings),
+        ]);
         try {
             await Promise.all([chUser.save(), opUser.save()]);
         } catch (err) {
             console.error('[pet battle] save error:', err);
         }
+        announcePetAchievements(interaction, chUser, guildSettings, earnedA);
+        announcePetAchievements(interaction, opUser, guildSettings, earnedB);
 
         const da2 = getPetDisplay(aSnap), db2 = getPetDisplay(bSnap);
         const winnerDisp = aWon ? da2 : db2;

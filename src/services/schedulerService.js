@@ -438,9 +438,13 @@ async function awardWeeklyLeaderboardBadges(client) {
 
 // ── Pet of the Week ───────────────────────────────────────────────────────────
 
+// Pet of the Week payout. Overridable per guild via economy.potwReward.
+const POTW_COIN_REWARD = 5_000;
+
 async function selectPetOfTheWeek(client) {
     const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
     const { generatePetSprite } = require('../utils/cardGenerator');
+    const { logTransaction } = require('../utils/logTransaction');
 
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const guilds  = await Guild.find({}, 'guildId economy potwLastRunAt').lean();
@@ -456,31 +460,52 @@ async function selectPetOfTheWeek(client) {
             );
             if (!claimed) continue; // another worker already ran POTW for this guild this week
 
-            const users = await User.find({ guildId, 'pets.0': { $exists: true } }, 'userId pets').lean();
-            if (!users.length) continue;
+            // Pick the winner in the database rather than loading every user with a
+            // pet into memory and scanning in JS.
+            const [top] = await User.aggregate([
+                { $match: { guildId, 'pets.0': { $exists: true } } },
+                { $unwind: '$pets' },
+                { $match: { 'pets.weeklyInteractions': { $gt: 0 } } },
+                { $sort: { 'pets.weeklyInteractions': -1 } },
+                { $limit: 1 },
+                { $project: { _id: 0, userId: 1, pet: '$pets' } },
+            ]);
 
-            // Find pet with most weekly interactions
-            let bestUser = null, bestPet = null, bestCount = 0;
-            for (const u of users) {
-                for (const pet of (u.pets ?? [])) {
-                    if ((pet.weeklyInteractions || 0) > bestCount) {
-                        bestCount = pet.weeklyInteractions;
-                        bestPet   = pet;
-                        bestUser  = u;
-                    }
-                }
+            // Crown the winner BEFORE clearing counters. Doing it the other way
+            // round meant a failure between the two left the week with no POTW and
+            // the counts already wiped, with nothing to recompute from.
+            if (top?.pet?._id) {
+                await User.updateOne(
+                    { guildId, userId: top.userId, 'pets._id': top.pet._id },
+                    { $set: { 'pets.$.potw': true } }
+                );
             }
 
-            // Reset weekly interaction counts + clear old POTW flags for all pets in guild
-            await User.updateMany({ guildId }, { $set: { 'pets.$[].potw': false, 'pets.$[].weeklyInteractions': 0 } });
-
-            if (!bestPet || bestCount === 0) continue;
-
-            // Set POTW on winning pet
-            await User.updateOne(
-                { guildId, userId: bestUser.userId, 'pets._id': bestPet._id },
-                { $set: { 'pets.$.potw': true } }
+            // Clear last week's ribbons and counters, leaving the new winner's flag.
+            await User.updateMany(
+                { guildId },
+                { $set: { 'pets.$[old].potw': false, 'pets.$[].weeklyInteractions': 0 } },
+                { arrayFilters: [{ 'old._id': { $ne: top?.pet?._id ?? null } }] }
             );
+
+            if (!top?.pet) continue;
+            const bestUser  = { userId: top.userId };
+            const bestPet   = top.pet;
+            const bestCount = bestPet.weeklyInteractions ?? 0;
+
+            // Winning is worth something now — it used to be a flag and an embed.
+            const potwCoins = guildDoc.economy?.potwReward ?? POTW_COIN_REWARD;
+            if (potwCoins > 0) {
+                const paid = await User.findOneAndUpdate(
+                    { guildId, userId: bestUser.userId },
+                    { $inc: { balance: potwCoins } },
+                    { new: true }
+                );
+                logTransaction({
+                    userId: bestUser.userId, guildId, type: 'potw_reward', amount: potwCoins,
+                    balance: paid?.balance ?? 0, note: 'Pet of the Week reward',
+                });
+            }
 
             // Determine announcement channel
             let channelId = guildDoc.economy?.announcementChannelId ?? null;
@@ -503,6 +528,7 @@ async function selectPetOfTheWeek(client) {
                     `_${bestCount} interaction${bestCount !== 1 ? 's' : ''} this week_`
                 )
                 .addFields({ name: '❤️ Bond', value: `${heartBar(bondDays)} ${bondDays} days`, inline: true })
+                .addFields({ name: '🏆 Prize', value: `${potwCoins.toLocaleString()} coins`, inline: true })
                 .setFooter({ text: 'Earn the ribbon by feeding, playing with, or resting your pet!' })
                 .setTimestamp();
 
