@@ -13,6 +13,7 @@ const {
     MINE_QUEST_TEMPLATES
 } = require('../data/mineData');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
+const { getPityBonus } = require('../utils/pityBonus');
 const { hasIronWill } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
 const { getGatheringYieldEffect, consumeEffect } = require('./effectsService');
@@ -167,10 +168,7 @@ function calculateSuccessChance(user, pickaxe, depth) {
     }
 
     // Pity system
-    const pityStacks = Math.min(m.consecutiveFails, LIMITS.PITY_CONSECUTIVE_FAILS);
-    if (pityStacks > 0) {
-        chance += pityStacks * LIMITS.PITY_BONUS_PER_STACK;
-    }
+    chance += getPityBonus(m.consecutiveFails, LIMITS);
 
     return Math.min(0.95, Math.max(0.10, chance));
 }
@@ -649,9 +647,15 @@ function executeMine(user, depthId, options = {}) {
         }
     }
 
+    // An empty vein costs time and pickaxe wear but no stamina: a dry run should
+    // burn your afternoon, not your ability to keep playing. Every harsher tier
+    // still costs a point.
+    const staminaSpared = !success && result.failure?.severity?.id === 'clean_miss';
+    result.staminaSpared = staminaSpared;
+
     m.totalMines  += 1;
     m.dailyMines  += 1;
-    m.stamina     -= 1;
+    if (!staminaSpared) m.stamina -= 1;
     m.lastMine     = new Date();
 
     tickConsumables(user);

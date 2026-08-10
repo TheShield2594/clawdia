@@ -14,8 +14,9 @@ const {
     TROPHY_QUALITIES,
     APEX_TYPES
 } = require('../data/huntData');
-const { hasEffect, consumeEffect, getGatheringYieldMultiplier, getGatheringYieldEffect } = require('./effectsService');
+const { hasEffect, consumeEffect, getEffect, getGatheringYieldEffect, EFFECT_CONFIGS } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
+const { getPityBonus } = require('../utils/pityBonus');
 const { getHuntSynergyStaminaBonus } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
 
@@ -191,10 +192,7 @@ function calculateSuccessChance(user, weapon, zone) {
     }
 
     // Pity system: consecutive failure streak bonus
-    const pityStacks = Math.min(h.consecutiveFails, LIMITS.PITY_CONSECUTIVE_FAILS);
-    if (pityStacks > 0) {
-        chance += pityStacks * LIMITS.PITY_BONUS_PER_STACK;
-    }
+    chance += getPityBonus(h.consecutiveFails, LIMITS);
 
     return Math.min(0.95, Math.max(0.10, chance));
 }
@@ -235,13 +233,18 @@ function rollTrophyQuality(user, weapon, isCrit) {
     // Base weights: [poor, normal, good, pristine, mythic]
     const w = [25, 45, 18, 9, 3];
 
-    // Weapon tier: each tier above 1 shifts weight from poor/normal toward good+
-    const tierBonus = weapon.tier - 1; // 0–4
-    w[0] = Math.max(0, w[0] - tierBonus * 2);
-    w[1] = Math.max(0, w[1] - tierBonus);
-    w[2] += Math.floor(tierBonus * 1.5);
-    w[3] += tierBonus;
-    w[4] += Math.floor(tierBonus * 0.5);
+    // Weapon tier shifts weight off poor/normal and onto good+. Scaled by progress
+    // along the whole tier ladder rather than by raw tier number, so the curve keeps
+    // its shape if tiers are ever added — the previous per-tier steps were tuned for
+    // a 5-tier ladder and would drive `poor` to 0 past T13.
+    const tierProgress = WEAPON_TIERS.length > 1
+        ? (weapon.tier - 1) / (WEAPON_TIERS.length - 1)   // 0 at T1 → 1 at max tier
+        : 0;
+    w[0] = Math.max(0, w[0] - Math.round(tierProgress * 18));
+    w[1] = Math.max(0, w[1] - Math.round(tierProgress * 10));
+    w[2] += Math.round(tierProgress * 14);
+    w[3] += Math.round(tierProgress * 10);
+    w[4] += Math.round(tierProgress * 4);
 
     // Critical hit: significant quality boost
     if (isCrit) {
@@ -416,9 +419,15 @@ function rollFailureSeverity() {
  *   - Zone payout bonus
  *   - Diminishing returns (daily hunt count)
  *   - Daily coin caps (soft and hard)
- * Returns { adjustedPayout, cappedByHard }
+ *
+ * `options.reuseGatheringYield` applies a doubling that a charge already paid
+ * for earlier in the same hunt rather than spending a second one — the apex
+ * bonus rides on the charge the kill itself spent.
+ *
+ * Returns { adjustedPayout, cappedByHard, gatheringYield }, where gatheringYield
+ * is { effect, label, emoji, chargesLeft } when a charge was spent here.
  */
-function applyPayoutModifiers(user, rawPayout, zone) {
+function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
     const h = user.hunt;
     let payout = rawPayout;
 
@@ -446,20 +455,40 @@ function applyPayoutModifiers(user, rawPayout, zone) {
         return { adjustedPayout: 0, cappedByHard: true };
     }
 
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
-    const gatherEffect = getGatheringYieldEffect(user);
-    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
+    // Applies the daily soft cap and clamps to the headroom left under the hard cap.
+    const softCapped = h.dailyCoins >= LIMITS.DAILY_SOFT_CAP;
+    const remaining  = LIMITS.DAILY_HARD_CAP - h.dailyCoins;
+    const settle = raw => Math.max(0, Math.min(softCapped ? Math.round(raw * 0.50) : raw, remaining));
 
-    // Soft cap: 50% reduction
-    if (h.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {
-        payout = Math.round(payout * 0.50);
+    const basePayout    = settle(payout);
+    const doubledPayout = settle(payout * 2);
+
+    // A doubling already paid for earlier this hunt — no second charge.
+    if (options.reuseGatheringYield) {
+        return { adjustedPayout: doubledPayout, cappedByHard: false, gatheringYield: null };
     }
 
-    // Don't let payout push past hard cap
-    const remaining = LIMITS.DAILY_HARD_CAP - h.dailyCoins;
-    payout = Math.min(payout, remaining);
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
+    // is active. Only burn the charge when doubling actually pays more — within a
+    // hair of the daily hard cap the headroom clamp swallows the bonus entirely, and
+    // a charge that buys nothing shouldn't be spent.
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect && doubledPayout > basePayout) {
+        consumeEffect(user, gatherEffect);
+        const cfg = EFFECT_CONFIGS[gatherEffect];
+        return {
+            adjustedPayout: doubledPayout,
+            cappedByHard:   false,
+            gatheringYield: {
+                effect:      gatherEffect,
+                label:       cfg?.label ?? gatherEffect.replace(/_/g, ' '),
+                emoji:       cfg?.emoji ?? '✨',
+                chargesLeft: getEffect(user, gatherEffect)?.charges ?? 0,
+            },
+        };
+    }
 
-    return { adjustedPayout: Math.max(0, payout), cappedByHard: false };
+    return { adjustedPayout: basePayout, cappedByHard: false, gatheringYield: null };
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -478,6 +507,18 @@ function applyDurabilityLoss(weapon, baseLoss) {
 }
 
 /**
+ * True once shop repairs have ground a weapon's durability ceiling below 20% of
+ * its original. Derived from the durability ratio rather than `weapon.status`:
+ * updateWeaponStatus reports 'broken' whenever current durability hits 0, which
+ * would otherwise mask condemnation and let a condemned weapon be repaired again
+ * every time it breaks.
+ */
+function isCondemned(weapon) {
+    if (!weapon?.baseDurability) return false;
+    return weapon.maxDurability / weapon.baseDurability < 0.20;
+}
+
+/**
  * Updates weapon status label based on current/max durability ratios.
  */
 function updateWeaponStatus(weapon) {
@@ -486,9 +527,33 @@ function updateWeaponStatus(weapon) {
         return;
     }
     const ratio = weapon.maxDurability / weapon.baseDurability;
-    if (ratio < 0.20)       weapon.status = 'condemned';
-    else if (ratio < 0.50)  weapon.status = 'degraded';
-    else                    weapon.status = 'good';
+    if (isCondemned(weapon))  weapon.status = 'condemned';
+    else if (ratio < 0.50)    weapon.status = 'degraded';
+    else                      weapon.status = 'good';
+}
+
+/**
+ * Prices one repair cycle without touching the weapon, so callers can check
+ * affordability before anything is mutated.
+ *
+ * Returns { cost, amount } or { error }.
+ */
+function quoteRepair(weapon, requestedAmount) {
+    const weaponData = WEAPON_BY_TIER[weapon.tier];
+    if (!weaponData) throw new Error('Unknown weapon tier');
+
+    if (isCondemned(weapon)) {
+        return { error: 'This weapon is condemned and cannot be repaired. Replace it.' };
+    }
+    if (weapon.status !== 'broken' && weapon.currentDurability >= weapon.maxDurability) {
+        return { error: 'Weapon is already at full durability.' };
+    }
+
+    const needed = weapon.maxDurability - weapon.currentDurability;
+    const amount = Math.min(requestedAmount ?? needed, needed);
+    const units  = Math.ceil(amount / 20);
+
+    return { cost: units * weaponData.repairCostPer20, amount };
 }
 
 /**
@@ -499,20 +564,9 @@ function updateWeaponStatus(weapon) {
  * Returns { cost, restoredAmount, newStatus, condemned }
  */
 function applyRepair(weapon, requestedAmount) {
-    const weaponData = WEAPON_BY_TIER[weapon.tier];
-    if (!weaponData) throw new Error('Unknown weapon tier');
-
-    if (weapon.status === 'condemned') {
-        return { error: 'This weapon is condemned and cannot be repaired. Replace it.' };
-    }
-    if (weapon.status !== 'broken' && weapon.currentDurability >= weapon.maxDurability) {
-        return { error: 'Weapon is already at full durability.' };
-    }
-
-    const needed = weapon.maxDurability - weapon.currentDurability;
-    const amount = Math.min(requestedAmount ?? needed, needed);
-    const units  = Math.ceil(amount / 20);
-    const cost   = units * weaponData.repairCostPer20;
+    const quote = quoteRepair(weapon, requestedAmount);
+    if (quote.error) return quote;
+    const { cost, amount } = quote;
 
     // Restore durability
     weapon.currentDurability = Math.min(weapon.maxDurability, weapon.currentDurability + amount);
@@ -527,7 +581,7 @@ function applyRepair(weapon, requestedAmount) {
 
     updateWeaponStatus(weapon);
 
-    return { cost, restoredAmount: amount, newStatus: weapon.status, condemned: weapon.status === 'condemned' };
+    return { cost, restoredAmount: amount, newStatus: weapon.status, condemned: isCondemned(weapon) };
 }
 
 // ─── LEVEL / XP ──────────────────────────────────────────────────────────────
@@ -757,7 +811,7 @@ function executeHunt(user, zoneId, options = {}) {
             result.traitEffects.push({ trait: 'enraged', msg: 'Its fury drove the prize higher (+25% payout).' });
         }
 
-        const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payoutBeforeMods, zone);
+        const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, payoutBeforeMods, zone);
 
         // Special drop
         let specialDrop = null;
@@ -830,6 +884,7 @@ function executeHunt(user, zoneId, options = {}) {
             specialDrop, xpEarned: xpGain,
             levelUp: lvResult.leveledUp ? lvResult : null,
             cappedByHard,
+            gatheringYield,
             streakMult
         });
 
@@ -886,9 +941,18 @@ function executeHunt(user, zoneId, options = {}) {
     }
 
     // ── Common post-hunt updates ────────────────────────────────────────
+    // A clean miss costs time and weapon wear but no stamina: a dry run should
+    // burn your afternoon, not your ability to keep playing. Every other outcome
+    // — including the harsher failure tiers — still costs a point.
+    const staminaSpared = !success && result.failure?.severity?.id === 'clean_miss';
+    result.staminaSpared = staminaSpared;
+
     h.totalHunts  += 1;
     h.dailyHunts  += 1;
-    h.stamina     -= 1;
+    // Clamped: venomous prey already docks a point above, so a hunter who started
+    // the hunt with exactly 1 would otherwise land on -1 — which /hunt profile
+    // turns into a RangeError building the stamina bar.
+    if (!staminaSpared) h.stamina = Math.max(0, h.stamina - 1);
     h.lastHunt     = new Date();
 
     // Ammo deduction (handled by caller after pre-check)
@@ -1111,6 +1175,8 @@ module.exports = {
     applyPayoutModifiers,
     applyDurabilityLoss,
     updateWeaponStatus,
+    isCondemned,
+    quoteRepair,
     applyRepair,
     levelFromXp,
     getLevelData,

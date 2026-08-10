@@ -40,6 +40,8 @@ const {
     activateConsumable,
     applyRepair,
     updateWeaponStatus,
+    isCondemned,
+    quoteRepair,
     applyXp,
     rollApexType,
     resolveApexEncounter,
@@ -54,6 +56,7 @@ const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/h
 const { isDistrictActive } = require('../../services/districtService');
 const { ensureQuests, onHunt, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { getActiveSynergies } = require('../../services/synergyService');
+const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 
 const WILDERNESS_YIELD_BONUS = 0.10;
 
@@ -460,42 +463,53 @@ async function executeStart(interaction) {
 
     if (weapon.status === 'broken' || weapon.currentDurability <= 0) {
         return interaction.reply({
-            content: `Your **${weapon.name}** is broken! Repair it with \`/hunt shop repair\` or buy a new one with \`/hunt shop weapon\`.`,
+            content: isCondemned(weapon)
+                ? `Your **${weapon.name}** is broken beyond repair — too many shop repairs have worn it out. Buy a replacement with \`/hunt shop weapon\` and discard this one with \`/hunt inv discard\`.`
+                : `Your **${weapon.name}** is broken! Repair it with \`/hunt shop repair\` or buy a new one with \`/hunt shop weapon\`.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
     const weaponData = WEAPON_BY_TIER[weapon.tier];
-    if (weaponData.requiresAmmo) {
-        const ammoStock = h.ammo[weaponData.ammoType] ?? 0;
-        if (ammoStock <= 0) {
-            return interaction.reply({
-                content: `You're out of **${weaponData.ammoType.replace(/_/g, ' ')}**! Buy more with \`/hunt shop buy\`.`,
-                flags: MessageFlags.Ephemeral
-            });
-        }
-        h.ammo[weaponData.ammoType] = ammoStock - 1;
-        user.markModified('hunt');
+    if (weaponData.requiresAmmo && (h.ammo[weaponData.ammoType] ?? 0) <= 0) {
+        return interaction.reply({
+            content: `You're out of **${weaponData.ammoType.replace(/_/g, ' ')}**! Buy more with \`/hunt shop buy\`.`,
+            flags: MessageFlags.Ephemeral
+        });
     }
 
     // Atomically claim the cooldown slot now that all preflight checks have passed —
     // lastHunt is set the moment the hunt is actually accepted, not earlier, so a
     // failed precheck (stamina/weapon/ammo) never burns the cooldown. The same guard
     // still prevents two concurrent /hunt start calls from both slipping through.
+    //
+    // The claim targets GrindProfile, not User: hunt state lives in its own
+    // collection (see src/models/User.js), so a User-level guard would match every
+    // document on the missing `hunt` field and never reject anything.
     const huntClaimNow = new Date();
     const huntCooldownFloor = new Date(huntClaimNow.getTime() - LIMITS.HUNT_COOLDOWN_MS);
-    const claimedHunt = await User.findOneAndUpdate(
+    const priorLastHunt = h.lastHunt ?? null;
+    await persistGrindIfNew(user, 'hunt');
+    const huntClaimQuery = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'hunt' };
+    const claimedHunt = await GrindProfile.findOneAndUpdate(
         {
-            userId: interaction.user.id,
-            guildId: interaction.guild.id,
-            $or: [{ 'hunt.lastHunt': null }, { 'hunt.lastHunt': { $lte: huntCooldownFloor } }],
+            ...huntClaimQuery,
+            $or: [{ 'data.lastHunt': null }, { 'data.lastHunt': { $lte: huntCooldownFloor } }],
         },
-        { $set: { 'hunt.lastHunt': huntClaimNow } },
+        { $set: { 'data.lastHunt': huntClaimNow } },
         { new: true },
     );
 
     if (!claimedHunt) {
-        const nextAt = new Date(h.lastHunt.getTime() + LIMITS.HUNT_COOLDOWN_MS);
+        // Losing the claim means another hunt already took the slot, so the
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the hunt that actually happened. If that read fails,
+        // fall back to now rather than the snapshot: reaching the claim at all
+        // means the snapshot was already past the cooldown floor, so it would
+        // render a countdown in the past and tell the player they can hunt again.
+        const current = await GrindProfile.findOne(huntClaimQuery).catch(() => null);
+        const lastAt  = current?.data?.lastHunt ?? huntClaimNow;
+        const nextAt  = new Date(new Date(lastAt).getTime() + LIMITS.HUNT_COOLDOWN_MS);
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '🫁 Catching Your Breath',
@@ -508,510 +522,559 @@ async function executeStart(interaction) {
     }
     h.lastHunt = huntClaimNow;
 
-    // ── Stealth Approach + Precision Aim ─────────────────────────────────────
-    // Phase 1 — Stealth: player reads a behaviour hint and picks the right approach.
-    //   Correct  → stealthBonus = +0.25 success chance, common→uncommon upgrade ~30%
-    //   Partial  → stealthBonus = +0.05 (safe but suboptimal)
-    //   Wrong    → stealthBonus = −0.10 (spooked the animal)
-    //   Timeout  → stealthBonus = 0
-    // Phase 2 — Aim: a single quick timing window for the shot.
-    //   Perfect (<0.8s) → aimBonus = +0.18 crit chance
-    //   Good    (<2.5s) → aimBonus = +0.08 crit chance
-    //   Timeout         → aimBonus = 0
+    // The claim is a real write now, so a hunt that dies before its result is
+    // saved would otherwise cost the player a full cooldown for nothing. Hand the
+    // slot back — but only while it is still ours, so a newer claim isn't undone.
+    const releaseHuntClaim = () => GrindProfile.updateOne(
+        { ...huntClaimQuery, 'data.lastHunt': huntClaimNow },
+        { $set: { 'data.lastHunt': priorLastHunt } },
+    ).catch(() => null);
 
-    let stealthBonus = 0;
-    let aimBonus     = 0;
-
-    const approachData = ZONE_APPROACHES[zoneId];
-    const delay = ms => new Promise(r => setTimeout(r, ms));
-
-    if (approachData) {
-        // Shuffle the 3 options
-        const shuffled = [...approachData.options].sort(() => Math.random() - 0.5);
-
-        const stealthEmbed = new EmbedBuilder()
-            .setColor('#556B2F')
-            .setTitle(`🌿 Approaching ${zone.emoji} ${zone.name}…`)
-            .setDescription(
-                `*${approachData.hint}*\n\n` +
-                `**How do you close in on your prey?**\n` +
-                `Choose wisely — the animal will react to your approach.`
-            )
-            .setFooter({ text: 'You have 15 seconds — or the hunt begins without a stealth bonus.' });
-
-        const stealthRow = new ActionRowBuilder().addComponents(
-            ...shuffled.map(opt => new ButtonBuilder()
-                .setCustomId(`stealth_${opt.id}`)
-                .setLabel(opt.label)
-                .setStyle(ButtonStyle.Primary)
-            )
-        );
-
-        await interaction.reply({ embeds: [stealthEmbed], components: [stealthRow] });
-        const huntMsg = await interaction.fetchReply();
-
-        const pickedId = await new Promise(resolve => {
-            const col = huntMsg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId.startsWith('stealth_'),
-                time: 15_000,
-                max: 1,
-            });
-            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('stealth_', '')); });
-            col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
-        });
-
-        const chosen = shuffled.find(o => o.id === pickedId);
-        if (chosen) {
-            const isCorrectChoice = pickedId === approachData.correctId;
-            const isNeutralChoice = !isCorrectChoice && chosen.stealthBonus >= 0;
-            // Probabilistic outcome: correct=80% success, neutral=50%, wrong=20%
-            const successChance = isCorrectChoice ? 0.80 : isNeutralChoice ? 0.50 : 0.20;
-            const approachSucceeded = Math.random() < successChance;
-            if (approachSucceeded) {
-                stealthBonus = chosen.stealthBonus;
-            } else {
-                // Correct/neutral failed: animal startled; wrong: already bad, just slightly worse
-                stealthBonus = isNeutralChoice ? 0 : -0.10;
-            }
-        }
-
-        const isCorrect  = pickedId === approachData.correctId;
-        const isTimeout  = pickedId === null;
-        const chosenLabel = chosen?.label ?? '';
-        const stealthResultEmbed = new EmbedBuilder()
-            .setColor(
-                isTimeout ? '#888888' :
-                stealthBonus > 0 ? '#00FF7F' :
-                stealthBonus < 0 ? '#FF6B6B' : '#FFA500'
-            )
-            .setTitle(
-                isTimeout  ? '⏰ Hesitated too long…' :
-                isCorrect && stealthBonus > 0 ? '🤫 Perfect approach!' :
-                isCorrect && stealthBonus <= 0 ? '🐾 So close — it sensed you anyway…' :
-                stealthBonus > 0 ? '🤔 Decent approach…' :
-                stealthBonus < 0 ? '🔊 You spooked the animal!' :
-                '🤔 No harm done…'
-            )
-            .setDescription(
-                isTimeout
-                    ? `You weighed your options too long — the window closed.\n\nNo stealth bonus this hunt.`
-                    : isCorrect && stealthBonus > 0
-                    ? `**${chosenLabel}**\n\n*You read the terrain perfectly. The animal froze for a moment — then relaxed. It never sensed you.*\n\n**+25% success chance** and a chance of better prey.`
-                    : isCorrect && stealthBonus <= 0
-                    ? `**${chosenLabel}**\n\n*The right call — but the animal picked up something off. A twig snapped, the wind shifted. No bonus this time.*\n\n**No stealth bonus.**`
-                    : stealthBonus > 0
-                    ? `**${chosenLabel}**\n\n*Not the ideal approach, but you kept your noise down. The animal stirred — then settled.*\n\n**+5% success chance.**`
-                    : stealthBonus < 0
-                    ? `**${chosenLabel}**\n\n*The animal heard you before you got within range. It fixed you with a stare — every advantage lost.*\n\n**−10% success chance** this hunt.`
-                    : `**${chosenLabel}**\n\n*Could've gone worse. The animal wasn't alarmed, but you didn't gain any ground either.*\n\n**No stealth bonus.**`
-            );
-
-        await interaction.editReply({ embeds: [stealthResultEmbed], components: [] });
-        await delay(800);
-
-        // ── Aim Phase ──────────────────────────────────────────────────────────
-        // Show "target in sights" then after a short wait show the FIRE! button.
-        const aimWaitMs = 1000 + Math.floor(Math.random() * 1001);
-        const aimSightsEmbed = new EmbedBuilder()
-            .setColor('#8B0000')
-            .setTitle('🎯 Target in Sights…')
-            .setDescription('*Hold your breath… wait for the right moment…*')
-            .setFooter({ text: 'Ready your shot — don\'t fire too early.' });
-        await interaction.editReply({ embeds: [aimSightsEmbed], components: [] });
-        await delay(aimWaitMs);
-
-        const fireId  = `hunt_fire_${interaction.id}`;
-        const aimEmbed = new EmbedBuilder()
-            .setColor('#FF0000')
-            .setTitle('💥 FIRE!')
-            .setDescription('**Take the shot — NOW!**');
-        const aimRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(fireId).setLabel('🔫 Fire!').setStyle(ButtonStyle.Danger)
-        );
-        await interaction.editReply({ embeds: [aimEmbed], components: [aimRow] });
-        const aimTime = Date.now();
-
-        const shotMs = await new Promise(resolve => {
-            const col = huntMsg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId === fireId,
-                time: 2500,
-                max: 1,
-            });
-            col.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - aimTime); });
-            col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
-        });
-
-        if (shotMs !== null && shotMs < 800) {
-            aimBonus = 0.18;
-        } else if (shotMs !== null) {
-            aimBonus = 0.08;
-        }
-
-        const aimResultEmbed = new EmbedBuilder()
-            .setColor(aimBonus >= 0.18 ? '#FFD700' : aimBonus > 0 ? '#00CC66' : '#888888')
-            .setTitle(aimBonus >= 0.18 ? '🎯 Perfect Shot!' : aimBonus > 0 ? '✅ Clean Shot!' : '⏰ Shot rushed…')
-            .setDescription(
-                aimBonus >= 0.18 ? `Textbook precision. **+18% crit chance** this hunt.` :
-                aimBonus > 0     ? `Solid hit. **+8% crit chance** this hunt.` :
-                                   `You hesitated on the trigger. No aim bonus this hunt.`
-            );
-        await interaction.editReply({ embeds: [aimResultEmbed], components: [] });
-        await delay(600);
-
-    } else {
-        await interaction.deferReply();
-    }
-
-    // Wolf pet: +10% coin yield; Eagle pet: +15% XP (only if hunger >= 30)
-    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
-    const petYieldPct = getTotalBonus(user.pets || [], 'hunt_yield');
-    const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
-
-    const featured       = getDailyFeatured(interaction.guild.id);
-    const isFeaturedZone = zoneId === featured.huntZone.id;
-
-    const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
-    const result = executeHunt(user, zoneId, { stealthBonus, aimBonus, marketplaceActive });
-
-    // Pity counter: reset on rare+ success, increment otherwise
-    if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
-        user.hunt.sinceRare = 0;
-    } else {
-        user.hunt.sinceRare = (user.hunt.sinceRare ?? 0) + 1;
-    }
-
-    if (result.success && result.finalPayout > 0 && petYieldPct > 0) {
-        const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins);
-        const bonus = Math.min(Math.round(result.finalPayout * petYieldPct / 100), remaining);
-        if (bonus > 0) {
-            user.balance           += bonus;
-            user.hunt.totalEarned  += bonus;
-            user.hunt.dailyCoins   += bonus;
-            result.finalPayout     += bonus;
-            result.petYieldBonus    = bonus;
-        }
-    }
-    if (result.success && result.xpEarned > 0 && petXpPct > 0) {
-        const xpBonus = Math.round(result.xpEarned * petXpPct / 100);
-        if (xpBonus > 0) {
-            result.xpEarned      += xpBonus;
-            result.petXpBonus     = xpBonus;
-        }
-    }
-
-    // Featured zone bonus: +25% payout
-    if (result.success && result.finalPayout > 0 && isFeaturedZone) {
-        const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins);
-        const featBonus = Math.min(Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS), remaining);
-        if (featBonus > 0) {
-            user.balance              += featBonus;
-            user.hunt.totalEarned     += featBonus;
-            user.hunt.dailyCoins      += featBonus;
-            result.finalPayout        += featBonus;
-            result.featuredZoneBonus   = featBonus;
-        }
-    }
-    // Wilderness district: +10% hunt yield (clamped to daily hard cap)
-    const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
-    if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const remaining = LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins;
-        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
-        if (bonus > 0) {
-            user.balance           += bonus;
-            user.hunt.totalEarned  += bonus;
-            user.hunt.dailyCoins   += bonus;
-            result.finalPayout     += bonus;
-            result.wildernessBonus  = bonus;
-        }
-    }
-    if (result.success && result.finalPayout > user.hunt.bestPayout) user.hunt.bestPayout = result.finalPayout;
-
-    updateHuntQuestProgress(user, result, zoneId);
-    await ensureQuests(user, guildSettings);
-    const { completed: questsDone, nearComplete: questsNear } = await onHunt(user, guildSettings);
-    if (result.success && result.finalPayout > 0) {
-        const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
-        questsDone.push(...earn.completed);
-        questsNear.push(...earn.nearComplete);
-    }
-
-    // Rare companions are found, not bought: a legendary result is the only
-    // thing that can turn one up. Rolled before the save below persists it.
-    const rarePetDrop = result.success ? tryGrantRarePet(user, 'hunt', result.tier) : null;
-    if (rarePetDrop) user.markModified('pets');
-
-    const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
-
+    // Everything between here and the save can still fail — a Discord API error
+    // while collecting the approach prompts, a service throwing — and until the
+    // result is persisted the player has nothing to show for the cooldown they
+    // just paid for. Hand the slot back on the way out unless the hunt committed.
+    let huntCommitted = false;
     try {
-        await user.save();
-        if (huntAchievements.length) {
-            announceAchievements(interaction.client, guildSettings, user, interaction.member, huntAchievements).catch(() => null);
+
+        // Ammo comes out only once the cooldown slot is ours, so a lost race never
+        // costs the player a round.
+        if (weaponData.requiresAmmo) {
+            h.ammo[weaponData.ammoType] = (h.ammo[weaponData.ammoType] ?? 0) - 1;
+            user.markModified('hunt');
         }
-        notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
-        notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
-    } catch (err) {
-        if (err.name === 'VersionError') {
-            return interaction.editReply({ content: 'A simultaneous request conflicted with your hunt. Please try `/hunt start` again.' });
+
+        // ── Stealth Approach + Precision Aim ─────────────────────────────────────
+        // Phase 1 — Stealth: player reads a behaviour hint and picks the right approach.
+        //   Correct  → stealthBonus = +0.25 success chance, common→uncommon upgrade ~30%
+        //   Partial  → stealthBonus = +0.05 (safe but suboptimal)
+        //   Wrong    → stealthBonus = −0.10 (spooked the animal)
+        //   Timeout  → stealthBonus = 0
+        // Phase 2 — Aim: a single quick timing window for the shot.
+        //   Perfect (<0.8s) → aimBonus = +0.18 crit chance
+        //   Good    (<2.5s) → aimBonus = +0.08 crit chance
+        //   Timeout         → aimBonus = 0
+
+        let stealthBonus = 0;
+        let aimBonus     = 0;
+
+        const approachData = ZONE_APPROACHES[zoneId];
+        const delay = ms => new Promise(r => setTimeout(r, ms));
+
+        if (approachData) {
+            // Shuffle the 3 options
+            const shuffled = [...approachData.options].sort(() => Math.random() - 0.5);
+
+            const stealthEmbed = new EmbedBuilder()
+                .setColor('#556B2F')
+                .setTitle(`🌿 Approaching ${zone.emoji} ${zone.name}…`)
+                .setDescription(
+                    `*${approachData.hint}*\n\n` +
+                    `**How do you close in on your prey?**\n` +
+                    `Choose wisely — the animal will react to your approach.`
+                )
+                .setFooter({ text: 'You have 15 seconds — or the hunt begins without a stealth bonus.' });
+
+            const stealthRow = new ActionRowBuilder().addComponents(
+                ...shuffled.map(opt => new ButtonBuilder()
+                    .setCustomId(`stealth_${opt.id}`)
+                    .setLabel(opt.label)
+                    .setStyle(ButtonStyle.Primary)
+                )
+            );
+
+            await interaction.reply({ embeds: [stealthEmbed], components: [stealthRow] });
+            const huntMsg = await interaction.fetchReply();
+
+            const pickedId = await new Promise(resolve => {
+                const col = huntMsg.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith('stealth_'),
+                    time: 15_000,
+                    max: 1,
+                });
+                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('stealth_', '')); });
+                col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+            });
+
+            const chosen = shuffled.find(o => o.id === pickedId);
+            if (chosen) {
+                const isCorrectChoice = pickedId === approachData.correctId;
+                const isNeutralChoice = !isCorrectChoice && chosen.stealthBonus >= 0;
+                // Probabilistic outcome: correct=80% success, neutral=50%, wrong=20%
+                const successChance = isCorrectChoice ? 0.80 : isNeutralChoice ? 0.50 : 0.20;
+                const approachSucceeded = Math.random() < successChance;
+                if (approachSucceeded) {
+                    stealthBonus = chosen.stealthBonus;
+                } else {
+                    // Correct/neutral failed: animal startled; wrong: already bad, just slightly worse
+                    stealthBonus = isNeutralChoice ? 0 : -0.10;
+                }
+            }
+
+            const isCorrect  = pickedId === approachData.correctId;
+            const isTimeout  = pickedId === null;
+            const chosenLabel = chosen?.label ?? '';
+            const stealthResultEmbed = new EmbedBuilder()
+                .setColor(
+                    isTimeout ? '#888888' :
+                    stealthBonus > 0 ? '#00FF7F' :
+                    stealthBonus < 0 ? '#FF6B6B' : '#FFA500'
+                )
+                .setTitle(
+                    isTimeout  ? '⏰ Hesitated too long…' :
+                    isCorrect && stealthBonus > 0 ? '🤫 Perfect approach!' :
+                    isCorrect && stealthBonus <= 0 ? '🐾 So close — it sensed you anyway…' :
+                    stealthBonus > 0 ? '🤔 Decent approach…' :
+                    stealthBonus < 0 ? '🔊 You spooked the animal!' :
+                    '🤔 No harm done…'
+                )
+                .setDescription(
+                    isTimeout
+                        ? `You weighed your options too long — the window closed.\n\nNo stealth bonus this hunt.`
+                        : isCorrect && stealthBonus > 0
+                        ? `**${chosenLabel}**\n\n*You read the terrain perfectly. The animal froze for a moment — then relaxed. It never sensed you.*\n\n**+25% success chance** and a chance of better prey.`
+                        : isCorrect && stealthBonus <= 0
+                        ? `**${chosenLabel}**\n\n*The right call — but the animal picked up something off. A twig snapped, the wind shifted. No bonus this time.*\n\n**No stealth bonus.**`
+                        : stealthBonus > 0
+                        ? `**${chosenLabel}**\n\n*Not the ideal approach, but you kept your noise down. The animal stirred — then settled.*\n\n**+5% success chance.**`
+                        : stealthBonus < 0
+                        ? `**${chosenLabel}**\n\n*The animal heard you before you got within range. It fixed you with a stare — every advantage lost.*\n\n**−10% success chance** this hunt.`
+                        : `**${chosenLabel}**\n\n*Could've gone worse. The animal wasn't alarmed, but you didn't gain any ground either.*\n\n**No stealth bonus.**`
+                );
+
+            await interaction.editReply({ embeds: [stealthResultEmbed], components: [] });
+            await delay(800);
+
+            // ── Aim Phase ──────────────────────────────────────────────────────────
+            // Show "target in sights" then after a short wait show the FIRE! button.
+            const aimWaitMs = 1000 + Math.floor(Math.random() * 1001);
+            const aimSightsEmbed = new EmbedBuilder()
+                .setColor('#8B0000')
+                .setTitle('🎯 Target in Sights…')
+                .setDescription('*Hold your breath… wait for the right moment…*')
+                .setFooter({ text: 'Ready your shot — don\'t fire too early.' });
+            await interaction.editReply({ embeds: [aimSightsEmbed], components: [] });
+            await delay(aimWaitMs);
+
+            const fireId  = `hunt_fire_${interaction.id}`;
+            const aimEmbed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('💥 FIRE!')
+                .setDescription('**Take the shot — NOW!**');
+            const aimRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(fireId).setLabel('🔫 Fire!').setStyle(ButtonStyle.Danger)
+            );
+            await interaction.editReply({ embeds: [aimEmbed], components: [aimRow] });
+            const aimTime = Date.now();
+
+            const shotMs = await new Promise(resolve => {
+                const col = huntMsg.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && i.customId === fireId,
+                    time: 2500,
+                    max: 1,
+                });
+                col.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - aimTime); });
+                col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+            });
+
+            if (shotMs !== null && shotMs < 800) {
+                aimBonus = 0.18;
+            } else if (shotMs !== null) {
+                aimBonus = 0.08;
+            }
+
+            const aimResultEmbed = new EmbedBuilder()
+                .setColor(aimBonus >= 0.18 ? '#FFD700' : aimBonus > 0 ? '#00CC66' : '#888888')
+                .setTitle(aimBonus >= 0.18 ? '🎯 Perfect Shot!' : aimBonus > 0 ? '✅ Clean Shot!' : '⏰ Shot rushed…')
+                .setDescription(
+                    aimBonus >= 0.18 ? `Textbook precision. **+18% crit chance** this hunt.` :
+                    aimBonus > 0     ? `Solid hit. **+8% crit chance** this hunt.` :
+                                       `You hesitated on the trigger. No aim bonus this hunt.`
+                );
+            await interaction.editReply({ embeds: [aimResultEmbed], components: [] });
+            await delay(600);
+
+        } else {
+            await interaction.deferReply();
         }
-        console.error('[hunt] save error:', err);
-        return interaction.editReply({ content: 'Something went wrong saving your hunt. Please try again.' });
-    }
 
-    // Log big win, then await hourly leader update and re-fetch for accurate footer
-    if (result.success && result.finalPayout > 0) {
-        const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-        if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
-            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'hunt', details: { itemName: result.animal?.name, rarity: result.tier }, client: interaction.client });
+        // Wolf pet: +10% coin yield; Eagle pet: +15% XP (only if hunger >= 30)
+        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
+        const petYieldPct = getTotalBonus(user.pets || [], 'hunt_yield');
+        const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
+
+        const featured       = getDailyFeatured(interaction.guild.id);
+        const isFeaturedZone = zoneId === featured.huntZone.id;
+
+        const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
+        const result = executeHunt(user, zoneId, { stealthBonus, aimBonus, marketplaceActive });
+
+        // Pity counter: reset on rare+ success, increment otherwise
+        if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
+            user.hunt.sinceRare = 0;
+        } else {
+            user.hunt.sinceRare = (user.hunt.sinceRare ?? 0) + 1;
         }
-        await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'hunt', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.animal ? `${result.animal.emoji} ${result.animal.name} (${currency}${result.finalPayout.toLocaleString()})` : null }).catch(() => null);
-    }
-    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'hunt').catch(() => null);
 
-    const timeBand = getTimeBand();
-    const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
-    {
-        const desc = embed.data.description ?? '';
-        const lines = [];
-        if (stealthBonus > 0.10) lines.push(`> 🤫 *Perfect approach — +25% success, chance of better prey*`);
-        else if (stealthBonus > 0) lines.push(`> 🌿 *Decent approach — +5% success*`);
-        else if (stealthBonus < 0) lines.push(`> 🔊 *Spooked the animal — −10% success*`);
-        if (aimBonus >= 0.18) lines.push(`> 🎯 *Perfect shot — +18% crit chance*`);
-        else if (aimBonus > 0) lines.push(`> ✅ *Clean shot — +8% crit chance*`);
-        if (lines.length) embed.setDescription(desc + '\n' + lines.join('\n'));
-    }
-    if (result.petYieldBonus > 0) {
-        embed.addFields({ name: '🐺 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petYieldPct}% yield)`, inline: true });
-    }
-    if (result.petXpBonus > 0) {
-        embed.addFields({ name: '🦅 Pet XP Bonus', value: `+${result.petXpBonus} XP (${petXpPct}%)`, inline: true });
-    }
-    if (result.featuredZoneBonus > 0) {
-        embed.addFields({ name: '🌟 Featured Zone Bonus', value: `+${result.featuredZoneBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
-    }
-    if (result.wildernessBonus > 0) {
-        embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
-    }
-
-    // Hourly leader footer
-    const leaderNote = hourlyLeader
-        ? `🏆 Hourly leader: ${hourlyLeader.username} — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
-        : '🏆 No hourly leader yet — be the first!';
-    const footerBase = `${timeBand.emoji} ${timeBand.label}`;
-    const currentFooter = embed.data.footer?.text ?? '';
-    embed.setFooter({ text: currentFooter ? `${currentFooter} · ${footerBase} · ${leaderNote}` : `${footerBase} · ${leaderNote}` });
-
-    if (isFeaturedZone) {
-        const desc = embed.data.description ?? '';
-        embed.setDescription(desc + `\n> 🌟 *Featured Zone: ${zone.emoji} ${zone.name} — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout bonus active!*`);
-    }
-
-    // Rare companion drop — announced prominently; this is the only way to get one.
-    if (rarePetDrop) {
-        embed.addFields({
-            name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
-            value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
-                 + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
-                 + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
-            inline: false,
-        });
-    }
-
-    // Pet narrative: show active pet's personality flavor in description
-    if (result.success) {
-        const activePet = (user.pets || []).find(p => isPetActive(p));
-        if (activePet) {
-            const petDef = PET_DEFS[activePet.petId];
-            const petName = activePet.name || petDef?.name || activePet.petId;
-            const flavorFn = TRAIT_FLAVOR[activePet.personality]?.hunt;
-            if (flavorFn && petDef) {
-                const desc = embed.data.description ?? '';
-                embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
+        if (result.success && result.finalPayout > 0 && petYieldPct > 0) {
+            const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins);
+            const bonus = Math.min(Math.round(result.finalPayout * petYieldPct / 100), remaining);
+            if (bonus > 0) {
+                user.balance           += bonus;
+                user.hunt.totalEarned  += bonus;
+                user.hunt.dailyCoins   += bonus;
+                result.finalPayout     += bonus;
+                result.petYieldBonus    = bonus;
             }
         }
-    }
+        if (result.success && result.xpEarned > 0 && petXpPct > 0) {
+            const xpBonus = Math.round(result.xpEarned * petXpPct / 100);
+            if (xpBonus > 0) {
+                const petLevelUp = applyXp(user, xpBonus);
+                result.xpEarned      += xpBonus;
+                result.petXpBonus     = xpBonus;
+                if (petLevelUp.leveledUp) {
+                    // Fold into any level-up the base XP already produced so the embed
+                    // reports one old → new span rather than two.
+                    result.levelUp = {
+                        oldLevel:  result.levelUp?.oldLevel ?? petLevelUp.oldLevel,
+                        newLevel:  petLevelUp.newLevel,
+                        leveledUp: true,
+                    };
+                }
+            }
+        }
 
-    // Staged loot reveal for rare+ drops
-    await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+        // Featured zone bonus: +25% payout
+        if (result.success && result.finalPayout > 0 && isFeaturedZone) {
+            const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins);
+            const featBonus = Math.min(Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS), remaining);
+            if (featBonus > 0) {
+                user.balance              += featBonus;
+                user.hunt.totalEarned     += featBonus;
+                user.hunt.dailyCoins      += featBonus;
+                result.finalPayout        += featBonus;
+                result.featuredZoneBonus   = featBonus;
+            }
+        }
+        // Wilderness district: +10% hunt yield (clamped to daily hard cap)
+        const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
+        if (result.success && result.finalPayout > 0 && wildernessActive) {
+            const remaining = LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins;
+            const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+            const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+            if (bonus > 0) {
+                user.balance           += bonus;
+                user.hunt.totalEarned  += bonus;
+                user.hunt.dailyCoins   += bonus;
+                result.finalPayout     += bonus;
+                result.wildernessBonus  = bonus;
+            }
+        }
+        if (result.success && result.finalPayout > user.hunt.bestPayout) user.hunt.bestPayout = result.finalPayout;
 
-    if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
-        const announceChannelId = guildSettings?.economy?.announcementChannelId;
-        const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
-        const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-        const isLeg = result.tier === 'legendary';
-        const announcementEmbed = new EmbedBuilder()
-            .setColor(isLeg ? '#ff9800' : '#9c27b0')
-            .setTitle(isLeg ? '✨ Legendary Trophy! ✨' : '🔮 Epic Find!')
-            .setDescription(
-                `<@${interaction.user.id}> just brought down ${result.animal.emoji} **${result.animal.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
-                `deep in the **${zone.name}**.\n\n` +
-                (isLeg ? `Only a handful of hunters have ever managed that.` : `A rare moment in the wild.`)
-            )
-            .setTimestamp();
-        announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
-    }
+        updateHuntQuestProgress(user, result, zoneId);
+        await ensureQuests(user, guildSettings);
+        const { completed: questsDone, nearComplete: questsNear } = await onHunt(user, guildSettings);
+        if (result.success && result.finalPayout > 0) {
+            const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
+            questsDone.push(...earn.completed);
+            questsNear.push(...earn.nearComplete);
+        }
 
-    // ── Apex encounter — multi-phase showdown (mirrors the fishing boss UI) ──
-    if (result.apexEncounter) {
-        // Pin the weapon that was actually equipped for this encounter so durability
-        // loss can't land on a different weapon if the player re-equips mid-flow.
-        const apexWeaponIndex = user.hunt.equippedWeaponIndex;
-        const apexType    = rollApexType();
-        const choicesMade = [];
-        const phaseCount  = apexType.phases.length;
+        // Rare companions are found, not bought: a legendary result is the only
+        // thing that can turn one up. Rolled before the save below persists it.
+        const rarePetDrop = result.success ? tryGrantRarePet(user, 'hunt', result.tier) : null;
+        if (rarePetDrop) user.markModified('pets');
 
-        const buildApexPhaseEmbed = (phaseIndex, prevResults) => {
-            const phase  = apexType.phases[phaseIndex];
-            const nerve  = 3 - prevResults.filter(p => !p.correct && p.chosen !== 'safe').length;
-            const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(3 - nerve);
-            const histLines = prevResults.map((p, i) => {
+        const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
+
+        try {
+            await user.save();
+            huntCommitted = true;
+            if (huntAchievements.length) {
+                announceAchievements(interaction.client, guildSettings, user, interaction.member, huntAchievements).catch(() => null);
+            }
+            notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+            notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
+        } catch (err) {
+            // Nothing was saved, so give the cooldown slot back before telling them to retry.
+            await releaseHuntClaim();
+            if (err.name === 'VersionError') {
+                return interaction.editReply({ content: 'A simultaneous request conflicted with your hunt. Please try `/hunt start` again.' });
+            }
+            console.error('[hunt] save error:', err);
+            return interaction.editReply({ content: 'Something went wrong saving your hunt. Please try again.' });
+        }
+
+        // Log big win, then await hourly leader update and re-fetch for accurate footer
+        if (result.success && result.finalPayout > 0) {
+            const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+            if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'hunt', details: { itemName: result.animal?.name, rarity: result.tier }, client: interaction.client });
+            }
+            await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'hunt', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.animal ? `${result.animal.emoji} ${result.animal.name} (${currency}${result.finalPayout.toLocaleString()})` : null }).catch(() => null);
+        }
+        const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'hunt').catch(() => null);
+
+        const timeBand = getTimeBand();
+        const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
+        {
+            const desc = embed.data.description ?? '';
+            const lines = [];
+            if (stealthBonus > 0.10) lines.push(`> 🤫 *Perfect approach — +25% success, chance of better prey*`);
+            else if (stealthBonus > 0) lines.push(`> 🌿 *Decent approach — +5% success*`);
+            else if (stealthBonus < 0) lines.push(`> 🔊 *Spooked the animal — −10% success*`);
+            if (aimBonus >= 0.18) lines.push(`> 🎯 *Perfect shot — +18% crit chance*`);
+            else if (aimBonus > 0) lines.push(`> ✅ *Clean shot — +8% crit chance*`);
+            if (lines.length) embed.setDescription(desc + '\n' + lines.join('\n'));
+        }
+        // One consolidated field rather than one per bonus: Discord caps an embed at
+        // 25 fields, and giving each its own put a maximal hunt within one of the
+        // limit. Grouping them also reads better — they are all the same idea.
+        const bonusLines = buildBonusLines(result, petYieldPct, petXpPct);
+        if (bonusLines.length) {
+            embed.addFields({ name: '✨ Bonuses', value: bonusLines.join('\n'), inline: false });
+        }
+
+        // Hourly leader footer
+        const leaderNote = hourlyLeader
+            ? `🏆 Hourly leader: ${hourlyLeader.username} — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
+            : '🏆 No hourly leader yet — be the first!';
+        const footerBase = `${timeBand.emoji} ${timeBand.label}`;
+        const currentFooter = embed.data.footer?.text ?? '';
+        embed.setFooter({ text: currentFooter ? `${currentFooter} · ${footerBase} · ${leaderNote}` : `${footerBase} · ${leaderNote}` });
+
+        if (isFeaturedZone) {
+            const desc = embed.data.description ?? '';
+            embed.setDescription(desc + `\n> 🌟 *Featured Zone: ${zone.emoji} ${zone.name} — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout bonus active!*`);
+        }
+
+        // Rare companion drop — announced prominently; this is the only way to get one.
+        if (rarePetDrop) {
+            embed.addFields({
+                name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
+                value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
+                     + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                     + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
+                inline: false,
+            });
+        }
+
+        // Pet narrative: show active pet's personality flavor in description
+        if (result.success) {
+            const activePet = (user.pets || []).find(p => isPetActive(p));
+            if (activePet) {
+                const petDef = PET_DEFS[activePet.petId];
+                const petName = activePet.name || petDef?.name || activePet.petId;
+                const flavorFn = TRAIT_FLAVOR[activePet.personality]?.hunt;
+                if (flavorFn && petDef) {
+                    const desc = embed.data.description ?? '';
+                    embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
+                }
+            }
+        }
+
+        // Discord rejects an embed with more than 25 fields. A maximal hunt — crit,
+        // traits, trait effects, special drop, booster proc, level-up, both buffs
+        // expiring, weapon warning, pity, plus the pet / featured-zone / district
+        // bonuses — now reaches 24. Trim rather than lose the whole result embed to
+        // an exception if another field is added later.
+        if (embed.data.fields && embed.data.fields.length > 25) {
+            embed.data.fields.length = 25;
+        }
+
+        // Staged loot reveal for rare+ drops
+        await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+
+        if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
+            const announceChannelId = guildSettings?.economy?.announcementChannelId;
+            const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
+            const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
+            const isLeg = result.tier === 'legendary';
+            const announcementEmbed = new EmbedBuilder()
+                .setColor(isLeg ? '#ff9800' : '#9c27b0')
+                .setTitle(isLeg ? '✨ Legendary Trophy! ✨' : '🔮 Epic Find!')
+                .setDescription(
+                    `<@${interaction.user.id}> just brought down ${result.animal.emoji} **${result.animal.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
+                    `deep in the **${zone.name}**.\n\n` +
+                    (isLeg ? `Only a handful of hunters have ever managed that.` : `A rare moment in the wild.`)
+                )
+                .setTimestamp();
+            announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
+        }
+
+        // ── Apex encounter — multi-phase showdown (mirrors the fishing boss UI) ──
+        if (result.apexEncounter) {
+            // Pin the weapon that was actually equipped for this encounter so durability
+            // loss can't land on a different weapon if the player re-equips mid-flow.
+            const apexWeaponIndex = user.hunt.equippedWeaponIndex;
+            const apexType    = rollApexType();
+            const choicesMade = [];
+            const phaseCount  = apexType.phases.length;
+
+            const buildApexPhaseEmbed = (phaseIndex, prevResults) => {
+                const phase  = apexType.phases[phaseIndex];
+                const nerve  = 3 - prevResults.filter(p => !p.correct && p.chosen !== 'safe').length;
+                const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(3 - nerve);
+                const histLines = prevResults.map((p, i) => {
+                    const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
+                    return `Phase ${i + 1}: ${icon}`;
+                }).join('  ');
+
+                return new EmbedBuilder()
+                    .setColor('#3b1f04')
+                    .setTitle(`${apexType.emoji} ${apexType.name} — Phase ${phaseIndex + 1}/${phaseCount}`)
+                    .setDescription(
+                        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                        `  ${result.apexEncounter.animal.emoji}  The pack leader of your **${result.apexEncounter.animal.name}** appears!\n` +
+                        `  Nerve: ${nerveBar}\n` +
+                        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                        `${phase.hint}\n\n` +
+                        (histLines ? `${histLines}\n\n` : '') +
+                        `**Choose your move — NOW:**`
+                    )
+                    .setFooter({ text: `⏱️ 30 seconds per phase • Outcomes: 3/3=1.5x bonus | 2/3=1x | 1/3=0.4x | 0/3=Nothing` });
+            };
+
+            const buildPhaseRow = (phaseIndex) => {
+                const choices = apexType.phases[phaseIndex].choices;
+                return new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('apex_match').setLabel(choices.match.label).setStyle(ButtonStyle.Danger),
+                    new ButtonBuilder().setCustomId('apex_hold').setLabel(choices.hold.label).setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('apex_safe').setLabel(choices.safe.label).setStyle(ButtonStyle.Secondary)
+                );
+            };
+
+            const validIds = ['apex_match', 'apex_hold', 'apex_safe'];
+            const idToKey  = { apex_match: 'match', apex_hold: 'hold', apex_safe: 'safe' };
+
+            await interaction.editReply({ embeds: [embed, buildApexPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
+
+            const runPhase = async (phaseIndex, prevResults, prevBtn) => {
+                const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
+                return new Promise(resolve => {
+                    const collector = fetchReply.createMessageComponentCollector({
+                        filter: i => i.user.id === interaction.user.id && validIds.includes(i.customId),
+                        time: 30_000, max: 1
+                    });
+                    collector.on('collect', async btn => {
+                        const chosen  = idToKey[btn.customId];
+                        const phase   = apexType.phases[phaseIndex];
+                        const correct = chosen === phase.correct;
+                        const results = [...prevResults, { correct, chosen, correctChoice: phase.correct }];
+                        choicesMade.push(chosen);
+
+                        if (phaseIndex < phaseCount - 1) {
+                            await btn.update({ embeds: [embed, buildApexPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
+                            resolve({ btn, results });
+                        } else {
+                            resolve({ btn, results, done: true });
+                        }
+                    });
+                    collector.on('end', (collected, reason) => {
+                        if (reason === 'time' && collected.size === 0) {
+                            resolve({ btn: null, results: prevResults, timedOut: true });
+                        }
+                    });
+                });
+            };
+
+            let state = { btn: null, results: [], done: false, timedOut: false };
+            for (let i = 0; i < phaseCount; i++) {
+                state = await runPhase(i, state.results, state.btn);
+                if (state.timedOut) {
+                    const timeoutEmbed = new EmbedBuilder()
+                        .setColor('#3b1f04')
+                        .setTitle(`💨 ${apexType.emoji} The ${apexType.name} Escaped`)
+                        .setDescription('You hesitated too long — it melted back into the wild. No bonus this time.')
+                        .setTimestamp();
+                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
+                    return;
+                }
+            }
+
+            // Resolve outcome on a fresh user document
+            const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+            if (!freshUser) {
+                console.error(`[hunt apex] user document vanished mid-encounter — user=${interaction.user.id} guild=${interaction.guild.id}`);
+                return state.btn.update({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [] }).catch(() => {});
+            }
+            await attachGrind(freshUser);
+            ensureHuntData(freshUser);
+            const apexResult = resolveApexEncounter(freshUser, result.apexEncounter.animal, result.apexEncounter.tier, choicesMade, apexType, apexWeaponIndex);
+
+            let apexQuestsDone = [], apexQuestsNear = [];
+            if (apexResult.bonusPayout > 0) {
+                const apexZone = ZONES[freshUser.hunt.activeZone] ?? zone;
+                // The apex fight is part of this hunt, so it rides on the gathering
+                // charge the kill already spent rather than burning a second one —
+                // otherwise a booster drains fastest on exactly the rare kills that
+                // trigger an apex in the first place.
+                const { adjustedPayout } = applyPayoutModifiers(freshUser, apexResult.bonusPayout, apexZone, {
+                    reuseGatheringYield: !!result.gatheringYield,
+                });
+                apexResult.bonusPayout = adjustedPayout;
+                freshUser.balance          += adjustedPayout;
+                freshUser.hunt.totalEarned += adjustedPayout;
+                freshUser.hunt.dailyCoins  += adjustedPayout;
+                if (adjustedPayout > freshUser.hunt.bestPayout) freshUser.hunt.bestPayout = adjustedPayout;
+
+                await ensureQuests(freshUser, guildSettings);
+                const earn = await onEconomyEarn(freshUser, guildSettings, adjustedPayout);
+                apexQuestsDone = earn.completed;
+                apexQuestsNear = earn.nearComplete;
+            }
+            freshUser.markModified('hunt');
+            try {
+                await freshUser.save();
+                if (apexQuestsDone.length || apexQuestsNear.length) {
+                    notifyQuestComplete(guildSettings, interaction.member, apexQuestsDone, interaction.channel, freshUser).catch(() => null);
+                    notifyQuestNearComplete(guildSettings, interaction.member, apexQuestsNear, interaction.channel).catch(() => null);
+                }
+            } catch (saveErr) {
+                console.error('[hunt apex] save error:', saveErr);
+                return state.btn.update({ content: 'Something went wrong saving your apex result — the encounter is lost and cannot be retried. Your original hunt rewards were already saved.', embeds: [], components: [] }).catch(() => {});
+            }
+
+            if (apexResult.bonusPayout > 0) {
+                const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+                if (apexResult.bonusPayout >= bigWinThreshold) {
+                    logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: apexResult.bonusPayout, source: 'hunt', details: { itemName: result.apexEncounter.animal.name, rarity: 'apex' }, client: interaction.client });
+                }
+            }
+
+            const phaseScoreLine = apexResult.phaseResults.map((p, i) => {
                 const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
                 return `Phase ${i + 1}: ${icon}`;
             }).join('  ');
 
-            return new EmbedBuilder()
-                .setColor('#3b1f04')
-                .setTitle(`${apexType.emoji} ${apexType.name} — Phase ${phaseIndex + 1}/${phaseCount}`)
+            const outcomeColors = { perfect: '#FFD700', win: '#2ecc71', survived: '#3498db', escaped: '#3b1f04' };
+            const outcomeTitles = {
+                perfect:  `🏆 ${apexType.emoji} PERFECT — ${apexType.name} Brought Down!`,
+                win:      `✅ ${apexType.emoji} ${apexType.name} Defeated!`,
+                survived: `😓 ${apexType.emoji} You Survived the ${apexType.name}`,
+                escaped:  `💀 ${apexType.emoji} The ${apexType.name} Escaped`
+            };
+
+            const apexEmbed = new EmbedBuilder()
+                .setColor(outcomeColors[apexResult.outcome])
+                .setTitle(outcomeTitles[apexResult.outcome])
                 .setDescription(
-                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `  ${result.apexEncounter.animal.emoji}  The pack leader of your **${result.apexEncounter.animal.name}** appears!\n` +
-                    `  Nerve: ${nerveBar}\n` +
-                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-                    `${phase.hint}\n\n` +
-                    (histLines ? `${histLines}\n\n` : '') +
-                    `**Choose your move — NOW:**`
+                    `${apexResult.message}\n\n${phaseScoreLine}\n\n` +
+                    (apexResult.bonusPayout > 0
+                        ? `💰 Bonus trophy: **+${currency}${apexResult.bonusPayout.toLocaleString()}**`
+                        : '*No bonus this time — but you lived to tell the tale.*') +
+                    `\n🔧 Weapon wear: -${apexResult.durabilityLost} durability`
                 )
-                .setFooter({ text: `⏱️ 30 seconds per phase • Outcomes: 3/3=1.5x bonus | 2/3=1x | 1/3=0.4x | 0/3=Nothing` });
-        };
+                .setTimestamp();
 
-        const buildPhaseRow = (phaseIndex) => {
-            const choices = apexType.phases[phaseIndex].choices;
-            return new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('apex_match').setLabel(choices.match.label).setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId('apex_hold').setLabel(choices.hold.label).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('apex_safe').setLabel(choices.safe.label).setStyle(ButtonStyle.Secondary)
-            );
-        };
-
-        const validIds = ['apex_match', 'apex_hold', 'apex_safe'];
-        const idToKey  = { apex_match: 'match', apex_hold: 'hold', apex_safe: 'safe' };
-
-        await interaction.editReply({ embeds: [embed, buildApexPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
-
-        const runPhase = async (phaseIndex, prevResults, prevBtn) => {
-            const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
-            return new Promise(resolve => {
-                const collector = fetchReply.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && validIds.includes(i.customId),
-                    time: 30_000, max: 1
-                });
-                collector.on('collect', async btn => {
-                    const chosen  = idToKey[btn.customId];
-                    const phase   = apexType.phases[phaseIndex];
-                    const correct = chosen === phase.correct;
-                    const results = [...prevResults, { correct, chosen, correctChoice: phase.correct }];
-                    choicesMade.push(chosen);
-
-                    if (phaseIndex < phaseCount - 1) {
-                        await btn.update({ embeds: [embed, buildApexPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
-                        resolve({ btn, results });
-                    } else {
-                        resolve({ btn, results, done: true });
-                    }
-                });
-                collector.on('end', (collected, reason) => {
-                    if (reason === 'time' && collected.size === 0) {
-                        resolve({ btn: null, results: prevResults, timedOut: true });
-                    }
-                });
-            });
-        };
-
-        let state = { btn: null, results: [], done: false, timedOut: false };
-        for (let i = 0; i < phaseCount; i++) {
-            state = await runPhase(i, state.results, state.btn);
-            if (state.timedOut) {
-                const timeoutEmbed = new EmbedBuilder()
-                    .setColor('#3b1f04')
-                    .setTitle(`💨 ${apexType.emoji} The ${apexType.name} Escaped`)
-                    .setDescription('You hesitated too long — it melted back into the wild. No bonus this time.')
-                    .setTimestamp();
-                interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
-                return;
-            }
+            await state.btn.update({ embeds: [embed, apexEmbed], components: [] }).catch(() => {});
+            return;
         }
-
-        // Resolve outcome on a fresh user document
-        const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        if (!freshUser) {
-            console.error(`[hunt apex] user document vanished mid-encounter — user=${interaction.user.id} guild=${interaction.guild.id}`);
-            return state.btn.update({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [] }).catch(() => {});
-        }
-        await attachGrind(freshUser);
-        ensureHuntData(freshUser);
-        const apexResult = resolveApexEncounter(freshUser, result.apexEncounter.animal, result.apexEncounter.tier, choicesMade, apexType, apexWeaponIndex);
-
-        let apexQuestsDone = [], apexQuestsNear = [];
-        if (apexResult.bonusPayout > 0) {
-            const apexZone = ZONES[freshUser.hunt.activeZone] ?? zone;
-            const { adjustedPayout } = applyPayoutModifiers(freshUser, apexResult.bonusPayout, apexZone);
-            apexResult.bonusPayout = adjustedPayout;
-            freshUser.balance          += adjustedPayout;
-            freshUser.hunt.totalEarned += adjustedPayout;
-            freshUser.hunt.dailyCoins  += adjustedPayout;
-            if (adjustedPayout > freshUser.hunt.bestPayout) freshUser.hunt.bestPayout = adjustedPayout;
-
-            await ensureQuests(freshUser, guildSettings);
-            const earn = await onEconomyEarn(freshUser, guildSettings, adjustedPayout);
-            apexQuestsDone = earn.completed;
-            apexQuestsNear = earn.nearComplete;
-        }
-        freshUser.markModified('hunt');
-        try {
-            await freshUser.save();
-            if (apexQuestsDone.length || apexQuestsNear.length) {
-                notifyQuestComplete(guildSettings, interaction.member, apexQuestsDone, interaction.channel, freshUser).catch(() => null);
-                notifyQuestNearComplete(guildSettings, interaction.member, apexQuestsNear, interaction.channel).catch(() => null);
-            }
-        } catch (saveErr) {
-            console.error('[hunt apex] save error:', saveErr);
-            return state.btn.update({ content: 'Something went wrong saving your apex result — the encounter is lost and cannot be retried. Your original hunt rewards were already saved.', embeds: [], components: [] }).catch(() => {});
-        }
-
-        if (apexResult.bonusPayout > 0) {
-            const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-            if (apexResult.bonusPayout >= bigWinThreshold) {
-                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: apexResult.bonusPayout, source: 'hunt', details: { itemName: result.apexEncounter.animal.name, rarity: 'apex' }, client: interaction.client });
-            }
-        }
-
-        const phaseScoreLine = apexResult.phaseResults.map((p, i) => {
-            const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
-            return `Phase ${i + 1}: ${icon}`;
-        }).join('  ');
-
-        const outcomeColors = { perfect: '#FFD700', win: '#2ecc71', survived: '#3498db', escaped: '#3b1f04' };
-        const outcomeTitles = {
-            perfect:  `🏆 ${apexType.emoji} PERFECT — ${apexType.name} Brought Down!`,
-            win:      `✅ ${apexType.emoji} ${apexType.name} Defeated!`,
-            survived: `😓 ${apexType.emoji} You Survived the ${apexType.name}`,
-            escaped:  `💀 ${apexType.emoji} The ${apexType.name} Escaped`
-        };
-
-        const apexEmbed = new EmbedBuilder()
-            .setColor(outcomeColors[apexResult.outcome])
-            .setTitle(outcomeTitles[apexResult.outcome])
-            .setDescription(
-                `${apexResult.message}\n\n${phaseScoreLine}\n\n` +
-                (apexResult.bonusPayout > 0
-                    ? `💰 Bonus trophy: **+${currency}${apexResult.bonusPayout.toLocaleString()}**`
-                    : '*No bonus this time — but you lived to tell the tale.*') +
-                `\n🔧 Weapon wear: -${apexResult.durabilityLost} durability`
-            )
-            .setTimestamp();
-
-        await state.btn.update({ embeds: [embed, apexEmbed], components: [] }).catch(() => {});
-        return;
+    } catch (err) {
+        if (!huntCommitted) await releaseHuntClaim();
+        throw err;
     }
 }
 
@@ -1083,11 +1146,15 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             embed.addFields({ name: '⬆️ Level Up!', value: `Hunter Level **${levelUp.oldLevel}** → **${levelUp.newLevel}** (${ld.title})`, inline: false });
         }
 
-        if (result.expiredBait)  embed.addFields({ name: '🪱 Bait Expired', value: `Your ${result.expiredBait.replace(/_/g, ' ')} has worn off.`, inline: false });
-        if (result.expiredCharm) embed.addFields({ name: '🍀 Charm Expired', value: `Your luck charm has worn off.`, inline: false });
+        const expiredBuffs = [];
+        if (result.expiredBait)  expiredBuffs.push(`🪱 Your ${result.expiredBait.replace(/_/g, ' ')} has worn off.`);
+        if (result.expiredCharm) expiredBuffs.push(`🍀 Your luck charm has worn off.`);
+        if (expiredBuffs.length) {
+            embed.addFields({ name: 'Buffs Expired', value: expiredBuffs.join('\n'), inline: false });
+        }
 
         if (weapon.status === 'broken') {
-            embed.addFields({ name: '⚠️ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/hunt shop repair\` before hunting again.`, inline: false });
+            embed.addFields({ name: '⚠️ Weapon Broke!', value: buildBrokenWeaponNote(weapon), inline: false });
         } else if (weapon.currentDurability <= Math.floor(weapon.maxDurability * 0.20)) {
             embed.addFields({ name: '⚠️ Low Durability', value: `Your **${weapon.name}** is nearly worn out (${weapon.currentDurability}/${weapon.maxDurability}). Repair soon!`, inline: false });
         }
@@ -1114,8 +1181,18 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             { name: 'Reward',  value: 'Nothing',                      inline: true },
             { name: 'XP',      value: xpEarned > 0 ? `+${xpEarned} XP` : 'None', inline: true },
             { name: 'Weapon',  value: `${weapon.name} ${weaponStatusEmoji(weapon.status)}\n${durabilityBar(weapon.currentDurability, weapon.maxDurability)} ${weapon.currentDurability}/${weapon.maxDurability}`, inline: true },
-            { name: 'Stamina', value: buildStaminaLine(user), inline: true }
+            {
+                name: 'Stamina',
+                value: result.staminaSpared
+                    ? `${buildStaminaLine(user)}\n*Clean miss — no stamina spent*`
+                    : buildStaminaLine(user),
+                inline: true
+            }
         );
+
+    if ((user.hunt.consecutiveFails ?? 0) > 0) {
+        embed.addFields(buildPityStreakField(user.hunt.consecutiveFails, LIMITS, PITY_COPY.hunt));
+    }
 
     if (failTraits && failTraits.length > 0) {
         const traitLine = failTraits.map(t => {
@@ -1140,7 +1217,13 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             embed.addFields({ name: '🛟 Lifesaver Activated!', value: `A severe injury would have destroyed your **${result.deathEvent.weaponName}**, but your Lifesaver absorbed it! (consumed)`, inline: false });
         } else {
             embed.setColor('#8B0000');
-            embed.addFields({ name: '💀 Severe Injury!', value: `The encounter was catastrophic — your **${result.deathEvent.weaponName}** was completely destroyed! Use \`/hunt shop repair\` to fix it.`, inline: false });
+            embed.addFields({
+                name: '💀 Severe Injury!',
+                value: isCondemned(weapon)
+                    ? `The encounter was catastrophic — your **${result.deathEvent.weaponName}** was wrecked outright, and it's condemned: too many shop repairs have worn it out, so it can't be fixed. Replace it with \`/hunt shop weapon\`.`
+                    : `The encounter was catastrophic — your **${result.deathEvent.weaponName}** was wrecked outright! Use \`/hunt shop repair\` to fix it.`,
+                inline: false
+            });
         }
     }
 
@@ -1150,7 +1233,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     }
 
     if (weapon.status === 'broken' && !result.deathEvent) {
-        embed.addFields({ name: '❌ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/hunt shop repair\` before hunting again.`, inline: false });
+        embed.addFields({ name: '❌ Weapon Broke!', value: buildBrokenWeaponNote(weapon), inline: false });
     }
 
     const sinceRareNow = user.hunt.sinceRare ?? 0;
@@ -1159,6 +1242,43 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     embed.setFooter({ text: 'Tip: Use consumables from /hunt shop to boost your success chance' });
     embed.setTimestamp();
     return embed;
+}
+
+/**
+ * Lines for the consolidated "✨ Bonuses" field — every extra that stacked on top
+ * of the base payout, in the order they were applied.
+ */
+function buildBonusLines(result, petYieldPct, petXpPct) {
+    const lines = [];
+
+    if (result.gatheringYield) {
+        const { label, emoji, chargesLeft } = result.gatheringYield;
+        lines.push(`${emoji} **${label}** — payout doubled · ${
+            chargesLeft > 0
+                ? `${chargesLeft} charge${chargesLeft === 1 ? '' : 's'} left`
+                : '**last charge**'
+        }`);
+    }
+    if (result.petYieldBonus > 0) {
+        lines.push(`🐺 **Pet** — +${result.petYieldBonus.toLocaleString()} coins (${petYieldPct}% yield)`);
+    }
+    if (result.petXpBonus > 0) {
+        lines.push(`🦅 **Pet** — +${result.petXpBonus.toLocaleString()} XP (${petXpPct}%)`);
+    }
+    if (result.featuredZoneBonus > 0) {
+        lines.push(`🌟 **Featured Zone** — +${result.featuredZoneBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`);
+    }
+    if (result.wildernessBonus > 0) {
+        lines.push(`🌲 **Wilderness District** — +${result.wildernessBonus.toLocaleString()} coins (+${Math.round(WILDERNESS_YIELD_BONUS * 100)}% yield)`);
+    }
+
+    return lines;
+}
+
+function buildBrokenWeaponNote(weapon) {
+    return isCondemned(weapon)
+        ? `Your **${weapon.name}** has broken, and it's condemned — too many shop repairs have worn it out, so it can't be fixed. Replace it with \`/hunt shop weapon\`.`
+        : `Your **${weapon.name}** has broken! Use \`/hunt shop repair\` before hunting again.`;
 }
 
 function buildFailureTitle(severityId) {
@@ -2402,7 +2522,7 @@ async function handleRepair(interaction, user, currency) {
                 flags: MessageFlags.Ephemeral
             });
         }
-        if (weapon.status === 'condemned') {
+        if (isCondemned(weapon)) {
             return interaction.reply({ content: 'This weapon is condemned and cannot be repaired. Replace it with `/hunt shop weapon`.', flags: MessageFlags.Ephemeral });
         }
         if (weapon.currentDurability >= weapon.maxDurability) {
@@ -2433,7 +2553,7 @@ async function handleRepair(interaction, user, currency) {
         });
     }
 
-    if (weapon.status === 'condemned') {
+    if (isCondemned(weapon)) {
         return interaction.reply({ content: 'This weapon is **condemned** and cannot be repaired. Replace it with `/hunt shop weapon`.', flags: MessageFlags.Ephemeral });
     }
     if (weapon.currentDurability >= weapon.maxDurability && weapon.status !== 'broken') {
@@ -2445,16 +2565,24 @@ async function handleRepair(interaction, user, currency) {
     if (!requestedAmt || requestedAmt > needed) requestedAmt = needed;
     requestedAmt = Math.ceil(requestedAmt / 20) * 20;
 
-    const result = applyRepair(weapon, requestedAmt);
+    // Price the repair before applying it — applyRepair degrades max durability and
+    // bumps the repair count, and none of that should happen on a quote the player
+    // can't afford.
+    const quote = quoteRepair(weapon, requestedAmt);
 
-    if (result.error) {
-        return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
+    if (quote.error) {
+        return interaction.reply({ content: quote.error, flags: MessageFlags.Ephemeral });
     }
-    if (user.balance < result.cost) {
+    if (user.balance < quote.cost) {
         return interaction.reply({
-            content: `Repair costs ${currency}${result.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`,
+            content: `Repair costs ${currency}${quote.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`,
             flags: MessageFlags.Ephemeral
         });
+    }
+
+    const result = applyRepair(weapon, requestedAmt);
+    if (result.error) {
+        return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
     }
 
     user.balance -= result.cost;
@@ -2521,22 +2649,28 @@ async function handleUnlock(interaction, user, currency) {
         .map(([t, w]) => `${t}: ${w}%`)
         .join(' · ');
 
-    return interaction.reply({
-        embeds: [
-            new EmbedBuilder()
-                .setColor('#f39c12')
-                .setTitle(`${zone.emoji} Zone Unlocked: ${zone.name}!`)
-                .setDescription(zone.description)
-                .addFields(
-                    { name: 'Loot Table',   value: tierStr,                                                                                                        inline: false },
-                    { name: 'Difficulty',   value: zone.difficultyMod < 0 ? `${Math.round(zone.difficultyMod * 100)}% success` : 'No penalty',                    inline: true },
-                    { name: 'Payout Bonus', value: zone.payoutBonus > 0 ? `+${Math.round(zone.payoutBonus * 100)}%` : 'Standard',                                 inline: true },
-                    { name: 'Unlock Cost',  value: `${currency}${zone.unlockCost.toLocaleString()}`,                                                              inline: true },
-                    { name: 'New Balance',  value: `${currency}${user.balance.toLocaleString()}`,                                                                  inline: true }
-                )
-                .setFooter({ text: `Switch to it with /hunt zone set ${zoneId}` })
-        ]
-    });
+    const materialStr = (zone.zoneMaterials ?? [])
+        .map(id => MATERIAL_NAMES[id] ?? id)
+        .join(' · ');
+
+    const unlockEmbed = new EmbedBuilder()
+        .setColor('#f39c12')
+        .setTitle(`${zone.emoji} Zone Unlocked: ${zone.name}!`)
+        .setDescription(zone.description)
+        .addFields(
+            { name: 'Loot Table',   value: tierStr,                                                                                             inline: false },
+            { name: 'Difficulty',   value: zone.difficultyMod < 0 ? `${Math.round(zone.difficultyMod * 100)}% success` : 'No penalty',           inline: true },
+            { name: 'Payout Bonus', value: zone.payoutBonus > 0 ? `+${Math.round(zone.payoutBonus * 100)}%` : 'Standard',                        inline: true },
+            { name: 'Unlock Cost',  value: `${currency}${zone.unlockCost.toLocaleString()}`,                                                     inline: true },
+            { name: 'New Balance',  value: `${currency}${user.balance.toLocaleString()}`,                                                        inline: true }
+        )
+        .setFooter({ text: `Switch to it with /hunt zone set ${zoneId}` });
+
+    if (materialStr) {
+        unlockEmbed.addFields({ name: '🪨 Materials Found Here', value: materialStr, inline: false });
+    }
+
+    return interaction.reply({ embeds: [unlockEmbed] });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2674,6 +2808,10 @@ async function checkGrandPrestige(client, user, guild, guildId) {
         } catch { /* non-critical */ }
     }
 }
+
+// Test hooks. The command loader only looks for `data` and `execute`
+// (src/index.js), so extra exports are inert at runtime.
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines };
 
 // ── Per-user action lock ──────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent

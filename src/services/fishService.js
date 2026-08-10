@@ -23,6 +23,7 @@ const {
 } = require('../data/fishData');
 const { getCurrentWeather } = require('./weatherService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
+const { getPityBonus } = require('../utils/pityBonus');
 const { ensureHuntData, getMaxStamina: getHuntMaxStamina } = require('./huntService');
 const { getFishSynergyStaminaBonus } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
@@ -164,8 +165,7 @@ function calculateSuccessChance(user, rod, location) {
     }
 
     // Pity: consecutive fail streak
-    const pityStacks = Math.min(f.consecutiveFails, LIMITS.PITY_CONSECUTIVE_FAILS);
-    if (pityStacks > 0) chance += pityStacks * LIMITS.PITY_BONUS_PER_STACK;
+    chance += getPityBonus(f.consecutiveFails, LIMITS);
 
     return Math.min(0.95, Math.max(0.10, chance));
 }
@@ -811,9 +811,15 @@ function executeCast(user, locationId, options = {}) {
     }
 
     // Common post-cast updates
+    // A slack line costs time and rod wear but no stamina: a dry run should burn
+    // your afternoon, not your ability to keep playing. Every harsher tier — and
+    // the trait-driven escape above, which still pays XP — costs a point.
+    const staminaSpared = !success && result.failure?.severity?.id === 'line_slack';
+    result.staminaSpared = staminaSpared;
+
     f.totalCasts += 1;
     f.dailyCasts += 1;
-    f.stamina    -= 1;
+    if (!staminaSpared) f.stamina -= 1;
     f.lastCast    = new Date();
 
     tickConsumables(user);

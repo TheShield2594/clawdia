@@ -22,6 +22,7 @@ const {
     BOSS_TYPES
 } = require('../../data/fishData');
 const { MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../data/huntData');
+const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const {
     ensureFishingData,
@@ -469,36 +470,45 @@ async function handleCast(interaction) {
 
     // ── Bait check ────────────────────────────────────────────────────
     const rodData = ROD_BY_TIER[rod.tier];
-    if (rodData.requiresBait) {
-        const baitStock = f.bait[rodData.baitType] ?? 0;
-        if (baitStock <= 0) {
-            return interaction.reply({
-                content: `You're out of **${rodData.baitType.replace(/_/g, ' ')}**! Buy more with \`/fish shop\`.`,
-                flags: MessageFlags.Ephemeral
-            });
-        }
-        f.bait[rodData.baitType] = baitStock - 1;
-        user.markModified('fishing');
+    if (rodData.requiresBait && (f.bait[rodData.baitType] ?? 0) <= 0) {
+        return interaction.reply({
+            content: `You're out of **${rodData.baitType.replace(/_/g, ' ')}**! Buy more with \`/fish shop\`.`,
+            flags: MessageFlags.Ephemeral
+        });
     }
 
     // Atomically claim the cooldown slot now that all preflight checks have passed —
     // lastCast is set the moment the cast is actually accepted, not earlier, so a
     // failed precheck (stamina/rod/bait) never burns the cooldown. The same guard
     // still prevents two concurrent /fish casts from both slipping through.
+    //
+    // The claim targets GrindProfile, not User: fishing state lives in its own
+    // collection (see src/models/User.js), so a User-level guard would match every
+    // document on the missing `fishing` field and never reject anything.
     const fishClaimNow = new Date();
     const fishCooldownFloor = new Date(fishClaimNow.getTime() - LIMITS.CAST_COOLDOWN_MS);
-    const claimedFish = await User.findOneAndUpdate(
+    const priorLastCast = f.lastCast ?? null;
+    await persistGrindIfNew(user, 'fishing');
+    const fishClaimQuery = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
+    const claimedFish = await GrindProfile.findOneAndUpdate(
         {
-            userId: interaction.user.id,
-            guildId: interaction.guild.id,
-            $or: [{ 'fishing.lastCast': null }, { 'fishing.lastCast': { $lte: fishCooldownFloor } }],
+            ...fishClaimQuery,
+            $or: [{ 'data.lastCast': null }, { 'data.lastCast': { $lte: fishCooldownFloor } }],
         },
-        { $set: { 'fishing.lastCast': fishClaimNow } },
+        { $set: { 'data.lastCast': fishClaimNow } },
         { new: true },
     );
 
     if (!claimedFish) {
-        const nextAt = new Date(f.lastCast.getTime() + LIMITS.CAST_COOLDOWN_MS);
+        // Losing the claim means another cast already took the slot, so the
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the cast that actually happened. If that read fails,
+        // fall back to now rather than the snapshot: reaching the claim at all
+        // means the snapshot was already past the cooldown floor, so it would
+        // render a countdown in the past and tell the player they can cast again.
+        const current = await GrindProfile.findOne(fishClaimQuery).catch(() => null);
+        const lastAt  = current?.data?.lastCast ?? fishClaimNow;
+        const nextAt  = new Date(new Date(lastAt).getTime() + LIMITS.CAST_COOLDOWN_MS);
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '🎣 Line Still Settling',
@@ -511,544 +521,573 @@ async function handleCast(interaction) {
     }
     f.lastCast = fishClaimNow;
 
-    const featured          = getDailyFeatured(interaction.guild.id);
-    const isFeaturedSpot    = locationId === featured.fishSpot.id;
-    const timeBand          = getTimeBand();
+    // The claim is a real write now, so a cast that dies before its result is
+    // saved would otherwise cost the player a full cooldown for nothing. Hand the
+    // slot back — but only while it is still ours, so a newer claim isn't undone.
+    const releaseFishClaim = () => GrindProfile.updateOne(
+        { ...fishClaimQuery, 'data.lastCast': fishClaimNow },
+        { $set: { 'data.lastCast': priorLastCast } },
+    ).catch(() => null);
 
-    await interaction.deferReply();
-
-    // ── Cast & Wait for Bite ──────────────────────────────────────────────────
-    // Common/Uncommon: passive (no button). Rare: optional single button (3s) — miss
-    // downgrades to Uncommon payout. Epic: required (3s). Legendary: required (2s).
-    const delay      = ms => new Promise(r => setTimeout(r, ms));
-    const authorOpts = { name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) };
-    const featuredNote = isFeaturedSpot ? `\n\n🌟 **Featured Spot!** +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout & +${Math.round(FEATURED_RARE_BONUS * 100)}% rare chance active.` : '';
-
-    const luringEmbed = new EmbedBuilder()
-        .setColor(isFeaturedSpot ? '#FFD700' : '#4169E1')
-        .setTitle('🎣 Cast!')
-        .setDescription(`*Your lure hits the water with a satisfying plop…*\n\n🎣 **Lure in water… watching for a bite…**${featuredNote}`)
-        .setAuthor(authorOpts);
-    await interaction.editReply({ embeds: [luringEmbed], components: [] });
-    const reelMsg = await interaction.fetchReply();
-    await delay(2000 + Math.floor(Math.random() * 3001));
-
-    // Fish/Shark pet: +5%/+15% yield (only if hunger >= 30)
-    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
-    const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
-
-    const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
-
-    // Snapshot pre-cast reward state so we can reverse it if the fish escapes
-    const preCastBalance          = user.balance;
-    const preCastTotalEarned      = user.fishing.totalEarned;
-    const preCastDailyCoins       = user.fishing.dailyCoins;
-    const preCastSuccessful       = user.fishing.successfulCasts;
-    const preCastXp               = user.fishing.xp;
-    const preCastLevel            = user.fishing.level;
-    const preCastLegendaryCatches = user.fishing.legendaryCatches;
-    const preCastEventCatches     = user.fishing.eventCatches;
-    const preCastBestPayout       = user.fishing.bestPayout;
-    const preCastMaterials        = JSON.parse(JSON.stringify(user.fishing.materials ?? {}));
-    const preCastPersonalBest = user.fishing.personalBest
-        ? JSON.parse(JSON.stringify(user.fishing.personalBest))
-        : null;
-
-    let reelResult = null; // { caught: bool, label: string, icon: string }
-
-    const result = executeCast(user, locationId, { reactionFactor: 1.0, marketplaceActive });
-
-    // ── Rarity-Gated Reel-In ──────────────────────────────────────────────────
-    if (result.success && result.catchType === 'fish' && ['rare', 'epic', 'legendary'].includes(result.tier)) {
-        const REEL_TIERS = {
-            legendary: { window: 2000, required: true,  color: '#FFD700', emoji: '⚡', label: 'LEGENDARY CATCH — REEL IT IN!',  tagline: 'Once-in-a-lifetime — don\'t let it go!' },
-            epic:      { window: 3000, required: true,  color: '#9b59b6', emoji: '🔥', label: 'EPIC CATCH — HOLD THE LINE!',    tagline: 'A rare fighter — keep the tension!' },
-            rare:      { window: 3000, required: false, color: '#3498db', emoji: '🎣', label: 'You feel a bite! Reel In?',      tagline: 'Hit the button to land it, or it slips to Uncommon.' },
-        };
-        const cfg   = REEL_TIERS[result.tier];
-        const reelId = `reel_${interaction.id}`;
-
-        const biteEmbed = new EmbedBuilder()
-            .setColor(cfg.color)
-            .setTitle(`${cfg.emoji} ${cfg.label}`)
-            .setDescription(
-                `*A **${result.fish.name}** is on the line!*\n\n` +
-                `${cfg.tagline}\n\n` +
-                (cfg.required
-                    ? `⚠️ **Press within ${cfg.window / 1000}s or it escapes!**`
-                    : `💡 **Optional** — miss it and you still get an Uncommon catch.`)
-            )
-            .setAuthor(authorOpts);
-        const reelRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(reelId)
-                .setLabel(`🎣 Reel In! (${cfg.window / 1000}s)`)
-                .setStyle(cfg.required ? ButtonStyle.Danger : ButtonStyle.Primary)
-        );
-        await interaction.editReply({ embeds: [biteEmbed], components: [reelRow] });
-
-        const reelPressed = await new Promise(resolve => {
-            const col = reelMsg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId === reelId,
-                time: cfg.window,
-                max: 1,
-            });
-            col.on('collect', async i => { await i.deferUpdate(); resolve(true); });
-            col.on('end', (_, reason) => { if (reason !== 'limit') resolve(false); });
-        });
-
-        if (!reelPressed) {
-            if (cfg.required) {
-                // Reverse all reward mutations — fish escapes, only stamina and rod durability are spent
-                user.balance                   = preCastBalance;
-                user.fishing.totalEarned       = preCastTotalEarned;
-                user.fishing.dailyCoins        = preCastDailyCoins;
-                user.fishing.successfulCasts   = preCastSuccessful;
-                user.fishing.xp                = preCastXp;
-                user.fishing.level             = preCastLevel;
-                user.fishing.legendaryCatches  = preCastLegendaryCatches;
-                user.fishing.eventCatches      = preCastEventCatches;
-                user.fishing.bestPayout        = preCastBestPayout;
-                user.fishing.materials         = preCastMaterials;
-                if (preCastPersonalBest !== null) user.fishing.personalBest = preCastPersonalBest;
-                user.markModified('fishing');
-                result.success      = false;
-                result.finalPayout  = 0;
-                result.rawPayout    = 0;
-                result.xpEarned     = 0;
-                result.levelUp      = null;
-                result.specialDrop  = null;
-                result.escaped      = true;
-                reelResult = { caught: false, icon: '💨', label: `${result.tier} fish escaped!` };
-
-                const durLine = result.durabilityLost > 0 ? ` Rod took ${result.durabilityLost} durability damage.` : '';
-                await interaction.editReply({
-                    embeds: [new EmbedBuilder()
-                        .setColor('#888888')
-                        .setTitle('💨 It Got Away!')
-                        .setDescription(`*The ${result.fish.name} snapped the line and vanished into the depths.*\n\nStamina spent — nothing to show for it.${durLine}`)
-                        .setAuthor(authorOpts)],
-                    components: [],
-                });
-                await delay(1200);
-            } else {
-                // Rare optional miss — downgrade payout by ~65% to simulate Uncommon yield
-                const reduction = Math.round(result.finalPayout * 0.65);
-                result.finalPayout              -= reduction;
-                result.rawPayout                -= reduction;
-                user.balance                    -= reduction;
-                user.fishing.totalEarned        -= reduction;
-                user.fishing.dailyCoins         -= reduction;
-                result.tier = 'uncommon';
-                reelResult = { caught: true, icon: '😬', label: 'Rare slipped — Uncommon catch instead' };
-
-                await interaction.editReply({
-                    embeds: [new EmbedBuilder()
-                        .setColor('#aaaaaa')
-                        .setTitle('😬 Slipped Away Partially…')
-                        .setDescription(`*The ${result.fish.name} struggled free but you still pulled something in.*\n\nCatch downgraded to Uncommon.`)
-                        .setAuthor(authorOpts)],
-                    components: [],
-                });
-                await delay(800);
-            }
-        } else {
-            const tierLabel = result.tier.charAt(0).toUpperCase() + result.tier.slice(1);
-            reelResult = { caught: true, icon: cfg.required ? '🏆' : '✅', label: `${tierLabel} catch secured!` };
-            await interaction.editReply({
-                embeds: [new EmbedBuilder()
-                    .setColor(cfg.color)
-                    .setTitle(`${reelResult.icon} ${reelResult.label}`)
-                    .setDescription('*Reeling it in…*')
-                    .setAuthor(authorOpts)],
-                components: [],
-            });
-            await delay(600);
-        }
-    }
-    // ─────────────────────────────────────────────────────────────────────────
-
-    // Pity counter: reset on rare+ success, increment otherwise
-    if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
-        user.fishing.sinceRare = 0;
-    } else {
-        user.fishing.sinceRare = (user.fishing.sinceRare ?? 0) + 1;
-    }
-
-    if (result.success && result.finalPayout > 0 && petFishYieldPct > 0) {
-        const bonus = Math.round(result.finalPayout * petFishYieldPct / 100);
-        if (bonus > 0) {
-            user.balance              += bonus;
-            user.fishing.totalEarned  += bonus;
-            user.fishing.dailyCoins   += bonus;
-            result.finalPayout        += bonus;
-            result.petYieldBonus       = bonus;
-        }
-    }
-
-    // Featured spot bonus: +25% payout
-    if (result.success && result.finalPayout > 0 && isFeaturedSpot) {
-        const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
-        if (featBonus > 0) {
-            user.balance                += featBonus;
-            user.fishing.totalEarned    += featBonus;
-            user.fishing.dailyCoins     += featBonus;
-            result.finalPayout          += featBonus;
-            result.featuredSpotBonus     = featBonus;
-        }
-    }
-    // Wilderness district: +10% fish yield (clamped to daily hard cap)
-    const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
-    if (result.success && result.finalPayout > 0 && wildernessActive) {
-        const remaining = LIMITS.DAILY_HARD_CAP - user.fishing.dailyCoins;
-        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
-        if (bonus > 0) {
-            user.balance               += bonus;
-            user.fishing.totalEarned   += bonus;
-            user.fishing.dailyCoins    += bonus;
-            result.finalPayout         += bonus;
-            result.wildernessBonus      = bonus;
-        }
-    }
-    if (result.success && result.finalPayout > user.fishing.bestPayout) user.fishing.bestPayout = result.finalPayout;
-
-    // Winter Hunt cross-system bonus: fishing at Misty Lake drops arctic hunt materials
-    let winterHuntMaterial = null;
-    if (result.success && getEventCrossSystemType(guildSettings) === 'winter_hunt' && locationId === 'lake') {
-        const ARCTIC_MATERIALS = ['arctic_fox_pelt', 'snowy_feather', 'thick_hide', 'polar_claw', 'mammoth_tusk'];
-        const roll = Math.random();
-        if (roll < 0.40) {
-            const matId = ARCTIC_MATERIALS[Math.floor(Math.random() * ARCTIC_MATERIALS.length)];
-            user.hunt.materials[matId] = (user.hunt.materials[matId] ?? 0) + 1;
-            user.markModified('hunt');
-            winterHuntMaterial = matId;
-        }
-    }
-
-    updateFishQuestProgress(user, result, locationId);
-    await ensureQuests(user, guildSettings);
-    const { completed: questsDone, nearComplete: questsNear } = await onFish(user, guildSettings);
-    if (result.success && result.finalPayout > 0) {
-        const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
-        questsDone.push(...earn.completed);
-        questsNear.push(...earn.nearComplete);
-    }
-
-    // Rare companions are found, not bought: a legendary result is the only
-    // thing that can turn one up. Rolled before the save below persists it.
-    const rarePetDrop = result.success ? tryGrantRarePet(user, 'fish', result.tier) : null;
-    if (rarePetDrop) user.markModified('pets');
-
-    const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
-
+    // Everything between here and the save can still fail — a Discord API error
+    // while collecting the reel-in prompts, a service throwing — and until the
+    // result is persisted the player has nothing to show for the cooldown they
+    // just paid for. Hand the slot back on the way out unless the cast committed.
+    let castCommitted = false;
     try {
-        await user.save();
-        if (fishAchievements.length) {
-            announceAchievements(interaction.client, guildSettings, user, interaction.member, fishAchievements).catch(() => null);
+
+        // Bait comes out only once the cooldown slot is ours, so a lost race never
+        // costs the player a bait.
+        if (rodData.requiresBait) {
+            f.bait[rodData.baitType] = (f.bait[rodData.baitType] ?? 0) - 1;
+            user.markModified('fishing');
         }
-        notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
-        notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
-    } catch (err) {
-        if (err.name === 'VersionError') {
-            return interaction.editReply({ content: 'A simultaneous request conflicted. Please try `/fish cast` again.' });
+
+        const featured          = getDailyFeatured(interaction.guild.id);
+        const isFeaturedSpot    = locationId === featured.fishSpot.id;
+        const timeBand          = getTimeBand();
+
+        await interaction.deferReply();
+
+        // ── Cast & Wait for Bite ──────────────────────────────────────────────────
+        // Common/Uncommon: passive (no button). Rare: optional single button (3s) — miss
+        // downgrades to Uncommon payout. Epic: required (3s). Legendary: required (2s).
+        const delay      = ms => new Promise(r => setTimeout(r, ms));
+        const authorOpts = { name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) };
+        const featuredNote = isFeaturedSpot ? `\n\n🌟 **Featured Spot!** +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout & +${Math.round(FEATURED_RARE_BONUS * 100)}% rare chance active.` : '';
+
+        const luringEmbed = new EmbedBuilder()
+            .setColor(isFeaturedSpot ? '#FFD700' : '#4169E1')
+            .setTitle('🎣 Cast!')
+            .setDescription(`*Your lure hits the water with a satisfying plop…*\n\n🎣 **Lure in water… watching for a bite…**${featuredNote}`)
+            .setAuthor(authorOpts);
+        await interaction.editReply({ embeds: [luringEmbed], components: [] });
+        const reelMsg = await interaction.fetchReply();
+        await delay(2000 + Math.floor(Math.random() * 3001));
+
+        // Fish/Shark pet: +5%/+15% yield (only if hunger >= 30)
+        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
+        const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
+
+        const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
+
+        // Snapshot pre-cast reward state so we can reverse it if the fish escapes
+        const preCastBalance          = user.balance;
+        const preCastTotalEarned      = user.fishing.totalEarned;
+        const preCastDailyCoins       = user.fishing.dailyCoins;
+        const preCastSuccessful       = user.fishing.successfulCasts;
+        const preCastXp               = user.fishing.xp;
+        const preCastLevel            = user.fishing.level;
+        const preCastLegendaryCatches = user.fishing.legendaryCatches;
+        const preCastEventCatches     = user.fishing.eventCatches;
+        const preCastBestPayout       = user.fishing.bestPayout;
+        const preCastMaterials        = JSON.parse(JSON.stringify(user.fishing.materials ?? {}));
+        const preCastPersonalBest = user.fishing.personalBest
+            ? JSON.parse(JSON.stringify(user.fishing.personalBest))
+            : null;
+
+        let reelResult = null; // { caught: bool, label: string, icon: string }
+
+        const result = executeCast(user, locationId, { reactionFactor: 1.0, marketplaceActive });
+
+        // ── Rarity-Gated Reel-In ──────────────────────────────────────────────────
+        if (result.success && result.catchType === 'fish' && ['rare', 'epic', 'legendary'].includes(result.tier)) {
+            const REEL_TIERS = {
+                legendary: { window: 2000, required: true,  color: '#FFD700', emoji: '⚡', label: 'LEGENDARY CATCH — REEL IT IN!',  tagline: 'Once-in-a-lifetime — don\'t let it go!' },
+                epic:      { window: 3000, required: true,  color: '#9b59b6', emoji: '🔥', label: 'EPIC CATCH — HOLD THE LINE!',    tagline: 'A rare fighter — keep the tension!' },
+                rare:      { window: 3000, required: false, color: '#3498db', emoji: '🎣', label: 'You feel a bite! Reel In?',      tagline: 'Hit the button to land it, or it slips to Uncommon.' },
+            };
+            const cfg   = REEL_TIERS[result.tier];
+            const reelId = `reel_${interaction.id}`;
+
+            const biteEmbed = new EmbedBuilder()
+                .setColor(cfg.color)
+                .setTitle(`${cfg.emoji} ${cfg.label}`)
+                .setDescription(
+                    `*A **${result.fish.name}** is on the line!*\n\n` +
+                    `${cfg.tagline}\n\n` +
+                    (cfg.required
+                        ? `⚠️ **Press within ${cfg.window / 1000}s or it escapes!**`
+                        : `💡 **Optional** — miss it and you still get an Uncommon catch.`)
+                )
+                .setAuthor(authorOpts);
+            const reelRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(reelId)
+                    .setLabel(`🎣 Reel In! (${cfg.window / 1000}s)`)
+                    .setStyle(cfg.required ? ButtonStyle.Danger : ButtonStyle.Primary)
+            );
+            await interaction.editReply({ embeds: [biteEmbed], components: [reelRow] });
+
+            const reelPressed = await new Promise(resolve => {
+                const col = reelMsg.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && i.customId === reelId,
+                    time: cfg.window,
+                    max: 1,
+                });
+                col.on('collect', async i => { await i.deferUpdate(); resolve(true); });
+                col.on('end', (_, reason) => { if (reason !== 'limit') resolve(false); });
+            });
+
+            if (!reelPressed) {
+                if (cfg.required) {
+                    // Reverse all reward mutations — fish escapes, only stamina and rod durability are spent
+                    user.balance                   = preCastBalance;
+                    user.fishing.totalEarned       = preCastTotalEarned;
+                    user.fishing.dailyCoins        = preCastDailyCoins;
+                    user.fishing.successfulCasts   = preCastSuccessful;
+                    user.fishing.xp                = preCastXp;
+                    user.fishing.level             = preCastLevel;
+                    user.fishing.legendaryCatches  = preCastLegendaryCatches;
+                    user.fishing.eventCatches      = preCastEventCatches;
+                    user.fishing.bestPayout        = preCastBestPayout;
+                    user.fishing.materials         = preCastMaterials;
+                    if (preCastPersonalBest !== null) user.fishing.personalBest = preCastPersonalBest;
+                    user.markModified('fishing');
+                    result.success      = false;
+                    result.finalPayout  = 0;
+                    result.rawPayout    = 0;
+                    result.xpEarned     = 0;
+                    result.levelUp      = null;
+                    result.specialDrop  = null;
+                    result.escaped      = true;
+                    reelResult = { caught: false, icon: '💨', label: `${result.tier} fish escaped!` };
+
+                    const durLine = result.durabilityLost > 0 ? ` Rod took ${result.durabilityLost} durability damage.` : '';
+                    await interaction.editReply({
+                        embeds: [new EmbedBuilder()
+                            .setColor('#888888')
+                            .setTitle('💨 It Got Away!')
+                            .setDescription(`*The ${result.fish.name} snapped the line and vanished into the depths.*\n\nStamina spent — nothing to show for it.${durLine}`)
+                            .setAuthor(authorOpts)],
+                        components: [],
+                    });
+                    await delay(1200);
+                } else {
+                    // Rare optional miss — downgrade payout by ~65% to simulate Uncommon yield
+                    const reduction = Math.round(result.finalPayout * 0.65);
+                    result.finalPayout              -= reduction;
+                    result.rawPayout                -= reduction;
+                    user.balance                    -= reduction;
+                    user.fishing.totalEarned        -= reduction;
+                    user.fishing.dailyCoins         -= reduction;
+                    result.tier = 'uncommon';
+                    reelResult = { caught: true, icon: '😬', label: 'Rare slipped — Uncommon catch instead' };
+
+                    await interaction.editReply({
+                        embeds: [new EmbedBuilder()
+                            .setColor('#aaaaaa')
+                            .setTitle('😬 Slipped Away Partially…')
+                            .setDescription(`*The ${result.fish.name} struggled free but you still pulled something in.*\n\nCatch downgraded to Uncommon.`)
+                            .setAuthor(authorOpts)],
+                        components: [],
+                    });
+                    await delay(800);
+                }
+            } else {
+                const tierLabel = result.tier.charAt(0).toUpperCase() + result.tier.slice(1);
+                reelResult = { caught: true, icon: cfg.required ? '🏆' : '✅', label: `${tierLabel} catch secured!` };
+                await interaction.editReply({
+                    embeds: [new EmbedBuilder()
+                        .setColor(cfg.color)
+                        .setTitle(`${reelResult.icon} ${reelResult.label}`)
+                        .setDescription('*Reeling it in…*')
+                        .setAuthor(authorOpts)],
+                    components: [],
+                });
+                await delay(600);
+            }
         }
-        console.error('[fish] save error:', err);
-        return interaction.editReply({ content: 'Something went wrong saving your catch. Please try again.' });
-    }
+        // ─────────────────────────────────────────────────────────────────────────
 
-    // Submit to active tournament if fish catch (not junk/treasure)
-    if (result.success && result.catchType === 'fish' && result.fish && result.finalPayout > 0) {
-        submitTournamentCatch(interaction.guild.id, {
-            userId:    interaction.user.id,
-            username:  interaction.user.username,
-            fishName:  result.fish.name,
-            fishEmoji: result.fish.emoji ?? '🐟',
-            tier:      result.tier,
-            score:     result.finalPayout
-        }).catch(() => null);
-    }
-
-    // Track world records (heaviest catch per fish species in the server)
-    if (result.success && result.catchType === 'fish' && result.fish && result.weightLbs > 0) {
-        checkAndUpdateWorldRecord(interaction.guild.id, {
-            fish:     result.fish.name,
-            weight:   result.weightLbs,
-            userId:   interaction.user.id,
-            username: interaction.user.username,
-        }).catch(() => null);
-    }
-
-    // Await hourly winner update then re-fetch for accurate footer
-    if (result.success) {
-        const tierScore = FISH_TIER_SCORE[result.tier] ?? 0;
-        if (tierScore > 0 && result.fish) {
-            await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'fish', userId: interaction.user.id, username: interaction.user.username, value: tierScore, details: `${result.fish.emoji ?? ''} ${result.fish.name} (${result.tier})`.trim() }).catch(() => null);
+        // Pity counter: reset on rare+ success, increment otherwise
+        if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
+            user.fishing.sinceRare = 0;
+        } else {
+            user.fishing.sinceRare = (user.fishing.sinceRare ?? 0) + 1;
         }
-    }
-    const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'fish').catch(() => null);
 
-    // Fish escaped — already showed escape embed; just save stamina/cooldown and return
-    if (result.escaped) {
-        await user.save().catch(err => console.error('[fish] escape save error:', err));
-        return;
-    }
+        if (result.success && result.finalPayout > 0 && petFishYieldPct > 0) {
+            const bonus = Math.round(result.finalPayout * petFishYieldPct / 100);
+            if (bonus > 0) {
+                user.balance              += bonus;
+                user.fishing.totalEarned  += bonus;
+                user.fishing.dailyCoins   += bonus;
+                result.finalPayout        += bonus;
+                result.petYieldBonus       = bonus;
+            }
+        }
 
-    const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
+        // Featured spot bonus: +25% payout
+        if (result.success && result.finalPayout > 0 && isFeaturedSpot) {
+            const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
+            if (featBonus > 0) {
+                user.balance                += featBonus;
+                user.fishing.totalEarned    += featBonus;
+                user.fishing.dailyCoins     += featBonus;
+                result.finalPayout          += featBonus;
+                result.featuredSpotBonus     = featBonus;
+            }
+        }
+        // Wilderness district: +10% fish yield (clamped to daily hard cap)
+        const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
+        if (result.success && result.finalPayout > 0 && wildernessActive) {
+            const remaining = LIMITS.DAILY_HARD_CAP - user.fishing.dailyCoins;
+            const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+            const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+            if (bonus > 0) {
+                user.balance               += bonus;
+                user.fishing.totalEarned   += bonus;
+                user.fishing.dailyCoins    += bonus;
+                result.finalPayout         += bonus;
+                result.wildernessBonus      = bonus;
+            }
+        }
+        if (result.success && result.finalPayout > user.fishing.bestPayout) user.fishing.bestPayout = result.finalPayout;
 
-    if (result.petYieldBonus > 0) {
-        embed.addFields({ name: '🐠 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petFishYieldPct}% yield)`, inline: true });
-    }
-    if (result.featuredSpotBonus > 0) {
-        embed.addFields({ name: '🌟 Featured Spot Bonus', value: `+${result.featuredSpotBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
-    }
-    if (result.wildernessBonus > 0) {
-        embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
-    }
-    if (winterHuntMaterial) {
-        const matName = HUNT_MATERIAL_NAMES[winterHuntMaterial] ?? winterHuntMaterial;
-        embed.addFields({ name: '❄️ Winter Hunt Event', value: `+1 ${matName} (hunt material found in icy waters!)`, inline: true });
-    }
+        // Winter Hunt cross-system bonus: fishing at Misty Lake drops arctic hunt materials
+        let winterHuntMaterial = null;
+        if (result.success && getEventCrossSystemType(guildSettings) === 'winter_hunt' && locationId === 'lake') {
+            const ARCTIC_MATERIALS = ['arctic_fox_pelt', 'snowy_feather', 'thick_hide', 'polar_claw', 'mammoth_tusk'];
+            const roll = Math.random();
+            if (roll < 0.40) {
+                const matId = ARCTIC_MATERIALS[Math.floor(Math.random() * ARCTIC_MATERIALS.length)];
+                user.hunt.materials[matId] = (user.hunt.materials[matId] ?? 0) + 1;
+                user.markModified('hunt');
+                winterHuntMaterial = matId;
+            }
+        }
 
-    // Hourly leader footer
-    let leaderNote;
-    if (hourlyLeader) {
-        leaderNote = `🏆 Rarest this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? 'N/A'}`;
-    } else {
-        leaderNote = '🏆 No hourly leader yet — be the first!';
-    }
-    const existingFooter = embed.data.footer?.text ?? '';
-    embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
+        updateFishQuestProgress(user, result, locationId);
+        await ensureQuests(user, guildSettings);
+        const { completed: questsDone, nearComplete: questsNear } = await onFish(user, guildSettings);
+        if (result.success && result.finalPayout > 0) {
+            const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
+            questsDone.push(...earn.completed);
+            questsNear.push(...earn.nearComplete);
+        }
 
-    // Annotate embed with rarity reel-in result
-    if (reelResult) {
-        const desc = embed.data.description ?? '';
-        embed.setDescription(desc + `\n> ${reelResult.icon} *${reelResult.label}*`);
-    }
+        // Rare companions are found, not bought: a legendary result is the only
+        // thing that can turn one up. Rolled before the save below persists it.
+        const rarePetDrop = result.success ? tryGrantRarePet(user, 'fish', result.tier) : null;
+        if (rarePetDrop) user.markModified('pets');
 
-    // Boss encounter — multi-phase fight
-    if (result.bossEncounter) {
-        const bossType     = rollBossType();
-        const choicesMade  = [];
-        const phaseCount   = bossType.phases.length;
+        const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
-        const buildBossPhaseEmbed = (phaseIndex, prevResults) => {
-            const phase      = bossType.phases[phaseIndex];
-            const integrity  = 3 - prevResults.filter(p => !p.correct && p.chosen !== 'safe').length;
-            const intBar     = '❤️'.repeat(integrity) + '🖤'.repeat(3 - integrity);
-            const histLines  = prevResults.map((p, i) => {
+        try {
+            await user.save();
+            castCommitted = true;
+            if (fishAchievements.length) {
+                announceAchievements(interaction.client, guildSettings, user, interaction.member, fishAchievements).catch(() => null);
+            }
+            notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+            notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
+        } catch (err) {
+            // Nothing was saved, so give the cooldown slot back before telling them to retry.
+            await releaseFishClaim();
+            if (err.name === 'VersionError') {
+                return interaction.editReply({ content: 'A simultaneous request conflicted. Please try `/fish cast` again.' });
+            }
+            console.error('[fish] save error:', err);
+            return interaction.editReply({ content: 'Something went wrong saving your catch. Please try again.' });
+        }
+
+        // Submit to active tournament if fish catch (not junk/treasure)
+        if (result.success && result.catchType === 'fish' && result.fish && result.finalPayout > 0) {
+            submitTournamentCatch(interaction.guild.id, {
+                userId:    interaction.user.id,
+                username:  interaction.user.username,
+                fishName:  result.fish.name,
+                fishEmoji: result.fish.emoji ?? '🐟',
+                tier:      result.tier,
+                score:     result.finalPayout
+            }).catch(() => null);
+        }
+
+        // Track world records (heaviest catch per fish species in the server)
+        if (result.success && result.catchType === 'fish' && result.fish && result.weightLbs > 0) {
+            checkAndUpdateWorldRecord(interaction.guild.id, {
+                fish:     result.fish.name,
+                weight:   result.weightLbs,
+                userId:   interaction.user.id,
+                username: interaction.user.username,
+            }).catch(() => null);
+        }
+
+        // Await hourly winner update then re-fetch for accurate footer
+        if (result.success) {
+            const tierScore = FISH_TIER_SCORE[result.tier] ?? 0;
+            if (tierScore > 0 && result.fish) {
+                await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'fish', userId: interaction.user.id, username: interaction.user.username, value: tierScore, details: `${result.fish.emoji ?? ''} ${result.fish.name} (${result.tier})`.trim() }).catch(() => null);
+            }
+        }
+        const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'fish').catch(() => null);
+
+        // Fish escaped — already showed escape embed; just save stamina/cooldown and return
+        if (result.escaped) {
+            await user.save().catch(err => console.error('[fish] escape save error:', err));
+            return;
+        }
+
+        const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
+
+        if (result.petYieldBonus > 0) {
+            embed.addFields({ name: '🐠 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petFishYieldPct}% yield)`, inline: true });
+        }
+        if (result.featuredSpotBonus > 0) {
+            embed.addFields({ name: '🌟 Featured Spot Bonus', value: `+${result.featuredSpotBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
+        }
+        if (result.wildernessBonus > 0) {
+            embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
+        }
+        if (winterHuntMaterial) {
+            const matName = HUNT_MATERIAL_NAMES[winterHuntMaterial] ?? winterHuntMaterial;
+            embed.addFields({ name: '❄️ Winter Hunt Event', value: `+1 ${matName} (hunt material found in icy waters!)`, inline: true });
+        }
+
+        // Hourly leader footer
+        let leaderNote;
+        if (hourlyLeader) {
+            leaderNote = `🏆 Rarest this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? 'N/A'}`;
+        } else {
+            leaderNote = '🏆 No hourly leader yet — be the first!';
+        }
+        const existingFooter = embed.data.footer?.text ?? '';
+        embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
+
+        // Annotate embed with rarity reel-in result
+        if (reelResult) {
+            const desc = embed.data.description ?? '';
+            embed.setDescription(desc + `\n> ${reelResult.icon} *${reelResult.label}*`);
+        }
+
+        // Boss encounter — multi-phase fight
+        if (result.bossEncounter) {
+            const bossType     = rollBossType();
+            const choicesMade  = [];
+            const phaseCount   = bossType.phases.length;
+
+            const buildBossPhaseEmbed = (phaseIndex, prevResults) => {
+                const phase      = bossType.phases[phaseIndex];
+                const integrity  = 3 - prevResults.filter(p => !p.correct && p.chosen !== 'safe').length;
+                const intBar     = '❤️'.repeat(integrity) + '🖤'.repeat(3 - integrity);
+                const histLines  = prevResults.map((p, i) => {
+                    const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
+                    return `Phase ${i + 1}: ${icon}`;
+                }).join('  ');
+
+                return new EmbedBuilder()
+                    .setColor('#1C0A00')
+                    .setTitle(`${bossType.emoji} ${bossType.name} — Phase ${phaseIndex + 1}/${phaseCount}`)
+                    .setDescription(
+                        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                        `  ${result.bossEncounter.fish.emoji}  **${result.bossEncounter.fish.name}**\n` +
+                        `  Line Integrity: ${intBar}\n` +
+                        `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+                        `${phase.hint}\n\n` +
+                        (histLines ? `${histLines}\n\n` : '') +
+                        `**Choose your response — NOW:**`
+                    )
+                    .setFooter({ text: `⏱️ 30 seconds per phase • Outcomes: 3/3=Full legendary payout | 2/3=Rare | 1/3=Common | 0/3=Nothing` });
+            };
+
+            const buildPhaseRow = (phaseIndex) => {
+                const phase   = bossType.phases[phaseIndex];
+                const choices = phase.choices;
+                return new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('boss_match').setLabel(choices.match.label).setStyle(ButtonStyle.Danger),
+                    new ButtonBuilder().setCustomId('boss_hold').setLabel(choices.hold.label).setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('boss_safe').setLabel(choices.safe.label).setStyle(ButtonStyle.Secondary)
+                );
+            };
+
+            const validIds = ['boss_match', 'boss_hold', 'boss_safe'];
+            const idToKey  = { boss_match: 'match', boss_hold: 'hold', boss_safe: 'safe' };
+
+            // Phase 1
+            await interaction.editReply({ embeds: [embed, buildBossPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
+
+            const runPhase = async (phaseIndex, prevResults, prevBtn) => {
+                const responder  = prevBtn ?? interaction;
+                const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
+
+                return new Promise(resolve => {
+                    const collector = fetchReply.createMessageComponentCollector({
+                        filter: i => i.user.id === interaction.user.id && validIds.includes(i.customId),
+                        time: 30_000, max: 1
+                    });
+                    collector.on('collect', async btn => {
+                        const chosen    = idToKey[btn.customId];
+                        const phase     = bossType.phases[phaseIndex];
+                        const correct   = chosen === phase.correct;
+                        const results   = [...prevResults, { correct, chosen, correctChoice: phase.correct }];
+                        choicesMade.push(chosen);
+
+                        if (phaseIndex < phaseCount - 1) {
+                            // More phases ahead
+                            await btn.update({ embeds: [embed, buildBossPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
+                            resolve({ btn, results });
+                        } else {
+                            resolve({ btn, results, done: true });
+                        }
+                    });
+                    collector.on('end', (collected, reason) => {
+                        if (reason === 'time' && collected.size === 0) {
+                            // Timeout — treat as safe choice for remaining phases
+                            resolve({ btn: null, results: prevResults, timedOut: true });
+                        }
+                    });
+                });
+            };
+
+            // Run all 3 phases sequentially
+            let state = { btn: null, results: [], done: false, timedOut: false };
+            for (let i = 0; i < phaseCount; i++) {
+                state = await runPhase(i, state.results, state.btn);
+                if (state.timedOut) {
+                    const timeoutEmbed = new EmbedBuilder()
+                        .setColor('#1C0A00')
+                        .setTitle(`${bossType.emoji} ${bossType.name} Slipped Away`)
+                        .setDescription(`⏱️ *You hesitated too long — the ${bossType.name} broke free before you could respond.*\n\nThe base catch above still counts; no bonus boss payout was earned.`);
+                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
+                    return;
+                }
+            }
+
+            // Resolve outcome
+            const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+            await attachGrind(freshUser);
+            ensureFishingData(freshUser);
+            const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choicesMade, bossType);
+
+            let bossQuestsDone = [], bossQuestsNear = [];
+            if (bossResult.bonusPayout > 0) {
+                const bossLocation = LOCATIONS[freshUser.fishing.activeLocation] ?? location;
+                const { adjustedPayout } = applyPayoutModifiers(freshUser, bossResult.bonusPayout, bossLocation);
+                bossResult.bonusPayout = adjustedPayout;
+                freshUser.balance                 += adjustedPayout;
+                freshUser.fishing.totalEarned     += adjustedPayout;
+                freshUser.fishing.dailyCoins      += adjustedPayout;
+                if (adjustedPayout > freshUser.fishing.bestPayout) freshUser.fishing.bestPayout = adjustedPayout;
+
+                await ensureQuests(freshUser, guildSettings);
+                const earn = await onEconomyEarn(freshUser, guildSettings, adjustedPayout);
+                bossQuestsDone = earn.completed;
+                bossQuestsNear = earn.nearComplete;
+            }
+            freshUser.markModified('fishing');
+            try {
+                await freshUser.save();
+                if (bossQuestsDone.length || bossQuestsNear.length) {
+                    notifyQuestComplete(guildSettings, interaction.member, bossQuestsDone, interaction.channel, freshUser).catch(() => null);
+                    notifyQuestNearComplete(guildSettings, interaction.member, bossQuestsNear, interaction.channel).catch(() => null);
+                }
+            } catch (saveErr) {
+                console.error('[fish boss] save error:', saveErr);
+                return state.btn.update({ content: 'Something went wrong saving your boss result. Please try again.', embeds: [], components: [] });
+            }
+
+            if (bossResult.bonusPayout > 0) {
+                const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
+                if (bossResult.bonusPayout >= bigWinThreshold) {
+                    logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: bossResult.bonusPayout, source: 'fish', details: { itemName: result.bossEncounter.fish.name, rarity: 'boss' }, client: interaction.client });
+                }
+                // Submit boss win to active tournament with multiplier bonus
+                const tournamentScore = Math.round(bossResult.bonusPayout * (bossResult.tournamentMultiplier ?? 1));
+                submitTournamentCatch(interaction.guild.id, {
+                    userId:    interaction.user.id,
+                    username:  interaction.user.username,
+                    fishName:  result.bossEncounter.fish.name,
+                    fishEmoji: result.bossEncounter.fish.emoji ?? '🐉',
+                    tier:      result.bossEncounter.tier,
+                    score:     tournamentScore,
+                    isBossKill: ['perfect', 'win'].includes(bossResult.outcome)
+                }).catch(() => null);
+            }
+
+            const phaseScoreLine = bossResult.phaseResults.map((p, i) => {
                 const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
                 return `Phase ${i + 1}: ${icon}`;
             }).join('  ');
 
-            return new EmbedBuilder()
-                .setColor('#1C0A00')
-                .setTitle(`${bossType.emoji} ${bossType.name} — Phase ${phaseIndex + 1}/${phaseCount}`)
-                .setDescription(
-                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `  ${result.bossEncounter.fish.emoji}  **${result.bossEncounter.fish.name}**\n` +
-                    `  Line Integrity: ${intBar}\n` +
-                    `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-                    `${phase.hint}\n\n` +
-                    (histLines ? `${histLines}\n\n` : '') +
-                    `**Choose your response — NOW:**`
+            const outcomeColors = { perfect: '#FFD700', win: '#2ecc71', survived: '#3498db', escaped: '#1C0A00' };
+            const outcomeTitles = {
+                perfect:  `🏆 ${result.bossEncounter.fish.emoji} PERFECT — ${bossType.name} Mastered!`,
+                win:      `✅ ${result.bossEncounter.fish.emoji} ${bossType.name} Subdued`,
+                survived: `😓 ${result.bossEncounter.fish.emoji} Barely Survived`,
+                escaped:  `💀 ${result.bossEncounter.fish.emoji} ${bossType.name} Escaped!`
+            };
+
+            const bossResultEmbed = new EmbedBuilder()
+                .setColor(outcomeColors[bossResult.outcome] ?? '#95a5a6')
+                .setTitle(outcomeTitles[bossResult.outcome] ?? '❓ Boss Result')
+                .setDescription(`${phaseScoreLine}\n\n${bossResult.message}`)
+                .addFields(
+                    { name: 'Score',        value: `${bossResult.correctCount}/3 correct`, inline: true },
+                    { name: 'Bonus Payout', value: bossResult.bonusPayout > 0 ? `${currency}${bossResult.bonusPayout.toLocaleString()}` : 'None', inline: true },
+                    { name: 'Rod Damage',   value: `-${bossResult.durabilityLost} durability`, inline: true }
                 )
-                .setFooter({ text: `⏱️ 30 seconds per phase • Outcomes: 3/3=Full legendary payout | 2/3=Rare | 1/3=Common | 0/3=Nothing` });
-        };
+                .setTimestamp();
 
-        const buildPhaseRow = (phaseIndex) => {
-            const phase   = bossType.phases[phaseIndex];
-            const choices = phase.choices;
-            return new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('boss_match').setLabel(choices.match.label).setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId('boss_hold').setLabel(choices.hold.label).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('boss_safe').setLabel(choices.safe.label).setStyle(ButtonStyle.Secondary)
-            );
-        };
-
-        const validIds = ['boss_match', 'boss_hold', 'boss_safe'];
-        const idToKey  = { boss_match: 'match', boss_hold: 'hold', boss_safe: 'safe' };
-
-        // Phase 1
-        await interaction.editReply({ embeds: [embed, buildBossPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
-
-        const runPhase = async (phaseIndex, prevResults, prevBtn) => {
-            const responder  = prevBtn ?? interaction;
-            const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
-
-            return new Promise(resolve => {
-                const collector = fetchReply.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && validIds.includes(i.customId),
-                    time: 30_000, max: 1
-                });
-                collector.on('collect', async btn => {
-                    const chosen    = idToKey[btn.customId];
-                    const phase     = bossType.phases[phaseIndex];
-                    const correct   = chosen === phase.correct;
-                    const results   = [...prevResults, { correct, chosen, correctChoice: phase.correct }];
-                    choicesMade.push(chosen);
-
-                    if (phaseIndex < phaseCount - 1) {
-                        // More phases ahead
-                        await btn.update({ embeds: [embed, buildBossPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
-                        resolve({ btn, results });
-                    } else {
-                        resolve({ btn, results, done: true });
-                    }
-                });
-                collector.on('end', (collected, reason) => {
-                    if (reason === 'time' && collected.size === 0) {
-                        // Timeout — treat as safe choice for remaining phases
-                        resolve({ btn: null, results: prevResults, timedOut: true });
-                    }
-                });
-            });
-        };
-
-        // Run all 3 phases sequentially
-        let state = { btn: null, results: [], done: false, timedOut: false };
-        for (let i = 0; i < phaseCount; i++) {
-            state = await runPhase(i, state.results, state.btn);
-            if (state.timedOut) {
-                const timeoutEmbed = new EmbedBuilder()
-                    .setColor('#1C0A00')
-                    .setTitle(`${bossType.emoji} ${bossType.name} Slipped Away`)
-                    .setDescription(`⏱️ *You hesitated too long — the ${bossType.name} broke free before you could respond.*\n\nThe base catch above still counts; no bonus boss payout was earned.`);
-                interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
-                return;
-            }
+            await state.btn.update({ embeds: [embed, bossResultEmbed], components: [] });
+            return;
         }
 
-        // Resolve outcome
-        const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        await attachGrind(freshUser);
-        ensureFishingData(freshUser);
-        const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choicesMade, bossType);
-
-        let bossQuestsDone = [], bossQuestsNear = [];
-        if (bossResult.bonusPayout > 0) {
-            const bossLocation = LOCATIONS[freshUser.fishing.activeLocation] ?? location;
-            const { adjustedPayout } = applyPayoutModifiers(freshUser, bossResult.bonusPayout, bossLocation);
-            bossResult.bonusPayout = adjustedPayout;
-            freshUser.balance                 += adjustedPayout;
-            freshUser.fishing.totalEarned     += adjustedPayout;
-            freshUser.fishing.dailyCoins      += adjustedPayout;
-            if (adjustedPayout > freshUser.fishing.bestPayout) freshUser.fishing.bestPayout = adjustedPayout;
-
-            await ensureQuests(freshUser, guildSettings);
-            const earn = await onEconomyEarn(freshUser, guildSettings, adjustedPayout);
-            bossQuestsDone = earn.completed;
-            bossQuestsNear = earn.nearComplete;
-        }
-        freshUser.markModified('fishing');
-        try {
-            await freshUser.save();
-            if (bossQuestsDone.length || bossQuestsNear.length) {
-                notifyQuestComplete(guildSettings, interaction.member, bossQuestsDone, interaction.channel, freshUser).catch(() => null);
-                notifyQuestNearComplete(guildSettings, interaction.member, bossQuestsNear, interaction.channel).catch(() => null);
-            }
-        } catch (saveErr) {
-            console.error('[fish boss] save error:', saveErr);
-            return state.btn.update({ content: 'Something went wrong saving your boss result. Please try again.', embeds: [], components: [] });
-        }
-
-        if (bossResult.bonusPayout > 0) {
+        // Non-boss path: log big win after all payouts finalized
+        if (result.success) {
             const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-            if (bossResult.bonusPayout >= bigWinThreshold) {
-                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: bossResult.bonusPayout, source: 'fish', details: { itemName: result.bossEncounter.fish.name, rarity: 'boss' }, client: interaction.client });
-            }
-            // Submit boss win to active tournament with multiplier bonus
-            const tournamentScore = Math.round(bossResult.bonusPayout * (bossResult.tournamentMultiplier ?? 1));
-            submitTournamentCatch(interaction.guild.id, {
-                userId:    interaction.user.id,
-                username:  interaction.user.username,
-                fishName:  result.bossEncounter.fish.name,
-                fishEmoji: result.bossEncounter.fish.emoji ?? '🐉',
-                tier:      result.bossEncounter.tier,
-                score:     tournamentScore,
-                isBossKill: ['perfect', 'win'].includes(bossResult.outcome)
-            }).catch(() => null);
-        }
-
-        const phaseScoreLine = bossResult.phaseResults.map((p, i) => {
-            const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
-            return `Phase ${i + 1}: ${icon}`;
-        }).join('  ');
-
-        const outcomeColors = { perfect: '#FFD700', win: '#2ecc71', survived: '#3498db', escaped: '#1C0A00' };
-        const outcomeTitles = {
-            perfect:  `🏆 ${result.bossEncounter.fish.emoji} PERFECT — ${bossType.name} Mastered!`,
-            win:      `✅ ${result.bossEncounter.fish.emoji} ${bossType.name} Subdued`,
-            survived: `😓 ${result.bossEncounter.fish.emoji} Barely Survived`,
-            escaped:  `💀 ${result.bossEncounter.fish.emoji} ${bossType.name} Escaped!`
-        };
-
-        const bossResultEmbed = new EmbedBuilder()
-            .setColor(outcomeColors[bossResult.outcome] ?? '#95a5a6')
-            .setTitle(outcomeTitles[bossResult.outcome] ?? '❓ Boss Result')
-            .setDescription(`${phaseScoreLine}\n\n${bossResult.message}`)
-            .addFields(
-                { name: 'Score',        value: `${bossResult.correctCount}/3 correct`, inline: true },
-                { name: 'Bonus Payout', value: bossResult.bonusPayout > 0 ? `${currency}${bossResult.bonusPayout.toLocaleString()}` : 'None', inline: true },
-                { name: 'Rod Damage',   value: `-${bossResult.durabilityLost} durability`, inline: true }
-            )
-            .setTimestamp();
-
-        await state.btn.update({ embeds: [embed, bossResultEmbed], components: [] });
-        return;
-    }
-
-    // Non-boss path: log big win after all payouts finalized
-    if (result.success) {
-        const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-        if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
-            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'fish', details: { itemName: result.fish?.name, rarity: result.tier }, client: interaction.client });
-        }
-    }
-
-    // Rare companion drop — announced prominently; this is the only way to get one.
-    if (rarePetDrop) {
-        embed.addFields({
-            name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
-            value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
-                 + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
-                 + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
-            inline: false,
-        });
-    }
-
-    // Pet narrative: show active pet's personality flavor in description
-    if (result.success && result.catchType !== 'junk') {
-        const activePet = (user.pets || []).find(p => isPetActive(p));
-        if (activePet) {
-            const petDef = PET_DEFS[activePet.petId];
-            const petName = activePet.name || petDef?.name || activePet.petId;
-            const flavorFn = TRAIT_FLAVOR[activePet.personality]?.fish;
-            if (flavorFn && petDef) {
-                const desc = embed.data.description ?? '';
-                embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
+            if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+                logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'fish', details: { itemName: result.fish?.name, rarity: result.tier }, client: interaction.client });
             }
         }
-    }
 
-    // Staged loot reveal for rare+ drops
-    await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+        // Rare companion drop — announced prominently; this is the only way to get one.
+        if (rarePetDrop) {
+            embed.addFields({
+                name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
+                value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
+                     + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                     + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
+                inline: false,
+            });
+        }
 
-    if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
-        const announceChannelId = guildSettings?.economy?.announcementChannelId;
-        const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
-        const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-        const isLeg = result.tier === 'legendary';
-        const announcementEmbed = new EmbedBuilder()
-            .setColor(isLeg ? '#ff9800' : '#9c27b0')
-            .setTitle(isLeg ? '✨ Legendary Catch! ✨' : '🔮 Epic Catch!')
-            .setDescription(
-                `<@${interaction.user.id}> just pulled ${result.fish.emoji} **${result.fish.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
-                `while fishing in the **${location.name}**.\n\n` +
-                (isLeg ? `That's incredibly rare.` : `A remarkable catch.`)
-            )
-            .setTimestamp();
-        announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
+        // Pet narrative: show active pet's personality flavor in description
+        if (result.success && result.catchType !== 'junk') {
+            const activePet = (user.pets || []).find(p => isPetActive(p));
+            if (activePet) {
+                const petDef = PET_DEFS[activePet.petId];
+                const petName = activePet.name || petDef?.name || activePet.petId;
+                const flavorFn = TRAIT_FLAVOR[activePet.personality]?.fish;
+                if (flavorFn && petDef) {
+                    const desc = embed.data.description ?? '';
+                    embed.setDescription(desc + `\n> ${flavorFn(petName, petDef.emoji)}`);
+                }
+            }
+        }
+
+        // Staged loot reveal for rare+ drops
+        await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+
+        if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
+            const announceChannelId = guildSettings?.economy?.announcementChannelId;
+            const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
+            const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
+            const isLeg = result.tier === 'legendary';
+            const announcementEmbed = new EmbedBuilder()
+                .setColor(isLeg ? '#ff9800' : '#9c27b0')
+                .setTitle(isLeg ? '✨ Legendary Catch! ✨' : '🔮 Epic Catch!')
+                .setDescription(
+                    `<@${interaction.user.id}> just pulled ${result.fish.emoji} **${result.fish.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
+                    `while fishing in the **${location.name}**.\n\n` +
+                    (isLeg ? `That's incredibly rare.` : `A remarkable catch.`)
+                )
+                .setTimestamp();
+            announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
+        }
+    } catch (err) {
+        if (!castCommitted) await releaseFishClaim();
+        throw err;
     }
 }
 
@@ -1228,8 +1267,18 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
             { name: 'Reward',   value: 'Nothing',                             inline: true },
             { name: 'XP',       value: xpEarned > 0 ? `+${xpEarned} XP` : 'None', inline: true },
             { name: 'Rod',      value: buildRodLine(rod),                     inline: true },
-            { name: 'Stamina',  value: buildStaminaLine(user),                inline: true }
+            {
+                name: 'Stamina',
+                value: result.staminaSpared
+                    ? `${buildStaminaLine(user)}\n*Slack line — no stamina spent*`
+                    : buildStaminaLine(user),
+                inline: true
+            }
         );
+
+    if ((user.fishing.consecutiveFails ?? 0) > 0) {
+        embed.addFields(buildPityStreakField(user.fishing.consecutiveFails, LIMITS, PITY_COPY.fishing));
+    }
 
     if (failure.severity.injuryMs > 0) {
         embed.addFields({ name: '🤕 Soaked!', value: `Extra cooldown: **${formatMs(failure.severity.injuryMs)}**`, inline: true });

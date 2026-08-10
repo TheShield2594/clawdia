@@ -1,0 +1,190 @@
+'use strict';
+
+const {
+    isCondemned,
+    quoteRepair,
+    applyRepair,
+    updateWeaponStatus,
+    applyDurabilityLoss,
+    applyPayoutModifiers,
+} = require('../src/services/huntService');
+const { ZONES, LIMITS, WEAPON_BY_TIER } = require('../src/data/huntData');
+
+function makeWeapon(overrides = {}) {
+    return {
+        name: 'Wooden Rifle',
+        tier: 1,
+        currentDurability: 80,
+        maxDurability: 80,
+        baseDurability: 80,
+        repairCount: 0,
+        upgrade: null,
+        status: 'good',
+        ...overrides,
+    };
+}
+
+/** Repairs until the weapon is condemned, returning it. */
+function repairUntilCondemned(weapon) {
+    for (let i = 0; i < 50 && !isCondemned(weapon); i++) {
+        weapon.currentDurability = 0;
+        updateWeaponStatus(weapon);
+        const res = applyRepair(weapon, weapon.maxDurability);
+        if (res.error) break;
+    }
+    return weapon;
+}
+
+describe('weapon condemnation', () => {
+    test('shop repairs eventually condemn a weapon', () => {
+        const weapon = repairUntilCondemned(makeWeapon());
+        expect(isCondemned(weapon)).toBe(true);
+        expect(weapon.maxDurability / weapon.baseDurability).toBeLessThan(0.20);
+    });
+
+    test('a condemned weapon cannot be repaired even after it breaks', () => {
+        const weapon = repairUntilCondemned(makeWeapon());
+
+        // Break it: updateWeaponStatus labels it 'broken', which used to mask
+        // 'condemned' and reopen the repair path for another cycle.
+        weapon.currentDurability = 0;
+        updateWeaponStatus(weapon);
+        expect(weapon.status).toBe('broken');
+
+        expect(isCondemned(weapon)).toBe(true);
+        expect(quoteRepair(weapon, 20).error).toMatch(/condemned/i);
+        expect(applyRepair(weapon, 20).error).toMatch(/condemned/i);
+    });
+
+    test('breaking a condemned weapon does not restore any durability', () => {
+        const weapon = repairUntilCondemned(makeWeapon());
+        weapon.currentDurability = 0;
+        updateWeaponStatus(weapon);
+        const repairsBefore = weapon.repairCount;
+
+        applyRepair(weapon, weapon.maxDurability);
+
+        expect(weapon.currentDurability).toBe(0);
+        expect(weapon.repairCount).toBe(repairsBefore);
+    });
+
+    test('a healthy weapon is not condemned', () => {
+        const weapon = makeWeapon({ currentDurability: 10 });
+        expect(isCondemned(weapon)).toBe(false);
+        expect(quoteRepair(weapon, 20).error).toBeUndefined();
+    });
+});
+
+describe('quoteRepair', () => {
+    test('prices a repair without mutating the weapon', () => {
+        const weapon = makeWeapon({ currentDurability: 20 });
+        const snapshot = { ...weapon };
+
+        const quote = quoteRepair(weapon, 60);
+
+        expect(quote.cost).toBe(3 * WEAPON_BY_TIER[1].repairCostPer20);
+        expect(quote.amount).toBe(60);
+        expect(weapon).toEqual(snapshot);
+    });
+
+    test('agrees with the cost applyRepair actually charges', () => {
+        const weapon = makeWeapon({ currentDurability: 20 });
+        const quote  = quoteRepair(weapon, 60);
+        const result = applyRepair(weapon, 60);
+
+        expect(result.cost).toBe(quote.cost);
+        expect(result.restoredAmount).toBe(quote.amount);
+    });
+
+    test('refuses a weapon already at full durability', () => {
+        expect(quoteRepair(makeWeapon(), 20).error).toMatch(/full durability/i);
+    });
+});
+
+describe('gathering-yield charges', () => {
+    function makeUser(dailyCoins) {
+        return {
+            hunt: { dailyCoins, dailyHunts: 0, prestige: 0 },
+            activeEffects: [
+                { type: 'silvered_talisman', charges: 5, expiresAt: new Date(Date.now() + 3600_000) },
+            ],
+            markModified: () => {},
+        };
+    }
+
+    test('doubles the payout and spends a charge with headroom to spare', () => {
+        const user = makeUser(0);
+
+        const { adjustedPayout } = applyPayoutModifiers(user, 5000, ZONES.beginner_forest);
+
+        expect(adjustedPayout).toBe(10_000);
+        expect(user.activeEffects[0].charges).toBe(4);
+    });
+
+    test('still pays past the soft cap, where x2 beats the halving', () => {
+        const user = makeUser(LIMITS.DAILY_SOFT_CAP);
+
+        const { adjustedPayout } = applyPayoutModifiers(user, 5000, ZONES.beginner_forest);
+
+        expect(adjustedPayout).toBe(5000);
+        expect(user.activeEffects[0].charges).toBe(4);
+    });
+
+    test('is not consumed when the hard-cap headroom makes doubling worthless', () => {
+        const user = makeUser(LIMITS.DAILY_HARD_CAP - 1);
+
+        const { adjustedPayout } = applyPayoutModifiers(user, 5000, ZONES.beginner_forest);
+
+        expect(adjustedPayout).toBe(1);
+        expect(user.activeEffects[0].charges).toBe(5);
+    });
+
+    test('reports the effect and remaining charges so the embed can show them', () => {
+        const user = makeUser(0);
+
+        const { gatheringYield } = applyPayoutModifiers(user, 5000, ZONES.beginner_forest);
+
+        expect(gatheringYield).toMatchObject({ effect: 'silvered_talisman', chargesLeft: 4 });
+        expect(gatheringYield.label).toBe('Silvered Talisman');
+    });
+
+    test('reuse doubles the apex bonus without spending a second charge', () => {
+        const user = makeUser(0);
+
+        // The kill itself spends one charge...
+        const kill = applyPayoutModifiers(user, 5000, ZONES.beginner_forest);
+        expect(user.activeEffects[0].charges).toBe(4);
+
+        // ...and the apex bonus rides on it rather than burning another.
+        const apex = applyPayoutModifiers(user, 1000, ZONES.beginner_forest, {
+            reuseGatheringYield: !!kill.gatheringYield,
+        });
+
+        expect(apex.adjustedPayout).toBe(2000);
+        expect(apex.gatheringYield).toBeNull();
+        expect(user.activeEffects[0].charges).toBe(4);
+    });
+
+    test('a hunt plus its apex never costs more than one charge', () => {
+        const user = makeUser(0);
+        const kill = applyPayoutModifiers(user, 5000, ZONES.beginner_forest);
+        applyPayoutModifiers(user, 1000, ZONES.beginner_forest, { reuseGatheringYield: !!kill.gatheringYield });
+
+        expect(user.activeEffects[0].charges).toBe(5 - 1);
+    });
+});
+
+describe('applyDurabilityLoss', () => {
+    test('reinforced stock reduces loss but never below 1', () => {
+        const weapon = makeWeapon({ upgrade: 'reinforced_stock' });
+        applyDurabilityLoss(weapon, 1);
+        expect(weapon.currentDurability).toBe(79);
+    });
+
+    test('never drives durability below zero', () => {
+        const weapon = makeWeapon({ currentDurability: 2 });
+        applyDurabilityLoss(weapon, 10);
+        expect(weapon.currentDurability).toBe(0);
+        expect(weapon.status).toBe('broken');
+    });
+});
