@@ -487,12 +487,12 @@ async function handleCast(interaction) {
     // document on the missing `fishing` field and never reject anything.
     const fishClaimNow = new Date();
     const fishCooldownFloor = new Date(fishClaimNow.getTime() - LIMITS.CAST_COOLDOWN_MS);
+    const priorLastCast = f.lastCast ?? null;
     await persistGrindIfNew(user, 'fishing');
+    const fishClaimQuery = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
     const claimedFish = await GrindProfile.findOneAndUpdate(
         {
-            userId: interaction.user.id,
-            guildId: interaction.guild.id,
-            system: 'fishing',
+            ...fishClaimQuery,
             $or: [{ 'data.lastCast': null }, { 'data.lastCast': { $lte: fishCooldownFloor } }],
         },
         { $set: { 'data.lastCast': fishClaimNow } },
@@ -500,8 +500,12 @@ async function handleCast(interaction) {
     );
 
     if (!claimedFish) {
-        const lastAt = f.lastCast ?? fishClaimNow;
-        const nextAt = new Date(lastAt.getTime() + LIMITS.CAST_COOLDOWN_MS);
+        // Losing the claim means another cast already took the slot, so the
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the cast that actually happened.
+        const current = await GrindProfile.findOne(fishClaimQuery).catch(() => null);
+        const lastAt  = current?.data?.lastCast ?? priorLastCast ?? fishClaimNow;
+        const nextAt  = new Date(new Date(lastAt).getTime() + LIMITS.CAST_COOLDOWN_MS);
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '🎣 Line Still Settling',
@@ -513,6 +517,14 @@ async function handleCast(interaction) {
         });
     }
     f.lastCast = fishClaimNow;
+
+    // The claim is a real write now, so a cast that dies before its result is
+    // saved would otherwise cost the player a full cooldown for nothing. Hand the
+    // slot back — but only while it is still ours, so a newer claim isn't undone.
+    const releaseFishClaim = () => GrindProfile.updateOne(
+        { ...fishClaimQuery, 'data.lastCast': fishClaimNow },
+        { $set: { 'data.lastCast': priorLastCast } },
+    ).catch(() => null);
 
     // Bait comes out only once the cooldown slot is ours, so a lost race never
     // costs the player a bait.
@@ -760,6 +772,8 @@ async function handleCast(interaction) {
         notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
         notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
     } catch (err) {
+        // Nothing was saved, so give the cooldown slot back before telling them to retry.
+        await releaseFishClaim();
         if (err.name === 'VersionError') {
             return interaction.editReply({ content: 'A simultaneous request conflicted. Please try `/fish cast` again.' });
         }

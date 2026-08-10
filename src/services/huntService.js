@@ -949,7 +949,10 @@ function executeHunt(user, zoneId, options = {}) {
 
     h.totalHunts  += 1;
     h.dailyHunts  += 1;
-    if (!staminaSpared) h.stamina -= 1;
+    // Clamped: venomous prey already docks a point above, so a hunter who started
+    // the hunt with exactly 1 would otherwise land on -1 — which /hunt profile
+    // turns into a RangeError building the stamina bar.
+    if (!staminaSpared) h.stamina = Math.max(0, h.stamina - 1);
     h.lastHunt     = new Date();
 
     // Ammo deduction (handled by caller after pre-check)

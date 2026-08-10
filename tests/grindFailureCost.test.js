@@ -87,6 +87,29 @@ const ACTIVITIES = [
     },
 ];
 
+describe('hunting: stamina floor', () => {
+    test('a venomous kill at one stamina cannot push the hunter below zero', () => {
+        // /hunt start admits an attempt at exactly 1 stamina, and venomous prey
+        // docks an extra point before the common per-hunt cost lands. Landing on
+        // -1 makes /hunt profile throw building its stamina bar ('⚡'.repeat(-1)).
+        const huntActivity = ACTIVITIES.find(a => a.name === 'hunting');
+        let venomousKills = 0;
+        let lowest = Infinity;
+
+        for (let i = 0; i < 20_000; i++) {
+            const user = huntActivity.build();
+            user.hunt.stamina = 1;
+            const result = executeHunt(user, 'murky_swamp'); // venomous prey lives here
+            if (result.success && result.traits?.includes('venomous')) venomousKills++;
+            lowest = Math.min(lowest, user.hunt.stamina);
+        }
+
+        expect(venomousKills).toBeGreaterThan(0); // the double-deduction path really ran
+        expect(lowest).toBe(0);
+        expect(() => '⚡'.repeat(lowest)).not.toThrow();
+    });
+});
+
 /**
  * These paths are RNG-driven, so the rule is asserted across many runs rather
  * than by stubbing Math.random and coupling to the order of the roll calls.
@@ -139,12 +162,22 @@ describe.each(ACTIVITIES)('$name: stamina cost of a failed attempt', (activity) 
     });
 
     test('a free failure still wears the gear and advances the streak', () => {
-        let user, result;
-        do {
-            user   = activity.build();
-            result = activity.act(user);
-        } while (result.failure?.severity?.id !== activity.mildest);
+        // Bounded rather than looping until a clean miss turns up: the tier fires
+        // ~17-19% of the time, so 500 attempts is a certainty in practice, but a
+        // renamed severity id should fail the run rather than hang it forever.
+        const MAX_ATTEMPTS = 500;
+        let user = null, result = null;
 
+        for (let i = 0; i < MAX_ATTEMPTS && !result; i++) {
+            const candidate = activity.build();
+            const outcome   = activity.act(candidate);
+            if (outcome.failure?.severity?.id === activity.mildest) {
+                user   = candidate;
+                result = outcome;
+            }
+        }
+
+        expect(result).not.toBeNull();
         expect(result.durabilityLost).toBeGreaterThan(0);
         expect(result.staminaSpared).toBe(true);
         expect(activity.failsOf(user)).toBe(1);

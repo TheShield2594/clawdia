@@ -488,12 +488,12 @@ async function executeStart(interaction) {
     // document on the missing `hunt` field and never reject anything.
     const huntClaimNow = new Date();
     const huntCooldownFloor = new Date(huntClaimNow.getTime() - LIMITS.HUNT_COOLDOWN_MS);
+    const priorLastHunt = h.lastHunt ?? null;
     await persistGrindIfNew(user, 'hunt');
+    const huntClaimQuery = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'hunt' };
     const claimedHunt = await GrindProfile.findOneAndUpdate(
         {
-            userId: interaction.user.id,
-            guildId: interaction.guild.id,
-            system: 'hunt',
+            ...huntClaimQuery,
             $or: [{ 'data.lastHunt': null }, { 'data.lastHunt': { $lte: huntCooldownFloor } }],
         },
         { $set: { 'data.lastHunt': huntClaimNow } },
@@ -501,8 +501,12 @@ async function executeStart(interaction) {
     );
 
     if (!claimedHunt) {
-        const lastAt = h.lastHunt ?? huntClaimNow;
-        const nextAt = new Date(lastAt.getTime() + LIMITS.HUNT_COOLDOWN_MS);
+        // Losing the claim means another hunt already took the slot, so the
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the hunt that actually happened.
+        const current = await GrindProfile.findOne(huntClaimQuery).catch(() => null);
+        const lastAt  = current?.data?.lastHunt ?? priorLastHunt ?? huntClaimNow;
+        const nextAt  = new Date(new Date(lastAt).getTime() + LIMITS.HUNT_COOLDOWN_MS);
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '🫁 Catching Your Breath',
@@ -514,6 +518,14 @@ async function executeStart(interaction) {
         });
     }
     h.lastHunt = huntClaimNow;
+
+    // The claim is a real write now, so a hunt that dies before its result is
+    // saved would otherwise cost the player a full cooldown for nothing. Hand the
+    // slot back — but only while it is still ours, so a newer claim isn't undone.
+    const releaseHuntClaim = () => GrindProfile.updateOne(
+        { ...huntClaimQuery, 'data.lastHunt': huntClaimNow },
+        { $set: { 'data.lastHunt': priorLastHunt } },
+    ).catch(() => null);
 
     // Ammo comes out only once the cooldown slot is ours, so a lost race never
     // costs the player a round.
@@ -775,6 +787,8 @@ async function executeStart(interaction) {
         notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
         notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
     } catch (err) {
+        // Nothing was saved, so give the cooldown slot back before telling them to retry.
+        await releaseHuntClaim();
         if (err.name === 'VersionError') {
             return interaction.editReply({ content: 'A simultaneous request conflicted with your hunt. Please try `/hunt start` again.' });
         }
