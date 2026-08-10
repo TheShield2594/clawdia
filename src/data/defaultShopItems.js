@@ -19,6 +19,7 @@ const DEFAULT_SHOP_ITEMS = [
     { name: 'Lucky Streak',       itemId: 'lucky_streak',      rarity: 'Common',   price: 1500,  description: '🎯 +25% win chance on games for 30 minutes (casino saves apply to bets up to 25k).',                      lore: "The universe owes you one. This is collecting." },
     { name: 'Salary Raise',       itemId: 'salary_raise',      rarity: 'Rare',     price: 4000,  description: '📈 1.5x earnings on /work shifts for 2 hours.',                    lore: "A briefly forged memo your boss won't remember signing." },
     { name: 'Pet Food',           itemId: 'pet_food',          rarity: 'Common',   price: 250,   description: '🍖 Feeds any pet, restoring 10 hunger (use with /pet feed). Not a favorite food, so no bonus XP boost.', lore: "Generic, slightly bland, and always in stock. Pets prefer their favorites, but won't say no in a pinch." },
+    { name: 'Revive Scroll',      itemId: 'revive_scroll',     rarity: 'Rare',     price: 15000, description: '📜 Brings back your most recently starved pet with its level, bond and battle record intact (use with /use).', lore: "The ink is still wet. Somewhere, a very hungry animal decides it isn't finished with you yet." },
 
     // ── Prestige / Aspiration items ──────────────────────────────────────────
     { name: 'Custom Job Title',       itemId: 'custom_job_title',        rarity: 'Epic',   price: 75000,  category: 'prestige', description: '✏️ Set a custom job title shown on your /profile for 30 days.',     lore: "The business card says whatever you want. Nobody checks." },
@@ -26,7 +27,7 @@ const DEFAULT_SHOP_ITEMS = [
     { name: 'Golden Profile Frame',   itemId: 'golden_profile_frame',    rarity: 'Mythic', price: 250000, category: 'prestige', description: '🖼️ Gold border and accent color on your /profile for 30 days.',     lore: "Subtle enough to be classy. Loud enough to be noticed." },
     { name: 'Server Trophy',          itemId: 'server_trophy',           rarity: 'Mythic', price: 500000, category: 'prestige', description: '🏆 Your name displayed as Top Earner in a pinned embed for 7 days.', lore: "Seven days. Your name. The whole server looking." },
     { name: 'Zone Unlock Token',      itemId: 'zone_unlock_token',       rarity: 'Rare',   price: 80000,  category: 'prestige', description: '🗺️ Unlock any hunt/fish/mine zone regardless of level.',             lore: "The gatekeepers step aside. Turns out coin is the key." },
-    { name: 'Pet Slot Expansion',     itemId: 'pet_slot_expansion',      rarity: 'Epic',   price: 60000,  category: 'prestige', description: '🐾 Allows owning one additional pet simultaneously (stackable ×3).', lore: "More companions. More chaos. Entirely worth it." },
+    { name: 'Pet Slot Expansion',     itemId: 'pet_slot_expansion',      rarity: 'Epic',   price: 60000,  category: 'prestige', description: '🐾 +1 pet slot, on top of the 3 you start with (stackable ×3). Use with /use.', lore: "More companions. More chaos. Entirely worth it." },
     { name: 'Permanent Stamina +1',   itemId: 'permanent_stamina',       rarity: 'Mythic', price: 100000, category: 'prestige', description: '⚡ Permanently increases your max hunt/fish/mine stamina by 1.',     lore: "The grind never ends. At least now you last a little longer." },
     { name: 'Prestige Accelerator',   itemId: 'prestige_accelerator',    rarity: 'Mythic', price: 200000, category: 'prestige', description: '🚀 -20% XP required for your next prestige (one-time use).',         lore: "The shortcut nobody talks about. Until they use it." },
 
@@ -104,7 +105,7 @@ function ensureDefaultShopItems(guildSettings) {
     const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
     const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame', 'p8_black_market']);
-    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food', 'streak_freeze', 'tier_skip_token']);
+    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food', 'streak_freeze', 'tier_skip_token', 'revive_scroll']);
     let changed = false;
 
     if (!guildSettings.shopDefaultsSeeded) {

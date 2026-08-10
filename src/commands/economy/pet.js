@@ -5,6 +5,7 @@ const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, MessageFlags
 } = require('discord.js');
 const User  = require('../../models/User');
+const { DECEASED_PET_LIMIT } = User;
 const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const {
@@ -13,6 +14,10 @@ const {
     STARVING_THRESHOLD,
     RUNAWAY_DAYS,
     applyHungerDecay,
+    effectiveHunger,
+    isPetActive,
+    pickDefenderPet,
+    REST_DURATION_MS,
     checkRunaway,
     feedPet,
     getMoodLine,
@@ -32,16 +37,28 @@ const {
     getPetStats,
     simulateBattle,
     makeWildPet,
-    assignPersonality,
+    createPet,
+    resolvePetRef,
+    hasFreePetSlot,
+    petCapacity,
+    countSlotPets,
+    RARE_PET_DROP_CHANCE,
 } = require('../../services/petService');
 const { generatePetSprite } = require('../../utils/cardGenerator');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
 const { logTransaction } = require('../../utils/logTransaction');
+const { MATERIAL_RARITY } = require('../../data/materialRarity');
+const { checkAndAward, announceAchievements } = require('../../services/achievementService');
+const { onPetCare, notifyQuestComplete } = require('../../services/questService');
 
+const NO_SUCH_PET = "Couldn't find that pet — pick one from the list `/pet status` shows, or start typing to choose from your pets.";
 const HUNGER_BAR_LENGTH = 10;
 const BATTLE_COOLDOWN_MS  = 10 * 60 * 1000;    // per-pet battle cooldown
 const BATTLE_MIN_ACCOUNT_AGE_MS = 7 * 24 * 3_600_000; // wagered battles only
 const BATTLE_RAKE = 0.05;
+// Wagered battles only: pet stats scale hard with level, so an unbounded
+// matchup let a maxed pet farm newcomers for coins on a near-certain win.
+const BATTLE_MAX_LEVEL_GAP = 5;
 const _delay = ms => new Promise(r => setTimeout(r, ms));
 
 function hpBar(current, max, length = 10) {
@@ -59,10 +76,18 @@ function battleLogLines(rounds, nameA, nameB) {
     });
 }
 
+// Hunger is stored at full precision (decay is continuous), so round for display —
+// otherwise the bar reads "80.41666666666666%".
 function hungerBar(hunger) {
-    const filled = Math.round((hunger / 100) * HUNGER_BAR_LENGTH);
-    const color  = hunger >= STARVING_THRESHOLD ? '🟩' : '🟥';
-    return color.repeat(filled) + '⬛'.repeat(HUNGER_BAR_LENGTH - filled) + ` ${hunger}%`;
+    const pct    = Math.round(Math.min(100, Math.max(0, Number(hunger) || 0)));
+    const filled = Math.round((pct / 100) * HUNGER_BAR_LENGTH);
+    const color  = pct >= STARVING_THRESHOLD ? '🟩' : '🟥';
+    return color.repeat(filled) + '⬛'.repeat(HUNGER_BAR_LENGTH - filled) + ` ${pct}%`;
+}
+
+// What a pet will actually eat: any known grind material, plus shop pet food.
+function isEdible(materialId) {
+    return Boolean(MATERIAL_RARITY[materialId]) || materialId === 'pet_food';
 }
 
 function getInventoryQuantity(user, itemId) {
@@ -91,6 +116,58 @@ function decrementMaterial(user, materialId) {
     return false;
 }
 
+/**
+ * Read the `slot` option without asserting its type.
+ *
+ * It changed from an integer to an autocompleted string; global command updates
+ * take a while to reach every client, so during that window a stale client can
+ * still send an integer — which getString() would throw on. resolvePetRef()
+ * accepts both forms, so normalise to a string here and let it decide.
+ */
+function readSlotOption(interaction) {
+    const raw = interaction.options.get('slot');
+    return raw?.value == null ? null : String(raw.value);
+}
+
+/** Short label for a pet in an autocomplete list. Discord caps choice names at 100. */
+function petChoiceLabel(pet) {
+    const def    = PET_DEFINITIONS[pet.petId];
+    const name   = pet.name || def?.name || pet.petId;
+    const hunger = Math.round(effectiveHunger(pet));
+    const fed    = hunger >= STARVING_THRESHOLD ? '' : ' · hungry!';
+    return `${name} — ${def?.name ?? pet.petId} Lv${pet.level ?? 1} · ${hunger}% fed${fed}`.slice(0, 100);
+}
+
+/**
+ * Evaluate achievements against the freshly mutated user. Pet achievements would
+ * otherwise only fire the next time the player happened to hunt, fish or mine,
+ * since those were the only commands running this check.
+ *
+ * Call before saving so one write persists the pet change and the unlock.
+ */
+/** Advance pet-care quest progress and surface any completions. */
+async function creditPetCare(interaction, user, guildSettings) {
+    const { completed } = await onPetCare(user, guildSettings).catch(err => {
+        console.error('[pet] quest progress failed:', err);
+        return { completed: [] };
+    });
+    if (completed.length) {
+        notifyQuestComplete(guildSettings, interaction.member, completed, interaction.channel, user).catch(() => {});
+    }
+}
+
+function collectPetAchievements(user, guildSettings) {
+    return checkAndAward(user, guildSettings).catch(err => {
+        console.error('[pet] achievement check failed:', err);
+        return [];
+    });
+}
+
+function announcePetAchievements(interaction, user, guildSettings, earned) {
+    if (!earned?.length) return;
+    announceAchievements(interaction.client, guildSettings, user, interaction.member, earned).catch(() => {});
+}
+
 async function resolveUser(interaction) {
     const user = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId: interaction.guild.id },
@@ -104,16 +181,30 @@ async function resolveUser(interaction) {
 async function syncHungerAndRunaway(user, interaction) {
     if (!user.pets || user.pets.length === 0) return;
 
+    // Write the accrued decay back onto the live subdocuments, then evaluate
+    // runaways against those updated values.
     const decayed = applyHungerDecay(user.pets);
-    const { keepPets, ranAwayPets } = checkRunaway(decayed);
+    for (let i = 0; i < user.pets.length; i++) {
+        const d = decayed[i];
+        if (!d || d === user.pets[i]) continue; // no time elapsed for this pet
+        user.pets[i].hunger          = d.hunger;
+        user.pets[i].lastDecayAt     = d.lastDecayAt;
+        user.pets[i].starving        = d.starving;
+        user.pets[i].starvingStartAt = d.starvingStartAt ?? null;
+    }
 
-    user.pets = keepPets;
-    for (let i = 0; i < keepPets.length; i++) {
-        const d = keepPets[i];
-        user.pets[i].hunger         = d.hunger;
-        user.pets[i].lastFed        = d.lastFed;
-        user.pets[i].starving       = d.starving;
-        if (d.starvingStartAt) user.pets[i].starvingStartAt = d.starvingStartAt;
+    const { ranAwayPets } = checkRunaway(user.pets);
+    for (const gone of ranAwayPets) {
+        // Keep a record so a Revive Scroll can bring the pet back with its
+        // level, bond and battle record intact.
+        const snapshot = gone.toObject ? gone.toObject() : { ...gone };
+        delete snapshot._id;
+        user.deceasedPets.unshift({ ...snapshot, diedAt: new Date() });
+        if (gone._id) user.pets.pull(gone._id);
+    }
+    if (ranAwayPets.length > 0) {
+        user.deceasedPets = user.deceasedPets.slice(0, DECEASED_PET_LIMIT);
+        user.markModified('deceasedPets');
     }
     user.markModified('pets');
 
@@ -126,10 +217,15 @@ async function syncHungerAndRunaway(user, interaction) {
             ? `💀 **${interaction.user.username}**'s pet ${names[0]} passed away from starvation...`
             : `💀 **${interaction.user.username}**'s pets ${names.join(', ')} passed away from starvation...`;
         interaction.channel?.send({ content: deathMsg }).catch(() => {});
-        await interaction.followUp({
-            content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` to get a new companion, or buy a Revive Scroll from the shop to bring them back.*`,
-            flags: MessageFlags.Ephemeral
-        }).catch(() => {});
+        // followUp only works once the interaction has been answered. /pet battle
+        // syncs before it replies, so on that path the public channel message
+        // above is the only notice the owner gets — which is why it names them.
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp({
+                content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` for a new companion, or a Revive Scroll from \`/shop\` to bring one back with its level and bond intact.*`,
+                flags: MessageFlags.Ephemeral
+            }).catch(() => {});
+        }
     }
 }
 
@@ -139,9 +235,10 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL) {
     const def         = PET_DEFINITIONS[pet.petId];
     const displayName = pet.name || def?.name || pet.petId;
     const bondDays    = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
+    const hunger      = effectiveHunger(pet);
     const moodLine    = getMoodLine(pet);
-    const moodColor   = getMoodColor(pet.hunger);
-    const bonusActive = pet.hunger >= STARVING_THRESHOLD;
+    const moodColor   = getMoodColor(hunger);
+    const bonusActive = hunger >= STARVING_THRESHOLD;
     const bonusEmoji  = bonusActive ? '✅' : '❌';
     const effPct      = getEffectiveBonusPct(pet);
     const bonusLabel  = `+${effPct}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}${bonusActive ? '' : ' *(inactive)*'}`;
@@ -172,6 +269,12 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL) {
         : `Lv. **${level}** ${stageStars} — ${xpInLevel}/${xpToNext} XP`;
     const record = `${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L`;
 
+    // Where to actually get the +25 food — previously only /pet list mentioned it.
+    const favMeta      = def ? MATERIAL_RARITY[def.favoriteMaterial] : null;
+    const favouriteLine = def
+        ? `${favMeta?.emoji ?? '🍖'} \`${def.favoriteMaterial}\` — from **/${def.materialSource}** *(+25 hunger, bonus XP)*`
+        : '—';
+
     return new EmbedBuilder()
         .setColor(moodColor)
         .setAuthor({ name: `${getPetDisplay(pet).titledName} • ${def?.name ?? pet.petId}`, iconURL: ownerAvatarURL })
@@ -179,9 +282,10 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL) {
         .addFields(
             { name: '📈 Level',             value: levelLine,                            inline: false },
             { name: '❤️ Bond',              value: `${heartBar(bondDays)} ${bondDays}d`, inline: false },
-            { name: '🍖 Hunger',            value: hungerBar(pet.hunger),                inline: false },
+            { name: '🍖 Hunger',            value: hungerBar(hunger),                    inline: false },
             { name: `${bonusEmoji} Bonus`,  value: bonusLabel,                           inline: true  },
             { name: '⚔️ Battle Record',     value: record,                               inline: true  },
+            { name: '🍗 Favourite Food',    value: favouriteLine,                        inline: false },
         )
         .setFooter({ text: `Pet ${index + 1} of ${total} • Last fed ${lastFedStr}` })
         .setTimestamp();
@@ -218,6 +322,74 @@ function buildNavComponents(userId, index, total) {
     return rows;
 }
 
+// ── Autocomplete ──────────────────────────────────────────────────────────────
+
+/** Pets the player currently owns, keyed by their stable _id. */
+async function slotAutocomplete(interaction, focused) {
+    const user = await User.findOne(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        'pets'
+    );
+    const pets  = user?.pets ?? [];
+    const query = focused.toLowerCase();
+
+    const choices = pets
+        .map(pet => ({ name: petChoiceLabel(pet), value: String(pet._id) }))
+        .filter(c => !query || c.name.toLowerCase().includes(query));
+
+    return interaction.respond(choices.slice(0, 25));
+}
+
+/**
+ * Materials the player actually holds and could plausibly feed a pet, with the
+ * selected pet's favourite pinned to the top. Without this the option required
+ * typing exact snake_case ids like `rabbits_foot` from memory.
+ */
+async function materialAutocomplete(interaction, focused) {
+    // Read-only and projected: resolveUser() upserts, and Discord fires an
+    // autocomplete event per keystroke with a 3s budget.
+    const found = await User.findOne(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        'pets inventory guildId userId'
+    );
+    if (!found) return interaction.respond([]);
+    const user = await attachGrind(found);
+
+    // The slot option may already be filled in; if so, favour that pet's food.
+    const selected  = resolvePetRef(user?.pets, readSlotOption(interaction));
+    const favourite = selected ? PET_DEFINITIONS[selected.pet.petId]?.favoriteMaterial : null;
+
+    const held = new Map(); // materialId -> quantity
+    const add  = (id, qty) => {
+        if (!id || !(qty > 0)) return;
+        held.set(id, (held.get(id) ?? 0) + qty);
+    };
+    for (const system of ['hunt', 'fishing', 'mining']) {
+        for (const [id, qty] of Object.entries(user?.[system]?.materials ?? {})) add(id, qty);
+    }
+    for (const entry of user?.inventory ?? []) add(entry.itemId, entry.quantity);
+
+    const query = focused.toLowerCase();
+    const choices = [...held.entries()]
+        // Grind materials plus shop-bought pet food — not every stray inventory item.
+        .filter(([id]) => isEdible(id))
+        .filter(([id]) => !query || id.toLowerCase().includes(query))
+        .map(([id, qty]) => {
+            const meta  = MATERIAL_RARITY[id];
+            const label = meta?.label ?? (id === 'pet_food' ? 'Pet Food' : id);
+            const isFav = id === favourite;
+            return {
+                id, qty, isFav,
+                name: `${meta?.emoji ?? '🍖'} ${label} — ${qty}x${isFav ? ' ⭐ favourite (+25)' : ' (+10)'}`.slice(0, 100),
+            };
+        })
+        .sort((a, b) => (b.isFav - a.isFav) || (b.qty - a.qty) || a.name.localeCompare(b.name))
+        .slice(0, 25)
+        .map(c => ({ name: c.name, value: c.id }));
+
+    return interaction.respond(choices);
+}
+
 // ── Subcommand handlers ───────────────────────────────────────────────────────
 
 async function executeAdopt(interaction) {
@@ -237,6 +409,13 @@ async function executeAdopt(interaction) {
 
     if (guildSettings?.economy?.enabled === false) return interaction.reply({ content: 'The economy is disabled in this server.', flags: MessageFlags.Ephemeral });
     if ((user.pets ?? []).some(p => p.petId === petId)) return interaction.reply({ content: `You already own a ${def.emoji} **${def.name}**!`, flags: MessageFlags.Ephemeral });
+    if (!hasFreePetSlot(user)) {
+        return interaction.reply({
+            content: `🐾 You're caring for **${countSlotPets(user.pets)}** pets and have room for **${petCapacity(user)}**. `
+                   + `Release one with \`/pet release\`, or buy a **Pet Slot Expansion** from \`/shop\` for another slot.`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
 
     const currency = guildSettings?.economy?.currency ?? '💰';
     if (user.balance < def.cost) {
@@ -246,10 +425,13 @@ async function executeAdopt(interaction) {
         });
     }
 
-    const personality = assignPersonality();
     user.balance -= def.cost;
-    user.pets.push({ petId, name: petName, hunger: 100, lastFed: new Date(), adoptedAt: new Date(), personality });
+    const newPet = createPet(petId, { name: petName });
+    user.pets.push(newPet);
     user.markModified('pets');
+    const personality = newPet.personality;
+
+    const earned = await collectPetAchievements(user, guildSettings);
 
     try {
         await user.save();
@@ -257,6 +439,7 @@ async function executeAdopt(interaction) {
         if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
+    announcePetAchievements(interaction, user, guildSettings, earned);
 
     const personalityDef = PERSONALITY_TRAITS[personality];
     const displayName = petName || def.name;
@@ -268,7 +451,7 @@ async function executeAdopt(interaction) {
             `${personalityDef.emoji} **Personality: ${personalityDef.label}** — *${personalityDef.desc}*`
         )
         .addFields(
-            { name: 'Passive Bonus',  value: `+${def.bonusPct}% ${def.bonusType.replace(/_/g, ' ')} (active when hunger ≥ 30%)`, inline: true },
+            { name: 'Passive Bonus',  value: `+${def.bonusPct}% ${def.bonusType.replace(/_/g, ' ')} (active when hunger ≥ ${STARVING_THRESHOLD}%)`, inline: true },
             { name: 'Favorite Food',  value: `\`${def.favoriteMaterial}\` (restores 25 hunger)`,                                  inline: true },
             { name: 'Cost',           value: `${def.cost.toLocaleString()} ${currency}`,                                           inline: true },
         )
@@ -291,7 +474,14 @@ async function executeStatus(interaction) {
         return interaction.editReply('You have no pets. Use `/pet adopt` to get one!');
     }
 
-    await user.save().catch(() => {});
+    try {
+        await user.save();
+    } catch (err) {
+        // Swallowing this meant a runaway could be announced, fail to persist, and
+        // then be announced again on the next /pet status.
+        console.error('[pet] status save error:', err);
+        return interaction.editReply('Something went wrong updating your pets. Please try again.');
+    }
 
     let currentIndex = 0;
     const ownerAvatarURL = interaction.user.displayAvatarURL();
@@ -343,12 +533,13 @@ async function executeStatus(interaction) {
                 return btn.reply({ content: `🎾 **${name}** is tired from playing! Try again in **${remaining}m**.`, flags: MessageFlags.Ephemeral });
             }
 
-            const xpGain = 15 + Math.floor(Math.random() * 11); // 15–25 XP
-            const { leveled } = applyXpGain(freshUser, xpGain);
+            const rolledXp = 15 + Math.floor(Math.random() * 11); // 15–25 XP
+            const { leveled, gained: xpGain } = applyXpGain(freshUser, rolledXp);
             const petXpResult = applyPetXp(freshUser.pets[idx], 10);
             freshUser.pets[idx].lastPlay           = new Date();
             freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
+            await creditPetCare(interaction, freshUser, guildSettings);
 
             try {
                 await freshUser.save();
@@ -386,9 +577,10 @@ async function executeStatus(interaction) {
                 return btn.reply({ content: `🛏️ **${name}** is already resting! ${remaining}m remaining.`, flags: MessageFlags.Ephemeral });
             }
 
-            freshUser.pets[idx].restUntil           = new Date(Date.now() + 2 * 60 * 60 * 1000);
+            freshUser.pets[idx].restUntil           = new Date(Date.now() + REST_DURATION_MS);
             freshUser.pets[idx].weeklyInteractions  = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
+            await creditPetCare(interaction, freshUser, guildSettings);
 
             try {
                 await freshUser.save();
@@ -411,6 +603,7 @@ async function executeStatus(interaction) {
             const def      = PET_DEFINITIONS[pet.petId];
             const name     = pet.name || def?.name || pet.petId;
             const bondDays = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
+            const hunger   = effectiveHunger(pet);
 
             freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
@@ -426,15 +619,15 @@ async function executeStatus(interaction) {
             }
 
             const showcaseEmbed = new EmbedBuilder()
-                .setColor(getMoodColor(pet.hunger))
+                .setColor(getMoodColor(hunger))
                 .setTitle(`${def?.emoji ?? '🐾'} ${name}`)
                 .setAuthor({ name: `Owned by ${interaction.user.username}`, iconURL: ownerAvatarURL })
                 .setDescription(`*${getMoodLine(pet)}*${pet.potw ? '\n🌟 **Pet of the Week**' : ''}`)
                 .addFields(
                     { name: '❤️ Bond',    value: `${heartBar(bondDays)} ${bondDays}d`,               inline: true },
-                    { name: '🍖 Hunger', value: hungerBar(pet.hunger),                                inline: true },
-                    { name: `${pet.hunger >= STARVING_THRESHOLD ? '✅' : '❌'} Bonus`,
-                      value: `+${def?.bonusPct ?? 0}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}`, inline: false },
+                    { name: '🍖 Hunger', value: hungerBar(hunger),                                    inline: true },
+                    { name: `${hunger >= STARVING_THRESHOLD ? '✅' : '❌'} Bonus`,
+                      value: `+${getEffectiveBonusPct(pet)}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}`, inline: false },
                 )
                 .setFooter({ text: `${def?.name ?? pet.petId} • Use /pet status to check on yours!` })
                 .setTimestamp();
@@ -442,7 +635,7 @@ async function executeStatus(interaction) {
             // Try to attach a pet sprite
             let files = [];
             try {
-                const spriteBuf = await generatePetSprite(pet.petId, 80);
+                const spriteBuf = await generatePetSprite(pet.petId, 80, pet.evolutionStage ?? 1);
                 if (spriteBuf) {
                     showcaseEmbed.setThumbnail('attachment://pet_sprite.png');
                     files = [new AttachmentBuilder(spriteBuf, { name: 'pet_sprite.png' })];
@@ -466,16 +659,26 @@ async function executeStatus(interaction) {
 
 async function executeFeed(interaction) {
     const materialId = interaction.options.getString('material');
-    const petIndex   = interaction.options.getInteger('slot') ?? 0;
+    const petRef     = readSlotOption(interaction);
 
     await interaction.deferReply();
 
-    const user = await resolveUser(interaction);
+    const [user, guildSettings] = await Promise.all([resolveUser(interaction), Guild.findOne({ guildId: interaction.guild.id })]);
     await syncHungerAndRunaway(user, interaction);
 
     if (!user.pets || user.pets.length === 0) return interaction.editReply('You have no pets to feed!');
-    if (petIndex < 0 || petIndex >= user.pets.length) {
-        return interaction.editReply(`Invalid pet slot. You have ${user.pets.length} pet(s) (slots 0–${user.pets.length - 1}).`);
+    const target = resolvePetRef(user?.pets, petRef);
+    if (!target) return interaction.editReply(NO_SUCH_PET);
+    const petIndex = target.index;
+
+    // Only grind materials and shop pet food are edible. Without this any
+    // inventory item counted, so `/pet feed material:tier_skip_token` would
+    // destroy a 50,000-coin item for 10 hunger.
+    if (!isEdible(materialId)) {
+        return interaction.editReply(
+            `\`${materialId}\` isn't something a pet will eat. Feed a hunt/fish/mine material or \`pet_food\` — ` +
+            `start typing in the **material** option to see what you have.`
+        );
     }
 
     const { total } = getMaterialSource(user, materialId);
@@ -483,17 +686,30 @@ async function executeFeed(interaction) {
 
     const pet    = user.pets[petIndex];
     const def    = PET_DEFINITIONS[pet.petId];
+
+    // Refuse rather than consume the material for nothing.
+    if (effectiveHunger(pet) >= 100) {
+        const fullName = pet.name || def?.name || pet.petId;
+        return interaction.editReply(`${getPetDisplay(pet).emoji} **${fullName}** is completely full — save that \`${materialId}\` for later.`);
+    }
+
     const result = feedPet(pet, materialId);
     if (!result) return interaction.editReply('Could not feed that pet.');
 
     decrementMaterial(user, materialId);
     user.pets[petIndex].hunger          = result.hunger;
     user.pets[petIndex].lastFed         = new Date();
+    // Decay was brought up to date by syncHungerAndRunaway above; re-anchor the
+    // cursor so the restored hunger isn't immediately docked again.
+    user.pets[petIndex].lastDecayAt     = new Date();
     user.pets[petIndex].starving        = result.hunger < STARVING_THRESHOLD;
     user.pets[petIndex].weeklyInteractions = (user.pets[petIndex].weeklyInteractions || 0) + 1;
-    if (result.hunger >= STARVING_THRESHOLD) user.pets[petIndex].starvingStartAt = null;
+    if (result.hunger > 0) user.pets[petIndex].starvingStartAt = null;
     const feedXp = applyPetXp(user.pets[petIndex], result.isFavorite ? XP_FEED_FAVORITE : XP_FEED_OTHER);
     user.markModified('pets');
+
+    await creditPetCare(interaction, user, guildSettings);
+    const earned = await collectPetAchievements(user, guildSettings);
 
     try {
         await user.save();
@@ -501,6 +717,7 @@ async function executeFeed(interaction) {
         if (err.name === 'VersionError') return interaction.editReply('Edit conflict — please try again.');
         throw err;
     }
+    announcePetAchievements(interaction, user, guildSettings, earned);
 
     const displayName  = pet.name || def?.name || pet.petId;
     const favoriteNote = result.isFavorite ? ' *(favorite food — +25 hunger!)*' : ' *(not favorite — +10 hunger)*';
@@ -517,7 +734,7 @@ async function executeFeed(interaction) {
         .addFields(
             { name: 'Food',   value: `\`${materialId}\`${favoriteNote}`,   inline: true  },
             { name: 'Hunger', value: hungerBar(result.hunger),              inline: false },
-            { name: 'Bonus',  value: result.hunger >= STARVING_THRESHOLD ? '✅ Active' : '❌ Still inactive (need ≥ 30%)', inline: true },
+            { name: 'Bonus',  value: result.hunger >= STARVING_THRESHOLD ? '✅ Active' : `❌ Still inactive (need ≥ ${STARVING_THRESHOLD}%)`, inline: true },
         )
         .setTimestamp();
 
@@ -525,38 +742,88 @@ async function executeFeed(interaction) {
 }
 
 async function executeRelease(interaction) {
-    const petIndex = interaction.options.getInteger('slot');
-    const user     = await resolveUser(interaction);
+    const user   = await resolveUser(interaction);
+    const target = resolvePetRef(user?.pets, readSlotOption(interaction));
+    if (!target) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
 
-    if (!user.pets || petIndex < 0 || petIndex >= user.pets.length) {
-        return interaction.reply({ content: 'Invalid pet slot.', flags: MessageFlags.Ephemeral });
+    const { pet } = target;
+    const def     = PET_DEFINITIONS[pet.petId];
+    const name    = pet.name || def?.name || pet.petId;
+    const petId   = String(pet._id);
+    const level   = pet.level ?? 1;
+    const bondDays = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
+
+    // Releasing is permanent and unrevivable — a Revive Scroll only brings back
+    // pets lost to starvation — so a level 30 pet was one mistyped slot away
+    // from being gone with no confirmation at all.
+    const confirmId = `pet_release_yes:${interaction.id}`;
+    const cancelId  = `pet_release_no:${interaction.id}`;
+    const confirm = await interaction.reply({
+        embeds: [new EmbedBuilder()
+            .setColor('#e74c3c')
+            .setTitle(`Release ${name}?`)
+            .setDescription(
+                `${getPetDisplay(pet).emoji} **${getPetDisplay(pet).titledName}** — Lv.${level}, ` +
+                `${bondDays} day${bondDays === 1 ? '' : 's'} of bond, ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L.\n\n` +
+                `**This cannot be undone.** A Revive Scroll only restores pets lost to starvation, not released ones.`
+            )],
+        components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(confirmId).setLabel('Release').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId(cancelId).setLabel('Keep them').setStyle(ButtonStyle.Secondary),
+        )],
+        flags: MessageFlags.Ephemeral,
+        withResponse: true,
+    }).catch(() => null);
+
+    const message = confirm?.resource?.message ?? await interaction.fetchReply().catch(() => null);
+    if (!message) return;
+
+    let choice;
+    try {
+        choice = await message.awaitMessageComponent({
+            filter: i => i.user.id === interaction.user.id && [confirmId, cancelId].includes(i.customId),
+            time: 30_000,
+        });
+    } catch {
+        return interaction.editReply({ content: `Release cancelled — **${name}** stays with you.`, embeds: [], components: [] }).catch(() => {});
     }
 
-    const pet  = user.pets[petIndex];
-    const def  = PET_DEFINITIONS[pet.petId];
-    const name = pet.name || def?.name || pet.petId;
+    if (choice.customId === cancelId) {
+        return choice.update({ content: `**${name}** stays with you.`, embeds: [], components: [] }).catch(() => {});
+    }
 
-    user.pets.splice(petIndex, 1);
-    user.markModified('pets');
+    // Re-resolve by id: the roster may have changed while the prompt was open.
+    const fresh = await resolveUser(interaction);
+    const still = resolvePetRef(fresh?.pets, petId);
+    if (!still) {
+        return choice.update({ content: `**${name}** is no longer in your roster.`, embeds: [], components: [] }).catch(() => {});
+    }
+
+    fresh.pets.splice(still.index, 1);
+    fresh.markModified('pets');
 
     try {
-        await user.save();
+        await fresh.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
+        if (err.name === 'VersionError') {
+            return choice.update({ content: 'Edit conflict — try again.', embeds: [], components: [] }).catch(() => {});
+        }
         throw err;
     }
 
-    return interaction.reply({ content: `${def?.emoji ?? '🐾'} **${name}** has been released. Goodbye, friend!`, flags: MessageFlags.Ephemeral });
+    return choice.update({
+        content: `${def?.emoji ?? '🐾'} **${name}** has been released. Goodbye, friend!`,
+        embeds: [], components: [],
+    }).catch(() => {});
 }
 
 async function executeRename(interaction) {
-    const petIndex = interaction.options.getInteger('slot');
-    const newName  = interaction.options.getString('name').trim().slice(0, 32);
-    const user     = await resolveUser(interaction);
+    const newName = interaction.options.getString('name').trim().slice(0, 32);
+    const user    = await resolveUser(interaction);
 
-    if (!user.pets || petIndex < 0 || petIndex >= user.pets.length) {
-        return interaction.reply({ content: 'Invalid pet slot.', flags: MessageFlags.Ephemeral });
-    }
+    const target = resolvePetRef(user?.pets, readSlotOption(interaction));
+    if (!target) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
+    const petIndex = target.index;
 
     user.pets[petIndex].name = newName;
     user.markModified('pets');
@@ -576,7 +843,7 @@ async function executeRename(interaction) {
 
 function petUsable(pet) {
     if (!pet) return { ok: false, reason: 'no pet in that slot' };
-    if (pet.hunger < STARVING_THRESHOLD) return { ok: false, reason: 'too hungry to fight (feed it first)' };
+    if (!isPetActive(pet)) return { ok: false, reason: 'too hungry to fight (feed it first)' };
     return { ok: true };
 }
 
@@ -619,7 +886,7 @@ function petXpLine(name, res) {
 
 async function executeBattle(interaction) {
     const opponent = interaction.options.getUser('opponent');
-    const slot     = interaction.options.getInteger('slot') ?? 0;
+    const petRef   = readSlotOption(interaction);
     const bet      = interaction.options.getInteger('bet') ?? 0;
 
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -632,10 +899,16 @@ async function executeBattle(interaction) {
     await syncHungerAndRunaway(user, interaction);
     await user.save().catch(() => {});
 
-    const myPet = user.pets?.[slot];
-    const usable = petUsable(myPet);
+    const mine = resolvePetRef(user?.pets, petRef);
+    if (!mine) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
+    const { pet: myPet } = mine;
+    // Carry the pet's stable id, not its index: a PvP challenge can sit unanswered
+    // for a minute, and anything that shrinks the array would shift the index onto
+    // a different pet before the fight resolves.
+    const myPetId = String(myPet._id);
+    const usable  = petUsable(myPet);
     if (!usable.ok) {
-        return interaction.reply({ content: `Your pet in slot ${slot} is ${usable.reason}.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `${getPetDisplay(myPet).titledName} is ${usable.reason}.`, flags: MessageFlags.Ephemeral });
     }
 
     // Per-pet cooldown
@@ -648,7 +921,7 @@ async function executeBattle(interaction) {
         if (bet > 0) {
             return interaction.reply({ content: "You can't wager against a wild pet — challenge a member instead.", flags: MessageFlags.Ephemeral });
         }
-        return wildBattle(interaction, user, slot, currency, guildSettings);
+        return wildBattle(interaction, user, myPetId, currency, guildSettings);
     }
 
     // ── PvP setup ──
@@ -666,17 +939,29 @@ async function executeBattle(interaction) {
     }
 
     const oppUser = await User.findOne({ userId: opponent.id, guildId: interaction.guild.id });
-    const oppPet  = oppUser?.pets?.find(p => p.hunger >= STARVING_THRESHOLD);
+    const oppPet  = pickDefenderPet(oppUser?.pets, myPet.level ?? 1);
     if (!oppPet) {
         return interaction.reply({ content: `${opponent.username} has no battle-ready pet (they need a fed pet).`, flags: MessageFlags.Ephemeral });
     }
 
-    return pvpBattle(interaction, { user, myPet, slot, opponent, oppUser, oppPet, bet, currency, guildSettings });
+    if (bet > 0) {
+        const gap = Math.abs((myPet.level ?? 1) - (oppPet.level ?? 1));
+        if (gap > BATTLE_MAX_LEVEL_GAP) {
+            return interaction.reply({
+                content: `⚖️ Wagered battles are limited to a **${BATTLE_MAX_LEVEL_GAP}-level** gap, and the closest match ${opponent.username} can field is `
+                       + `**Lv.${oppPet.level ?? 1}** against your **Lv.${myPet.level ?? 1}** — too lopsided to bet on. `
+                       + `You can still fight a friendly match by leaving out the wager.`,
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+    }
+
+    return pvpBattle(interaction, { user, myPet, myPetId, opponent, oppUser, oppPet, bet, currency, guildSettings });
 }
 
-async function wildBattle(interaction, user, slot, currency, guildSettings) {
+async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
     await interaction.deferReply();
-    const myPet  = user.pets[slot];
+    const myPet  = resolvePetRef(user?.pets, myPetId).pet;
     const wild   = makeWildPet(myPet.level ?? 1);
     const mySnap = petSnapshot(myPet); // pre-XP snapshot for consistent result rendering
     const result = simulateBattle(myPet, wild);
@@ -695,12 +980,15 @@ async function wildBattle(interaction, user, slot, currency, guildSettings) {
     if (won) myPet.battleWins   = (myPet.battleWins ?? 0) + 1;
     else     myPet.battleLosses = (myPet.battleLosses ?? 0) + 1;
     user.markModified('pets');
+    await creditPetCare(interaction, user, guildSettings);
+    const earned = await collectPetAchievements(user, guildSettings);
     try {
         await user.save();
     } catch (err) {
         if (err.name === 'VersionError') return interaction.editReply({ content: 'Edit conflict — please try again.', embeds: [] });
         throw err;
     }
+    announcePetAchievements(interaction, user, guildSettings, earned);
 
     return interaction.editReply({
         embeds: [battleResultEmbed({
@@ -714,9 +1002,10 @@ async function wildBattle(interaction, user, slot, currency, guildSettings) {
 }
 
 async function pvpBattle(interaction, ctx) {
-    const { myPet, slot, opponent, bet, currency, guildSettings } = ctx;
+    const { myPet, myPetId, opponent, oppPet, bet, currency, guildSettings } = ctx;
     const guildId = interaction.guild.id;
     const da = getPetDisplay(myPet);
+    const db = oppPet ? getPetDisplay(oppPet) : null;
 
     const acceptId  = `petb_accept_${interaction.id}`;
     const declineId = `petb_decline_${interaction.id}`;
@@ -726,6 +1015,9 @@ async function pvpBattle(interaction, ctx) {
         .setDescription(
             `${da.emoji} **${interaction.member?.displayName ?? interaction.user.username}'s ${da.titledName}** (Lv.${myPet.level ?? 1}) ` +
             `challenges ${opponent} to a battle!` +
+            // Name the defending pet up front — it is chosen automatically as the
+            // closest level match, and accepting blind to which pet fights is unfair.
+            (db ? `\n\n${db.emoji} **${db.titledName}** (Lv.${oppPet.level ?? 1}) will answer the call.` : '') +
             (bet > 0 ? `\n\n💰 Wager: **${currency}${bet.toLocaleString()}** each — winner takes the pot.` : '\n\n*Friendly match — pet XP only.*')
         )
         .setFooter({ text: 'Accept within 60 seconds' });
@@ -766,8 +1058,8 @@ async function pvpBattle(interaction, ctx) {
             User.findOne({ userId: interaction.user.id, guildId }),
             User.findOne({ userId: opponent.id, guildId }),
         ]);
-        const aPet = chUser?.pets?.[slot];
-        const bPet = opUser?.pets?.find(p => p.hunger >= STARVING_THRESHOLD);
+        const aPet = resolvePetRef(chUser?.pets, myPetId)?.pet;
+        const bPet = pickDefenderPet(opUser?.pets, aPet?.level ?? 1);
 
         // If a fighter is gone, no longer battle-ready, or went on cooldown
         // between the challenge and acceptance, refund and abort.
@@ -824,11 +1116,19 @@ async function pvpBattle(interaction, ctx) {
                 (houseCut > 0 ? `  *(house kept ${Math.round(houseCut * 100)}%)*` : '');
         }
 
+        await creditPetCare(interaction, chUser, guildSettings);
+        await creditPetCare(interaction, opUser, guildSettings);
+        const [earnedA, earnedB] = await Promise.all([
+            collectPetAchievements(chUser, guildSettings),
+            collectPetAchievements(opUser, guildSettings),
+        ]);
         try {
             await Promise.all([chUser.save(), opUser.save()]);
         } catch (err) {
             console.error('[pet battle] save error:', err);
         }
+        announcePetAchievements(interaction, chUser, guildSettings, earnedA);
+        announcePetAchievements(interaction, opUser, guildSettings, earnedB);
 
         const da2 = getPetDisplay(aSnap), db2 = getPetDisplay(bSnap);
         const winnerDisp = aWon ? da2 : db2;
@@ -856,13 +1156,14 @@ async function pvpBattle(interaction, ctx) {
 async function executeList(interaction) {
     const lines = Object.values(PET_DEFINITIONS)
         .filter(d => d.purchasable)
-        .map(d => `${d.emoji} **${d.name}** — ${d.cost.toLocaleString()} coins\nBonus: +${d.bonusPct}% ${d.bonusType.replace(/_/g, ' ')}  |  Fave food: \`${d.favoriteMaterial}\``);
+        .map(d => `${d.emoji} **${d.name}** — ${d.cost.toLocaleString()} coins\n`
+                + `Bonus: +${d.bonusPct}% ${d.bonusType.replace(/_/g, ' ')} → **+${(d.bonusPct * 2.5).toFixed(1)}%** at Lv.${PET_MAX_LEVEL}  |  Fave food: \`${d.favoriteMaterial}\``);
 
     const embed = new EmbedBuilder()
         .setColor('#ff9800')
         .setTitle('🐾 Pet Shop')
-        .setDescription(lines.join('\n\n'))
-        .setFooter({ text: 'Rare pets (Eagle, Shark, Crystal Fox) drop from legendary hunt/fish/mine' })
+        .setDescription(`Pets level up from feeding and battling, and their passive grows with them.\n\n${lines.join('\n\n')}`)
+        .setFooter({ text: `Eagle, Shark and Crystal Fox aren't sold — each has a ${Math.round(RARE_PET_DROP_CHANCE * 100)}% chance to appear on a legendary hunt / fish / mine` })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -882,7 +1183,7 @@ async function executeLeaderboard(interaction) {
         lineBuilder = (e, rank) => {
             const def  = PET_DEFINITIONS[e.pet.petId];
             const name = e.pet.name || def?.name || e.pet.petId;
-            const stage = e.pet.stage ?? 1;
+            const stage = e.pet.evolutionStage ?? 1;
             const stageEmoji = stage >= 3 ? '🌟' : stage >= 2 ? '✨' : '';
             return `${rank} ${def?.emoji ?? '🐾'} **${name}** ${stageEmoji} — Lv**${e.pet.level ?? 1}** — <@${e.userId}>`;
         };
@@ -961,26 +1262,26 @@ module.exports = {
         .addSubcommand(sub => sub.setName('status').setDescription('View your pets and their mood.'))
         .addSubcommand(sub =>
             sub.setName('feed')
-                .setDescription('Feed a pet using a hunt/fish/mine material, or shop-bought pet_food.')
+                .setDescription('Feed a pet — favourite foods restore the most and grant bonus XP.')
                 .addStringOption(opt =>
-                    opt.setName('material').setDescription('Material to feed (e.g. rabbits_foot, fish_scale, pet_food)').setRequired(true)
+                    opt.setName('material').setDescription('Which food to use — start typing to see what you have').setRequired(true).setAutocomplete(true)
                 )
-                .addIntegerOption(opt =>
-                    opt.setName('slot').setDescription('Pet slot number (0 = first pet, default 0)').setRequired(false).setMinValue(0).setMaxValue(9)
+                .addStringOption(opt =>
+                    opt.setName('slot').setDescription('Which pet to feed (defaults to your first)').setRequired(false).setAutocomplete(true)
                 )
         )
         .addSubcommand(sub =>
             sub.setName('release')
                 .setDescription('Release a pet permanently.')
-                .addIntegerOption(opt =>
-                    opt.setName('slot').setDescription('Pet slot number (0 = first pet)').setRequired(true).setMinValue(0).setMaxValue(9)
+                .addStringOption(opt =>
+                    opt.setName('slot').setDescription('Which pet to release').setRequired(true).setAutocomplete(true)
                 )
         )
         .addSubcommand(sub =>
             sub.setName('rename')
                 .setDescription('Give your pet a custom name.')
-                .addIntegerOption(opt =>
-                    opt.setName('slot').setDescription('Pet slot number (0 = first pet)').setRequired(true).setMinValue(0).setMaxValue(9)
+                .addStringOption(opt =>
+                    opt.setName('slot').setDescription('Which pet to rename').setRequired(true).setAutocomplete(true)
                 )
                 .addStringOption(opt =>
                     opt.setName('name').setDescription('New name (max 32 chars)').setRequired(true).setMaxLength(32)
@@ -1006,10 +1307,22 @@ module.exports = {
                 .setDescription('Battle a wild pet for XP, or challenge another member (optionally for coins).')
                 .addUserOption(opt =>
                     opt.setName('opponent').setDescription('Member to challenge (leave empty to fight a wild pet)').setRequired(false))
-                .addIntegerOption(opt =>
-                    opt.setName('slot').setDescription('Which of your pets fights (0 = first, default 0)').setRequired(false).setMinValue(0).setMaxValue(9))
+                .addStringOption(opt =>
+                    opt.setName('slot').setDescription('Which of your pets fights (defaults to your first)').setRequired(false).setAutocomplete(true))
                 .addIntegerOption(opt =>
                     opt.setName('bet').setDescription('Coins to wager (requires an opponent)').setRequired(false).setMinValue(1))),
+
+    async autocomplete(interaction) {
+        try {
+            const focused = interaction.options.getFocused(true);
+            if (focused.name === 'slot')     return await slotAutocomplete(interaction, focused.value ?? '');
+            if (focused.name === 'material') return await materialAutocomplete(interaction, focused.value ?? '');
+            return await interaction.respond([]);
+        } catch (err) {
+            console.error('[pet] autocomplete error:', err);
+            return interaction.respond([]).catch(() => {});
+        }
+    },
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();

@@ -516,7 +516,7 @@ async function handleDig(interaction) {
     await interaction.editReply({ embeds: [confirmEmbed], components: [] });
 
     // Crystal Fox pet: +15% mine yield (only if hunger >= 30)
-    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, STARVING_THRESHOLD: PET_STARVE, TRAIT_FLAVOR } = require('../../services/petService');
+    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
     const petMineYieldPct = getTotalBonus(user.pets || [], 'mine_yield');
 
     const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
@@ -656,6 +656,16 @@ async function handleDig(interaction) {
         questsNear.push(...earn.nearComplete);
     }
 
+    // Rare companions are found, not bought: a legendary result is the only
+    // thing that can turn one up. Rolled before the save below persists it.
+    // Mirrors the keptRareFind predicate above: a cave-in the player fled leaves
+    // result.success true while revoking the find, and an abandoned haul must not
+    // hand out a companion either.
+    const rarePetDrop = result.success && !result.caveInAbandoned
+        ? tryGrantRarePet(user, 'mine', result.tier)
+        : null;
+    if (rarePetDrop) user.markModified('pets');
+
     const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
     try {
@@ -708,9 +718,20 @@ async function handleDig(interaction) {
     const existingFooter = embed.data.footer?.text ?? '';
     embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });
 
+    // Rare companion drop — announced prominently; this is the only way to get one.
+    if (rarePetDrop) {
+        embed.addFields({
+            name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
+            value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
+                 + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                 + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
+            inline: false,
+        });
+    }
+
     // Pet narrative: show active pet's personality flavor in description
     if (result.success) {
-        const activePet = (user.pets || []).find(p => p.hunger >= PET_STARVE);
+        const activePet = (user.pets || []).find(p => isPetActive(p));
         if (activePet) {
             const petDef = PET_DEFS[activePet.petId];
             const petName = activePet.name || petDef?.name || activePet.petId;

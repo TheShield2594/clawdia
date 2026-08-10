@@ -663,7 +663,7 @@ async function executeStart(interaction) {
     }
 
     // Wolf pet: +10% coin yield; Eagle pet: +15% XP (only if hunger >= 30)
-    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, STARVING_THRESHOLD: PET_STARVE, TRAIT_FLAVOR } = require('../../services/petService');
+    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
     const petYieldPct = getTotalBonus(user.pets || [], 'hunt_yield');
     const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
 
@@ -736,6 +736,11 @@ async function executeStart(interaction) {
         questsNear.push(...earn.nearComplete);
     }
 
+    // Rare companions are found, not bought: a legendary result is the only
+    // thing that can turn one up. Rolled before the save below persists it.
+    const rarePetDrop = result.success ? tryGrantRarePet(user, 'hunt', result.tier) : null;
+    if (rarePetDrop) user.markModified('pets');
+
     const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
     try {
@@ -801,9 +806,20 @@ async function executeStart(interaction) {
         embed.setDescription(desc + `\n> 🌟 *Featured Zone: ${zone.emoji} ${zone.name} — +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout bonus active!*`);
     }
 
+    // Rare companion drop — announced prominently; this is the only way to get one.
+    if (rarePetDrop) {
+        embed.addFields({
+            name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
+            value: `A wild **${rarePetDrop.name}** followed you home! It joined your pets at full hunger.\n`
+                 + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                 + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
+            inline: false,
+        });
+    }
+
     // Pet narrative: show active pet's personality flavor in description
     if (result.success) {
-        const activePet = (user.pets || []).find(p => p.hunger >= PET_STARVE);
+        const activePet = (user.pets || []).find(p => isPetActive(p));
         if (activePet) {
             const petDef = PET_DEFS[activePet.petId];
             const petName = activePet.name || petDef?.name || activePet.petId;

@@ -8,6 +8,7 @@ const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/
 const { getStreakMultiplier, MILESTONES } = require('../../utils/streakMultiplier');
 const { badgeFor, titleForExactRank, getBonusMultipliers } = require('../../utils/prestige');
 const { getActiveSynergies } = require('../../services/synergyService');
+const { isPetActive } = require('../../services/petService');
 
 const PRESTIGE_BADGES = ['', '🥉', '🥈', '🥇', '🏆', '💎'];
 
@@ -172,7 +173,7 @@ module.exports = {
                 ? `**Synergies:** ${activeSynergies.map(s => `${s.emoji} ${s.name}`).join('  ·  ')}`
                 : null;
 
-            const activePet = (userData.pets ?? []).find(p => !p.starving);
+            const activePet = (userData.pets ?? []).find(p => isPetActive(p));
             const petLine   = activePet
                 ? `**Active Pet:** 🐾 ${activePet.name ?? activePet.petId} (Lv${activePet.level})`
                 : null;

@@ -278,10 +278,12 @@ async function handleGo(interaction) {
     }
 
     // Guild leveling XP mirrors half the explorer XP
-    const mainXp = Math.floor((result.xp ?? 0) * 0.5 * getEventXpMultiplier(guildSettings));
+    let mainXp = Math.floor((result.xp ?? 0) * 0.5 * getEventXpMultiplier(guildSettings));
     let leveledUp = false;
     if (mainXp > 0) {
-        ({ leveled: leveledUp } = applyXpGain(user, mainXp));
+        // Reassign from `gained` so the embed reports the XP actually credited
+        // (applyXpGain folds in the Bird pet's xp_gain passive).
+        ({ leveled: leveledUp, gained: mainXp } = applyXpGain(user, mainXp));
     }
 
     // Journal

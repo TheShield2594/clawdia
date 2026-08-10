@@ -1,5 +1,39 @@
 const { Schema, model } = require('mongoose');
 
+// How many starved pets are retained for revival, most recent first.
+const DECEASED_PET_LIMIT = 5;
+
+// Shared between `pets` and `deceasedPets` so a revived pet round-trips with
+// every field intact. A factory rather than a constant: Mongoose normalises
+// definition objects in place, so handing the same one to two paths risks
+// them sharing mutated SchemaType options.
+const petFields = () => ({
+    petId:              { type: String,  required: true },
+    name:               { type: String,  default: null },
+    hunger:             { type: Number,  default: 100, min: 0, max: 100 },
+    lastFed:            { type: Date,    default: Date.now },
+    // Cursor tracking how far hunger decay has been applied. Kept separate
+    // from lastFed so that feeding restores hunger without also rewinding
+    // the decay clock (which used to make decay avoidable entirely).
+    lastDecayAt:        { type: Date,    default: Date.now },
+    adoptedAt:          { type: Date,    default: Date.now },
+    starving:           { type: Boolean, default: false },
+    starvingStartAt:    { type: Date,    default: null },
+    lastPlay:           { type: Date,    default: null },
+    restUntil:          { type: Date,    default: null },
+    potw:               { type: Boolean, default: false },
+    weeklyInteractions: { type: Number,  default: 0    },
+    personality:        { type: String,  default: null },
+    // Progression (Phase 4): pets gain XP from feeding and battles, level up,
+    // and evolve through stages that scale their passive bonus.
+    level:              { type: Number,  default: 1, min: 1 },
+    xp:                 { type: Number,  default: 0, min: 0 },
+    evolutionStage:     { type: Number,  default: 1, min: 1, max: 3 },
+    battleWins:         { type: Number,  default: 0 },
+    battleLosses:       { type: Number,  default: 0 },
+    lastBattle:         { type: Date,    default: null },
+});
+
 const userSchema = new Schema({
     userId: { type: String, required: true },
     guildId: { type: String, required: true },
@@ -159,28 +193,14 @@ const userSchema = new Schema({
     },
 
     // Pet system
-    pets: [{
-        petId:              { type: String,  required: true },
-        name:               { type: String,  default: null },
-        hunger:             { type: Number,  default: 100, min: 0, max: 100 },
-        lastFed:            { type: Date,    default: Date.now },
-        adoptedAt:          { type: Date,    default: Date.now },
-        starving:           { type: Boolean, default: false },
-        starvingStartAt:    { type: Date,    default: null },
-        lastPlay:           { type: Date,    default: null },
-        restUntil:          { type: Date,    default: null },
-        potw:               { type: Boolean, default: false },
-        weeklyInteractions: { type: Number,  default: 0    },
-        personality:        { type: String,  default: null },
-        // Progression (Phase 4): pets gain XP from feeding and battles, level up,
-        // and evolve through stages that scale their passive bonus.
-        level:              { type: Number,  default: 1, min: 1 },
-        xp:                 { type: Number,  default: 0, min: 0 },
-        evolutionStage:     { type: Number,  default: 1, min: 1, max: 3 },
-        battleWins:         { type: Number,  default: 0 },
-        battleLosses:       { type: Number,  default: 0 },
-        lastBattle:         { type: Date,    default: null },
-    }],
+    // Extra pet slots bought with the Pet Slot Expansion item (capped in petService).
+    petSlots: { type: Number, default: 0, min: 0 },
+    pets: [petFields()],
+
+    // Pets lost to starvation, most recent first. Retained so a Revive Scroll
+    // can restore one with its level, bond and battle record intact; capped at
+    // DECEASED_PET_LIMIT so the array can't grow without bound.
+    deceasedPets: [{ ...petFields(), diedAt: { type: Date, default: Date.now } }],
 
     // Pet of the Week tracking
     petInteractionLog: { type: Date,    default: null },
@@ -334,3 +354,4 @@ userSchema.pre('save', function(next) {
 });
 
 module.exports = model('User', userSchema);
+module.exports.DECEASED_PET_LIMIT = DECEASED_PET_LIMIT;

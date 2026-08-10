@@ -171,6 +171,8 @@ const guildSchema = new Schema({
         robFailFineRate: { type: Number, default: 0.2, min: 0, max: 1 },
         duelEnabled: { type: Boolean, default: true },
         duelMaxBet: { type: Number, default: 10000, min: 1 },
+        // Coins paid to the Pet of the Week winner (0 disables the payout).
+        potwReward: { type: Number, default: 5000, min: 0 },
         casinoEnabled: { type: Boolean, default: true },
         crimeEnabled: { type: Boolean, default: true },
         quizEnabled: { type: Boolean, default: true },

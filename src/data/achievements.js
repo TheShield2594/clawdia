@@ -464,6 +464,105 @@ const ACHIEVEMENTS = [
         }
     },
 
+    // ── Pets ─────────────────────────────────────────────────────────────────
+    // Pets were the only major economy system with no achievements at all.
+    {
+        id: 'first_companion',
+        name: 'First Companion',
+        description: 'Adopt your first pet',
+        emoji: '🐾',
+        category: 'pets',
+        xpReward: 50,
+        coinReward: 250,
+        check: (user) => (user.pets || []).length >= 1,
+        progress: (user) => [Math.min((user.pets || []).length, 1), 1]
+    },
+    {
+        id: 'full_house',
+        name: 'Full House',
+        description: 'Care for 3 pets at once',
+        emoji: '🏠',
+        category: 'pets',
+        xpReward: 150,
+        coinReward: 1_000,
+        check: (user) => (user.pets || []).length >= 3,
+        progress: (user) => [Math.min((user.pets || []).length, 3), 3]
+    },
+    {
+        id: 'well_fed',
+        name: 'Well Fed',
+        description: 'Get a pet to level 10',
+        emoji: '🍖',
+        category: 'pets',
+        xpReward: 200,
+        coinReward: 1_500,
+        check: (user) => (user.pets || []).some(p => (p.level || 1) >= 10),
+        progress: (user) => [Math.min(Math.max(0, ...(user.pets || []).map(p => p.level || 1)), 10), 10]
+    },
+    {
+        id: 'apex_companion',
+        name: 'Apex Companion',
+        description: 'Evolve a pet to its final stage (level 20)',
+        emoji: '⭐',
+        category: 'pets',
+        xpReward: 500,
+        coinReward: 5_000,
+        check: (user) => (user.pets || []).some(p => (p.evolutionStage || 1) >= 3),
+        // Reports the same field the check gates on, so a pet cannot show full
+        // progress while the achievement stays locked.
+        progress: (user) => [Math.min(Math.max(0, ...(user.pets || []).map(p => p.evolutionStage || 1)), 3), 3]
+    },
+    {
+        id: 'pet_champion',
+        name: 'Pet Champion',
+        description: 'Win 25 pet battles',
+        emoji: '⚔️',
+        category: 'pets',
+        xpReward: 300,
+        coinReward: 2_500,
+        check: (user) => (user.pets || []).reduce((sum, p) => sum + (p.battleWins || 0), 0) >= 25,
+        progress: (user) => {
+            const wins = (user.pets || []).reduce((sum, p) => sum + (p.battleWins || 0), 0);
+            return [Math.min(wins, 25), 25];
+        }
+    },
+    {
+        id: 'inseparable',
+        name: 'Inseparable',
+        description: 'Keep a pet for 30 days',
+        emoji: '❤️',
+        category: 'pets',
+        xpReward: 400,
+        coinReward: 4_000,
+        check: (user) => (user.pets || []).some(p =>
+            p.adoptedAt && (Date.now() - new Date(p.adoptedAt).getTime()) >= 30 * 86400000),
+        progress: (user) => {
+            const oldest = (user.pets || []).reduce((best, p) => {
+                if (!p.adoptedAt) return best;
+                const days = (Date.now() - new Date(p.adoptedAt).getTime()) / 86400000;
+                return Math.max(best, days);
+            }, 0);
+            return [Math.min(Math.floor(oldest), 30), 30];
+        }
+    },
+    {
+        id: 'menagerie',
+        name: 'Menagerie',
+        description: 'Find all three rare companions: Eagle, Shark and Crystal Fox',
+        emoji: '💎',
+        category: 'pets',
+        xpReward: 1_000,
+        coinReward: 15_000,
+        check: (user) => {
+            const owned = new Set((user.pets || []).map(p => p.petId));
+            return ['eagle', 'shark', 'crystal_fox'].every(id => owned.has(id));
+        },
+        progress: (user) => {
+            const owned = new Set((user.pets || []).map(p => p.petId));
+            return [['eagle', 'shark', 'crystal_fox'].filter(id => owned.has(id)).length, 3];
+        }
+    },
+
     // ── Secret ────────────────────────────────────────────────────────────────
     // Secret achievements are hidden (name/description/progress concealed) until earned.
     {
@@ -799,6 +898,7 @@ const CATEGORY_LABELS = {
     hunt: 'Hunt',
     fishing: 'Fishing',
     exploration: 'Exploration',
+    pets: 'Pets',
     community: 'Community',
     moderation: 'Moderation',
     custom: 'Custom'
@@ -810,6 +910,7 @@ const CATEGORY_EMOJIS = {
     hunt: '🏹',
     fishing: '🎣',
     exploration: '🧭',
+    pets: '🐾',
     community: '👥',
     moderation: '🛡️',
     custom: '⚙️'
