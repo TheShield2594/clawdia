@@ -14,6 +14,7 @@ const {
     resolveActiveRegion,
     getRelicCollection,
     getRelicBonus,
+    buildEventWeights,
     getSecretOdds,
     getPayoutMultiplier,
     getPenaltyMultiplier,
@@ -29,6 +30,9 @@ const {
     REGION_LIST,
     RELIC_LIST,
     RELIC_INDEX,
+    RELIC_VALUES,
+    RELIC_EMOJI,
+    RELIC_RARITY_ORDER,
     TOTAL_CORE_SECRETS,
     EXPLORER_LEVELS,
     getRelicMeta,
@@ -555,6 +559,23 @@ describe('secret pity tells the truth', () => {
         expect(getSecretOdds(user, region, progress).exhausted).toBe(true);
     });
 
+    test('the quoted odds use the same table the roll does', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        const progress = chartRegion(user, region, { secrets: false });
+
+        const plain = makeGuildSettings();
+        const boosted = makeGuildSettings();
+        boosted.exploration.rareEventBonus = 0.25;
+
+        // rareEventBonus shifts weight into the secret slot; the display must
+        // move with it or it quotes a chance the roll never uses.
+        expect(buildEventWeights(region, boosted).secret)
+            .toBeGreaterThan(buildEventWeights(region, plain).secret);
+        expect(getSecretOdds(user, region, progress, boosted).baseChance)
+            .toBeGreaterThan(getSecretOdds(user, region, progress, plain).baseChance);
+    });
+
     test('pity lifts the secret chance above its base rate', () => {
         const user = makeUser();
         const region = REGIONS.whispering_forest;
@@ -686,6 +707,33 @@ describe('relic collection', () => {
             expect(relic.value).toBeGreaterThan(0);
             expect(relic.regionName).toBeTruthy();
         }
+    });
+
+    test('every relic rarity is on the ladder, priced and iconned', () => {
+        // An off-ladder rarity would fall through to value 0 and still raise the
+        // collection bonus — a relic that pays a bonus and shows a price of zero.
+        for (const relic of RELIC_LIST) {
+            expect(RELIC_RARITY_ORDER).toContain(relic.rarity);
+            expect(RELIC_VALUES[relic.rarity]).toBeGreaterThan(0);
+            expect(RELIC_EMOJI[relic.rarity]).toBeTruthy();
+        }
+    });
+
+    test('every region defines a relic pool, and a region without one still pays out', () => {
+        for (const region of REGION_LIST) {
+            expect(Array.isArray(region.relics)).toBe(true);
+        }
+        // Guard the future case: a hand-added region with no relics must degrade
+        // to a plain treasure rather than throwing mid-expedition.
+        const user = makeUser();
+        const barren = { ...REGIONS.whispering_forest, id: 'barren_test', relics: undefined };
+        const result = withRandom(
+            () => executeExplore(user, barren, makeGuildSettings(), {}),
+            scriptRandom([0.6, 0.5, 0.995, 0.5, 0.5, 0, 0]),
+        );
+        expect(result.type).toBe('treasure');
+        expect(result.relic).toBeUndefined();
+        expect(result.payout).toBeGreaterThan(0);
     });
 
     test('relic itemIds are unique across every region', () => {

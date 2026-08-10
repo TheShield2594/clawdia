@@ -301,9 +301,15 @@ function getRelicBonus(user) {
  * Admin rareEventBonus and the secret pity counter shift weight toward
  * the rarer slots.
  */
-function rollEventType(user, region, guildSettings, progress) {
+/**
+ * The region's event table with the admin rareEventBonus knob applied.
+ *
+ * Shared by the roll and by the odds display: computing it in only one of the
+ * two is how a server with rareEventBonus set ends up being quoted a secret
+ * chance lower than the one it actually rolls against.
+ */
+function buildEventWeights(region, guildSettings) {
     const w = { ...region.eventWeights };
-    const secretsLeft = hasUnfoundSecrets(region, progress);
 
     // Admin knob: shift weight from the mundane to secrets + treasure
     const rareBonus = Math.min(0.25, Math.max(0, guildSettings?.exploration?.rareEventBonus ?? 0));
@@ -314,6 +320,12 @@ function rollEventType(user, region, guildSettings, progress) {
         w.treasure += shift * 0.6;
         w.secret   += shift * 0.4;
     }
+    return w;
+}
+
+function rollEventType(user, region, guildSettings, progress) {
+    const w = buildEventWeights(region, guildSettings);
+    const secretsLeft = hasUnfoundSecrets(region, progress);
 
     if (secretsLeft) {
         // Secret pity: long droughts self-correct
@@ -344,11 +356,13 @@ function getSecretPity(user) {
  * chance, the pity-boosted chance, and whether the region has anything left
  * to find at all. Display-only — the roll itself lives in rollEventType.
  */
-function getSecretOdds(user, region, progress) {
+function getSecretOdds(user, region, progress, guildSettings = null) {
     if (!hasUnfoundSecrets(region, progress)) {
         return { exhausted: true, sinceSecret: 0, baseChance: 0, chance: 0, pity: 0 };
     }
-    const w = region.eventWeights;
+    // Same table the roll uses, so a server running rareEventBonus is quoted
+    // the odds it actually plays against.
+    const w = buildEventWeights(region, guildSettings);
     const total = Object.values(w).reduce((s, n) => s + n, 0);
     const pity = getSecretPity(user);
     return {
@@ -573,7 +587,10 @@ function finishAsTreasure(user, region, progress, result, coinMult, { fallback =
 
     // Rare+ treasures may carry a relic into the player's inventory
     if (Math.random() < tier.relicChance) {
-        const pool = region.relics.filter(r =>
+        // Every region in the table defines relics today; the fallback is here so
+        // a future one added without them degrades to a plain treasure instead of
+        // throwing mid-expedition.
+        const pool = (region.relics ?? []).filter(r =>
             tier.tier === 'legendary' ? true : r.rarity !== 'legendary'
         );
         if (pool.length) {
@@ -780,6 +797,7 @@ module.exports = {
     isRegionFullyCharted,
     getRelicCollection,
     getRelicBonus,
+    buildEventWeights,
     getSecretOdds,
     getPayoutMultiplier,
     getPenaltyMultiplier,

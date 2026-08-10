@@ -6,10 +6,11 @@ const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const {
-    LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST,
+    LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST, CORE_REGION_IDS,
     RELIC_LIST, RELIC_RARITY_ORDER, TOTAL_CORE_RELICS,
     FOOTER_LINES, INJURY_LINES,
 } = require('../../data/exploreData');
+const { fitDescription, EMBED_LIMITS } = require('../../utils/embedFields');
 const {
     ensureExploreData,
     applyStaminaRegen,
@@ -231,7 +232,7 @@ async function handleGo(interaction) {
                 description: 'You just got back. Shake the dust off, check your boots for stowaways, then go again.',
                 color: '#2e7d32',
                 nextAt: new Date(e.lastExplore.getTime() + LIMITS.EXPLORE_COOLDOWN_MS),
-                nextRewardPreview: secretTeaser(user, region),
+                nextRewardPreview: secretTeaser(user, region, guildSettings),
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -287,7 +288,7 @@ async function handleGo(interaction) {
                 description: 'You just got back. Shake the dust off, check your boots for stowaways, then go again.',
                 color: '#2e7d32',
                 nextAt: new Date(new Date(lastAt).getTime() + LIMITS.EXPLORE_COOLDOWN_MS),
-                nextRewardPreview: secretTeaser(user, region),
+                nextRewardPreview: secretTeaser(user, region, guildSettings),
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -446,7 +447,7 @@ async function handleGo(interaction) {
         }
 
         // ── Result embed ──────────────────────────────────────────────────────────
-        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit);
+        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings);
         await interaction.editReply({ embeds: [embed], components: [] });
 
         // Server-wide whisper for secrets
@@ -498,9 +499,9 @@ function summarizeResult(result, currency) {
  * region still HAS a secret to give. Once it's fully uncovered, saying it is
  * a promise nothing can keep, so say something honest instead.
  */
-function secretTeaser(user, region) {
+function secretTeaser(user, region, guildSettings) {
     if (!region) return 'The map never fills itself in.';
-    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id));
+    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id), guildSettings);
     if (odds.exhausted) {
         return `${region.name} has nothing left to hide from you. Other maps still do.`;
     }
@@ -515,8 +516,8 @@ function secretTeaser(user, region) {
  * invisible and a dry run just looks like bad luck with no reason to believe
  * it lets up — the same reason hunt, fishing and mining grew a streak field.
  */
-function buildSecretPityField(user, region) {
-    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id));
+function buildSecretPityField(user, region, guildSettings) {
+    const odds = getSecretOdds(user, region, getRegionProgress(user, region.id), guildSettings);
     if (odds.exhausted) return null;
 
     const barLen = 16;
@@ -540,7 +541,7 @@ function buildSecretPityField(user, region) {
     };
 }
 
-function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit) {
+function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings) {
     const e = user.exploration;
     const embed = new EmbedBuilder().setTimestamp();
     const lines = [];
@@ -653,7 +654,7 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
 
     // Pity curve — only on runs that didn't turn up the secret
     if (result.type !== 'secret') {
-        const pityField = buildSecretPityField(user, region);
+        const pityField = buildSecretPityField(user, region, guildSettings);
         if (pityField) embed.addFields(pityField);
     }
 
@@ -801,7 +802,7 @@ async function handleRegions(interaction) {
         .setColor('#2e7d32')
         .setTitle('🧭 Known Regions')
         .setDescription(sections.join('\n\n'))
-        .setFooter({ text: 'Seasonal regions come and go with /event seasons. The core four are always out there, being patient.' })
+        .setFooter({ text: `Seasonal regions come and go with /event seasons. The core ${CORE_REGION_IDS.length} are always out there, being patient.` })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -858,15 +859,37 @@ async function handleRelics(interaction) {
         });
     }
 
-    // Grouped by rarity, rarest first — the case should read like a case.
-    const byRarity = [...RELIC_RARITY_ORDER].reverse().map(rarity => {
+    // Grouped by rarity, rarest first — the case should read like a case. Any
+    // rarity not in the ladder still gets a group rather than silently vanishing
+    // from a case whose totals already count it.
+    const knownRarities = [...RELIC_RARITY_ORDER].reverse();
+    const extraRarities = [...new Set(collection.map(r => r.rarity))].filter(r => !knownRarities.includes(r));
+
+    const renderGroups = withLore => [...knownRarities, ...extraRarities].map(rarity => {
         const held = collection.filter(r => r.rarity === rarity);
         if (!held.length) return null;
-        const rows = held.map(r =>
-            `${r.emoji} **${r.itemId}**${r.quantity > 1 ? ` ×${r.quantity}` : ''} — *${r.regionName}* · ${currency}${r.value.toLocaleString()}\n> *${r.lore}*`
-        );
+        const rows = held.map(r => {
+            const head = `${r.emoji} **${r.itemId}**${r.quantity > 1 ? ` ×${r.quantity}` : ''} — *${r.regionName}* · ${currency}${r.value.toLocaleString()}`;
+            return withLore ? `${head}\n> *${r.lore}*` : head;
+        });
         return `**${rarity.charAt(0).toUpperCase() + rarity.slice(1)}**\n${rows.join('\n')}`;
     }).filter(Boolean);
+
+    // A full 25-relic case with lore runs past the 4096-char description limit,
+    // and discord.js throws rather than truncating. Drop the lore before dropping
+    // relics — the case is a list first and a story second.
+    const budget = EMBED_LIMITS.DESCRIPTION - 120; // headroom for the omission note
+    let groups = renderGroups(true);
+    let loreDropped = false;
+    if (groups.join('\n\n').length > budget) {
+        groups = renderGroups(false);
+        loreDropped = true;
+    }
+    const { text: caseText, omitted } = fitDescription(groups, { limit: budget, separator: '\n\n' });
+    const caseNote = [
+        loreDropped ? '*The case has outgrown its little plaques — names only from here.*' : '',
+        omitted > 0 ? `*…and ${omitted} more group${omitted === 1 ? '' : 's'} that wouldn't fit.*` : '',
+    ].filter(Boolean).join('\n');
 
     const distinct = collection.length;
     const bonus = getRelicBonus(userData);
@@ -877,7 +900,7 @@ async function handleRelics(interaction) {
         .setColor('#c9a227')
         .setTitle(`🏺 The Relic Case — ${target.username}`)
         .setThumbnail(target.displayAvatarURL({ dynamic: true }))
-        .setDescription(byRarity.join('\n\n'))
+        .setDescription(caseNote ? `${caseText}\n\n${caseNote}` : caseText)
         .addFields(
             {
                 name: '📚 The Collection',

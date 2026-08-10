@@ -7,6 +7,7 @@ const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/
 const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
 const { getItemLore } = require('../../data/defaultShopItems');
 const { getRelicMeta } = require('../../data/exploreData');
+const { packFields } = require('../../utils/embedFields');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
 
@@ -90,9 +91,11 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
             if (relic) {
                 // Relics come out of /explore, not the shop — without their own
                 // section they render as a bare name with no worth and no story.
+                // The lore stays in `/explore relics`: 25 relics' worth of it
+                // would blow the 1024-char field limit and take the embed down.
                 relicLines.push(
                     `${relic.emoji} **${relic.itemId}**${entry.quantity > 1 ? ` ×${entry.quantity}` : ''} `
-                    + `*(${relic.rarity} · ${relic.regionName} · worth ${currency}${relic.value.toLocaleString()})*\n*${relic.lore}*`
+                    + `*(${relic.rarity} · ${relic.regionName} · ${currency}${relic.value.toLocaleString()})*`
                 );
             } else if (entry.itemId.startsWith('ai_') && aiItemMap[entry.itemId]) {
                 const ai = aiItemMap[entry.itemId];
@@ -120,9 +123,11 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
             hasContent = true;
         }
         if (relicLines.length) {
+            // A full collection is 25 relics — well past one field's budget.
+            embed.addFields(...packFields('🏺 Relics', relicLines));
             embed.addFields({
-                name: '🏺 Relics',
-                value: `${relicLines.join('\n')}\n\n*Every distinct relic pays a standing bonus on exploration coins — see \`/explore relics\`.*`,
+                name: '​',
+                value: '*Every distinct relic pays a standing bonus on exploration coins — see `/explore relics`.*',
                 inline: false,
             });
             hasContent = true;
