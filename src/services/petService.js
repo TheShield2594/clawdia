@@ -199,11 +199,13 @@ function getMoodLine(pet, now = Date.now()) {
     return lines[(petHash + nameHash + dayIndex) % lines.length];
 }
 
+// Ramps monotonically from calm to alarming. It used to end on purple, which
+// read as *less* urgent than the red band above it.
 function getMoodColor(hunger) {
-    if (hunger >= 90) return '#4caf50'; // blissful — green
-    if (hunger >= 50) return '#ff9800'; // content  — orange
-    if (hunger >= 20) return '#f44336'; // pleading — red
-    return '#9c27b0';                   // concerning — purple
+    if (hunger >= 90) return '#4caf50'; // blissful   — green
+    if (hunger >= 50) return '#cddc39'; // content    — lime
+    if (hunger >= 20) return '#ff9800'; // pleading   — orange
+    return '#f44336';                   // concerning — red
 }
 
 const HEART_BAR_LENGTH = 8;

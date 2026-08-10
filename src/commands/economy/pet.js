@@ -83,6 +83,11 @@ function hungerBar(hunger) {
     return color.repeat(filled) + '⬛'.repeat(HUNGER_BAR_LENGTH - filled) + ` ${pct}%`;
 }
 
+// What a pet will actually eat: any known grind material, plus shop pet food.
+function isEdible(materialId) {
+    return Boolean(MATERIAL_RARITY[materialId]) || materialId === 'pet_food';
+}
+
 function getInventoryQuantity(user, itemId) {
     return user.inventory?.find(i => i.itemId === itemId)?.quantity ?? 0;
 }
@@ -232,6 +237,12 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL) {
         : `Lv. **${level}** ${stageStars} — ${xpInLevel}/${xpToNext} XP`;
     const record = `${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L`;
 
+    // Where to actually get the +25 food — previously only /pet list mentioned it.
+    const favMeta      = def ? MATERIAL_RARITY[def.favoriteMaterial] : null;
+    const favouriteLine = def
+        ? `${favMeta?.emoji ?? '🍖'} \`${def.favoriteMaterial}\` — from **/${def.materialSource}** *(+25 hunger, bonus XP)*`
+        : '—';
+
     return new EmbedBuilder()
         .setColor(moodColor)
         .setAuthor({ name: `${getPetDisplay(pet).titledName} • ${def?.name ?? pet.petId}`, iconURL: ownerAvatarURL })
@@ -242,6 +253,7 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL) {
             { name: '🍖 Hunger',            value: hungerBar(hunger),                    inline: false },
             { name: `${bonusEmoji} Bonus`,  value: bonusLabel,                           inline: true  },
             { name: '⚔️ Battle Record',     value: record,                               inline: true  },
+            { name: '🍗 Favourite Food',    value: favouriteLine,                        inline: false },
         )
         .setFooter({ text: `Pet ${index + 1} of ${total} • Last fed ${lastFedStr}` })
         .setTimestamp();
@@ -324,7 +336,7 @@ async function materialAutocomplete(interaction, focused) {
     const query = focused.toLowerCase();
     const choices = [...held.entries()]
         // Grind materials plus shop-bought pet food — not every stray inventory item.
-        .filter(([id]) => MATERIAL_RARITY[id] || id === 'pet_food')
+        .filter(([id]) => isEdible(id))
         .filter(([id]) => !query || id.toLowerCase().includes(query))
         .map(([id, qty]) => {
             const meta  = MATERIAL_RARITY[id];
@@ -400,7 +412,7 @@ async function executeAdopt(interaction) {
             `${personalityDef.emoji} **Personality: ${personalityDef.label}** — *${personalityDef.desc}*`
         )
         .addFields(
-            { name: 'Passive Bonus',  value: `+${def.bonusPct}% ${def.bonusType.replace(/_/g, ' ')} (active when hunger ≥ 30%)`, inline: true },
+            { name: 'Passive Bonus',  value: `+${def.bonusPct}% ${def.bonusType.replace(/_/g, ' ')} (active when hunger ≥ ${STARVING_THRESHOLD}%)`, inline: true },
             { name: 'Favorite Food',  value: `\`${def.favoriteMaterial}\` (restores 25 hunger)`,                                  inline: true },
             { name: 'Cost',           value: `${def.cost.toLocaleString()} ${currency}`,                                           inline: true },
         )
@@ -423,7 +435,14 @@ async function executeStatus(interaction) {
         return interaction.editReply('You have no pets. Use `/pet adopt` to get one!');
     }
 
-    await user.save().catch(() => {});
+    try {
+        await user.save();
+    } catch (err) {
+        // Swallowing this meant a runaway could be announced, fail to persist, and
+        // then be announced again on the next /pet status.
+        console.error('[pet] status save error:', err);
+        return interaction.editReply('Something went wrong updating your pets. Please try again.');
+    }
 
     let currentIndex = 0;
     const ownerAvatarURL = interaction.user.displayAvatarURL();
@@ -567,7 +586,7 @@ async function executeStatus(interaction) {
                     { name: '❤️ Bond',    value: `${heartBar(bondDays)} ${bondDays}d`,               inline: true },
                     { name: '🍖 Hunger', value: hungerBar(hunger),                                    inline: true },
                     { name: `${hunger >= STARVING_THRESHOLD ? '✅' : '❌'} Bonus`,
-                      value: `+${def?.bonusPct ?? 0}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}`, inline: false },
+                      value: `+${getEffectiveBonusPct(pet)}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}`, inline: false },
                 )
                 .setFooter({ text: `${def?.name ?? pet.petId} • Use /pet status to check on yours!` })
                 .setTimestamp();
@@ -575,7 +594,7 @@ async function executeStatus(interaction) {
             // Try to attach a pet sprite
             let files = [];
             try {
-                const spriteBuf = await generatePetSprite(pet.petId, 80);
+                const spriteBuf = await generatePetSprite(pet.petId, 80, pet.evolutionStage ?? 1);
                 if (spriteBuf) {
                     showcaseEmbed.setThumbnail('attachment://pet_sprite.png');
                     files = [new AttachmentBuilder(spriteBuf, { name: 'pet_sprite.png' })];
@@ -611,11 +630,28 @@ async function executeFeed(interaction) {
     if (!target) return interaction.editReply(NO_SUCH_PET);
     const petIndex = target.index;
 
+    // Only grind materials and shop pet food are edible. Without this any
+    // inventory item counted, so `/pet feed material:tier_skip_token` would
+    // destroy a 50,000-coin item for 10 hunger.
+    if (!isEdible(materialId)) {
+        return interaction.editReply(
+            `\`${materialId}\` isn't something a pet will eat. Feed a hunt/fish/mine material or \`pet_food\` — ` +
+            `start typing in the **material** option to see what you have.`
+        );
+    }
+
     const { total } = getMaterialSource(user, materialId);
     if (total < 1) return interaction.editReply(`You don't have any \`${materialId}\` to feed your pet with.`);
 
     const pet    = user.pets[petIndex];
     const def    = PET_DEFINITIONS[pet.petId];
+
+    // Refuse rather than consume the material for nothing.
+    if (effectiveHunger(pet) >= 100) {
+        const fullName = pet.name || def?.name || pet.petId;
+        return interaction.editReply(`${getPetDisplay(pet).emoji} **${fullName}** is completely full — save that \`${materialId}\` for later.`);
+    }
+
     const result = feedPet(pet, materialId);
     if (!result) return interaction.editReply('Could not feed that pet.');
 
@@ -653,7 +689,7 @@ async function executeFeed(interaction) {
         .addFields(
             { name: 'Food',   value: `\`${materialId}\`${favoriteNote}`,   inline: true  },
             { name: 'Hunger', value: hungerBar(result.hunger),              inline: false },
-            { name: 'Bonus',  value: result.hunger >= STARVING_THRESHOLD ? '✅ Active' : '❌ Still inactive (need ≥ 30%)', inline: true },
+            { name: 'Bonus',  value: result.hunger >= STARVING_THRESHOLD ? '✅ Active' : `❌ Still inactive (need ≥ ${STARVING_THRESHOLD}%)`, inline: true },
         )
         .setTimestamp();
 
@@ -665,21 +701,75 @@ async function executeRelease(interaction) {
     const target = resolvePetRef(user?.pets, readSlotOption(interaction));
     if (!target) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
 
-    const { index: petIndex, pet } = target;
-    const def  = PET_DEFINITIONS[pet.petId];
-    const name = pet.name || def?.name || pet.petId;
+    const { pet } = target;
+    const def     = PET_DEFINITIONS[pet.petId];
+    const name    = pet.name || def?.name || pet.petId;
+    const petId   = String(pet._id);
+    const level   = pet.level ?? 1;
+    const bondDays = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
 
-    user.pets.splice(petIndex, 1);
-    user.markModified('pets');
+    // Releasing is permanent and unrevivable — a Revive Scroll only brings back
+    // pets lost to starvation — so a level 30 pet was one mistyped slot away
+    // from being gone with no confirmation at all.
+    const confirmId = `pet_release_yes:${interaction.id}`;
+    const cancelId  = `pet_release_no:${interaction.id}`;
+    const confirm = await interaction.reply({
+        embeds: [new EmbedBuilder()
+            .setColor('#e74c3c')
+            .setTitle(`Release ${name}?`)
+            .setDescription(
+                `${getPetDisplay(pet).emoji} **${getPetDisplay(pet).titledName}** — Lv.${level}, ` +
+                `${bondDays} day${bondDays === 1 ? '' : 's'} of bond, ${pet.battleWins ?? 0}W / ${pet.battleLosses ?? 0}L.\n\n` +
+                `**This cannot be undone.** A Revive Scroll only restores pets lost to starvation, not released ones.`
+            )],
+        components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(confirmId).setLabel('Release').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId(cancelId).setLabel('Keep them').setStyle(ButtonStyle.Secondary),
+        )],
+        flags: MessageFlags.Ephemeral,
+        withResponse: true,
+    }).catch(() => null);
+
+    const message = confirm?.resource?.message ?? await interaction.fetchReply().catch(() => null);
+    if (!message) return;
+
+    let choice;
+    try {
+        choice = await message.awaitMessageComponent({
+            filter: i => i.user.id === interaction.user.id && [confirmId, cancelId].includes(i.customId),
+            time: 30_000,
+        });
+    } catch {
+        return interaction.editReply({ content: `Release cancelled — **${name}** stays with you.`, embeds: [], components: [] }).catch(() => {});
+    }
+
+    if (choice.customId === cancelId) {
+        return choice.update({ content: `**${name}** stays with you.`, embeds: [], components: [] }).catch(() => {});
+    }
+
+    // Re-resolve by id: the roster may have changed while the prompt was open.
+    const fresh = await resolveUser(interaction);
+    const still = resolvePetRef(fresh?.pets, petId);
+    if (!still) {
+        return choice.update({ content: `**${name}** is no longer in your roster.`, embeds: [], components: [] }).catch(() => {});
+    }
+
+    fresh.pets.splice(still.index, 1);
+    fresh.markModified('pets');
 
     try {
-        await user.save();
+        await fresh.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
+        if (err.name === 'VersionError') {
+            return choice.update({ content: 'Edit conflict — try again.', embeds: [], components: [] }).catch(() => {});
+        }
         throw err;
     }
 
-    return interaction.reply({ content: `${def?.emoji ?? '🐾'} **${name}** has been released. Goodbye, friend!`, flags: MessageFlags.Ephemeral });
+    return choice.update({
+        content: `${def?.emoji ?? '🐾'} **${name}** has been released. Goodbye, friend!`,
+        embeds: [], components: [],
+    }).catch(() => {});
 }
 
 async function executeRename(interaction) {
@@ -1010,12 +1100,13 @@ async function pvpBattle(interaction, ctx) {
 async function executeList(interaction) {
     const lines = Object.values(PET_DEFINITIONS)
         .filter(d => d.purchasable)
-        .map(d => `${d.emoji} **${d.name}** — ${d.cost.toLocaleString()} coins\nBonus: +${d.bonusPct}% ${d.bonusType.replace(/_/g, ' ')}  |  Fave food: \`${d.favoriteMaterial}\``);
+        .map(d => `${d.emoji} **${d.name}** — ${d.cost.toLocaleString()} coins\n`
+                + `Bonus: +${d.bonusPct}% ${d.bonusType.replace(/_/g, ' ')} → **+${(d.bonusPct * 2.5).toFixed(1)}%** at Lv.${PET_MAX_LEVEL}  |  Fave food: \`${d.favoriteMaterial}\``);
 
     const embed = new EmbedBuilder()
         .setColor('#ff9800')
         .setTitle('🐾 Pet Shop')
-        .setDescription(lines.join('\n\n'))
+        .setDescription(`Pets level up from feeding and battling, and their passive grows with them.\n\n${lines.join('\n\n')}`)
         .setFooter({ text: `Eagle, Shark and Crystal Fox aren't sold — each has a ${Math.round(RARE_PET_DROP_CHANCE * 100)}% chance to appear on a legendary hunt / fish / mine` })
         .setTimestamp();
 
@@ -1036,7 +1127,7 @@ async function executeLeaderboard(interaction) {
         lineBuilder = (e, rank) => {
             const def  = PET_DEFINITIONS[e.pet.petId];
             const name = e.pet.name || def?.name || e.pet.petId;
-            const stage = e.pet.stage ?? 1;
+            const stage = e.pet.evolutionStage ?? 1;
             const stageEmoji = stage >= 3 ? '🌟' : stage >= 2 ? '✨' : '';
             return `${rank} ${def?.emoji ?? '🐾'} **${name}** ${stageEmoji} — Lv**${e.pet.level ?? 1}** — <@${e.userId}>`;
         };

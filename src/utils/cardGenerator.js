@@ -322,16 +322,33 @@ const PET_SPRITE_COLORS = {
     crystal_fox: { bg: '#7c4dff', ring: '#311b92' },
 };
 
+// Mirrors EVOLUTION_STAGE emoji in petService so a showcased Apex pet is
+// visibly different from a stage 1 of the same species.
+const EVOLVED_PET_EMOJIS = {
+    dog:         { 2: '🐕', 3: '🐺' },
+    cat:         { 2: '🐈', 3: '🐅' },
+    bird:        { 2: '🦜', 3: '🦅' },
+    fish:        { 2: '🐟', 3: '🦈' },
+    fox:         { 2: '🦊', 3: '🌟' },
+    wolf:        { 2: '🐺', 3: '🌑' },
+    eagle:       { 2: '🦅', 3: '⚡' },
+    shark:       { 2: '🦈', 3: '🌊' },
+    crystal_fox: { 2: '💎', 3: '🔮' },
+};
+
 const PET_SPRITE_EMOJIS = {
     dog: '🐶', cat: '🐱', bird: '🐦', fish: '🐠',
     fox: '🦊', wolf: '🐺', eagle: '🦅', shark: '🦈', crystal_fox: '💎',
 };
 
-async function generatePetSprite(petId, size = 80) {
+// An evolved pet should not look identical to a hatchling: stage 2 and 3 swap in
+// the evolved emoji and gain ring pips so the tier reads at a glance.
+async function generatePetSprite(petId, size = 80, stage = 1) {
     const canvas = createCanvas(size, size);
     const ctx    = canvas.getContext('2d');
     const colors = PET_SPRITE_COLORS[petId] ?? { bg: '#9e9e9e', ring: '#616161' };
     const r      = size / 2;
+    const tier   = Math.min(3, Math.max(1, Number(stage) || 1));
 
     ctx.beginPath();
     ctx.arc(r, r, r, 0, Math.PI * 2);
@@ -344,7 +361,18 @@ async function generatePetSprite(petId, size = 80) {
     ctx.lineWidth   = 4;
     ctx.stroke();
 
-    const emoji    = PET_SPRITE_EMOJIS[petId] ?? '🐾';
+    // Ring pips: one per evolution stage beyond the first.
+    if (tier > 1) {
+        ctx.fillStyle = '#ffd700';
+        for (let i = 0; i < tier - 1; i++) {
+            const angle = -Math.PI / 2 + (i - (tier - 2) / 2) * 0.45;
+            ctx.beginPath();
+            ctx.arc(r + Math.cos(angle) * (r - 3), r + Math.sin(angle) * (r - 3), Math.max(2, size * 0.045), 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    const emoji    = EVOLVED_PET_EMOJIS[petId]?.[tier] ?? PET_SPRITE_EMOJIS[petId] ?? '🐾';
     const fontSize = Math.floor(size * 0.48);
     ctx.font         = `${fontSize}px ${EMOJI_FONT}`;
     ctx.textAlign    = 'center';

@@ -508,7 +508,7 @@ async function selectPetOfTheWeek(client) {
 
             let files = [];
             try {
-                const spriteBuf = await generatePetSprite(bestPet.petId, 80);
+                const spriteBuf = await generatePetSprite(bestPet.petId, 80, bestPet.evolutionStage ?? 1);
                 embed.setThumbnail('attachment://potw_sprite.png');
                 files = [new AttachmentBuilder(spriteBuf, { name: 'potw_sprite.png' })];
             } catch { /* non-critical */ }
