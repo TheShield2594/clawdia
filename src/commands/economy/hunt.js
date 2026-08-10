@@ -854,6 +854,15 @@ async function executeStart(interaction) {
         }
     }
 
+    // Discord rejects an embed with more than 25 fields. A maximal hunt — crit,
+    // traits, trait effects, special drop, booster proc, level-up, both buffs
+    // expiring, weapon warning, pity, plus the pet / featured-zone / district
+    // bonuses — now reaches 24. Trim rather than lose the whole result embed to
+    // an exception if another field is added later.
+    if (embed.data.fields && embed.data.fields.length > 25) {
+        embed.data.fields.length = 25;
+    }
+
     // Staged loot reveal for rare+ drops
     await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
 
@@ -977,7 +986,13 @@ async function executeStart(interaction) {
         let apexQuestsDone = [], apexQuestsNear = [];
         if (apexResult.bonusPayout > 0) {
             const apexZone = ZONES[freshUser.hunt.activeZone] ?? zone;
-            const { adjustedPayout } = applyPayoutModifiers(freshUser, apexResult.bonusPayout, apexZone);
+            // The apex fight is part of this hunt, so it rides on the gathering
+            // charge the kill already spent rather than burning a second one —
+            // otherwise a booster drains fastest on exactly the rare kills that
+            // trigger an apex in the first place.
+            const { adjustedPayout } = applyPayoutModifiers(freshUser, apexResult.bonusPayout, apexZone, {
+                reuseGatheringYield: !!result.gatheringYield,
+            });
             apexResult.bonusPayout = adjustedPayout;
             freshUser.balance          += adjustedPayout;
             freshUser.hunt.totalEarned += adjustedPayout;
@@ -1101,6 +1116,17 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             embed.addFields({ name: '🎁 Special Drop!', value: `You found **${specialDrop.name}**!`, inline: false });
         }
 
+        if (result.gatheringYield) {
+            const { label, emoji, chargesLeft } = result.gatheringYield;
+            embed.addFields({
+                name:  `${emoji} ${label}`,
+                value: chargesLeft > 0
+                    ? `Payout doubled — **${chargesLeft}** charge${chargesLeft === 1 ? '' : 's'} left.`
+                    : `Payout doubled — that was your **last charge**.`,
+                inline: true,
+            });
+        }
+
         if (levelUp) {
             const ld = getLevelData(levelUp.newLevel);
             embed.addFields({ name: '⬆️ Level Up!', value: `Hunter Level **${levelUp.oldLevel}** → **${levelUp.newLevel}** (${ld.title})`, inline: false });
@@ -1137,8 +1163,18 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             { name: 'Reward',  value: 'Nothing',                      inline: true },
             { name: 'XP',      value: xpEarned > 0 ? `+${xpEarned} XP` : 'None', inline: true },
             { name: 'Weapon',  value: `${weapon.name} ${weaponStatusEmoji(weapon.status)}\n${durabilityBar(weapon.currentDurability, weapon.maxDurability)} ${weapon.currentDurability}/${weapon.maxDurability}`, inline: true },
-            { name: 'Stamina', value: buildStaminaLine(user), inline: true }
+            {
+                name: 'Stamina',
+                value: result.staminaSpared
+                    ? `${buildStaminaLine(user)}\n*Clean miss — no stamina spent*`
+                    : buildStaminaLine(user),
+                inline: true
+            }
         );
+
+    if ((user.hunt.consecutiveFails ?? 0) > 0) {
+        embed.addFields(buildFailStreakField(user));
+    }
 
     if (failTraits && failTraits.length > 0) {
         const traitLine = failTraits.map(t => {
@@ -1224,6 +1260,40 @@ function buildPityField(user) {
     }
 
     return { name: `${heat} Rare Pity: ${sinceRare}/${threshold}`, value: `\`${bar}\`\n${label}`, inline: false };
+}
+
+/**
+ * Shows where the player sits on the consecutive-failure pity curve.
+ * Failure-embed only — a success resets the streak, so there is nothing to show.
+ *
+ * Without this the curve is invisible: a dry run just looks like bad luck with no
+ * reason to believe it will let up.
+ */
+function buildFailStreakField(user) {
+    const fails     = user.hunt.consecutiveFails ?? 0;
+    const threshold = LIMITS.PITY_CONSECUTIVE_FAILS;
+    const stacks    = Math.min(Math.max(0, fails - threshold + 1), threshold);
+
+    const barLen    = 16;
+    const filledLen = Math.min(barLen, Math.round((Math.min(fails, threshold) / threshold) * barLen));
+    const bar       = '█'.repeat(filledLen) + '░'.repeat(barLen - filledLen);
+
+    if (stacks > 0) {
+        const bonus  = Math.round(stacks * LIMITS.PITY_BONUS_PER_STACK * 100);
+        const maxed  = stacks >= threshold;
+        return {
+            name:  `⚡ Steadying Your Aim — ${fails} straight misses`,
+            value: `\`${bar}\`\n**+${bonus}% success** on your next hunt${maxed ? ' *(max)*' : ' — climbing with every miss'}`,
+            inline: false,
+        };
+    }
+
+    const remaining = threshold - fails;
+    return {
+        name:  `❄️ Bad Run — ${fails}/${threshold}`,
+        value: `\`${bar}\`\n${remaining} more miss${remaining === 1 ? '' : 'es'} and pity kicks in: **+${Math.round(LIMITS.PITY_BONUS_PER_STACK * 100)}% success**, growing with each one after.`,
+        inline: false,
+    };
 }
 
 function buildStaminaLine(user) {

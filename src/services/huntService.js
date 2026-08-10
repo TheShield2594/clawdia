@@ -14,7 +14,7 @@ const {
     TROPHY_QUALITIES,
     APEX_TYPES
 } = require('../data/huntData');
-const { hasEffect, consumeEffect, getGatheringYieldEffect } = require('./effectsService');
+const { hasEffect, consumeEffect, getEffect, getGatheringYieldEffect, EFFECT_CONFIGS } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
 const { getHuntSynergyStaminaBonus } = require('./synergyService');
@@ -419,9 +419,15 @@ function rollFailureSeverity() {
  *   - Zone payout bonus
  *   - Diminishing returns (daily hunt count)
  *   - Daily coin caps (soft and hard)
- * Returns { adjustedPayout, cappedByHard }
+ *
+ * `options.reuseGatheringYield` applies a doubling that a charge already paid
+ * for earlier in the same hunt rather than spending a second one — the apex
+ * bonus rides on the charge the kill itself spent.
+ *
+ * Returns { adjustedPayout, cappedByHard, gatheringYield }, where gatheringYield
+ * is { effect, label, emoji, chargesLeft } when a charge was spent here.
  */
-function applyPayoutModifiers(user, rawPayout, zone) {
+function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
     const h = user.hunt;
     let payout = rawPayout;
 
@@ -454,22 +460,35 @@ function applyPayoutModifiers(user, rawPayout, zone) {
     const remaining  = LIMITS.DAILY_HARD_CAP - h.dailyCoins;
     const settle = raw => Math.max(0, Math.min(softCapped ? Math.round(raw * 0.50) : raw, remaining));
 
-    const basePayout = settle(payout);
+    const basePayout    = settle(payout);
+    const doubledPayout = settle(payout * 2);
+
+    // A doubling already paid for earlier this hunt — no second charge.
+    if (options.reuseGatheringYield) {
+        return { adjustedPayout: doubledPayout, cappedByHard: false, gatheringYield: null };
+    }
 
     // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
     // is active. Only burn the charge when doubling actually pays more — within a
     // hair of the daily hard cap the headroom clamp swallows the bonus entirely, and
     // a charge that buys nothing shouldn't be spent.
     const gatherEffect = getGatheringYieldEffect(user);
-    if (gatherEffect) {
-        const doubledPayout = settle(payout * 2);
-        if (doubledPayout > basePayout) {
-            consumeEffect(user, gatherEffect);
-            return { adjustedPayout: doubledPayout, cappedByHard: false };
-        }
+    if (gatherEffect && doubledPayout > basePayout) {
+        consumeEffect(user, gatherEffect);
+        const cfg = EFFECT_CONFIGS[gatherEffect];
+        return {
+            adjustedPayout: doubledPayout,
+            cappedByHard:   false,
+            gatheringYield: {
+                effect:      gatherEffect,
+                label:       cfg?.label ?? gatherEffect.replace(/_/g, ' '),
+                emoji:       cfg?.emoji ?? '✨',
+                chargesLeft: getEffect(user, gatherEffect)?.charges ?? 0,
+            },
+        };
     }
 
-    return { adjustedPayout: basePayout, cappedByHard: false };
+    return { adjustedPayout: basePayout, cappedByHard: false, gatheringYield: null };
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -792,7 +811,7 @@ function executeHunt(user, zoneId, options = {}) {
             result.traitEffects.push({ trait: 'enraged', msg: 'Its fury drove the prize higher (+25% payout).' });
         }
 
-        const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payoutBeforeMods, zone);
+        const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, payoutBeforeMods, zone);
 
         // Special drop
         let specialDrop = null;
@@ -865,6 +884,7 @@ function executeHunt(user, zoneId, options = {}) {
             specialDrop, xpEarned: xpGain,
             levelUp: lvResult.leveledUp ? lvResult : null,
             cappedByHard,
+            gatheringYield,
             streakMult
         });
 
@@ -921,9 +941,15 @@ function executeHunt(user, zoneId, options = {}) {
     }
 
     // ── Common post-hunt updates ────────────────────────────────────────
+    // A clean miss costs time and weapon wear but no stamina: a dry run should
+    // burn your afternoon, not your ability to keep playing. Every other outcome
+    // — including the harsher failure tiers — still costs a point.
+    const staminaSpared = !success && result.failure?.severity?.id === 'clean_miss';
+    result.staminaSpared = staminaSpared;
+
     h.totalHunts  += 1;
     h.dailyHunts  += 1;
-    h.stamina     -= 1;
+    if (!staminaSpared) h.stamina -= 1;
     h.lastHunt     = new Date();
 
     // Ammo deduction (handled by caller after pre-check)

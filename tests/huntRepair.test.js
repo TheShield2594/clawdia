@@ -176,6 +176,40 @@ describe('gathering-yield charges', () => {
         expect(adjustedPayout).toBe(1);
         expect(user.activeEffects[0].charges).toBe(5);
     });
+
+    test('reports the effect and remaining charges so the embed can show them', () => {
+        const user = makeUser(0);
+
+        const { gatheringYield } = applyPayoutModifiers(user, 5000, ZONES.beginner_forest);
+
+        expect(gatheringYield).toMatchObject({ effect: 'silvered_talisman', chargesLeft: 4 });
+        expect(gatheringYield.label).toBe('Silvered Talisman');
+    });
+
+    test('reuse doubles the apex bonus without spending a second charge', () => {
+        const user = makeUser(0);
+
+        // The kill itself spends one charge...
+        const kill = applyPayoutModifiers(user, 5000, ZONES.beginner_forest);
+        expect(user.activeEffects[0].charges).toBe(4);
+
+        // ...and the apex bonus rides on it rather than burning another.
+        const apex = applyPayoutModifiers(user, 1000, ZONES.beginner_forest, {
+            reuseGatheringYield: !!kill.gatheringYield,
+        });
+
+        expect(apex.adjustedPayout).toBe(2000);
+        expect(apex.gatheringYield).toBeNull();
+        expect(user.activeEffects[0].charges).toBe(4);
+    });
+
+    test('a hunt plus its apex never costs more than one charge', () => {
+        const user = makeUser(0);
+        const kill = applyPayoutModifiers(user, 5000, ZONES.beginner_forest);
+        applyPayoutModifiers(user, 1000, ZONES.beginner_forest, { reuseGatheringYield: !!kill.gatheringYield });
+
+        expect(user.activeEffects[0].charges).toBe(5 - 1);
+    });
 });
 
 describe('applyDurabilityLoss', () => {
