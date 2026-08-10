@@ -115,6 +115,27 @@ function consumeEffect(user, type) {
     return true;
 }
 
+// Restore one charge consumed by consumeEffect, re-adding the effect if spending
+// the last charge removed it. Used when an action that already charged the player
+// is reversed (e.g. a fish escaping after the payout was rolled).
+// No-op for unlimited-charge effects (charges === -1), which are never spent.
+function refundEffectCharge(user, type) {
+    const cfg = EFFECT_CONFIGS[type];
+    if (!cfg || cfg.charges === -1) return false;
+    pruneEffects(user);
+    const effect = user.activeEffects.find(e => e.type === type);
+    if (effect) {
+        effect.charges = Math.min(cfg.charges, effect.charges + 1);
+    } else {
+        user.activeEffects.push({
+            type,
+            expiresAt: cfg.durationMs ? new Date(Date.now() + cfg.durationMs) : null,
+            charges:   1,
+        });
+    }
+    return true;
+}
+
 // Returns a human-readable time-remaining string (e.g. "1h 23m")
 function timeRemaining(expiresAt) {
     if (!expiresAt) return 'permanent';
@@ -204,6 +225,7 @@ module.exports = {
     getEffect,
     addEffect,
     consumeEffect,
+    refundEffectCharge,
     timeRemaining,
     getCoinMultiplier,
     getSalaryMultiplier,

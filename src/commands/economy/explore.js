@@ -2,7 +2,8 @@
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
-const { attachGrind, saveGrind } = require('../../utils/grindProfile');
+const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
+const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const {
     LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST,
@@ -141,8 +142,8 @@ async function loadContext(interaction) {
         { upsert: true, new: true }
     );
     await attachGrind(user);
-    const seeded = ensureExploreData(user);
-    return { guildSettings, user, seeded, currency: guildSettings?.economy?.currency ?? '💰' };
+    ensureExploreData(user);
+    return { guildSettings, user, currency: guildSettings?.economy?.currency ?? '💰' };
 }
 
 /**
@@ -186,9 +187,14 @@ async function handleGo(interaction) {
     const { guildSettings, user, currency } = ctx;
 
     const e = user.exploration;
-    let dirty = ctx.seeded;
-    dirty = applyStaminaRegen(user) || dirty;
-    dirty = applyDailyReset(user)   || dirty;
+
+    // Regen, the daily rollover and the seeded defaults are all recomputed from
+    // persisted anchors (staminaLastRegen, dailyWindowStart), so nothing is lost
+    // by leaving them in memory until the expedition's own save. They are
+    // deliberately NOT flushed here: saveGrind rewrites the whole `data` blob,
+    // which would stomp a concurrent expedition's cooldown claim below.
+    applyStaminaRegen(user);
+    applyDailyReset(user);
 
     // A bare /explore go follows your active region — unless that region has
     // gone out of season or been switched off underneath you, in which case
@@ -200,15 +206,7 @@ async function handleGo(interaction) {
     } else {
         const resolved = resolveActiveRegion(user, guildSettings);
         region = resolved.region;
-        if (resolved.switched) {
-            rerouted = resolved.from;
-            dirty = true;
-        }
-    }
-
-    if (dirty) {
-        // exploration lives in GrindProfile, so user.isModified() never sees it
-        await saveGrind(user, ['exploration']).catch(err => console.error('[explore] pre-check save error:', err));
+        if (resolved.switched) rerouted = resolved.from;
     }
 
     const gateError = regionGateError(user, region, guildSettings);
@@ -252,160 +250,224 @@ async function handleGo(interaction) {
         });
     }
 
-    // ── Run the expedition ────────────────────────────────────────────────────
-    const coinMultiplier = getEventCoinMultiplier(guildSettings);
-    const result = executeExplore(user, region, guildSettings, { coinMultiplier });
-    const firstVisit = result.firstVisit;
+    // Atomically claim the cooldown slot now that all preflight checks have passed —
+    // lastExplore is set the moment the expedition is actually accepted, not earlier,
+    // so a failed precheck (region/injury/stamina) never burns the cooldown. The same
+    // guard stops two concurrent /explore go calls from both slipping through.
+    //
+    // The claim targets GrindProfile, not User: exploration state lives in its own
+    // collection (see src/models/User.js), so a User-level guard would match every
+    // document on the missing `exploration` field and never reject anything.
+    const exploreClaimNow = new Date();
+    const exploreCooldownFloor = new Date(exploreClaimNow.getTime() - LIMITS.EXPLORE_COOLDOWN_MS);
+    const priorLastExplore = e.lastExplore ?? null;
+    await persistGrindIfNew(user, 'exploration');
+    const exploreClaimQuery = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'exploration' };
+    const claimedExplore = await GrindProfile.findOneAndUpdate(
+        {
+            ...exploreClaimQuery,
+            $or: [{ 'data.lastExplore': null }, { 'data.lastExplore': { $lte: exploreCooldownFloor } }],
+        },
+        { $set: { 'data.lastExplore': exploreClaimNow } },
+        { new: true },
+    );
 
-    // Commit stamina spend + cooldown timestamp now, before the (up to 20s)
-    // encounter prompt below. Otherwise a second /explore go fired while this
-    // one is still waiting on a button press reads stale DB state and slips
-    // past the cooldown/stamina gate.
-    try {
-        await user.save();
-    } catch (err) {
-        if (err.name === 'VersionError') {
-            return interaction.reply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', flags: MessageFlags.Ephemeral });
-        }
-        console.error('[explore] pre-encounter save error:', err);
-        return interaction.reply({ content: 'Something went wrong writing your expedition down. Try again.', flags: MessageFlags.Ephemeral });
+    if (!claimedExplore) {
+        // Losing the claim means another expedition already took the slot, so the
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the expedition that actually happened. If that read
+        // fails, fall back to now rather than the snapshot: reaching the claim at all
+        // means the snapshot was already past the cooldown floor, so it would render
+        // a countdown in the past and say they can set out again.
+        const current = await GrindProfile.findOne(exploreClaimQuery).catch(() => null);
+        const lastAt  = current?.data?.lastExplore ?? exploreClaimNow;
+        return interaction.reply({
+            embeds: [buildCooldownEmbed({
+                title: '🥾 Catching Your Breath',
+                description: 'You just got back. Shake the dust off, check your boots for stowaways, then go again.',
+                color: '#2e7d32',
+                nextAt: new Date(new Date(lastAt).getTime() + LIMITS.EXPLORE_COOLDOWN_MS),
+                nextRewardPreview: secretTeaser(user, region),
+            })],
+            flags: MessageFlags.Ephemeral,
+        });
     }
+    e.lastExplore = exploreClaimNow;
 
-    // Staged narration: the setting-out beat, then the find
-    const delay = ms => new Promise(r => setTimeout(r, ms));
-    const reroutedLine = rerouted
-        ? `\n\n🧭 **${rerouted.emoji} ${rerouted.name}** is closed to you right now, so your compass reset to **${region.emoji} ${region.name}**. It'll wait.`
-        : '';
-    await interaction.reply({
-        embeds: [new EmbedBuilder()
-            .setColor(region.color)
-            .setTitle(`${region.emoji} Setting out — ${region.name}`)
-            .setDescription(`*${result.intro}*${reroutedLine}`)
-            .setFooter({ text: region.tagline })],
-    });
-    await delay(2000);
+    // The claim is a real write now, so an expedition that dies before its result
+    // is saved would otherwise cost the player a full cooldown for nothing. Hand
+    // the slot back — but only while it is still ours, so a newer claim isn't undone.
+    const releaseExploreClaim = () => GrindProfile.updateOne(
+        { ...exploreClaimQuery, 'data.lastExplore': exploreClaimNow },
+        { $set: { 'data.lastExplore': priorLastExplore } },
+    ).catch(() => null);
 
-    // ── Encounter choice ──────────────────────────────────────────────────────
-    if (result.pendingChoice) {
-        const enc = result.encounter;
-        const encId = `explore_${interaction.id}`;
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`${encId}_approach`).setLabel('🤝 Approach').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(`${encId}_observe`).setLabel('🌿 Keep Your Distance').setStyle(ButtonStyle.Secondary),
-        );
-        await interaction.editReply({
+    // Everything between here and the pre-encounter save can still fail, and until
+    // that save lands the player has nothing to show for the cooldown they just
+    // paid for. Hand the slot back on the way out unless the expedition committed.
+    let exploreCommitted = false;
+    try {
+
+        // ── Run the expedition ────────────────────────────────────────────────────
+        const coinMultiplier = getEventCoinMultiplier(guildSettings);
+        const result = executeExplore(user, region, guildSettings, { coinMultiplier });
+        const firstVisit = result.firstVisit;
+
+        // Commit stamina spend + cooldown timestamp now, before the (up to 20s)
+        // encounter prompt below. Once this lands the expedition is real, so the
+        // cooldown slot is earned and must not be handed back on a later failure.
+        try {
+            await user.save();
+            exploreCommitted = true;
+        } catch (err) {
+            // Nothing was saved, so give the cooldown slot back before telling them to retry.
+            await releaseExploreClaim();
+            if (err.name === 'VersionError') {
+                return interaction.reply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', flags: MessageFlags.Ephemeral });
+            }
+            console.error('[explore] pre-encounter save error:', err);
+            return interaction.reply({ content: 'Something went wrong writing your expedition down. Try again.', flags: MessageFlags.Ephemeral });
+        }
+
+        // Staged narration: the setting-out beat, then the find
+        const delay = ms => new Promise(r => setTimeout(r, ms));
+        const reroutedLine = rerouted
+            ? `\n\n🧭 **${rerouted.emoji} ${rerouted.name}** is closed to you right now, so your compass reset to **${region.emoji} ${region.name}**. It'll wait.`
+            : '';
+        await interaction.reply({
             embeds: [new EmbedBuilder()
                 .setColor(region.color)
-                .setTitle(`${enc.emoji} ${enc.name}`)
-                .setDescription(`*${enc.intro}*\n\nApproach it, or watch from a safe distance? Bold pays better. Careful always pays.`)
-                .setFooter({ text: '20 seconds to decide. Hesitation counts as keeping your distance, which is honest of it.' })],
-            components: [row],
+                .setTitle(`${region.emoji} Setting out — ${region.name}`)
+                .setDescription(`*${result.intro}*${reroutedLine}`)
+                .setFooter({ text: region.tagline })],
         });
-        const msg = await interaction.fetchReply();
-        const choice = await new Promise(resolve => {
-            const col = msg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId.startsWith(encId),
-                time: 20_000,
-                max: 1,
+        await delay(2000);
+
+        // ── Encounter choice ──────────────────────────────────────────────────────
+        if (result.pendingChoice) {
+            const enc = result.encounter;
+            const encId = `explore_${interaction.id}`;
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`${encId}_approach`).setLabel('🤝 Approach').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`${encId}_observe`).setLabel('🌿 Keep Your Distance').setStyle(ButtonStyle.Secondary),
+            );
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setColor(region.color)
+                    .setTitle(`${enc.emoji} ${enc.name}`)
+                    .setDescription(`*${enc.intro}*\n\nApproach it, or watch from a safe distance? Bold pays better. Careful always pays.`)
+                    .setFooter({ text: '20 seconds to decide. Hesitation counts as keeping your distance, which is honest of it.' })],
+                components: [row],
             });
-            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.endsWith('_approach') ? 'approach' : 'observe'); });
-            col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
-        });
-        resolveEncounter(user, region, guildSettings, result, choice);
-    }
-
-    // ── Cross-system rewards ──────────────────────────────────────────────────
-    // Seasonal event currency: a real handful in the seasonal region, loose
-    // change anywhere else while an event runs.
-    let eventDrop = null;
-    const currencyId = getEventCurrencyId(guildSettings);
-    if (currencyId && hasActiveEvent(guildSettings)) {
-        const range = region.eventCurrency ?? { min: 1, max: 2 };
-        const amount = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-        addEventCurrency(user, currencyId, amount);
-        eventDrop = { currencyId, amount };
-    }
-
-    // Guild leveling XP mirrors half the explorer XP
-    let mainXp = Math.floor((result.xp ?? 0) * 0.5 * getEventXpMultiplier(guildSettings));
-    let leveledUp = false;
-    if (mainXp > 0) {
-        // Reassign from `gained` so the embed reports the XP actually credited
-        // (applyXpGain folds in the Bird pet's xp_gain passive).
-        ({ leveled: leveledUp, gained: mainXp } = applyXpGain(user, mainXp));
-    }
-
-    // Journal
-    addJournalEntry(user, region.id, result.type, summarizeResult(result, currency));
-
-    // Achievements (checked against the freshly mutated user doc)
-    const newAchievements = await checkAndAward(user, guildSettings).catch(err => {
-        console.error('[explore] checkAndAward error:', err);
-        return [];
-    });
-
-    await ensureQuests(user, guildSettings);
-    let questsDone = [], questsNear = [];
-    if (result.payout > 0) {
-        const earn = await onEconomyEarn(user, guildSettings, result.payout);
-        questsDone = earn.completed;
-        questsNear = earn.nearComplete;
-    }
-
-    try {
-        await user.save();
-    } catch (err) {
-        if (err.name === 'VersionError') {
-            return interaction.editReply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', embeds: [], components: [] });
+            const msg = await interaction.fetchReply();
+            const choice = await new Promise(resolve => {
+                const col = msg.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith(encId),
+                    time: 20_000,
+                    max: 1,
+                });
+                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.endsWith('_approach') ? 'approach' : 'observe'); });
+                col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
+            });
+            resolveEncounter(user, region, guildSettings, result, choice);
         }
-        console.error('[explore] save error:', err);
-        return interaction.editReply({ content: 'Something went wrong writing your expedition down. Try again.', embeds: [], components: [] });
-    }
 
-    if (newAchievements.length) {
-        announceAchievements(interaction.client, guildSettings, user, interaction.member, newAchievements)
-            .catch(err => console.error('[explore] announceAchievements error:', err));
-    }
-    if (questsDone.length || questsNear.length) {
-        notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
-        notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
-    }
-    if (leveledUp) {
-        announceLevelUp(user, guildSettings, interaction.member, interaction.guild, interaction.channel)
-            .catch(err => console.error('[explore] announceLevelUp error:', err));
-    }
+        // ── Cross-system rewards ──────────────────────────────────────────────────
+        // Seasonal event currency: a real handful in the seasonal region, loose
+        // change anywhere else while an event runs.
+        let eventDrop = null;
+        const currencyId = getEventCurrencyId(guildSettings);
+        if (currencyId && hasActiveEvent(guildSettings)) {
+            const range = region.eventCurrency ?? { min: 1, max: 2 };
+            const amount = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+            addEventCurrency(user, currencyId, amount);
+            eventDrop = { currencyId, amount };
+        }
 
-    // Transaction audit log
-    if (result.payout > 0) {
-        logTransaction({ userId: user.userId, guildId: user.guildId, type: 'explore', amount: result.payout, balance: user.balance, note: `${region.name} · ${result.type}` });
-    } else if (result.penalty > 0) {
-        logTransaction({ userId: user.userId, guildId: user.guildId, type: 'explore', amount: -result.penalty, balance: user.balance, note: `${region.name} · ${result.type}` });
-    }
+        // Guild leveling XP mirrors half the explorer XP
+        let mainXp = Math.floor((result.xp ?? 0) * 0.5 * getEventXpMultiplier(guildSettings));
+        let leveledUp = false;
+        if (mainXp > 0) {
+            // Reassign from `gained` so the embed reports the XP actually credited
+            // (applyXpGain folds in the Bird pet's xp_gain passive).
+            ({ leveled: leveledUp, gained: mainXp } = applyXpGain(user, mainXp));
+        }
 
-    // Big-win feed for legendary treasure and secrets
-    if (result.payout > 0 && (result.treasureTier?.tier === 'legendary' || result.type === 'secret')) {
-        logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.payout, source: 'explore', details: result.secret?.name ?? `${region.name} legendary treasure` });
-    }
+        // Journal
+        addJournalEntry(user, region.id, result.type, summarizeResult(result, currency));
 
-    // ── Result embed ──────────────────────────────────────────────────────────
-    const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit);
-    await interaction.editReply({ embeds: [embed], components: [] });
+        // Achievements (checked against the freshly mutated user doc)
+        const newAchievements = await checkAndAward(user, guildSettings).catch(err => {
+            console.error('[explore] checkAndAward error:', err);
+            return [];
+        });
 
-    // Server-wide whisper for secrets
-    if (result.type === 'secret' && guildSettings?.exploration?.announceSecrets !== false) {
-        const channelId = guildSettings?.economy?.announcementChannelId;
-        const resolved = channelId ? interaction.guild.channels.cache.get(channelId) : null;
-        const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-        announceChannel.send({
-            embeds: [new EmbedBuilder()
-                .setColor('#FFD700')
-                .setTitle('✨ A Secret Has Been Found')
-                .setDescription(
-                    `<@${interaction.user.id}> just uncovered **${result.secret.name}** in ${region.emoji} **${region.name}**.\n\n` +
-                    `*The map has fewer blank spaces tonight. The blank spaces are taking it personally.*`
-                )
-                .setTimestamp()],
-        }).catch(err => console.error('[explore] secret announce error:', err));
+        await ensureQuests(user, guildSettings);
+        let questsDone = [], questsNear = [];
+        if (result.payout > 0) {
+            const earn = await onEconomyEarn(user, guildSettings, result.payout);
+            questsDone = earn.completed;
+            questsNear = earn.nearComplete;
+        }
+
+        try {
+            await user.save();
+        } catch (err) {
+            if (err.name === 'VersionError') {
+                return interaction.editReply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', embeds: [], components: [] });
+            }
+            console.error('[explore] save error:', err);
+            return interaction.editReply({ content: 'Something went wrong writing your expedition down. Try again.', embeds: [], components: [] });
+        }
+
+        if (newAchievements.length) {
+            announceAchievements(interaction.client, guildSettings, user, interaction.member, newAchievements)
+                .catch(err => console.error('[explore] announceAchievements error:', err));
+        }
+        if (questsDone.length || questsNear.length) {
+            notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, user).catch(() => null);
+            notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
+        }
+        if (leveledUp) {
+            announceLevelUp(user, guildSettings, interaction.member, interaction.guild, interaction.channel)
+                .catch(err => console.error('[explore] announceLevelUp error:', err));
+        }
+
+        // Transaction audit log
+        if (result.payout > 0) {
+            logTransaction({ userId: user.userId, guildId: user.guildId, type: 'explore', amount: result.payout, balance: user.balance, note: `${region.name} · ${result.type}` });
+        } else if (result.penalty > 0) {
+            logTransaction({ userId: user.userId, guildId: user.guildId, type: 'explore', amount: -result.penalty, balance: user.balance, note: `${region.name} · ${result.type}` });
+        }
+
+        // Big-win feed for legendary treasure and secrets
+        if (result.payout > 0 && (result.treasureTier?.tier === 'legendary' || result.type === 'secret')) {
+            logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.payout, source: 'explore', details: result.secret?.name ?? `${region.name} legendary treasure` });
+        }
+
+        // ── Result embed ──────────────────────────────────────────────────────────
+        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit);
+        await interaction.editReply({ embeds: [embed], components: [] });
+
+        // Server-wide whisper for secrets
+        if (result.type === 'secret' && guildSettings?.exploration?.announceSecrets !== false) {
+            const channelId = guildSettings?.economy?.announcementChannelId;
+            const resolved = channelId ? interaction.guild.channels.cache.get(channelId) : null;
+            const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
+            announceChannel.send({
+                embeds: [new EmbedBuilder()
+                    .setColor('#FFD700')
+                    .setTitle('✨ A Secret Has Been Found')
+                    .setDescription(
+                        `<@${interaction.user.id}> just uncovered **${result.secret.name}** in ${region.emoji} **${region.name}**.\n\n` +
+                        `*The map has fewer blank spaces tonight. The blank spaces are taking it personally.*`
+                    )
+                    .setTimestamp()],
+            }).catch(err => console.error('[explore] secret announce error:', err));
+        }
+    } catch (err) {
+        if (!exploreCommitted) await releaseExploreClaim();
+        throw err;
     }
 }
 
@@ -935,3 +997,25 @@ async function handleProfile(interaction) {
 
     return interaction.reply({ embeds: [embed] });
 }
+
+// ── Per-user action lock ──────────────────────────────────────────────────────
+// Exploration mutates the user document with read-modify-write saves, and an
+// expedition can sit for 20s waiting on the encounter prompt. Serialize them:
+// one exploration action at a time per user, matching /fish, /hunt and /mine.
+const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
+const _exploreExecute = module.exports.execute;
+module.exports.execute = async function (interaction) {
+    const lockKey   = `grind:explore:${interaction.guild?.id}:${interaction.user.id}`;
+    const lockToken = _lockAcquire(lockKey, 120_000);
+    if (!lockToken) {
+        return interaction.reply({
+            content: '🥾 You already have an exploration action in progress — finish it first.',
+            flags: MessageFlags.Ephemeral,
+        }).catch(() => {});
+    }
+    try {
+        return await _exploreExecute(interaction);
+    } finally {
+        _lockRelease(lockKey, lockToken);
+    }
+};

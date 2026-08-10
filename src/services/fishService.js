@@ -30,6 +30,7 @@ const { getBonusMultipliers } = require('../utils/prestige');
 const { getGatheringYieldEffect, consumeEffect } = require('./effectsService');
 
 const DAILY_QUEST_COUNT = 3;
+const WEEK_MS = 7 * 24 * 3_600_000;
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ function ensureFishingData(user) {
     if (f.personalBest         == null) f.personalBest         = { fish: null, weight: 0, payout: 0 };
     if (f.weeklyRecord         == null) f.weeklyRecord         = { fish: null, weight: 0, userId: null, username: null, weekStart: null };
     if (f.lastBossEncounter    == null) f.lastBossEncounter    = null;
+    if (!Array.isArray(f.trophies)) f.trophies = [];
 
     if (!f.unlockedLocations.includes('pond')) f.unlockedLocations.push('pond');
 
@@ -348,8 +350,10 @@ function applyPayoutModifiers(user, rawPayout, location) {
         return { adjustedPayout: 0, cappedByHard: true };
     }
 
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
-    const gatherEffect = getGatheringYieldEffect(user);
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
+    // is active. Only spend a charge when there is something to double — a worthless
+    // junk pull must not burn a charge for 2 × 0.
+    const gatherEffect = payout > 0 ? getGatheringYieldEffect(user) : null;
     if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
     if (f.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {
         payout = Math.round(payout * 0.50);
@@ -358,7 +362,7 @@ function applyPayoutModifiers(user, rawPayout, location) {
     const remaining = LIMITS.DAILY_HARD_CAP - f.dailyCoins;
     payout = Math.min(payout, remaining);
 
-    return { adjustedPayout: Math.max(0, payout), cappedByHard: false };
+    return { adjustedPayout: Math.max(0, payout), cappedByHard: false, gatherEffectConsumed: gatherEffect };
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -380,7 +384,13 @@ function updateRodStatus(rod) {
     else                   rod.status = 'good';
 }
 
-function applyRepair(rod, requestedAmount) {
+/**
+ * Prices a shop repair without touching the rod, so a caller can check the
+ * player's balance before committing. A repair permanently degrades max
+ * durability, so quoting and applying must be separable — an unaffordable
+ * quote must leave the rod exactly as it was.
+ */
+function quoteRepair(rod, requestedAmount) {
     const rodData = ROD_BY_TIER[rod.tier];
     if (!rodData) throw new Error('Unknown rod tier');
 
@@ -398,15 +408,22 @@ function applyRepair(rod, requestedAmount) {
     const needed = Math.max(0, newMax - rod.currentDurability);
     const amount = Math.min(requestedAmount ?? needed, needed);
     const units  = Math.ceil(amount / 20);
-    const cost   = units * rodData.repairCostPer20;
 
-    rod.maxDurability     = newMax;
-    rod.currentDurability = Math.min(newMax, rod.currentDurability + amount);
+    return { newMax, restoredAmount: amount, cost: units * rodData.repairCostPer20 };
+}
+
+/** Commits the repair priced by quoteRepair. Mutates the rod. */
+function applyRepair(rod, requestedAmount) {
+    const quote = quoteRepair(rod, requestedAmount);
+    if (quote.error) return quote;
+
+    rod.maxDurability     = quote.newMax;
+    rod.currentDurability = Math.min(quote.newMax, rod.currentDurability + quote.restoredAmount);
     rod.repairCount      += 1;
 
     updateRodStatus(rod);
 
-    return { cost, restoredAmount: amount, newStatus: rod.status, condemned: rod.status === 'condemned' };
+    return { cost: quote.cost, restoredAmount: quote.restoredAmount, newStatus: rod.status, condemned: rod.status === 'condemned' };
 }
 
 // ─── LEVEL / XP ──────────────────────────────────────────────────────────────
@@ -706,7 +723,8 @@ function executeCast(user, locationId, options = {}) {
             const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
             const preModPayout   = Math.round(sizedPayout * critMultiplier * traitPayoutMult * streakMult * reactionFactor);
 
-            const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, preModPayout, location);
+            const { adjustedPayout, cappedByHard, gatherEffectConsumed } = applyPayoutModifiers(user, preModPayout, location);
+            result.gatherEffectConsumed = gatherEffectConsumed;
 
             // ── Special material drop ──────────────────────────────────────
             let specialDrop = null;
@@ -751,10 +769,24 @@ function executeCast(user, locationId, options = {}) {
                     f.personalBest = { fish: fish.name, weight: weightLbs, payout: adjustedPayout, caughtAt: new Date() };
                     isPersonalBest = true;
                 }
-                // Weekly server record stored on user (simplification; a real server record needs a guild-level store)
-                if (!f.weeklyRecord || weightLbs > f.weeklyRecord.weight) {
-                    f.weeklyRecord = { fish: fish.name, weight: weightLbs, weekStart: new Date() };
-                    newRecord = { type: 'personal', fish: fish.name, weight: weightLbs };
+                // Per-player heaviest catch of the current week. The server-wide
+                // records live on the guild document (see checkAndUpdateWorldRecord).
+                // Roll the window over first, otherwise the "weekly" best is just an
+                // all-time best that can never be beaten by a lighter fish.
+                const weekStart = f.weeklyRecord?.weekStart;
+                const weekExpired = !weekStart || (Date.now() - new Date(weekStart).getTime()) >= WEEK_MS;
+                if (weekExpired) {
+                    f.weeklyRecord = { fish: null, weight: 0, userId: null, username: null, weekStart: new Date() };
+                }
+                if (weightLbs > (f.weeklyRecord.weight ?? 0)) {
+                    f.weeklyRecord = {
+                        fish:      fish.name,
+                        weight:    weightLbs,
+                        userId:    user.userId ?? null,
+                        username:  options.username ?? f.weeklyRecord.username ?? null,
+                        weekStart: f.weeklyRecord.weekStart ?? new Date(),
+                    };
+                    newRecord = { type: 'weekly', fish: fish.name, weight: weightLbs };
                 }
             }
 
@@ -1039,6 +1071,7 @@ module.exports = {
     applyPayoutModifiers,
     applyDurabilityLoss,
     updateRodStatus,
+    quoteRepair,
     applyRepair,
     levelFromXp,
     getLevelData,
