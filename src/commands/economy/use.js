@@ -10,6 +10,7 @@ const {
 } = require('../../services/effectsService');
 const { getItemLore } = require('../../data/defaultShopItems');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
+const { PET_DEFINITIONS } = require('../../services/petService');
 
 // itemId of a seasonal loot box -> the event definition that owns it
 const LOOT_BOX_EVENTS = new Map(
@@ -197,6 +198,77 @@ module.exports = {
                 .setDescription(
                     `A permanent +5% crime success bonus has been added to your record.\n\n` +
                     `**Contract stacks:** ${newStacks} / ${MAX_STACKS} (+${newStacks * 5}% total bonus)`
+                )
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        // ── Revive Scroll ──────────────────────────────────────────────────────
+        if (canonicalId.toLowerCase() === 'revive_scroll') {
+            const fallen = preview.deceasedPets?.[0];
+            if (!fallen) {
+                return interaction.reply({
+                    content: '📜 The scroll finds no one to call back — none of your pets have starved. Keep it for a rainier day.',
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+            if ((preview.pets ?? []).some(p => p.petId === fallen.petId)) {
+                const def = PET_DEFINITIONS[fallen.petId];
+                return interaction.reply({
+                    content: `📜 You already have another ${def?.emoji ?? '🐾'} **${def?.name ?? fallen.petId}**, and the scroll won't make a second. Release it first if you want this one back.`,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            // Consume the scroll and remove the record in one conditional write so a
+            // double-click can't revive the same pet twice.
+            const user = await User.findOneAndUpdate(
+                {
+                    ...userFilter,
+                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
+                    'deceasedPets._id': fallen._id,
+                },
+                // arrayFilters rather than the positional `$`: the query touches two
+                // arrays here, which makes `$` ambiguous about which one it indexes.
+                { $inc: { 'inventory.$[inv].quantity': -1 }, $pull: { deceasedPets: { _id: fallen._id } } },
+                { new: true, arrayFilters: [{ 'inv.itemId': canonicalId, 'inv.quantity': { $gt: 0 } }] }
+            );
+            if (!user) {
+                return interaction.reply({ content: "Couldn't use the scroll — try again.", flags: MessageFlags.Ephemeral });
+            }
+
+            const now = new Date();
+            const revived = {
+                ...(fallen.toObject ? fallen.toObject() : fallen),
+                // Comes back weak but alive: bond, level, XP and record are preserved,
+                // the starvation state is not.
+                hunger: 50,
+                lastFed: now,
+                lastDecayAt: now,
+                starving: false,
+                starvingStartAt: null,
+            };
+            delete revived._id;
+            delete revived.diedAt;
+            user.pets.push(revived);
+            user.inventory = user.inventory.filter(e => e.quantity > 0);
+            user.markModified('pets');
+            await user.save();
+
+            const def  = PET_DEFINITIONS[fallen.petId];
+            const name = fallen.name || def?.name || fallen.petId;
+            const embed = new EmbedBuilder()
+                .setColor('#f1c40f')
+                .setTitle(`📜 ${name} Returns!`)
+                .setDescription(
+                    `${def?.emoji ?? '🐾'} **${name}** is back at your side, weak but whole.\n\n` +
+                    `They kept everything: **Level ${fallen.level ?? 1}**, ` +
+                    `**${fallen.battleWins ?? 0}W / ${fallen.battleLosses ?? 0}L**, and every day of your bond.`
+                )
+                .addFields(
+                    { name: '🍖 Hunger', value: '50% — feed them soon', inline: true },
+                    { name: 'Scrolls left', value: `${user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 0}x`, inline: true },
                 )
                 .setTimestamp();
 

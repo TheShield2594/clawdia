@@ -1,5 +1,7 @@
 'use strict';
 
+const { getTotalBonus } = require('../services/petService');
+
 const TIER_STYLES = [
     { min: 0,   color: '#cd7f32', label: 'Bronze',  glyph: '⬡' },
     { min: 10,  color: '#c0c0c0', label: 'Silver',  glyph: '◈' },
@@ -10,10 +12,19 @@ const TIER_STYLES = [
 
 /**
  * Apply XP in-memory, processing multi-level threshold crossings.
- * Does NOT save the user. Returns { leveled, newLevel }.
+ *
+ * Applies any `xp_gain` pet passive (the Bird) here rather than at each call
+ * site, so every source of levelling XP benefits from it consistently.
+ * Does NOT save the user.
+ *
+ * Returns { leveled, newLevel, gained, petBonusPct } — `gained` is the amount
+ * actually credited after the pet bonus, and is what callers should display.
  */
 function applyXpGain(user, amount) {
-    user.xp = (user.xp || 0) + amount;
+    const petBonusPct = getTotalBonus(user?.pets ?? [], 'xp_gain');
+    const gained = Math.max(0, Math.floor(amount * (1 + petBonusPct / 100)));
+
+    user.xp = (user.xp || 0) + gained;
     let leveled = false;
     while (user.xp >= (user.level || 0) * 100 + 100) {
         const threshold = (user.level || 0) * 100 + 100;
@@ -21,7 +32,7 @@ function applyXpGain(user, amount) {
         user.level = (user.level || 0) + 1;
         leveled = true;
     }
-    return { leveled, newLevel: user.level };
+    return { leveled, newLevel: user.level, gained, petBonusPct };
 }
 
 /**

@@ -5,6 +5,7 @@ const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, MessageFlags
 } = require('discord.js');
 const User  = require('../../models/User');
+const { DECEASED_PET_LIMIT } = User;
 const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const {
@@ -35,7 +36,8 @@ const {
     getPetStats,
     simulateBattle,
     makeWildPet,
-    assignPersonality,
+    createPet,
+    RARE_PET_DROP_CHANCE,
 } = require('../../services/petService');
 const { generatePetSprite } = require('../../utils/cardGenerator');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
@@ -124,7 +126,16 @@ async function syncHungerAndRunaway(user, interaction) {
 
     const { ranAwayPets } = checkRunaway(user.pets);
     for (const gone of ranAwayPets) {
+        // Keep a record so a Revive Scroll can bring the pet back with its
+        // level, bond and battle record intact.
+        const snapshot = gone.toObject ? gone.toObject() : { ...gone };
+        delete snapshot._id;
+        user.deceasedPets.unshift({ ...snapshot, diedAt: new Date() });
         if (gone._id) user.pets.pull(gone._id);
+    }
+    if (ranAwayPets.length > 0) {
+        user.deceasedPets = user.deceasedPets.slice(0, DECEASED_PET_LIMIT);
+        user.markModified('deceasedPets');
     }
     user.markModified('pets');
 
@@ -142,7 +153,7 @@ async function syncHungerAndRunaway(user, interaction) {
         // leave the owner with no explanation for the missing pet.
         if (interaction.replied || interaction.deferred) {
             await interaction.followUp({
-                content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` to get a new companion.*`,
+                content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` for a new companion, or a Revive Scroll from \`/shop\` to bring one back with its level and bond intact.*`,
                 flags: MessageFlags.Ephemeral
             }).catch(() => {});
         }
@@ -263,10 +274,11 @@ async function executeAdopt(interaction) {
         });
     }
 
-    const personality = assignPersonality();
     user.balance -= def.cost;
-    user.pets.push({ petId, name: petName, hunger: 100, lastFed: new Date(), adoptedAt: new Date(), personality });
+    const newPet = createPet(petId, { name: petName });
+    user.pets.push(newPet);
     user.markModified('pets');
+    const personality = newPet.personality;
 
     try {
         await user.save();
@@ -360,8 +372,8 @@ async function executeStatus(interaction) {
                 return btn.reply({ content: `🎾 **${name}** is tired from playing! Try again in **${remaining}m**.`, flags: MessageFlags.Ephemeral });
             }
 
-            const xpGain = 15 + Math.floor(Math.random() * 11); // 15–25 XP
-            const { leveled } = applyXpGain(freshUser, xpGain);
+            const rolledXp = 15 + Math.floor(Math.random() * 11); // 15–25 XP
+            const { leveled, gained: xpGain } = applyXpGain(freshUser, rolledXp);
             const petXpResult = applyPetXp(freshUser.pets[idx], 10);
             freshUser.pets[idx].lastPlay           = new Date();
             freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
@@ -883,7 +895,7 @@ async function executeList(interaction) {
         .setColor('#ff9800')
         .setTitle('🐾 Pet Shop')
         .setDescription(lines.join('\n\n'))
-        .setFooter({ text: 'Rare pets (Eagle, Shark, Crystal Fox) drop from legendary hunt/fish/mine' })
+        .setFooter({ text: `Eagle, Shark and Crystal Fox aren't sold — each has a ${Math.round(RARE_PET_DROP_CHANCE * 100)}% chance to appear on a legendary hunt / fish / mine` })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });

@@ -19,6 +19,7 @@ const DEFAULT_SHOP_ITEMS = [
     { name: 'Lucky Streak',       itemId: 'lucky_streak',      rarity: 'Common',   price: 1500,  description: '🎯 +25% win chance on games for 30 minutes (casino saves apply to bets up to 25k).',                      lore: "The universe owes you one. This is collecting." },
     { name: 'Salary Raise',       itemId: 'salary_raise',      rarity: 'Rare',     price: 4000,  description: '📈 1.5x earnings on /work shifts for 2 hours.',                    lore: "A briefly forged memo your boss won't remember signing." },
     { name: 'Pet Food',           itemId: 'pet_food',          rarity: 'Common',   price: 250,   description: '🍖 Feeds any pet, restoring 10 hunger (use with /pet feed). Not a favorite food, so no bonus XP boost.', lore: "Generic, slightly bland, and always in stock. Pets prefer their favorites, but won't say no in a pinch." },
+    { name: 'Revive Scroll',      itemId: 'revive_scroll',     rarity: 'Rare',     price: 15000, description: '📜 Brings back your most recently starved pet with its level, bond and battle record intact (use with /use).', lore: "The ink is still wet. Somewhere, a very hungry animal decides it isn't finished with you yet." },
 
     // ── Prestige / Aspiration items ──────────────────────────────────────────
     { name: 'Custom Job Title',       itemId: 'custom_job_title',        rarity: 'Epic',   price: 75000,  category: 'prestige', description: '✏️ Set a custom job title shown on your /profile for 30 days.',     lore: "The business card says whatever you want. Nobody checks." },
@@ -104,7 +105,7 @@ function ensureDefaultShopItems(guildSettings) {
     const existingIds   = new Set(guildSettings.shop.map(i => (i.itemId || '').toLowerCase()));
     const existingNames = new Set(guildSettings.shop.map(i => i.name.toLowerCase()));
     const ALWAYS_BACKFILL_CATEGORIES = new Set(['black_market', 'endgame', 'p8_black_market']);
-    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food', 'streak_freeze', 'tier_skip_token']);
+    const ALWAYS_BACKFILL_ITEM_IDS   = new Set(['pet_food', 'streak_freeze', 'tier_skip_token', 'revive_scroll']);
     let changed = false;
 
     if (!guildSettings.shopDefaultsSeeded) {

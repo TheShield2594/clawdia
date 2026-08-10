@@ -49,6 +49,65 @@ const PET_DEFINITIONS = {
     crystal_fox:  { petId: 'crystal_fox', emoji: '💎', name: 'Crystal Fox', cost: null,  purchasable: false, bonusType: 'mine_yield',        bonusPct: 15, favoriteMaterial: 'crystal_sliver', materialSource: 'mine' }
 };
 
+// ── Acquisition ───────────────────────────────────────────────────────────────
+//
+// Purchasable pets come from /pet adopt. The three rare pets are not sold
+// anywhere: each is tied to one grind system via its materialSource and only
+// ever turns up alongside a legendary-tier result there.
+
+const RARE_PET_DROP_CHANCE = 0.04;
+
+/** The unpurchasable companion tied to a grind system ('hunt'|'fish'|'mine'). */
+function rarePetForSource(source) {
+    return Object.values(PET_DEFINITIONS)
+        .find(d => !d.purchasable && d.materialSource === source) ?? null;
+}
+
+/** A fresh pet document. Shared by /pet adopt and rare drops so they can't drift. */
+function createPet(petId, { name = null, now = new Date() } = {}) {
+    return {
+        petId,
+        name,
+        hunger: 100,
+        lastFed: now,
+        lastDecayAt: now,
+        adoptedAt: now,
+        starving: false,
+        starvingStartAt: null,
+        personality: assignPersonality(),
+        level: 1,
+        xp: 0,
+        evolutionStage: 1,
+        battleWins: 0,
+        battleLosses: 0,
+    };
+}
+
+/**
+ * Roll for the rare companion tied to `source`. Returns its definition on a hit,
+ * else null. Never offers a pet the player already owns. Pure — does not mutate.
+ */
+function rollRarePet(pets, source, tier, rng = Math.random) {
+    if (tier !== 'legendary') return null;
+    const def = rarePetForSource(source);
+    if (!def) return null;
+    if ((pets ?? []).some(p => p.petId === def.petId)) return null;
+    return rng() < RARE_PET_DROP_CHANCE ? def : null;
+}
+
+/**
+ * Roll for the rare companion tied to `source` and add it to `user` on a hit.
+ * Returns the granted definition, or null. The caller is responsible for
+ * markModified('pets') and saving.
+ */
+function tryGrantRarePet(user, source, tier, rng = Math.random) {
+    if (!user) return null;
+    const def = rollRarePet(user.pets ?? [], source, tier, rng);
+    if (!def) return null;
+    user.pets.push(createPet(def.petId));
+    return def;
+}
+
 const HUNGER_DECAY_PER_DAY = 10;
 const HUNGER_DECAY_RESTING  = 5;   // half-speed decay while resting
 const HUNGER_RESTORE_FAVORITE = 25;
@@ -480,6 +539,11 @@ module.exports = {
     PERSONALITY_TRAITS,
     PERSONALITY_KEYS,
     TRAIT_FLAVOR,
+    RARE_PET_DROP_CHANCE,
+    rarePetForSource,
+    createPet,
+    rollRarePet,
+    tryGrantRarePet,
     HUNGER_DECAY_PER_DAY,
     HUNGER_DECAY_RESTING,
     MS_PER_DAY,
