@@ -37,12 +37,15 @@ const {
     simulateBattle,
     makeWildPet,
     createPet,
+    resolvePetRef,
     RARE_PET_DROP_CHANCE,
 } = require('../../services/petService');
 const { generatePetSprite } = require('../../utils/cardGenerator');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
 const { logTransaction } = require('../../utils/logTransaction');
+const { MATERIAL_RARITY } = require('../../data/materialRarity');
 
+const NO_SUCH_PET = "Couldn't find that pet — pick one from the list `/pet status` shows, or start typing to choose from your pets.";
 const HUNGER_BAR_LENGTH = 10;
 const BATTLE_COOLDOWN_MS  = 10 * 60 * 1000;    // per-pet battle cooldown
 const BATTLE_MIN_ACCOUNT_AGE_MS = 7 * 24 * 3_600_000; // wagered battles only
@@ -97,6 +100,28 @@ function decrementMaterial(user, materialId) {
         return true;
     }
     return false;
+}
+
+/**
+ * Read the `slot` option without asserting its type.
+ *
+ * It changed from an integer to an autocompleted string; global command updates
+ * take a while to reach every client, so during that window a stale client can
+ * still send an integer — which getString() would throw on. resolvePetRef()
+ * accepts both forms, so normalise to a string here and let it decide.
+ */
+function readSlotOption(interaction) {
+    const raw = interaction.options.get('slot');
+    return raw?.value == null ? null : String(raw.value);
+}
+
+/** Short label for a pet in an autocomplete list. Discord caps choice names at 100. */
+function petChoiceLabel(pet) {
+    const def    = PET_DEFINITIONS[pet.petId];
+    const name   = pet.name || def?.name || pet.petId;
+    const hunger = Math.round(effectiveHunger(pet));
+    const fed    = hunger >= STARVING_THRESHOLD ? '' : ' · hungry!';
+    return `${name} — ${def?.name ?? pet.petId} Lv${pet.level ?? 1} · ${hunger}% fed${fed}`.slice(0, 100);
 }
 
 async function resolveUser(interaction) {
@@ -244,6 +269,70 @@ function buildNavComponents(userId, index, total) {
     );
 
     return rows;
+}
+
+// ── Autocomplete ──────────────────────────────────────────────────────────────
+
+/** Pets the player currently owns, keyed by their stable _id. */
+async function slotAutocomplete(interaction, focused) {
+    const user = await User.findOne(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        'pets'
+    );
+    const pets  = user?.pets ?? [];
+    const query = focused.toLowerCase();
+
+    const choices = pets
+        .map(pet => ({ name: petChoiceLabel(pet), value: String(pet._id) }))
+        .filter(c => !query || c.name.toLowerCase().includes(query));
+
+    return interaction.respond(choices.slice(0, 25));
+}
+
+/**
+ * Materials the player actually holds and could plausibly feed a pet, with the
+ * selected pet's favourite pinned to the top. Without this the option required
+ * typing exact snake_case ids like `rabbits_foot` from memory.
+ */
+async function materialAutocomplete(interaction, focused) {
+    // Read-only: resolveUser() upserts, and autocomplete fires on every keystroke.
+    const found = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+    if (!found) return interaction.respond([]);
+    const user = await attachGrind(found);
+
+    // The slot option may already be filled in; if so, favour that pet's food.
+    const selected  = resolvePetRef(user?.pets, readSlotOption(interaction));
+    const favourite = selected ? PET_DEFINITIONS[selected.pet.petId]?.favoriteMaterial : null;
+
+    const held = new Map(); // materialId -> quantity
+    const add  = (id, qty) => {
+        if (!id || !(qty > 0)) return;
+        held.set(id, (held.get(id) ?? 0) + qty);
+    };
+    for (const system of ['hunt', 'fishing', 'mining']) {
+        for (const [id, qty] of Object.entries(user?.[system]?.materials ?? {})) add(id, qty);
+    }
+    for (const entry of user?.inventory ?? []) add(entry.itemId, entry.quantity);
+
+    const query = focused.toLowerCase();
+    const choices = [...held.entries()]
+        // Grind materials plus shop-bought pet food — not every stray inventory item.
+        .filter(([id]) => MATERIAL_RARITY[id] || id === 'pet_food')
+        .filter(([id]) => !query || id.toLowerCase().includes(query))
+        .map(([id, qty]) => {
+            const meta  = MATERIAL_RARITY[id];
+            const label = meta?.label ?? (id === 'pet_food' ? 'Pet Food' : id);
+            const isFav = id === favourite;
+            return {
+                id, qty, isFav,
+                name: `${meta?.emoji ?? '🍖'} ${label} — ${qty}x${isFav ? ' ⭐ favourite (+25)' : ' (+10)'}`.slice(0, 100),
+            };
+        })
+        .sort((a, b) => (b.isFav - a.isFav) || (b.qty - a.qty) || a.name.localeCompare(b.name))
+        .slice(0, 25)
+        .map(c => ({ name: c.name, value: c.id }));
+
+    return interaction.respond(choices);
 }
 
 // ── Subcommand handlers ───────────────────────────────────────────────────────
@@ -496,7 +585,7 @@ async function executeStatus(interaction) {
 
 async function executeFeed(interaction) {
     const materialId = interaction.options.getString('material');
-    const petIndex   = interaction.options.getInteger('slot') ?? 0;
+    const petRef     = readSlotOption(interaction);
 
     await interaction.deferReply();
 
@@ -504,9 +593,9 @@ async function executeFeed(interaction) {
     await syncHungerAndRunaway(user, interaction);
 
     if (!user.pets || user.pets.length === 0) return interaction.editReply('You have no pets to feed!');
-    if (petIndex < 0 || petIndex >= user.pets.length) {
-        return interaction.editReply(`Invalid pet slot. You have ${user.pets.length} pet(s) (slots 0–${user.pets.length - 1}).`);
-    }
+    const target = resolvePetRef(user?.pets, petRef);
+    if (!target) return interaction.editReply(NO_SUCH_PET);
+    const petIndex = target.index;
 
     const { total } = getMaterialSource(user, materialId);
     if (total < 1) return interaction.editReply(`You don't have any \`${materialId}\` to feed your pet with.`);
@@ -558,14 +647,11 @@ async function executeFeed(interaction) {
 }
 
 async function executeRelease(interaction) {
-    const petIndex = interaction.options.getInteger('slot');
-    const user     = await resolveUser(interaction);
+    const user   = await resolveUser(interaction);
+    const target = resolvePetRef(user?.pets, readSlotOption(interaction));
+    if (!target) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
 
-    if (!user.pets || petIndex < 0 || petIndex >= user.pets.length) {
-        return interaction.reply({ content: 'Invalid pet slot.', flags: MessageFlags.Ephemeral });
-    }
-
-    const pet  = user.pets[petIndex];
+    const { index: petIndex, pet } = target;
     const def  = PET_DEFINITIONS[pet.petId];
     const name = pet.name || def?.name || pet.petId;
 
@@ -583,13 +669,12 @@ async function executeRelease(interaction) {
 }
 
 async function executeRename(interaction) {
-    const petIndex = interaction.options.getInteger('slot');
-    const newName  = interaction.options.getString('name').trim().slice(0, 32);
-    const user     = await resolveUser(interaction);
+    const newName = interaction.options.getString('name').trim().slice(0, 32);
+    const user    = await resolveUser(interaction);
 
-    if (!user.pets || petIndex < 0 || petIndex >= user.pets.length) {
-        return interaction.reply({ content: 'Invalid pet slot.', flags: MessageFlags.Ephemeral });
-    }
+    const target = resolvePetRef(user?.pets, readSlotOption(interaction));
+    if (!target) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
+    const petIndex = target.index;
 
     user.pets[petIndex].name = newName;
     user.markModified('pets');
@@ -652,7 +737,7 @@ function petXpLine(name, res) {
 
 async function executeBattle(interaction) {
     const opponent = interaction.options.getUser('opponent');
-    const slot     = interaction.options.getInteger('slot') ?? 0;
+    const petRef   = readSlotOption(interaction);
     const bet      = interaction.options.getInteger('bet') ?? 0;
 
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -665,10 +750,16 @@ async function executeBattle(interaction) {
     await syncHungerAndRunaway(user, interaction);
     await user.save().catch(() => {});
 
-    const myPet = user.pets?.[slot];
-    const usable = petUsable(myPet);
+    const mine = resolvePetRef(user?.pets, petRef);
+    if (!mine) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
+    const { pet: myPet } = mine;
+    // Carry the pet's stable id, not its index: a PvP challenge can sit unanswered
+    // for a minute, and anything that shrinks the array would shift the index onto
+    // a different pet before the fight resolves.
+    const myPetId = String(myPet._id);
+    const usable  = petUsable(myPet);
     if (!usable.ok) {
-        return interaction.reply({ content: `Your pet in slot ${slot} is ${usable.reason}.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `${getPetDisplay(myPet).titledName} is ${usable.reason}.`, flags: MessageFlags.Ephemeral });
     }
 
     // Per-pet cooldown
@@ -681,7 +772,7 @@ async function executeBattle(interaction) {
         if (bet > 0) {
             return interaction.reply({ content: "You can't wager against a wild pet — challenge a member instead.", flags: MessageFlags.Ephemeral });
         }
-        return wildBattle(interaction, user, slot, currency, guildSettings);
+        return wildBattle(interaction, user, myPetId, currency, guildSettings);
     }
 
     // ── PvP setup ──
@@ -704,12 +795,12 @@ async function executeBattle(interaction) {
         return interaction.reply({ content: `${opponent.username} has no battle-ready pet (they need a fed pet).`, flags: MessageFlags.Ephemeral });
     }
 
-    return pvpBattle(interaction, { user, myPet, slot, opponent, oppUser, oppPet, bet, currency, guildSettings });
+    return pvpBattle(interaction, { user, myPet, myPetId, opponent, oppUser, oppPet, bet, currency, guildSettings });
 }
 
-async function wildBattle(interaction, user, slot, currency, guildSettings) {
+async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
     await interaction.deferReply();
-    const myPet  = user.pets[slot];
+    const myPet  = resolvePetRef(user?.pets, myPetId).pet;
     const wild   = makeWildPet(myPet.level ?? 1);
     const mySnap = petSnapshot(myPet); // pre-XP snapshot for consistent result rendering
     const result = simulateBattle(myPet, wild);
@@ -747,7 +838,7 @@ async function wildBattle(interaction, user, slot, currency, guildSettings) {
 }
 
 async function pvpBattle(interaction, ctx) {
-    const { myPet, slot, opponent, bet, currency, guildSettings } = ctx;
+    const { myPet, myPetId, opponent, bet, currency, guildSettings } = ctx;
     const guildId = interaction.guild.id;
     const da = getPetDisplay(myPet);
 
@@ -799,7 +890,7 @@ async function pvpBattle(interaction, ctx) {
             User.findOne({ userId: interaction.user.id, guildId }),
             User.findOne({ userId: opponent.id, guildId }),
         ]);
-        const aPet = chUser?.pets?.[slot];
+        const aPet = resolvePetRef(chUser?.pets, myPetId)?.pet;
         const bPet = opUser?.pets?.find(p => isPetActive(p));
 
         // If a fighter is gone, no longer battle-ready, or went on cooldown
@@ -994,26 +1085,26 @@ module.exports = {
         .addSubcommand(sub => sub.setName('status').setDescription('View your pets and their mood.'))
         .addSubcommand(sub =>
             sub.setName('feed')
-                .setDescription('Feed a pet using a hunt/fish/mine material, or shop-bought pet_food.')
+                .setDescription('Feed a pet — favourite foods restore the most and grant bonus XP.')
                 .addStringOption(opt =>
-                    opt.setName('material').setDescription('Material to feed (e.g. rabbits_foot, fish_scale, pet_food)').setRequired(true)
+                    opt.setName('material').setDescription('Which food to use — start typing to see what you have').setRequired(true).setAutocomplete(true)
                 )
-                .addIntegerOption(opt =>
-                    opt.setName('slot').setDescription('Pet slot number (0 = first pet, default 0)').setRequired(false).setMinValue(0).setMaxValue(9)
+                .addStringOption(opt =>
+                    opt.setName('slot').setDescription('Which pet to feed (defaults to your first)').setRequired(false).setAutocomplete(true)
                 )
         )
         .addSubcommand(sub =>
             sub.setName('release')
                 .setDescription('Release a pet permanently.')
-                .addIntegerOption(opt =>
-                    opt.setName('slot').setDescription('Pet slot number (0 = first pet)').setRequired(true).setMinValue(0).setMaxValue(9)
+                .addStringOption(opt =>
+                    opt.setName('slot').setDescription('Which pet to release').setRequired(true).setAutocomplete(true)
                 )
         )
         .addSubcommand(sub =>
             sub.setName('rename')
                 .setDescription('Give your pet a custom name.')
-                .addIntegerOption(opt =>
-                    opt.setName('slot').setDescription('Pet slot number (0 = first pet)').setRequired(true).setMinValue(0).setMaxValue(9)
+                .addStringOption(opt =>
+                    opt.setName('slot').setDescription('Which pet to rename').setRequired(true).setAutocomplete(true)
                 )
                 .addStringOption(opt =>
                     opt.setName('name').setDescription('New name (max 32 chars)').setRequired(true).setMaxLength(32)
@@ -1039,10 +1130,22 @@ module.exports = {
                 .setDescription('Battle a wild pet for XP, or challenge another member (optionally for coins).')
                 .addUserOption(opt =>
                     opt.setName('opponent').setDescription('Member to challenge (leave empty to fight a wild pet)').setRequired(false))
-                .addIntegerOption(opt =>
-                    opt.setName('slot').setDescription('Which of your pets fights (0 = first, default 0)').setRequired(false).setMinValue(0).setMaxValue(9))
+                .addStringOption(opt =>
+                    opt.setName('slot').setDescription('Which of your pets fights (defaults to your first)').setRequired(false).setAutocomplete(true))
                 .addIntegerOption(opt =>
                     opt.setName('bet').setDescription('Coins to wager (requires an opponent)').setRequired(false).setMinValue(1))),
+
+    async autocomplete(interaction) {
+        try {
+            const focused = interaction.options.getFocused(true);
+            if (focused.name === 'slot')     return await slotAutocomplete(interaction, focused.value ?? '');
+            if (focused.name === 'material') return await materialAutocomplete(interaction, focused.value ?? '');
+            return await interaction.respond([]);
+        } catch (err) {
+            console.error('[pet] autocomplete error:', err);
+            return interaction.respond([]).catch(() => {});
+        }
+    },
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();

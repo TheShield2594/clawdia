@@ -37,6 +37,24 @@ describe('rare pet sources', () => {
     });
 });
 
+describe('favourite foods', () => {
+    test('every favourite is a known material', () => {
+        // /pet feed's autocomplete only lists ids present in MATERIAL_RARITY, so a
+        // pet whose favourite is missing from the registry would be unsuggestible.
+        const { MATERIAL_RARITY } = require('../src/data/materialRarity');
+        for (const def of Object.values(PET_DEFINITIONS)) {
+            expect(MATERIAL_RARITY[def.favoriteMaterial]).toBeDefined();
+        }
+    });
+
+    test('each favourite comes from the system the pet is tied to', () => {
+        const { MATERIAL_RARITY } = require('../src/data/materialRarity');
+        for (const def of Object.values(PET_DEFINITIONS)) {
+            expect(MATERIAL_RARITY[def.favoriteMaterial].source).toBe(def.materialSource);
+        }
+    });
+});
+
 describe('rollRarePet', () => {
     test('only legendary results can produce a drop', () => {
         for (const tier of ['common', 'uncommon', 'rare', 'epic', 'event']) {

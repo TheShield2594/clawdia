@@ -183,6 +183,41 @@ function heartBar(bondDays) {
     return '❤️'.repeat(filled) + '🖤'.repeat(HEART_BAR_LENGTH - filled);
 }
 
+/**
+ * Resolve the `slot` option to a live pet.
+ *
+ * Autocomplete sends the pet's stable _id, so a release, a revive or a
+ * starvation death between picking a pet and running the command can no longer
+ * silently retarget a different animal — which positional indexes did, since
+ * every later index shifts when the array changes. Bare numbers are still
+ * accepted so anyone typing the old slot number by hand keeps working, and a
+ * pet's name is taken as a last resort.
+ *
+ * Returns { index, pet } or null.
+ */
+function resolvePetRef(pets, ref) {
+    pets = pets ?? [];
+    if (pets.length === 0) return null;
+
+    const raw = String(ref ?? '').trim();
+    if (!raw) return { index: 0, pet: pets[0] };
+
+    const byId = pets.findIndex(p => String(p._id) === raw);
+    if (byId !== -1) return { index: byId, pet: pets[byId] };
+
+    if (/^\d+$/.test(raw)) {
+        const idx = Number(raw);
+        return idx < pets.length ? { index: idx, pet: pets[idx] } : null;
+    }
+
+    const lower  = raw.toLowerCase();
+    const byName = pets.findIndex(p => (p.name ?? '').toLowerCase() === lower);
+    if (byName !== -1) return { index: byName, pet: pets[byName] };
+
+    const byType = pets.findIndex(p => String(p.petId).toLowerCase() === lower);
+    return byType !== -1 ? { index: byType, pet: pets[byType] } : null;
+}
+
 // ── Hunger decay ──────────────────────────────────────────────────────────────
 //
 // Hunger decays *continuously* from `lastDecayAt`, a cursor that tracks how far
@@ -542,6 +577,7 @@ module.exports = {
     RARE_PET_DROP_CHANCE,
     rarePetForSource,
     createPet,
+    resolvePetRef,
     rollRarePet,
     tryGrantRarePet,
     HUNGER_DECAY_PER_DAY,
