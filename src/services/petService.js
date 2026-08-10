@@ -56,6 +56,7 @@ const HUNGER_RESTORE_OTHER = 10;
 const STARVING_THRESHOLD = 30;
 const RUNAWAY_DAYS = 3;
 const MS_PER_DAY = 86400000;
+const REST_DURATION_MS = 2 * 60 * 60 * 1000; // a /pet rest lasts 2 hours
 
 // ── Mood system ───────────────────────────────────────────────────────────────
 
@@ -101,8 +102,8 @@ function getMoodBand(hunger) {
     return 'concerning';
 }
 
-function getMoodLine(pet) {
-    const band = getMoodBand(pet.hunger);
+function getMoodLine(pet, now = Date.now()) {
+    const band = getMoodBand(effectiveHunger(pet, now));
     const lines = MOOD_LINES[band];
     const dayIndex = Math.floor(Date.now() / 86400000);
     const petHash  = (pet.petId  || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -123,47 +124,108 @@ function heartBar(bondDays) {
     return '❤️'.repeat(filled) + '🖤'.repeat(HEART_BAR_LENGTH - filled);
 }
 
+// ── Hunger decay ──────────────────────────────────────────────────────────────
+//
+// Hunger decays *continuously* from `lastDecayAt`, a cursor that tracks how far
+// hunger has been brought up to date. It is deliberately separate from
+// `lastFed` (which only records when the pet was last fed, for display): when
+// the two were the same field, feeding reset the decay clock, so feeding on any
+// sub-24h cadence meant hunger never decayed at all.
+//
+// Decay is never written to the database outside of applyHungerDecay, so every
+// *read* of a pet's hunger must go through effectiveHunger()/isPetActive() —
+// otherwise a player who never runs a /pet command keeps a stale hunger value
+// and collects their passive bonus forever.
+
+function clampHunger(value) {
+    const n = Number(value ?? 100);
+    if (!Number.isFinite(n)) return 100;
+    return Math.min(100, Math.max(0, n));
+}
+
+/** The decay cursor for a pet, in ms. Falls back for pets predating the field. */
+function decayCursor(pet, now = Date.now()) {
+    const raw = pet.lastDecayAt ?? pet.lastFed ?? pet.adoptedAt;
+    const ms  = raw ? new Date(raw).getTime() : now;
+    return Number.isFinite(ms) ? ms : now;
+}
+
+/** Milliseconds of the window [from, to] that overlap the pet's rest window. */
+function restedOverlapMs(pet, from, to) {
+    const restUntil = pet.restUntil ? new Date(pet.restUntil).getTime() : 0;
+    if (!Number.isFinite(restUntil) || restUntil <= 0) return 0;
+    const restStart = restUntil - REST_DURATION_MS;
+    return Math.max(0, Math.min(restUntil, to) - Math.max(restStart, from));
+}
+
 /**
- * Apply daily hunger decay to all pets. Call from a scheduled job or lazily on pet commands.
- * Returns the updated pet array.
- *
- * Idempotent: advances lastFed by the processed days so repeated calls
- * don't re-apply the same decay. starvingStartAt is only set when hunger
- * reaches 0 (not merely below the STARVING_THRESHOLD) so checkRunaway
- * counts time at zero hunger only.
+ * Decay accrued since the pet's cursor, without persisting anything.
+ * Returns { hunger, decay, windowMs, restedMs }.
  */
-function applyHungerDecay(pets) {
-    const now = Date.now();
+function decaySince(pet, now = Date.now()) {
+    const from     = decayCursor(pet, now);
+    const windowMs = Math.max(0, now - from);
+    const hunger   = clampHunger(pet.hunger);
+    if (windowMs === 0) return { hunger, decay: 0, windowMs: 0, restedMs: 0 };
+
+    const restedMs = Math.min(windowMs, restedOverlapMs(pet, from, now));
+    const normalMs = windowMs - restedMs;
+    const decay    = (restedMs * HUNGER_DECAY_RESTING + normalMs * HUNGER_DECAY_PER_DAY) / MS_PER_DAY;
+
+    return { hunger: Math.max(0, hunger - decay), decay, windowMs, restedMs };
+}
+
+/** A pet's current hunger, including decay not yet written to the database. */
+function effectiveHunger(pet, now = Date.now()) {
+    if (!pet) return 0;
+    return decaySince(pet, now).hunger;
+}
+
+/** Whether a pet is fed enough for its passive bonus to apply (decay-aware). */
+function isPetActive(pet, now = Date.now()) {
+    return !!pet && effectiveHunger(pet, now) >= STARVING_THRESHOLD;
+}
+
+/**
+ * Apply accrued hunger decay to all pets. Call lazily on pet commands.
+ * Returns a new array; entries with no elapsed time are returned untouched.
+ *
+ * Idempotent: advances lastDecayAt to `now`, so repeated calls are no-ops.
+ * starvingStartAt is only set when hunger reaches 0 (not merely below the
+ * STARVING_THRESHOLD) so checkRunaway counts time at zero hunger only.
+ */
+function applyHungerDecay(pets, now = Date.now()) {
     return pets.map(pet => {
-        const lastFed = pet.lastFed ? new Date(pet.lastFed).getTime() : now;
-        const daysPassed = Math.floor((now - lastFed) / MS_PER_DAY);
-        if (daysPassed <= 0) return pet;
+        const from = decayCursor(pet, now);
+        const { hunger: newHunger, decay, windowMs } = decaySince(pet, now);
+        if (windowMs <= 0) return pet;
 
-        // Prorate decay: compute overlap of the decay window with the rest window
-        const REST_WINDOW_MS  = 2 * 60 * 60 * 1000; // rest lasts 2 hours
-        const restUntilMs     = pet.restUntil ? new Date(pet.restUntil).getTime() : 0;
-        const restStartMs     = restUntilMs - REST_WINDOW_MS;
-        const restedMs        = restUntilMs > 0
-            ? Math.max(0, Math.min(restUntilMs, now) - Math.max(restStartMs, lastFed))
-            : 0;
-        const restedDays      = restedMs / MS_PER_DAY;
-        const normalDays      = Math.max(0, daysPassed - restedDays);
-        const decay           = restedDays * HUNGER_DECAY_RESTING + normalDays * HUNGER_DECAY_PER_DAY;
-        const newHunger = Math.max(0, pet.hunger - decay);
-        // Advance the decay cursor by the days processed so re-calls are no-ops
-        const newLastFed = new Date(lastFed + daysPassed * MS_PER_DAY);
+        const prevHunger = clampHunger(pet.hunger);
+        const wasAtZero  = prevHunger === 0;
+        const nowAtZero  = newHunger === 0;
 
-        // Only start the runaway clock when hunger hits 0
-        const wasAtZero = pet.hunger === 0;
-        const nowAtZero = newHunger === 0;
-        const newStarvingStartAt = (nowAtZero && !wasAtZero) ? new Date() : pet.starvingStartAt;
+        let starvingStartAt = pet.starvingStartAt ?? null;
+        if (nowAtZero && !wasAtZero) {
+            // Back-date the runaway clock to when hunger actually hit zero, using
+            // the window's average decay rate. Without this the clock would start
+            // whenever the owner next happened to run a /pet command, so a pet
+            // left alone for a month would still get a 3-day grace period from
+            // the moment it was noticed.
+            const ratePerMs = decay / windowMs;
+            const crossedAt = ratePerMs > 0
+                ? from + Math.min(windowMs, prevHunger / ratePerMs)
+                : now;
+            starvingStartAt = new Date(Math.round(crossedAt));
+        } else if (!nowAtZero) {
+            starvingStartAt = null;
+        }
 
         return {
-            ...pet.toObject ? pet.toObject() : pet,
+            ...(pet.toObject ? pet.toObject() : pet),
             hunger: newHunger,
-            lastFed: newLastFed,
+            lastDecayAt: new Date(now),
             starving: newHunger < STARVING_THRESHOLD,
-            starvingStartAt: newStarvingStartAt
+            starvingStartAt,
         };
     });
 }
@@ -172,8 +234,7 @@ function applyHungerDecay(pets) {
  * Check which pets have been at zero hunger for 3+ days (runaway).
  * Returns { keepPets, ranAwayPets }.
  */
-function checkRunaway(pets) {
-    const now = Date.now();
+function checkRunaway(pets, now = Date.now()) {
     const keepPets = [];
     const ranAwayPets = [];
 
@@ -194,22 +255,25 @@ function checkRunaway(pets) {
 /**
  * Feed a pet with a given material. Returns { hunger, restored }.
  */
-function feedPet(pet, materialId) {
+function feedPet(pet, materialId, now = Date.now()) {
     const def = PET_DEFINITIONS[pet.petId];
     if (!def) return null;
 
     const isFavorite = def.favoriteMaterial === materialId;
     const restored = isFavorite ? HUNGER_RESTORE_FAVORITE : HUNGER_RESTORE_OTHER;
-    const newHunger = Math.min(100, pet.hunger + restored);
+    // Feed from decay-aware hunger so restoring never resurrects a stale value.
+    const newHunger = Math.min(100, effectiveHunger(pet, now) + restored);
 
     return { hunger: newHunger, restored, isFavorite };
 }
 
 /**
- * Returns the active passive bonus for a pet (only if hunger >= STARVING_THRESHOLD).
+ * Returns the active passive bonus for a pet, or null if it is too hungry.
+ * Uses decay-aware hunger, so the bonus lapses on schedule even for a player
+ * who never runs a /pet command.
  */
-function getPetBonus(pet) {
-    if (!pet || pet.hunger < STARVING_THRESHOLD) return null;
+function getPetBonus(pet, now = Date.now()) {
+    if (!isPetActive(pet, now)) return null;
     return PET_DEFINITIONS[pet.petId] ?? null;
 }
 
@@ -218,10 +282,10 @@ function getPetBonus(pet) {
  * Uses each pet's *effective* bonus (scaled by evolution + level), so investing
  * in a pet meaningfully improves its passive.
  */
-function getTotalBonus(pets, bonusType) {
+function getTotalBonus(pets, bonusType, now = Date.now()) {
     let total = 0;
     for (const pet of pets) {
-        const bonus = getPetBonus(pet);
+        const bonus = getPetBonus(pet, now);
         if (bonus && bonus.bonusType === bonusType) {
             total += getEffectiveBonusPct(pet);
         }
@@ -417,11 +481,16 @@ module.exports = {
     PERSONALITY_KEYS,
     TRAIT_FLAVOR,
     HUNGER_DECAY_PER_DAY,
+    HUNGER_DECAY_RESTING,
     MS_PER_DAY,
+    REST_DURATION_MS,
     STARVING_THRESHOLD,
     RUNAWAY_DAYS,
     MOOD_LINES,
     applyHungerDecay,
+    decaySince,
+    effectiveHunger,
+    isPetActive,
     checkRunaway,
     feedPet,
     getPetBonus,

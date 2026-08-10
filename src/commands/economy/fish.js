@@ -534,7 +534,7 @@ async function handleCast(interaction) {
     await delay(2000 + Math.floor(Math.random() * 3001));
 
     // Fish/Shark pet: +5%/+15% yield (only if hunger >= 30)
-    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, STARVING_THRESHOLD: PET_STARVE, TRAIT_FLAVOR } = require('../../services/petService');
+    const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR } = require('../../services/petService');
     const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
 
     const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
@@ -1003,7 +1003,7 @@ async function handleCast(interaction) {
 
     // Pet narrative: show active pet's personality flavor in description
     if (result.success && result.catchType !== 'junk') {
-        const activePet = (user.pets || []).find(p => p.hunger >= PET_STARVE);
+        const activePet = (user.pets || []).find(p => isPetActive(p));
         if (activePet) {
             const petDef = PET_DEFS[activePet.petId];
             const petName = activePet.name || petDef?.name || activePet.petId;

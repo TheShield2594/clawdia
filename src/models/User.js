@@ -164,6 +164,10 @@ const userSchema = new Schema({
         name:               { type: String,  default: null },
         hunger:             { type: Number,  default: 100, min: 0, max: 100 },
         lastFed:            { type: Date,    default: Date.now },
+        // Cursor tracking how far hunger decay has been applied. Kept separate
+        // from lastFed so that feeding restores hunger without also rewinding
+        // the decay clock (which used to make decay avoidable entirely).
+        lastDecayAt:        { type: Date,    default: Date.now },
         adoptedAt:          { type: Date,    default: Date.now },
         starving:           { type: Boolean, default: false },
         starvingStartAt:    { type: Date,    default: null },

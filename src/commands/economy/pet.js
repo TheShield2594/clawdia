@@ -13,6 +13,9 @@ const {
     STARVING_THRESHOLD,
     RUNAWAY_DAYS,
     applyHungerDecay,
+    effectiveHunger,
+    isPetActive,
+    REST_DURATION_MS,
     checkRunaway,
     feedPet,
     getMoodLine,
@@ -59,10 +62,13 @@ function battleLogLines(rounds, nameA, nameB) {
     });
 }
 
+// Hunger is stored at full precision (decay is continuous), so round for display —
+// otherwise the bar reads "80.41666666666666%".
 function hungerBar(hunger) {
-    const filled = Math.round((hunger / 100) * HUNGER_BAR_LENGTH);
-    const color  = hunger >= STARVING_THRESHOLD ? '🟩' : '🟥';
-    return color.repeat(filled) + '⬛'.repeat(HUNGER_BAR_LENGTH - filled) + ` ${hunger}%`;
+    const pct    = Math.round(Math.min(100, Math.max(0, Number(hunger) || 0)));
+    const filled = Math.round((pct / 100) * HUNGER_BAR_LENGTH);
+    const color  = pct >= STARVING_THRESHOLD ? '🟩' : '🟥';
+    return color.repeat(filled) + '⬛'.repeat(HUNGER_BAR_LENGTH - filled) + ` ${pct}%`;
 }
 
 function getInventoryQuantity(user, itemId) {
@@ -104,16 +110,21 @@ async function resolveUser(interaction) {
 async function syncHungerAndRunaway(user, interaction) {
     if (!user.pets || user.pets.length === 0) return;
 
+    // Write the accrued decay back onto the live subdocuments, then evaluate
+    // runaways against those updated values.
     const decayed = applyHungerDecay(user.pets);
-    const { keepPets, ranAwayPets } = checkRunaway(decayed);
+    for (let i = 0; i < user.pets.length; i++) {
+        const d = decayed[i];
+        if (!d || d === user.pets[i]) continue; // no time elapsed for this pet
+        user.pets[i].hunger          = d.hunger;
+        user.pets[i].lastDecayAt     = d.lastDecayAt;
+        user.pets[i].starving        = d.starving;
+        user.pets[i].starvingStartAt = d.starvingStartAt ?? null;
+    }
 
-    user.pets = keepPets;
-    for (let i = 0; i < keepPets.length; i++) {
-        const d = keepPets[i];
-        user.pets[i].hunger         = d.hunger;
-        user.pets[i].lastFed        = d.lastFed;
-        user.pets[i].starving       = d.starving;
-        if (d.starvingStartAt) user.pets[i].starvingStartAt = d.starvingStartAt;
+    const { ranAwayPets } = checkRunaway(user.pets);
+    for (const gone of ranAwayPets) {
+        if (gone._id) user.pets.pull(gone._id);
     }
     user.markModified('pets');
 
@@ -126,10 +137,15 @@ async function syncHungerAndRunaway(user, interaction) {
             ? `💀 **${interaction.user.username}**'s pet ${names[0]} passed away from starvation...`
             : `💀 **${interaction.user.username}**'s pets ${names.join(', ')} passed away from starvation...`;
         interaction.channel?.send({ content: deathMsg }).catch(() => {});
-        await interaction.followUp({
-            content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` to get a new companion, or buy a Revive Scroll from the shop to bring them back.*`,
-            flags: MessageFlags.Ephemeral
-        }).catch(() => {});
+        // followUp only works once the interaction has been answered — /pet battle
+        // syncs before replying, and silently dropping the notice there would
+        // leave the owner with no explanation for the missing pet.
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp({
+                content: `💔 Your pet${ranAwayPets.length > 1 ? 's' : ''} died from starvation: ${names.join(', ')}\n*Use \`/pet adopt\` to get a new companion.*`,
+                flags: MessageFlags.Ephemeral
+            }).catch(() => {});
+        }
     }
 }
 
@@ -139,9 +155,10 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL) {
     const def         = PET_DEFINITIONS[pet.petId];
     const displayName = pet.name || def?.name || pet.petId;
     const bondDays    = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
+    const hunger      = effectiveHunger(pet);
     const moodLine    = getMoodLine(pet);
-    const moodColor   = getMoodColor(pet.hunger);
-    const bonusActive = pet.hunger >= STARVING_THRESHOLD;
+    const moodColor   = getMoodColor(hunger);
+    const bonusActive = hunger >= STARVING_THRESHOLD;
     const bonusEmoji  = bonusActive ? '✅' : '❌';
     const effPct      = getEffectiveBonusPct(pet);
     const bonusLabel  = `+${effPct}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}${bonusActive ? '' : ' *(inactive)*'}`;
@@ -179,7 +196,7 @@ function buildPetEmbed(pet, index, total, ownerAvatarURL) {
         .addFields(
             { name: '📈 Level',             value: levelLine,                            inline: false },
             { name: '❤️ Bond',              value: `${heartBar(bondDays)} ${bondDays}d`, inline: false },
-            { name: '🍖 Hunger',            value: hungerBar(pet.hunger),                inline: false },
+            { name: '🍖 Hunger',            value: hungerBar(hunger),                    inline: false },
             { name: `${bonusEmoji} Bonus`,  value: bonusLabel,                           inline: true  },
             { name: '⚔️ Battle Record',     value: record,                               inline: true  },
         )
@@ -386,7 +403,7 @@ async function executeStatus(interaction) {
                 return btn.reply({ content: `🛏️ **${name}** is already resting! ${remaining}m remaining.`, flags: MessageFlags.Ephemeral });
             }
 
-            freshUser.pets[idx].restUntil           = new Date(Date.now() + 2 * 60 * 60 * 1000);
+            freshUser.pets[idx].restUntil           = new Date(Date.now() + REST_DURATION_MS);
             freshUser.pets[idx].weeklyInteractions  = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
 
@@ -411,6 +428,7 @@ async function executeStatus(interaction) {
             const def      = PET_DEFINITIONS[pet.petId];
             const name     = pet.name || def?.name || pet.petId;
             const bondDays = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
+            const hunger   = effectiveHunger(pet);
 
             freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
@@ -426,14 +444,14 @@ async function executeStatus(interaction) {
             }
 
             const showcaseEmbed = new EmbedBuilder()
-                .setColor(getMoodColor(pet.hunger))
+                .setColor(getMoodColor(hunger))
                 .setTitle(`${def?.emoji ?? '🐾'} ${name}`)
                 .setAuthor({ name: `Owned by ${interaction.user.username}`, iconURL: ownerAvatarURL })
                 .setDescription(`*${getMoodLine(pet)}*${pet.potw ? '\n🌟 **Pet of the Week**' : ''}`)
                 .addFields(
                     { name: '❤️ Bond',    value: `${heartBar(bondDays)} ${bondDays}d`,               inline: true },
-                    { name: '🍖 Hunger', value: hungerBar(pet.hunger),                                inline: true },
-                    { name: `${pet.hunger >= STARVING_THRESHOLD ? '✅' : '❌'} Bonus`,
+                    { name: '🍖 Hunger', value: hungerBar(hunger),                                    inline: true },
+                    { name: `${hunger >= STARVING_THRESHOLD ? '✅' : '❌'} Bonus`,
                       value: `+${def?.bonusPct ?? 0}% ${(def?.bonusType ?? '').replace(/_/g, ' ')}`, inline: false },
                 )
                 .setFooter({ text: `${def?.name ?? pet.petId} • Use /pet status to check on yours!` })
@@ -489,9 +507,12 @@ async function executeFeed(interaction) {
     decrementMaterial(user, materialId);
     user.pets[petIndex].hunger          = result.hunger;
     user.pets[petIndex].lastFed         = new Date();
+    // Decay was brought up to date by syncHungerAndRunaway above; re-anchor the
+    // cursor so the restored hunger isn't immediately docked again.
+    user.pets[petIndex].lastDecayAt     = new Date();
     user.pets[petIndex].starving        = result.hunger < STARVING_THRESHOLD;
     user.pets[petIndex].weeklyInteractions = (user.pets[petIndex].weeklyInteractions || 0) + 1;
-    if (result.hunger >= STARVING_THRESHOLD) user.pets[petIndex].starvingStartAt = null;
+    if (result.hunger > 0) user.pets[petIndex].starvingStartAt = null;
     const feedXp = applyPetXp(user.pets[petIndex], result.isFavorite ? XP_FEED_FAVORITE : XP_FEED_OTHER);
     user.markModified('pets');
 
@@ -576,7 +597,7 @@ async function executeRename(interaction) {
 
 function petUsable(pet) {
     if (!pet) return { ok: false, reason: 'no pet in that slot' };
-    if (pet.hunger < STARVING_THRESHOLD) return { ok: false, reason: 'too hungry to fight (feed it first)' };
+    if (!isPetActive(pet)) return { ok: false, reason: 'too hungry to fight (feed it first)' };
     return { ok: true };
 }
 
@@ -666,7 +687,7 @@ async function executeBattle(interaction) {
     }
 
     const oppUser = await User.findOne({ userId: opponent.id, guildId: interaction.guild.id });
-    const oppPet  = oppUser?.pets?.find(p => p.hunger >= STARVING_THRESHOLD);
+    const oppPet  = oppUser?.pets?.find(p => isPetActive(p));
     if (!oppPet) {
         return interaction.reply({ content: `${opponent.username} has no battle-ready pet (they need a fed pet).`, flags: MessageFlags.Ephemeral });
     }
@@ -767,7 +788,7 @@ async function pvpBattle(interaction, ctx) {
             User.findOne({ userId: opponent.id, guildId }),
         ]);
         const aPet = chUser?.pets?.[slot];
-        const bPet = opUser?.pets?.find(p => p.hunger >= STARVING_THRESHOLD);
+        const bPet = opUser?.pets?.find(p => isPetActive(p));
 
         // If a fighter is gone, no longer battle-ready, or went on cooldown
         // between the challenge and acceptance, refund and abort.
