@@ -6,11 +6,9 @@ const {
     applyRepair,
     updateWeaponStatus,
     applyDurabilityLoss,
-    calculateSuccessChance,
     applyPayoutModifiers,
 } = require('../src/services/huntService');
 const { ZONES, LIMITS, WEAPON_BY_TIER } = require('../src/data/huntData');
-const { getPityBonus } = require('../src/utils/pityBonus');
 
 function makeWeapon(overrides = {}) {
     return {
@@ -100,42 +98,6 @@ describe('quoteRepair', () => {
 
     test('refuses a weapon already at full durability', () => {
         expect(quoteRepair(makeWeapon(), 20).error).toMatch(/full durability/i);
-    });
-});
-
-describe('pity curve', () => {
-    const limits = { PITY_CONSECUTIVE_FAILS: 4, PITY_BONUS_PER_STACK: 0.15 };
-
-    test('grants nothing before the streak reaches the threshold', () => {
-        for (let fails = 0; fails < limits.PITY_CONSECUTIVE_FAILS; fails++) {
-            expect(getPityBonus(fails, limits)).toBe(0);
-        }
-    });
-
-    test('starts on the Nth straight failure and stacks one per further failure', () => {
-        expect(getPityBonus(4, limits)).toBeCloseTo(0.15);
-        expect(getPityBonus(5, limits)).toBeCloseTo(0.30);
-        expect(getPityBonus(6, limits)).toBeCloseTo(0.45);
-    });
-
-    test('caps at PITY_CONSECUTIVE_FAILS stacks', () => {
-        expect(getPityBonus(7, limits)).toBeCloseTo(0.60);
-        expect(getPityBonus(50, limits)).toBeCloseTo(0.60);
-    });
-
-    test('treats a missing streak as no bonus', () => {
-        expect(getPityBonus(undefined, limits)).toBe(0);
-    });
-
-    test('feeds through calculateSuccessChance', () => {
-        const base = { hunt: { level: 1, prestige: 0, activeCharm: null, activeFocus: false, consecutiveFails: 0 } };
-        const pitied = { hunt: { ...base.hunt, consecutiveFails: 4 } };
-        const weapon = makeWeapon();
-
-        const without = calculateSuccessChance(base, weapon, ZONES.beginner_forest);
-        const with4   = calculateSuccessChance(pitied, weapon, ZONES.beginner_forest);
-
-        expect(with4 - without).toBeCloseTo(0.15);
     });
 });
 

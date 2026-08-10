@@ -56,6 +56,7 @@ const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/h
 const { isDistrictActive } = require('../../services/districtService');
 const { ensureQuests, onHunt, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { getActiveSynergies } = require('../../services/synergyService');
+const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 
 const WILDERNESS_YIELD_BONUS = 0.10;
 
@@ -1173,7 +1174,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         );
 
     if ((user.hunt.consecutiveFails ?? 0) > 0) {
-        embed.addFields(buildFailStreakField(user));
+        embed.addFields(buildPityStreakField(user.hunt.consecutiveFails, LIMITS, PITY_COPY.hunt));
     }
 
     if (failTraits && failTraits.length > 0) {
@@ -1260,40 +1261,6 @@ function buildPityField(user) {
     }
 
     return { name: `${heat} Rare Pity: ${sinceRare}/${threshold}`, value: `\`${bar}\`\n${label}`, inline: false };
-}
-
-/**
- * Shows where the player sits on the consecutive-failure pity curve.
- * Failure-embed only — a success resets the streak, so there is nothing to show.
- *
- * Without this the curve is invisible: a dry run just looks like bad luck with no
- * reason to believe it will let up.
- */
-function buildFailStreakField(user) {
-    const fails     = user.hunt.consecutiveFails ?? 0;
-    const threshold = LIMITS.PITY_CONSECUTIVE_FAILS;
-    const stacks    = Math.min(Math.max(0, fails - threshold + 1), threshold);
-
-    const barLen    = 16;
-    const filledLen = Math.min(barLen, Math.round((Math.min(fails, threshold) / threshold) * barLen));
-    const bar       = '█'.repeat(filledLen) + '░'.repeat(barLen - filledLen);
-
-    if (stacks > 0) {
-        const bonus  = Math.round(stacks * LIMITS.PITY_BONUS_PER_STACK * 100);
-        const maxed  = stacks >= threshold;
-        return {
-            name:  `⚡ Steadying Your Aim — ${fails} straight misses`,
-            value: `\`${bar}\`\n**+${bonus}% success** on your next hunt${maxed ? ' *(max)*' : ' — climbing with every miss'}`,
-            inline: false,
-        };
-    }
-
-    const remaining = threshold - fails;
-    return {
-        name:  `❄️ Bad Run — ${fails}/${threshold}`,
-        value: `\`${bar}\`\n${remaining} more miss${remaining === 1 ? '' : 'es'} and pity kicks in: **+${Math.round(LIMITS.PITY_BONUS_PER_STACK * 100)}% success**, growing with each one after.`,
-        inline: false,
-    };
 }
 
 function buildStaminaLine(user) {

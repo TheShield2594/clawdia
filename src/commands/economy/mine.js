@@ -17,6 +17,7 @@ const {
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
 const { randomFrom, MINE_CAVE_LINES } = require('../../utils/copyLines');
+const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const {
     ensureMineData,
     applyStaminaRegen,
@@ -1820,6 +1821,10 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
             { name: 'Pickaxe', value: `${pickaxe.name} ${pickaxeStatusEmoji(pickaxe.status)}\n${durabilityBar(pickaxe.currentDurability, pickaxe.maxDurability)} ${pickaxe.currentDurability}/${pickaxe.maxDurability}`, inline: true },
             { name: 'Stamina', value: buildStaminaLine(user), inline: true }
         );
+
+    if ((user.mining.consecutiveFails ?? 0) > 0) {
+        embed.addFields(buildPityStreakField(user.mining.consecutiveFails, LIMITS, PITY_COPY.mining));
+    }
 
     if (failure.severity.injuryMs > 0) {
         embed.addFields({ name: '🤕 Cave-in', value: `Extra cooldown: **${formatMs(failure.severity.injuryMs)}**`, inline: true });

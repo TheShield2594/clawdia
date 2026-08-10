@@ -22,6 +22,7 @@ const {
     BOSS_TYPES
 } = require('../../data/fishData');
 const { MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../data/huntData');
+const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const {
     ensureFishingData,
@@ -1239,6 +1240,10 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
             { name: 'Rod',      value: buildRodLine(rod),                     inline: true },
             { name: 'Stamina',  value: buildStaminaLine(user),                inline: true }
         );
+
+    if ((user.fishing.consecutiveFails ?? 0) > 0) {
+        embed.addFields(buildPityStreakField(user.fishing.consecutiveFails, LIMITS, PITY_COPY.fishing));
+    }
 
     if (failure.severity.injuryMs > 0) {
         embed.addFields({ name: '🤕 Soaked!', value: `Extra cooldown: **${formatMs(failure.severity.injuryMs)}**`, inline: true });
