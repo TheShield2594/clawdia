@@ -22,7 +22,7 @@ const {
     BOSS_TYPES
 } = require('../../data/fishData');
 const { MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../data/huntData');
-const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
+const { getPityBonus, buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const {
     ensureFishingData,
@@ -42,7 +42,9 @@ const {
     getLevelData,
     xpToNextLevel,
     activateConsumable,
+    quoteRepair,
     applyRepair,
+    applyPayoutModifiers,
     updateRodStatus,
     applyXp
 } = require('../../services/fishService');
@@ -53,7 +55,7 @@ const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
 const { randomFrom, FISH_MISS_POOL } = require('../../utils/copyLines');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
-const { submitCatch: submitTournamentCatch, getActiveTournament, buildLeaderboardEmbed, endTournament, buildWinnersEmbed, announceTournamentEnd } = require('../../services/tournamentService');
+const { submitCatch: submitTournamentCatch, startTournament, getActiveTournament, buildLeaderboardEmbed, endTournament, buildWinnersEmbed, announceTournamentEnd } = require('../../services/tournamentService');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../data/featuredRotation');
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
@@ -62,6 +64,7 @@ const { isDistrictActive } = require('../../services/districtService');
 const { ensureQuests, onFish, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { hasActiveEvent, getEventCrossSystemType } = require('../../services/seasonalEventService');
+const { refundEffectCharge } = require('../../services/effectsService');
 
 // Rarity score for hourly fish competition (rarest catch wins)
 const WILDERNESS_YIELD_BONUS = 0.10;
@@ -434,10 +437,18 @@ async function handleCast(interaction) {
     if (f.stamina <= 0) {
         const regenMs   = msUntilNextStamina(user);
         const nextAt    = new Date(Date.now() + regenMs);
-        const sinceRare = f.sinceRare ?? 0;
-        const pityStat  = sinceRare >= 5
-            ? `🎯 ${sinceRare} casts since last Rare+ catch • next rare guaranteed around cast ~50`
-            : null;
+        // Surfaces the fail-streak pity that actually exists, using the shared
+        // curve so this never drifts from what calculateSuccessChance applies.
+        // There is no rare-catch pity — sinceRare is a stat, not a guarantee,
+        // so it is reported as one.
+        const sinceRare  = f.sinceRare ?? 0;
+        const pityBonus  = getPityBonus(f.consecutiveFails ?? 0, LIMITS);
+        const pityBits   = [];
+        if (pityBonus > 0) {
+            pityBits.push(`🎯 ${f.consecutiveFails} ${PITY_COPY.fishing.streakNoun} • +${Math.round(pityBonus * 100)}% success on your next cast`);
+        }
+        if (sinceRare >= 5) pityBits.push(`🐟 ${sinceRare} casts since your last Rare+ catch`);
+        const pityStat = pityBits.length ? pityBits.join('\n') : null;
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '😮‍💨 Too Tired to Cast',
@@ -445,7 +456,7 @@ async function handleCast(interaction) {
                 color: '#1e6fa5',
                 nextAt,
                 pityStat,
-                nextRewardPreview: 'Full stamina = 10 casts · Boss encounters unlock at Prestige 1+',
+                nextRewardPreview: `Full stamina = ${getMaxStamina(user)} casts · Boss fights can start on any Rare or better catch`,
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -468,7 +479,7 @@ async function handleCast(interaction) {
         });
     }
 
-    // ── Bait check ────────────────────────────────────────────────────
+    // ── Bait check (read-only; the stock is spent after the claim below) ──
     const rodData = ROD_BY_TIER[rod.tier];
     if (rodData.requiresBait && (f.bait[rodData.baitType] ?? 0) <= 0) {
         return interaction.reply({
@@ -581,14 +592,18 @@ async function handleCast(interaction) {
         const preCastLegendaryCatches = user.fishing.legendaryCatches;
         const preCastEventCatches     = user.fishing.eventCatches;
         const preCastBestPayout       = user.fishing.bestPayout;
+        const preCastConsecutiveFails = user.fishing.consecutiveFails ?? 0;
         const preCastMaterials        = JSON.parse(JSON.stringify(user.fishing.materials ?? {}));
         const preCastPersonalBest = user.fishing.personalBest
             ? JSON.parse(JSON.stringify(user.fishing.personalBest))
             : null;
+        const preCastWeeklyRecord = user.fishing.weeklyRecord
+            ? JSON.parse(JSON.stringify(user.fishing.weeklyRecord))
+            : null;
 
         let reelResult = null; // { caught: bool, label: string, icon: string }
 
-        const result = executeCast(user, locationId, { reactionFactor: 1.0, marketplaceActive });
+        const result = executeCast(user, locationId, { reactionFactor: 1.0, marketplaceActive, username: interaction.user.username });
 
         // ── Rarity-Gated Reel-In ──────────────────────────────────────────────────
         if (result.success && result.catchType === 'fish' && ['rare', 'epic', 'legendary'].includes(result.tier)) {
@@ -643,6 +658,13 @@ async function handleCast(interaction) {
                     user.fishing.bestPayout        = preCastBestPayout;
                     user.fishing.materials         = preCastMaterials;
                     if (preCastPersonalBest !== null) user.fishing.personalBest = preCastPersonalBest;
+                    if (preCastWeeklyRecord !== null) user.fishing.weeklyRecord = preCastWeeklyRecord;
+                    // executeCast zeroed the fail streak on the successful roll; the
+                    // fish was never landed, so restore it and count this as the miss
+                    // it was — otherwise a required reel-in miss hands back pity progress.
+                    user.fishing.consecutiveFails = preCastConsecutiveFails + 1;
+                    // The doubled-yield charge paid for a payout that is being reversed.
+                    if (result.gatherEffectConsumed) refundEffectCharge(user, result.gatherEffectConsumed);
                     user.markModified('fishing');
                     result.success      = false;
                     result.finalPayout  = 0;
@@ -1768,7 +1790,11 @@ async function showBait(interaction, user, currency) {
         });
 
     const activeLines = [];
-    if (f.activeBait)    activeLines.push(`🐟 Chum Bait active (${f.activeBaitCastsLeft} casts left)`);
+    if (f.activeBait) {
+        const activeDef = CONSUMABLES[f.activeBait];
+        const activeName = activeDef?.name ?? f.activeBait.replace(/_/g, ' ');
+        activeLines.push(`${activeDef?.emoji ?? '🐟'} ${activeName} active (${f.activeBaitCastsLeft} casts left)`);
+    }
     if (f.activeLuck)    activeLines.push(`🍀 Angler's Luck queued`);
     if (f.activeXpScroll) activeLines.push(`📜 XP Scroll queued`);
 
@@ -2007,7 +2033,7 @@ async function showShopList(interaction, user, currency) {
         subline: `~${Math.round(u.costMultiplier * 100)}% of rod`
     }));
     const upgradeList = Object.values(ROD_UPGRADES).map(u =>
-        `${u.emoji} **${u.name}** — *${u.description}* · \`/fish shop upgrade module:${u.id}\``
+        `${u.emoji} **${u.name}** — *${u.description}* · \`/fish shop upgrade type:${u.id}\``
     ).join('\n');
 
     const baitItems = BAIT_PACKS.map(p => ({
@@ -2557,18 +2583,21 @@ async function handleRepair(interaction, user, currency) {
     }
 
     const requestedAmount = interaction.options.getInteger('amount') ?? null;
-    const result = applyRepair(rod, requestedAmount);
 
-    if (result.error) {
-        return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
+    // Price the repair before committing — applying it permanently degrades the
+    // rod's max durability, which must not happen on a quote the player can't buy.
+    const quote = quoteRepair(rod, requestedAmount);
+    if (quote.error) {
+        return interaction.reply({ content: quote.error, flags: MessageFlags.Ephemeral });
     }
-    if (user.balance < result.cost) {
+    if (user.balance < quote.cost) {
         return interaction.reply({
-            content: `Repairing **${result.restoredAmount}** durability costs **${currency}${result.cost.toLocaleString()}**. You only have **${currency}${user.balance.toLocaleString()}**.`,
+            content: `Repairing **${quote.restoredAmount}** durability costs **${currency}${quote.cost.toLocaleString()}**. You only have **${currency}${user.balance.toLocaleString()}**.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
+    const result = applyRepair(rod, requestedAmount);
     user.balance -= result.cost;
     user.markModified('fishing');
 
