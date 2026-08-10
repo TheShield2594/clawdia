@@ -261,9 +261,9 @@ module.exports = {
                 }
 
             } else if (out.type === 'mine_consumable') {
-                if (out.id === 'mine_lock' && m.mineLockActive) {
-                    return interaction.reply({ content: 'Your mine already has an active **Mine Lock**.', flags: MessageFlags.Ephemeral });
-                }
+                // A Mine Lock is stock you arm later with `/mine shop use`, so holding
+                // spares while one is armed is fine — the stack guard above is the only
+                // limit that applies.
                 m.consumables[out.id] = (m.consumables[out.id] ?? 0) + out.qty;
                 const def = MINE_CONSUMABLES[out.id];
                 outputDesc = `${def?.emoji ?? '📦'} **${out.qty}× ${def?.name ?? out.id}**`;

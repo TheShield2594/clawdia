@@ -2,7 +2,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
-const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
+const { attachGrind, persistGrindIfNew, saveGrind } = require('../../utils/grindProfile');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -33,14 +33,15 @@ const {
     getLevelData,
     xpToNextLevel,
     activateConsumable,
+    isCondemned,
+    quoteRepair,
     applyRepair,
     updatePickaxeStatus,
     applyXp,
     updateMineMap,
     renderMineMap,
     getOreStashSummary,
-    isOreStashEmpty,
-    activateMineLock
+    isOreStashEmpty
 } = require('../../services/mineService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -51,6 +52,7 @@ const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/h
 const { isDistrictActive } = require('../../services/districtService');
 const { ensureQuests, onMine, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { getActiveSynergies } = require('../../services/synergyService');
+const { refundEffectCharge } = require('../../services/effectsService');
 const { CROSS_CONSUMABLES } = require('../../data/crossSystemData');
 
 const WILDERNESS_YIELD_BONUS = 0.10;
@@ -60,11 +62,31 @@ function resolveConsumableDef(id) {
     return CONSUMABLES[id] ?? CROSS_CONSUMABLES[id] ?? null;
 }
 
+// Take `cost` coins with a conditional update rather than `user.balance -= cost`
+// followed by a save: the loaded document's balance goes stale the moment any
+// other command pays the player, and saving it back would erase that payout.
+// Returns the updated document, or null when the player can't afford it any more.
+function chargeBalance(interaction, cost) {
+    return User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: cost } },
+        { $inc: { balance: -cost } },
+        { new: true },
+    );
+}
+
+// Undo a chargeBalance when the purchase it paid for could not be persisted.
+function refundBalance(interaction, cost) {
+    return User.updateOne(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        { $inc: { balance: cost } },
+    ).catch(err => console.error('[mineshop] refund error:', err));
+}
+
 const DEPTH_CHOICES    = DEPTH_LIST.map(d => ({ name: d.name, value: d.id }));
 const PICKAXE_CHOICES  = PICKAXE_TIERS.map(p => ({ name: `${p.emoji} ${p.name} — ${p.cost.toLocaleString()} coins`, value: p.slug }));
 const ALL_ITEMS        = [...Object.values(CONSUMABLES), ...BLAST_PACKS];
 const ITEM_CHOICES     = ALL_ITEMS.map(i => ({ name: `${i.emoji ?? ''} ${i.name} — ${i.cost} coins`.trim(), value: i.id }));
-const ACTIVATABLE      = ['ore_magnet', 'premium_magnet', 'miners_lamp', 'miners_instinct', 'xp_scroll', 'energy_tonic', 'reinforced_trap'];
+const ACTIVATABLE      = ['ore_magnet', 'premium_magnet', 'miners_lamp', 'miners_instinct', 'xp_scroll', 'energy_tonic', 'reinforced_trap', 'mine_lock'];
 const UPGRADE_CHOICES  = Object.values(PICKAXE_UPGRADES).map(u => ({ name: `${u.emoji} ${u.name} — ${u.description}`, value: u.id }));
 const UNLOCK_CHOICES   = DEPTH_LIST.filter(d => !d.defaultUnlocked).map(d => ({ name: `${d.emoji} ${d.name}`, value: d.id }));
 
@@ -326,17 +348,15 @@ async function handleDig(interaction) {
 
     if (m.lastMine && Date.now() - m.lastMine.getTime() < LIMITS.MINE_COOLDOWN_MS) {
         const nextAt = new Date(m.lastMine.getTime() + LIMITS.MINE_COOLDOWN_MS);
-        const sinceRare = m.sinceRare ?? 0;
-        const depthHint = m.stamina >= 5
-            ? 'Tip: Deep intensity (💎) doubles your yield — try it when stamina is full'
-            : null;
+        // Intensity is earned in the vein-reading rounds, not picked from a menu —
+        // so the preview promises what a good read pays, not a setting to choose.
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '⛏️ Catching Your Breath',
                 description: 'You just came up from a dig.\nTake a short break before heading back down.',
                 color: '#b5651d',
                 nextAt,
-                nextRewardPreview: depthHint ?? 'Next dig: Abyss tier multiplies your payout by 3×',
+                nextRewardPreview: 'Read the vein 3/3 on your next dig and the haul pays 2× — 3× if it opens into the Abyss',
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -364,7 +384,9 @@ async function handleDig(interaction) {
                 color: '#b5651d',
                 nextAt,
                 pityStat,
-                nextRewardPreview: 'Full stamina + Deep intensity = best rare material odds',
+                // Stamina buys swings, not luck: tier odds come from the depth you
+                // dig, your pickaxe and an active magnet. Don't imply otherwise.
+                nextRewardPreview: 'Deeper depths, a better pickaxe and an Ore Magnet are what move your rare odds',
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -458,6 +480,14 @@ async function handleDig(interaction) {
         // never costs the player a charge.
         if (pickaxeData.requiresCharge) {
             m.charges[pickaxeData.chargeType] = (m.charges[pickaxeData.chargeType] ?? 0) - 1;
+            user.markModified('mining');
+        }
+
+        // Digging an explicit depth makes it your active depth. Without this it only
+        // ever moved when you unlocked something, so /mine profile and /mine map kept
+        // reporting a depth you had long since stopped digging.
+        if (requestedDepth && m.activeDepth !== depthId) {
+            m.activeDepth = depthId;
             user.markModified('mining');
         }
 
@@ -656,6 +686,12 @@ async function handleDig(interaction) {
                     m.totalEarned      -= result.caveInPayout;
                     m.dailyCoins       -= result.caveInPayout;
                     result.finalPayout  = 0;
+                }
+                // The doubling charge bought ore that is now buried — hand it back
+                // rather than billing a Black Market item for coins never kept.
+                if (result.gatheringYield) {
+                    refundEffectCharge(user, result.gatheringYield.effect);
+                    result.gatheringYield = null;
                 }
                 if (result.tier === 'legendary') m.legendaryFinds = Math.max(0, m.legendaryFinds - 1);
                 if (result.tier === 'event')     m.eventFinds     = Math.max(0, m.eventFinds - 1);
@@ -1529,10 +1565,23 @@ async function handleShop(interaction, sub) {
             return interaction.reply({ content: `This upgrade costs ${currency}${cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, flags: MessageFlags.Ephemeral });
         }
 
-        user.balance -= cost;
+        await persistGrindIfNew(user, 'mining');
+        const charged = await chargeBalance(interaction, cost);
+        if (!charged) {
+            return interaction.reply({ content: `This upgrade costs ${currency}${cost.toLocaleString()} — you no longer have enough. Check \`/balance\` and try again.`, flags: MessageFlags.Ephemeral });
+        }
+        user.balance = charged.balance;
+
         pickaxe.upgrade = moduleId;
         user.markModified('mining');
-        await user.save();
+        try {
+            await saveGrind(user, ['mining']);
+        } catch (err) {
+            console.error('[mineshop upgrade] save error:', err);
+            pickaxe.upgrade = null;
+            await refundBalance(interaction, cost);
+            return interaction.reply({ content: 'Installing the upgrade failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+        }
 
         const embed = new EmbedBuilder()
             .setColor('#b5651d')
@@ -1717,16 +1766,32 @@ async function handleShop(interaction, sub) {
         const pickaxe = m.pickaxes[m.equippedPickaxeIndex];
 
         if (method === 'shop') {
-            const repairResult = applyRepair(pickaxe, null);
-            if (repairResult.error) return interaction.reply({ content: repairResult.error, flags: MessageFlags.Ephemeral });
+            // Price it before touching the pickaxe: applyRepair permanently degrades
+            // max durability, so quoting first keeps a player who can't pay from
+            // wearing their pickaxe down for nothing.
+            const quote = quoteRepair(pickaxe, null);
+            if (quote.error) return interaction.reply({ content: quote.error, flags: MessageFlags.Ephemeral });
 
-            if (user.balance < repairResult.cost) {
-                return interaction.reply({ content: `Repair costs ${currency}${repairResult.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, flags: MessageFlags.Ephemeral });
+            if (user.balance < quote.cost) {
+                return interaction.reply({ content: `Repair costs ${currency}${quote.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, flags: MessageFlags.Ephemeral });
             }
 
-            user.balance -= repairResult.cost;
+            await persistGrindIfNew(user, 'mining');
+            const charged = await chargeBalance(interaction, quote.cost);
+            if (!charged) {
+                return interaction.reply({ content: `Repair costs ${currency}${quote.cost.toLocaleString()} — you no longer have enough. Check \`/balance\` and try again.`, flags: MessageFlags.Ephemeral });
+            }
+            user.balance = charged.balance;
+
+            const repairResult = applyRepair(pickaxe, null);
             user.markModified('mining');
-            await user.save();
+            try {
+                await saveGrind(user, ['mining']);
+            } catch (err) {
+                console.error('[mineshop repair] save error:', err);
+                await refundBalance(interaction, quote.cost);
+                return interaction.reply({ content: 'The repair failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+            }
 
             const embed = new EmbedBuilder()
                 .setColor('#b5651d')
@@ -1755,8 +1820,8 @@ async function handleShop(interaction, sub) {
                 return interaction.reply({ content: `You don't have any **${kit.name}**. Buy one with \`/mine shop buy\`.`, flags: MessageFlags.Ephemeral });
             }
 
-            if (pickaxe.status === 'condemned') {
-                return interaction.reply({ content: 'This pickaxe is condemned and cannot be repaired.', flags: MessageFlags.Ephemeral });
+            if (isCondemned(pickaxe)) {
+                return interaction.reply({ content: 'This pickaxe is condemned and cannot be repaired. Replace it with `/mine shop pickaxe`.', flags: MessageFlags.Ephemeral });
             }
             if (pickaxe.currentDurability >= pickaxe.maxDurability) {
                 return interaction.reply({ content: 'Pickaxe is already at full durability.', flags: MessageFlags.Ephemeral });
@@ -1800,11 +1865,26 @@ async function handleShop(interaction, sub) {
             return interaction.reply({ content: `Unlocking **${depthDef.name}** costs ${currency}${depthDef.unlockCost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`, flags: MessageFlags.Ephemeral });
         }
 
-        user.balance -= depthDef.unlockCost;
+        await persistGrindIfNew(user, 'mining');
+        const charged = await chargeBalance(interaction, depthDef.unlockCost);
+        if (!charged) {
+            return interaction.reply({ content: `Unlocking **${depthDef.name}** costs ${currency}${depthDef.unlockCost.toLocaleString()} — you no longer have enough. Check \`/balance\` and try again.`, flags: MessageFlags.Ephemeral });
+        }
+        user.balance = charged.balance;
+
+        const priorDepth = m.activeDepth;
         m.unlockedDepths.push(depthId);
         m.activeDepth = depthId;
         user.markModified('mining');
-        await user.save();
+        try {
+            await saveGrind(user, ['mining']);
+        } catch (err) {
+            console.error('[mineshop unlock] save error:', err);
+            m.unlockedDepths = m.unlockedDepths.filter(id => id !== depthId);
+            m.activeDepth = priorDepth;
+            await refundBalance(interaction, depthDef.unlockCost);
+            return interaction.reply({ content: 'The unlock failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+        }
 
         const embed = new EmbedBuilder()
             .setColor('#b5651d')
@@ -1857,6 +1937,15 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
         if (mineMultEntries.length > 0) {
             const mineCombined = (result.streakMult ?? 1) * critMultiplier;
             embed.addFields({ name: '📈 Multipliers', value: stackBar(mineMultEntries, mineCombined, finalPayout, currency), inline: false });
+        }
+
+        if (result.gatheringYield) {
+            const { label, emoji, chargesLeft } = result.gatheringYield;
+            embed.addFields({
+                name: `${emoji} ${label}`,
+                value: `Payout doubled · ${chargesLeft > 0 ? `${chargesLeft} charge${chargesLeft === 1 ? '' : 's'} left` : '**last charge**'}`,
+                inline: false,
+            });
         }
 
         if (specialDrop) {
@@ -2013,8 +2102,9 @@ async function handleMap(interaction) {
     const explored = (m.mineMap ?? []).filter(c => c !== 0).length;
     const total    = mapSize * mapSize;
 
-    // Compute depth level proxy from miner level for the yield multiplier hint
-    const intensityHint = m.level >= 40 ? '2.0×–3.0×' : m.level >= 20 ? '1.4×–2.0×' : '1.0×–1.4×';
+    // Yield multiplier comes from the vein-reading rounds, not from miner level:
+    // 0/3 correct pays 0.7× and 3/3 pays 2× (3× on a lucky break into the Abyss).
+    const intensityHint = '0.7×–3.0×, set by your vein read';
 
     const stashLines = getOreStashSummary(user).map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
 
@@ -2045,8 +2135,11 @@ async function handleMap(interaction) {
         .setFooter({ text: 'Mine more to expand your map • Use /mine raid to steal from others' })
         .setTimestamp();
 
+    const spareLocks = m.consumables?.mine_lock ?? 0;
     if (m.mineLockActive) {
-        embed.addFields({ name: '🔒 Mine Lock', value: 'Active — your mine is protected from raiders.', inline: true });
+        embed.addFields({ name: '🔒 Mine Lock', value: `Armed — the next raid on your mine bounces off it.${spareLocks > 0 ? `\n${spareLocks} spare in your bag.` : ''}`, inline: true });
+    } else if (spareLocks > 0) {
+        embed.addFields({ name: '🔓 Mine Lock', value: `${spareLocks} in your bag, none armed — use \`/mine shop use item:mine_lock\`.`, inline: true });
     }
 
     return interaction.reply({ embeds: [embed] });
@@ -2230,7 +2323,8 @@ async function handleRaid(interaction) {
             `**${interaction.user.username}** broke into your mine on **${interaction.guild.name}** ` +
             `and stole **${pct}%** of your ore stash!\n\n` +
             `**Lost:**\n${stolenLines}\n\n` +
-            `Craft a **Mine Lock** (\`/craft make mine_lock_from_obsidian\`) to protect yourself next time.`
+            `Get a **Mine Lock** (\`/mine shop buy item:mine_lock\` or \`/craft make mine_lock_from_obsidian\`) ` +
+            `and arm it with \`/mine shop use item:mine_lock\` to block the next raid.`
         )
         .setTimestamp();
     targetUser.send({ embeds: [dmEmbed] }).catch(() => null);
