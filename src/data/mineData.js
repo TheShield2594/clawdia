@@ -150,7 +150,7 @@ const CONSUMABLES = {
     mine_lock: {
         id: 'mine_lock', name: 'Mine Lock', emoji: '🔒',
         cost: 400, type: 'defense',
-        description: 'Blocks the next raid attempt on your mine; consumed on first use',
+        description: 'Arm it with `/mine shop use` — blocks the next raid on your mine, then breaks',
         maxStack: 3
     }
 };

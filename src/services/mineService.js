@@ -16,7 +16,7 @@ const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
 const { hasIronWill } = require('./synergyService');
 const { getBonusMultipliers } = require('../utils/prestige');
-const { getGatheringYieldEffect, consumeEffect } = require('./effectsService');
+const { getGatheringYieldEffect, consumeEffect, getEffect, EFFECT_CONFIGS } = require('./effectsService');
 
 const DANGEROUS_DEPTH_IDS = new Set(['crystal_caves', 'the_abyss']);
 const MINE_DEATH_RATE = 0.08;
@@ -294,6 +294,10 @@ function rollFailureSeverity() {
 
 // ─── PAYOUT CALCULATION ───────────────────────────────────────────────────────
 
+/**
+ * Returns { adjustedPayout, cappedByHard, gatheringYield }, where gatheringYield
+ * is { effect, label, emoji, chargesLeft } when a charge was spent here.
+ */
 function applyPayoutModifiers(user, rawPayout, depth) {
     const m = user.mining;
     let payout = rawPayout;
@@ -316,21 +320,38 @@ function applyPayoutModifiers(user, rawPayout, depth) {
 
     // Hard cap: zero coins — check before consuming item charges
     if (m.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
-        return { adjustedPayout: 0, cappedByHard: true };
+        return { adjustedPayout: 0, cappedByHard: true, gatheringYield: null };
     }
 
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
+    // Applies the daily soft cap and clamps to the headroom left under the hard cap.
+    const softCapped = m.dailyCoins >= LIMITS.DAILY_SOFT_CAP;
+    const remaining  = LIMITS.DAILY_HARD_CAP - m.dailyCoins;
+    const settle = raw => Math.max(0, Math.min(softCapped ? Math.round(raw * 0.50) : raw, remaining));
+
+    const basePayout    = settle(payout);
+    const doubledPayout = settle(payout * 2);
+
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
+    // is active. Only burn the charge when doubling actually pays more — within a
+    // hair of the daily hard cap the headroom clamp swallows the bonus entirely, and
+    // a charge that buys nothing shouldn't be spent.
     const gatherEffect = getGatheringYieldEffect(user);
-    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
-
-    if (m.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {
-        payout = Math.round(payout * 0.50);
+    if (gatherEffect && doubledPayout > basePayout) {
+        consumeEffect(user, gatherEffect);
+        const cfg = EFFECT_CONFIGS[gatherEffect];
+        return {
+            adjustedPayout: doubledPayout,
+            cappedByHard:   false,
+            gatheringYield: {
+                effect:      gatherEffect,
+                label:       cfg?.label ?? gatherEffect.replace(/_/g, ' '),
+                emoji:       cfg?.emoji ?? '✨',
+                chargesLeft: getEffect(user, gatherEffect)?.charges ?? 0,
+            },
+        };
     }
 
-    const remaining = LIMITS.DAILY_HARD_CAP - m.dailyCoins;
-    payout = Math.min(payout, remaining);
-
-    return { adjustedPayout: Math.max(0, payout), cappedByHard: false };
+    return { adjustedPayout: basePayout, cappedByHard: false, gatheringYield: null };
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -344,22 +365,41 @@ function applyDurabilityLoss(pickaxe, baseLoss) {
     updatePickaxeStatus(pickaxe);
 }
 
+/**
+ * True once shop repairs have ground a pickaxe's durability ceiling below 20% of
+ * its original. Derived from the durability ratio rather than `pickaxe.status`:
+ * updatePickaxeStatus reports 'broken' whenever current durability hits 0, which
+ * would otherwise mask condemnation and let a condemned pickaxe be repaired again
+ * every time it breaks — an endless loop that costs a repair instead of a
+ * replacement pickaxe.
+ */
+function isCondemned(pickaxe) {
+    if (!pickaxe?.baseDurability) return false;
+    return pickaxe.maxDurability / pickaxe.baseDurability < 0.20;
+}
+
 function updatePickaxeStatus(pickaxe) {
     if (pickaxe.currentDurability <= 0) {
         pickaxe.status = 'broken';
         return;
     }
     const ratio = pickaxe.maxDurability / pickaxe.baseDurability;
-    if (ratio < 0.20)      pickaxe.status = 'condemned';
-    else if (ratio < 0.50) pickaxe.status = 'degraded';
-    else                   pickaxe.status = 'good';
+    if (isCondemned(pickaxe)) pickaxe.status = 'condemned';
+    else if (ratio < 0.50)    pickaxe.status = 'degraded';
+    else                      pickaxe.status = 'good';
 }
 
-function applyRepair(pickaxe, requestedAmount) {
+/**
+ * Prices one repair cycle without touching the pickaxe, so callers can check
+ * affordability before anything is mutated.
+ *
+ * Returns { cost, amount } or { error }.
+ */
+function quoteRepair(pickaxe, requestedAmount) {
     const pickaxeData = PICKAXE_BY_TIER[pickaxe.tier];
     if (!pickaxeData) throw new Error('Unknown pickaxe tier');
 
-    if (pickaxe.status === 'condemned') {
+    if (isCondemned(pickaxe)) {
         return { error: 'This pickaxe is condemned and cannot be repaired. Replace it.' };
     }
     if (pickaxe.status !== 'broken' && pickaxe.currentDurability >= pickaxe.maxDurability) {
@@ -369,7 +409,14 @@ function applyRepair(pickaxe, requestedAmount) {
     const needed = pickaxe.maxDurability - pickaxe.currentDurability;
     const amount = Math.min(requestedAmount ?? needed, needed);
     const units  = Math.ceil(amount / 20);
-    const cost   = units * pickaxeData.repairCostPer20;
+
+    return { cost: units * pickaxeData.repairCostPer20, amount };
+}
+
+function applyRepair(pickaxe, requestedAmount) {
+    const quote = quoteRepair(pickaxe, requestedAmount);
+    if (quote.error) return quote;
+    const { cost, amount } = quote;
 
     pickaxe.currentDurability = Math.min(pickaxe.maxDurability, pickaxe.currentDurability + amount);
 
@@ -380,7 +427,7 @@ function applyRepair(pickaxe, requestedAmount) {
 
     updatePickaxeStatus(pickaxe);
 
-    return { cost, restoredAmount: amount, newStatus: pickaxe.status, condemned: pickaxe.status === 'condemned' };
+    return { cost, restoredAmount: amount, newStatus: pickaxe.status, condemned: isCondemned(pickaxe) };
 }
 
 // ─── LEVEL / XP ──────────────────────────────────────────────────────────────
@@ -468,6 +515,12 @@ function activateConsumable(user, consumableId) {
         }
         m.consumables[consumableId] -= 1;
         m.activeReinforcedTrapMinesLeft = def.minesLeft;
+    } else if (def.type === 'defense' && consumableId === 'mine_lock') {
+        if (m.mineLockActive) {
+            return { success: false, error: 'Your mine already has an active **Mine Lock**. It stays armed until a raider trips it.' };
+        }
+        m.consumables[consumableId] -= 1;
+        m.mineLockActive = true;
     } else if (def.type === 'repair') {
         return { success: false, error: `Use repair kits with \`/mine shop repair\`.` };
     } else {
@@ -535,7 +588,7 @@ function executeMine(user, depthId, options = {}) {
 
         const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
         const payoutBeforeMods = Math.round(rawPayout * critMultiplier * streakMult);
-        const { adjustedPayout, cappedByHard } = applyPayoutModifiers(user, payoutBeforeMods, depth);
+        const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, payoutBeforeMods, depth);
 
         let specialDrop = null;
         const mineDropChance = (isCrit ? ore.specialDrop?.chance * 2 : ore.specialDrop?.chance ?? 0) * (options.marketplaceActive ? 1.10 : 1.0);
@@ -560,7 +613,9 @@ function executeMine(user, depthId, options = {}) {
         user.balance     += adjustedPayout;
         m.totalEarned    += adjustedPayout;
         m.dailyCoins     += adjustedPayout;
-        if (adjustedPayout > m.bestPayout) m.bestPayout = adjustedPayout;
+        // bestPayout is deliberately NOT booked here: the intensity multiplier,
+        // the yield bonuses and the cave-in resolution all still run in mine.js,
+        // so only the caller knows what the player actually walked away with.
 
         m.successfulMines  += 1;
         m.consecutiveFails  = 0;
@@ -575,6 +630,7 @@ function executeMine(user, depthId, options = {}) {
             specialDrop, xpEarned: xpGain,
             levelUp: lvResult.leveledUp ? lvResult : null,
             cappedByHard,
+            gatheringYield,
             streakMult
         });
 
@@ -854,13 +910,6 @@ function isOreStashEmpty(user) {
     return getOreStashSummary(user).length === 0;
 }
 
-// ─── MINE LOCK ────────────────────────────────────────────────────────────────
-
-function activateMineLock(user) {
-    user.mining.mineLockActive = true;
-    user.markModified('mining');
-}
-
 module.exports = {
     ensureMineData,
     getMaxStamina,
@@ -875,6 +924,8 @@ module.exports = {
     applyPayoutModifiers,
     applyDurabilityLoss,
     updatePickaxeStatus,
+    isCondemned,
+    quoteRepair,
     applyRepair,
     levelFromXp,
     getLevelData,
@@ -891,6 +942,5 @@ module.exports = {
     updateMineMap,
     renderMineMap,
     getOreStashSummary,
-    isOreStashEmpty,
-    activateMineLock
+    isOreStashEmpty
 };
