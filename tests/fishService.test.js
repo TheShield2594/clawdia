@@ -154,16 +154,55 @@ function collectBindingsAndCalls(ast) {
     return { bound, called };
 }
 
-describe('fishing modules reference only names they define or import', () => {
-    const files = ['src/commands/economy/fish.js', 'src/services/fishService.js'];
+const GRIND_FILES = [
+    'src/commands/economy/fish.js',
+    'src/commands/economy/hunt.js',
+    'src/commands/economy/mine.js',
+    'src/commands/economy/explore.js',
+    'src/services/fishService.js',
+];
 
-    test.each(files)('%s calls no undefined function', relPath => {
-        const source = fs.readFileSync(path.join(__dirname, '..', relPath), 'utf8');
-        const ast    = parse(source, { sourceType: 'script', allowReturnOutsideFunction: true });
-        const { bound, called } = collectBindingsAndCalls(ast);
+const readAst = relPath => parse(
+    fs.readFileSync(path.join(__dirname, '..', relPath), 'utf8'),
+    { sourceType: 'script', allowReturnOutsideFunction: true },
+);
+
+describe('grind modules reference only names they define or import', () => {
+    test.each(GRIND_FILES)('%s calls no undefined function', relPath => {
+        const { bound, called } = collectBindingsAndCalls(readAst(relPath));
 
         const undefinedCalls = [...called].filter(name => !bound.has(name) && !JS_GLOBALS.has(name));
         expect(undefinedCalls).toEqual([]);
+    });
+});
+
+// The four grind systems moved off the User document into GrindProfile
+// (migration 005). A guard written against User silently matches every document
+// on the now-missing path and rejects nothing, which is how the fishing and
+// hunting cooldown claims both shipped doing nothing. Any dotted grind path in
+// a command is a query built against the wrong collection.
+describe('grind commands query no User-level grind paths', () => {
+    const GRIND_PATH = /^(fishing|hunt|mining|exploration)\./;
+
+    test.each(GRIND_FILES)('%s uses no "<system>.<field>" query path', relPath => {
+        const ast = readAst(relPath);
+        const offenders = [];
+
+        const visit = node => {
+            if (!node || typeof node.type !== 'string') return;
+            if (node.type === 'StringLiteral' && GRIND_PATH.test(node.value)) {
+                offenders.push(`${node.value} (line ${node.loc?.start.line})`);
+            }
+            for (const key of Object.keys(node)) {
+                if (key === 'loc') continue;
+                const child = node[key];
+                if (Array.isArray(child)) child.forEach(visit);
+                else if (child && typeof child.type === 'string') visit(child);
+            }
+        };
+        visit(ast.program);
+
+        expect(offenders).toEqual([]);
     });
 });
 
