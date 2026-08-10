@@ -804,17 +804,12 @@ async function executeStart(interaction) {
         else if (aimBonus > 0) lines.push(`> ✅ *Clean shot — +8% crit chance*`);
         if (lines.length) embed.setDescription(desc + '\n' + lines.join('\n'));
     }
-    if (result.petYieldBonus > 0) {
-        embed.addFields({ name: '🐺 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petYieldPct}% yield)`, inline: true });
-    }
-    if (result.petXpBonus > 0) {
-        embed.addFields({ name: '🦅 Pet XP Bonus', value: `+${result.petXpBonus} XP (${petXpPct}%)`, inline: true });
-    }
-    if (result.featuredZoneBonus > 0) {
-        embed.addFields({ name: '🌟 Featured Zone Bonus', value: `+${result.featuredZoneBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`, inline: true });
-    }
-    if (result.wildernessBonus > 0) {
-        embed.addFields({ name: '🌲 Wilderness District', value: `+${result.wildernessBonus.toLocaleString()} coins (+10% yield)`, inline: true });
+    // One consolidated field rather than one per bonus: Discord caps an embed at
+    // 25 fields, and giving each its own put a maximal hunt within one of the
+    // limit. Grouping them also reads better — they are all the same idea.
+    const bonusLines = buildBonusLines(result, petYieldPct, petXpPct);
+    if (bonusLines.length) {
+        embed.addFields({ name: '✨ Bonuses', value: bonusLines.join('\n'), inline: false });
     }
 
     // Hourly leader footer
@@ -1117,24 +1112,17 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             embed.addFields({ name: '🎁 Special Drop!', value: `You found **${specialDrop.name}**!`, inline: false });
         }
 
-        if (result.gatheringYield) {
-            const { label, emoji, chargesLeft } = result.gatheringYield;
-            embed.addFields({
-                name:  `${emoji} ${label}`,
-                value: chargesLeft > 0
-                    ? `Payout doubled — **${chargesLeft}** charge${chargesLeft === 1 ? '' : 's'} left.`
-                    : `Payout doubled — that was your **last charge**.`,
-                inline: true,
-            });
-        }
-
         if (levelUp) {
             const ld = getLevelData(levelUp.newLevel);
             embed.addFields({ name: '⬆️ Level Up!', value: `Hunter Level **${levelUp.oldLevel}** → **${levelUp.newLevel}** (${ld.title})`, inline: false });
         }
 
-        if (result.expiredBait)  embed.addFields({ name: '🪱 Bait Expired', value: `Your ${result.expiredBait.replace(/_/g, ' ')} has worn off.`, inline: false });
-        if (result.expiredCharm) embed.addFields({ name: '🍀 Charm Expired', value: `Your luck charm has worn off.`, inline: false });
+        const expiredBuffs = [];
+        if (result.expiredBait)  expiredBuffs.push(`🪱 Your ${result.expiredBait.replace(/_/g, ' ')} has worn off.`);
+        if (result.expiredCharm) expiredBuffs.push(`🍀 Your luck charm has worn off.`);
+        if (expiredBuffs.length) {
+            embed.addFields({ name: 'Buffs Expired', value: expiredBuffs.join('\n'), inline: false });
+        }
 
         if (weapon.status === 'broken') {
             embed.addFields({ name: '⚠️ Weapon Broke!', value: buildBrokenWeaponNote(weapon), inline: false });
@@ -1225,6 +1213,37 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     embed.setFooter({ text: 'Tip: Use consumables from /hunt shop to boost your success chance' });
     embed.setTimestamp();
     return embed;
+}
+
+/**
+ * Lines for the consolidated "✨ Bonuses" field — every extra that stacked on top
+ * of the base payout, in the order they were applied.
+ */
+function buildBonusLines(result, petYieldPct, petXpPct) {
+    const lines = [];
+
+    if (result.gatheringYield) {
+        const { label, emoji, chargesLeft } = result.gatheringYield;
+        lines.push(`${emoji} **${label}** — payout doubled · ${
+            chargesLeft > 0
+                ? `${chargesLeft} charge${chargesLeft === 1 ? '' : 's'} left`
+                : '**last charge**'
+        }`);
+    }
+    if (result.petYieldBonus > 0) {
+        lines.push(`🐺 **Pet** — +${result.petYieldBonus.toLocaleString()} coins (${petYieldPct}% yield)`);
+    }
+    if (result.petXpBonus > 0) {
+        lines.push(`🦅 **Pet** — +${result.petXpBonus.toLocaleString()} XP (${petXpPct}%)`);
+    }
+    if (result.featuredZoneBonus > 0) {
+        lines.push(`🌟 **Featured Zone** — +${result.featuredZoneBonus.toLocaleString()} coins (+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%)`);
+    }
+    if (result.wildernessBonus > 0) {
+        lines.push(`🌲 **Wilderness District** — +${result.wildernessBonus.toLocaleString()} coins (+${Math.round(WILDERNESS_YIELD_BONUS * 100)}% yield)`);
+    }
+
+    return lines;
 }
 
 function buildBrokenWeaponNote(weapon) {
@@ -2760,6 +2779,10 @@ async function checkGrandPrestige(client, user, guild, guildId) {
         } catch { /* non-critical */ }
     }
 }
+
+// Test hooks. The command loader only looks for `data` and `execute`
+// (src/index.js), so extra exports are inert at runtime.
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines };
 
 // ── Per-user action lock ──────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent
