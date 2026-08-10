@@ -40,6 +40,8 @@ const {
     activateConsumable,
     applyRepair,
     updateWeaponStatus,
+    isCondemned,
+    quoteRepair,
     applyXp,
     rollApexType,
     resolveApexEncounter,
@@ -460,42 +462,46 @@ async function executeStart(interaction) {
 
     if (weapon.status === 'broken' || weapon.currentDurability <= 0) {
         return interaction.reply({
-            content: `Your **${weapon.name}** is broken! Repair it with \`/hunt shop repair\` or buy a new one with \`/hunt shop weapon\`.`,
+            content: isCondemned(weapon)
+                ? `Your **${weapon.name}** is broken beyond repair — too many shop repairs have worn it out. Buy a replacement with \`/hunt shop weapon\` and discard this one with \`/hunt inv discard\`.`
+                : `Your **${weapon.name}** is broken! Repair it with \`/hunt shop repair\` or buy a new one with \`/hunt shop weapon\`.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
     const weaponData = WEAPON_BY_TIER[weapon.tier];
-    if (weaponData.requiresAmmo) {
-        const ammoStock = h.ammo[weaponData.ammoType] ?? 0;
-        if (ammoStock <= 0) {
-            return interaction.reply({
-                content: `You're out of **${weaponData.ammoType.replace(/_/g, ' ')}**! Buy more with \`/hunt shop buy\`.`,
-                flags: MessageFlags.Ephemeral
-            });
-        }
-        h.ammo[weaponData.ammoType] = ammoStock - 1;
-        user.markModified('hunt');
+    if (weaponData.requiresAmmo && (h.ammo[weaponData.ammoType] ?? 0) <= 0) {
+        return interaction.reply({
+            content: `You're out of **${weaponData.ammoType.replace(/_/g, ' ')}**! Buy more with \`/hunt shop buy\`.`,
+            flags: MessageFlags.Ephemeral
+        });
     }
 
     // Atomically claim the cooldown slot now that all preflight checks have passed —
     // lastHunt is set the moment the hunt is actually accepted, not earlier, so a
     // failed precheck (stamina/weapon/ammo) never burns the cooldown. The same guard
     // still prevents two concurrent /hunt start calls from both slipping through.
+    //
+    // The claim targets GrindProfile, not User: hunt state lives in its own
+    // collection (see src/models/User.js), so a User-level guard would match every
+    // document on the missing `hunt` field and never reject anything.
     const huntClaimNow = new Date();
     const huntCooldownFloor = new Date(huntClaimNow.getTime() - LIMITS.HUNT_COOLDOWN_MS);
-    const claimedHunt = await User.findOneAndUpdate(
+    await persistGrindIfNew(user, 'hunt');
+    const claimedHunt = await GrindProfile.findOneAndUpdate(
         {
             userId: interaction.user.id,
             guildId: interaction.guild.id,
-            $or: [{ 'hunt.lastHunt': null }, { 'hunt.lastHunt': { $lte: huntCooldownFloor } }],
+            system: 'hunt',
+            $or: [{ 'data.lastHunt': null }, { 'data.lastHunt': { $lte: huntCooldownFloor } }],
         },
-        { $set: { 'hunt.lastHunt': huntClaimNow } },
+        { $set: { 'data.lastHunt': huntClaimNow } },
         { new: true },
     );
 
     if (!claimedHunt) {
-        const nextAt = new Date(h.lastHunt.getTime() + LIMITS.HUNT_COOLDOWN_MS);
+        const lastAt = h.lastHunt ?? huntClaimNow;
+        const nextAt = new Date(lastAt.getTime() + LIMITS.HUNT_COOLDOWN_MS);
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '🫁 Catching Your Breath',
@@ -507,6 +513,13 @@ async function executeStart(interaction) {
         });
     }
     h.lastHunt = huntClaimNow;
+
+    // Ammo comes out only once the cooldown slot is ours, so a lost race never
+    // costs the player a round.
+    if (weaponData.requiresAmmo) {
+        h.ammo[weaponData.ammoType] = (h.ammo[weaponData.ammoType] ?? 0) - 1;
+        user.markModified('hunt');
+    }
 
     // ── Stealth Approach + Precision Aim ─────────────────────────────────────
     // Phase 1 — Stealth: player reads a behaviour hint and picks the right approach.
@@ -694,8 +707,18 @@ async function executeStart(interaction) {
     if (result.success && result.xpEarned > 0 && petXpPct > 0) {
         const xpBonus = Math.round(result.xpEarned * petXpPct / 100);
         if (xpBonus > 0) {
+            const petLevelUp = applyXp(user, xpBonus);
             result.xpEarned      += xpBonus;
             result.petXpBonus     = xpBonus;
+            if (petLevelUp.leveledUp) {
+                // Fold into any level-up the base XP already produced so the embed
+                // reports one old → new span rather than two.
+                result.levelUp = {
+                    oldLevel:  result.levelUp?.oldLevel ?? petLevelUp.oldLevel,
+                    newLevel:  petLevelUp.newLevel,
+                    leveledUp: true,
+                };
+            }
         }
     }
 
@@ -1087,7 +1110,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         if (result.expiredCharm) embed.addFields({ name: '🍀 Charm Expired', value: `Your luck charm has worn off.`, inline: false });
 
         if (weapon.status === 'broken') {
-            embed.addFields({ name: '⚠️ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/hunt shop repair\` before hunting again.`, inline: false });
+            embed.addFields({ name: '⚠️ Weapon Broke!', value: buildBrokenWeaponNote(weapon), inline: false });
         } else if (weapon.currentDurability <= Math.floor(weapon.maxDurability * 0.20)) {
             embed.addFields({ name: '⚠️ Low Durability', value: `Your **${weapon.name}** is nearly worn out (${weapon.currentDurability}/${weapon.maxDurability}). Repair soon!`, inline: false });
         }
@@ -1150,7 +1173,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     }
 
     if (weapon.status === 'broken' && !result.deathEvent) {
-        embed.addFields({ name: '❌ Weapon Broke!', value: `Your **${weapon.name}** has broken! Use \`/hunt shop repair\` before hunting again.`, inline: false });
+        embed.addFields({ name: '❌ Weapon Broke!', value: buildBrokenWeaponNote(weapon), inline: false });
     }
 
     const sinceRareNow = user.hunt.sinceRare ?? 0;
@@ -1159,6 +1182,12 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     embed.setFooter({ text: 'Tip: Use consumables from /hunt shop to boost your success chance' });
     embed.setTimestamp();
     return embed;
+}
+
+function buildBrokenWeaponNote(weapon) {
+    return isCondemned(weapon)
+        ? `Your **${weapon.name}** has broken, and it's condemned — too many shop repairs have worn it out, so it can't be fixed. Replace it with \`/hunt shop weapon\`.`
+        : `Your **${weapon.name}** has broken! Use \`/hunt shop repair\` before hunting again.`;
 }
 
 function buildFailureTitle(severityId) {
@@ -2402,7 +2431,7 @@ async function handleRepair(interaction, user, currency) {
                 flags: MessageFlags.Ephemeral
             });
         }
-        if (weapon.status === 'condemned') {
+        if (isCondemned(weapon)) {
             return interaction.reply({ content: 'This weapon is condemned and cannot be repaired. Replace it with `/hunt shop weapon`.', flags: MessageFlags.Ephemeral });
         }
         if (weapon.currentDurability >= weapon.maxDurability) {
@@ -2433,7 +2462,7 @@ async function handleRepair(interaction, user, currency) {
         });
     }
 
-    if (weapon.status === 'condemned') {
+    if (isCondemned(weapon)) {
         return interaction.reply({ content: 'This weapon is **condemned** and cannot be repaired. Replace it with `/hunt shop weapon`.', flags: MessageFlags.Ephemeral });
     }
     if (weapon.currentDurability >= weapon.maxDurability && weapon.status !== 'broken') {
@@ -2445,16 +2474,24 @@ async function handleRepair(interaction, user, currency) {
     if (!requestedAmt || requestedAmt > needed) requestedAmt = needed;
     requestedAmt = Math.ceil(requestedAmt / 20) * 20;
 
-    const result = applyRepair(weapon, requestedAmt);
+    // Price the repair before applying it — applyRepair degrades max durability and
+    // bumps the repair count, and none of that should happen on a quote the player
+    // can't afford.
+    const quote = quoteRepair(weapon, requestedAmt);
 
-    if (result.error) {
-        return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
+    if (quote.error) {
+        return interaction.reply({ content: quote.error, flags: MessageFlags.Ephemeral });
     }
-    if (user.balance < result.cost) {
+    if (user.balance < quote.cost) {
         return interaction.reply({
-            content: `Repair costs ${currency}${result.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`,
+            content: `Repair costs ${currency}${quote.cost.toLocaleString()} but you only have ${currency}${user.balance.toLocaleString()}.`,
             flags: MessageFlags.Ephemeral
         });
+    }
+
+    const result = applyRepair(weapon, requestedAmt);
+    if (result.error) {
+        return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
     }
 
     user.balance -= result.cost;

@@ -446,20 +446,27 @@ function applyPayoutModifiers(user, rawPayout, zone) {
         return { adjustedPayout: 0, cappedByHard: true };
     }
 
-    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever is active
-    const gatherEffect = getGatheringYieldEffect(user);
-    if (gatherEffect) { consumeEffect(user, gatherEffect); payout *= 2; }
+    // Applies the daily soft cap and clamps to the headroom left under the hard cap.
+    const softCapped = h.dailyCoins >= LIMITS.DAILY_SOFT_CAP;
+    const remaining  = LIMITS.DAILY_HARD_CAP - h.dailyCoins;
+    const settle = raw => Math.max(0, Math.min(softCapped ? Math.round(raw * 0.50) : raw, remaining));
 
-    // Soft cap: 50% reduction
-    if (h.dailyCoins >= LIMITS.DAILY_SOFT_CAP) {
-        payout = Math.round(payout * 0.50);
+    const basePayout = settle(payout);
+
+    // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
+    // is active. Only burn the charge when doubling actually pays more — within a
+    // hair of the daily hard cap the headroom clamp swallows the bonus entirely, and
+    // a charge that buys nothing shouldn't be spent.
+    const gatherEffect = getGatheringYieldEffect(user);
+    if (gatherEffect) {
+        const doubledPayout = settle(payout * 2);
+        if (doubledPayout > basePayout) {
+            consumeEffect(user, gatherEffect);
+            return { adjustedPayout: doubledPayout, cappedByHard: false };
+        }
     }
 
-    // Don't let payout push past hard cap
-    const remaining = LIMITS.DAILY_HARD_CAP - h.dailyCoins;
-    payout = Math.min(payout, remaining);
-
-    return { adjustedPayout: Math.max(0, payout), cappedByHard: false };
+    return { adjustedPayout: basePayout, cappedByHard: false };
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -478,6 +485,18 @@ function applyDurabilityLoss(weapon, baseLoss) {
 }
 
 /**
+ * True once shop repairs have ground a weapon's durability ceiling below 20% of
+ * its original. Derived from the durability ratio rather than `weapon.status`:
+ * updateWeaponStatus reports 'broken' whenever current durability hits 0, which
+ * would otherwise mask condemnation and let a condemned weapon be repaired again
+ * every time it breaks.
+ */
+function isCondemned(weapon) {
+    if (!weapon?.baseDurability) return false;
+    return weapon.maxDurability / weapon.baseDurability < 0.20;
+}
+
+/**
  * Updates weapon status label based on current/max durability ratios.
  */
 function updateWeaponStatus(weapon) {
@@ -486,9 +505,33 @@ function updateWeaponStatus(weapon) {
         return;
     }
     const ratio = weapon.maxDurability / weapon.baseDurability;
-    if (ratio < 0.20)       weapon.status = 'condemned';
-    else if (ratio < 0.50)  weapon.status = 'degraded';
-    else                    weapon.status = 'good';
+    if (isCondemned(weapon))  weapon.status = 'condemned';
+    else if (ratio < 0.50)    weapon.status = 'degraded';
+    else                      weapon.status = 'good';
+}
+
+/**
+ * Prices one repair cycle without touching the weapon, so callers can check
+ * affordability before anything is mutated.
+ *
+ * Returns { cost, amount } or { error }.
+ */
+function quoteRepair(weapon, requestedAmount) {
+    const weaponData = WEAPON_BY_TIER[weapon.tier];
+    if (!weaponData) throw new Error('Unknown weapon tier');
+
+    if (isCondemned(weapon)) {
+        return { error: 'This weapon is condemned and cannot be repaired. Replace it.' };
+    }
+    if (weapon.status !== 'broken' && weapon.currentDurability >= weapon.maxDurability) {
+        return { error: 'Weapon is already at full durability.' };
+    }
+
+    const needed = weapon.maxDurability - weapon.currentDurability;
+    const amount = Math.min(requestedAmount ?? needed, needed);
+    const units  = Math.ceil(amount / 20);
+
+    return { cost: units * weaponData.repairCostPer20, amount };
 }
 
 /**
@@ -499,20 +542,9 @@ function updateWeaponStatus(weapon) {
  * Returns { cost, restoredAmount, newStatus, condemned }
  */
 function applyRepair(weapon, requestedAmount) {
-    const weaponData = WEAPON_BY_TIER[weapon.tier];
-    if (!weaponData) throw new Error('Unknown weapon tier');
-
-    if (weapon.status === 'condemned') {
-        return { error: 'This weapon is condemned and cannot be repaired. Replace it.' };
-    }
-    if (weapon.status !== 'broken' && weapon.currentDurability >= weapon.maxDurability) {
-        return { error: 'Weapon is already at full durability.' };
-    }
-
-    const needed = weapon.maxDurability - weapon.currentDurability;
-    const amount = Math.min(requestedAmount ?? needed, needed);
-    const units  = Math.ceil(amount / 20);
-    const cost   = units * weaponData.repairCostPer20;
+    const quote = quoteRepair(weapon, requestedAmount);
+    if (quote.error) return quote;
+    const { cost, amount } = quote;
 
     // Restore durability
     weapon.currentDurability = Math.min(weapon.maxDurability, weapon.currentDurability + amount);
@@ -527,7 +559,7 @@ function applyRepair(weapon, requestedAmount) {
 
     updateWeaponStatus(weapon);
 
-    return { cost, restoredAmount: amount, newStatus: weapon.status, condemned: weapon.status === 'condemned' };
+    return { cost, restoredAmount: amount, newStatus: weapon.status, condemned: isCondemned(weapon) };
 }
 
 // ─── LEVEL / XP ──────────────────────────────────────────────────────────────
@@ -1111,6 +1143,8 @@ module.exports = {
     applyPayoutModifiers,
     applyDurabilityLoss,
     updateWeaponStatus,
+    isCondemned,
+    quoteRepair,
     applyRepair,
     levelFromXp,
     getLevelData,

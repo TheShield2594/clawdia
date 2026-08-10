@@ -469,36 +469,38 @@ async function handleCast(interaction) {
 
     // ── Bait check ────────────────────────────────────────────────────
     const rodData = ROD_BY_TIER[rod.tier];
-    if (rodData.requiresBait) {
-        const baitStock = f.bait[rodData.baitType] ?? 0;
-        if (baitStock <= 0) {
-            return interaction.reply({
-                content: `You're out of **${rodData.baitType.replace(/_/g, ' ')}**! Buy more with \`/fish shop\`.`,
-                flags: MessageFlags.Ephemeral
-            });
-        }
-        f.bait[rodData.baitType] = baitStock - 1;
-        user.markModified('fishing');
+    if (rodData.requiresBait && (f.bait[rodData.baitType] ?? 0) <= 0) {
+        return interaction.reply({
+            content: `You're out of **${rodData.baitType.replace(/_/g, ' ')}**! Buy more with \`/fish shop\`.`,
+            flags: MessageFlags.Ephemeral
+        });
     }
 
     // Atomically claim the cooldown slot now that all preflight checks have passed —
     // lastCast is set the moment the cast is actually accepted, not earlier, so a
     // failed precheck (stamina/rod/bait) never burns the cooldown. The same guard
     // still prevents two concurrent /fish casts from both slipping through.
+    //
+    // The claim targets GrindProfile, not User: fishing state lives in its own
+    // collection (see src/models/User.js), so a User-level guard would match every
+    // document on the missing `fishing` field and never reject anything.
     const fishClaimNow = new Date();
     const fishCooldownFloor = new Date(fishClaimNow.getTime() - LIMITS.CAST_COOLDOWN_MS);
-    const claimedFish = await User.findOneAndUpdate(
+    await persistGrindIfNew(user, 'fishing');
+    const claimedFish = await GrindProfile.findOneAndUpdate(
         {
             userId: interaction.user.id,
             guildId: interaction.guild.id,
-            $or: [{ 'fishing.lastCast': null }, { 'fishing.lastCast': { $lte: fishCooldownFloor } }],
+            system: 'fishing',
+            $or: [{ 'data.lastCast': null }, { 'data.lastCast': { $lte: fishCooldownFloor } }],
         },
-        { $set: { 'fishing.lastCast': fishClaimNow } },
+        { $set: { 'data.lastCast': fishClaimNow } },
         { new: true },
     );
 
     if (!claimedFish) {
-        const nextAt = new Date(f.lastCast.getTime() + LIMITS.CAST_COOLDOWN_MS);
+        const lastAt = f.lastCast ?? fishClaimNow;
+        const nextAt = new Date(lastAt.getTime() + LIMITS.CAST_COOLDOWN_MS);
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '🎣 Line Still Settling',
@@ -510,6 +512,13 @@ async function handleCast(interaction) {
         });
     }
     f.lastCast = fishClaimNow;
+
+    // Bait comes out only once the cooldown slot is ours, so a lost race never
+    // costs the player a bait.
+    if (rodData.requiresBait) {
+        f.bait[rodData.baitType] = (f.bait[rodData.baitType] ?? 0) - 1;
+        user.markModified('fishing');
+    }
 
     const featured          = getDailyFeatured(interaction.guild.id);
     const isFeaturedSpot    = locationId === featured.fishSpot.id;
