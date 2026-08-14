@@ -50,6 +50,7 @@
 ### 3. Invite Bot to Server
 
 Use this URL (replace CLIENT_ID with yours):
+
 ```
 https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=8&scope=bot%20applications.commands
 ```
@@ -174,6 +175,7 @@ NODE_ENV=production
 ### Generating Session Secret
 
 Use this command to generate a secure session secret:
+
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
@@ -246,6 +248,7 @@ before deleting anything.
 2. Click "Pull and redeploy"
 
 **Manual:**
+
 ```bash
 docker-compose pull
 docker-compose up -d
@@ -256,6 +259,7 @@ docker-compose up -d
 **Portainer:** Stacks > clawdia > bot > Logs
 
 **Command line:**
+
 ```bash
 docker logs clawdia -f
 ```
