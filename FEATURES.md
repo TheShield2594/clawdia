@@ -162,21 +162,15 @@ Set a moderation log channel to track:
 /daily               - Daily reward (24h cooldown)
 /work                - Work for coins (1h cooldown)
 /bank transfer <user> <amount> - Send coins
-/casino wheel        - Spin the Wheel of Fortune (free spin per cooldown, or buy extra spins)
+/casino <game>       - Casino games: blackjack, crash, cupgame, higherlower, keno, poker, roulette, slots
 /casino roulette     - Bet on Red/Black, Odd/Even, Low/High, dozens, columns, or a straight number
+/casino jackpot      - View the current progressive jackpot pool
 ```
-
-**Wheel of Fortune:**
-- One free spin per cooldown window (default: 24 hours, configurable per server)
-- Optional paid spins at any time using server currency
-- Weighted prize segments — coins, jackpot, free re-spin, or bust
-- Animated reveal in the embed before the result is shown
 
 **Dashboard Settings:**
 - Currency symbol (💰, 🪙, $, etc.)
 - Daily reward amount
 - Work reward range (min-max)
-- Wheel of Fortune: enable/disable, cooldown hours, extra spin cost
 
 ### World Exploration
 
@@ -263,7 +257,7 @@ Auto-generated cards include:
 
 ### Decision-Focused Dashboards
 
-UltraBot now provides decision-grade analytics so server owners can move from raw events to clear actions.
+Clawdia now provides decision-grade analytics so server owners can move from raw events to clear actions.
 
 ### Included Insights
 
@@ -399,8 +393,7 @@ Prevent spam with built-in cooldowns:
 |---------|----------|
 | `/daily` | 24 hours |
 | `/work` | 1 hour |
-| `/casino wheel` | 24 hours (configurable; bypass with paid spin) |
-| `/casino` (other games) | 5–10 seconds |
+| `/casino` (games) | 5–10 seconds |
 | `/play` | 3 seconds |
 | Most others | 3 seconds |
 

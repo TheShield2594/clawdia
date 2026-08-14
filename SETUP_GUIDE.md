@@ -1,4 +1,4 @@
-# UltraBot Setup Guide
+# Clawdia Setup Guide
 
 ## Table of Contents
 1. [Discord Bot Setup](#discord-bot-setup)
@@ -50,6 +50,7 @@
 ### 3. Invite Bot to Server
 
 Use this URL (replace CLIENT_ID with yours):
+
 ```
 https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=8&scope=bot%20applications.commands
 ```
@@ -146,7 +147,10 @@ DISCORD_TOKEN=your_bot_token_here
 CLIENT_ID=your_client_id_here
 CLIENT_SECRET=your_client_secret_here
 
-# Database
+# Database — the name is still "ultrabot" from before the rebrand, deliberately.
+# Renaming it points the bot at a new, empty database rather than moving data.
+# Upgrading an existing deployment? See "Migrating an existing UltraBot stack"
+# below: the volume holding this database is namespaced by your stack name.
 MONGODB_URI=mongodb://mongodb:27017/ultrabot
 
 # Dashboard
@@ -171,25 +175,68 @@ NODE_ENV=production
 ### Generating Session Secret
 
 Use this command to generate a secure session secret:
+
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 ## Portainer Deployment
 
+### Migrating an existing UltraBot stack
+
+Skip this section on a fresh install. If you already run the stack under the old
+name, read it before deploying — the container and network renames are not
+drop-in.
+
+**The data lives in the volume, and the volume is namespaced by the stack name.**
+`mongodb_data` is a normal (non-external) named volume, so Compose stores it as
+`<stack-name>_mongodb_data`. A stack deployed as `ultrabot` holds its data in
+`ultrabot_mongodb_data`. Deploy the same file under the name `clawdia` and
+Compose creates a *new, empty* `clawdia_mongodb_data` — the bot starts up clean
+and the old data is still on disk, just orphaned. Confirm what you have first:
+
+```bash
+docker volume ls | grep mongodb_data
+```
+
+Then pick one:
+
+- **Keep the stack name (simplest).** Leave the Portainer stack called
+  `ultrabot` and redeploy the updated file into it. The containers and network
+  get their new names; the volume path never changes, so nothing moves.
+- **Rename the stack and reuse the volume.** Stop and remove the old stack
+  first — `container_name` is fixed, so `clawdia-mongodb` and `clawdia` collide
+  with the still-running old containers, as does the published port. Then, in
+  the new stack, point at the existing volume explicitly:
+
+  ```yaml
+  volumes:
+    mongodb_data:
+      external: true
+      name: ultrabot_mongodb_data
+  ```
+
+- **Rename the stack and move the data.** Run `./scripts/backup.sh` against the
+  old stack, deploy the new one, then `./scripts/restore.sh <archive>`. Use this
+  if you want the volume named after the new stack too.
+
+Removing a stack in Portainer does not delete its volumes, so the old data
+survives a mistake here — but verify the bot came up with your servers intact
+before deleting anything.
+
 ### Method 1: Docker Compose in Portainer
 
 1. Open Portainer
 2. Go to "Stacks"
 3. Click "Add stack"
-4. Name it "ultrabot"
+4. Name it "clawdia" (or keep your existing stack name — see the migration note above)
 5. Paste the `docker-compose.yml` content
 6. Add environment variables in the env section or upload `.env` file
 7. Click "Deploy the stack"
 
 ### Method 2: Manual Container Creation
 
-1. Create a custom bridge network: `ultrabot-network`
+1. Create a custom bridge network: `clawdia-network`
 2. Deploy MongoDB container first
 3. Deploy bot container with environment variables
 4. Link containers to the network
@@ -197,10 +244,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ### Updating the Bot
 
 **With Portainer:**
-1. Go to Stacks > ultrabot
+1. Go to Stacks > clawdia
 2. Click "Pull and redeploy"
 
 **Manual:**
+
 ```bash
 docker-compose pull
 docker-compose up -d
@@ -208,11 +256,12 @@ docker-compose up -d
 
 ### Viewing Logs
 
-**Portainer:** Stacks > ultrabot > bot > Logs
+**Portainer:** Stacks > clawdia > bot > Logs
 
 **Command line:**
+
 ```bash
-docker logs ultrabot -f
+docker logs clawdia -f
 ```
 
 ## Database Management
@@ -224,15 +273,15 @@ The bot automatically creates the database and collections. No manual setup need
 ### Backup Database
 
 ```bash
-docker exec ultrabot-mongodb mongodump --out /data/backup
-docker cp ultrabot-mongodb:/data/backup ./backup
+docker exec clawdia-mongodb mongodump --out /data/backup
+docker cp clawdia-mongodb:/data/backup ./backup
 ```
 
 ### Restore Database
 
 ```bash
-docker cp ./backup ultrabot-mongodb:/data/backup
-docker exec ultrabot-mongodb mongorestore /data/backup
+docker cp ./backup clawdia-mongodb:/data/backup
+docker exec clawdia-mongodb mongorestore /data/backup
 ```
 
 ## Troubleshooting
@@ -242,7 +291,7 @@ docker exec ultrabot-mongodb mongorestore /data/backup
 1. Check bot is online in Discord
 2. Verify `DISCORD_TOKEN` is correct
 3. Check intents are enabled in Discord Developer Portal
-4. View logs: `docker logs ultrabot`
+4. View logs: `docker logs clawdia`
 
 ### Dashboard Not Loading
 
@@ -297,7 +346,7 @@ docker exec ultrabot-mongodb mongorestore /data/backup
 
 ## Getting Help
 
-- Check logs first: `docker logs ultrabot -f`
+- Check logs first: `docker logs clawdia -f`
 - Review this guide thoroughly
 - Check Discord.js documentation for bot issues
 - Review API provider documentation for AI issues

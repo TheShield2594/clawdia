@@ -35,7 +35,7 @@ const CATEGORIES = [
             { name: 'hunt',           description: 'Hunt animals, manage gear, quests, zones, and prestige — all in one place' },
             { name: 'craft',          description: 'Craft items from hunting materials' },
             { name: 'fish',           description: 'Fishing: cast lines, manage gear, shop, craft, quests, locations, and prestige' },
-            { name: 'casino',         description: 'Casino games: baccarat, blackjack, crash, doubleornothing, higherlower, plinko, roulette, slots, wheel' },
+            { name: 'casino',         description: 'Casino games: blackjack, crash, cupgame, higherlower, keno, poker, roulette, slots' },
             { name: 'duel',           description: 'Challenge another user to a coin duel' },
             { name: 'quiz',           description: 'Answer trivia questions to win coins' },
         ],

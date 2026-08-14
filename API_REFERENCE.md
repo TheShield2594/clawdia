@@ -1,6 +1,6 @@
-# UltraBot API Reference
+# Clawdia API Reference
 
-## Developer Guide for Extending UltraBot
+## Developer Guide for Extending Clawdia
 
 This guide is for developers who want to add custom features or modify existing functionality.
 
@@ -667,7 +667,7 @@ if (interaction.isButton()) {
 ### Building Docker Image
 
 ```bash
-docker build -t ultrabot:latest .
+docker build -t clawdia:latest .
 ```
 
 ### Running Locally

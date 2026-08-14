@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restore UltraBot MongoDB data from a backup archive.
+# Restore Clawdia MongoDB data from a backup archive.
 # Usage: ./scripts/restore.sh <path-to-archive.gz> [--drop]
 #   --drop  Drop existing collections before restoring (clean restore)
 set -euo pipefail
@@ -44,14 +44,26 @@ if command -v mongorestore &>/dev/null; then
     # shellcheck disable=SC2086
     mongorestore --uri="${MONGO_URI}" --gzip --archive="${ARCHIVE}" ${DROP_FLAG}
 else
-    echo "[restore] mongorestore not found locally; attempting via Docker container 'ultrabot-mongodb'"
-    docker cp "${ARCHIVE}" ultrabot-mongodb:/tmp/ultrabot-restore.gz
+    echo "[restore] mongorestore not found locally; attempting via Docker container 'clawdia-mongodb'"
+    # Stage the archive in a private directory (mktemp -d is 0700) rather than a
+    # fixed, guessable path in the container's world-readable /tmp. Cleanup runs
+    # from an EXIT trap: a trailing rm would be skipped by `set -e` if
+    # mongorestore failed, stranding a full copy of the data in the container.
+    REMOTE_DIR=$(docker exec clawdia-mongodb mktemp -d)
+    # An empty result would stage the archive at the container root and make the
+    # cleanup a no-op, so refuse rather than guess a path. `set -u` does not
+    # catch this: the variable is set, just empty.
+    if [ -z "${REMOTE_DIR}" ]; then
+        echo "[restore] ERROR: could not create a temp directory in clawdia-mongodb" >&2
+        exit 1
+    fi
+    trap 'docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true' EXIT
+    docker cp "${ARCHIVE}" "clawdia-mongodb:${REMOTE_DIR}/restore.gz"
     # Replace 'localhost' with '127.0.0.1' so the URI resolves inside the container.
     SAFE_URI="${MONGO_URI/localhost/127.0.0.1}"
     # shellcheck disable=SC2086
-    docker exec ultrabot-mongodb \
-        mongorestore --uri="${SAFE_URI}" --gzip --archive=/tmp/ultrabot-restore.gz ${DROP_FLAG}
-    docker exec ultrabot-mongodb rm /tmp/ultrabot-restore.gz
+    docker exec clawdia-mongodb \
+        mongorestore --uri="${SAFE_URI}" --gzip --archive="${REMOTE_DIR}/restore.gz" ${DROP_FLAG}
 fi
 
 echo "[restore] Restore complete."

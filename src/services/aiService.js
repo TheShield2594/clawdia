@@ -525,7 +525,7 @@ function openRouterArgs(base) {
         ...base,
         baseURL: 'https://openrouter.ai/api/v1',
         defaultHeaders: {
-            'HTTP-Referer': process.env.OPENROUTER_REFERER || 'https://github.com/theshield2594/ultrabot',
+            'HTTP-Referer': process.env.OPENROUTER_REFERER || 'https://github.com/TheShield2594/clawdia',
             'X-Title': 'Clawdia'
         }
     };
