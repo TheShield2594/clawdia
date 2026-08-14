@@ -30,10 +30,22 @@ else
     # own loopback interface (the service hostname is not reachable from within).
     echo "[backup] mongodump not found locally; attempting via Docker container 'clawdia-mongodb'"
     CONTAINER_URI="${MONGO_URI/localhost/127.0.0.1}"
+    # Dump into a private directory (mktemp -d is 0700) rather than a fixed,
+    # guessable path in the container's world-readable /tmp. Cleanup runs from an
+    # EXIT trap: a trailing rm would be skipped by `set -e` if mongodump or
+    # docker cp failed, stranding a full copy of the database in the container.
+    REMOTE_DIR=$(docker exec clawdia-mongodb mktemp -d)
+    # An empty result would send the dump to the container root and make the
+    # cleanup a no-op, so refuse rather than guess a path. `set -u` does not
+    # catch this: the variable is set, just empty.
+    if [ -z "${REMOTE_DIR}" ]; then
+        echo "[backup] ERROR: could not create a temp directory in clawdia-mongodb" >&2
+        exit 1
+    fi
+    trap 'docker exec clawdia-mongodb rm -rf "${REMOTE_DIR}" >/dev/null 2>&1 || true' EXIT
     docker exec clawdia-mongodb \
-        mongodump --uri="${CONTAINER_URI}" --gzip --archive=/tmp/clawdia-backup.gz
-    docker cp clawdia-mongodb:/tmp/clawdia-backup.gz "${ARCHIVE}"
-    docker exec clawdia-mongodb rm /tmp/clawdia-backup.gz
+        mongodump --uri="${CONTAINER_URI}" --gzip --archive="${REMOTE_DIR}/backup.gz"
+    docker cp "clawdia-mongodb:${REMOTE_DIR}/backup.gz" "${ARCHIVE}"
 fi
 
 SIZE=$(du -sh "${ARCHIVE}" | cut -f1)

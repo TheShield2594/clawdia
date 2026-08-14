@@ -148,6 +148,8 @@ CLIENT_SECRET=your_client_secret_here
 
 # Database — the name is still "ultrabot" from before the rebrand, deliberately.
 # Renaming it points the bot at a new, empty database rather than moving data.
+# Upgrading an existing deployment? See "Migrating an existing UltraBot stack"
+# below: the volume holding this database is namespaced by your stack name.
 MONGODB_URI=mongodb://mongodb:27017/ultrabot
 
 # Dashboard
@@ -178,12 +180,54 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ## Portainer Deployment
 
+### Migrating an existing UltraBot stack
+
+Skip this section on a fresh install. If you already run the stack under the old
+name, read it before deploying — the container and network renames are not
+drop-in.
+
+**The data lives in the volume, and the volume is namespaced by the stack name.**
+`mongodb_data` is a normal (non-external) named volume, so Compose stores it as
+`<stack-name>_mongodb_data`. A stack deployed as `ultrabot` holds its data in
+`ultrabot_mongodb_data`. Deploy the same file under the name `clawdia` and
+Compose creates a *new, empty* `clawdia_mongodb_data` — the bot starts up clean
+and the old data is still on disk, just orphaned. Confirm what you have first:
+
+```bash
+docker volume ls | grep mongodb_data
+```
+
+Then pick one:
+
+- **Keep the stack name (simplest).** Leave the Portainer stack called
+  `ultrabot` and redeploy the updated file into it. The containers and network
+  get their new names; the volume path never changes, so nothing moves.
+- **Rename the stack and reuse the volume.** Stop and remove the old stack
+  first — `container_name` is fixed, so `clawdia-mongodb` and `clawdia` collide
+  with the still-running old containers, as does the published port. Then, in
+  the new stack, point at the existing volume explicitly:
+
+  ```yaml
+  volumes:
+    mongodb_data:
+      external: true
+      name: ultrabot_mongodb_data
+  ```
+
+- **Rename the stack and move the data.** Run `./scripts/backup.sh` against the
+  old stack, deploy the new one, then `./scripts/restore.sh <archive>`. Use this
+  if you want the volume named after the new stack too.
+
+Removing a stack in Portainer does not delete its volumes, so the old data
+survives a mistake here — but verify the bot came up with your servers intact
+before deleting anything.
+
 ### Method 1: Docker Compose in Portainer
 
 1. Open Portainer
 2. Go to "Stacks"
 3. Click "Add stack"
-4. Name it "clawdia"
+4. Name it "clawdia" (or keep your existing stack name — see the migration note above)
 5. Paste the `docker-compose.yml` content
 6. Add environment variables in the env section or upload `.env` file
 7. Click "Deploy the stack"

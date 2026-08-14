@@ -400,4 +400,5 @@ wide, and it is widest exactly where the risk is.
 
 ---
 
-*Sections above last reviewed: 2026-05-28*
+*The audited subsystems — and only those — were last reviewed on 2026-05-28.
+"Not yet reviewed" carries no review date, because nothing in it has been reviewed.*
