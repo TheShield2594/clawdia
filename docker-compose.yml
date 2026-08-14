@@ -1,7 +1,7 @@
 services:
   mongodb:
     image: mongo:7
-    container_name: ultrabot-mongodb
+    container_name: clawdia-mongodb
     restart: unless-stopped
     volumes:
       - mongodb_data:/data/db
@@ -16,7 +16,7 @@ services:
 
   bot:
     build: .
-    container_name: ultrabot
+    container_name: clawdia
     restart: unless-stopped
     env_file:
       - .env
@@ -34,7 +34,7 @@ services:
       - ./backups:/app/backups
     networks:
       - db-network      # reaches MongoDB
-      - ultrabot-network # reaches the internet (Discord API, AI APIs, etc.)
+      - clawdia-network # reaches the internet (Discord API, AI APIs, etc.)
     logging:
       driver: "json-file"
       options:
@@ -59,7 +59,7 @@ services:
   # Optional scheduled backup (runs mongodump once a day at 03:00 UTC)
   backup:
     image: mongo:7
-    container_name: ultrabot-backup
+    container_name: clawdia-backup
     profiles:
       - backup
     restart: unless-stopped
@@ -84,10 +84,12 @@ services:
         while true; do
           TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
           echo "[backup] Starting backup at $$TIMESTAMP";
-          mongodump --uri="$$MONGODB_URI" --gzip --archive="/backups/ultrabot-$$TIMESTAMP.gz" &&
-            echo "[backup] Done: /backups/ultrabot-$$TIMESTAMP.gz" ||
+          mongodump --uri="$$MONGODB_URI" --gzip --archive="/backups/clawdia-$$TIMESTAMP.gz" &&
+            echo "[backup] Done: /backups/clawdia-$$TIMESTAMP.gz" ||
             echo "[backup] FAILED";
-          find /backups -name "ultrabot-*.gz" -mtime +30 -delete;
+          # Prunes the old ultrabot-* prefix too, so archives written before the
+          # rename are still aged out instead of accumulating forever.
+          find /backups \( -name "clawdia-*.gz" -o -name "ultrabot-*.gz" \) -mtime +30 -delete;
           sleep 86400;
         done'
 
@@ -95,7 +97,7 @@ volumes:
   mongodb_data:
 
 networks:
-  ultrabot-network:
+  clawdia-network:
     driver: bridge
   db-network:
     driver: bridge

@@ -1,4 +1,4 @@
-# UltraBot Setup Guide
+# Clawdia Setup Guide
 
 ## Table of Contents
 1. [Discord Bot Setup](#discord-bot-setup)
@@ -146,7 +146,8 @@ DISCORD_TOKEN=your_bot_token_here
 CLIENT_ID=your_client_id_here
 CLIENT_SECRET=your_client_secret_here
 
-# Database
+# Database — the name is still "ultrabot" from before the rebrand, deliberately.
+# Renaming it points the bot at a new, empty database rather than moving data.
 MONGODB_URI=mongodb://mongodb:27017/ultrabot
 
 # Dashboard
@@ -182,14 +183,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 1. Open Portainer
 2. Go to "Stacks"
 3. Click "Add stack"
-4. Name it "ultrabot"
+4. Name it "clawdia"
 5. Paste the `docker-compose.yml` content
 6. Add environment variables in the env section or upload `.env` file
 7. Click "Deploy the stack"
 
 ### Method 2: Manual Container Creation
 
-1. Create a custom bridge network: `ultrabot-network`
+1. Create a custom bridge network: `clawdia-network`
 2. Deploy MongoDB container first
 3. Deploy bot container with environment variables
 4. Link containers to the network
@@ -197,7 +198,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ### Updating the Bot
 
 **With Portainer:**
-1. Go to Stacks > ultrabot
+1. Go to Stacks > clawdia
 2. Click "Pull and redeploy"
 
 **Manual:**
@@ -208,11 +209,11 @@ docker-compose up -d
 
 ### Viewing Logs
 
-**Portainer:** Stacks > ultrabot > bot > Logs
+**Portainer:** Stacks > clawdia > bot > Logs
 
 **Command line:**
 ```bash
-docker logs ultrabot -f
+docker logs clawdia -f
 ```
 
 ## Database Management
@@ -224,15 +225,15 @@ The bot automatically creates the database and collections. No manual setup need
 ### Backup Database
 
 ```bash
-docker exec ultrabot-mongodb mongodump --out /data/backup
-docker cp ultrabot-mongodb:/data/backup ./backup
+docker exec clawdia-mongodb mongodump --out /data/backup
+docker cp clawdia-mongodb:/data/backup ./backup
 ```
 
 ### Restore Database
 
 ```bash
-docker cp ./backup ultrabot-mongodb:/data/backup
-docker exec ultrabot-mongodb mongorestore /data/backup
+docker cp ./backup clawdia-mongodb:/data/backup
+docker exec clawdia-mongodb mongorestore /data/backup
 ```
 
 ## Troubleshooting
@@ -242,7 +243,7 @@ docker exec ultrabot-mongodb mongorestore /data/backup
 1. Check bot is online in Discord
 2. Verify `DISCORD_TOKEN` is correct
 3. Check intents are enabled in Discord Developer Portal
-4. View logs: `docker logs ultrabot`
+4. View logs: `docker logs clawdia`
 
 ### Dashboard Not Loading
 
@@ -297,7 +298,7 @@ docker exec ultrabot-mongodb mongorestore /data/backup
 
 ## Getting Help
 
-- Check logs first: `docker logs ultrabot -f`
+- Check logs first: `docker logs clawdia -f`
 - Review this guide thoroughly
 - Check Discord.js documentation for bot issues
 - Review API provider documentation for AI issues

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restore UltraBot MongoDB data from a backup archive.
+# Restore Clawdia MongoDB data from a backup archive.
 # Usage: ./scripts/restore.sh <path-to-archive.gz> [--drop]
 #   --drop  Drop existing collections before restoring (clean restore)
 set -euo pipefail
@@ -44,14 +44,14 @@ if command -v mongorestore &>/dev/null; then
     # shellcheck disable=SC2086
     mongorestore --uri="${MONGO_URI}" --gzip --archive="${ARCHIVE}" ${DROP_FLAG}
 else
-    echo "[restore] mongorestore not found locally; attempting via Docker container 'ultrabot-mongodb'"
-    docker cp "${ARCHIVE}" ultrabot-mongodb:/tmp/ultrabot-restore.gz
+    echo "[restore] mongorestore not found locally; attempting via Docker container 'clawdia-mongodb'"
+    docker cp "${ARCHIVE}" clawdia-mongodb:/tmp/clawdia-restore.gz
     # Replace 'localhost' with '127.0.0.1' so the URI resolves inside the container.
     SAFE_URI="${MONGO_URI/localhost/127.0.0.1}"
     # shellcheck disable=SC2086
-    docker exec ultrabot-mongodb \
-        mongorestore --uri="${SAFE_URI}" --gzip --archive=/tmp/ultrabot-restore.gz ${DROP_FLAG}
-    docker exec ultrabot-mongodb rm /tmp/ultrabot-restore.gz
+    docker exec clawdia-mongodb \
+        mongorestore --uri="${SAFE_URI}" --gzip --archive=/tmp/clawdia-restore.gz ${DROP_FLAG}
+    docker exec clawdia-mongodb rm /tmp/clawdia-restore.gz
 fi
 
 echo "[restore] Restore complete."

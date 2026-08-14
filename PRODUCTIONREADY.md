@@ -1,12 +1,22 @@
-# Production Readiness Checklist
+# Feature Audit Log
 
-This file tracks the production readiness status of each feature/function in Clawdia.
+A record of the subsystems that have been through a line-by-line audit, and what
+was found and fixed in each. **It is not a survey of the whole bot.** Nine
+subsystems have been audited — all of them long-stable, low-churn ones. The
+majority of the codebase, including every economy subsystem, has never been
+audited; see [Not yet reviewed](#not-yet-reviewed) for the full list.
+
+A subsystem appearing here means it was audited on the date at the bottom of
+this file and the findings were resolved. A subsystem *not* appearing here means
+nothing — neither that it is broken nor that it is sound. Do not read the
+absence of a section as a clean bill of health, and do not treat this file as a
+release gate.
 
 ---
 
 ## Welcome Function
 
-**Status: PRODUCTION READY** ✓
+**Status: Audited — all findings resolved** ✓
 
 **Files reviewed/fixed:**
 - `src/utils/cardGenerator.js`
@@ -51,7 +61,7 @@ This file tracks the production readiness status of each feature/function in Cla
 
 ## Farewell Function
 
-**Status: PRODUCTION READY** ✓
+**Status: Audited — all findings resolved** ✓
 
 **Files reviewed/fixed:**
 - `src/events/guildMemberRemove.js`
@@ -89,7 +99,7 @@ This file tracks the production readiness status of each feature/function in Cla
 
 ## Birthday Function
 
-**Status: PRODUCTION READY** ✓
+**Status: Audited — all findings resolved** ✓
 
 **Files reviewed/fixed:**
 - `src/services/birthdayService.js`
@@ -121,7 +131,7 @@ This file tracks the production readiness status of each feature/function in Cla
 
 ## Moderation Function
 
-**Status: PRODUCTION READY** ✓
+**Status: Audited — all findings resolved** ✓
 
 **Files reviewed/fixed:**
 - `src/commands/moderation/appeal.js`
@@ -137,7 +147,6 @@ This file tracks the production readiness status of each feature/function in Cla
 - `src/commands/moderation/note.js`
 - `src/commands/moderation/slowmode.js`
 - `src/commands/moderation/softban.js`
-- `src/commands/moderation/ticket.js`
 - `src/commands/moderation/unban.js`
 - `src/commands/moderation/unmute.js`
 - `src/commands/moderation/warn.js`
@@ -159,23 +168,27 @@ This file tracks the production readiness status of each feature/function in Cla
 |---|-------|-----|-------|
 | 1 | `warn add` subcommand had 5+ sequential DB/API operations before `interaction.reply` — routinely exceeded Discord's 3-second response deadline, causing "This interaction failed" errors | Added `interaction.deferReply()` immediately after the bot-check guard; changed reply to `editReply`; fixed the catch path to use `editReply` when already deferred | `warn.js` |
 | 2 | `appeal.js` had 2 DB operations before any reply — at-risk of 3-second timeout | Added `interaction.deferReply({ ephemeral: true })` before first DB call; changed all subsequent `reply` calls to `editReply` | `appeal.js` |
-| 3 | `ticket open` subcommand had a DB save + channel creation (2+ slow operations) before reply | Added `interaction.deferReply({ ephemeral: true })` before the slow section; changed final `reply` to `editReply` | `ticket.js` |
 
 #### Warnings (all resolved)
 
 | # | Issue | Fix | Files |
 |---|-------|-----|-------|
-| 4 | `user.tag` deprecated throughout — in the new Discord username system `.tag` always returns `username#0000` for non-legacy accounts | Replaced all `user.tag` / `interaction.user.tag` / `ban.user.tag` / `msg.author.tag` / `targetUser.tag` / `botUser.tag` with `globalName ?? username` | `appeal.js`, `ban.js`, `cases.js`, `closecase.js`, `escalationService.js`, `kick.js`, `logger.js`, `massban.js`, `mute.js`, `note.js`, `slowmode.js`, `softban.js`, `ticket.js`, `unban.js`, `unmute.js`, `warn.js` |
-| 5 | `displayAvatarURL({ dynamic: true })` deprecated in discord.js v14 | Removed the `{ dynamic: true }` option; the method returns animated URLs by default | `cases.js` |
-| 6 | `c.createdAt / 1000` in the case list embed (`cases.js`) — implicit Date→number coercion instead of explicit `.getTime()` | Changed to `c.createdAt.getTime() / 1000` | `cases.js` |
-| 7 | `massban.js` fallback user object used `{ id, tag }` — mismatched logger's `globalName ?? username` lookup after fix #4 | Changed to `{ id, globalName: null, username: userId }` | `massban.js` |
-| 8 | `warn.js` used flat `if` chains for subcommand dispatch — all three branches evaluated on every call | Changed to `if / else if / else if` | `warn.js` |
+| 3 | `user.tag` deprecated throughout — in the new Discord username system `.tag` always returns `username#0000` for non-legacy accounts | Replaced all `user.tag` / `interaction.user.tag` / `ban.user.tag` / `msg.author.tag` / `targetUser.tag` / `botUser.tag` with `globalName ?? username` | `appeal.js`, `ban.js`, `cases.js`, `closecase.js`, `escalationService.js`, `kick.js`, `logger.js`, `massban.js`, `mute.js`, `note.js`, `slowmode.js`, `softban.js`, `unban.js`, `unmute.js`, `warn.js` |
+| 4 | `displayAvatarURL({ dynamic: true })` deprecated in discord.js v14 | Removed the `{ dynamic: true }` option; the method returns animated URLs by default | `cases.js` |
+| 5 | `c.createdAt / 1000` in the case list embed (`cases.js`) — implicit Date→number coercion instead of explicit `.getTime()` | Changed to `c.createdAt.getTime() / 1000` | `cases.js` |
+| 6 | `massban.js` fallback user object used `{ id, tag }` — mismatched logger's `globalName ?? username` lookup after fix #3 | Changed to `{ id, globalName: null, username: userId }` | `massban.js` |
+| 7 | `warn.js` used flat `if` chains for subcommand dispatch — all three branches evaluated on every call | Changed to `if / else if / else if` | `warn.js` |
+
+> **No ticket system exists.** Earlier revisions of this file listed
+> `src/commands/moderation/ticket.js` as reviewed and fixed. That file has never
+> existed in any commit, and no ticket command is registered. The claims have
+> been struck; a ticket system remains an unimplemented feature, not a reviewed one.
 
 ---
 
 ## Temp Voice Function
 
-**Status: PRODUCTION READY** ✓
+**Status: Audited — all findings resolved** ✓
 
 **Files reviewed/fixed:**
 - `src/services/tempVoiceService.js`
@@ -213,7 +226,7 @@ This file tracks the production readiness status of each feature/function in Cla
 
 ## Raid Detection Function
 
-**Status: PRODUCTION READY** ✓
+**Status: Audited — all findings resolved** ✓
 
 **Files reviewed/fixed:**
 - `src/services/raidService.js`
@@ -251,7 +264,7 @@ This file tracks the production readiness status of each feature/function in Cla
 
 ## Bible Verses Function
 
-**Status: PRODUCTION READY** ✓
+**Status: Audited — all findings resolved** ✓
 
 **Files reviewed/fixed:**
 - `src/services/bibleService.js`
@@ -283,7 +296,7 @@ This file tracks the production readiness status of each feature/function in Cla
 
 ## Analytics Function
 
-**Status: PRODUCTION READY** ✓
+**Status: Audited — all findings resolved** ✓
 
 **Files reviewed/fixed:**
 - `src/events/guildMemberAdd.js`
@@ -320,7 +333,7 @@ This file tracks the production readiness status of each feature/function in Cla
 
 ## Event Log Function
 
-**Status: PRODUCTION READY** ✓
+**Status: Audited — all findings resolved** ✓
 
 **Files reviewed/fixed:**
 - `src/events/messageDelete.js`
@@ -352,4 +365,39 @@ This file tracks the production readiness status of each feature/function in Cla
 
 ---
 
-*Last reviewed: 2026-05-28*
+## Not yet reviewed
+
+Nothing below has been audited. Several of these are the highest-churn areas of
+the codebase — the economy alone is roughly a third of `src/` and takes the bulk
+of ongoing rework — so the gap between what this file covers and what ships is
+wide, and it is widest exactly where the risk is.
+
+**Economy** — the largest uncovered area:
+
+- `hunt` (`huntService.js`, `hunt.js`, `trackhunt.js`, `craft.js`, `forge.js`)
+- `mine` (`mineService.js`, `mine.js`)
+- `fish` (`fishService.js`, `fish.js`)
+- `pet` (`petService.js`, `pet.js`)
+- `use` / items / effects (`use.js`, `effectsService.js`, `inventory.js`, `shop.js`)
+- exploration (`exploreService.js`, `explore.js`, `map.js`)
+- casino (`src/games/casino/*`, `casino.js`, `casinoJackpotService.js`)
+- core currency (`balance.js`, `bank.js`, `daily.js`, `work.js`, `jobs.js`, `crime.js`, `rob.js`, `invest.js`, `market.js`, `gift.js`)
+- group and PvP systems (`heistService.js`, `syndicateService.js`, `war.js`, `duel.js`, `rivalryService.js`, `tournamentService.js`)
+- progression (`prestige.js`, `season.js`, `synergyService.js`, `dailychallenge.js`)
+- seasonal events (`seasonalEventService.js`, `eventshop.js`, and the seasonal commands)
+
+**Everything else uncovered:**
+
+- AI chat, personas, and summaries (`aiService.js`, `summaryService.js`, `ai.js`, `dm.js`)
+- RSS feeds and the daily newspaper (`rssService.js`, `newspaperService.js`, `newspaper.js`, `feed.js`)
+- quests and achievements (`questService.js`, `achievementService.js`, `quests.js`, `questgen.js`, `achievements.js`)
+- giveaways (`giveawayService.js`, `giveaway.js`)
+- starboard, suggestions, and reaction roles
+- command policies and the permission layer
+- reminders (`reminderService.js`), polls, profiles, and the remaining utility commands
+- anti-nuke (`antiNukeService.js`) and the scheduler (`schedulerService.js`)
+- the dashboard beyond the settings validators named above
+
+---
+
+*Sections above last reviewed: 2026-05-28*

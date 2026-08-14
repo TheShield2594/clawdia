@@ -24,7 +24,7 @@
 services:
   mongodb:
     image: mongo:7
-    container_name: ultrabot-mongodb
+    container_name: clawdia-mongodb
     restart: unless-stopped
     volumes:
       - mongodb_data:/data/db
@@ -39,7 +39,7 @@ services:
 
   bot:
     image: ghcr.io/theshield2594/clawdia:latest
-    container_name: ultrabot
+    container_name: clawdia
     restart: unless-stopped
     environment:
       # --- Required ---
@@ -58,6 +58,9 @@ services:
       - IMGFLIP_USERNAME=${IMGFLIP_USERNAME}
       - IMGFLIP_PASSWORD=${IMGFLIP_PASSWORD}
       # --- Defaults (override if needed) ---
+      # The database name is still "ultrabot" after the rebrand, on purpose:
+      # renaming it does not move data, it just points the bot at an empty
+      # database. Change it only alongside a dump-and-restore into the new name.
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
       - DASHBOARD_PORT=7001
       - AUDIT_LOG_RETENTION_DAYS=${AUDIT_LOG_RETENTION_DAYS:-90}
@@ -71,7 +74,7 @@ services:
         condition: service_healthy
     networks:
       - db-network       # reaches MongoDB
-      - ultrabot-network # reaches the internet (Discord API, AI APIs, etc.)
+      - clawdia-network # reaches the internet (Discord API, AI APIs, etc.)
     logging:
       driver: "json-file"
       options:
@@ -98,7 +101,7 @@ volumes:
   mongodb_data:
 
 networks:
-  ultrabot-network:
+  clawdia-network:
     driver: bridge
   db-network:
     driver: bridge
