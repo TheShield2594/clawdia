@@ -16,6 +16,7 @@
 ### Configuration Options
 
 **Global Configuration** (`.env` file):
+
 ```env
 OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=AIza...
@@ -38,7 +39,8 @@ OLLAMA_BASE_URL=http://localhost:11434
 - Bot shows typing indicator while processing
 
 **Customization:**
-```
+
+```text
 System Prompt Examples:
 - "You are a helpful gaming assistant for our Discord server."
 - "You are a coding tutor. Explain concepts simply."
@@ -56,7 +58,7 @@ lists them and `/ai memories delete <number>` removes one.
 provider. Session state lives in the `DmSession` model, so an adventure survives
 a bot restart.
 
-```
+```text
 /dm start            - Start a new session in this channel
 /dm join <name> <class> - Join with a character
 /dm begin            - Begin the adventure (host only)
@@ -75,7 +77,7 @@ Requires a working AI provider — the same one configured for AI Chat.
 
 Two other features call the AI provider directly:
 
-- **`/questgen`** — spends **200 coins** to generate a personal legendary quest tuned to one mechanic (hunt, fishing, mining, chat, economy, or commands), with targets clamped to sane ranges per mechanic. 23-hour cooldown, and only **one** AI quest can be active at a time.
+- **`/questgen`** — spends **200 coins** to generate a personal legendary quest tuned to one mechanic (`hunt`, `fishing`, `mining`, `social`, `economy`, or `explore`), with targets clamped to sane ranges per mechanic. 23-hour cooldown, and only **one** AI quest can be active at a time.
 - **`/newspaper preview`** — renders the AI-written server newspaper on demand. Requires **Manage Server**, and the Newspaper must be enabled under **Engagement → Newspaper** in the dashboard. The scheduled edition posts on its own; this is just the preview.
 
 ## 📰 Daily News Digest
@@ -107,21 +109,24 @@ Compiles multiple RSS feeds into a single daily post at a scheduled time.
 ### RSS Feed Examples
 
 **Technology:**
-```
+
+```text
 https://techcrunch.com/feed/
 https://www.theverge.com/rss/index.xml
 https://arstechnica.com/feed/
 ```
 
 **Gaming:**
-```
+
+```text
 https://www.ign.com/articles?format=rss
 https://www.polygon.com/rss/index.xml
 https://kotaku.com/rss
 ```
 
 **General News:**
-```
+
+```text
 http://feeds.bbci.co.uk/news/rss.xml
 http://rss.cnn.com/rss/cnn_topstories.rss
 https://www.reddit.com/r/worldnews/.rss
@@ -177,7 +182,8 @@ Set a moderation log channel to track:
 - Level formula: `Level * 100 + 100` XP needed
 
 **Commands:**
-```
+
+```text
 /rank                - View your rank card
 /leaderboard         - Server leaderboard
 ```
@@ -193,7 +199,8 @@ The economy is the largest system in the bot — 43 of 98 commands and roughly a
 third of the code. The sections below cover it in full.
 
 **Core currency:**
-```
+
+```text
 /balance             - Check balance
 /daily               - Daily reward (24h cooldown)
 /work                - Work for coins (1h cooldown)
@@ -218,7 +225,7 @@ third of the code. The sections below cover it in full.
 each with its own stamina pool, material table, and rarity tiers. Materials feed
 crafting, pet food, and the market.
 
-```
+```text
 /fish · /hunt · /mine  - Gathering activities (stamina-gated)
 /craft                 - Craft items from gathered materials
 /forge <rarity>        - Have the AI forge a one-of-a-kind item
@@ -252,7 +259,7 @@ gathering tracks. `/synergies` shows progress toward each:
 **Pets** are passive-bonus companions with their own hunger, mood, level, and
 evolution track.
 
-```
+```text
 /pet adopt <type> [name]  - Adopt a pet from the shop
 /pet status               - View your pets and their mood
 /pet feed <material>      - Feed a pet (favourite foods restore most, grant bonus XP)
@@ -267,7 +274,7 @@ evolution track.
 
 ### Trading & Server Investment
 
-```
+```text
 /gift <user> <coins|item>  - Send coins or an item to another player
 /market list <item> <qty> <price>  - List an item for sale
 /market browse [item]      - Browse active listings
@@ -294,7 +301,7 @@ coin goal and, once funded, activates its benefit for **7 days**:
 
 ### Group Play & PvP
 
-```
+```text
 /duel <user>              - Challenge another user
 /heist start <target>     - Open a heist lobby (60s join window)
 /heist status             - Check the running heist
@@ -337,7 +344,7 @@ target's active protections first — at the cost of a 2-minute cooldown per che
 
 ### Progression
 
-```
+```text
 /prestige info      - Every prestige tier and what it unlocks
 /prestige up        - Prestige your account (resets level)
 /prestige [user]    - Inspect a player's rank, bonuses, and unlocks
@@ -368,7 +375,7 @@ coin and 250 XP bonus, claimable once every 24 hours.
 
 ### Feeds & Rotation
 
-```
+```text
 /featured   - Today's featured rotation (+25% payout, +10% rare chance)
 /winfeed    - Last 20 big wins in this server (50k+ coins or legendary drops)
 ```
@@ -380,7 +387,7 @@ coin and 250 XP bonus, claimable once every 24 hours.
 
 These are only usable while their seasonal event is running:
 
-```
+```text
 /trackhunt   - Track game across the Arctic Tundra (Winter Hunt)
 /sandcastle  - Build a sandcastle on the shore (Summer Festival)
 /lovenote    - Send a love note into the Arcade (Valentine's Day)
@@ -439,7 +446,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 
 ### Variables
 
-```
+```text
 {user}         - Mention the user
 {server}       - Server name
 {memberCount}  - Total member count
@@ -449,14 +456,16 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 ### Example Messages
 
 **Welcome:**
-```
+
+```text
 Welcome {user} to {server}! 🎉
 You are member #{memberCount}!
 Check out #rules to get started.
 ```
 
 **Farewell:**
-```
+
+```text
 Goodbye {user}! We'll miss you 😢
 ```
 
@@ -511,7 +520,8 @@ open work items, not wording problems:
 ### Custom Commands
 
 Create simple text response commands in dashboard:
-```
+
+```text
 Trigger: !website
 Response: Visit us at https://example.com
 ```
@@ -526,7 +536,8 @@ Automatically assign roles to new members:
 ### Reminders
 
 Set personal reminders using relative time options, or an absolute time:
-```
+
+```text
 /remind minutes:30 message:Check the oven
 /remind hours:2 message:Meeting at 9am
 /remind days:2 message:Submit report
@@ -534,6 +545,7 @@ Set personal reminders using relative time options, or an absolute time:
 /remind at:"2026-07-20 09:00" message:Submit report
 /remind message:Standup every:daily at:9:00
 ```
+
 Reminders post in the channel where they were set; if that channel is no longer
 reachable, the bot DMs the user instead. Set `/timezone set` so absolute times
 (and the AI's natural-language reminders — e.g. "remind me at 5pm") resolve to

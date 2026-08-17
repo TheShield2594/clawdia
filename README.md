@@ -128,6 +128,7 @@ npm start
 - `/note` - Add a moderator note to a user
 
 ### Economy — currency and items
+
 - `/balance` - Check balance
 - `/bank` - Manage your bank account
 - `/daily` - Claim daily reward
@@ -147,6 +148,7 @@ npm start
 - `/featured` - Today's featured rotation (+25% payout, +10% rare chance)
 
 ### Economy — gathering, crafting, and exploration
+
 - `/fish` / `/hunt` / `/mine` - Gathering activities
 - `/craft` - Craft items from gathered materials
 - `/forge` - Spend coins to have the AI forge a one-of-a-kind item
@@ -156,6 +158,7 @@ npm start
 - `/showcase` - Trophy card of a player's rarest items and top achievements
 
 ### Economy — competition and groups
+
 - `/duel` - Challenge another user
 - `/heist` - Plan and run a group heist
 - `/syndicate` - Crime syndicates: create, join, leave, invite, kick, open, info, leaderboard, heist, sabotage, upgrade
@@ -165,12 +168,14 @@ npm start
 - `/winfeed` - Last 20 big wins in this server (50k+ coins or legendary drops)
 
 ### Economy — progression
+
 - `/prestige` - Reset your level for permanent rewards and unlocks
 - `/dailychallenge` - Prestige VI+ daily challenge board
 - `/synergies` - Cross-system synergy bonuses and your progress toward them
 - `/season` - View current season info
 
 ### Economy — seasonal
+
 - `/eventshop` - Seasonal event shop
 - `/trackhunt` - Track game across the Arctic Tundra (Winter Hunt only)
 - `/sandcastle` - Build a sandcastle (Summer Festival only)
@@ -193,7 +198,7 @@ npm start
 - `/notifications` - Manage your notifications
 - `/track` - Track events or milestones
 - `/questgen` - Spend coins to have the AI generate a personal legendary quest
-- `/newspaper` - Preview the AI-written server newspaper (Manage Server)
+- `/newspaper preview` - Preview the AI-written server newspaper (Manage Server)
 
 ### Fun
 - `/8ball` - Ask the magic 8-ball
@@ -258,7 +263,12 @@ Configuration that previously lived behind slash commands (settings link, level 
    - Get your API key from https://console.anthropic.com/
    - Add to `.env` as `ANTHROPIC_API_KEY` or configure per-server in dashboard
 
-4. **Local (Ollama)**
+4. **OpenRouter**
+   - Get your API key from https://openrouter.ai/keys
+   - Add to `.env` as `OPENROUTER_API_KEY` or configure per-server in dashboard
+   - Reaches many models through one API; defaults to `openai/gpt-4o-mini`
+
+5. **Local (Ollama)**
    - Point `OLLAMA_BASE_URL` to your local instance
    - Configure `OLLAMA_MODEL` in dashboard (e.g., `llama3.2`, `mistral`)
    - Ideal for private, zero-cost inference
@@ -283,7 +293,7 @@ definitions below matter. Read them before acting on a number.
 
 ### Key Metrics
 
-- **Net Retention (7/30 days)**: `(joins − leaves) / joins` over the last 7 and 30 days of tracked member events. A guild-wide **proxy** — it does not follow individual members, so there is no D1 figure and no join-week segmentation.
+- **Net Retention (7/30 days)**: `(joins − leaves) / joins`, clamped at 0, over the last 7 and 30 days of tracked member events. A guild-wide **proxy** — it does not follow individual members, so there is no D1 figure and no join-week segmentation.
 - **Active Hours**: A 24-bucket histogram of command usage by hour, plus the top 5 hours. **Always UTC**; there is no server-timezone option and no weekday dimension.
 - **Toxic Channel Detection**: Ranks up to 8 channels from the most recent 1,000 moderation cases, scored as `warns + (2 × severe)`, where severe is mute/kick/ban. Channels are resolved from case evidence jump URLs; cases without one are bucketed as `unknown`.
 - **Moderator Resolution Time**: Median hours from case creation to case **resolution**, with a 6-month trend. This is time-to-close, **not** time-to-first-response.
