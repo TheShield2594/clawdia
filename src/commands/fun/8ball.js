@@ -2,10 +2,16 @@
 
 const {
     SlashCommandBuilder,
-    EmbedBuilder,
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    ContainerBuilder,
+    SectionBuilder,
+    SeparatorBuilder,
+    SeparatorSpacingSize,
+    TextDisplayBuilder,
+    ThumbnailBuilder,
+    ComponentType,
     MessageFlags,
     ModalBuilder,
     TextInputBuilder,
@@ -116,61 +122,97 @@ function quoteQuestion(question) {
 }
 
 // ── Reading a shake's context back off the message ───────────────────────────
+//
+// A Components V2 message has no embed to read state out of, so the question
+// and the shake count are recovered from the text the last render wrote. The
+// owner never needs recovering — it rides in the button's custom id.
 
-const SHAKES_FIELD = '🌀 Shakes';
+// Anchored to the meta line's own prefix rather than matching "Shake #n"
+// anywhere: the question is rendered as a block quote on a single line, so it
+// can never start with "-#", and therefore can't spoof the counter by
+// containing those words itself.
+const SHAKE_COUNT = /^-# .*\bShake #(\d+)/m;
+const QUOTED_LINE = /^> .*$/m;
+
+// Text displays can be nested inside sections inside containers; walk the lot.
+function textContents(message) {
+    const found = [];
+
+    const walk = node => {
+        if (!node || typeof node !== 'object') return;
+        if (Array.isArray(node)) return node.forEach(walk);
+        if (node.type === ComponentType.TextDisplay && typeof node.content === 'string') {
+            found.push(node.content);
+        }
+        walk(node.components);
+        walk(node.accessory);
+    };
+
+    const top = message?.components ?? [];
+    walk(top.map(c => (typeof c?.toJSON === 'function' ? c.toJSON() : c)));
+    return found;
+}
 
 function readState(message) {
-    const embed = message?.embeds?.[0];
-    const shakesRaw = embed?.fields?.find(f => f.name === SHAKES_FIELD)?.value ?? '';
-    const shakes = Number.parseInt(shakesRaw.replace(/\D/g, ''), 10);
+    const text = textContents(message).join('\n');
+    const shakes = Number.parseInt(text.match(SHAKE_COUNT)?.[1] ?? '', 10);
 
     return {
-        // Already escaped when it was written; reused verbatim.
-        quoted: embed?.description ?? '> *"…"*',
+        // Already escaped when it was written; reused verbatim, because
+        // re-escaping on each shake would pile up backslashes.
+        quoted: text.match(QUOTED_LINE)?.[0] ?? '> *"…"*',
         shakes: Number.isFinite(shakes) && shakes > 0 ? shakes : 0,
-        // discord.js's Embed exposes iconURL; the raw gateway payload it is built
-        // from spells the same field icon_url. Read either.
-        author: embed?.author
-            ? { name: embed.author.name, iconURL: embed.author.iconURL ?? embed.author.icon_url }
-            : null,
     };
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
 
-function embedAuthor(interaction) {
-    return {
-        name: interaction.member?.displayName || interaction.user.username,
-        iconURL: interaction.user.displayAvatarURL({ dynamic: true }),
-    };
+const V2_FLAGS = MessageFlags.IsComponentsV2;
+
+// The asker is named with a mention so it renders as a pill, but a shake is not
+// a reason to ping someone — least of all on a message that stays clickable
+// indefinitely.
+const NO_PINGS = { parse: [] };
+
+const accent = hex => Number.parseInt(hex.slice(1), 16);
+
+const HEADING = '### 🎱 Magic 8-Ball';
+
+function shakingView(quoted, frame) {
+    return new ContainerBuilder()
+        .setAccentColor(accent('#5865F2'))
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `${HEADING}\n${quoted}\n\n${SHAKE_FRAMES[frame % SHAKE_FRAMES.length]}  *shaking…*`,
+            ),
+        );
 }
 
-function baseEmbed(author) {
-    const embed = new EmbedBuilder().setTitle('🎱 Magic 8-Ball');
-    return author ? embed.setAuthor(author) : embed;
-}
-
-function shakingEmbed(author, quoted, frame) {
-    return baseEmbed(author)
-        .setColor('#5865F2')
-        .setDescription(`${SHAKE_FRAMES[frame % SHAKE_FRAMES.length]}\n\n${quoted}`)
-        .setFooter({ text: 'Shaking…' });
-}
-
-function resultEmbed(author, quoted, response, shakes) {
+function resultView(quoted, response, shakes, ownerId) {
     const { color, emoji, outlook } = TYPE_CONFIG[response.type];
 
-    return baseEmbed(author)
-        .setColor(color)
-        .setDescription(quoted)
-        .setImage(`attachment://${BALL_FILE}`)
-        .addFields(
-            { name: `${emoji} The 8-Ball Says`, value: `**${response.text}**`, inline: false },
-            { name: '🔮 Outlook',               value: outlook,               inline: true  },
-            { name: SHAKES_FIELD,               value: `**${shakes}**`,       inline: true  },
+    return new ContainerBuilder()
+        .setAccentColor(accent(color))
+        .addSectionComponents(
+            new SectionBuilder()
+                .addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(`${HEADING}\n${quoted}`),
+                )
+                .setThumbnailAccessory(
+                    new ThumbnailBuilder()
+                        .setURL(`attachment://${BALL_FILE}`)
+                        .setDescription(`A magic 8-ball showing: ${response.text}`),
+                ),
         )
-        .setFooter({ text: 'Shake again for a new answer — or ask it something else' })
-        .setTimestamp();
+        .addSeparatorComponents(
+            new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+        )
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `## ${emoji} ${response.text}\n-# ${outlook} · Shake #${shakes} · asked by <@${ownerId}>`,
+            ),
+        )
+        .addActionRowComponents(buttonRow(ownerId));
 }
 
 function buttonRow(ownerId) {
@@ -207,16 +249,16 @@ function questionModal(ownerId) {
 
 // Shake, then settle on an answer. `responder` is whichever interaction is
 // driving this edit — the slash command, a button, or a modal submission.
-async function shake(responder, { author, quoted, shakes, ownerId }) {
+async function shake(responder, { quoted, shakes, ownerId }) {
     // Animation frames are cosmetic, and dropping the buttons for their
     // duration is what stops a click landing mid-shake. A transient failure on
     // one of these edits shouldn't cost the user their answer.
     for (let f = 0; f < SHAKE_FRAMES.length; f++) {
         await responder.editReply({
-            embeds:      [shakingEmbed(author, quoted, f)],
-            components:  [],
+            components:  [shakingView(quoted, f)],
+            flags:       V2_FLAGS,
             // Drop the previous answer's render for the duration of the shake —
-            // the ball is being shaken, it shouldn't still be showing a verdict.
+            // the ball is being shaken, it shouldn't still show a verdict.
             files:       [],
             attachments: [],
         }).catch(() => {});
@@ -227,12 +269,13 @@ async function shake(responder, { author, quoted, shakes, ownerId }) {
     const ball = new AttachmentBuilder(renderEightBall(response.text, response.type), { name: BALL_FILE });
 
     return responder.editReply({
-        embeds:      [resultEmbed(author, quoted, response, shakes)],
-        components:  [buttonRow(ownerId)],
-        files:       [ball],
+        components:      [resultView(quoted, response, shakes, ownerId)],
+        flags:           V2_FLAGS,
+        files:           [ball],
         // Clears the attachment the last shake left behind; without it Discord
         // keeps both and the message grows an image per click.
-        attachments: [],
+        attachments:     [],
+        allowedMentions: NO_PINGS,
     });
 }
 
@@ -271,12 +314,7 @@ async function handleButton(interaction) {
     try {
         await interaction.deferUpdate();
         const state = readState(interaction.message);
-        await shake(interaction, {
-            author:  state.author,
-            quoted:  state.quoted,
-            shakes:  state.shakes + 1,
-            ownerId,
-        });
+        await shake(interaction, { quoted: state.quoted, shakes: state.shakes + 1, ownerId });
     } finally {
         shaking.delete(messageId);
     }
@@ -310,12 +348,7 @@ async function handleModal(interaction) {
     try {
         await interaction.deferUpdate();
         // A new question restarts the count; it's a new thing being asked.
-        await shake(interaction, {
-            author:  readState(interaction.message).author,
-            quoted:  quoteQuestion(question),
-            shakes:  1,
-            ownerId,
-        });
+        await shake(interaction, { quoted: quoteQuestion(question), shakes: 1, ownerId });
     } finally {
         shaking.delete(messageId);
     }
@@ -340,13 +373,15 @@ module.exports = {
             });
         }
 
-        await interaction.deferReply();
-        await shake(interaction, {
-            author:  embedAuthor(interaction),
-            quoted:  quoteQuestion(question),
-            shakes:  1,
-            ownerId: interaction.user.id,
+        // Replying straight into a Components V2 message rather than deferring:
+        // the flag belongs to the message from the moment it exists.
+        const quoted = quoteQuestion(question);
+        await interaction.reply({
+            components:      [shakingView(quoted, 0)],
+            flags:           V2_FLAGS,
+            allowedMentions: NO_PINGS,
         });
+        await shake(interaction, { quoted, shakes: 1, ownerId: interaction.user.id });
     },
 
     // Routed from events/interactionCreate — see the custom-id note above.
@@ -358,7 +393,7 @@ module.exports = {
     __test__: {
         RESPONSES, TYPE_CONFIG, MAX_QUESTION, SHAKE_LIMIT, SHAKE_WINDOW_MS,
         pickResponse, normalizeQuestion, quoteQuestion, readState, ownerOf, BALL_FILE,
-        isEightBallButton, isEightBallModal, buttonRow, resultEmbed,
+        isEightBallButton, isEightBallModal, buttonRow, resultView, shakingView, textContents,
         handleButton, handleModal, shaking, shakeLimiter,
     },
 };

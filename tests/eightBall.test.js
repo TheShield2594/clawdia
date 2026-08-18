@@ -129,9 +129,16 @@ describe('quoteQuestion', () => {
 
 const {
     readState, ownerOf, isEightBallButton, isEightBallModal,
-    buttonRow, resultEmbed, handleButton, handleModal, shaking, shakeLimiter,
-    SHAKE_LIMIT,
+    buttonRow, resultView, shakingView, textContents,
+    handleButton, handleModal, shaking, shakeLimiter, SHAKE_LIMIT, BALL_FILE,
 } = __test__;
+
+// What a rendered message looks like once Discord has round-tripped it: the
+// builders are gone, leaving raw component JSON.
+const asMessage = (view, id = 'msg-1') => ({ id, components: [view.toJSON()] });
+const lastEdit  = interaction => interaction.editReply.mock.calls.at(-1)[0];
+const viewJSON  = payload => payload.components[0].toJSON();
+const textOf    = payload => textContents({ components: payload.components }).join('\n');
 
 describe('custom ids', () => {
     test('claim only the 8-ball\'s own buttons', () => {
@@ -153,53 +160,71 @@ describe('custom ids', () => {
 });
 
 describe('readState', () => {
-    const author = { name: 'Asker', iconURL: 'https://example.invalid/a.png' };
-
-    function messageFrom(embed) {
-        return { id: 'msg-1', embeds: [embed.toJSON()] };
-    }
-
     test('round-trips what a shake needs from a rendered message', () => {
         const quoted = quoteQuestion('will it rain?');
-        const embed  = resultEmbed(author, quoted, { type: 'positive', text: 'Yes.' }, 4);
+        const view   = resultView(quoted, { type: 'positive', text: 'Yes.' }, 4, '1111');
 
-        const state = readState(messageFrom(embed));
-        expect(state.quoted).toBe(quoted);
-        expect(state.shakes).toBe(4);
-        expect(state.author).toEqual(author);
+        expect(readState(asMessage(view))).toEqual({ quoted, shakes: 4 });
     });
 
-    test('reads the author whichever way the avatar field is spelled', () => {
-        // messageFrom() hands over the raw gateway shape (icon_url); the Embed
-        // class discord.js wraps it in exposes the same value as iconURL.
-        const quoted = quoteQuestion('either way?');
-        const embed  = resultEmbed(author, quoted, { type: 'positive', text: 'Yes.' }, 1);
-
-        const wrapped = {
-            id: 'msg-2',
-            embeds: [{ ...embed.toJSON(), author: { name: author.name, iconURL: author.iconURL } }],
-        };
-        expect(readState(wrapped).author).toEqual(author);
+    test('finds the question inside a nested section, not just a bare text display', () => {
+        // The question lives in a Section's text display; the shake count lives
+        // in a top-level one. Both have to be reachable.
+        const json = resultView(quoteQuestion('nested?'), { type: 'neutral', text: 'Ask again later.' }, 2, '1111').toJSON();
+        expect(json.components[0].type).toBe(9); // Section
+        expect(textContents({ components: [json] }).length).toBeGreaterThan(1);
+        expect(readState({ components: [json] }).quoted).toBe(quoteQuestion('nested?'));
     });
 
     test('carries an escaped question forward without re-escaping it', () => {
         const quoted = quoteQuestion('**really**?');
-        const embed  = resultEmbed(author, quoted, { type: 'neutral', text: 'Ask again later.' }, 1);
+        const answer = { type: 'neutral', text: 'Ask again later.' };
 
         // A second shake reuses the stored string verbatim; escaping it again
         // would pile up backslashes with every click.
-        const once  = readState(messageFrom(embed)).quoted;
-        const twice = readState(messageFrom(resultEmbed(author, once, { type: 'neutral', text: 'Ask again later.' }, 2))).quoted;
+        const once  = readState(asMessage(resultView(quoted, answer, 1, '1111'))).quoted;
+        const twice = readState(asMessage(resultView(once, answer, 2, '1111'))).quoted;
         expect(twice).toBe(quoted);
     });
 
+    test('does not mistake the shake counter for part of the question', () => {
+        const quoted = quoteQuestion('is Shake #9 a real question?');
+        const state  = readState(asMessage(resultView(quoted, { type: 'positive', text: 'Yes.' }, 3, '1111')));
+        expect(state.quoted).toBe(quoted);
+        expect(state.shakes).toBe(3);
+    });
+
     test('survives a message it cannot read', () => {
-        for (const message of [undefined, {}, { embeds: [] }, { embeds: [{}] }]) {
+        for (const message of [undefined, {}, { components: [] }, { components: [{ type: 17 }] }]) {
             const state = readState(message);
             expect(typeof state.quoted).toBe('string');
             expect(state.shakes).toBe(0);
-            expect(state.author).toBeNull();
         }
+    });
+});
+
+describe('rendering', () => {
+    test('the answer is text as well as picture, and the ball carries alt text', () => {
+        const payload = resultView(quoteQuestion('legible?'), { type: 'negative', text: 'Very doubtful.' }, 1, '1111').toJSON();
+        const section = payload.components.find(c => c.type === 9);
+
+        expect(section.accessory.media.url).toBe(`attachment://${BALL_FILE}`);
+        expect(section.accessory.description).toContain('Very doubtful.');
+        // Screen readers and image-blocked clients still get the verdict.
+        expect(textContents({ components: [payload] }).join('\n')).toContain('Very doubtful.');
+    });
+
+    test('the accent colour tracks the outlook', () => {
+        const colors = ['positive', 'neutral', 'negative'].map(type =>
+            resultView('> *"q"*', { type, text: 'x' }, 1, '1111').toJSON().accent_color);
+        expect(new Set(colors).size).toBe(3);
+        expect(colors.every(Number.isInteger)).toBe(true);
+    });
+
+    test('a shaking ball shows no answer and no buttons to press', () => {
+        const payload = shakingView(quoteQuestion('mid-shake?'), 0).toJSON();
+        expect(JSON.stringify(payload)).not.toContain('attachment://');
+        expect(payload.components.some(c => c.type === 1)).toBe(false);
     });
 });
 
@@ -210,7 +235,7 @@ describe('button handler', () => {
         return {
             customId:    `8ball_again_${OWNER}`,
             user:        { id: OWNER },
-            message:     { id: `msg-${Math.random()}`, embeds: [] },
+            message:     { id: `msg-${Math.random()}`, components: [] },
             reply:       jest.fn().mockResolvedValue(undefined),
             deferUpdate: jest.fn().mockResolvedValue(undefined),
             editReply:   jest.fn().mockResolvedValue(undefined),
@@ -248,18 +273,34 @@ describe('button handler', () => {
         await handleButton(i);
 
         expect(i.deferUpdate).toHaveBeenCalled();
-        const final = i.editReply.mock.calls.at(-1)[0];
+        const final = lastEdit(i);
         expect(final.components).toHaveLength(1);
-        expect(final.components[0].toJSON().components).toHaveLength(2);
+        expect(viewJSON(final).components.some(c => c.type === 1)).toBe(true);
+    });
+
+    test('never pings the asker it names, however many times it is shaken', async () => {
+        const i = buttonInteraction();
+        await handleButton(i);
+
+        const final = lastEdit(i);
+        expect(textOf(final)).toContain('asked by <@');
+        expect(final.allowedMentions).toEqual({ parse: [] });
+    });
+
+    test('clears the previous render so the message does not collect images', async () => {
+        const i = buttonInteraction();
+        await handleButton(i);
+
+        for (const call of i.editReply.mock.calls) expect(call[0].attachments).toEqual([]);
+        expect(lastEdit(i).files).toHaveLength(1);
     });
 
     test('counts up from whatever the message already recorded', async () => {
-        const embed = resultEmbed(null, quoteQuestion('again?'), { type: 'positive', text: 'Yes.' }, 7);
-        const i = buttonInteraction({ message: { id: 'msg-count', embeds: [embed.toJSON()] } });
+        const view = resultView(quoteQuestion('again?'), { type: 'positive', text: 'Yes.' }, 7, OWNER);
+        const i = buttonInteraction({ message: asMessage(view, 'msg-count') });
         await handleButton(i);
 
-        const shown = i.editReply.mock.calls.at(-1)[0].embeds[0].toJSON();
-        expect(shown.fields.find(f => f.name === '🌀 Shakes').value).toBe('**8**');
+        expect(textOf(lastEdit(i))).toContain('Shake #8');
     });
 
     test('rate limits a member hammering the button', async () => {
@@ -274,7 +315,7 @@ describe('button handler', () => {
     });
 
     test('one shake at a time per message', async () => {
-        const message = { id: 'msg-shared', embeds: [] };
+        const message = { id: 'msg-shared', components: [] };
         const first  = buttonInteraction({ message });
         const second = buttonInteraction({ message });
 
@@ -297,7 +338,7 @@ describe('modal handler', () => {
         return {
             customId:      `8ball_modal_${OWNER}`,
             user:          { id: OWNER },
-            message:       { id: `msg-${Math.random()}`, embeds: [] },
+            message:       { id: `msg-${Math.random()}`, components: [] },
             isFromMessage: () => true,
             fields:        { getTextInputValue: jest.fn().mockReturnValue(value) },
             reply:         jest.fn().mockResolvedValue(undefined),
@@ -316,9 +357,9 @@ describe('modal handler', () => {
         const i = modalInteraction('will it snow?');
         await handleModal(i);
 
-        const shown = i.editReply.mock.calls.at(-1)[0].embeds[0].toJSON();
-        expect(shown.description).toBe(quoteQuestion('will it snow?'));
-        expect(shown.fields.find(f => f.name === '🌀 Shakes').value).toBe('**1**');
+        const text = textOf(lastEdit(i));
+        expect(text).toContain(quoteQuestion('will it snow?'));
+        expect(text).toContain('Shake #1');
     });
 
     test('rejects a blank question without touching the message', async () => {
