@@ -31,11 +31,20 @@ OLLAMA_BASE_URL=http://localhost:11434
 - Custom system prompts
 - Dedicated AI chat channel
 
-**MCP Servers** (`config/mcp-servers.json`, Anthropic provider only):
+**MCP Servers** (Anthropic provider only):
 
 Claude can call tools on remote [MCP](https://modelcontextprotocol.io) servers.
-The servers come from a config file — as many as you like, none of them
-hardcoded — and Anthropic connects to them server-side:
+Add them per-server in the dashboard under **AI → 🔌 Connections**, or
+operator-wide in `config/mcp-servers.json`; a dashboard entry overrides a file
+entry of the same name.
+
+Dashboard:
+- Preset for GitHub (`https://api.githubcopilot.com/mcp/`), or any https MCP endpoint
+- Allow/deny lists per tool, so a destructive tool can be switched off by name
+- **Test** button — one real request, reports whether Claude reached the server
+- Tokens are write-only: stored on the bot, never returned to the browser
+
+Config file:
 
 ```json
 {
@@ -45,17 +54,16 @@ hardcoded — and Anthropic connects to them server-side:
       "name": "calendar",
       "url": "https://mcp.example.com/calendar",
       "authorization_token": "${CALENDAR_MCP_TOKEN}",
-      "default_config": { "enabled": false },
-      "configs": { "search_events": { "enabled": true } }
+      "allowed_tools": ["search_events"]
     }
   ]
 }
 ```
 
 - `${VAR}` values resolve from the environment, so tokens stay out of the file
-- `default_config` / `configs` allowlist or denylist individual tools
 - `enabled: false` parks a server without deleting the entry
-- No config file means no change to how requests are sent
+- `MCP_ALLOW_GUILD_SERVERS=false` makes the file the only way in
+- With neither source configured, requests are unchanged
 
 Full field reference: [SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers-anthropic-only)
 

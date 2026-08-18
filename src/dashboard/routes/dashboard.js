@@ -110,6 +110,13 @@ async function renderGuildSettings(req, res) {
         if (Array.isArray(safeSettings.shop)) {
             safeSettings.shop = safeSettings.shop.map(({ imageData, imageType, ...rest }) => rest);
         }
+        // MCP authorization tokens are write-only: the panel shows that a token
+        // exists, never its value, so it must not be in the rendered page at all.
+        if (Array.isArray(safeSettings.ai?.mcpServers)) {
+            safeSettings.ai.mcpServers = safeSettings.ai.mcpServers.map(
+                ({ authorizationToken, ...rest }) => ({ ...rest, hasToken: Boolean(authorizationToken) })
+            );
+        }
 
         // Pre-load the set of activity item images that actually exist so the
         // template can skip rendering <img> tags that would otherwise 404.

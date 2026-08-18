@@ -335,6 +335,7 @@
             if (tabId === 'ai-knowledgebase') loadKnowledgeBase();
             if (tabId === 'ai-summaries') loadSummaryJobs();
             if (tabId === 'ai-personas') renderPersonas();
+            if (tabId === 'ai-mcp') loadMcpServers();
         }
         document.querySelectorAll('.ai-inner-tab[data-ai-tab]').forEach(tab => {
             tab.addEventListener('click', () => switchAiInnerTab(tab.dataset.aiTab));
@@ -2659,6 +2660,246 @@
 
         // Initialize personas on page load (data already available from template)
         renderPersonas();
+
+        // ── MCP connections ─────────────────────────────────────────────────
+        // Servers are fetched rather than templated: the response is the one
+        // place that knows which are editable, and tokens never come back with
+        // it (the API returns hasToken, never the value).
+        var _mcpServers = null;
+        var _mcpGlobal = [];
+        var _mcpPresets = [];
+        var _mcpEditable = true;
+        var _mcpMaxServers = 10;
+        var _mcpEditing = null;
+
+        function mcpEl(id) { return document.getElementById(id); }
+
+        async function loadMcpServers(force) {
+            if (_mcpServers && !force) { renderMcpServers(); return; }
+            var guildId = '<%= guild.id %>';
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/mcp-servers');
+                var data = await resp.json();
+                if (!resp.ok) throw new Error(data.error || 'Failed to load');
+                _mcpServers = data.servers || [];
+                _mcpGlobal = data.globalServers || [];
+                _mcpPresets = data.presets || [];
+                _mcpEditable = data.editable !== false;
+                _mcpMaxServers = data.maxServers || 10;
+                renderMcpPresets();
+                renderMcpServers(data.provider);
+            } catch (e) {
+                console.error(e);
+                var list = mcpEl('mcp-list');
+                if (list) list.innerHTML = '<div class="empty-state" style="padding:1.5rem;"><p>Could not load MCP connections.</p></div>';
+            }
+        }
+
+        function renderMcpPresets() {
+            var select = mcpEl('mcp-preset');
+            if (!select) return;
+            select.innerHTML = '<option value="">Custom server…</option>';
+            _mcpPresets.forEach(function(preset) {
+                var opt = document.createElement('option');
+                opt.value = preset.id;
+                opt.textContent = preset.label;
+                select.appendChild(opt);
+            });
+        }
+
+        var MCP_DEFAULT_PRESET_HINT = 'Pick a known service to prefill its endpoint, or enter any remote MCP server URL yourself.';
+        var MCP_DEFAULT_TOKEN_HINT = 'Stored on the bot and sent to Anthropic with each request. It is never shown again once saved.';
+
+        function resetMcpHints() {
+            mcpEl('mcp-preset-hint').textContent = MCP_DEFAULT_PRESET_HINT;
+            mcpEl('mcp-token-hint').textContent = MCP_DEFAULT_TOKEN_HINT;
+        }
+
+        function applyMcpPreset() {
+            var select = mcpEl('mcp-preset');
+            var hint = mcpEl('mcp-preset-hint');
+            var tokenHint = mcpEl('mcp-token-hint');
+            var preset = _mcpPresets.find(function(p) { return p.id === select.value; });
+            if (!preset) {
+                resetMcpHints();
+                return;
+            }
+            mcpEl('mcp-name').value = preset.name;
+            mcpEl('mcp-url').value = preset.url;
+            if (preset.suggestedBlockedTools && preset.suggestedBlockedTools.length) {
+                mcpEl('mcp-blocked').value = preset.suggestedBlockedTools.join(', ');
+            }
+            hint.textContent = preset.tokenHint || '';
+            tokenHint.textContent = preset.tokenLabel
+                ? preset.tokenLabel + ' — stored on the bot, never shown again once saved.'
+                : 'Stored on the bot and sent to Anthropic with each request.';
+        }
+
+        function renderMcpServers(provider) {
+            var providerWarn = mcpEl('mcp-provider-warning');
+            if (providerWarn) {
+                var selected = provider || (mcpEl('ai-provider') ? mcpEl('ai-provider').value : null);
+                providerWarn.style.display = selected && selected !== 'anthropic' ? '' : 'none';
+            }
+            var disabledWarn = mcpEl('mcp-disabled-warning');
+            if (disabledWarn) disabledWarn.style.display = _mcpEditable ? 'none' : '';
+
+            var container = mcpEl('mcp-list');
+            if (!container) return;
+            if (!_mcpServers || !_mcpServers.length) {
+                container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><h3>No connections yet</h3><p>Add one below to let Claude use another service\'s tools during a conversation.</p></div>';
+            } else {
+                container.innerHTML = '';
+                _mcpServers.forEach(function(srv) {
+                    var bits = [];
+                    bits.push(srv.hasToken ? '🔑 token stored' : 'no token');
+                    if (srv.allowedTools.length) bits.push('only ' + srv.allowedTools.length + ' tool(s)');
+                    if (srv.blockedTools.length) bits.push(srv.blockedTools.length + ' blocked');
+                    var div = document.createElement('div');
+                    div.className = 'list-item';
+                    div.innerHTML =
+                        '<div style="min-width:0;flex:1;">' +
+                            '<strong>' + escHtml(srv.name) + '</strong>' +
+                            (srv.enabled ? '' : ' <span style="color:var(--text-mute);font-size:.8rem;">(disabled)</span>') +
+                            '<div style="color:var(--text-mute);font-size:.82rem;margin-top:.2rem;word-break:break-all;">' + escHtml(srv.url) + '</div>' +
+                            '<div style="color:var(--text-mute);font-size:.78rem;margin-top:.15rem;">' + escHtml(bits.join(' · ')) + '</div>' +
+                            '<div class="mcp-test-result" id="mcp-test-' + escHtml(srv.name) + '"></div>' +
+                        '</div>' +
+                        '<div style="display:flex;gap:.4rem;flex-wrap:wrap;">' +
+                            '<button class="btn btn-sm" onclick="testMcpServer(\'' + escHtml(srv.name) + '\')">Test</button>' +
+                            '<button class="btn btn-sm" onclick="editMcpServer(\'' + escHtml(srv.name) + '\')">Edit</button>' +
+                            '<button class="btn btn-danger btn-sm" onclick="removeMcpServer(\'' + escHtml(srv.name) + '\')">Remove</button>' +
+                        '</div>';
+                    container.appendChild(div);
+                });
+            }
+
+            var globalBox = mcpEl('mcp-global-list');
+            if (globalBox) {
+                if (!_mcpGlobal.length) {
+                    globalBox.innerHTML = '';
+                } else {
+                    globalBox.innerHTML =
+                        '<div class="mcp-note">🌐 The bot operator has also configured these for every server: ' +
+                        _mcpGlobal.map(function(g) { return '<code>' + escHtml(g.name) + '</code>'; }).join(', ') +
+                        '. Add one here with the same name to override it.</div>';
+                }
+            }
+        }
+
+        function splitToolNames(value) {
+            return value.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+        }
+
+        function resetMcpForm() {
+            _mcpEditing = null;
+            ['mcp-name', 'mcp-url', 'mcp-token', 'mcp-allowed', 'mcp-blocked'].forEach(function(id) {
+                if (mcpEl(id)) mcpEl(id).value = '';
+            });
+            mcpEl('mcp-preset').value = '';
+            mcpEl('mcp-enabled').checked = true;
+            mcpEl('mcp-name').disabled = false;
+            mcpEl('mcp-form-title').textContent = 'Add a connection';
+            mcpEl('mcp-save-btn').textContent = 'Add connection';
+            mcpEl('mcp-cancel-btn').style.display = 'none';
+            mcpEl('mcp-token').placeholder = 'Bearer token, if the server needs one';
+            resetMcpHints();
+        }
+
+        function editMcpServer(name) {
+            var srv = (_mcpServers || []).find(function(s) { return s.name === name; });
+            if (!srv) return;
+            _mcpEditing = name;
+            mcpEl('mcp-preset').value = '';
+            resetMcpHints();
+            mcpEl('mcp-name').value = srv.name;
+            mcpEl('mcp-name').disabled = true;
+            mcpEl('mcp-url').value = srv.url;
+            mcpEl('mcp-token').value = '';
+            mcpEl('mcp-token').placeholder = srv.hasToken ? '•••••••••• (leave empty to keep)' : 'Bearer token, if the server needs one';
+            mcpEl('mcp-allowed').value = srv.allowedTools.join(', ');
+            mcpEl('mcp-blocked').value = srv.blockedTools.join(', ');
+            mcpEl('mcp-enabled').checked = srv.enabled;
+            mcpEl('mcp-form-title').textContent = 'Edit ' + srv.name;
+            mcpEl('mcp-save-btn').textContent = 'Save changes';
+            mcpEl('mcp-cancel-btn').style.display = '';
+            mcpEl('mcp-form-title').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        async function saveMcpServer() {
+            var guildId = '<%= guild.id %>';
+            var name = (_mcpEditing || mcpEl('mcp-name').value).trim();
+            var url = mcpEl('mcp-url').value.trim();
+            if (!name || !url) { toast('Name and URL are required', 'error'); return; }
+
+            var body = {
+                url: url,
+                enabled: mcpEl('mcp-enabled').checked,
+                allowedTools: splitToolNames(mcpEl('mcp-allowed').value),
+                blockedTools: splitToolNames(mcpEl('mcp-blocked').value)
+            };
+            // Only send the token when one was typed — an absent field means
+            // "keep whatever is stored", which is how editing without
+            // re-entering the secret works.
+            var token = mcpEl('mcp-token').value;
+            if (token) body.authorizationToken = token;
+
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                var data = await resp.json();
+                if (!resp.ok) { toast(data.error || 'Failed to save connection', 'error'); return; }
+                toast('Connection saved ✓', 'success');
+                _mcpServers = data.servers || [];
+                resetMcpForm();
+                renderMcpServers();
+            } catch (e) {
+                console.error(e);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        async function removeMcpServer(name) {
+            const ok = await showConfirm({
+                title: 'Remove connection',
+                body: 'Remove "' + name + '"? Claude will lose access to its tools, and the stored token is deleted.',
+                okText: 'Remove'
+            });
+            if (!ok) return;
+            var guildId = '<%= guild.id %>';
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), { method: 'DELETE' });
+                var data = await resp.json();
+                if (!resp.ok) { toast(data.error || 'Failed to remove', 'error'); return; }
+                toast('Connection removed ✓', 'success');
+                _mcpServers = data.servers || [];
+                if (_mcpEditing === name) resetMcpForm();
+                renderMcpServers();
+            } catch (e) {
+                console.error(e);
+                toast('An error occurred', 'error');
+            }
+        }
+
+        async function testMcpServer(name) {
+            var guildId = '<%= guild.id %>';
+            var out = mcpEl('mcp-test-' + name);
+            if (out) { out.className = 'mcp-test-result'; out.textContent = 'Testing…'; }
+            try {
+                var resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/test', { method: 'POST' });
+                var data = await resp.json();
+                if (!out) return;
+                var okay = resp.ok && data.success;
+                out.className = 'mcp-test-result ' + (okay ? 'ok' : 'bad');
+                out.textContent = (okay ? '✓ ' : '✗ ') + (data.message || data.error || (okay ? 'Connected' : 'Failed'));
+            } catch (e) {
+                console.error(e);
+                if (out) { out.className = 'mcp-test-result bad'; out.textContent = '✗ Request failed'; }
+            }
+        }
 
         // ── Prompt editor: char counter + full-screen modal ─────────────────
         function updatePromptCount(textareaId) {

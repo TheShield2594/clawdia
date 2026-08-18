@@ -13,6 +13,19 @@ function distinctProfileIds(profiles) {
     return true;
 }
 
+function distinctMcpServerNames(servers) {
+    if (!Array.isArray(servers)) return true;
+
+    const seen = new Set();
+    for (const server of servers) {
+        if (!server || !server.name) continue;
+        if (seen.has(server.name)) return false;
+        seen.add(server.name);
+    }
+
+    return true;
+}
+
 function distinctChannelPersonaIds(personas) {
     if (!Array.isArray(personas)) return true;
 
@@ -296,6 +309,30 @@ const guildSchema = new Schema({
             validate: {
                 validator: distinctChannelPersonaIds,
                 message: 'channelPersonas contains duplicate channelId values.'
+            }
+        },
+        // Remote MCP servers this guild has connected in the dashboard. Merged
+        // with the operator-wide config file at request time; a name defined in
+        // both places resolves to the guild's entry. Anthropic provider only —
+        // it is the only one whose API takes an mcp_servers parameter.
+        mcpServers: {
+            type: [{
+                name:               { type: String, required: true },
+                url:                { type: String, required: true },
+                enabled:            { type: Boolean, default: true },
+                // Stored as given. Never rendered back to the dashboard: the UI
+                // shows whether a token exists, never what it is.
+                authorizationToken: { type: String, default: null },
+                // Empty allowedTools means "every tool"; anything in
+                // blockedTools is switched off even if also allowed.
+                allowedTools:       [{ type: String }],
+                blockedTools:       [{ type: String }],
+                addedBy:            { type: String, default: null },
+                createdAt:          { type: Date, default: Date.now }
+            }],
+            validate: {
+                validator: distinctMcpServerNames,
+                message: 'mcpServers contains duplicate name values.'
             }
         },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)

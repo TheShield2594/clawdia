@@ -1,28 +1,28 @@
 {
   "servers": [
     {
-      "name": "example-mcp",
-      "url": "https://example-server.modelcontextprotocol.io/mcp",
+      "name": "github",
+      "url": "https://api.githubcopilot.com/mcp/",
       "enabled": true,
-      "authorization_token": "${EXAMPLE_MCP_TOKEN}"
+      "authorization_token": "${GITHUB_MCP_TOKEN}",
+      "blocked_tools": [
+        "delete_file",
+        "delete_repository"
+      ]
     },
     {
       "name": "read-only-calendar",
       "url": "https://mcp.example.com/calendar",
       "authorization_token": "${CALENDAR_MCP_TOKEN}",
-      "default_config": { "enabled": false },
-      "configs": {
-        "search_events": { "enabled": true },
-        "list_events": { "enabled": true }
-      }
+      "allowed_tools": [
+        "search_events",
+        "list_events"
+      ]
     },
     {
       "name": "docs-search",
       "url": "https://mcp.example.com/docs",
-      "enabled": false,
-      "configs": {
-        "delete_document": { "enabled": false }
-      }
+      "enabled": false
     }
   ]
 }

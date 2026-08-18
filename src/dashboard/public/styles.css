@@ -601,6 +601,27 @@ body {
 .ai-inner-panel.active { display: block; animation: panel-in 0.2s ease; }
 .ai-inner-desc { color: var(--text-dim); font-size: 0.92rem; margin-bottom: 1.5rem; }
 
+/* MCP connections panel */
+.mcp-note {
+    margin-bottom: 1rem;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-strong);
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+.mcp-note code { font-size: 0.82rem; }
+.mcp-note-warn {
+    background: var(--warn-bg, #fffbe6);
+    border-color: var(--warn-border, #ffe58f);
+    color: var(--warn-text, #7a5f00);
+}
+.mcp-test-result { font-size: 0.78rem; margin-top: 0.35rem; color: var(--text-mute); word-break: break-word; }
+.mcp-test-result.ok { color: var(--ok, #16a34a); }
+.mcp-test-result.bad { color: var(--danger, #dc2626); }
+
 .panel-head {
     margin-bottom: 1.75rem;
     padding-bottom: 1.25rem;

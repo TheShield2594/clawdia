@@ -9,9 +9,10 @@ const os = require('os');
 const path = require('path');
 
 const {
-    MCP_BETA_HEADER,
+    MCP_BETA,
     loadMcpServers,
     getMcpServers,
+    resolveMcpServers,
     buildAnthropicMcpParams
 } = require('../src/config/mcpServers');
 
@@ -228,8 +229,110 @@ describe('buildAnthropicMcpParams', () => {
     });
 });
 
+describe('tool allow/block lists', () => {
+    test('an allow list flips the default off and re-enables the named tools', () => {
+        writeConfig({
+            servers: [{
+                name: 'calendar',
+                url: 'https://mcp.example.com/sse',
+                allowed_tools: ['search_events', 'list_events']
+            }]
+        });
+        expect(load().servers[0].toolset).toEqual({
+            type: 'mcp_toolset',
+            mcp_server_name: 'calendar',
+            default_config: { enabled: false },
+            configs: { search_events: { enabled: true }, list_events: { enabled: true } }
+        });
+    });
+
+    test('a block list leaves everything else enabled', () => {
+        writeConfig({
+            servers: [{ name: 'gh', url: 'https://mcp.example.com/sse', blocked_tools: ['delete_repository'] }]
+        });
+        const toolset = load().servers[0].toolset;
+        expect(toolset.default_config).toBeUndefined();
+        expect(toolset.configs).toEqual({ delete_repository: { enabled: false } });
+    });
+
+    test('blocking wins over allowing for a tool named in both lists', () => {
+        writeConfig({
+            servers: [{
+                name: 'gh',
+                url: 'https://mcp.example.com/sse',
+                allowedTools: ['read_file', 'delete_file'],
+                blockedTools: ['delete_file']
+            }]
+        });
+        expect(load().servers[0].toolset.configs).toEqual({
+            read_file: { enabled: true },
+            delete_file: { enabled: false }
+        });
+    });
+});
+
+describe('resolveMcpServers', () => {
+    const guildServer = {
+        name: 'github',
+        url: 'https://api.githubcopilot.com/mcp/',
+        authorizationToken: 'ghp_test'
+    };
+
+    beforeEach(() => {
+        writeConfig({ servers: [{ name: 'docs', url: 'https://docs.example.com/sse' }] });
+        load();
+    });
+
+    test('adds guild servers alongside the config-file ones', () => {
+        const names = resolveMcpServers([guildServer]).map(s => s.name);
+        expect(names).toEqual(['docs', 'github']);
+    });
+
+    test('tags where each server came from', () => {
+        const bySource = Object.fromEntries(resolveMcpServers([guildServer]).map(s => [s.name, s.source]));
+        expect(bySource).toEqual({ docs: 'file', github: 'guild' });
+    });
+
+    test('a guild server replaces the file server of the same name', () => {
+        const resolved = resolveMcpServers([{ name: 'docs', url: 'https://guild.example.com/sse' }]);
+        expect(resolved).toHaveLength(1);
+        expect(resolved[0].server.url).toBe('https://guild.example.com/sse');
+        expect(resolved[0].source).toBe('guild');
+    });
+
+    test('never expands ${VAR} from guild input', () => {
+        process.env.LEAK_ME = 'secret';
+        try {
+            const resolved = resolveMcpServers([{ ...guildServer, authorizationToken: '${LEAK_ME}' }]);
+            expect(resolved.find(s => s.name === 'github').server.authorization_token).toBe('${LEAK_ME}');
+        } finally {
+            delete process.env.LEAK_ME;
+        }
+    });
+
+    test('drops a guild server with a non-https URL', () => {
+        const names = resolveMcpServers([{ name: 'bad', url: 'http://plain.example.com/sse' }]).map(s => s.name);
+        expect(names).toEqual(['docs']);
+    });
+
+    test('caps how many guild servers are honoured', () => {
+        const many = Array.from({ length: 25 }, (_, i) => ({ name: `srv${i}`, url: `https://s${i}.example.com/sse` }));
+        // 10 guild servers plus the one from the config file.
+        expect(resolveMcpServers(many)).toHaveLength(11);
+    });
+
+    test('MCP_ALLOW_GUILD_SERVERS=false leaves only the config file', () => {
+        process.env.MCP_ALLOW_GUILD_SERVERS = 'false';
+        try {
+            expect(resolveMcpServers([guildServer]).map(s => s.name)).toEqual(['docs']);
+        } finally {
+            delete process.env.MCP_ALLOW_GUILD_SERVERS;
+        }
+    });
+});
+
 describe('beta flag', () => {
     test('is the current MCP connector version', () => {
-        expect(MCP_BETA_HEADER).toBe('mcp-client-2025-11-20');
+        expect(MCP_BETA).toBe('mcp-client-2025-11-20');
     });
 });

@@ -150,13 +150,13 @@ async function beginSession(interaction) {
     try {
         const gs = await Guild.findOne({ guildId: guild.id });
         const aiSettings = gs?.ai || {};
-        const { provider, model, apiKey, baseUrl } = resolveProviderConfig(aiSettings);
+        const { provider, model, apiKey, baseUrl, mcpServers } = resolveProviderConfig(aiSettings);
 
         if (provider !== 'ollama' && !apiKey) {
             return interaction.editReply('AI is not configured for this server. An admin must add an API key.');
         }
 
-        const story = await getCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history: [], prompt: openingPrompt, temperature: 0.9, maxTokens: 600 });
+        const story = await getCompletion({ provider, model, apiKey, baseUrl, mcpServers, systemPrompt, history: [], prompt: openingPrompt, temperature: 0.9, maxTokens: 600 });
 
         await DmSession.findOneAndUpdate(
             { sessionId: session.sessionId },
@@ -222,13 +222,13 @@ async function takeAction(interaction) {
     try {
         const gs = await Guild.findOne({ guildId: guild.id });
         const aiSettings = gs?.ai || {};
-        const { provider, model, apiKey, baseUrl } = resolveProviderConfig(aiSettings);
+        const { provider, model, apiKey, baseUrl, mcpServers } = resolveProviderConfig(aiSettings);
 
         if (provider !== 'ollama' && !apiKey) {
             return interaction.editReply('AI is not configured for this server.');
         }
 
-        const narrative = await getCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature: 0.9, maxTokens: 500 });
+        const narrative = await getCompletion({ provider, model, apiKey, baseUrl, mcpServers, systemPrompt, history, prompt, temperature: 0.9, maxTokens: 500 });
 
         // Scope damage/heal detection to this player by name or "you/your"
         const namePattern = escapeRegex(player.name);
@@ -422,7 +422,7 @@ async function handleDmButton(interaction, client) {
     try {
         const gs = await Guild.findOne({ guildId: session.guildId });
         const aiSettings = gs?.ai || {};
-        const { provider, model, apiKey, baseUrl } = resolveProviderConfig(aiSettings);
+        const { provider, model, apiKey, baseUrl, mcpServers } = resolveProviderConfig(aiSettings);
 
         if (provider !== 'ollama' && !apiKey) {
             return interaction.editReply('AI is not configured for this server.');
@@ -430,7 +430,7 @@ async function handleDmButton(interaction, client) {
 
         const logSnippet = session.storyLog.slice(-16).join('\n\n');
         const recap = await getCompletion({
-            provider, model, apiKey, baseUrl,
+            provider, model, apiKey, baseUrl, mcpServers,
             systemPrompt: 'You are a dramatic fantasy narrator. Summarize the story concisely.',
             history: [],
             prompt: `Summarize the following campaign story so far as a dramatic narrator in 3-5 sentences:\n\n${logSnippet}`,

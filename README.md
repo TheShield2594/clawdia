@@ -108,6 +108,7 @@ npm start
 - `OPENROUTER_API_KEY` - (Optional) OpenRouter API key for AI features
 - `OLLAMA_BASE_URL` - (Optional) Local Ollama endpoint (e.g., `http://localhost:11434`)
 - `MCP_SERVERS_CONFIG` - (Optional) Path to the MCP server list (default: `config/mcp-servers.json`)
+- `MCP_ALLOW_GUILD_SERVERS` - (Optional) Set to `false` to disable dashboard-managed MCP servers
 - `IMGFLIP_USERNAME` / `IMGFLIP_PASSWORD` - (Optional) Imgflip credentials for `/meme` command
 
 ## Commands
@@ -277,28 +278,39 @@ Configuration that previously lived behind slash commands (settings link, level 
 ### MCP Servers (Anthropic only)
 
 Claude can call tools on remote [MCP](https://modelcontextprotocol.io) servers —
-a Jira board, a calendar, an internal docs search — without the bot implementing
-an MCP client. Anthropic opens the connection server-side; Clawdia only names the
-servers.
+a GitHub repo, a calendar, an internal docs search — without the bot
+implementing an MCP client. Anthropic opens the connection server-side; Clawdia
+only names the servers.
 
-The list lives in a config file, not in code. Copy
-`config/mcp-servers.example.json` to `config/mcp-servers.json`, list as many
-servers as you need, and restart:
+**From the dashboard** (AI → 🔌 Connections): pick a service or paste any https
+MCP endpoint, add a token, and optionally list the tools Claude may or may not
+call. GitHub is available as a preset (`https://api.githubcopilot.com/mcp/`,
+authenticated with a fine-grained PAT). A **Test** button makes one real request
+and reports whether Claude reached the server. Tokens are write-only — once
+saved they are never sent back to the browser.
+
+**From a config file** for servers that apply to every Discord server, at
+`config/mcp-servers.json`:
 
 ```json
 {
   "servers": [
     { "name": "docs", "url": "https://mcp.example.com/docs" },
-    { "name": "calendar", "url": "https://mcp.example.com/calendar", "authorization_token": "${CALENDAR_MCP_TOKEN}" }
+    {
+      "name": "calendar",
+      "url": "https://mcp.example.com/calendar",
+      "authorization_token": "${CALENDAR_MCP_TOKEN}",
+      "blocked_tools": ["delete_event"]
+    }
   ]
 }
 ```
 
-Tokens written as `${VAR}` are read from the environment, so the file itself
-stays free of secrets. With no config file present, requests are exactly what
+Tokens written as `${VAR}` in the file resolve from the environment, so it holds
+no secrets of its own. With neither source configured, requests are exactly what
 they were before — the connector is off. See
 [SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers-anthropic-only) for the full field
-reference, including per-tool allowlists.
+reference and `MCP_ALLOW_GUILD_SERVERS`.
 
 ### Setup
 

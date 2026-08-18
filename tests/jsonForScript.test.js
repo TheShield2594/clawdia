@@ -50,4 +50,42 @@ describe('guild-settings.ejs', () => {
         // a bare JSON.stringify there is a stored-XSS vector.
         expect(source).not.toMatch(/<%-[^%]*JSON\.stringify/);
     });
+
+    // Secrets that live on the guild document — provider API keys, and now MCP
+    // authorization tokens — must never reach the browser. The route strips
+    // them before rendering; this asserts the template would not print them
+    // even if that strip were removed.
+    it('renders without leaking stored secrets', () => {
+        const Guild = require('../src/models/Guild');
+        const settings = new Guild({ guildId: '1' }).toObject();
+        settings.ai.anthropicKey = 'sk-ant-DO-NOT-LEAK';
+        settings.ai.mcpServers = [{
+            name: 'github',
+            url: 'https://api.githubcopilot.com/mcp/',
+            enabled: true,
+            authorizationToken: 'ghp_DO-NOT-LEAK',
+            allowedTools: [],
+            blockedTools: ['delete_file']
+        }];
+
+        const html = ejs.render(source, {
+            jsonForScript,
+            user: { id: '1', username: 'u' },
+            guild: { id: '1', name: 'g', icon: null, ownerId: '1', owner: true },
+            settings,
+            channels: [{ id: '10', name: 'general' }],
+            voiceChannels: [], stageChannels: [], categories: [],
+            roles: [{ id: '20', name: 'Admin' }],
+            defaultJobs: [], defaultTiers: [], builtinAchievements: [],
+            huntItems: { weapons: [], upgrades: [], ammo: [], consumables: [] },
+            fishItems: { rods: [], upgrades: [], bait: [], consumables: [] },
+            mineItems: { pickaxes: [], upgrades: [], blasts: [], consumables: [] },
+            explorationRegions: []
+        }, { filename: templatePath });
+
+        expect(html).not.toContain('ghp_DO-NOT-LEAK');
+        expect(html).not.toContain('sk-ant-DO-NOT-LEAK');
+        // The panel itself still renders — otherwise this would pass vacuously.
+        expect(html).toContain('id="ai-mcp"');
+    });
 });
