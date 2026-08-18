@@ -10,12 +10,14 @@ const {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
+    AttachmentBuilder,
     escapeMarkdown,
 } = require('discord.js');
 const { delay } = require('../../utils/delay');
+const { renderEightBall } = require('../../utils/eightBallImage');
 const { BoundedRateLimiter } = require('../../utils/boundedRateLimiter');
 
-const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b1.png';
+const BALL_FILE = '8ball.png';
 
 const MAX_QUESTION   = 200;
 const SHAKE_FRAME_MS = 260;
@@ -144,7 +146,7 @@ function embedAuthor(interaction) {
 }
 
 function baseEmbed(author) {
-    const embed = new EmbedBuilder().setThumbnail(THUMB).setTitle('🎱 Magic 8-Ball');
+    const embed = new EmbedBuilder().setTitle('🎱 Magic 8-Ball');
     return author ? embed.setAuthor(author) : embed;
 }
 
@@ -161,6 +163,7 @@ function resultEmbed(author, quoted, response, shakes) {
     return baseEmbed(author)
         .setColor(color)
         .setDescription(quoted)
+        .setImage(`attachment://${BALL_FILE}`)
         .addFields(
             { name: `${emoji} The 8-Ball Says`, value: `**${response.text}**`, inline: false },
             { name: '🔮 Outlook',               value: outlook,               inline: true  },
@@ -210,15 +213,26 @@ async function shake(responder, { author, quoted, shakes, ownerId }) {
     // one of these edits shouldn't cost the user their answer.
     for (let f = 0; f < SHAKE_FRAMES.length; f++) {
         await responder.editReply({
-            embeds:     [shakingEmbed(author, quoted, f)],
-            components: [],
+            embeds:      [shakingEmbed(author, quoted, f)],
+            components:  [],
+            // Drop the previous answer's render for the duration of the shake —
+            // the ball is being shaken, it shouldn't still be showing a verdict.
+            files:       [],
+            attachments: [],
         }).catch(() => {});
         await delay(SHAKE_FRAME_MS);
     }
 
+    const response = pickResponse();
+    const ball = new AttachmentBuilder(renderEightBall(response.text, response.type), { name: BALL_FILE });
+
     return responder.editReply({
-        embeds:     [resultEmbed(author, quoted, pickResponse(), shakes)],
-        components: [buttonRow(ownerId)],
+        embeds:      [resultEmbed(author, quoted, response, shakes)],
+        components:  [buttonRow(ownerId)],
+        files:       [ball],
+        // Clears the attachment the last shake left behind; without it Discord
+        // keeps both and the message grows an image per click.
+        attachments: [],
     });
 }
 
@@ -343,7 +357,7 @@ module.exports = {
 
     __test__: {
         RESPONSES, TYPE_CONFIG, MAX_QUESTION, SHAKE_LIMIT, SHAKE_WINDOW_MS,
-        pickResponse, normalizeQuestion, quoteQuestion, readState, ownerOf,
+        pickResponse, normalizeQuestion, quoteQuestion, readState, ownerOf, BALL_FILE,
         isEightBallButton, isEightBallModal, buttonRow, resultEmbed,
         handleButton, handleModal, shaking, shakeLimiter,
     },
