@@ -134,6 +134,8 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
                     prompt,
                     temperature: 0.95,
                     maxTokens,
+                    // Pure JSON out — no MCP tools, whose output would only muddy it.
+                    mcp: false,
                 });
 
                 const cleaned = raw.replace(/```json|```/gi, '').trim();

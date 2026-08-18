@@ -99,6 +99,135 @@ https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=8&scope
 
 **Recommendation:** Start with Gemini for testing (free), then add OpenAI if you need more advanced capabilities.
 
+### MCP Servers (Anthropic only)
+
+When the AI provider is Anthropic, Claude can call tools hosted on remote
+[MCP](https://modelcontextprotocol.io) servers — a GitHub repo, a calendar, an
+internal search. Anthropic makes the connection itself; the bot never speaks
+MCP, it only names the servers.
+
+There are two ways to add one, and they stack:
+
+| | Where | Applies to | Who edits it |
+|---|---|---|---|
+| **Dashboard** | AI → 🔌 Connections | One Discord server | Anyone with Manage Server |
+| **Config file** | `config/mcp-servers.json` | Every Discord server | Whoever runs the bot |
+
+A dashboard entry with the same name as a file entry replaces it, so a server
+can be defined centrally and pointed at one guild's own credentials.
+
+#### Connecting GitHub from the dashboard
+
+1. Set the provider to **Anthropic (Claude)** in the AI → Chat tab and save.
+2. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens),
+   granting it only the repositories and scopes the bot should reach.
+3. Open AI → **🔌 Connections**, pick **GitHub** under Service. The name and
+   endpoint (`https://api.githubcopilot.com/mcp/`) fill themselves in.
+4. Paste the token, and list anything destructive under **Never these tools**.
+5. Click **Add connection**, then **Test** — Claude makes one real request and
+   reports whether it reached the server.
+
+Other services work the same way: choose **Custom server…** and paste the
+server's https endpoint and token. GitHub is the only preset because it is the
+one major service with a documented, publicly hosted MCP endpoint; most others
+(Gmail among them) need a hosted or self-hosted MCP server whose URL you supply.
+
+**Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
+everything the server offers. *Never these tools* is a denylist and wins over
+the allowlist. Filling in the denylist is worth the minute it takes: Claude
+decides on its own when to call a tool.
+
+**Tokens are write-only.** A saved token is never sent back to the browser and
+never appears in the rendered page — the panel shows only that one exists. Edit
+a connection without retyping the token to keep it, or save an empty token field
+to clear it.
+
+#### The config file
+
+For servers that should apply to every Discord server the bot is in:
+
+```bash
+cp config/mcp-servers.example.json config/mcp-servers.json
+```
+
+The default path is `config/mcp-servers.json` next to `package.json`. Set
+`MCP_SERVERS_CONFIG` in `.env` to read it from somewhere else — useful when the
+file lives outside the repo checkout.
+
+```json
+{
+  "servers": [
+    {
+      "name": "docs-search",
+      "url": "https://mcp.example.com/docs"
+    },
+    {
+      "name": "calendar",
+      "url": "https://mcp.example.com/calendar",
+      "authorization_token": "${CALENDAR_MCP_TOKEN}",
+      "allowed_tools": ["search_events", "list_events"]
+    }
+  ]
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique identifier, letters/digits/`_`/`-`. Appears in Claude's tool calls. |
+| `url` | Yes | The server's HTTPS endpoint (Streamable HTTP or SSE). Local stdio servers cannot be reached this way. |
+| `enabled` | No | Set `false` to keep an entry in the file without connecting to it. |
+| `authorization_token` | No | OAuth bearer token, if the server needs one. |
+| `allowed_tools` | No | Allowlist of tool names. Empty means every tool. |
+| `blocked_tools` | No | Denylist of tool names. Wins over `allowed_tools`. |
+| `default_config` / `configs` | No | The API's raw toolset shape, if you need `defer_loading` or another setting the two lists above don't cover. |
+
+**Keeping tokens out of the file.** Any `url` or `authorization_token` written
+as `${VAR_NAME}` is read from the environment at startup, so real credentials
+stay in `.env`:
+
+```env
+CALENDAR_MCP_TOKEN=your_oauth_access_token
+```
+
+A `${VAR}` that resolves to nothing disables that one server (with a log line)
+rather than sending the literal `${VAR}` text to it. This expansion is
+deliberately **file-only** — a dashboard token is used exactly as typed, so a
+guild admin cannot read the bot's environment back out through a server they
+control.
+
+`config/mcp-servers.json` is gitignored and excluded from the Docker image;
+`docker-compose.yml` mounts `./config` read-only instead, so tokens stay on the
+host.
+
+#### Locking it down
+
+Set `MCP_ALLOW_GUILD_SERVERS=false` in `.env` to make the config file the only
+way in. The Connections tab still lists what is active but refuses to save.
+
+#### Checking it works
+
+```text
+[MCP] 2 server(s) from /app/config/mcp-servers.json: docs-search, calendar
+```
+
+Problems are reported as `[MCP] ...` warnings and skip the offending entry — a
+malformed config disables the connector, it never stops the bot from starting.
+
+**Notes**
+
+- Anthropic only. The other providers ignore all of this — their APIs have no
+  equivalent parameter.
+- Tokens are not free: every enabled tool's description is sent with each
+  request. Trim with the allow/deny lists if you connect a large server.
+- `/forge` and `/questgen` parse the model's reply as JSON and deliberately run
+  without MCP tools.
+- Data retention needs checking on both sides. Anthropic's zero-data-retention
+  arrangements do **not** cover the MCP connector, so tool definitions and tool
+  results are retained under their standard policy. Separately, the remote
+  server is a third party that sets its own retention and downstream processing
+  for whatever Claude sends it and whatever it holds. Read the privacy policy of
+  every server you connect before pointing it at a Discord server's traffic.
+
 ## Daily News Configuration
 
 ### Finding RSS Feeds
@@ -162,6 +291,9 @@ SESSION_SECRET=random_string_here_32_characters_min
 OPENAI_API_KEY=sk-your_openai_key_here
 GEMINI_API_KEY=AIza_your_gemini_key_here
 
+# MCP servers for the Anthropic provider (Optional)
+# Defaults to config/mcp-servers.json; set this only to read it from elsewhere.
+# MCP_SERVERS_CONFIG=/opt/clawdia/config/mcp-servers.json
 
 # Meme Generation (Optional — required for /meme command)
 # Free account at https://imgflip.com/api

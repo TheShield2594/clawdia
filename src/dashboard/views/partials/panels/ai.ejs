@@ -10,6 +10,7 @@
                         <button class="ai-inner-tab" data-ai-tab="ai-knowledgebase">📚 Knowledge Base</button>
                         <button class="ai-inner-tab" data-ai-tab="ai-summaries">📝 Summaries</button>
                         <button class="ai-inner-tab" data-ai-tab="ai-personas">👤 Personas</button>
+                        <button class="ai-inner-tab" data-ai-tab="ai-mcp">🔌 Connections</button>
                     </div>
 
                     <!-- Chat -->
@@ -309,6 +310,74 @@
                         </div>
                         <div class="actions-row">
                             <button class="btn btn-primary" onclick="addPersona()">Save persona</button>
+                        </div>
+                    </div>
+
+                    <!-- MCP connections -->
+                    <div id="ai-mcp" class="ai-inner-panel">
+                        <p class="ai-inner-desc">Connect Claude to external services over <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP</a> — a GitHub repo, a calendar, an internal search. Anthropic opens the connection on their side and Claude calls the tools during a conversation.</p>
+
+                        <div id="mcp-provider-warning" class="mcp-note mcp-note-warn" style="display:none;">
+                            ⚠️ MCP connections only apply to the <strong>Anthropic (Claude)</strong> provider. Your server is currently set to a different provider in the <strong>Chat</strong> tab, so these connections are inactive.
+                        </div>
+                        <div id="mcp-disabled-warning" class="mcp-note mcp-note-warn" style="display:none;">
+                            🔒 The bot operator has disabled dashboard-managed MCP servers. Only the servers in the bot's config file are active.
+                        </div>
+                        <div id="mcp-cap-warning" class="mcp-note mcp-note-warn" style="display:none;"></div>
+
+                        <div id="mcp-list" style="margin-bottom:1.25rem;">
+                            <div id="mcp-skeleton">
+                                <div class="skel-bar" style="width:70%"></div>
+                                <div class="skel-bar" style="width:55%"></div>
+                            </div>
+                        </div>
+
+                        <div id="mcp-global-list"></div>
+
+                        <div class="panel-head" style="margin-top:1.25rem"><h3 id="mcp-form-title">Add a connection</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="mcp-preset">Service</label>
+                            <select id="mcp-preset" onchange="applyMcpPreset()">
+                                <option value="">Custom server…</option>
+                            </select>
+                            <small id="mcp-preset-hint">Pick a known service to prefill its endpoint, or enter any remote MCP server URL yourself.</small>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="mcp-name">Name</label>
+                            <input type="text" id="mcp-name" maxlength="64" placeholder="github">
+                            <small>Letters, digits, underscores and hyphens. Claude sees this name when it calls a tool.</small>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="mcp-url">Server URL</label>
+                            <input type="text" id="mcp-url" maxlength="2048" placeholder="https://api.example.com/mcp/">
+                            <small>Must be https. Local <code>stdio</code> servers cannot be reached this way.</small>
+                        </div>
+                        <form class="ai-keys-form" autocomplete="off" onsubmit="return false">
+                        <div class="field">
+                            <label class="field-label" for="mcp-token">Authorization token <span style="font-weight:400;color:var(--muted,#888)">(optional)</span></label>
+                            <input type="password" id="mcp-token" value="" autocomplete="new-password" placeholder="Bearer token, if the server needs one">
+                            <small id="mcp-token-hint">Stored on the bot and sent to Anthropic with each request. It is never shown again once saved.</small>
+                        </div>
+                        </form>
+                        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+                            <div>
+                                <label class="field-label" for="mcp-allowed">Only these tools <span style="font-weight:400;color:var(--muted,#888)">(optional)</span></label>
+                                <input type="text" id="mcp-allowed" placeholder="search_repositories, get_file_contents">
+                                <small>Comma-separated. Leave empty to allow every tool the server offers.</small>
+                            </div>
+                            <div>
+                                <label class="field-label" for="mcp-blocked">Never these tools</label>
+                                <input type="text" id="mcp-blocked" placeholder="delete_file">
+                                <small>Comma-separated. Wins over the allow list. Worth filling in for anything destructive.</small>
+                            </div>
+                        </div>
+                        <label class="toggle">
+                            <span class="toggle-text"><strong>Enabled</strong><span>Offer this server's tools to Claude</span></span>
+                            <span class="switch"><input type="checkbox" id="mcp-enabled" checked><span class="slider"></span></span>
+                        </label>
+                        <div class="actions-row">
+                            <button class="btn btn-primary" id="mcp-save-btn" onclick="saveMcpServer()">Add connection</button>
+                            <button class="btn" id="mcp-cancel-btn" onclick="resetMcpForm()" style="display:none;">Cancel</button>
                         </div>
                     </div>
 

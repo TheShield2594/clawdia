@@ -54,6 +54,9 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      # Path to the MCP server list (Anthropic provider only). Needs the
+      # volume below; leave unset to keep the MCP connector off.
+      - MCP_SERVERS_CONFIG=${MCP_SERVERS_CONFIG:-}
       # --- Optional: meme generation (/meme) ---
       - IMGFLIP_USERNAME=${IMGFLIP_USERNAME}
       - IMGFLIP_PASSWORD=${IMGFLIP_PASSWORD}
@@ -65,6 +68,11 @@ services:
       - DASHBOARD_PORT=7001
       - AUDIT_LOG_RETENTION_DAYS=${AUDIT_LOG_RETENTION_DAYS:-90}
       - NODE_ENV=${NODE_ENV:-production}
+    # A Portainer stack has no repo checkout to mount, so put mcp-servers.json
+    # somewhere on the Docker host and point MCP_SERVERS_CONFIG at it inside the
+    # container. Mounted read-only: the file can hold OAuth tokens.
+    # volumes:
+    #   - /opt/clawdia/config:/app/config:ro
     # Loopback only — put your reverse proxy in front of this. Publish on
     # 0.0.0.0 only if TLS is terminated elsewhere on the host network.
     ports:

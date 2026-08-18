@@ -32,6 +32,9 @@ services:
         condition: service_healthy
     volumes:
       - ./backups:/app/backups
+      # MCP server list, read at startup. Mounted rather than baked into the
+      # image so the file (which can hold OAuth tokens) stays on the host.
+      - ./config:/app/config:ro
     networks:
       - db-network      # reaches MongoDB
       - clawdia-network # reaches the internet (Discord API, AI APIs, etc.)
