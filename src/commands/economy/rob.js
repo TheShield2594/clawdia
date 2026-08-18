@@ -96,15 +96,32 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
         }
     } catch (victimErr) {
         try {
+            // Give the cooldown slot back only if it is still ours: another rob
+            // may have won the CAS since our write, and restoring the old
+            // lastRob over its value would hand that rob a free cooldown reset.
+            await User.updateOne(
+                { userId: robber.userId, guildId: robber.guildId, lastRob: robber.lastRob },
+                { $set: { lastRob: robberSnapshot.lastRob } }
+            );
+
             // Reverse the deltas rather than restoring the snapshot values, so a
             // concurrent credit that landed after the robber write survives.
-            const rollbackInc = {};
-            if (robberBalDelta !== 0) rollbackInc.balance        = -robberBalDelta;
-            if (successDelta   !== 0) rollbackInc.successfulRobs = -successDelta;
-            if (failedDelta    !== 0) rollbackInc.failedRobs     = -failedDelta;
-            const rollback = { $set: { lastRob: robberSnapshot.lastRob } };
-            if (Object.keys(rollbackInc).length) rollback.$inc = rollbackInc;
-            await User.updateOne({ userId: robber.userId, guildId: robber.guildId }, rollback);
+            // Clamped at zero: spending between the write and here can leave less
+            // on the account than this rob added.
+            const reversals = {};
+            if (robberBalDelta !== 0) reversals.balance        = -robberBalDelta;
+            if (successDelta   !== 0) reversals.successfulRobs = -successDelta;
+            if (failedDelta    !== 0) reversals.failedRobs     = -failedDelta;
+            if (Object.keys(reversals).length) {
+                const clamped = {};
+                for (const [field, delta] of Object.entries(reversals)) {
+                    clamped[field] = { $max: [0, { $add: [{ $ifNull: [`$${field}`, 0] }, delta] }] };
+                }
+                await User.updateOne(
+                    { userId: robber.userId, guildId: robber.guildId },
+                    [{ $set: clamped }]
+                );
+            }
         } catch (rollbackErr) {
             console.error('[rob] rollback failed; balances may be inconsistent:', rollbackErr);
         }

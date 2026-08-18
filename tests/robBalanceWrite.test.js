@@ -37,6 +37,14 @@ function mockGuardsPass(doc, query) {
 }
 
 function mockApply(doc, update) {
+    // Aggregation-pipeline update: [{ $set: { field: { $max: [0, { $add: [...] }] } } }]
+    if (Array.isArray(update)) {
+        for (const [field, expr] of Object.entries(update[0].$set)) {
+            const delta = expr.$max[1].$add[1];
+            doc[field] = Math.max(0, (doc[field] ?? 0) + delta);
+        }
+        return;
+    }
     for (const [path, value] of Object.entries(update.$set ?? {})) {
         if (path.includes('.')) continue; // nested trap/effect paths are not asserted here
         doc[path] = value;
@@ -68,8 +76,11 @@ jest.mock('../src/models/User', () => ({
     }),
     updateOne: jest.fn(async (query, update = {}) => {
         const doc = mockFindDoc(query);
-        if (doc) { mockUpdates.push({ userId: doc.userId, query, update }); mockApply(doc, update); }
-        return {};
+        if (Object.keys(update).length && mockBeforeWrite) mockBeforeWrite(query, update);
+        if (!doc || !mockGuardsPass(doc, query)) return { matchedCount: 0 };
+        mockUpdates.push({ userId: doc.userId, query, update });
+        mockApply(doc, update);
+        return { matchedCount: 1 };
     }),
 }));
 
@@ -182,4 +193,67 @@ test('the victim write stays a delta too', async () => {
     const victimWrite = mockUpdates.find(u => u.userId === 'victim' && u.update.$inc);
     expect(victimWrite.update.$set).not.toHaveProperty('balance');
     expect(victimWrite.update.$inc.balance).toBeLessThan(0);
+});
+
+describe('rollback when the victim write fails', () => {
+    // Force the victim update to find nothing, which is what drives the compensator.
+    function blockVictimWrite() {
+        mockBeforeWrite = (query) => {
+            if (query.userId === 'victim') mockStore.victim.lastRobbedAt = new Date();
+        };
+    }
+
+    test('the reversal is clamped so spending mid-heist cannot go negative', async () => {
+        // Success path: the robber is credited, so the reversal is a debit. If the
+        // robber spends the haul before the compensator runs, a raw $inc of
+        // -stolen would leave a negative balance.
+        blockVictimWrite();
+        const priorHook = mockBeforeWrite;
+        mockBeforeWrite = (query, update) => {
+            priorHook(query, update);
+            // The clamped reversal is a pipeline update — drain right before it.
+            if (Array.isArray(update) && query.userId === 'robber') {
+                mockStore.robber.balance = 0;
+            }
+        };
+
+        const { interaction } = buildInteraction();
+        await robCommand.execute(interaction).catch(() => {});
+
+        expect(mockStore.robber.balance).toBe(0);
+        expect(mockStore.robber.balance).toBeGreaterThanOrEqual(0);
+    });
+
+    test('the cooldown slot is only handed back while it is still ours', async () => {
+        blockVictimWrite();
+        const { interaction } = buildInteraction();
+        await robCommand.execute(interaction).catch(() => {});
+
+        const restore = mockUpdates.find(u => u.update.$set && 'lastRob' in u.update.$set && u.userId === 'robber' && u.query.lastRob !== undefined);
+        expect(restore).toBeTruthy();
+        // The restore is conditional on the value this attempt wrote.
+        expect(restore.query.lastRob).toBeInstanceOf(Date);
+        expect(mockStore.robber.lastRob).toBeNull(); // handed back
+    });
+
+    test('a rob that started after ours keeps its cooldown', async () => {
+        blockVictimWrite();
+        const { interaction } = buildInteraction();
+        const foreign = new Date(Date.now() + 5_000);
+        const origBefore = mockStore.robber.balance;
+
+        // Another rob wins the slot after our write but before the compensator.
+        const priorHook = mockBeforeWrite;
+        mockBeforeWrite = (query, update) => {
+            priorHook(query, update);
+            if (query.userId === 'robber' && update.$set && 'lastRob' in update.$set && query.lastRob !== undefined) {
+                mockStore.robber.lastRob = foreign;
+            }
+        };
+
+        await robCommand.execute(interaction).catch(() => {});
+
+        expect(mockStore.robber.lastRob).toBe(foreign);   // not stomped
+        expect(mockStore.robber.balance).toBe(origBefore); // balance still reversed
+    });
 });

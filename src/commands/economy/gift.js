@@ -245,8 +245,10 @@ module.exports = {
                 User.updateOne({ userId: target.id, guildId: interaction.guild.id }, {}, { upsert: true }),
             ]);
 
-            const slot = sender.inventory.find(i => i.itemId === itemId);
-            if (!slot || slot.quantity < qty) {
+            // Same predicate as the atomic debit below — `find` on itemId alone
+            // would reject on a small duplicate slot while a later one can cover it.
+            const slot = sender.inventory.find(i => i.itemId === itemId && i.quantity >= qty);
+            if (!slot) {
                 return interaction.reply({
                     content: `You don't have ${qty}x \`${itemId}\` in your inventory.`,
                     flags: MessageFlags.Ephemeral,
@@ -273,8 +275,11 @@ module.exports = {
                     guildId: interaction.guild.id,
                     inventory: { $elemMatch: { itemId, quantity: { $gte: qty } } },
                 },
-                { $inc: { 'inventory.$[slot].quantity': -qty } },
-                { arrayFilters: [{ 'slot.itemId': itemId }], new: true }
+                // Positional `$`, not an arrayFilter: `$[slot]` would decrement
+                // every slot carrying this itemId, and duplicate slots are
+                // reachable — several writers $push without checking for one.
+                { $inc: { 'inventory.$.quantity': -qty } },
+                { new: true }
             );
             if (!debited) {
                 return interaction.reply({

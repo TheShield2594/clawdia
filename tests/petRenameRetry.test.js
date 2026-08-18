@@ -15,6 +15,9 @@ function mockVersionError() {
     return err;
 }
 
+// Called before each save attempt, so a test can reorder the roster mid-retry.
+let mockBeforeSave;
+
 function mockBuildDoc(pets) {
     return {
         userId: 'u1',
@@ -24,7 +27,9 @@ function mockBuildDoc(pets) {
         markModified: jest.fn(),
         async save() {
             this.saves++;
-            if (this.saves <= mockSaveFails) throw mockVersionError();
+            const failing = this.saves <= mockSaveFails;
+            if (failing && mockBeforeSave) mockBeforeSave(this);
+            if (failing) throw mockVersionError();
         },
     };
 }
@@ -72,7 +77,8 @@ function buildInteraction(sub, slot) {
 beforeEach(() => {
     mockSaveFails = 0;
     mockLoads = 0;
-    mockDoc = mockBuildDoc([{ petId: 'dog', name: 'Buddy', slotRef: null }]);
+    mockBeforeSave = null;
+    mockDoc = mockBuildDoc([{ _id: 'pet_a', petId: 'dog', name: 'Buddy' }]);
     jest.clearAllMocks();
 });
 
@@ -111,4 +117,23 @@ test('renaming a slot that is not there reports no such pet, not a conflict', as
 
     expect(mockDoc.saves).toBe(0);
     expect(state.replies.at(-1).content).not.toContain('Edit conflict');
+});
+
+test('a roster reordered mid-retry still renames the pet the user picked', async () => {
+    // Slot refs are positional. If a concurrent write reorders the roster
+    // between attempts, replaying the raw slot ref would rename a different pet,
+    // so the first attempt pins the pet by its stable _id.
+    mockDoc = mockBuildDoc([
+        { _id: 'pet_a', petId: 'dog', name: 'Buddy' },
+        { _id: 'pet_b', petId: 'cat', name: 'Mittens' },
+    ]);
+    mockSaveFails = 1;
+    mockBeforeSave = (doc) => { doc.pets.reverse(); };  // Mittens is now slot 0
+
+    const { interaction } = buildInteraction('rename', '0');
+    await petCommand.execute(interaction);
+
+    const byId = Object.fromEntries(mockDoc.pets.map(p => [p._id, p.name]));
+    expect(byId.pet_a).toBe('Rex');       // the pet at slot 0 when the user asked
+    expect(byId.pet_b).toBe('Mittens');   // untouched
 });

@@ -19,8 +19,11 @@ function mockMatches(doc, query) {
     if (!doc) return false;
     const elem = query.inventory?.$elemMatch;
     if (elem) {
-        const slot = doc.inventory.find(s => s.itemId === elem.itemId);
-        if (!slot || slot.quantity < elem.quantity.$gte) return false;
+        const idx = doc.inventory.findIndex(
+            s => s.itemId === elem.itemId && s.quantity >= elem.quantity.$gte
+        );
+        if (idx === -1) return false;
+        doc._matchedIndex = idx;
     }
     const byItem = query['inventory.itemId'];
     if (byItem !== undefined) {
@@ -34,14 +37,18 @@ function mockApplyUpdate(doc, update, options = {}) {
     if (update.$inc) {
         for (const [path, delta] of Object.entries(update.$inc)) {
             if (path === 'inventory.$[slot].quantity') {
+                // An arrayFilter hits EVERY matching element — that is the bug.
                 const itemId = options.arrayFilters[0]['slot.itemId'];
-                doc.inventory.find(s => s.itemId === itemId).quantity += delta;
-                mockWrites.push({ user: doc.userId, itemId, delta });
+                doc.inventory.filter(s => s.itemId === itemId).forEach((s) => {
+                    s.quantity += delta;
+                    mockWrites.push({ user: doc.userId, itemId, delta });
+                });
             } else if (path === 'inventory.$.quantity') {
-                // The positional operator binds to the 'inventory.itemId' filter.
-                const itemId = doc._matchedItemId;
-                doc.inventory.find(s => s.itemId === itemId).quantity += delta;
-                mockWrites.push({ user: doc.userId, itemId, delta });
+                // The positional operator binds to the FIRST element the query
+                // matched, whether that came from $elemMatch or 'inventory.itemId'.
+                const slot = doc.inventory[doc._matchedIndex];
+                slot.quantity += delta;
+                mockWrites.push({ user: doc.userId, itemId: slot.itemId, delta });
             } else {
                 doc[path] = (doc[path] ?? 0) + delta;
             }
@@ -75,8 +82,8 @@ jest.mock('../src/models/User', () => ({
             mockStore[query.userId] = doc;
         }
         if (!mockMatches(doc, query)) return null;
-        if (query['inventory.itemId'] !== undefined) {
-            doc._matchedItemId = query['inventory.itemId']?.$ne ?? query['inventory.itemId'];
+        if (query['inventory.itemId'] !== undefined && query['inventory.itemId'].$ne === undefined) {
+            doc._matchedIndex = doc.inventory.findIndex(s => s.itemId === query['inventory.itemId']);
         }
         if (mockFailCreditFor && doc.userId === mockFailCreditFor && (update.$inc || update.$push)) {
             throw new Error('simulated write failure');
@@ -124,7 +131,10 @@ function buildInteraction({ itemId = 'pet_food', quantity = 1 } = {}) {
 
 function mockTotalHeld(itemId) {
     return Object.values(mockStore).reduce(
-        (sum, u) => sum + (u.inventory.find(s => s.itemId === itemId)?.quantity ?? 0), 0
+        (sum, u) => sum + u.inventory
+            .filter(s => s.itemId === itemId)
+            .reduce((n, s) => n + s.quantity, 0),
+        0
     );
 }
 
@@ -197,4 +207,37 @@ test('gifting more than you hold moves nothing', async () => {
     expect(mockStore.sender.inventory).toEqual([{ itemId: 'pet_food', quantity: 3 }]);
     expect(mockStore.recipient.inventory).toEqual([]);
     expect(state.replies.at(-1).content).toContain("don't have 9x");
+});
+
+test('a duplicate slot for the same item is not double-debited', async () => {
+    // Several writers $push without checking for an existing slot, so two slots
+    // for one itemId is a reachable state. An arrayFilter would decrement both.
+    mockStore.sender.inventory = [
+        { itemId: 'pet_food', quantity: 3 },
+        { itemId: 'pet_food', quantity: 4 },
+    ];
+    const { interaction } = buildInteraction({ quantity: 2 });
+    await giftCommand.execute(interaction);
+
+    expect(mockStore.sender.inventory).toEqual([
+        { itemId: 'pet_food', quantity: 1 },
+        { itemId: 'pet_food', quantity: 4 },   // untouched
+    ]);
+    expect(mockStore.recipient.inventory).toEqual([{ itemId: 'pet_food', quantity: 2 }]);
+    expect(mockTotalHeld('pet_food')).toBe(7); // 3 + 4 conserved
+});
+
+test('a slot too small to cover the gift is skipped for one that can', async () => {
+    mockStore.sender.inventory = [
+        { itemId: 'pet_food', quantity: 1 },
+        { itemId: 'pet_food', quantity: 6 },
+    ];
+    const { interaction } = buildInteraction({ quantity: 4 });
+    await giftCommand.execute(interaction);
+
+    expect(mockStore.sender.inventory).toEqual([
+        { itemId: 'pet_food', quantity: 1 },
+        { itemId: 'pet_food', quantity: 2 },
+    ]);
+    expect(mockTotalHeld('pet_food')).toBe(7);
 });
