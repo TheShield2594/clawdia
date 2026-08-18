@@ -1,14 +1,27 @@
 const { Options } = require('discord.js');
 
+/** The bot's own member: discord.js needs it for permission and hierarchy checks. */
+function isClientMember(member) {
+    return member.id === member.client.user.id;
+}
+
 /**
- * Members worth holding on to regardless of cache pressure: the bot itself
- * (discord.js needs its own member for permission and hierarchy checks) and
- * anyone currently serving a timeout — the dashboard's active-sanctions view
- * reads those out of the member cache because Discord has no "list timed-out
- * members" endpoint.
+ * Members the periodic sweep leaves alone: the bot itself, and anyone currently
+ * serving a timeout — the dashboard's active-sanctions view reads those out of
+ * the member cache because Discord has no "list timed-out members" endpoint.
+ *
+ * This spares them from the hourly reclaim only, never from the size limit.
+ * LimitedCollection drops the first entry its keepOverLimit call rejects and
+ * inserts regardless of whether it found one, so a predicate that can hold back
+ * an unbounded number of members turns the limit into a suggestion: 200 members
+ * all serving timeouts at once would sit in a cache configured for 200 and grow
+ * with every new arrival. The limit stays absolute, and a timed-out member can
+ * be evicted under cache pressure like any other — which the sanctions view
+ * already tolerates, since the member cache has never been a complete roster of
+ * a guild large enough for Discord to withhold one.
  */
 function keepMemberCached(member) {
-    return member.id === member.client.user.id
+    return isClientMember(member)
         || (member.communicationDisabledUntilTimestamp ?? 0) > Date.now();
 }
 
@@ -27,7 +40,7 @@ function keepMemberCached(member) {
 const makeCache = Options.cacheWithLimits({
     ...Options.DefaultMakeCacheSettings,
     MessageManager: 50,
-    GuildMemberManager: { maxSize: 200, keepOverLimit: keepMemberCached },
+    GuildMemberManager: { maxSize: 200, keepOverLimit: isClientMember },
     UserManager: { maxSize: 500, keepOverLimit: user => user.id === user.client.user.id },
     // The presence intent is not requested, so nothing ever lands here.
     PresenceManager: 0,
@@ -44,4 +57,4 @@ const sweepers = {
     users: { interval: 3600, filter: () => user => user.id !== user.client.user.id },
 };
 
-module.exports = { keepMemberCached, makeCache, sweepers };
+module.exports = { isClientMember, keepMemberCached, makeCache, sweepers };

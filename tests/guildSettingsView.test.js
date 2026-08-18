@@ -49,12 +49,27 @@ describe('guild-settings view', () => {
         }
     });
 
-    it('never lets a guild name break out of the bootstrap block', () => {
+    it('never lets a guild name break out, in the bootstrap block or anywhere else', () => {
+        const payload = '</script><img src=x onerror=alert(1)>';
         const hostile = render({
-            guild: { id: '1', name: '</script><img src=x onerror=alert(1)>', icon: null, ownerId: '1', owner: true },
+            guild: { id: '1', name: payload, icon: null, ownerId: '1', owner: true },
         });
+
+        // The name is printed in several places besides the bootstrap — the
+        // title, the sidebar, the topbar — so the whole response has to be
+        // clear of the raw payload, not just the script block. Checking for
+        // the markup, not for "onerror=": that substring survives inside the
+        // escaped text, where it is inert for want of a real tag around it.
+        expect(hostile).not.toContain(payload);
+        expect(hostile).not.toContain('<img');
+
+        // Scoped to the bootstrap: the page legitimately contains </script>
+        // tags of its own, so this one can only be asserted there.
         const boot = inlineScripts(hostile).find(s => s.includes('window.CLAWDIA_BOOTSTRAP'));
         expect(boot).not.toContain('</script>');
-        expect(boot).not.toContain('<img');
+
+        // And the name did reach the page, escaped — otherwise the above passes
+        // by the payload having been dropped rather than neutralised.
+        expect(hostile).toContain('&lt;img src=x onerror=alert(1)&gt;');
     });
 });

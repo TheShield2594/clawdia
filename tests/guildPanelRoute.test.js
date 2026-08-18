@@ -81,6 +81,11 @@ describe('GET /dashboard/guild/:guildId', () => {
             if (panel !== DEFAULT_PANEL) expect(html).toContain(`data-panel="${panel}"`);
         }
     });
+
+    it('keeps the page out of shared caches, like the fragments', async () => {
+        const res = await fetch(`${baseUrl}/dashboard/guild/g1`);
+        expect(res.headers.get('cache-control')).toBe('private, no-store');
+    });
 });
 
 describe('GET /dashboard/guild/:guildId/panel/:panel', () => {

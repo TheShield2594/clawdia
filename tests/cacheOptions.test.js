@@ -1,6 +1,10 @@
 const { Client, GatewayIntentBits, Options } = require('discord.js');
 const { makeCache, sweepers, keepMemberCached } = require('../src/utils/cacheOptions');
 
+const client = { user: { id: 'bot' } };
+const member = (id, disabledUntil = 0) => ({ id, client, communicationDisabledUntilTimestamp: disabledUntil });
+const timedOut = id => member(id, Date.now() + 60_000);
+
 /** Build the cache a manager would get, without needing a live client. */
 function cacheFor(managerName) {
     return makeCache({ name: managerName }, null, { name: managerName });
@@ -21,22 +25,30 @@ describe('discord.js cache options', () => {
         }
     });
 
-    it('evicts an ordinary member once the limit is reached but keeps the bot and timed-out members', () => {
+    it('evicts ordinary members once the limit is reached but keeps the bot', () => {
         const cache = cacheFor('GuildMemberManager');
-        const client = { user: { id: 'bot' } };
-        const member = (id, disabledUntil = 0) => ({
-            id, client, communicationDisabledUntilTimestamp: disabledUntil,
-        });
 
         cache.set('bot', member('bot'));
-        cache.set('muted', member('muted', Date.now() + 60_000));
         for (let i = 0; i < 300; i++) cache.set(`u${i}`, member(`u${i}`));
 
         expect(cache.size).toBe(200);
         expect(cache.has('bot')).toBe(true);
-        expect(cache.has('muted')).toBe(true);
         expect(cache.has('u0')).toBe(false);
         expect(cache.has('u299')).toBe(true);
+    });
+
+    it('holds the member limit even when every member is serving a timeout', () => {
+        // A keepOverLimit that can spare an unbounded number of members turns
+        // the limit into a suggestion: LimitedCollection inserts whether or not
+        // its scan found something to drop, so a guild timing out more members
+        // than the cache holds would grow past it without this.
+        const cache = cacheFor('GuildMemberManager');
+
+        cache.set('bot', member('bot'));
+        for (let i = 0; i < 300; i++) cache.set(`u${i}`, timedOut(`u${i}`));
+
+        expect(cache.size).toBe(200);
+        expect(cache.has('bot')).toBe(true);
     });
 
     it('keeps the thread sweeper discord.js ships with, and adds message/member/user sweeping', () => {
@@ -46,14 +58,13 @@ describe('discord.js cache options', () => {
         expect(sweepers.users.interval).toBe(3600);
     });
 
-    it('never sweeps the bot itself out of the member or user caches', () => {
-        const client = { user: { id: 'bot' } };
+    it('sweeps ordinary members but not the bot or anyone serving a timeout', () => {
         const memberFilter = sweepers.guildMembers.filter();
         const userFilter = sweepers.users.filter();
 
-        expect(memberFilter({ id: 'bot', client, communicationDisabledUntilTimestamp: null })).toBe(false);
-        expect(memberFilter({ id: 'someone', client, communicationDisabledUntilTimestamp: null })).toBe(true);
-        expect(memberFilter({ id: 'muted', client, communicationDisabledUntilTimestamp: Date.now() + 60_000 })).toBe(false);
+        expect(memberFilter(member('bot'))).toBe(false);
+        expect(memberFilter(member('someone'))).toBe(true);
+        expect(memberFilter(timedOut('muted'))).toBe(false);
         expect(userFilter({ id: 'bot', client })).toBe(false);
         expect(userFilter({ id: 'someone', client })).toBe(true);
     });
@@ -67,7 +78,6 @@ describe('discord.js cache options', () => {
 
 describe('keepMemberCached', () => {
     it('treats an expired timeout as sweepable', () => {
-        const client = { user: { id: 'bot' } };
-        expect(keepMemberCached({ id: 'x', client, communicationDisabledUntilTimestamp: Date.now() - 1000 })).toBe(false);
+        expect(keepMemberCached(member('x', Date.now() - 1000))).toBe(false);
     });
 });

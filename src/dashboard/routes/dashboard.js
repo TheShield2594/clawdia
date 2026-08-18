@@ -191,6 +191,9 @@ async function renderGuildSettings(req, res) {
         const result = await buildGuildSettingsLocals(req);
         if (result.message) return res.status(result.status).send(result.message);
 
+        // The page carries this guild's settings and is reachable only by its
+        // managers; no shared cache has any business holding a copy.
+        res.set('Cache-Control', 'private, no-store');
         res.render('guild-settings', {
             ...result.locals,
             panels: PANELS,

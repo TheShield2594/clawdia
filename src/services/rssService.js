@@ -253,25 +253,27 @@ async function sendDailyNewsForProfile(client, guild, profile) {
     await persistSentLinks(guild, profile, sentLinks);
 }
 
+/**
+ * Failures propagate: both callers need them. The scheduled run goes through
+ * runJob, which records the failure and files a dead-letter entry, and the
+ * dashboard's "send now" button answers 500 instead of reporting success for a
+ * digest that never went out.
+ */
 async function sendDailyNews(client, guildId, profileId = null) {
-    try {
-        const guild = await Guild.findOne({ guildId });
-        if (!guild) return;
+    const guild = await Guild.findOne({ guildId });
+    if (!guild) return;
 
-        const profiles = getDailyNewsProfiles(guild)
-            .filter(profile => profile.enabled && Array.isArray(profile.feeds) && profile.feeds.length > 0);
+    const profiles = getDailyNewsProfiles(guild)
+        .filter(profile => profile.enabled && Array.isArray(profile.feeds) && profile.feeds.length > 0);
 
-        if (!profiles.length) return;
+    if (!profiles.length) return;
 
-        const targetProfiles = profileId
-            ? profiles.filter(profile => profile.profileId === profileId)
-            : profiles;
+    const targetProfiles = profileId
+        ? profiles.filter(profile => profile.profileId === profileId)
+        : profiles;
 
-        for (const profile of targetProfiles) {
-            await sendDailyNewsForProfile(client, guild, profile);
-        }
-    } catch (error) {
-        console.error('Error sending daily news:', error);
+    for (const profile of targetProfiles) {
+        await sendDailyNewsForProfile(client, guild, profile);
     }
 }
 

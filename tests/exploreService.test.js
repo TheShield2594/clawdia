@@ -597,11 +597,13 @@ describe('secret pity tells the truth', () => {
         user.exploration.stamina = LIMITS.MAX_STAMINA;
         user.exploration.sinceSecret = 7;
 
-        // A secret is a 3% slot, so leaving this to the dice checks the reset
-        // on about half of runs and lets a missing one through on the rest.
-        // 0.92 lands inside that slot in the region's event table; if the table
-        // is ever reordered the type assertion below fails loudly rather than
-        // letting the test quietly stop covering this.
+        // 0.92 is chosen to land in the secret slot of the region's event
+        // table, so this expedition finds one rather than hoping a roll does.
+        // The type assertion below is what keeps that honest: reorder or
+        // reweight the table and it fails, instead of the test quietly
+        // covering nothing. The twenty-expedition sweep below cannot stand in
+        // for this — delete the reset and it still passes whenever those
+        // twenty happen to turn up no secret at all.
         const roll = jest.spyOn(Math, 'random').mockReturnValue(0.92);
         try {
             const result = executeExplore(user, region, settings, {});
