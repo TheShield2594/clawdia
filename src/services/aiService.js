@@ -11,6 +11,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const { formatLocalTime } = require('../utils/timezones');
 const { MAX_REMINDER_MINUTES, MAX_OPEN_REMINDERS, MAX_REMINDER_MESSAGE_LENGTH } = require('../utils/reminderLimits');
 const { BoundedRateLimiter } = require('../utils/boundedRateLimiter');
+const { buildAnthropicMcpParams, MCP_BETA_HEADER } = require('../config/mcpServers');
 
 const DEFAULT_MODELS = {
     openai: 'gpt-4o-mini',
@@ -24,6 +25,12 @@ const DISCORD_MAX_LEN = 2000;
 const STREAM_EDIT_INTERVAL_MS = 800;
 // Discord typing indicator expires after 10s — refresh every 8s during long generations
 const TYPING_REFRESH_INTERVAL_MS = 8000;
+
+// A turn that calls MCP tools can run long enough that the API hands back a
+// partial response with stop_reason "pause_turn"; passing that content straight
+// back resumes the same turn. Bounded so a slow or looping server cannot keep
+// one Discord message generating forever.
+const MAX_PAUSE_TURN_CONTINUATIONS = 3;
 
 // Sliding-window AI rate limiting, per user and per channel.
 //
@@ -402,61 +409,123 @@ async function callGeminiNonStream({ apiKey, model, systemPrompt, history, promp
     return { text, usage };
 }
 
-async function* streamAnthropic({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut }) {
-    const client = new Anthropic({ apiKey });
-    const messages = [
-        ...history.map(h => ({ role: h.role, content: h.content })),
-        { role: 'user', content: prompt }
-    ];
-    const stream = await client.messages.stream({
+// ---------- Anthropic ----------
+//
+// The MCP connector is Anthropic-specific: Claude opens the connection to each
+// configured server itself, so there is no client-side tool loop here. The
+// server list comes from the config file read by src/config/mcpServers.js —
+// nothing about it is hardcoded, and with no config file present these helpers
+// send exactly the request they always did.
+
+function anthropicBaseRequest({ model, systemPrompt, temperature, maxTokens }) {
+    return {
         model,
         max_tokens: maxTokens,
         temperature,
         system: [
             { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
-        ],
-        messages
-    });
-    let inputTokens = 0;
-    let outputTokens = 0;
-    for await (const event of stream) {
-        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-            yield event.delta.text;
-        } else if (event.type === 'message_start' && event.message?.usage) {
-            inputTokens = event.message.usage.input_tokens || 0;
-            outputTokens = event.message.usage.output_tokens || 0;
-        } else if (event.type === 'message_delta' && event.usage) {
-            // Final cumulative output_tokens arrive in message_delta
-            outputTokens = event.usage.output_tokens || outputTokens;
-        }
-    }
-    if (usageOut) usageOut.usage = { inputTokens, outputTokens };
+        ]
+    };
 }
 
-async function callAnthropicNonStream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens }) {
-    const client = new Anthropic({ apiKey });
-    const messages = [
-        ...history.map(h => ({ role: h.role, content: h.content })),
-        { role: 'user', content: prompt }
-    ];
-    const response = await client.messages.create({
-        model,
-        max_tokens: maxTokens,
-        temperature,
-        system: [
-            { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
-        ],
-        messages
-    });
-    const text = response.content
+// mcp_servers and the matching mcp_toolset entries are two halves of one
+// feature — the API rejects either on its own — so they are added together or
+// not at all, along with the beta flag that gates the connector.
+function anthropicMcpExtras(useMcp) {
+    if (!useMcp) return { params: {}, options: undefined };
+    const mcp = buildAnthropicMcpParams();
+    if (!mcp) return { params: {}, options: undefined };
+    return {
+        params: { mcp_servers: mcp.mcp_servers, tools: mcp.tools },
+        options: { headers: { 'anthropic-beta': MCP_BETA_HEADER } }
+    };
+}
+
+// Responses that used MCP tools also carry mcp_tool_use / mcp_tool_result
+// blocks; only the text belongs in a Discord message.
+function anthropicText(content) {
+    return (content || [])
         .filter(b => b.type === 'text')
         .map(b => b.text)
         .join('');
-    const usage = response.usage ? {
-        inputTokens: response.usage.input_tokens || 0,
-        outputTokens: response.usage.output_tokens || 0
-    } : null;
-    return { text, usage };
+}
+
+function anthropicMessages(history, prompt) {
+    return [
+        ...history.map(h => ({ role: h.role, content: h.content })),
+        { role: 'user', content: prompt }
+    ];
+}
+
+async function* streamAnthropic({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true }) {
+    const client = new Anthropic({ apiKey });
+    let messages = anthropicMessages(history, prompt);
+    const base = anthropicBaseRequest({ model, systemPrompt, temperature, maxTokens });
+    const { params, options } = anthropicMcpExtras(useMcp);
+
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    for (let turn = 0; ; turn++) {
+        const stream = await client.messages.stream({ ...base, ...params, messages }, options);
+        let turnOutput = 0;
+        for await (const event of stream) {
+            if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+                yield event.delta.text;
+            } else if (event.type === 'message_start' && event.message?.usage) {
+                inputTokens += event.message.usage.input_tokens || 0;
+                turnOutput = event.message.usage.output_tokens || 0;
+            } else if (event.type === 'message_delta' && event.usage) {
+                // Final cumulative output_tokens arrive in message_delta
+                turnOutput = event.usage.output_tokens || turnOutput;
+            }
+        }
+        outputTokens += turnOutput;
+
+        const final = await stream.finalMessage();
+        if (final.stop_reason !== 'pause_turn') break;
+        if (turn >= MAX_PAUSE_TURN_CONTINUATIONS) {
+            console.warn(`[AI:anthropic] still paused after ${MAX_PAUSE_TURN_CONTINUATIONS} continuations — returning the partial answer`);
+            break;
+        }
+        messages = [...messages, { role: 'assistant', content: final.content }];
+    }
+
+    if (usageOut) usageOut.usage = { inputTokens, outputTokens };
+}
+
+async function callAnthropicNonStream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true }) {
+    const client = new Anthropic({ apiKey });
+    let messages = anthropicMessages(history, prompt);
+    const base = anthropicBaseRequest({ model, systemPrompt, temperature, maxTokens });
+    const { params, options } = anthropicMcpExtras(useMcp);
+
+    const parts = [];
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let sawUsage = false;
+
+    for (let turn = 0; ; turn++) {
+        const response = await client.messages.create({ ...base, ...params, messages }, options);
+        parts.push(anthropicText(response.content));
+        if (response.usage) {
+            sawUsage = true;
+            inputTokens += response.usage.input_tokens || 0;
+            outputTokens += response.usage.output_tokens || 0;
+        }
+
+        if (response.stop_reason !== 'pause_turn') break;
+        if (turn >= MAX_PAUSE_TURN_CONTINUATIONS) {
+            console.warn(`[AI:anthropic] still paused after ${MAX_PAUSE_TURN_CONTINUATIONS} continuations — returning the partial answer`);
+            break;
+        }
+        messages = [...messages, { role: 'assistant', content: response.content }];
+    }
+
+    return {
+        text: parts.join(''),
+        usage: sawUsage ? { inputTokens, outputTokens } : null
+    };
 }
 
 async function* streamOllama({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut }) {
@@ -563,14 +632,17 @@ function resolveProviderConfig(aiSettings) {
     return { provider, model, temperature, maxTokens, apiKey, baseUrl };
 }
 
-async function* streamCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature, maxTokens, usageOut, guildId }) {
+// `mcp` controls whether configured MCP servers are offered to the model. It is
+// on by default for conversational calls; callers that parse the reply as JSON
+// pass mcp: false so tool output cannot derail the format they expect.
+async function* streamCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature, maxTokens, usageOut, guildId, mcp = true }) {
     const common = { model, systemPrompt, history, prompt, temperature, maxTokens, usageOut };
     if (provider === 'openai') {
         yield* streamOpenAI({ apiKey, ...common });
     } else if (provider === 'gemini') {
         yield* streamGemini({ apiKey, ...common });
     } else if (provider === 'anthropic') {
-        yield* streamAnthropic({ apiKey, ...common });
+        yield* streamAnthropic({ apiKey, ...common, useMcp: mcp });
     } else if (provider === 'ollama') {
         yield* streamOllama({ baseUrl, ...common });
     } else if (provider === 'openrouter') {
@@ -584,12 +656,12 @@ async function* streamCompletion({ provider, model, apiKey, baseUrl, systemPromp
     }
 }
 
-async function getCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature, maxTokens, guildId }) {
+async function getCompletion({ provider, model, apiKey, baseUrl, systemPrompt, history, prompt, temperature, maxTokens, guildId, mcp = true }) {
     const common = { model, systemPrompt, history, prompt, temperature, maxTokens };
     let result;
     if (provider === 'openai') result = await callOpenAINonStream({ apiKey, ...common });
     else if (provider === 'gemini') result = await callGeminiNonStream({ apiKey, ...common });
-    else if (provider === 'anthropic') result = await callAnthropicNonStream({ apiKey, ...common });
+    else if (provider === 'anthropic') result = await callAnthropicNonStream({ apiKey, ...common, useMcp: mcp });
     else if (provider === 'ollama') result = await callOllamaNonStream({ baseUrl, ...common });
     else if (provider === 'openrouter') result = await callOpenAINonStream(openRouterArgs({ apiKey, ...common }));
     else throw new Error(`Unknown provider: ${provider}`);

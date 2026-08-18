@@ -107,6 +107,7 @@ npm start
 - `ANTHROPIC_API_KEY` - (Optional) Anthropic Claude API key for AI features
 - `OPENROUTER_API_KEY` - (Optional) OpenRouter API key for AI features
 - `OLLAMA_BASE_URL` - (Optional) Local Ollama endpoint (e.g., `http://localhost:11434`)
+- `MCP_SERVERS_CONFIG` - (Optional) Path to the MCP server list (default: `config/mcp-servers.json`)
 - `IMGFLIP_USERNAME` / `IMGFLIP_PASSWORD` - (Optional) Imgflip credentials for `/meme` command
 
 ## Commands
@@ -272,6 +273,32 @@ Configuration that previously lived behind slash commands (settings link, level 
    - Point `OLLAMA_BASE_URL` to your local instance
    - Configure `OLLAMA_MODEL` in dashboard (e.g., `llama3.2`, `mistral`)
    - Ideal for private, zero-cost inference
+
+### MCP Servers (Anthropic only)
+
+Claude can call tools on remote [MCP](https://modelcontextprotocol.io) servers —
+a Jira board, a calendar, an internal docs search — without the bot implementing
+an MCP client. Anthropic opens the connection server-side; Clawdia only names the
+servers.
+
+The list lives in a config file, not in code. Copy
+`config/mcp-servers.example.json` to `config/mcp-servers.json`, list as many
+servers as you need, and restart:
+
+```json
+{
+  "servers": [
+    { "name": "docs", "url": "https://mcp.example.com/docs" },
+    { "name": "calendar", "url": "https://mcp.example.com/calendar", "authorization_token": "${CALENDAR_MCP_TOKEN}" }
+  ]
+}
+```
+
+Tokens written as `${VAR}` are read from the environment, so the file itself
+stays free of secrets. With no config file present, requests are exactly what
+they were before — the connector is off. See
+[SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers-anthropic-only) for the full field
+reference, including per-tool allowlists.
 
 ### Setup
 

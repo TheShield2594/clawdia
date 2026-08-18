@@ -1,0 +1,28 @@
+{
+  "servers": [
+    {
+      "name": "example-mcp",
+      "url": "https://example-server.modelcontextprotocol.io/mcp",
+      "enabled": true,
+      "authorization_token": "${EXAMPLE_MCP_TOKEN}"
+    },
+    {
+      "name": "read-only-calendar",
+      "url": "https://mcp.example.com/calendar",
+      "authorization_token": "${CALENDAR_MCP_TOKEN}",
+      "default_config": { "enabled": false },
+      "configs": {
+        "search_events": { "enabled": true },
+        "list_events": { "enabled": true }
+      }
+    },
+    {
+      "name": "docs-search",
+      "url": "https://mcp.example.com/docs",
+      "enabled": false,
+      "configs": {
+        "delete_document": { "enabled": false }
+      }
+    }
+  ]
+}

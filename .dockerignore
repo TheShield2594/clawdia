@@ -10,3 +10,4 @@ logs
 tests
 .github
 backups
+config/mcp-servers.json

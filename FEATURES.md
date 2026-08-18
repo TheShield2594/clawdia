@@ -31,6 +31,34 @@ OLLAMA_BASE_URL=http://localhost:11434
 - Custom system prompts
 - Dedicated AI chat channel
 
+**MCP Servers** (`config/mcp-servers.json`, Anthropic provider only):
+
+Claude can call tools on remote [MCP](https://modelcontextprotocol.io) servers.
+The servers come from a config file — as many as you like, none of them
+hardcoded — and Anthropic connects to them server-side:
+
+```json
+{
+  "servers": [
+    { "name": "docs", "url": "https://mcp.example.com/docs" },
+    {
+      "name": "calendar",
+      "url": "https://mcp.example.com/calendar",
+      "authorization_token": "${CALENDAR_MCP_TOKEN}",
+      "default_config": { "enabled": false },
+      "configs": { "search_events": { "enabled": true } }
+    }
+  ]
+}
+```
+
+- `${VAR}` values resolve from the environment, so tokens stay out of the file
+- `default_config` / `configs` allowlist or denylist individual tools
+- `enabled: false` parks a server without deleting the entry
+- No config file means no change to how requests are sent
+
+Full field reference: [SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers-anthropic-only)
+
 ### Usage
 
 **Dedicated Channel:**

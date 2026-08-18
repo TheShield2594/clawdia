@@ -158,6 +158,8 @@ Create a legendary quest that feels fitting for their journey so far.`;
                     prompt,
                     temperature: 0.9,
                     maxTokens,
+                    // Pure JSON out — no MCP tools, whose output would only muddy it.
+                    mcp: false,
                 });
 
                 // Strip any accidental markdown fences, then isolate the JSON object
