@@ -9,6 +9,7 @@ const path = require('path');
 const { getStatus } = require('../health');
 const { hasManagePermission } = require('./lib/permissions');
 const { jsonForScript } = require('./lib/jsonForScript');
+const { asset } = require('./lib/assets');
 
 const app = express();
 
@@ -87,7 +88,13 @@ function start(client) {
     // and the routers so it covers assets and rendered views alike.
     app.use(compression());
 
-    app.use(express.static(path.join(__dirname, 'public')));
+    // Assets are requested through the asset() helper, which stamps each URL
+    // with a hash of the file's contents — a deploy changes the URL, so a long
+    // immutable cache never serves stale JavaScript or CSS.
+    app.use(express.static(path.join(__dirname, 'public'), {
+        maxAge: '1y',
+        immutable: true,
+    }));
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
@@ -115,6 +122,7 @@ function start(client) {
         const nonce = crypto.randomBytes(16).toString('base64');
         res.locals.cspNonce = nonce;
         res.locals.jsonForScript = jsonForScript;
+        res.locals.asset = asset;
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('X-Frame-Options', 'DENY');
         res.setHeader('X-XSS-Protection', '1; mode=block');
