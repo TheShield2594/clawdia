@@ -140,31 +140,15 @@
             <a href="/dashboard" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:var(--ink-850);border:1px solid var(--ink-800);color:var(--ink-200);font-size:13px;font-family:inherit;text-decoration:none;transition:border-color .15s,color .15s;" onmouseover="this.style.color='var(--cream-50)'" onmouseout="this.style.color='var(--ink-200)'">← All servers</a>
         </div>
 
-        <%- include('partials/panels/overview') %>
-        <%- include('partials/panels/welcome') %>
-        <%- include('partials/panels/farewell') %>
-        <%- include('partials/panels/birthdays') %>
-        <%- include('partials/panels/moderation') %>
-        <%- include('partials/panels/leveling') %>
-        <%- include('partials/panels/economy') %>
-        <%- include('partials/panels/achievements') %>
-        <%- include('partials/panels/raiddetection') %>
-        <%- include('partials/panels/antinuke') %>
-        <%- include('partials/panels/starboard') %>
-        <%- include('partials/panels/eventlog') %>
-        <%- include('partials/panels/quests') %>
-        <%- include('partials/panels/exploration') %>
-        <%- include('partials/panels/newspaper') %>
-        <%- include('partials/panels/season') %>
-        <%- include('partials/panels/progressiontracks') %>
-        <%- include('partials/panels/suggestions') %>
-        <%- include('partials/panels/reactionroles') %>
-        <%- include('partials/panels/rss') %>
-        <%- include('partials/panels/tempvoice') %>
-        <%- include('partials/panels/commandpolicies') %>
-        <%- include('partials/panels/ai') %>
-        <%- include('partials/panels/analytics') %>
-        <%- include('partials/panels/bibleverses') %>
+        <%# Only the active panel ships with the page. The rest are stubs that
+            guild-settings.js swaps for real markup, fetched from
+            /dashboard/guild/:guildId/panel/:panel, the first time their tab is
+            opened — roughly 200 KB of HTML a reader may never look at. %>
+<% panels.forEach(function(panelName) { %><% if (panelName === activePanel) { %>
+        <%- include('partials/panels/' + panelName) %>
+<% } else { %>
+        <div class="panel-stub" data-panel="<%= panelName %>" style="display:none;"><div class="panel-stub-message" role="status">Loading…</div></div>
+<% } %><% }); %>
 
         </main><!-- /.dash-main -->
 

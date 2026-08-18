@@ -81,7 +81,9 @@ describe('guild-settings.ejs', () => {
             huntItems: { weapons: [], upgrades: [], ammo: [], consumables: [] },
             fishItems: { rods: [], upgrades: [], bait: [], consumables: [] },
             mineItems: { pickaxes: [], upgrades: [], blasts: [], consumables: [] },
-            explorationRegions: []
+            explorationRegions: [],
+            panels: require('../src/dashboard/lib/panels').PANELS,
+            activePanel: 'ai'
         }, { filename: templatePath });
 
         expect(html).not.toContain('ghp_DO-NOT-LEAK');

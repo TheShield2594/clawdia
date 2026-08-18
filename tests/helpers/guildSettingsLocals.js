@@ -12,6 +12,7 @@ const { REGION_LIST } = require('../../src/data/exploreData');
 const { SEASONAL_EVENTS } = require('../../src/data/seasonalEvents');
 const { jsonForScript } = require('../../src/dashboard/lib/jsonForScript');
 const { asset } = require('../../src/dashboard/lib/assets');
+const { PANELS, DEFAULT_PANEL } = require('../../src/dashboard/lib/panels');
 
 const toItem = (ns, item, idField = 'id') => ({
     id: `${ns}:${item[idField]}`,
@@ -64,6 +65,10 @@ function guildSettingsLocals(overrides = {}) {
             name: r.name,
             seasonal: r.seasonalEventId ? (SEASONAL_EVENTS[r.seasonalEventId]?.name ?? r.seasonalEventId) : false,
         })),
+
+        // Which panels the page stubs out, and which one ships with it.
+        panels: PANELS,
+        activePanel: DEFAULT_PANEL,
 
         // Supplied by the dashboard's response-header middleware.
         cspNonce: 'test-nonce',

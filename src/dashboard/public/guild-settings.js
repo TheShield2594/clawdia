@@ -15,6 +15,76 @@ function boot(key) {
     return JSON.parse(JSON.stringify(BOOT[key]));
 }
 
+// ── Lazily loaded panels ─────────────────────────────────────────────
+// The page ships only the panel that is open on arrival; the other two dozen
+// come down as HTML fragments the first time their tab is clicked. So nothing
+// that renders into a panel, or binds a listener to an element inside one, can
+// run at load time. Register it with onPanel() instead: the callback runs as
+// soon as that panel's markup is in the document — immediately, for the panel
+// that came with the page — and is handed the panel element.
+const PANEL_URL = '/dashboard/guild/' + encodeURIComponent(BOOT.guildId) + '/panel/';
+const pendingPanelInit = new Map();   // panel id -> [callback]
+const panelRequests = new Map();      // panel id -> Promise<Element|null>
+
+function runPanelInit(id, fn) {
+    try {
+        fn(document.getElementById(id));
+    } catch (err) {
+        // One panel's setup blowing up must not take the others with it.
+        console.error('[dashboard] init for panel "' + id + '" failed:', err);
+    }
+}
+
+function onPanel(id, fn) {
+    if (document.getElementById(id)) { runPanelInit(id, fn); return; }
+    const queued = pendingPanelInit.get(id);
+    if (queued) queued.push(fn);
+    else pendingPanelInit.set(id, [fn]);
+}
+
+function panelStub(id) {
+    return document.querySelector('.panel-stub[data-panel="' + CSS.escape(id) + '"]');
+}
+
+function loadPanel(id) {
+    const loaded = document.getElementById(id);
+    if (loaded) return Promise.resolve(loaded);
+
+    const inFlight = panelRequests.get(id);
+    if (inFlight) return inFlight;
+
+    const stub = panelStub(id);
+    if (!stub) return Promise.resolve(null);
+
+    const request = fetch(PANEL_URL + encodeURIComponent(id), { headers: { Accept: 'text/html' } })
+        .then(res => {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.text();
+        })
+        .then(html => {
+            const holder = document.createElement('template');
+            holder.innerHTML = html.trim();
+            const panel = holder.content.firstElementChild;
+            stub.replaceWith(holder.content);
+            const queued = pendingPanelInit.get(id) || [];
+            pendingPanelInit.delete(id);
+            queued.forEach(fn => runPanelInit(id, fn));
+            return panel;
+        })
+        .catch(err => {
+            console.error('[dashboard] could not load panel "' + id + '":', err);
+            // Forget the attempt so the next click retries instead of sticking.
+            panelRequests.delete(id);
+            const message = stub.querySelector('.panel-stub-message');
+            if (message) message.textContent = 'Could not load this section. Click the tab again to retry.';
+            toast('Could not load that section. Please try again.', 'error');
+            return null;
+        });
+
+    panelRequests.set(id, request);
+    return request;
+}
+
 const DAILY_NEWS_INITIAL_PROFILES = boot('dailyNewsProfiles');
 const DAILY_NEWS_CHANNELS = boot('channels');
 const ESCALATION_DEFAULTS = [
@@ -27,7 +97,6 @@ let ESCALATION_LADDER = boot('escalationLadder');
 
 // Sidebar tab navigation
 const navItems = document.querySelectorAll('.nav-item');
-const panels = document.querySelectorAll('.panel');
 const topbarSection = document.getElementById('topbar-section');
 
 // Keyboard + ARIA accessibility for nav items
@@ -40,39 +109,63 @@ navItems.forEach(item => {
     });
 });
 
+// The tab the reader last asked for. A panel that is still being fetched when
+// the reader moves on must not steal the view when it finally arrives.
+let requestedTab = document.querySelector('.panel.active')?.id || null;
+
+async function activateTab(tab) {
+    if (!tab) return null;
+    const item = document.querySelector(`.nav-item[data-tab="${CSS.escape(tab)}"]`);
+    if (!item) return null;
+    requestedTab = tab;
+
+    navItems.forEach(n => { n.classList.remove('active'); n.setAttribute('aria-pressed', 'false'); });
+    document.querySelectorAll('.panel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
+    document.querySelectorAll('.panel-stub').forEach(p => { p.style.display = 'none'; });
+    item.classList.add('active');
+    item.setAttribute('aria-pressed', 'true');
+    if (topbarSection) topbarSection.textContent = item.querySelector('span:last-child')?.textContent || tab;
+    if (history.replaceState) {
+        const innerToParent = { knowledgebase: 'ai', aisummaries: 'ai', aipersonas: 'ai', dailynews: 'rss' };
+        const curInner = location.hash.slice(1);
+        const newHash = (innerToParent[curInner] === tab) ? location.hash : '#' + tab;
+        history.replaceState(null, '', newHash);
+    }
+
+    // Leave the stub on screen while its markup is in flight, so the main area
+    // shows "Loading…" rather than going blank.
+    const stub = panelStub(tab);
+    if (stub) {
+        const message = stub.querySelector('.panel-stub-message');
+        if (message) message.textContent = 'Loading…';
+        stub.style.display = 'block';
+    }
+
+    const panel = await loadPanel(tab);
+    if (requestedTab !== tab) {
+        // The reader moved on while this was in flight; land it out of sight.
+        if (stub && stub.isConnected) stub.style.display = 'none';
+        if (panel) panel.style.display = 'none';
+        return panel;
+    }
+    if (panel) { panel.classList.add('active'); panel.style.display = 'block'; }
+    if (tab === 'analytics') loadAnalytics();
+    if (tab === 'leveling') loadLevelLeaderboard(1);
+    return panel;
+}
+
 navItems.forEach(item => {
-    item.addEventListener('click', () => {
-        const tab = item.dataset.tab;
-        if (!tab) return;
-        navItems.forEach(n => { n.classList.remove('active'); n.setAttribute('aria-pressed', 'false'); });
-        panels.forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
-        item.classList.add('active');
-        item.setAttribute('aria-pressed', 'true');
-        const panel = document.getElementById(tab);
-        if (panel) { panel.classList.add('active'); panel.style.display = 'block'; }
-        if (topbarSection) topbarSection.textContent = item.querySelector('span:last-child')?.textContent || tab;
-        if (tab === 'analytics') loadAnalytics();
-        if (tab === 'leveling') loadLevelLeaderboard(1);
-        if (history.replaceState) {
-            const innerToParent = { knowledgebase: 'ai', aisummaries: 'ai', aipersonas: 'ai', dailynews: 'rss' };
-            const curInner = location.hash.slice(1);
-            const newHash = (innerToParent[curInner] === tab) ? location.hash : '#' + tab;
-            history.replaceState(null, '', newHash);
-        }
-    });
+    item.addEventListener('click', () => { activateTab(item.dataset.tab); });
 });
 
-// Module card click-to-navigate
-document.querySelectorAll('.dash-module[data-tab-link]').forEach(card => {
-    card.addEventListener('click', () => {
-        const target = card.dataset.tabLink;
-        const navBtn = document.querySelector(`.nav-item[data-tab="${target}"]`);
-        if (navBtn) navBtn.click();
-    });
+// Module card click-to-navigate. Delegated, because the cards sit inside a panel.
+document.addEventListener('click', e => {
+    const card = e.target.closest && e.target.closest('.dash-module[data-tab-link]');
+    if (card) activateTab(card.dataset.tabLink);
 });
 
 // Hide all panels except the active one on load
-panels.forEach(p => {
+document.querySelectorAll('.panel').forEach(p => {
     if (!p.classList.contains('active')) p.style.display = 'none';
 });
 
@@ -89,9 +182,6 @@ function switchAiInnerTab(tabId) {
     if (tabId === 'ai-personas') renderPersonas();
     if (tabId === 'ai-mcp') loadMcpServers();
 }
-document.querySelectorAll('.ai-inner-tab[data-ai-tab]').forEach(tab => {
-    tab.addEventListener('click', () => switchAiInnerTab(tab.dataset.aiTab));
-});
 
 // RSS inner tab navigation
 function switchRssInnerTab(tabId) {
@@ -102,9 +192,6 @@ function switchRssInnerTab(tabId) {
     if (btn) btn.classList.add('active');
     if (panel) panel.classList.add('active');
 }
-document.querySelectorAll('.rss-inner-tab').forEach(tab => {
-    tab.addEventListener('click', () => switchRssInnerTab(tab.dataset.rssTab));
-});
 
 // Game inner tab navigation (Hunt / Fish / Mine)
 function makeGameTabSwitcher(tabClass, panelSelector, dataAttr) {
@@ -118,40 +205,55 @@ function makeGameTabSwitcher(tabClass, panelSelector, dataAttr) {
     };
 }
 const switchEcoTab = makeGameTabSwitcher('eco-inner-tab', '#economy > .ai-inner-panel', 'eco-tab');
-document.querySelectorAll('.eco-inner-tab').forEach(tab => tab.addEventListener('click', () => {
-    switchEcoTab(tab.dataset.ecoTab);
-    if (tab.dataset.ecoTab === 'eco-tab-health') loadEcoHealth();
-}));
-
 const switchModTab = makeGameTabSwitcher('mod-inner-tab', '#moderation .ai-inner-panel', 'mod-tab');
-document.querySelectorAll('.mod-inner-tab').forEach(tab => tab.addEventListener('click', () => {
-    switchModTab(tab.dataset.modTab);
-    if (tab.dataset.modTab === 'mod-tab-sanctions') loadActiveSanctions();
-    if (tab.dataset.modTab === 'mod-tab-cases') loadCaseHistory(1);
-}));
 const switchHuntTab = makeGameTabSwitcher('hunt-inner-tab', '#eco-tab-hunt .ai-inner-panel', 'hunt-tab');
 const switchFishTab = makeGameTabSwitcher('fish-inner-tab', '#eco-tab-fish .ai-inner-panel', 'fish-tab');
 const switchMineTab = makeGameTabSwitcher('mine-inner-tab', '#eco-tab-mine .ai-inner-panel', 'mine-tab');
-document.querySelectorAll('.hunt-inner-tab').forEach(tab => tab.addEventListener('click', () => switchHuntTab(tab.dataset.huntTab)));
-document.querySelectorAll('.fish-inner-tab').forEach(tab => tab.addEventListener('click', () => switchFishTab(tab.dataset.fishTab)));
-document.querySelectorAll('.mine-inner-tab').forEach(tab => tab.addEventListener('click', () => switchMineTab(tab.dataset.mineTab)));
+
+// Every inner tab sits inside a panel that may not exist yet, so they are wired
+// by delegation rather than bound to the elements at load.
+document.addEventListener('click', e => {
+    const tab = e.target.closest && e.target.closest(
+        '.ai-inner-tab[data-ai-tab], .rss-inner-tab, .eco-inner-tab, .mod-inner-tab, ' +
+        '.hunt-inner-tab, .fish-inner-tab, .mine-inner-tab');
+    if (!tab) return;
+    // The economy, moderation and RSS tabs also carry the shared `ai-inner-tab`
+    // class for styling, so the specific ones have to be matched first.
+    const cls = tab.classList;
+    if (cls.contains('rss-inner-tab')) {
+        switchRssInnerTab(tab.dataset.rssTab);
+    } else if (cls.contains('eco-inner-tab')) {
+        switchEcoTab(tab.dataset.ecoTab);
+        if (tab.dataset.ecoTab === 'eco-tab-health') loadEcoHealth();
+    } else if (cls.contains('mod-inner-tab')) {
+        switchModTab(tab.dataset.modTab);
+        if (tab.dataset.modTab === 'mod-tab-sanctions') loadActiveSanctions();
+        if (tab.dataset.modTab === 'mod-tab-cases') loadCaseHistory(1);
+    } else if (cls.contains('hunt-inner-tab')) {
+        switchHuntTab(tab.dataset.huntTab);
+    } else if (cls.contains('fish-inner-tab')) {
+        switchFishTab(tab.dataset.fishTab);
+    } else if (cls.contains('mine-inner-tab')) {
+        switchMineTab(tab.dataset.mineTab);
+    } else if (cls.contains('ai-inner-tab')) {
+        switchAiInnerTab(tab.dataset.aiTab);
+    }
+});
 
 if (location.hash) {
-    const hash = location.hash.slice(1);
-    const aiInnerMap = { knowledgebase: 'ai-knowledgebase', aisummaries: 'ai-summaries', aipersonas: 'ai-personas' };
-    const rssInnerMap = { dailynews: 'rss-tab-dailynews' };
-    if (aiInnerMap[hash]) {
-        const aiNav = document.querySelector('.nav-item[data-tab="ai"]');
-        if (aiNav) aiNav.click();
-        switchAiInnerTab(aiInnerMap[hash]);
-    } else if (rssInnerMap[hash]) {
-        const rssNav = document.querySelector('.nav-item[data-tab="rss"]');
-        if (rssNav) rssNav.click();
-        switchRssInnerTab(rssInnerMap[hash]);
-    } else {
-        const target = document.querySelector(`.nav-item[data-tab="${hash}"]`);
-        if (target) target.click();
-    }
+    // An inner tab can only be selected once its parent panel has arrived.
+    (async function routeFromHash() {
+        const hash = location.hash.slice(1);
+        const aiInnerMap = { knowledgebase: 'ai-knowledgebase', aisummaries: 'ai-summaries', aipersonas: 'ai-personas' };
+        const rssInnerMap = { dailynews: 'rss-tab-dailynews' };
+        if (aiInnerMap[hash]) {
+            if (await activateTab('ai')) switchAiInnerTab(aiInnerMap[hash]);
+        } else if (rssInnerMap[hash]) {
+            if (await activateTab('rss')) switchRssInnerTab(rssInnerMap[hash]);
+        } else {
+            await activateTab(hash);
+        }
+    })();
 }
 
 // ── Sidebar search ────────────────────────────────────────────────────
@@ -274,10 +376,10 @@ function updateMsgPreview(textareaId, previewId) {
     const rendered = raw.replace(/\{(\w+)\}/g, (_, key) => PREVIEW_VARS[key] !== undefined ? PREVIEW_VARS[key] : `{${key}}`);
     box.textContent = rendered;
 }
-// Initialise previews on page load
-document.addEventListener('DOMContentLoaded', () => {
-    [['welcome-message','welcome-preview'],['farewell-message','farewell-preview'],['birthday-message','birthday-preview']].forEach(([t,p]) => updateMsgPreview(t,p));
-});
+// Initialise each preview when its panel arrives
+onPanel('welcome',   () => updateMsgPreview('welcome-message', 'welcome-preview'));
+onPanel('farewell',  () => updateMsgPreview('farewell-message', 'farewell-preview'));
+onPanel('birthdays', () => updateMsgPreview('birthday-message', 'birthday-preview'));
 
 // Toast helper
 const toastEl = document.getElementById('toast');
@@ -305,9 +407,9 @@ function updateAiProviderUI() {
     const hint = document.getElementById('ai-model-hint');
     if (hint) hint.textContent = 'Default: ' + (AI_MODEL_DEFAULTS[provider] || '');
 }
-if (document.getElementById('ai-provider')) updateAiProviderUI();
-renderDailyNewsProfiles();
-renderEscalationLadder();
+onPanel('ai', () => { if (document.getElementById('ai-provider')) updateAiProviderUI(); });
+onPanel('rss', renderDailyNewsProfiles);
+onPanel('moderation', renderEscalationLadder);
 
 function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
@@ -1302,8 +1404,7 @@ function addCpExcRole() {
 }
 
 // Initialize CP lists
-renderCpRules();
-renderCpCooldowns();
+onPanel('commandpolicies', () => { renderCpRules(); renderCpCooldowns(); });
 
 var storeItems = boot('shop');
 var _serverJobs = boot('jobs');
@@ -1602,10 +1703,12 @@ function deleteJob(idx) {
     renderJobs();
 }
 
-document.addEventListener('DOMContentLoaded', function() {
+onPanel('economy', function() {
     renderStoreItems();
     renderJobTiers();
     renderJobs();
+});
+onPanel('achievements', function() {
     renderBuiltinAchievements();
     renderCustomAchievements();
 });
@@ -2178,7 +2281,7 @@ async function deleteKbEntry(id) {
 }
 
 // KB static button listeners (inline onclick blocked by CSP)
-document.addEventListener('DOMContentLoaded', function() {
+onPanel('ai', function() {
     var addBtn = document.getElementById('kb-add-btn');
     if (addBtn) addBtn.addEventListener('click', addKbEntry);
     var retryBtn = document.getElementById('kb-retry-btn');
@@ -2350,10 +2453,10 @@ function updatePersonaChannelWarning() {
     warning.style.display = aiChannel.value ? '' : 'none';
 }
 
-(function() {
+onPanel('ai', function() {
     var aiChannel = document.getElementById('ai-channel');
     if (aiChannel) aiChannel.addEventListener('change', updatePersonaChannelWarning);
-})();
+});
 
 function renderPersonas() {
     updatePersonaChannelWarning();
@@ -2427,8 +2530,8 @@ async function removePersona(channelId) {
     }
 }
 
-// Initialize personas on page load (data already available from template)
-renderPersonas();
+// Initialize personas when the AI panel arrives (data came with the bootstrap)
+onPanel('ai', renderPersonas);
 
 // ── MCP connections ─────────────────────────────────────────────────
 // Servers are fetched rather than templated: the response is the one
@@ -2749,9 +2852,11 @@ function closePromptEditor(commit) {
     document.removeEventListener('keydown', _promptEditorKeydown);
     _promptEditorTarget = null;
 }
-// Initialize counters on load
-updatePromptCount('ai-prompt');
-updatePromptCount('persona-prompt');
+// Initialize counters when the AI panel arrives
+onPanel('ai', function() {
+    updatePromptCount('ai-prompt');
+    updatePromptCount('persona-prompt');
+});
 
 // ── AI Token Usage ──────────────────────────────────────────────────
 function formatTokens(n) {
@@ -2851,8 +2956,7 @@ async function loadAiUsage() {
 // Lazy-load AI usage stats the first time the AI panel becomes visible.
 // Watches the AI panel's `.active` class so it works for nav clicks, hash
 // routing, and initial page load without coupling to the nav implementation.
-(function() {
-    var aiPanel = document.getElementById('ai');
+onPanel('ai', function(aiPanel) {
     if (!aiPanel) return;
     var loaded = false;
     var inFlight = false;
@@ -2868,7 +2972,7 @@ async function loadAiUsage() {
     check();
     var obs = new MutationObserver(check);
     obs.observe(aiPanel, { attributes: true, attributeFilter: ['class'] });
-})();
+});
 
 // ── Leveling: No-XP role tag-input ──────────────────────────────────
 function addLevelNoXpRole() {
@@ -2983,7 +3087,7 @@ function addSeasonTierRow() {
 }
 
 // ── Getting Started checklist ────────────────────────────────────────
-(function initGettingStarted() {
+function initGettingStarted() {
     const guildId = BOOT.guildId;
     const key = `gs_dismissed_${guildId}`;
     if (localStorage.getItem(key) === '1') {
@@ -3000,7 +3104,8 @@ function addSeasonTierRow() {
         const wrap = document.getElementById('getting-started-wrap');
         if (wrap) wrap.style.display = 'none';
     }
-})();
+}
+onPanel('overview', initGettingStarted);
 function toggleGettingStarted() {
     const body = document.getElementById('getting-started-body');
     const icon = document.getElementById('gs-toggle-icon');
@@ -3140,7 +3245,7 @@ async function loadOverviewStats() {
         if (feed) feed.innerHTML = '<span style="opacity:.4;font-size:.85em">Could not load activity data.</span>';
     }
 }
-loadOverviewStats();
+onPanel('overview', loadOverviewStats);
 
 let _analyticsData = null;
 let _analyticsInsights = null;
@@ -3813,10 +3918,6 @@ async function ecoAdminAction(action) {
         textarea.value = [...existing, id].join('\n');
     }
 
-    window._initUserSearchWidgets = function() {
-        initUserSearchWidget('an-whitelist-users');
-        initUserSearchWidget('cp-exc-users');
-    };
-    // Init when DOM is ready (script runs at end of body)
-    _initUserSearchWidgets();
+    onPanel('antinuke', () => initUserSearchWidget('an-whitelist-users'));
+    onPanel('commandpolicies', () => initUserSearchWidget('cp-exc-users'));
 })();
