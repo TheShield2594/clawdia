@@ -27,19 +27,40 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
     } else {
         robberCond.$or = [{ lastRob: null }, { lastRob: { $exists: false } }];
     }
-    const robberRes = await User.findOneAndUpdate(robberCond, {
-        $set: {
-            balance:        robber.balance,
-            lastRob:        robber.lastRob,
-            successfulRobs: robber.successfulRobs ?? 0,
-            failedRobs:     robber.failedRobs     ?? 0,
-        },
-    });
+    // The robber's balance and rob counters are written as deltas, not absolute
+    // values: an absolute $set would clobber any concurrent credit (a payout, a
+    // gift received) landing between the read at the top of the command and this
+    // write. The lastRob CAS says nothing about balance, so guard the debit too.
+    const robberBalDelta = robber.balance - robberSnapshot.balance;
+    const successDelta   = (robber.successfulRobs ?? 0) - (robberSnapshot.successfulRobs ?? 0);
+    const failedDelta    = (robber.failedRobs     ?? 0) - (robberSnapshot.failedRobs     ?? 0);
+    if (robberBalDelta < 0) robberCond.balance = { $gte: -robberBalDelta };
+
+    const robberUpdate = { $set: { lastRob: robber.lastRob } };
+    const robberInc = {};
+    if (robberBalDelta !== 0) robberInc.balance        = robberBalDelta;
+    if (successDelta   !== 0) robberInc.successfulRobs = successDelta;
+    if (failedDelta    !== 0) robberInc.failedRobs     = failedDelta;
+    if (Object.keys(robberInc).length) robberUpdate.$inc = robberInc;
+
+    const robberRes = await User.findOneAndUpdate(robberCond, robberUpdate);
     if (!robberRes) {
-        throw Object.assign(
-            new Error('[rob] duplicate rob attempt — cooldown already applied'),
-            { robberCooldownConflict: true }
-        );
+        // Either the lastRob CAS lost to a parallel rob or the balance guard
+        // rejected the debit — read back to tell the user which one happened.
+        const current = await User.findOne(
+            { userId: robber.userId, guildId: robber.guildId },
+            { lastRob: 1 }
+        ).lean();
+        const casLost = String(current?.lastRob ?? '') !== String(robberSnapshot.lastRob ?? '');
+        throw casLost
+            ? Object.assign(
+                new Error('[rob] duplicate rob attempt — cooldown already applied'),
+                { robberCooldownConflict: true }
+            )
+            : Object.assign(
+                new Error('[rob] robber balance changed between read and write'),
+                { robberBalanceChanged: true }
+            );
     }
     try {
         const balDelta  = victim.balance - victimOrigBalance;
@@ -75,16 +96,15 @@ async function saveRobState(robber, victim, robberSnapshot, trapSnapshot, victim
         }
     } catch (victimErr) {
         try {
-            await User.updateOne(
-                { userId: robber.userId, guildId: robber.guildId },
-                { $set: {
-                    balance:         robberSnapshot.balance,
-                    bank:            robberSnapshot.bank,
-                    lastRob:         robberSnapshot.lastRob,
-                    successfulRobs:  robberSnapshot.successfulRobs,
-                    failedRobs:      robberSnapshot.failedRobs,
-                } }
-            );
+            // Reverse the deltas rather than restoring the snapshot values, so a
+            // concurrent credit that landed after the robber write survives.
+            const rollbackInc = {};
+            if (robberBalDelta !== 0) rollbackInc.balance        = -robberBalDelta;
+            if (successDelta   !== 0) rollbackInc.successfulRobs = -successDelta;
+            if (failedDelta    !== 0) rollbackInc.failedRobs     = -failedDelta;
+            const rollback = { $set: { lastRob: robberSnapshot.lastRob } };
+            if (Object.keys(rollbackInc).length) rollback.$inc = rollbackInc;
+            await User.updateOne({ userId: robber.userId, guildId: robber.guildId }, rollback);
         } catch (rollbackErr) {
             console.error('[rob] rollback failed; balances may be inconsistent:', rollbackErr);
         }
@@ -178,7 +198,6 @@ module.exports = {
 
             const robberSnapshot = {
                 balance:        robber.balance,
-                bank:           robber.bank,
                 lastRob:        robber.lastRob ?? null,
                 successfulRobs: robber.successfulRobs ?? 0,
                 failedRobs:     robber.failedRobs     ?? 0,
@@ -427,6 +446,9 @@ module.exports = {
         } catch (error) {
             if (error.robberCooldownConflict) {
                 return interaction.editReply({ content: '⚡ Duplicate rob attempt detected — please try again.' }).catch(() => {});
+            }
+            if (error.robberBalanceChanged) {
+                return interaction.editReply({ content: '⚡ Your balance shifted mid-heist — the rob was called off.' }).catch(() => {});
             }
             if (error.victimBalanceChanged) {
                 return interaction.editReply({ content: "⚡ The target's balance shifted mid-heist — you couldn't complete the rob." }).catch(() => {});
