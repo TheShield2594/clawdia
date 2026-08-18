@@ -118,6 +118,21 @@ describe('loadMcpServers', () => {
         expect(warnings[0]).toMatch(/MISSING_MCP_TOKEN/);
     });
 
+    test('skips a server whose token is longer than the limit rather than truncating it', () => {
+        writeConfig({
+            servers: [{ name: 'authed', url: 'https://mcp.example.com/sse', authorization_token: 'x'.repeat(4097) }]
+        });
+        const { servers, warnings } = load();
+        expect(servers).toEqual([]);
+        expect(warnings[0]).toMatch(/longer than 4096/);
+    });
+
+    test('keeps a token that is exactly at the limit', () => {
+        const token = 'x'.repeat(4096);
+        writeConfig({ servers: [{ name: 'authed', url: 'https://mcp.example.com/sse', authorization_token: token }] });
+        expect(load().servers[0].server.authorization_token).toBe(token);
+    });
+
     test('rejects non-https URLs', () => {
         writeConfig({ servers: [{ name: 'plaintext', url: 'http://mcp.example.com/sse' }] });
         const { servers, warnings } = load();

@@ -618,7 +618,7 @@ body {
     border-color: var(--warn-border, #ffe58f);
     color: var(--warn-text, #7a5f00);
 }
-.mcp-test-result { font-size: 0.78rem; margin-top: 0.35rem; color: var(--text-mute); word-break: break-word; }
+.mcp-test-result { font-size: 0.78rem; margin-top: 0.35rem; color: var(--text-mute); overflow-wrap: anywhere; }
 .mcp-test-result.ok { color: var(--ok, #16a34a); }
 .mcp-test-result.bad { color: var(--danger, #dc2626); }
 

@@ -163,9 +163,15 @@ function normalizeServer(raw, { label, source, expandEnv, warnings }) {
         warnings
     });
     if (token === null) return null;
+    if (token && token.length > MAX_TOKEN_LENGTH) {
+        // Truncating would send a token that cannot possibly authenticate and
+        // surface as a puzzling 401 from the server instead of a config error.
+        warnings.push(`${label} ("${name}") authorization_token is longer than ${MAX_TOKEN_LENGTH} characters — skipping it`);
+        return null;
+    }
 
     const server = { type: 'url', url, name };
-    if (token) server.authorization_token = token.slice(0, MAX_TOKEN_LENGTH);
+    if (token) server.authorization_token = token;
 
     return { name, source, server, toolset: buildToolset(name, raw, `${label} ("${name}")`, warnings) };
 }

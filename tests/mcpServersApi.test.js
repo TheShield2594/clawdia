@@ -36,6 +36,22 @@ describe('validateServerInput', () => {
         expect(validateServerInput({ url: 'file:///etc/passwd' }, 'local').error).toMatch(/https/);
     });
 
+    // The url is listed back to the dashboard, so a credential hidden in it
+    // would be readable there — unlike the token, which is write-only.
+    test.each([
+        ['a username and password', 'https://user:pass@mcp.example.com/sse'],
+        ['a username alone', 'https://token@mcp.example.com/sse'],
+        ['an empty username with a password', 'https://:pass@mcp.example.com/sse']
+    ])('rejects a url carrying %s', (_label, url) => {
+        expect(validateServerInput({ url }, 'github').error).toMatch(/username or password/);
+    });
+
+    test('still accepts a url with a port, path and query', () => {
+        const result = validateServerInput({ url: 'https://mcp.example.com:8443/mcp/sse?v=2' }, 'custom');
+        expect(result.error).toBeUndefined();
+        expect(result.value.url).toBe('https://mcp.example.com:8443/mcp/sse?v=2');
+    });
+
     test('trims, dedupes and keeps tool names', () => {
         const result = validateServerInput(
             { ...ok, allowedTools: [' search_repos ', 'search_repos', 'get_file'], blockedTools: ['delete_file'] },

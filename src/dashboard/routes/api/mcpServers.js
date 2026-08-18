@@ -77,6 +77,12 @@ function validateServerInput(body, name) {
     // Anthropic opens this connection, not the bot, so there is no SSRF surface
     // here — but the API only accepts https and so does the MCP spec.
     if (parsed.protocol !== 'https:') return { error: 'URL must start with https://' };
+    // The URL is listed back to the dashboard; a secret smuggled into it would
+    // be readable there and in the audit log, which is exactly what keeping the
+    // token in its own write-only field avoids.
+    if (parsed.username || parsed.password) {
+        return { error: 'URL must not contain a username or password — put the credential in the authorization token field' };
+    }
 
     const allowed = validateToolNames(body.allowedTools, 'allowedTools');
     if (allowed.error) return { error: allowed.error };

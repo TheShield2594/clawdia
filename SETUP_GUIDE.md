@@ -221,7 +221,12 @@ malformed config disables the connector, it never stops the bot from starting.
   request. Trim with the allow/deny lists if you connect a large server.
 - `/forge` and `/questgen` parse the model's reply as JSON and deliberately run
   without MCP tools.
-- MCP traffic is not covered by zero-data-retention arrangements.
+- Data retention needs checking on both sides. Anthropic's zero-data-retention
+  arrangements do **not** cover the MCP connector, so tool definitions and tool
+  results are retained under their standard policy. Separately, the remote
+  server is a third party that sets its own retention and downstream processing
+  for whatever Claude sends it and whatever it holds. Read the privacy policy of
+  every server you connect before pointing it at a Discord server's traffic.
 
 ## Daily News Configuration
 
