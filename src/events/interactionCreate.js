@@ -5,6 +5,12 @@ const { handlePollVote } = require('../commands/utility/poll');
 const { handleHeistButton } = require('../commands/economy/heist');
 const { handleSyndicateButton } = require('../commands/economy/syndicate');
 const { handleDmButton } = require('../services/dmService');
+const {
+    isEightBallButton,
+    isEightBallModal,
+    handleEightBallButton,
+    handleEightBallModal,
+} = require('../commands/fun/8ball');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 // Giveaway entry/withdrawal.
@@ -200,6 +206,16 @@ module.exports = {
                 await handlePollVote(interaction);
             }
 
+            // The 8-ball's buttons are deliberately not held by a collector:
+            // routing them here is what lets an old message still work, and
+            // keeps them working across a restart.
+            if (isEightBallButton(interaction.customId)) {
+                await handleEightBallButton(interaction).catch(err => {
+                    console.error('[8ball] button handler error:', err);
+                });
+                return;
+            }
+
             if (interaction.customId.startsWith('dm_storysofar_')) {
                 await handleDmButton(interaction, client).catch(err => {
                     console.error('[dm] button handler error:', err);
@@ -207,6 +223,15 @@ module.exports = {
                 return;
             }
 
+            return;
+        }
+
+        if (interaction.isModalSubmit()) {
+            if (isEightBallModal(interaction.customId)) {
+                await handleEightBallModal(interaction).catch(err => {
+                    console.error('[8ball] modal handler error:', err);
+                });
+            }
             return;
         }
 

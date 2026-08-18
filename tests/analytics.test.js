@@ -239,6 +239,7 @@ describe('logCommandMetric (interactionCreate)', () => {
         return {
             isChatInputCommand: () => true,
             isButton: () => false,
+            isModalSubmit: () => false,
             isAutocomplete: () => false,
             commandName: 'ping',
             guildId: '111111111111111111',
