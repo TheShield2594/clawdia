@@ -81,9 +81,9 @@ const CATEGORIES = [
         label: 'Fun',
         preview: '8ball, coinflip, roll',
         commands: [
-            { name: '8ball',    description: 'Ask the magic 8-ball a question' },
-            { name: 'coinflip', description: 'Flip a coin — heads or tails' },
-            { name: 'roll',     description: 'Roll dice with a given number of sides' },
+            { name: '8ball',    description: 'Ask the magic 8-ball a yes/no question — shake again or ask another' },
+            { name: 'coinflip', description: 'Flip a coin: call heads or tails, bet coins, or challenge a member' },
+            { name: 'roll',     description: 'Roll a 2-100 sided die, optionally betting high, low, or an exact number' },
         ],
     },
     {

@@ -203,9 +203,9 @@ npm start
 - `/newspaper preview` - Preview the AI-written server newspaper (Manage Server)
 
 ### Fun
-- `/8ball` - Ask the magic 8-ball
-- `/roll` - Roll a dice
-- `/coinflip` - Flip a coin
+- `/8ball` - Ask the magic 8-ball a yes/no question, then shake again or ask another from the reply
+- `/roll` - Roll a die (`sides`, 2-100), optionally wagering a `bet` on a `guess` of high/low or an exact `number`
+- `/coinflip` - Flip a coin: call your `side`, wager a `bet` against the house, or stake one against an `opponent`
 - `/meme` - Generate a meme (requires Imgflip credentials)
 - `/caption` - Add a caption to an image
 - `/wanted` / `/wasted` - Image filter commands
