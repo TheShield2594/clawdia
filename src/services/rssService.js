@@ -4,6 +4,7 @@ const { EmbedBuilder } = require('discord.js');
 const cron = require('node-cron');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
+const { runJob } = require('../utils/jobRunner');
 
 const parser = new Parser();
 
@@ -285,9 +286,12 @@ function scheduleProfileJob(client, guildId, profile) {
     }
 
     try {
-        const job = cron.schedule(cronExpression, () => {
-            sendDailyNews(client, guildId, profile.profileId);
-        }, profile.timezone ? { timezone: profile.timezone } : undefined);
+        const job = cron.schedule(cronExpression, () =>
+            runJob('rssService', 'sendDailyNews', () => sendDailyNews(client, guildId, profile.profileId), {
+                guildId,
+                payload: { profileId: profile.profileId },
+            }),
+        profile.timezone ? { timezone: profile.timezone } : undefined);
 
         dailyNewsJobs.set(jobKey, job);
         console.log(`Scheduled daily news for guild ${guildId}, profile ${profile.profileId} at ${safeTime}${profile.timezone ? ` (${profile.timezone})` : ''}`);

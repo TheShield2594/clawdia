@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 const { getDailyVerse, lookupVerse, createVerseEmbed, createVerseComponents } = require('./bibleService');
+const { runJob } = require('../utils/jobRunner');
 
 const bibleJobs = new Map();
 
@@ -86,7 +87,9 @@ function scheduleBibleVerse(client, guildId, bv) {
 
     const job = cron.schedule(
         cronExpr,
-        () => postDailyVerse(client, guildId, bv.channelId, bv.translation),
+        () => runJob('dailyBibleService', 'postDailyVerse',
+            () => postDailyVerse(client, guildId, bv.channelId, bv.translation),
+            { guildId }),
         { timezone: safeTz }
     );
     bibleJobs.set(key, job);

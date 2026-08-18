@@ -1,8 +1,22 @@
 const FailedJob = require('../models/FailedJob');
-const { recordServiceRun } = require('../health');
+const { recordServiceRun, recordServiceSkip } = require('../health');
+
+// Jobs currently executing, keyed by service/jobName (plus guild, for per-guild
+// jobs). node-cron fires on schedule whether or not the previous run finished,
+// and several jobs here run every minute against the network and the shared
+// Guild documents — two copies of the same job in flight can interleave a
+// read-modify-write and lose the first run's changes. A tick that arrives while
+// its own job is still running is dropped rather than queued: the next tick is
+// at most a minute away, and the work is idempotent catch-up work.
+const inFlight = new Set();
+
+function inFlightKey(service, jobName, guildId) {
+    return guildId ? `${service}/${jobName}#${guildId}` : `${service}/${jobName}`;
+}
 
 /**
- * Wraps a cron job function with error recording (dead-letter queue) and health tracking.
+ * Wraps a cron job function with overlap protection, error recording
+ * (dead-letter queue) and health tracking.
  *
  * @param {string} service  - human-readable service name, e.g. "reminderService"
  * @param {string} jobName  - specific job name, e.g. "checkReminders"
@@ -11,8 +25,18 @@ const { recordServiceRun } = require('../health');
  * @param {string}  [opts.guildId]      - guild this job is scoped to
  * @param {object}  [opts.payload]      - extra context stored on failure
  * @param {number}  [opts.maxAttempts]  - max DLQ retry count (default 3)
+ * @returns {Promise<boolean>} false when the run was skipped because the same
+ *   job (and guild, if scoped) was already in flight; true otherwise.
  */
 async function runJob(service, jobName, fn, { guildId = null, payload = null, maxAttempts = 3 } = {}) {
+    const key = inFlightKey(service, jobName, guildId);
+    if (inFlight.has(key)) {
+        recordServiceSkip(service);
+        console.warn(`[JobRunner] ${key} still running from a previous tick — skipping this one.`);
+        return false;
+    }
+    inFlight.add(key);
+
     const start = Date.now();
     try {
         await fn();
@@ -38,7 +62,11 @@ async function runJob(service, jobName, fn, { guildId = null, payload = null, ma
             // DLQ write failure must never crash the process
             console.error(`[JobRunner] Failed to write DLQ entry for ${service}/${jobName}:`, dbErr.message);
         }
+    } finally {
+        inFlight.delete(key);
     }
+
+    return true;
 }
 
 /**

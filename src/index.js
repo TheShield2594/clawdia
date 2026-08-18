@@ -5,6 +5,7 @@ const path = require('path');
 require('dotenv').config();
 
 const health = require('./health');
+const { makeCache, sweepers } = require('./utils/cacheOptions');
 
 // Validate required environment variables before doing anything else.
 // Fail loudly at startup rather than silently misbehaving at runtime.
@@ -28,7 +29,11 @@ const client = new Client({
         GatewayIntentBits.GuildModeration,
         GatewayIntentBits.GuildWebhooks
     ],
-    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
+    partials: [Partials.Channel, Partials.Message, Partials.Reaction],
+
+    // Member/user/ban caches are unbounded by default; see cacheOptions.js.
+    makeCache,
+    sweepers,
 });
 
 client.commands = new Collection();

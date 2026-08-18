@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const express = require('express');
+const compression = require('compression');
 const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const passport = require('passport');
@@ -79,6 +80,12 @@ function start(client) {
 
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
+
+    // Gzip/deflate every compressible response. The guild settings page alone
+    // renders a few hundred KB of HTML, and styles.css is another 70 KB — both
+    // shrink by roughly 85% over the wire. Registered before the static handler
+    // and the routers so it covers assets and rendered views alike.
+    app.use(compression());
 
     app.use(express.static(path.join(__dirname, 'public')));
     app.use(express.json());
