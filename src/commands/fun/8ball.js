@@ -6,7 +6,6 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ComponentType,
     MessageFlags,
     ModalBuilder,
     TextInputBuilder,
@@ -14,19 +13,14 @@ const {
     escapeMarkdown,
 } = require('discord.js');
 const { delay } = require('../../utils/delay');
+const { createReplaySession } = require('../../utils/replaySession');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b1.png';
 
 const MAX_QUESTION   = 200;
 const SHAKE_FRAME_MS = 260;
 
-// A session survives repeated shakes, but an interaction token dies 15 minutes
-// after the command was invoked — every follow-up here is an editReply on that
-// token. Cap the collector below that so the buttons come off while they still
-// can, instead of failing on the edit that was meant to clear them.
-const SESSION_IDLE_MS = 60_000;
-const SESSION_MAX_MS  = 13 * 60_000;
-const MODAL_WAIT_MS   = 120_000;
+const MODAL_WAIT_MS = 120_000;
 
 // The ball sloshing to the window before it settles.
 const SHAKE_FRAMES = [
@@ -187,22 +181,19 @@ module.exports = {
     __test__: { RESPONSES, TYPE_CONFIG, pickResponse, normalizeQuestion, quoteQuestion, MAX_QUESTION },
 };
 
-// One message, one collector, for as long as the owner keeps shaking. The
-// alternative — a fresh max:1 collector per shake — left a window on the
-// "New Question" path where the buttons were still on screen with nothing
-// listening, so a second click died as "This interaction failed".
+// One message, one session, for as long as the owner keeps shaking. The
+// collector boilerplate — owner check, overlap guard, timers, error handling —
+// lives in utils/replaySession, shared with /coinflip and /roll.
 async function runSession(interaction, firstQuestion) {
     const ids = {
         again: `8ball_again_${interaction.id}`,
         newq:  `8ball_newq_${interaction.id}`,
     };
 
-    const deadline = Date.now() + SESSION_MAX_MS;
-    let question   = firstQuestion;
-    let shakes     = 0;
-    let modalSeq   = 0;
-    let busy       = false;
-    let collector  = null;
+    let question = firstQuestion;
+    let shakes   = 0;
+    let modalSeq = 0;
+    let session  = null;
 
     async function shake() {
         shakes += 1;
@@ -220,47 +211,36 @@ async function runSession(interaction, firstQuestion) {
 
         return interaction.editReply({
             embeds:     [resultEmbed(interaction, question, pickResponse(), shakes)],
-            components: collector?.ended ? [] : [buttonRow(ids)],
+            components: session?.ended ? [] : [buttonRow(ids)],
         });
     }
 
     const message = await shake();
 
-    collector = message.createMessageComponentCollector({
-        componentType: ComponentType.Button,
-        filter: i => i.customId === ids.again || i.customId === ids.newq,
-        idle:   SESSION_IDLE_MS,
-        time:   SESSION_MAX_MS,
-    });
+    session = createReplaySession({
+        interaction,
+        message,
+        customIds: [ids.again, ids.newq],
+        label:     '8ball',
+        claim:     `That 8-ball is ${interaction.user}'s — run \`/8ball\` to ask your own.`,
 
-    collector.on('collect', async i => {
-        try {
-            // Rejecting these in the collector filter instead would show every
-            // other member a bare "This interaction failed".
-            if (i.user.id !== interaction.user.id) {
-                return await i.reply({
-                    content: `That 8-ball is ${interaction.user}'s — run \`/8ball\` to ask your own.`,
-                    flags:   MessageFlags.Ephemeral,
-                });
-            }
-
-            if (busy) return await i.deferUpdate().catch(() => {});
-
-            if (i.customId === ids.again) {
-                busy = true;
-                await i.deferUpdate();
+        async onCollect(button, ctl) {
+            if (button.customId === ids.again) {
+                await button.deferUpdate();
                 await shake();
                 return;
             }
 
-            // New question — collected through a modal. The buttons stay live
-            // while it's open, so dismissing the modal doesn't strand the message.
+            // New question — collected through a modal. The member has to
+            // dismiss the modal before they can reach the buttons again, so
+            // hold nothing while it's open.
             const modalId = `8ball_modal_${interaction.id}_${++modalSeq}`;
-            await i.showModal(questionModal(modalId));
+            await button.showModal(questionModal(modalId));
+            ctl.release();
 
-            const submitted = await i.awaitModalSubmit({
+            const submitted = await button.awaitModalSubmit({
                 // Matching the custom id matters: a filter on the user alone
-                // would swallow a modal this user submitted for another command.
+                // would swallow a modal they submitted for another command.
                 filter: mi => mi.customId === modalId && mi.user.id === interaction.user.id,
                 time:   MODAL_WAIT_MS,
             }).catch(() => null);
@@ -275,28 +255,15 @@ async function runSession(interaction, firstQuestion) {
                 });
             }
 
-            busy = true;
+            // A shake may have started while the modal was open.
+            if (!ctl.hold()) return await submitted.deferUpdate().catch(() => {});
+
             await submitted.deferUpdate();
             question = next;
             // Typing into a modal isn't a collected interaction, so the idle
-            // timer has been running the whole time. Restart it — but against
-            // the original deadline, never past the interaction token's life.
-            if (!collector.ended) {
-                collector.resetTimer({ idle: SESSION_IDLE_MS, time: Math.max(1_000, deadline - Date.now()) });
-            }
+            // timer has been running the whole time.
+            ctl.extend();
             await shake();
-        } catch (error) {
-            // Nothing above is awaited by execute(), so an unhandled rejection
-            // here would surface as a process-level warning instead of a log.
-            console.error('[8ball] component handler error:', error);
-        } finally {
-            busy = false;
-        }
-    });
-
-    collector.on('end', () => {
-        // A render in flight sets the final components itself (see shake()).
-        if (busy) return;
-        interaction.editReply({ components: [] }).catch(() => {});
+        },
     });
 }

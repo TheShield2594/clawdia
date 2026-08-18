@@ -9,16 +9,26 @@ const {
 const Guild = require('../../models/Guild');
 const User  = require('../../models/User');
 const { logTransaction } = require('../../utils/logTransaction');
+const { createReplaySession } = require('../../utils/replaySession');
+const { delay } = require('../../utils/delay');
 
 const HEADS_THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1fa99.png';
 
 // Spinning frame — single rotating coin
 const SPIN_FRAMES = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'];
+const SPIN_MS     = 300;
 
 const MIN_BET            = 10;
 const SOLO_RAKE          = 0.05;               // solo flips pay 1.95x on a win (-2.5% EV)
 const ACCEPT_TIMEOUT_MS  = 60_000;
 const MIN_ACCOUNT_AGE_MS = 7 * 24 * 3_600_000; // PvP wagers gated like /rob and /gift
+
+const HEADS = 'Heads';
+const TAILS = 'Tails';
+
+const flip  = () => (Math.random() < 0.5 ? HEADS : TAILS);
+const other = side => (side === HEADS ? TAILS : HEADS);
+const pip   = side => (side === HEADS ? '👑' : '🔘');
 
 function embedAuthor(interaction) {
     return {
@@ -37,12 +47,26 @@ function spinningEmbed(interaction, frame, stakeLine = null) {
         .setFooter({ text: 'Heads or Tails?' });
 }
 
-function resultEmbed(interaction, result) {
-    const isHeads = result === 'Heads';
-    return new EmbedBuilder()
+// Cosmetic frames: a transient edit failure here shouldn't abort a flip whose
+// wager has already been debited.
+async function spin(interaction, stakeLine = null) {
+    for (let f = 0; f < 4; f++) {
+        await interaction.editReply({
+            embeds:     [spinningEmbed(interaction, f, stakeLine)],
+            components: [],
+        }).catch(() => {});
+        await delay(SPIN_MS);
+    }
+}
+
+function resultEmbed(interaction, result, call = null) {
+    const isHeads = result === HEADS;
+    const called  = call ? result === call : null;
+
+    const embed = new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(HEADS_THUMB)
-        .setColor(isHeads ? '#f39c12' : '#95a5a6')
+        .setColor(called === null ? (isHeads ? '#f39c12' : '#95a5a6') : (called ? '#2ecc71' : '#e74c3c'))
         .setTitle(isHeads ? '🪙 Heads!' : '🪙 Tails!')
         .setDescription(
             isHeads
@@ -50,24 +74,91 @@ function resultEmbed(interaction, result) {
                 : '🔘 **TAILS!** The coin landed face-down.',
         )
         .addFields(
-            { name: '🎲 Result',  value: `**${result}**`, inline: true },
-            { name: '📊 Odds',    value: '**50 / 50**',   inline: true },
+            { name: '🎲 Result', value: `**${result}**`, inline: true },
+            { name: '📊 Odds',   value: '**50 / 50**',   inline: true },
         )
-        .setFooter({ text: 'Feeling lucky? Flip again!' })
         .setTimestamp();
+
+    if (call) {
+        embed.addFields({ name: '🗣️ Your Call', value: `${pip(call)} **${call}**`, inline: true });
+        embed.setFooter({ text: called ? 'Called it. Flip again?' : 'Not your side this time. Flip again?' });
+    } else {
+        embed.setFooter({ text: 'Feeling lucky? Flip again!' });
+    }
+
+    return embed;
+}
+
+// Best-effort return of coins already taken. Never throws: it runs on paths
+// that are themselves handling a failure, and losing the refund to a second
+// error would be worse than logging it.
+async function refund(userId, guildId, amount, note) {
+    try {
+        const doc = await User.findOneAndUpdate(
+            { userId, guildId },
+            { $inc: { balance: amount } },
+            { new: true }
+        );
+        logTransaction({ userId, guildId, type: 'coinflip', amount, balance: doc?.balance ?? 0, note });
+    } catch (error) {
+        console.error(`[coinflip] refund of ${amount} to ${userId} in ${guildId} failed:`, error);
+    }
+}
+
+// Take both wagers before the coin is flipped, and leave no coins stranded if
+// that can't be completed: a side that can't cover it, or a write that fails
+// outright, puts back whatever was already taken.
+async function escrowWagers(guildId, challengerId, opponentId, bet) {
+    let challengerHeld = false;
+
+    try {
+        const challengerDoc = await User.findOneAndUpdate(
+            { userId: challengerId, guildId, balance: { $gte: bet } },
+            { $inc: { balance: -bet } },
+            { new: true }
+        );
+        if (!challengerDoc) return { ok: false, short: 'challenger' };
+        challengerHeld = true;
+
+        const opponentDoc = await User.findOneAndUpdate(
+            { userId: opponentId, guildId, balance: { $gte: bet } },
+            { $inc: { balance: -bet } },
+            { new: true }
+        );
+        if (!opponentDoc) {
+            await refund(challengerId, guildId, bet, 'PvP coinflip — opponent short, wager returned');
+            return { ok: false, short: 'opponent' };
+        }
+
+        return { ok: true, challengerDoc, opponentDoc };
+    } catch (error) {
+        if (challengerHeld) {
+            await refund(challengerId, guildId, bet, 'PvP coinflip — escrow failed, wager returned');
+        }
+        return { ok: false, error };
+    }
 }
 
 module.exports = {
+    __test__: { escrowWagers, refund, flip, other, pip },
+
     data: new SlashCommandBuilder()
         .setName('coinflip')
         .setDescription('Flip a coin — for fun, for coins, or against another member.')
+        .addStringOption(o =>
+            o.setName('side')
+                .setDescription('Call it. Omit and the coin picks your side for you.')
+                .addChoices(
+                    { name: '👑 Heads', value: HEADS },
+                    { name: '🔘 Tails', value: TAILS },
+                ))
         .addIntegerOption(o =>
             o.setName('bet')
                 .setDescription('Coins to wager (omit for a casual flip).')
                 .setMinValue(MIN_BET))
         .addUserOption(o =>
             o.setName('opponent')
-                .setDescription('Challenge another member — you take Heads, they take Tails. Winner takes the pot.')),
+                .setDescription('Challenge another member — you take your side, they take the other. Winner takes the pot.')),
     cooldown: 5,
 
     async execute(interaction) {
@@ -78,13 +169,14 @@ module.exports = {
 
         const bet      = interaction.options.getInteger('bet');
         const opponent = interaction.options.getUser('opponent');
+        const side     = interaction.options.getString('side');
 
         if (!bet) {
             if (opponent) {
                 return interaction.reply({ content: 'Challenging someone requires a `bet` — add one to make it interesting.', flags: MessageFlags.Ephemeral });
             }
             await interaction.deferReply();
-            return playCasualFlip(interaction);
+            return playCasualFlip(interaction, side);
         }
 
         const maxBet = guildSettings?.economy?.duelMaxBet ?? 10_000;
@@ -92,60 +184,58 @@ module.exports = {
             return interaction.reply({ content: `The maximum coinflip wager here is **${maxBet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
         }
 
-        if (opponent) return playVersusFlip(interaction, guildSettings, bet, opponent);
-        return playSoloFlip(interaction, guildSettings, bet);
+        if (opponent) return playVersusFlip(interaction, guildSettings, bet, opponent, side ?? HEADS);
+        return playSoloFlip(interaction, guildSettings, bet, side);
     },
 };
 
 // ── Casual (no stakes) ────────────────────────────────────────────────────────
 
-async function playCasualFlip(interaction) {
-    const delay = ms => new Promise(r => setTimeout(r, ms));
+async function playCasualFlip(interaction, call) {
+    const replayId = `coinflip_replay_${interaction.id}`;
+    let session    = null;
 
-    // 4-frame spin animation
-    for (let f = 0; f < 4; f++) {
-        await interaction.editReply({ embeds: [spinningEmbed(interaction, f)], components: [] });
-        await delay(300);
+    async function render() {
+        await spin(interaction);
+        return interaction.editReply({
+            embeds:     [resultEmbed(interaction, flip(), call)],
+            components: session?.ended ? [] : [replayRow(replayId)],
+        });
     }
 
-    const result   = Math.random() < 0.5 ? 'Heads' : 'Tails';
-    const replayId = `coinflip_replay_${interaction.id}_${Date.now()}`;
+    const message = await render();
 
-    const row = new ActionRowBuilder().addComponents(
+    session = createReplaySession({
+        interaction,
+        message,
+        customIds: [replayId],
+        label:     'coinflip',
+        claim:     `That coin is ${interaction.user}'s — run \`/coinflip\` to flip your own.`,
+        async onCollect(button) {
+            await button.deferUpdate();
+            await render();
+        },
+    });
+}
+
+function replayRow(customId) {
+    return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setCustomId(replayId)
-            .setLabel('🪙 Flip Again')
+            .setCustomId(customId)
+            .setEmoji('🪙')
+            .setLabel('Flip Again')
             .setStyle(ButtonStyle.Primary),
     );
-
-    await interaction.editReply({
-        embeds:     [resultEmbed(interaction, result)],
-        components: [row],
-    });
-
-    const msg = await interaction.fetchReply();
-    const collector = msg.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id && i.customId === replayId,
-        max:    1,
-        time:   60_000,
-    });
-
-    collector.on('collect', async i => {
-        await i.deferUpdate();
-        await playCasualFlip(interaction);
-    });
-
-    collector.on('end', (_, reason) => {
-        if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
-    });
 }
 
 // ── Solo wager (vs the house) ────────────────────────────────────────────────
 
-async function playSoloFlip(interaction, guildSettings, bet) {
+async function playSoloFlip(interaction, guildSettings, bet, side) {
     const currency = guildSettings?.economy?.currency ?? '💰';
     const guildId  = interaction.guild.id;
-    const call     = Math.random() < 0.5 ? 'Heads' : 'Tails'; // the coin doesn't care which side you call
+    // The coin doesn't care which side you call, so an uncalled flip is settled
+    // on a side picked for the player — same odds, one less decision.
+    const call = side ?? flip();
 
     const debited = await User.findOneAndUpdate(
         { userId: interaction.user.id, guildId, balance: { $gte: bet } },
@@ -157,25 +247,38 @@ async function playSoloFlip(interaction, guildSettings, bet) {
     }
 
     await interaction.deferReply();
-    const delay = ms => new Promise(r => setTimeout(r, ms));
-    const stakeLine = `Wager: **${currency}${bet.toLocaleString()}** · You call **${call}**`;
-    for (let f = 0; f < 4; f++) {
-        await interaction.editReply({ embeds: [spinningEmbed(interaction, f, stakeLine)] });
-        await delay(300);
-    }
+    // The rake is disclosed up front here rather than only in the footer of a
+    // win: the player is watching the animation with the bet already placed.
+    await spin(
+        interaction,
+        `Wager: **${currency}${bet.toLocaleString()}** · You call ${pip(call)} **${call}** · pays **${(2 - SOLO_RAKE).toFixed(2)}x**`,
+    );
 
-    const result = Math.random() < 0.5 ? 'Heads' : 'Tails';
+    const result = flip();
     const won    = result === call;
     const profit = Math.floor(bet * (1 - SOLO_RAKE));
 
     let updated = debited;
     if (won) {
-        updated = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId },
-            { $inc: { balance: bet + profit } },
-            { new: true }
-        );
+        try {
+            updated = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId },
+                { $inc: { balance: bet + profit } },
+                { new: true }
+            );
+        } catch (error) {
+            // The stake is already gone and the win can't be paid. Give it back
+            // rather than let a database hiccup pocket the wager.
+            console.error('[coinflip] solo payout failed, returning the stake:', error);
+            await refund(interaction.user.id, guildId, bet, 'Solo coinflip — payout failed, stake returned');
+            return interaction.editReply({
+                content:    `The coin came up **${result}** and you called it — but the payout failed, so your **${currency}${bet.toLocaleString()}** has been returned. Try again in a moment.`,
+                embeds:     [],
+                components: [],
+            }).catch(() => {});
+        }
     }
+
     logTransaction({
         userId:  interaction.user.id,
         guildId,
@@ -191,8 +294,8 @@ async function playSoloFlip(interaction, guildSettings, bet) {
         .setColor(won ? '#2ecc71' : '#e74c3c')
         .setTitle(won ? `🪙 ${result}! You called it!` : `🪙 ${result}. Not your side.`)
         .setDescription(won
-            ? `You called **${call}** and the coin agreed.\n\n💰 **+${currency}${profit.toLocaleString()}**`
-            : `You called **${call}**, the coin said **${result}**.\n\n💸 **-${currency}${bet.toLocaleString()}**`)
+            ? `You called ${pip(call)} **${call}** and the coin agreed.\n\n💰 **+${currency}${profit.toLocaleString()}**`
+            : `You called ${pip(call)} **${call}**, the coin said **${result}**.\n\n💸 **-${currency}${bet.toLocaleString()}**`)
         .addFields({ name: '💰 Balance', value: `**${currency}${(updated?.balance ?? 0).toLocaleString()}**`, inline: true })
         .setFooter({ text: won ? 'The house keeps 5% — quit while you\'re ahead?' : 'The coin holds no grudges. Probably.' })
         .setTimestamp();
@@ -202,9 +305,10 @@ async function playSoloFlip(interaction, guildSettings, bet) {
 
 // ── Versus wager (PvP, escrowed) ─────────────────────────────────────────────
 
-async function playVersusFlip(interaction, guildSettings, bet, opponent) {
-    const currency = guildSettings?.economy?.currency ?? '💰';
-    const guildId  = interaction.guild.id;
+async function playVersusFlip(interaction, guildSettings, bet, opponent, challengerSide) {
+    const currency       = guildSettings?.economy?.currency ?? '💰';
+    const guildId        = interaction.guild.id;
+    const opponentSide   = other(challengerSide);
 
     if (opponent.id === interaction.user.id) {
         return interaction.reply({ content: 'Flipping a coin against yourself is called "thinking". Pick someone else.', flags: MessageFlags.Ephemeral });
@@ -227,9 +331,9 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent) {
         .setDescription(
             `**${interaction.member?.displayName ?? interaction.user.username}** challenges ${opponent} to a coinflip!\n\n` +
             `💰 Wager: **${currency}${bet.toLocaleString()}** each — winner takes the pot\n` +
-            `👑 ${interaction.user.username} takes **Heads** · 🔘 ${opponent.username} takes **Tails**`
+            `${pip(challengerSide)} ${interaction.user.username} takes **${challengerSide}** · ${pip(opponentSide)} ${opponent.username} takes **${opponentSide}**`
         )
-        .setFooter({ text: 'Accept within 60 seconds' });
+        .setFooter({ text: `${opponent.username} has 60 seconds to accept — ${interaction.user.username} can call it off with Decline` });
 
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(acceptId).setLabel('✅ Accept').setStyle(ButtonStyle.Success),
@@ -237,96 +341,105 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent) {
     );
 
     await interaction.reply({ content: `${opponent}`, embeds: [challengeEmbed], components: [row] });
-    const msg = await interaction.fetchReply();
+    const message = await interaction.fetchReply();
 
-    const collector = msg.createMessageComponentCollector({
-        filter: i => i.user.id === opponent.id && [acceptId, declineId].includes(i.customId),
+    const settle = (color, text) => interaction.editReply({
+        content:    null,
+        embeds:     [EmbedBuilder.from(challengeEmbed).setColor(color).setDescription(text)],
+        components: [],
+    }).catch(() => {});
+
+    const collector = message.createMessageComponentCollector({
+        // Decline doubles as the challenger's cancel — misfiring a challenge at
+        // the wrong member otherwise leaves it live for the full minute.
+        filter: i => (i.user.id === opponent.id && [acceptId, declineId].includes(i.customId))
+                  || (i.user.id === interaction.user.id && i.customId === declineId),
         max:    1,
         time:   ACCEPT_TIMEOUT_MS,
     });
 
     collector.on('collect', async i => {
-        if (i.customId === declineId) {
-            return i.update({
-                content:    null,
-                embeds:     [EmbedBuilder.from(challengeEmbed).setColor('#95a5a6').setDescription(`${opponent.username} declined the flip. The coin stays in its pocket.`)],
-                components: [],
-            }).catch(() => {});
+        // This runs long after execute() resolved, so the command dispatcher's
+        // error handling no longer covers it. Anything thrown below would be an
+        // unhandled rejection — with both wagers sitting in escrow.
+        let challengerEscrowed = false;
+        let opponentEscrowed   = false;
+
+        try {
+            if (i.customId === declineId) {
+                await i.deferUpdate().catch(() => {});
+                return await settle('#95a5a6', i.user.id === interaction.user.id
+                    ? `${interaction.user.username} called off the challenge. The coin stays in its pocket.`
+                    : `${opponent.username} declined the flip. The coin stays in its pocket.`);
+            }
+
+            await i.deferUpdate().catch(() => {});
+
+            const escrow = await escrowWagers(guildId, interaction.user.id, opponent.id, bet);
+            if (!escrow.ok) {
+                if (escrow.short === 'challenger') {
+                    return await settle('#e74c3c', `${interaction.user.username} no longer has the wager. Challenge cancelled.`);
+                }
+                if (escrow.short === 'opponent') {
+                    return await settle('#e74c3c', `${opponent.username} can't cover the wager. Challenge cancelled.`);
+                }
+                throw escrow.error;
+            }
+            const { challengerDoc, opponentDoc } = escrow;
+            challengerEscrowed = true;
+            opponentEscrowed   = true;
+
+            const stakeLine = `Pot: **${currency}${(bet * 2).toLocaleString()}** · ${pip(challengerSide)} ${interaction.user.username} = ${challengerSide} · ${pip(opponentSide)} ${opponent.username} = ${opponentSide}`;
+            await spin(interaction, stakeLine);
+
+            const result     = flip();
+            const winnerUser = result === challengerSide ? interaction.user : opponent;
+            const loserUser  = result === challengerSide ? opponent : interaction.user;
+            const houseCut   = guildSettings?.economy?.duelHouseCut ?? 0.05;
+            const pot        = bet * 2;
+            const payout     = pot - Math.floor(pot * houseCut);
+
+            const winnerDoc = await User.findOneAndUpdate(
+                { userId: winnerUser.id, guildId },
+                { $inc: { balance: payout } },
+                { new: true }
+            );
+            // Past this point the pot has been paid out; neither stake is ours
+            // to return any more.
+            challengerEscrowed = false;
+            opponentEscrowed   = false;
+
+            const loserDoc = result === challengerSide ? opponentDoc : challengerDoc;
+            logTransaction({ userId: winnerUser.id, guildId, type: 'coinflip', amount: payout - bet, balance: winnerDoc?.balance ?? 0, relatedUserId: loserUser.id, note: `PvP coinflip win (${result})` });
+            logTransaction({ userId: loserUser.id,  guildId, type: 'coinflip', amount: -bet, balance: loserDoc?.balance ?? 0, relatedUserId: winnerUser.id, note: `PvP coinflip loss (${result})` });
+
+            const resultEmbedPvp = new EmbedBuilder()
+                .setColor('#2ecc71')
+                .setThumbnail(HEADS_THUMB)
+                .setTitle(result === HEADS ? '🪙 HEADS!' : '🪙 TAILS!')
+                .setDescription(
+                    `The coin lands on **${result}**!\n\n` +
+                    `🏆 **${winnerUser.username}** takes the pot: **+${currency}${(payout - bet).toLocaleString()}**\n` +
+                    `💸 **${loserUser.username}** loses **${currency}${bet.toLocaleString()}**` +
+                    (houseCut > 0 ? `\n\n> 🏛️ The house kept ${Math.round(houseCut * 100)}% of the pot.` : '')
+                )
+                .setTimestamp();
+
+            return await interaction.editReply({ content: `${winnerUser}`, embeds: [resultEmbedPvp], components: [] }).catch(() => {});
+        } catch (error) {
+            console.error('[coinflip] versus handler error:', error);
+
+            if (challengerEscrowed) await refund(interaction.user.id, guildId, bet, 'PvP coinflip — flip failed, wager returned');
+            if (opponentEscrowed)   await refund(opponent.id, guildId, bet, 'PvP coinflip — flip failed, wager returned');
+
+            const returned = challengerEscrowed || opponentEscrowed;
+            await settle('#e74c3c', `The flip failed to resolve.${returned ? ' Both wagers have been returned.' : ''}`);
         }
-
-        // Escrow both wagers atomically; refund the challenger if the opponent can't cover
-        const challengerDoc = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId, balance: { $gte: bet } },
-            { $inc: { balance: -bet } },
-            { new: true }
-        );
-        if (!challengerDoc) {
-            return i.update({
-                content:    null,
-                embeds:     [EmbedBuilder.from(challengeEmbed).setColor('#e74c3c').setDescription(`${interaction.user.username} no longer has the wager. Challenge cancelled.`)],
-                components: [],
-            }).catch(() => {});
-        }
-        const opponentDoc = await User.findOneAndUpdate(
-            { userId: opponent.id, guildId, balance: { $gte: bet } },
-            { $inc: { balance: -bet } },
-            { new: true }
-        );
-        if (!opponentDoc) {
-            await User.updateOne({ userId: interaction.user.id, guildId }, { $inc: { balance: bet } });
-            return i.update({
-                content:    null,
-                embeds:     [EmbedBuilder.from(challengeEmbed).setColor('#e74c3c').setDescription(`${opponent.username} can't cover the wager. Challenge cancelled.`)],
-                components: [],
-            }).catch(() => {});
-        }
-
-        await i.deferUpdate().catch(() => {});
-        const delay = ms => new Promise(r => setTimeout(r, ms));
-        const stakeLine = `Pot: **${currency}${(bet * 2).toLocaleString()}** · 👑 ${interaction.user.username} = Heads · 🔘 ${opponent.username} = Tails`;
-        for (let f = 0; f < 4; f++) {
-            await interaction.editReply({ content: null, embeds: [spinningEmbed(interaction, f, stakeLine)], components: [] }).catch(() => {});
-            await delay(300);
-        }
-
-        const result     = Math.random() < 0.5 ? 'Heads' : 'Tails';
-        const winnerUser = result === 'Heads' ? interaction.user : opponent;
-        const loserUser  = result === 'Heads' ? opponent : interaction.user;
-        const houseCut   = guildSettings?.economy?.duelHouseCut ?? 0.05;
-        const pot        = bet * 2;
-        const payout     = pot - Math.floor(pot * houseCut);
-
-        const winnerDoc = await User.findOneAndUpdate(
-            { userId: winnerUser.id, guildId },
-            { $inc: { balance: payout } },
-            { new: true }
-        );
-        const loserDoc = result === 'Heads' ? opponentDoc : challengerDoc;
-        logTransaction({ userId: winnerUser.id, guildId, type: 'coinflip', amount: payout - bet, balance: winnerDoc?.balance ?? 0, relatedUserId: loserUser.id, note: `PvP coinflip win (${result})` });
-        logTransaction({ userId: loserUser.id,  guildId, type: 'coinflip', amount: -bet, balance: loserDoc?.balance ?? 0, relatedUserId: winnerUser.id, note: `PvP coinflip loss (${result})` });
-
-        const resultEmbedPvp = new EmbedBuilder()
-            .setColor('#2ecc71')
-            .setThumbnail(HEADS_THUMB)
-            .setTitle(result === 'Heads' ? '🪙 HEADS!' : '🪙 TAILS!')
-            .setDescription(
-                `The coin lands on **${result}**!\n\n` +
-                `🏆 **${winnerUser.username}** takes the pot: **+${currency}${(payout - bet).toLocaleString()}**\n` +
-                `💸 **${loserUser.username}** loses **${currency}${bet.toLocaleString()}**` +
-                (houseCut > 0 ? `\n\n> 🏛️ The house kept ${Math.round(houseCut * 100)}% of the pot.` : '')
-            )
-            .setTimestamp();
-
-        return interaction.editReply({ content: `${winnerUser}`, embeds: [resultEmbedPvp], components: [] }).catch(() => {});
     });
 
     collector.on('end', (collected, reason) => {
         if (reason === 'time' && collected.size === 0) {
-            interaction.editReply({
-                content:    null,
-                embeds:     [EmbedBuilder.from(challengeEmbed).setColor('#95a5a6').setDescription(`${opponent.username} didn't respond. The coin stays in its pocket.`)],
-                components: [],
-            }).catch(() => {});
+            settle('#95a5a6', `${opponent.username} didn't respond. The coin stays in its pocket.`);
         }
     });
 }

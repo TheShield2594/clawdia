@@ -9,6 +9,8 @@ const {
 const Guild = require('../../models/Guild');
 const User  = require('../../models/User');
 const { logTransaction } = require('../../utils/logTransaction');
+const { createReplaySession } = require('../../utils/replaySession');
+const { delay } = require('../../utils/delay');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b2.png';
 
@@ -74,6 +76,8 @@ function resultEmbed(interaction, result, sides) {
 }
 
 module.exports = {
+    __test__: { payoutMultiplier, callWon, callLabel, rollBar },
+
     data: new SlashCommandBuilder()
         .setName('roll')
         .setDescription('Roll a die')
@@ -136,36 +140,67 @@ module.exports = {
 };
 
 async function playRoll(interaction, sides) {
-    const result   = Math.floor(Math.random() * sides) + 1;
-    const replayId = `roll_replay_${interaction.id}_${Date.now()}`;
+    const replayId = `roll_replay_${interaction.id}`;
+    let session    = null;
 
-    const row = new ActionRowBuilder().addComponents(
+    async function render() {
+        const result = Math.floor(Math.random() * sides) + 1;
+        return interaction.editReply({
+            embeds:     [resultEmbed(interaction, result, sides)],
+            components: session?.ended ? [] : [replayRow(replayId)],
+        });
+    }
+
+    const message = await render();
+
+    session = createReplaySession({
+        interaction,
+        message,
+        customIds: [replayId],
+        label:     'roll',
+        claim:     `Those dice are ${interaction.user}'s — run \`/roll\` to roll your own.`,
+        async onCollect(button) {
+            await button.deferUpdate();
+            await render();
+        },
+    });
+}
+
+function replayRow(customId) {
+    return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setCustomId(replayId)
-            .setLabel('🎲 Roll Again')
+            .setCustomId(customId)
+            .setEmoji('🎲')
+            .setLabel('Roll Again')
             .setStyle(ButtonStyle.Primary),
     );
+}
 
-    await interaction.editReply({
-        embeds:     [resultEmbed(interaction, result, sides)],
-        components: [row],
-    });
+// Best-effort return of coins already taken. Never throws: it runs while another
+// failure is being handled, and losing the refund to a second error is worse
+// than logging it.
+async function refund(userId, guildId, amount, note) {
+    try {
+        const doc = await User.findOneAndUpdate(
+            { userId, guildId },
+            { $inc: { balance: amount } },
+            { new: true }
+        );
+        logTransaction({ userId, guildId, type: 'roll', amount, balance: doc?.balance ?? 0, note });
+    } catch (error) {
+        console.error(`[roll] refund of ${amount} to ${userId} in ${guildId} failed:`, error);
+    }
+}
 
-    const msg = await interaction.fetchReply();
-    const collector = msg.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id && i.customId === replayId,
-        max:    1,
-        time:   60_000,
-    });
-
-    collector.on('collect', async i => {
-        await i.deferUpdate();
-        await playRoll(interaction, sides);
-    });
-
-    collector.on('end', (_, reason) => {
-        if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
-    });
+// Exact-number bets pay out at sides:1 odds (before the house cut). High/low pays
+// at true odds for the split (sides / winning-number-count) rather than a flat 2x —
+// on odd-sided dice the low half has one fewer number than the high half, so a flat
+// 2x would give "high" bettors better-than-even odds at the same payout.
+function payoutMultiplier(call, sides) {
+    if (call.type === 'exact') return sides;
+    const half         = Math.floor(sides / 2);
+    const winningCount = call.type === 'high' ? sides - half : half;
+    return sides / winningCount;
 }
 
 function callLabel(call, sides) {
@@ -193,8 +228,11 @@ async function playRollBet(interaction, guildSettings, sides, bet, call) {
         return interaction.editReply({ content: `You don't have **${currency}${bet.toLocaleString()}** to wager.` });
     }
 
-    const delay = ms => new Promise(r => setTimeout(r, ms));
-    const stakeLine = `Wager: **${currency}${bet.toLocaleString()}** on ${callLabel(call, sides)}`;
+    // Work the payout out before the roll so it can be shown while the dice are
+    // still in the air, rather than only turning up in the result.
+    const multiplier  = payoutMultiplier(call, sides);
+    const grossPayout = Math.floor(bet * multiplier * (1 - HOUSE_CUT));
+    const stakeLine   = `Wager: **${currency}${bet.toLocaleString()}** on ${callLabel(call, sides)} · pays **${(grossPayout / bet).toFixed(2)}x**`;
     for (let f = 0; f < 4; f++) {
         // Animation frames are cosmetic — a transient editReply failure here shouldn't
         // abort the roll and strand the bet that was already debited above.
@@ -212,29 +250,26 @@ async function playRollBet(interaction, guildSettings, sides, bet, call) {
 
     const result = Math.floor(Math.random() * sides) + 1;
     const won    = callWon(call, result, sides);
-
-    // Exact-number bets pay out at sides:1 odds (minus house cut). High/low pays at
-    // true odds for the split (sides / winning-number-count) rather than a flat 2x —
-    // on odd-sided dice the low half has one fewer number than the high half, so a
-    // flat 2x would give "high" bettors better-than-even odds at the same payout.
-    let multiplier;
-    if (call.type === 'exact') {
-        multiplier = sides;
-    } else {
-        const half = Math.floor(sides / 2);
-        const winningCount = call.type === 'high' ? sides - half : half;
-        multiplier = sides / winningCount;
-    }
-    const grossPayout = Math.floor(bet * multiplier * (1 - HOUSE_CUT));
-    const profit       = grossPayout - bet;
+    const profit = grossPayout - bet;
 
     let updated = debited;
     if (won) {
-        updated = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId },
-            { $inc: { balance: grossPayout } },
-            { new: true }
-        );
+        try {
+            updated = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId },
+                { $inc: { balance: grossPayout } },
+                { new: true }
+            );
+        } catch (error) {
+            // The stake is gone and the win can't be paid. Return it rather
+            // than let a database hiccup pocket the wager.
+            console.error('[roll] payout failed, returning the stake:', error);
+            await refund(interaction.user.id, guildId, bet, 'Roll bet — payout failed, stake returned');
+            return interaction.editReply({
+                content: `You rolled **${result}** and called it — but the payout failed, so your **${currency}${bet.toLocaleString()}** has been returned. Try again in a moment.`,
+                embeds:  [],
+            }).catch(() => {});
+        }
     }
     logTransaction({
         userId:  interaction.user.id,
