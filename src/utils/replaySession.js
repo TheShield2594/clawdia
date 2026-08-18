@@ -1,6 +1,6 @@
 'use strict';
 
-const { ComponentType, MessageFlags } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, MessageFlags } = require('discord.js');
 
 // Discord expires an interaction token 15 minutes after the command was
 // invoked, and every follow-up in these sessions is an editReply against that
@@ -79,22 +79,28 @@ function createReplaySession({
         },
     };
 
+    const logFailure = error => console.error(`[${label}] component handler error:`, error);
+
     collector.on('collect', async button => {
+        // Neither branch below claimed the session, so neither may release it.
+        // Releasing unconditionally in a finally let a bystander's click — or a
+        // click rejected as overlapping — clear the flag held by a render still
+        // in flight, which is exactly the overlap the flag exists to prevent.
+        if (button.user.id !== interaction.user.id) {
+            // Turning these away in the collector filter instead would show
+            // every other member a bare "This interaction failed".
+            return button.reply({
+                content: claim ?? `That one belongs to ${interaction.user} — run the command yourself to play.`,
+                flags:   MessageFlags.Ephemeral,
+            }).catch(logFailure);
+        }
+
+        if (!session.hold()) return button.deferUpdate().catch(() => {});
+
         try {
-            if (button.user.id !== interaction.user.id) {
-                // Turning these away in the collector filter instead would show
-                // every other member a bare "This interaction failed".
-                return await button.reply({
-                    content: claim ?? `That one belongs to ${interaction.user} — run the command yourself to play.`,
-                    flags:   MessageFlags.Ephemeral,
-                });
-            }
-
-            if (!session.hold()) return await button.deferUpdate().catch(() => {});
-
             await onCollect(button, session);
         } catch (error) {
-            console.error(`[${label}] component handler error:`, error);
+            logFailure(error);
         } finally {
             session.release();
         }
@@ -110,4 +116,15 @@ function createReplaySession({
     return session;
 }
 
-module.exports = { createReplaySession, IDLE_MS, MAX_MS };
+/** The single "go again" button these sessions are built around. */
+function replayButtonRow(customId, { emoji, label, style = ButtonStyle.Primary }) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(customId)
+            .setEmoji(emoji)
+            .setLabel(label)
+            .setStyle(style),
+    );
+}
+
+module.exports = { createReplaySession, replayButtonRow, IDLE_MS, MAX_MS };

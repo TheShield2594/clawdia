@@ -9,7 +9,8 @@ const {
 const Guild = require('../../models/Guild');
 const User  = require('../../models/User');
 const { logTransaction } = require('../../utils/logTransaction');
-const { createReplaySession } = require('../../utils/replaySession');
+const { createReplaySession, replayButtonRow } = require('../../utils/replaySession');
+const { refundWager } = require('../../utils/refundWager');
 const { delay } = require('../../utils/delay');
 
 const HEADS_THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1fa99.png';
@@ -89,21 +90,8 @@ function resultEmbed(interaction, result, call = null) {
     return embed;
 }
 
-// Best-effort return of coins already taken. Never throws: it runs on paths
-// that are themselves handling a failure, and losing the refund to a second
-// error would be worse than logging it.
-async function refund(userId, guildId, amount, note) {
-    try {
-        const doc = await User.findOneAndUpdate(
-            { userId, guildId },
-            { $inc: { balance: amount } },
-            { new: true }
-        );
-        logTransaction({ userId, guildId, type: 'coinflip', amount, balance: doc?.balance ?? 0, note });
-    } catch (error) {
-        console.error(`[coinflip] refund of ${amount} to ${userId} in ${guildId} failed:`, error);
-    }
-}
+const refund = (userId, guildId, amount, note) =>
+    refundWager({ userId, guildId, amount, type: 'coinflip', note });
 
 // Take both wagers before the coin is flipped, and leave no coins stranded if
 // that can't be completed: a side that can't cover it, or a write that fails
@@ -134,13 +122,35 @@ async function escrowWagers(guildId, challengerId, opponentId, bet) {
     } catch (error) {
         if (challengerHeld) {
             await refund(challengerId, guildId, bet, 'PvP coinflip — escrow failed, wager returned');
+            // Reported so the caller can tell the challenger their coins came
+            // back, rather than leaving them to assume the worst.
+            return { ok: false, error, refunded: 'challenger' };
         }
         return { ok: false, error };
     }
 }
 
+// A rejected write is not proof the write never landed — a timeout can arrive
+// after the server applied it. Refunding on that assumption would pay the pot
+// out twice, so the payout is checked before anything is compensated. The
+// balance the escrow already observed is what makes the check possible.
+async function payoutState(userId, guildId, balanceBeforePayout, payout) {
+    if (!Number.isFinite(balanceBeforePayout)) return 'unknown';
+
+    try {
+        const doc = await User.findOne({ userId, guildId });
+        if (!doc) return 'unknown';
+        if (doc.balance === balanceBeforePayout + payout) return 'applied';
+        if (doc.balance === balanceBeforePayout) return 'not-applied';
+        return 'unknown'; // something else moved the balance; don't guess
+    } catch (error) {
+        console.error('[coinflip] could not verify the payout:', error);
+        return 'unknown';
+    }
+}
+
 module.exports = {
-    __test__: { escrowWagers, refund, flip, other, pip },
+    __test__: { escrowWagers, payoutState, refund, flip, other, pip },
 
     data: new SlashCommandBuilder()
         .setName('coinflip')
@@ -199,7 +209,7 @@ async function playCasualFlip(interaction, call) {
         await spin(interaction);
         return interaction.editReply({
             embeds:     [resultEmbed(interaction, flip(), call)],
-            components: session?.ended ? [] : [replayRow(replayId)],
+            components: session?.ended ? [] : [replayButtonRow(replayId, { emoji: '🪙', label: 'Flip Again' })],
         });
     }
 
@@ -218,15 +228,6 @@ async function playCasualFlip(interaction, call) {
     });
 }
 
-function replayRow(customId) {
-    return new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(customId)
-            .setEmoji('🪙')
-            .setLabel('Flip Again')
-            .setStyle(ButtonStyle.Primary),
-    );
-}
 
 // ── Solo wager (vs the house) ────────────────────────────────────────────────
 
@@ -364,6 +365,7 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent, challen
         // unhandled rejection — with both wagers sitting in escrow.
         let challengerEscrowed = false;
         let opponentEscrowed   = false;
+        let escrowRefunded     = null;
 
         try {
             if (i.customId === declineId) {
@@ -383,6 +385,7 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent, challen
                 if (escrow.short === 'opponent') {
                     return await settle('#e74c3c', `${opponent.username} can't cover the wager. Challenge cancelled.`);
                 }
+                escrowRefunded = escrow.refunded ?? null;
                 throw escrow.error;
             }
             const { challengerDoc, opponentDoc } = escrow;
@@ -399,11 +402,36 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent, challen
             const pot        = bet * 2;
             const payout     = pot - Math.floor(pot * houseCut);
 
-            const winnerDoc = await User.findOneAndUpdate(
-                { userId: winnerUser.id, guildId },
-                { $inc: { balance: payout } },
-                { new: true }
-            );
+            const winnerBefore = (winnerUser.id === interaction.user.id ? challengerDoc : opponentDoc)?.balance;
+
+            let winnerDoc = null;
+            try {
+                winnerDoc = await User.findOneAndUpdate(
+                    { userId: winnerUser.id, guildId },
+                    { $inc: { balance: payout } },
+                    { new: true }
+                );
+            } catch (error) {
+                const state = await payoutState(winnerUser.id, guildId, winnerBefore, payout);
+
+                if (state === 'not-applied') throw error; // stakes are still ours to return
+
+                // Either the pot was paid despite the error, or we can't tell.
+                // Both stakes are off the table either way — returning them on
+                // a maybe would mint the pot a second time.
+                challengerEscrowed = false;
+                opponentEscrowed   = false;
+
+                if (state !== 'applied') {
+                    console.error('[coinflip] payout outcome unresolved, wagers left in place for reconciliation:', {
+                        guildId, winnerId: winnerUser.id, loserId: loserUser.id, bet, payout, error,
+                    });
+                    throw error;
+                }
+
+                winnerDoc = { balance: winnerBefore + payout };
+            }
+
             // Past this point the pot has been paid out; neither stake is ours
             // to return any more.
             challengerEscrowed = false;
@@ -432,8 +460,17 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent, challen
             if (challengerEscrowed) await refund(interaction.user.id, guildId, bet, 'PvP coinflip — flip failed, wager returned');
             if (opponentEscrowed)   await refund(opponent.id, guildId, bet, 'PvP coinflip — flip failed, wager returned');
 
-            const returned = challengerEscrowed || opponentEscrowed;
-            await settle('#e74c3c', `The flip failed to resolve.${returned ? ' Both wagers have been returned.' : ''}`);
+            // Say exactly which coins moved back. "Both wagers returned" when
+            // only one was is worse than saying nothing.
+            const returnedBoth = challengerEscrowed && opponentEscrowed;
+            const returnedOne  = challengerEscrowed || opponentEscrowed || escrowRefunded;
+
+            let note;
+            if (returnedBoth)     note = ' Both wagers have been returned.';
+            else if (returnedOne) note = ` ${interaction.user.username}'s wager has been returned.`;
+            else                  note = ' The wagers are being reconciled from the transaction log.';
+
+            await settle('#e74c3c', `The flip failed to resolve.${note}`);
         }
     });
 

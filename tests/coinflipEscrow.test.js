@@ -5,14 +5,14 @@
 // are already out of the players' wallets when one can be thrown. These cover
 // the rule that matters: coins the bot took must never simply vanish.
 
-jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn() }));
+jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn().mockResolvedValue(null) }));
 jest.mock('../src/models/Transaction', () => ({ create: jest.fn().mockResolvedValue({}) }));
 
 const User = require('../src/models/User');
 const Transaction = require('../src/models/Transaction');
 const { __test__ } = require('../src/commands/fun/coinflip');
-const { escrowWagers, refund, flip, other, pip } = __test__;
+const { escrowWagers, payoutState, refund, flip, other, pip } = __test__;
 
 const GUILD = 'guild-1';
 const CHALLENGER = 'user-a';
@@ -86,7 +86,7 @@ describe('escrowWagers', () => {
 
         const result = await escrowWagers(GUILD, CHALLENGER, OPPONENT, BET);
 
-        expect(result).toEqual({ ok: false, error: boom });
+        expect(result).toEqual({ ok: false, error: boom, refunded: 'challenger' });
 
         const refundCall = User.findOneAndUpdate.mock.calls[2];
         expect(debitOf(refundCall)).toMatchObject({ userId: CHALLENGER });
@@ -104,8 +104,28 @@ describe('escrowWagers', () => {
     });
 
     test('reports the failure to the caller rather than throwing at the collector', async () => {
-        User.findOneAndUpdate.mockRejectedValue(new Error('down'));
+        // Single-use: clearAllMocks() resets calls but not implementations, so a
+        // permanent rejection here would follow the mock into later tests.
+        User.findOneAndUpdate.mockRejectedValueOnce(new Error('down'));
         await expect(escrowWagers(GUILD, CHALLENGER, OPPONENT, BET)).resolves.toMatchObject({ ok: false });
+    });
+
+    test('tells the caller when it put the challenger\'s stake back', async () => {
+        User.findOneAndUpdate
+            .mockResolvedValueOnce(wallet(400))
+            .mockRejectedValueOnce(new Error('connection reset'))
+            .mockResolvedValueOnce(wallet(500));
+
+        // Without this the collector reports a bare failure and the challenger
+        // is left assuming their coins are gone.
+        const result = await escrowWagers(GUILD, CHALLENGER, OPPONENT, BET);
+        expect(result.refunded).toBe('challenger');
+    });
+
+    test('claims no refund when it never took anything', async () => {
+        User.findOneAndUpdate.mockRejectedValueOnce(new Error('connection reset'));
+        const result = await escrowWagers(GUILD, CHALLENGER, OPPONENT, BET);
+        expect(result.refunded).toBeUndefined();
     });
 });
 
@@ -125,6 +145,39 @@ describe('refund', () => {
         User.findOneAndUpdate.mockRejectedValueOnce(new Error('still down'));
         await expect(refund(CHALLENGER, GUILD, BET, 'wager returned')).resolves.toBeUndefined();
         expect(errorSpy).toHaveBeenCalled();
+    });
+});
+
+describe('payoutState', () => {
+    const BEFORE = 400;
+    const PAYOUT = 190;
+
+    test('recognises a payout that landed despite the error', async () => {
+        User.findOne.mockResolvedValueOnce(wallet(BEFORE + PAYOUT));
+        await expect(payoutState(CHALLENGER, GUILD, BEFORE, PAYOUT)).resolves.toBe('applied');
+    });
+
+    test('recognises a payout that never landed', async () => {
+        User.findOne.mockResolvedValueOnce(wallet(BEFORE));
+        await expect(payoutState(CHALLENGER, GUILD, BEFORE, PAYOUT)).resolves.toBe('not-applied');
+    });
+
+    test('refuses to guess when something else moved the balance', async () => {
+        User.findOne.mockResolvedValueOnce(wallet(BEFORE + 25));
+        await expect(payoutState(CHALLENGER, GUILD, BEFORE, PAYOUT)).resolves.toBe('unknown');
+    });
+
+    test('refuses to guess when the balance cannot be read at all', async () => {
+        User.findOne.mockRejectedValueOnce(new Error('still down'));
+        await expect(payoutState(CHALLENGER, GUILD, BEFORE, PAYOUT)).resolves.toBe('unknown');
+
+        User.findOne.mockResolvedValueOnce(null);
+        await expect(payoutState(CHALLENGER, GUILD, BEFORE, PAYOUT)).resolves.toBe('unknown');
+    });
+
+    test('refuses to guess without a balance to compare against', async () => {
+        await expect(payoutState(CHALLENGER, GUILD, undefined, PAYOUT)).resolves.toBe('unknown');
+        expect(User.findOne).not.toHaveBeenCalled();
     });
 });
 

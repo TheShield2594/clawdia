@@ -1,15 +1,13 @@
 const {
     SlashCommandBuilder,
     EmbedBuilder,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
     MessageFlags,
 } = require('discord.js');
 const Guild = require('../../models/Guild');
 const User  = require('../../models/User');
 const { logTransaction } = require('../../utils/logTransaction');
-const { createReplaySession } = require('../../utils/replaySession');
+const { createReplaySession, replayButtonRow } = require('../../utils/replaySession');
+const { refundWager } = require('../../utils/refundWager');
 const { delay } = require('../../utils/delay');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b2.png';
@@ -147,7 +145,7 @@ async function playRoll(interaction, sides) {
         const result = Math.floor(Math.random() * sides) + 1;
         return interaction.editReply({
             embeds:     [resultEmbed(interaction, result, sides)],
-            components: session?.ended ? [] : [replayRow(replayId)],
+            components: session?.ended ? [] : [replayButtonRow(replayId, { emoji: '🎲', label: 'Roll Again' })],
         });
     }
 
@@ -166,31 +164,9 @@ async function playRoll(interaction, sides) {
     });
 }
 
-function replayRow(customId) {
-    return new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(customId)
-            .setEmoji('🎲')
-            .setLabel('Roll Again')
-            .setStyle(ButtonStyle.Primary),
-    );
-}
 
-// Best-effort return of coins already taken. Never throws: it runs while another
-// failure is being handled, and losing the refund to a second error is worse
-// than logging it.
-async function refund(userId, guildId, amount, note) {
-    try {
-        const doc = await User.findOneAndUpdate(
-            { userId, guildId },
-            { $inc: { balance: amount } },
-            { new: true }
-        );
-        logTransaction({ userId, guildId, type: 'roll', amount, balance: doc?.balance ?? 0, note });
-    } catch (error) {
-        console.error(`[roll] refund of ${amount} to ${userId} in ${guildId} failed:`, error);
-    }
-}
+const refund = (userId, guildId, amount, note) =>
+    refundWager({ userId, guildId, amount, type: 'roll', note });
 
 // Exact-number bets pay out at sides:1 odds (before the house cut). High/low pays
 // at true odds for the split (sides / winning-number-count) rather than a flat 2x —

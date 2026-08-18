@@ -314,6 +314,17 @@ describe('button handler', () => {
         expect(blocked.editReply).not.toHaveBeenCalled();
     });
 
+    test('a failed shake still lets go of the message', async () => {
+        const message = { id: 'msg-boom', components: [] };
+        const i = buttonInteraction({ message });
+        i.deferUpdate.mockRejectedValue(new Error('unknown interaction'));
+
+        // The error is the router's to log; what matters here is that the lock
+        // doesn't outlive it and wedge the message shut.
+        await expect(handleButton(i)).rejects.toThrow('unknown interaction');
+        expect(shaking.has(message.id)).toBe(false);
+    });
+
     test('one shake at a time per message', async () => {
         const message = { id: 'msg-shared', components: [] };
         const first  = buttonInteraction({ message });

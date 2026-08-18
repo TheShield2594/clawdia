@@ -129,6 +129,37 @@ describe('overlap guard', () => {
         expect(h.onCollect).toHaveBeenCalledTimes(2);
     });
 
+    test('a bystander\'s click cannot release a render in flight', async () => {
+        let finish;
+        const inFlight = new Promise(resolve => { finish = resolve; });
+        const h = setup({ onCollect: jest.fn(() => inFlight) });
+
+        const running = h.collect(button());        // owner starts a render
+        await h.collect(button('someone-else'));    // bystander is turned away
+        await h.collect(button());                  // owner clicks again
+
+        // The bystander's rejection must not have handed the second owner click
+        // a free claim on a session that is still rendering.
+        expect(h.onCollect).toHaveBeenCalledTimes(1);
+
+        finish();
+        await running;
+    });
+
+    test('a rejected overlapping click cannot release the claim it lost to', async () => {
+        let finish;
+        const inFlight = new Promise(resolve => { finish = resolve; });
+        const h = setup({ onCollect: jest.fn(() => inFlight) });
+
+        const running = h.collect(button());
+        await h.collect(button());  // rejected as overlapping
+        await h.collect(button());  // must still be rejected
+
+        expect(h.onCollect).toHaveBeenCalledTimes(1);
+        finish();
+        await running;
+    });
+
     test('release() lets a click through mid-handler, hold() takes it back', async () => {
         const h = setup({ onCollect: jest.fn() });
         expect(h.session.hold()).toBe(true);
