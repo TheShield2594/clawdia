@@ -590,17 +590,66 @@ describe('secret pity tells the truth', () => {
         expect(hot.pity).toBe(LIMITS.SECRET_PITY_MAX);
     });
 
+    test('finding a secret puts the drought counter back to zero', () => {
+        const user = makeUser();
+        const region = REGIONS.whispering_forest;
+        const settings = makeGuildSettings();
+        user.exploration.stamina = LIMITS.MAX_STAMINA;
+        user.exploration.sinceSecret = 7;
+
+        // A secret is a 3% slot, so leaving this to the dice checks the reset
+        // on about half of runs and lets a missing one through on the rest.
+        // 0.92 lands inside that slot in the region's event table; if the table
+        // is ever reordered the type assertion below fails loudly rather than
+        // letting the test quietly stop covering this.
+        const roll = jest.spyOn(Math, 'random').mockReturnValue(0.92);
+        try {
+            const result = executeExplore(user, region, settings, {});
+            expect(result.type).toBe('secret');
+        } finally {
+            roll.mockRestore();
+        }
+
+        expect(user.exploration.sinceSecret).toBe(0);
+    });
+
     test('expeditions into a region with secrets left do build pity', () => {
         const user = makeUser();
         const region = REGIONS.whispering_forest;
         const settings = makeGuildSettings();
+
+        // The counter holds "eligible expeditions since the last find", not
+        // "expeditions so far": a find puts it back to zero, and runs into a
+        // region with nothing left to uncover do not count at all. So it is
+        // checked after every expedition rather than once at the end — one
+        // run in twenty ends on the expedition that finds a secret, and a
+        // closing assertion that the total is above zero fails on those
+        // without anything being wrong.
+        let expected = 0;
+        let firstRun = null;
+
         for (let i = 0; i < 20; i++) {
             user.exploration.stamina = LIMITS.MAX_STAMINA;
             user.exploration.dailyCoins = 0;
+
             const r = executeExplore(user, region, settings, {});
             if (r.pendingChoice) resolveEncounter(user, region, settings, r, 'observe');
+            firstRun ??= r;
+
+            if (!r.secretsLeft) {
+                // Nothing left to find here, so the counter must sit still.
+            } else if (r.type === 'secret') {
+                expected = 0;
+            } else {
+                expected += 1;
+            }
+
+            expect(user.exploration.sinceSecret).toBe(expected);
         }
-        expect(user.exploration.sinceSecret).toBeGreaterThan(0);
+
+        // The loop above says nothing if no expedition was ever eligible, and
+        // a fresh region always is — so this is what keeps it honest.
+        expect(firstRun.secretsLeft).toBe(true);
     });
 });
 
