@@ -7,6 +7,21 @@ const state = {
     uncaughtExceptions: 0,
 };
 
+/**
+ * Record that a scheduled run was skipped because the previous run of the same
+ * job was still executing. Deliberately does not touch lastSuccess/errorCount:
+ * a skip is not a failure, but a job that skips every tick is overrunning its
+ * schedule and an operator should be able to see that.
+ */
+function recordServiceSkip(serviceName) {
+    const prev = state.services[serviceName] || { successCount: 0, errorCount: 0, skippedCount: 0 };
+    state.services[serviceName] = {
+        ...prev,
+        skippedCount: (prev.skippedCount || 0) + 1,
+        lastSkippedAt: new Date().toISOString(),
+    };
+}
+
 function recordServiceRun(serviceName, { success, error = null, durationMs = null } = {}) {
     const prev = state.services[serviceName] || { successCount: 0, errorCount: 0 };
     state.services[serviceName] = {
@@ -77,4 +92,4 @@ function getStatus({ detailed = true } = {}) {
 function incrementUnhandledRejections() { state.unhandledRejections++; }
 function incrementUncaughtExceptions() { state.uncaughtExceptions++; }
 
-module.exports = { recordServiceRun, getStatus, incrementUnhandledRejections, incrementUncaughtExceptions };
+module.exports = { recordServiceRun, recordServiceSkip, getStatus, incrementUnhandledRejections, incrementUncaughtExceptions };

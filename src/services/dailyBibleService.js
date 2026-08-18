@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 const { getDailyVerse, lookupVerse, createVerseEmbed, createVerseComponents } = require('./bibleService');
+const { runJob } = require('../utils/jobRunner');
 
 const bibleJobs = new Map();
 
@@ -29,37 +30,38 @@ function timeToCron(time) {
     return `${minute} ${hour} * * *`;
 }
 
+/**
+ * Failures propagate to runJob, which records the failed run on the health
+ * report and files a dead-letter entry. Swallowing them here would have every
+ * skipped verse counted as a delivery.
+ */
 async function postDailyVerse(client, guildId, channelId, translation) {
-    try {
-        const verseData = await getDailyVerse();
-        if (!verseData) return;
+    const verseData = await getDailyVerse();
+    if (!verseData) return;
 
-        // Re-fetch in the guild's configured translation when it isn't KJV or NIV.
-        // NIV is skipped because ourmanna.com already returns NIV text.
-        let displayVerse = verseData;
-        if (translation && translation !== 'kjv' && translation !== 'niv' && verseData.reference) {
-            const translated = await lookupVerse(verseData.reference, translation);
-            if (translated?.text) displayVerse = translated;
-        }
-
-        let channel = client.channels.cache.get(channelId);
-        if (!channel) channel = await client.channels.fetch(channelId).catch(() => null);
-        if (!channel || typeof channel.send !== 'function') return;
-
-        const guild = channel.guild;
-        if (guild) {
-            const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
-            if (botMember && !channel.permissionsFor(botMember).has(PermissionFlagsBits.SendMessages)) {
-                console.warn(`[BibleService] Missing SendMessages permission in channel ${channelId} for guild ${guildId}`);
-                return;
-            }
-        }
-
-        const embed = createVerseEmbed(displayVerse, '📖 Daily Bible Verse');
-        await channel.send({ embeds: [embed], components: createVerseComponents(displayVerse) });
-    } catch (err) {
-        console.error(`[BibleService] Failed to post daily verse for guild ${guildId}:`, err);
+    // Re-fetch in the guild's configured translation when it isn't KJV or NIV.
+    // NIV is skipped because ourmanna.com already returns NIV text.
+    let displayVerse = verseData;
+    if (translation && translation !== 'kjv' && translation !== 'niv' && verseData.reference) {
+        const translated = await lookupVerse(verseData.reference, translation);
+        if (translated?.text) displayVerse = translated;
     }
+
+    let channel = client.channels.cache.get(channelId);
+    if (!channel) channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel || typeof channel.send !== 'function') return;
+
+    const guild = channel.guild;
+    if (guild) {
+        const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+        if (botMember && !channel.permissionsFor(botMember).has(PermissionFlagsBits.SendMessages)) {
+            console.warn(`[BibleService] Missing SendMessages permission in channel ${channelId} for guild ${guildId}`);
+            return;
+        }
+    }
+
+    const embed = createVerseEmbed(displayVerse, '📖 Daily Bible Verse');
+    await channel.send({ embeds: [embed], components: createVerseComponents(displayVerse) });
 }
 
 function scheduleBibleVerse(client, guildId, bv) {
@@ -86,7 +88,9 @@ function scheduleBibleVerse(client, guildId, bv) {
 
     const job = cron.schedule(
         cronExpr,
-        () => postDailyVerse(client, guildId, bv.channelId, bv.translation),
+        () => runJob('dailyBibleService', 'postDailyVerse',
+            () => postDailyVerse(client, guildId, bv.channelId, bv.translation),
+            { guildId }),
         { timezone: safeTz }
     );
     bibleJobs.set(key, job);

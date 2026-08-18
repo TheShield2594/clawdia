@@ -70,6 +70,7 @@ describe('guild-settings.ejs', () => {
 
         const html = ejs.render(source, {
             jsonForScript,
+            asset: require('../src/dashboard/lib/assets').asset,
             user: { id: '1', username: 'u' },
             guild: { id: '1', name: 'g', icon: null, ownerId: '1', owner: true },
             settings,
@@ -80,7 +81,9 @@ describe('guild-settings.ejs', () => {
             huntItems: { weapons: [], upgrades: [], ammo: [], consumables: [] },
             fishItems: { rods: [], upgrades: [], bait: [], consumables: [] },
             mineItems: { pickaxes: [], upgrades: [], blasts: [], consumables: [] },
-            explorationRegions: []
+            explorationRegions: [],
+            panels: require('../src/dashboard/lib/panels').PANELS,
+            activePanel: 'ai'
         }, { filename: templatePath });
 
         expect(html).not.toContain('ghp_DO-NOT-LEAK');

@@ -569,6 +569,19 @@ body {
     animation: panel-in 0.3s ease;
 }
 .panel.active { display: block; }
+
+/* Placeholder shown while a panel's markup is being fetched. */
+.panel-stub {
+    padding: 2rem;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-card);
+}
+.panel-stub-message {
+    color: var(--text-dim);
+    font-size: 0.92rem;
+}
 @keyframes panel-in {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }

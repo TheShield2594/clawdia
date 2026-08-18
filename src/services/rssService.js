@@ -4,6 +4,7 @@ const { EmbedBuilder } = require('discord.js');
 const cron = require('node-cron');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
+const { runJob } = require('../utils/jobRunner');
 
 const parser = new Parser();
 
@@ -252,25 +253,27 @@ async function sendDailyNewsForProfile(client, guild, profile) {
     await persistSentLinks(guild, profile, sentLinks);
 }
 
+/**
+ * Failures propagate: both callers need them. The scheduled run goes through
+ * runJob, which records the failure and files a dead-letter entry, and the
+ * dashboard's "send now" button answers 500 instead of reporting success for a
+ * digest that never went out.
+ */
 async function sendDailyNews(client, guildId, profileId = null) {
-    try {
-        const guild = await Guild.findOne({ guildId });
-        if (!guild) return;
+    const guild = await Guild.findOne({ guildId });
+    if (!guild) return;
 
-        const profiles = getDailyNewsProfiles(guild)
-            .filter(profile => profile.enabled && Array.isArray(profile.feeds) && profile.feeds.length > 0);
+    const profiles = getDailyNewsProfiles(guild)
+        .filter(profile => profile.enabled && Array.isArray(profile.feeds) && profile.feeds.length > 0);
 
-        if (!profiles.length) return;
+    if (!profiles.length) return;
 
-        const targetProfiles = profileId
-            ? profiles.filter(profile => profile.profileId === profileId)
-            : profiles;
+    const targetProfiles = profileId
+        ? profiles.filter(profile => profile.profileId === profileId)
+        : profiles;
 
-        for (const profile of targetProfiles) {
-            await sendDailyNewsForProfile(client, guild, profile);
-        }
-    } catch (error) {
-        console.error('Error sending daily news:', error);
+    for (const profile of targetProfiles) {
+        await sendDailyNewsForProfile(client, guild, profile);
     }
 }
 
@@ -285,9 +288,12 @@ function scheduleProfileJob(client, guildId, profile) {
     }
 
     try {
-        const job = cron.schedule(cronExpression, () => {
-            sendDailyNews(client, guildId, profile.profileId);
-        }, profile.timezone ? { timezone: profile.timezone } : undefined);
+        const job = cron.schedule(cronExpression, () =>
+            runJob('rssService', 'sendDailyNews', () => sendDailyNews(client, guildId, profile.profileId), {
+                guildId,
+                payload: { profileId: profile.profileId },
+            }),
+        profile.timezone ? { timezone: profile.timezone } : undefined);
 
         dailyNewsJobs.set(jobKey, job);
         console.log(`Scheduled daily news for guild ${guildId}, profile ${profile.profileId} at ${safeTime}${profile.timezone ? ` (${profile.timezone})` : ''}`);

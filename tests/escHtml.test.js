@@ -4,6 +4,10 @@ const path = require('path');
 const { escHtml } = require('../src/dashboard/public/esc-html');
 
 const VIEW = fs.readFileSync(path.join(__dirname, '../src/dashboard/views/guild-settings.ejs'), 'utf8');
+const SCRIPT = fs.readFileSync(path.join(__dirname, '../src/dashboard/public/guild-settings.js'), 'utf8');
+// The page is the template plus the script it loads; either one could
+// reintroduce the patterns below.
+const PAGE = VIEW + SCRIPT;
 
 describe('escHtml', () => {
     it('escapes the characters that break out of an attribute', () => {
@@ -32,20 +36,20 @@ describe('escHtml', () => {
 
 describe('guild-settings.ejs', () => {
     it('defines escHtml once, in the shared script', () => {
-        expect(VIEW).not.toMatch(/function\s+escHtml/);
-        expect(VIEW).toContain('<script src="/esc-html.js"></script>');
+        expect(PAGE).not.toMatch(/function\s+escHtml/);
+        expect(VIEW).toContain("<script src=\"<%= asset('/esc-html.js') %>\"></script>");
     });
 
     it('never concatenates escaped values into an inline event handler', () => {
         // An on*="" attribute is HTML-decoded before it is parsed as JS, so
         // escHtml cannot protect a JS string literal built this way.
         const inlineHandlerWithEscHtml = /\son[a-z]+="[^"]*'\s*\+\s*escHtml\(/;
-        expect(VIEW).not.toMatch(inlineHandlerWithEscHtml);
+        expect(PAGE).not.toMatch(inlineHandlerWithEscHtml);
     });
 
     it('wires the member-search dropdown through dataset, not an inline handler', () => {
-        expect(VIEW).toContain('data-action="member-select"');
-        expect(VIEW).not.toContain('onmousedown="selectGrantMember');
-        expect(VIEW).toContain("selectGrantMember(el.dataset.memberId, el.dataset.memberName)");
+        expect(PAGE).toContain('data-action="member-select"');
+        expect(PAGE).not.toContain('onmousedown="selectGrantMember');
+        expect(PAGE).toContain("selectGrantMember(el.dataset.memberId, el.dataset.memberName)");
     });
 });
