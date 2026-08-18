@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
+    <script src="/esc-html.js"></script>
 </head>
 <body style="background:var(--ink-950);margin:0;">
 <div class="dash">
@@ -722,10 +723,6 @@
             });
         }
 
-        function escHtml(str) {
-            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        }
-
         function addDailyNewsProfile() {
             const container = document.getElementById('dailynews-profiles-list');
             const profiles = JSON.parse(container.dataset.profiles || '[]');
@@ -1382,10 +1379,6 @@
         var _cpRuleIdx = -1;
         var _cpCdIdx   = -1;
 
-        function escHtml(s) {
-            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        }
-
         // ── Styled confirmation modal ────────────────────────────────────────
         var _confirmResolve = null;
         var _confirmPrevFocus = null;
@@ -1574,11 +1567,6 @@
         <% roles.forEach(r => { %>_roleMap['<%= r.id %>'] = '<%= r.name.replace(/'/g, "\\'") %>';<% }); %>
         var editingItemIdx = -1;
         var editingJobIdx = -1;
-
-        function escHtml(s) {
-            if (!s) return '';
-            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        }
 
         var _shopItemPendingImages = {}; // itemId -> { file, dataUrl }
         var _shopItemClearedImages = new Set(); // itemIds whose images were explicitly removed
@@ -1879,6 +1867,37 @@
             if (e.target.id === 'ach-modal') closeAchModal();
         });
 
+        // ── Delegated handlers for rendered lists ────────────────────────────
+        // Attacker-influenced values (member nicknames, achievement names, MCP
+        // server names) ride in data-* attributes and come back out through
+        // dataset. They must never be concatenated into an inline handler:
+        // an on*="" attribute is HTML-decoded before it is parsed as JS, so a
+        // `&#39;` from escHtml turns back into a quote and closes the string it
+        // was meant to sit inside.
+        document.addEventListener('click', function(e) {
+            var el = e.target.closest && e.target.closest('[data-action]');
+            if (!el) return;
+            var d = el.dataset;
+            if (d.action === 'ach-grant')      openAchGrantModal(d.achId, d.achName);
+            else if (d.action === 'summary-delete') deleteSummaryJob(d.jobId);
+            else if (d.action === 'persona-remove') removePersona(d.channelId);
+            else if (d.action === 'mcp-test')       testMcpServer(d.serverName, el.closest('.list-item') && el.closest('.list-item').querySelector('.mcp-test-result'));
+            else if (d.action === 'mcp-edit')       editMcpServer(d.serverName);
+            else if (d.action === 'mcp-remove')     removeMcpServer(d.serverName);
+        });
+
+        // mousedown, not click: the dropdown is hidden by the input's blur, which
+        // fires first on a click.
+        document.addEventListener('mousedown', function(e) {
+            var el = e.target.closest && e.target.closest('[data-action="member-select"]');
+            if (el) selectGrantMember(el.dataset.memberId, el.dataset.memberName);
+        });
+
+        document.addEventListener('change', function(e) {
+            var el = e.target.closest && e.target.closest('[data-builtin-ach-id]');
+            if (el) toggleBuiltinAch(el.dataset.builtinAchId, el.checked);
+        });
+
         // ── Achievements ───────────────────────────────────────────────────────────
         var _BUILTIN_ACHS = <%- jsonForScript(builtinAchievements || []) %>;
         var _disabledAchievements = <%- jsonForScript(settings.achievements?.disabledAchievements || []) %>;
@@ -1901,7 +1920,7 @@
                     '<span style="font-size:.8rem;color:var(--text-dim);margin-right:.5rem">' +
                         (a.xpReward ? '+' + a.xpReward + ' XP' : '') + (a.xpReward && a.coinReward ? ' · ' : '') + (a.coinReward ? '+' + a.coinReward.toLocaleString() + ' coins' : '') +
                     '</span>' +
-                    '<label class="switch" style="margin:0"><input type="checkbox"' + (disabled ? '' : ' checked') + ' onchange="toggleBuiltinAch(\'' + escHtml(a.id) + '\', this.checked)"><span class="slider"></span></label>' +
+                    '<label class="switch" style="margin:0"><input type="checkbox"' + (disabled ? '' : ' checked') + ' data-builtin-ach-id="' + escHtml(a.id) + '"><span class="slider"></span></label>' +
                 '</div>';
             }).join('');
         }
@@ -1933,7 +1952,7 @@
                         '</div>' +
                     '</div>' +
                     '<div class="store-card-actions">' +
-                        '<button class="btn btn-sm" onclick="openAchGrantModal(\'' + escHtml(a.id) + '\',\'' + escHtml(a.name) + '\')">Grant</button>' +
+                        '<button class="btn btn-sm" data-action="ach-grant" data-ach-id="' + escHtml(a.id) + '" data-ach-name="' + escHtml(a.name) + '">Grant</button>' +
                         '<button class="btn btn-sm" onclick="openAchModal(' + i + ')">Edit</button>' +
                         '<button class="btn btn-sm btn-danger" onclick="deleteCustomAch(' + i + ')">Remove</button>' +
                     '</div>' +
@@ -2021,7 +2040,7 @@
                 } else {
                     resultsEl.innerHTML = members.map(function(m) {
                         return '<div class="grant-member-option" style="padding:.45rem .75rem;cursor:pointer;font-size:.88rem;display:flex;align-items:center;gap:.5rem;" ' +
-                            'onmousedown="selectGrantMember(\'' + escHtml(m.id) + '\',\'' + escHtml(m.displayName || m.username) + '\')">' +
+                            'data-action="member-select" data-member-id="' + escHtml(m.id) + '" data-member-name="' + escHtml(m.displayName || m.username) + '">' +
                             (m.avatarURL ? '<img src="' + escHtml(m.avatarURL) + '" style="width:22px;height:22px;border-radius:50%;">' : '') +
                             '<span>' + escHtml(m.displayName || m.username) + '</span>' +
                             '<span style="color:var(--text-dim);margin-left:auto;font-size:.8rem">' + escHtml(m.id) + '</span>' +
@@ -2479,7 +2498,7 @@
                             srcName + ' → ' + tgtName + ' · Daily at ' + hh + ':' + mm + ' UTC · Last run: ' + escHtml(lastRun) +
                         '</div>' +
                     '</div>' +
-                    '<button class="btn btn-danger btn-sm" onclick="deleteSummaryJob(\'' + escHtml(job._id) + '\')">Remove</button>';
+                    '<button class="btn btn-danger btn-sm" data-action="summary-delete" data-job-id="' + escHtml(job._id) + '">Remove</button>';
                 container.appendChild(div);
             });
         }
@@ -2605,7 +2624,7 @@
                         '<strong>' + escHtml(p.personaName) + '</strong> <span style="color:var(--text-mute);font-size:.85rem;">(' + chanName + ')</span>' +
                         '<div style="color:var(--text-mute);font-size:.82rem;margin-top:.2rem;">' + escHtml(preview) + '</div>' +
                     '</div>' +
-                    '<button class="btn btn-danger btn-sm" onclick="removePersona(\'' + escHtml(p.channelId) + '\')">Remove</button>';
+                    '<button class="btn btn-danger btn-sm" data-action="persona-remove" data-channel-id="' + escHtml(p.channelId) + '">Remove</button>';
                 container.appendChild(div);
             });
         }
@@ -2764,12 +2783,12 @@
                             (srv.enabled ? '' : ' <span style="color:var(--text-mute);font-size:.8rem;">(disabled)</span>') +
                             '<div style="color:var(--text-mute);font-size:.82rem;margin-top:.2rem;word-break:break-all;">' + escHtml(srv.url) + '</div>' +
                             '<div style="color:var(--text-mute);font-size:.78rem;margin-top:.15rem;">' + escHtml(bits.join(' · ')) + '</div>' +
-                            '<div class="mcp-test-result" id="mcp-test-' + escHtml(srv.name) + '"></div>' +
+                            '<div class="mcp-test-result"></div>' +
                         '</div>' +
                         '<div style="display:flex;gap:.4rem;flex-wrap:wrap;">' +
-                            '<button class="btn btn-sm" onclick="testMcpServer(\'' + escHtml(srv.name) + '\')">Test</button>' +
-                            '<button class="btn btn-sm" onclick="editMcpServer(\'' + escHtml(srv.name) + '\')">Edit</button>' +
-                            '<button class="btn btn-danger btn-sm" onclick="removeMcpServer(\'' + escHtml(srv.name) + '\')">Remove</button>' +
+                            '<button class="btn btn-sm" data-action="mcp-test" data-server-name="' + escHtml(srv.name) + '">Test</button>' +
+                            '<button class="btn btn-sm" data-action="mcp-edit" data-server-name="' + escHtml(srv.name) + '">Edit</button>' +
+                            '<button class="btn btn-danger btn-sm" data-action="mcp-remove" data-server-name="' + escHtml(srv.name) + '">Remove</button>' +
                         '</div>';
                     container.appendChild(div);
                 });
@@ -2906,9 +2925,11 @@
             }
         }
 
-        async function testMcpServer(name) {
+        // `out` is located relative to the clicked button rather than by an id
+        // built from the server name — a name is operator-supplied text and does
+        // not survive round-tripping through an id selector.
+        async function testMcpServer(name, out) {
             var guildId = '<%= guild.id %>';
-            var out = mcpEl('mcp-test-' + name);
             if (out) { out.className = 'mcp-test-result'; out.textContent = 'Testing…'; }
             try {
                 var resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/test', { method: 'POST' });
