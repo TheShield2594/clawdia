@@ -9,6 +9,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
+const { isVersionError } = require('../../utils/versionRetry');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -800,7 +801,7 @@ async function executeStart(interaction) {
         } catch (err) {
             // Nothing was saved, so give the cooldown slot back before telling them to retry.
             await releaseHuntClaim();
-            if (err.name === 'VersionError') {
+            if (isVersionError(err)) {
                 return interaction.editReply({ content: 'A simultaneous request conflicted with your hunt. Please try `/hunt start` again.' });
             }
             console.error('[hunt] save error:', err);

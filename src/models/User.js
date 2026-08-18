@@ -328,6 +328,16 @@ const userSchema = new Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 
+// Optimistic concurrency is a SAME-PATH guard only: Mongoose bumps `__v` on
+// `save()` and nowhere else, so the version check fires when one `save()` races
+// another `save()`. It does NOT fire when a `save()` races a
+// `findOneAndUpdate` / `updateOne` / `$inc` — those leave `__v` untouched, and
+// most economy writes take that atomic path. Do not read a document, mutate it,
+// and `save()` it expecting this to protect a balance or a counter; express the
+// change as a guarded `$inc` instead.
+//
+// For the save-vs-save half, `src/utils/versionRetry.js` has the shared
+// `isVersionError` / `withVersionRetry` helpers.
 userSchema.set('optimisticConcurrency', true);
 
 userSchema.index({ userId: 1, guildId: 1 }, { unique: true });

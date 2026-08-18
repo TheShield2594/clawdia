@@ -6,6 +6,7 @@ const { generateDailyMissions } = require('../../data/seasonMissions');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { getEventCurrencyBalance } = require('../../services/seasonalEventService');
 const { progressBar } = require('../../utils/progressBar');
+const { isVersionError } = require('../../utils/versionRetry');
 const { rewardReveal } = require('../../utils/rewardReveal');
 const { logTransaction } = require('../../utils/logTransaction');
 const { awardSeasonXp } = require('../../services/questService');
@@ -198,7 +199,7 @@ async function executeClaim(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
+        if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 
@@ -397,7 +398,7 @@ async function executeClaimMission(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
+        if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 
@@ -485,7 +486,7 @@ async function executeClaimAll(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
+        if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 

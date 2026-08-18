@@ -3,6 +3,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
+const { isVersionError } = require('../../utils/versionRetry');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const {
@@ -323,7 +324,7 @@ async function handleGo(interaction) {
         } catch (err) {
             // Nothing was saved, so give the cooldown slot back before telling them to retry.
             await releaseExploreClaim();
-            if (err.name === 'VersionError') {
+            if (isVersionError(err)) {
                 return interaction.reply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', flags: MessageFlags.Ephemeral });
             }
             console.error('[explore] pre-encounter save error:', err);
@@ -414,7 +415,7 @@ async function handleGo(interaction) {
         try {
             await user.save();
         } catch (err) {
-            if (err.name === 'VersionError') {
+            if (isVersionError(err)) {
                 return interaction.editReply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', embeds: [], components: [] });
             }
             console.error('[explore] save error:', err);

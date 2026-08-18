@@ -14,6 +14,33 @@ const MIN_ACCOUNT_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 // Items that cannot be gifted (soulbound — matches market.js)
 const SOULBOUND_ITEMS = new Set(['lifesaver', 'streak_shield']);
 
+// Add `qty` of `itemId` to a user's inventory without reading it first: bump the
+// existing slot if there is one, otherwise push a new slot, guarding the push so
+// two concurrent credits can never create duplicate slots for the same item.
+// Returns the updated document, or null if the user document does not exist.
+async function addInventoryItem(userId, guildId, itemId, qty) {
+    const bumped = await User.findOneAndUpdate(
+        { userId, guildId, 'inventory.itemId': itemId },
+        { $inc: { 'inventory.$.quantity': qty } },
+        { new: true }
+    );
+    if (bumped) return bumped;
+
+    const pushed = await User.findOneAndUpdate(
+        { userId, guildId, 'inventory.itemId': { $ne: itemId } },
+        { $push: { inventory: { itemId, quantity: qty } } },
+        { new: true }
+    );
+    if (pushed) return pushed;
+
+    // A concurrent write created the slot between the two calls — bump it now.
+    return User.findOneAndUpdate(
+        { userId, guildId, 'inventory.itemId': itemId },
+        { $inc: { 'inventory.$.quantity': qty } },
+        { new: true }
+    );
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('gift')
@@ -211,13 +238,17 @@ module.exports = {
                 return interaction.reply({ content: `\`${itemId}\` is soulbound and cannot be gifted.`, flags: MessageFlags.Ephemeral });
             }
 
-            const [sender, recipient] = await Promise.all([
+            // Both documents must exist before the transfer; the sender doc is also
+            // read here for the pre-flight checks below.
+            const [sender] = await Promise.all([
                 User.findOneAndUpdate({ userId: interaction.user.id, guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
-                User.findOneAndUpdate({ userId: target.id,           guildId: interaction.guild.id }, {}, { upsert: true, new: true }),
+                User.updateOne({ userId: target.id, guildId: interaction.guild.id }, {}, { upsert: true }),
             ]);
 
-            const slot = sender.inventory.find(i => i.itemId === itemId);
-            if (!slot || slot.quantity < qty) {
+            // Same predicate as the atomic debit below — `find` on itemId alone
+            // would reject on a small duplicate slot while a later one can cover it.
+            const slot = sender.inventory.find(i => i.itemId === itemId && i.quantity >= qty);
+            if (!slot) {
                 return interaction.reply({
                     content: `You don't have ${qty}x \`${itemId}\` in your inventory.`,
                     flags: MessageFlags.Ephemeral,
@@ -234,24 +265,59 @@ module.exports = {
                 });
             }
 
-            slot.quantity -= qty;
-            if (slot.quantity <= 0) {
-                sender.inventory = sender.inventory.filter(i => i.itemId !== itemId);
+            // Debit the sender atomically first, then credit the recipient and roll
+            // the debit back if the credit fails — the same shape as the coin path
+            // above. Saving both documents in parallel would duplicate the item
+            // whenever the sender's write lost and the recipient's won.
+            const debited = await User.findOneAndUpdate(
+                {
+                    userId: interaction.user.id,
+                    guildId: interaction.guild.id,
+                    inventory: { $elemMatch: { itemId, quantity: { $gte: qty } } },
+                },
+                // Positional `$`, not an arrayFilter: `$[slot]` would decrement
+                // every slot carrying this itemId, and duplicate slots are
+                // reachable — several writers $push without checking for one.
+                { $inc: { 'inventory.$.quantity': -qty } },
+                { new: true }
+            );
+            if (!debited) {
+                return interaction.reply({
+                    content: `You don't have ${qty}x \`${itemId}\` in your inventory.`,
+                    flags: MessageFlags.Ephemeral,
+                });
             }
-            sender.markModified('inventory');
+            // Drop the slot once it is empty so inventory listings stay clean. A
+            // failure here leaves a zero-quantity slot, which is cosmetic only.
+            await User.updateOne(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $pull: { inventory: { itemId, quantity: { $lte: 0 } } } }
+            ).catch(() => null);
 
-            const recipientSlot = recipient.inventory.find(i => i.itemId === itemId);
-            if (recipientSlot) {
-                recipientSlot.quantity += qty;
-            } else {
-                recipient.inventory.push({ itemId, quantity: qty });
+            let credited = null;
+            try {
+                credited = await addInventoryItem(target.id, interaction.guild.id, itemId, qty);
+            } catch (creditErr) {
+                console.error(`[gift] item credit failed — recipient=${target.id} guild=${interaction.guild.id} item=${itemId} qty=${qty}:`, creditErr);
             }
-            recipient.markModified('inventory');
+            if (!credited) {
+                try {
+                    await addInventoryItem(interaction.user.id, interaction.guild.id, itemId, qty);
+                } catch (rollbackErr) {
+                    console.error(`[gift] CRITICAL: item rollback failed — sender=${interaction.user.id} guild=${interaction.guild.id} item=${itemId} qty=${qty}:`, rollbackErr);
+                    return interaction.reply({
+                        content: 'Something went wrong returning your item — please contact a server admin.',
+                        flags: MessageFlags.Ephemeral,
+                    });
+                }
+                return interaction.reply({
+                    content: 'Could not complete the transfer — your item was returned.',
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
 
-            await Promise.all([sender.save(), recipient.save()]);
-
-            logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'gift_item_send',    amount: 0, balance: sender.balance,    relatedUserId: target.id,           note: `Gifted ${qty}x ${itemId}` });
-            logTransaction({ userId: target.id,           guildId: interaction.guild.id, type: 'gift_item_receive', amount: 0, balance: recipient.balance, relatedUserId: interaction.user.id, note: `Received ${qty}x ${itemId}` });
+            logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'gift_item_send',    amount: 0, balance: debited.balance,  relatedUserId: target.id,           note: `Gifted ${qty}x ${itemId}` });
+            logTransaction({ userId: target.id,           guildId: interaction.guild.id, type: 'gift_item_receive', amount: 0, balance: credited.balance, relatedUserId: interaction.user.id, note: `Received ${qty}x ${itemId}` });
 
             const embed = new EmbedBuilder()
                 .setColor('#f1c40f')
