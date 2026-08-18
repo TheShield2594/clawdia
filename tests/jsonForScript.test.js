@@ -70,6 +70,7 @@ describe('guild-settings.ejs', () => {
 
         const html = ejs.render(source, {
             jsonForScript,
+            asset: require('../src/dashboard/lib/assets').asset,
             user: { id: '1', username: 'u' },
             guild: { id: '1', name: 'g', icon: null, ownerId: '1', owner: true },
             settings,
