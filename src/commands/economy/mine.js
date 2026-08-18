@@ -3,6 +3,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew, saveGrind } = require('../../utils/grindProfile');
+const { isVersionError } = require('../../utils/versionRetry');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -786,7 +787,7 @@ async function handleDig(interaction) {
         } catch (err) {
             // Nothing was saved, so give the cooldown slot back before telling them to retry.
             await releaseMineClaim();
-            if (err.name === 'VersionError') {
+            if (isVersionError(err)) {
                 return interaction.editReply({ content: 'A simultaneous request conflicted with your mine. Please try `/mine dig` again.' });
             }
             console.error('[mine] save error:', err);

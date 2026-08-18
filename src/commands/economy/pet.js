@@ -7,6 +7,7 @@ const {
 const User  = require('../../models/User');
 const { DECEASED_PET_LIMIT } = User;
 const { attachGrind } = require('../../utils/grindProfile');
+const { isVersionError, withVersionRetry } = require('../../utils/versionRetry');
 const Guild = require('../../models/Guild');
 const {
     PET_DEFINITIONS,
@@ -436,7 +437,7 @@ async function executeAdopt(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
+        if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
     announcePetAchievements(interaction, user, guildSettings, earned);
@@ -544,7 +545,7 @@ async function executeStatus(interaction) {
             try {
                 await freshUser.save();
             } catch (err) {
-                if (err.name === 'VersionError') {
+                if (isVersionError(err)) {
                     return btn.reply({ content: '⚠️ Action conflict — please try again.', flags: MessageFlags.Ephemeral });
                 }
                 console.error('[pet] play save error:', err);
@@ -585,7 +586,7 @@ async function executeStatus(interaction) {
             try {
                 await freshUser.save();
             } catch (err) {
-                if (err.name === 'VersionError') {
+                if (isVersionError(err)) {
                     return btn.reply({ content: '⚠️ Action conflict — please try again.', flags: MessageFlags.Ephemeral });
                 }
                 console.error('[pet] rest save error:', err);
@@ -611,7 +612,7 @@ async function executeStatus(interaction) {
             try {
                 await freshUser.save();
             } catch (err) {
-                if (err.name === 'VersionError') {
+                if (isVersionError(err)) {
                     return btn.reply({ content: '⚠️ Action conflict — please try again.', flags: MessageFlags.Ephemeral });
                 }
                 console.error('[pet] showcase save error:', err);
@@ -714,7 +715,7 @@ async function executeFeed(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.editReply('Edit conflict — please try again.');
+        if (isVersionError(err)) return interaction.editReply('Edit conflict — please try again.');
         throw err;
     }
     announcePetAchievements(interaction, user, guildSettings, earned);
@@ -793,22 +794,31 @@ async function executeRelease(interaction) {
     }
 
     // Re-resolve by id: the roster may have changed while the prompt was open.
-    const fresh = await resolveUser(interaction);
-    const still = resolvePetRef(fresh?.pets, petId);
-    if (!still) {
-        return choice.update({ content: `**${name}** is no longer in your roster.`, embeds: [], components: [] }).catch(() => {});
+    // Dropping a pet by id is a pure function of the freshly read roster, so a
+    // lost version race can simply replay instead of bouncing back to the user.
+    let saved = null;
+    let conflict = false;
+    try {
+        saved = await withVersionRetry(
+            () => resolveUser(interaction),
+            (fresh) => {
+                const still = resolvePetRef(fresh?.pets, petId);
+                if (!still) return false;
+                fresh.pets.splice(still.index, 1);
+                fresh.markModified('pets');
+            },
+            { label: 'pet release' }
+        );
+    } catch (err) {
+        if (!isVersionError(err)) throw err;
+        conflict = true;
     }
 
-    fresh.pets.splice(still.index, 1);
-    fresh.markModified('pets');
-
-    try {
-        await fresh.save();
-    } catch (err) {
-        if (err.name === 'VersionError') {
-            return choice.update({ content: 'Edit conflict — try again.', embeds: [], components: [] }).catch(() => {});
-        }
-        throw err;
+    if (conflict) {
+        return choice.update({ content: 'Edit conflict — try again.', embeds: [], components: [] }).catch(() => {});
+    }
+    if (!saved) {
+        return choice.update({ content: `**${name}** is no longer in your roster.`, embeds: [], components: [] }).catch(() => {});
     }
 
     return choice.update({
@@ -819,23 +829,33 @@ async function executeRelease(interaction) {
 
 async function executeRename(interaction) {
     const newName = interaction.options.getString('name').trim().slice(0, 32);
-    const user    = await resolveUser(interaction);
+    const slotRef = readSlotOption(interaction);
 
-    const target = resolvePetRef(user?.pets, readSlotOption(interaction));
-    if (!target) return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
-    const petIndex = target.index;
-
-    user.pets[petIndex].name = newName;
-    user.markModified('pets');
-
+    // Setting a name is a pure function of the freshly read roster, so a lost
+    // version race replays rather than asking the user to retype the command.
+    let saved    = null;
+    let conflict = false;
+    let def      = null;
     try {
-        await user.save();
+        saved = await withVersionRetry(
+            () => resolveUser(interaction),
+            (user) => {
+                const target = resolvePetRef(user?.pets, slotRef);
+                if (!target) return false;
+                user.pets[target.index].name = newName;
+                user.markModified('pets');
+                def = PET_DEFINITIONS[user.pets[target.index].petId];
+            },
+            { label: 'pet rename' }
+        );
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
-        throw err;
+        if (!isVersionError(err)) throw err;
+        conflict = true;
     }
 
-    const def = PET_DEFINITIONS[user.pets[petIndex].petId];
+    if (conflict) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
+    if (!saved)   return interaction.reply({ content: NO_SUCH_PET, flags: MessageFlags.Ephemeral });
+
     return interaction.reply({ content: `${def?.emoji ?? '🐾'} Pet renamed to **${newName}**!`, flags: MessageFlags.Ephemeral });
 }
 
@@ -985,7 +1005,7 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
     try {
         await user.save();
     } catch (err) {
-        if (err.name === 'VersionError') return interaction.editReply({ content: 'Edit conflict — please try again.', embeds: [] });
+        if (isVersionError(err)) return interaction.editReply({ content: 'Edit conflict — please try again.', embeds: [] });
         throw err;
     }
     announcePetAchievements(interaction, user, guildSettings, earned);
