@@ -3,6 +3,7 @@ const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
 const { getMerchantCoinBonus } = require('../../services/synergyService');
+const { advanceMissions } = require('../../services/seasonMissionService');
 const { attachGrind } = require('../../utils/grindProfile');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
@@ -333,6 +334,11 @@ module.exports = {
                 );
 
                 logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success, ${execMethod.id})${isFeaturedCrime ? ' [featured]' : ''}` });
+
+                // Season pass: "Attempt a crime". Fire-and-forget — a mission
+                // that fails to tick must not cost the player their payout.
+                advanceMissions(User, userFilter, 'crime', 1, guildSettings)
+                    .catch(err => console.error('[crime] season mission error:', err));
 
                 const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
                 if (earned >= bigWinThreshold) {

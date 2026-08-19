@@ -54,6 +54,7 @@ const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
 const { ensureQuests, onMine, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { refundEffectCharge } = require('../../services/effectsService');
 const { CROSS_CONSUMABLES } = require('../../data/crossSystemData');
@@ -758,6 +759,8 @@ async function handleDig(interaction) {
 
         await ensureQuests(user, guildSettings);
         const { completed: questsDone, nearComplete: questsNear } = await onMine(user, guildSettings);
+        // Season pass daily missions listen for the same actions quests do.
+        recordMissionProgress(user, 'mine', 1, guildSettings);
         if (result.success && result.finalPayout > 0) {
             const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
             questsDone.push(...earn.completed);

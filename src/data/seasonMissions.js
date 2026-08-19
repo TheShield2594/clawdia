@@ -58,6 +58,22 @@ const MISSION_TEMPLATES = [
         coinReward: 350
     },
     {
+        id: 'explore_3',
+        description: 'Set out on 3 expeditions',
+        target: 3,
+        event: 'explore',
+        seasonXp: 30,
+        coinReward: 200
+    },
+    {
+        id: 'explore_5',
+        description: 'Set out on 5 expeditions',
+        target: 5,
+        event: 'explore',
+        seasonXp: 45,
+        coinReward: 350
+    },
+    {
         id: 'work_1',
         description: 'Complete a work shift',
         target: 1,

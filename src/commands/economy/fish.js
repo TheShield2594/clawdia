@@ -65,6 +65,7 @@ const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
 const { ensureQuests, onFish, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { hasActiveEvent, getEventCrossSystemType } = require('../../services/seasonalEventService');
 const { refundEffectCharge } = require('../../services/effectsService');
@@ -804,6 +805,8 @@ async function handleCast(interaction) {
         updateFishQuestProgress(user, result, locationId);
         await ensureQuests(user, guildSettings);
         const { completed: questsDone, nearComplete: questsNear } = await onFish(user, guildSettings);
+        // Season pass daily missions listen for the same actions quests do.
+        recordMissionProgress(user, 'fish', 1, guildSettings);
         if (result.success && result.finalPayout > 0) {
             const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
             questsDone.push(...earn.completed);

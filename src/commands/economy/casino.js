@@ -1,6 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
+const User  = require('../../models/User');
 const { processJackpotBet, getJackpotDisplay } = require('../../services/casinoJackpotService');
+const { advanceMissions } = require('../../services/seasonMissionService');
 const { tryAcquire, release } = require('../../utils/activeGameLock');
 
 const games = [
@@ -142,6 +144,15 @@ module.exports = {
                     bet,
                     interaction,
                 }).catch(err => console.error('[CasinoJackpot] error:', err));
+
+                // Season pass: "Play 5 casino games". Counted here rather than at
+                // subcommand dispatch so a hand that never got a bet down — bad
+                // amount, empty wallet — isn't scored as a game played.
+                advanceMissions(
+                    User,
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    'casino', 1, guildSettings,
+                ).catch(err => console.error('[casino] season mission error:', err));
             }
 
             return await game.execute(interaction, { releaseLock });

@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } =
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const SeasonRecord = require('../../models/SeasonRecord');
-const { generateDailyMissions } = require('../../data/seasonMissions');
+const { ensureMissions: ensureMissionsShared } = require('../../services/seasonMissionService');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { getEventCurrencyBalance } = require('../../services/seasonalEventService');
 const { progressBar } = require('../../utils/progressBar');
@@ -51,16 +51,11 @@ function xpProgressBar(xp) {
     return `${'█'.repeat(filled)}${'░'.repeat(10 - filled)} ${xpInTier}/${XP_PER_TIER} XP (Tier ${currentTier} → ${currentTier + 1})`;
 }
 
+// The rollover lives in seasonMissionService so that opening this menu and
+// acting in the world deal from the same deck — two copies would drift, and the
+// copy that ran first would decide which day's missions the other one advanced.
 async function ensureMissions(user) {
-    const now = new Date();
-    const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-
-    if (!user.seasonMissionsDate || new Date(user.seasonMissionsDate).getTime() < todayUtc.getTime()) {
-        user.seasonMissions = generateDailyMissions();
-        user.seasonMissionsDate = todayUtc;
-        user.markModified('seasonMissions');
-        user.markModified('seasonMissionsDate');
-    }
+    ensureMissionsShared(user);
 }
 
 // ── Subcommand handlers ───────────────────────────────────────────────────────

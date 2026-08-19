@@ -17,6 +17,7 @@ const { stackBar } = require('../../utils/rewardReveal');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { recordMissionProgress } = require('../../services/seasonMissionService');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -273,6 +274,9 @@ module.exports = {
                     questsDone = earn.completed;
                     questsNear = earn.nearComplete;
                 }
+                // Season pass daily missions advance on the same shift. Recorded
+                // in memory; the save below carries it.
+                recordMissionProgress(updated, 'work', 1, guildSettings);
                 await saveWithBalanceDelta(User, updated, balanceAfterShift, {
                     service: 'work',
                     jobName: 'shiftQuestReward',

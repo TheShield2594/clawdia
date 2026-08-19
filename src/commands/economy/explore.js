@@ -39,6 +39,7 @@ const {
 } = require('../../services/exploreService');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
 const {
     getEventXpMultiplier, getEventCoinMultiplier,
@@ -446,6 +447,9 @@ async function handleGo(interaction) {
         });
 
         await ensureQuests(user, guildSettings);
+        // Season pass daily missions count expeditions, the same way they count
+        // hunts and casts. Recorded in memory — the save below carries it.
+        recordMissionProgress(user, 'explore', 1, guildSettings);
         let questsDone = [], questsNear = [];
         if (result.payout > 0) {
             const earn = await onEconomyEarn(user, guildSettings, result.payout);

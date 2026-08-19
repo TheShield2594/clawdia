@@ -14,6 +14,7 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { claimStarterKit } = require('../../utils/starterKit');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { recordMissionProgress } = require('../../services/seasonMissionService');
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -367,6 +368,10 @@ module.exports = {
                     questsDone = earn.completed;
                     questsNear = earn.nearComplete;
                 }
+                // Season pass daily missions advance on the claim itself, not on
+                // the coins — a capped or zero payout is still a claim. Recorded
+                // in memory; the save below carries it.
+                recordMissionProgress(updated, 'daily', 1, guildSettings);
                 await saveWithBalanceDelta(User, updated, balanceAfterClaim, {
                     service: 'daily',
                     jobName: 'dailyQuestReward',
