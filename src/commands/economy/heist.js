@@ -9,6 +9,7 @@ const {
 const Guild = require('../../models/Guild');
 const User  = require('../../models/User');
 const { logTransaction } = require('../../utils/logTransaction');
+const { debitUpTo } = require('../../utils/balanceDebit');
 const {
     ROLES,
     TARGETS,
@@ -133,15 +134,15 @@ async function resolveHeist(client, heist) {
                 logTransaction({ userId, guildId, type: 'heist_payout', amount: share, balance: u?.balance ?? share, note: `Heist: ${TARGETS[heist.target]?.label}` });
             }
         } else if (outcome === 'failure' || (outcome === 'partial_success' && !passed)) {
-            // Jail the caught players: lock economy commands and apply a fine
-            // clamped to their current balance so it can't go negative.
+            // Jail the caught players: lock economy commands and apply a fine.
+            // The clamp is inside the update, not against a separate read — a
+            // read-then-clamp-then-$inc takes the amount the read justified even
+            // once the wallet has emptied, which is how a fine walks a balance
+            // negative. See src/utils/balanceDebit.js.
             const jailUntil = new Date(Date.now() + jailMins * 60_000);
             const rawFine   = Math.floor(Math.random() * 200) + 50;
-            const userDoc   = await User.findOne({ userId, guildId }, 'balance').lean();
-            const fine      = Math.min(rawFine, userDoc?.balance ?? 0);
-            await User.findOneAndUpdate(
-                { userId, guildId },
-                { $set: { heistJailedUntil: jailUntil }, ...(fine > 0 ? { $inc: { balance: -fine } } : {}) }
+            await debitUpTo(
+                User, { userId, guildId }, rawFine, { heistJailedUntil: jailUntil },
             ).catch(() => {});
         }
     }

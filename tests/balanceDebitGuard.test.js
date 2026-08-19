@@ -44,14 +44,32 @@ function walk(node, visit) {
 
 const snippet = (code, node) => code.slice(node.start, node.end);
 
+function isKey(node, name) {
+    return node.type === 'ObjectProperty' &&
+        ((node.key.type === 'Identifier' && !node.computed && node.key.name === name) ||
+         (node.key.type === 'StringLiteral' && node.key.value === name));
+}
+
 // Finds a property by key name in an object expression, ignoring spreads.
 function prop(objectNode, name) {
     if (objectNode?.type !== 'ObjectExpression') return null;
-    return objectNode.properties.find(p =>
-        p.type === 'ObjectProperty' &&
-        ((p.key.type === 'Identifier' && !p.computed && p.key.name === name) ||
-         (p.key.type === 'StringLiteral' && p.key.value === name))
-    ) ?? null;
+    return objectNode.properties.find(p => isKey(p, name)) ?? null;
+}
+
+/**
+ * Finds a property anywhere in a subtree, not just as a direct child.
+ *
+ * A debit is often not written flat — `{ $set: {...}, ...(fine > 0 ? { $inc: {
+ * balance: -fine } } : {}) }` buries it inside a spread of a conditional, and
+ * looking only at direct properties walked straight past it. That miss hid a
+ * real unguarded debit in /heist, so the scan reaches all the way down.
+ */
+function deepProp(node, name) {
+    let found = null;
+    walk(node, n => {
+        if (!found && isKey(n, name)) found = n;
+    });
+    return found;
 }
 
 /**
@@ -61,7 +79,7 @@ function prop(objectNode, name) {
  * rather than being waved through.
  */
 function debitAmount(code, updateNode) {
-    const inc = prop(updateNode, '$inc');
+    const inc = deepProp(updateNode, '$inc');
     if (!inc) return null;
     const balance = prop(inc.value, 'balance');
     if (!balance) return null;
@@ -77,7 +95,7 @@ function debitAmount(code, updateNode) {
 
 /** The amount a filter proves is available, as source text, or null if unguarded. */
 function guardAmount(code, filterNode) {
-    const balance = prop(filterNode, 'balance');
+    const balance = deepProp(filterNode, 'balance');
     if (!balance) return null;
     const gte = prop(balance.value, '$gte');
     return gte ? snippet(code, gte.value) : null;

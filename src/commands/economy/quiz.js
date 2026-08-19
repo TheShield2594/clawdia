@@ -30,6 +30,10 @@ const DAILY_LIMITS = { easy: 40, medium: 30, hard: 20 };
 const COUNT_FIELD = { easy: 'dailyQuizEasy', medium: 'dailyQuizMedium', hard: 'dailyQuizHard' };
 const RESET_FIELD = { easy: 'dailyQuizEasyReset', medium: 'dailyQuizMediumReset', hard: 'dailyQuizHardReset' };
 
+// The command's `cooldown: 300` is the in-memory pre-check; this is the value
+// the database claim enforces, and the two must stay in step.
+const QUIZ_COOLDOWN_MS = 300 * 1000;
+
 // Returns midnight UTC for today (used to detect daily reset)
 function todayUTC() {
     const now = new Date();
@@ -228,8 +232,45 @@ module.exports = {
 async function runQuiz(interaction, diffChoice) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
-    let user = await User.findOne(userFilter);
-    if (!user) user = await User.create(userFilter);
+    await User.findOneAndUpdate(userFilter, { $setOnInsert: userFilter }, { upsert: true, new: true });
+
+    // Claim the cooldown window in the database, not just in the interaction
+    // handler's in-memory map. That map is a per-process pre-check: it is empty
+    // after a restart and unshared between instances, and /quiz pays coins, so
+    // on its own it let a player burn a whole day's question allowance at once.
+    // The daily per-difficulty caps below still bound the total; this bounds the
+    // rate. Same shape as the claims in /work, /daily and /snowball.
+    const claimNow      = new Date();
+    const cooldownFloor = new Date(claimNow.getTime() - QUIZ_COOLDOWN_MS);
+    const user = await User.findOneAndUpdate(
+        {
+            ...userFilter,
+            $or: [{ lastQuiz: null }, { lastQuiz: { $exists: false } }, { lastQuiz: { $lte: cooldownFloor } }],
+        },
+        { $set: { lastQuiz: claimNow } },
+        { new: true },
+    );
+
+    if (!user) {
+        // The window is still open. Read the winning timestamp back so the
+        // countdown reflects the attempt that actually took the slot.
+        const current = await User.findOne(userFilter).select('lastQuiz').lean().catch(() => null);
+        const nextAt  = new Date(new Date(current?.lastQuiz ?? claimNow).getTime() + QUIZ_COOLDOWN_MS);
+        return interaction.editReply({
+            embeds: [buildCooldownEmbed({
+                title: '🎓 Still Thinking It Over',
+                description: 'Give the quizmaster a moment to dig out another question.',
+                color: '#9b59b6',
+                nextAt,
+            })],
+        });
+    }
+
+    return runQuizWithUser(interaction, diffChoice, user);
+}
+
+async function runQuizWithUser(interaction, diffChoice, user) {
+    const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
     let raw, offline;
     try {

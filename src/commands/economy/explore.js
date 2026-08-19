@@ -1030,7 +1030,7 @@ const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils
 const _exploreExecute = module.exports.execute;
 module.exports.execute = async function (interaction) {
     const lockKey   = `grind:explore:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = _lockAcquire(lockKey, 120_000);
+    const lockToken = await _lockAcquire(lockKey, 120_000);
     if (!lockToken) {
         return interaction.reply({
             content: '🥾 You already have an exploration action in progress — finish it first.',
@@ -1040,6 +1040,6 @@ module.exports.execute = async function (interaction) {
     try {
         return await _exploreExecute(interaction);
     } finally {
-        _lockRelease(lockKey, lockToken);
+        await _lockRelease(lockKey, lockToken);
     }
 };

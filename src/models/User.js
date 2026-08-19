@@ -54,6 +54,7 @@ const userSchema = new Schema({
     bank: { type: Number, default: 0, min: 0 },
     lastDaily: { type: Date, default: null },
     lastWork: { type: Date, default: null },
+    lastQuiz: { type: Date, default: null },
     lastSnowball: { type: Date, default: null },
     lastTrickOrTreat: { type: Date, default: null },
     lastSandcastle: { type: Date, default: null },

@@ -3195,7 +3195,7 @@ const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils
 const _fishExecute = module.exports.execute;
 module.exports.execute = async function (interaction) {
     const lockKey   = `grind:fish:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = _lockAcquire(lockKey, 120_000);
+    const lockToken = await _lockAcquire(lockKey, 120_000);
     if (!lockToken) {
         return interaction.reply({
             content: '🎣 You already have a fishing action in progress — finish it first.',
@@ -3205,6 +3205,6 @@ module.exports.execute = async function (interaction) {
     try {
         return await _fishExecute(interaction);
     } finally {
-        _lockRelease(lockKey, lockToken);
+        await _lockRelease(lockKey, lockToken);
     }
 };

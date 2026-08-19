@@ -2,6 +2,10 @@
 
 const { expectNonNegativeBalance } = require('./helpers/balanceInvariant');
 
+// The command's execute is wrapped in a Mongo-backed per-user action lock;
+// without this it would query a database this test never connects to.
+jest.mock('../src/models/ActiveLock', () => require('./helpers/fakeActiveLock'));
+
 jest.mock('../src/models/Guild', () => ({
     findOne: jest.fn().mockResolvedValue({ economy: { enabled: true, currency: '💰' } }),
 }));

@@ -2,7 +2,15 @@ const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 
 // guildId -> [{timestamp, userId, accountAgeDays}]
-// NOTE: in-memory only — data is lost on restart and not shared across shards.
+//
+// In-memory only: data is lost on restart and not shared across processes. This
+// one is a sliding window of recent joins used to detect a raid, and it moves no
+// money — the cost of losing it is a raid burst that has to re-establish its
+// rate before tripping the detector, and the cost of two processes is each
+// seeing roughly half the joins. Raid mode itself is persisted on the Guild
+// document (the Set below is a read cache of that field), so the state that
+// changes how the server behaves does survive both.
+//
 // For multi-shard or high-availability deployments, replace with a Redis-backed
 // store using sorted sets (ZADD/ZRANGEBYSCORE with TTL) for atomic, shared state.
 const joinLog = new Map();

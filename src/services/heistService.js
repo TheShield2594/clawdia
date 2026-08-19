@@ -1,5 +1,13 @@
 // In-memory state for active heist lobbies and in-progress heists.
 // Keyed by guildId so only one heist can run per guild at a time.
+//
+// Same boundary as src/utils/crashLobby.js: a heist is a sequence of role
+// minigames driven by collectors on live messages, so the session cannot be
+// moved to Mongo without redesigning the round itself. A second process would
+// allow two concurrent heists in one guild, and a restart abandons one — the
+// payout is credited per participant with an `$inc` at the end, so neither
+// duplicates anyone's coins. The per-user action lock, which is the thing that
+// actually gates money, is in Mongo; see src/utils/activeGameLock.js.
 
 const activeHeists = new Map();
 
