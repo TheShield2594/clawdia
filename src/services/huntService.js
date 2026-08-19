@@ -451,6 +451,25 @@ function rollFailureSeverity() {
 
 // ─── PAYOUT CALCULATION ───────────────────────────────────────────────────────
 
+// Payout decay by daily hunt count, steepest band first.
+const DIM_RETURNS_BANDS = [
+    { threshold: LIMITS.DIM_RETURNS_THRESHOLD_3, multiplier: 0.55 },
+    { threshold: LIMITS.DIM_RETURNS_THRESHOLD_2, multiplier: 0.70 },
+    { threshold: LIMITS.DIM_RETURNS_THRESHOLD_1, multiplier: 0.85 },
+];
+
+/** The diminishing-returns band a hunter is in, and where the next one starts. */
+function getDiminishingReturns(dailyHunts) {
+    const band = DIM_RETURNS_BANDS.find(b => dailyHunts >= b.threshold);
+    const next = [...DIM_RETURNS_BANDS].reverse().find(b => dailyHunts < b.threshold);
+    return {
+        multiplier: band?.multiplier ?? 1,
+        threshold:  band?.threshold ?? 0,
+        nextAt:     next?.threshold ?? null,
+        nextMultiplier: next?.multiplier ?? null,
+    };
+}
+
 /**
  * Applies anti-exploit modifiers to a raw payout:
  *   - Prestige payout bonus
@@ -477,14 +496,14 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
     const presBonus = PRESTIGE_BONUSES[p].payoutBonus;
     if (presBonus > 0) payout *= (1 + presBonus);
 
+    // What the kill is worth before the day's own penalties take their cut. Kept
+    // so the embed can show the hunter what was taken and why — a payout that
+    // quietly shrinks by up to 72% reads as bad luck or a stealth nerf.
+    const grossPayout = Math.round(payout);
+
     // Diminishing returns based on daily hunt count
-    if (h.dailyHunts >= LIMITS.DIM_RETURNS_THRESHOLD_3) {
-        payout *= 0.55;
-    } else if (h.dailyHunts >= LIMITS.DIM_RETURNS_THRESHOLD_2) {
-        payout *= 0.70;
-    } else if (h.dailyHunts >= LIMITS.DIM_RETURNS_THRESHOLD_1) {
-        payout *= 0.85;
-    }
+    const dimReturns = getDiminishingReturns(h.dailyHunts);
+    payout *= dimReturns.multiplier;
 
     payout = Math.round(payout);
 
@@ -492,7 +511,7 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
     // kill was worth so the embed can name the forfeited amount instead of
     // striking through a zero.
     if (h.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
-        return { adjustedPayout: 0, cappedByHard: true, forfeitedPayout: payout };
+        return { adjustedPayout: 0, cappedByHard: true, forfeitedPayout: grossPayout };
     }
 
     // Applies the daily soft cap and clamps to the headroom left under the hard cap.
@@ -503,9 +522,29 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
     const basePayout    = settle(payout);
     const doubledPayout = settle(payout * 2);
 
+    /** Which of the day's penalties actually bit, and by how much. */
+    const reportFor = (net, doubled) => {
+        const gross = doubled ? grossPayout * 2 : grossPayout;
+        return {
+            grossPayout: gross,
+            dimReturns:  dimReturns.multiplier < 1 ? dimReturns : null,
+            softCapped,
+            // The headroom clamp only shows up as its own line when it took more
+            // than the soft cap already had.
+            headroomClamped: net < (softCapped ? Math.round((doubled ? payout * 2 : payout) * 0.50)
+                                              : (doubled ? payout * 2 : payout)),
+            lostToDaily: Math.max(0, gross - net),
+        };
+    };
+
     // A doubling already paid for earlier this hunt — no second charge.
     if (options.reuseGatheringYield) {
-        return { adjustedPayout: doubledPayout, cappedByHard: false, gatheringYield: null };
+        return {
+            adjustedPayout: doubledPayout,
+            cappedByHard:   false,
+            gatheringYield: null,
+            dailyReport:    reportFor(doubledPayout, true),
+        };
     }
 
     // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
@@ -525,10 +564,16 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
                 emoji:       cfg?.emoji ?? '✨',
                 chargesLeft: getEffect(user, gatherEffect)?.charges ?? 0,
             },
+            dailyReport: reportFor(doubledPayout, true),
         };
     }
 
-    return { adjustedPayout: basePayout, cappedByHard: false, gatheringYield: null };
+    return {
+        adjustedPayout: basePayout,
+        cappedByHard:   false,
+        gatheringYield: null,
+        dailyReport:    reportFor(basePayout, false),
+    };
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -858,7 +903,7 @@ function executeHunt(user, zoneId, options = {}) {
             result.traitEffects.push({ trait: 'enraged', msg: 'Its fury drove the prize higher (+25% payout).' });
         }
 
-        const { adjustedPayout, cappedByHard, gatheringYield, forfeitedPayout } = applyPayoutModifiers(user, payoutBeforeMods, zone);
+        const { adjustedPayout, cappedByHard, gatheringYield, forfeitedPayout, dailyReport } = applyPayoutModifiers(user, payoutBeforeMods, zone);
 
         // Special drop
         let specialDrop = null;
@@ -938,6 +983,7 @@ function executeHunt(user, zoneId, options = {}) {
             levelUp: lvResult.leveledUp ? lvResult : null,
             cappedByHard,
             forfeitedPayout,
+            dailyReport,
             gatheringYield,
             streakMult
         });
@@ -1253,6 +1299,7 @@ module.exports = {
     getRarePityThreshold,
     rollFailureSeverity,
     applyPayoutModifiers,
+    getDiminishingReturns,
     applyDurabilityLoss,
     updateWeaponStatus,
     isCondemned,

@@ -52,6 +52,7 @@ const {
     apexNerveAfter,
     apexNerveMax,
     getRarePityThreshold,
+    getDiminishingReturns,
     applyPayoutModifiers
 } = require('../../services/huntService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
@@ -1212,6 +1213,9 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             embed.addFields({ name: '⚡ Trait Effects', value: effectLines, inline: false });
         }
 
+        const dailyToll = buildDailyTollField(result, user, currency);
+        if (dailyToll) embed.addFields(dailyToll);
+
         if (specialDrop) {
             embed.addFields({ name: '🎁 Special Drop!', value: `You found **${specialDrop.name}**!`, inline: false });
         }
@@ -1348,6 +1352,40 @@ function buildBonusLines(result, petYieldPct, petXpPct) {
     }
 
     return lines;
+}
+
+/**
+ * What the day's own limits took out of this payout, and when they lift.
+ *
+ * The soft cap halves every payout past 80k and diminishing returns cut it by up
+ * to 45% more, so a heavy session's rewards could shrink by nearly three
+ * quarters with nothing on screen to explain it — it read as bad luck, or as a
+ * silent nerf. Only the hard cap ever said anything. Null when nothing bit.
+ */
+function buildDailyTollField(result, user, currency) {
+    const report = result.dailyReport;
+    if (!report || report.lostToDaily <= 0) return null;
+
+    const h = user.hunt;
+    const lines = [];
+
+    if (report.dimReturns) {
+        const pct = Math.round((1 - report.dimReturns.multiplier) * 100);
+        lines.push(`📉 **Diminishing returns** −${pct}% · ${h.dailyHunts} hunts today (past ${report.dimReturns.threshold})`
+            + (report.dimReturns.nextAt
+                ? `\n> Drops again at ${report.dimReturns.nextAt} hunts.`
+                : ''));
+    }
+    if (report.softCapped) {
+        lines.push(`🪙 **Daily soft cap** −50% · past ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} earned today`);
+    }
+    if (report.headroomClamped) {
+        lines.push(`🧱 **Hard cap in sight** — only ${currency}${Math.max(0, LIMITS.DAILY_HARD_CAP - h.dailyCoins).toLocaleString()} of headroom left`);
+    }
+
+    lines.push(`*Worth ${currency}${report.grossPayout.toLocaleString()} on a fresh day — ${currency}${report.lostToDaily.toLocaleString()} withheld. Resets in ${formatMs(msUntilDailyReset(h))}.*`);
+
+    return { name: '⚖️ Daily Limits', value: lines.join('\n'), inline: false };
 }
 
 function buildBrokenWeaponNote(weapon) {
@@ -1560,10 +1598,10 @@ async function executeProfile(interaction) {
         });
     }
 
+    if (isSelf) embed.addFields(buildTodayField(h, currency));
+
     if (prestige === 0 && h.level >= 50) {
         embed.setFooter({ text: 'Max level reached! Use /hunt prestige to reset and unlock new bonuses.' });
-    } else if (isSelf) {
-        embed.setFooter({ text: `Daily: ${h.dailyHunts} hunts · ${currency}${h.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
     }
 
     embed.setTimestamp();
@@ -1623,6 +1661,38 @@ function buildTrophyField(trophies) {
         value:  shown.join(', ') + (hidden > 0 ? `, +${hidden} more` : ''),
         inline: true,
     };
+}
+
+/**
+ * Where today's earnings stand against the limits that quietly throttle them.
+ *
+ * The profile used to report only the hard cap, so a hunter had no way to see
+ * the −50% soft cap or the diminishing-returns band coming before it landed.
+ */
+function buildTodayField(h, currency) {
+    const dim   = getDiminishingReturns(h.dailyHunts ?? 0);
+    const coins = h.dailyCoins ?? 0;
+
+    const barLen    = 12;
+    const filledLen = Math.min(barLen, Math.round((coins / LIMITS.DAILY_HARD_CAP) * barLen));
+    const bar       = '█'.repeat(filledLen) + '░'.repeat(barLen - filledLen);
+
+    const lines = [
+        `\`${bar}\` ${currency}${coins.toLocaleString()} / ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}`,
+        `🏹 ${(h.dailyHunts ?? 0).toLocaleString()} hunts · payout ×${dim.multiplier.toFixed(2)}`,
+    ];
+
+    if (dim.nextAt) {
+        lines.push(`📉 Drops to ×${dim.nextMultiplier.toFixed(2)} at ${dim.nextAt} hunts`);
+    }
+    if (coins >= LIMITS.DAILY_SOFT_CAP) {
+        lines.push(`🪙 Past the soft cap — payouts halved`);
+    } else {
+        lines.push(`🪙 Soft cap (−50%) at ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()}`);
+    }
+    lines.push(`🕛 Resets in ${formatMs(msUntilDailyReset(h))}`);
+
+    return { name: '📅 Today', value: lines.join('\n'), inline: false };
 }
 
 function buildXpBar(h, toNext) {
@@ -3014,7 +3084,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField };
 
 // ── Per-user action lock ──────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent

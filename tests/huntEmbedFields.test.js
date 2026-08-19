@@ -23,6 +23,8 @@ function maximalUser() {
         hunt: {
             level: 25, xp: 13_000, prestige: 3, stamina: 7,
             consecutiveFails: 0, sinceRare: 49,
+            dailyHunts: 140, dailyCoins: 149_000,
+            dailyWindowStart: new Date(Date.now() - 3600_000),
             trophies: [], activeBait: 'premium_bait', activeBaitHuntsLeft: 1,
             activeCharm: 'luck_charm', activeCharmHuntsLeft: 1,
             activeFocus: true, activeXpScroll: true,
@@ -51,6 +53,15 @@ function maximalSuccessResult() {
         xpEarned: 260,
         levelUp: { oldLevel: 24, newLevel: 25 },
         cappedByHard: false,
+        // Every daily penalty biting at once, so the budget test counts the
+        // "Daily Limits" field too.
+        dailyReport: {
+            grossPayout: 15_000,
+            dimReturns:  { multiplier: 0.55, threshold: 120, nextAt: null, nextMultiplier: null },
+            softCapped:  true,
+            headroomClamped: true,
+            lostToDaily: 10_679,
+        },
         streakMult: 1.5,
         expiredBait: 'premium_bait',
         expiredCharm: 'luck_charm',
