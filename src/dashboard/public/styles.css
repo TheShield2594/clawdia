@@ -708,6 +708,15 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .switch input:checked + .slider { background: linear-gradient(135deg, #f97316, #f59e0b); }
 .switch input:checked + .slider::before { transform: translateX(18px); }
+/* The real checkbox is collapsed to zero size (above) so the slider can stand in
+   for it, which also collapses the focus ring the browser would have drawn. The
+   slider is the only thing on screen, so it has to carry the ring itself —
+   without this a keyboard user tabbing through a panel of these sees nothing
+   move. WCAG 2.4.7. */
+.switch input:focus-visible + .slider {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
 
 .actions-row {
     display: flex;

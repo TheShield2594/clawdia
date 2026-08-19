@@ -283,6 +283,9 @@ CLIENT_SECRET=your_client_secret_here
 MONGODB_URI=mongodb://mongodb:27017/ultrabot
 
 # Dashboard
+# DASHBOARD_URL must be https:// whenever NODE_ENV=production — the dashboard
+# refuses to start otherwise. This http://localhost value is paired with the
+# NODE_ENV=development at the bottom of this block; change the two together.
 DASHBOARD_PORT=3000
 DASHBOARD_URL=http://localhost:3000
 SESSION_SECRET=random_string_here_32_characters_min
@@ -301,8 +304,22 @@ IMGFLIP_USERNAME=your_imgflip_username
 IMGFLIP_PASSWORD=your_imgflip_password
 
 # Environment
+NODE_ENV=development
+```
+
+The block above is a working local setup: `NODE_ENV=development` goes with the
+`http://localhost:3000` dashboard URL. Going to production means changing both
+lines together —
+
+```env
+DASHBOARD_URL=https://bot.example.com
 NODE_ENV=production
 ```
+
+— because `NODE_ENV=production` with a non-HTTPS `DASHBOARD_URL` aborts startup
+with `DASHBOARD_URL must use HTTPS in production`. Discord also rejects
+non-HTTPS OAuth redirect URIs, so there is no production setup where the
+`http://` value is correct.
 
 ### Generating Session Secret
 

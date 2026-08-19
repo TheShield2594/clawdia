@@ -445,7 +445,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 /explore journal       - Reread your most recent finds
 /explore relics        - Open your relic case and see what it earns you
 /explore profile       - Explorer level, stamina, and field record
-/explore map  or  /map - Unroll your persistent Explorer's Map
+/explore map - Unroll your persistent Explorer's Map
 ```
 
 **Regions:**
