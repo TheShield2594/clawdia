@@ -2218,15 +2218,21 @@ async function executeQuests(interaction, sub) {
             });
         }
 
-        const remaining = user.quests.filter(q =>
-            q.questId.startsWith('hq_') &&
-            q.expiresAt?.getTime() > now &&
-            q.progress !== -1
-        ).length;
+        const liveQuests = user.quests.filter(q =>
+            q.questId.startsWith('hq_') && q.expiresAt?.getTime() > now
+        );
+        const remaining = liveQuests.filter(q => q.progress !== -1).length;
+
+        // A fresh batch is only assigned once the current one has expired — see the
+        // guard in assign*Quests. Say when that is rather than implying that playing
+        // again brings one sooner, which is what this footer used to promise.
+        const nextSetIn = liveQuests.length
+            ? formatExpiry(Math.min(...liveQuests.map(q => q.expiresAt.getTime())) - now)
+            : null;
 
         embed.setFooter({ text: remaining > 0
             ? `${remaining} quest(s) remaining — use /hunt quests view`
-            : 'All quests claimed! Hunt again to receive a fresh set.' });
+            : `All quests claimed! A fresh set arrives in ${nextSetIn ?? 'a few hours'}.` });
         embed.setTimestamp();
 
         return interaction.reply({ embeds: [embed] });

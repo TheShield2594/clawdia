@@ -325,8 +325,15 @@ function rollFailureSeverity() {
 // ─── PAYOUT CALCULATION ───────────────────────────────────────────────────────
 
 /**
- * Returns { adjustedPayout, cappedByHard, gatheringYield }, where gatheringYield
- * is { effect, label, emoji, chargesLeft } when a charge was spent here.
+ * Returns { adjustedPayout, cappedByHard, gatheringYield, forfeited, softCapped,
+ * fatigueMult }, where gatheringYield is { effect, label, emoji, chargesLeft } when
+ * a charge was spent here.
+ *
+ * The three throttles below — fatigue past DIM_RETURNS_THRESHOLD_1, the halving past
+ * DAILY_SOFT_CAP, and the DAILY_HARD_CAP floor — used to apply with nothing said. A
+ * player's haul quietly shrank by 15%, then 50%, then to zero with no explanation
+ * anywhere in the embed, which reads as the bot cheating rather than as a design.
+ * `forfeited` is what the cap swallowed, so the caller can show it.
  */
 function applyPayoutModifiers(user, rawPayout, depth) {
     const m = user.mining;
@@ -342,19 +349,20 @@ function applyPayoutModifiers(user, rawPayout, depth) {
     const artificerBonus = getArtificerMineYieldBonus(user);
     if (artificerBonus > 0) payout *= (1 + artificerBonus);
 
-    if (m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_3) {
-        payout *= 0.55;
-    } else if (m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_2) {
-        payout *= 0.70;
-    } else if (m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_1) {
-        payout *= 0.85;
-    }
+    const fatigueMult =
+        m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_3 ? 0.55 :
+        m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_2 ? 0.70 :
+        m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_1 ? 0.85 : 1.00;
+    payout *= fatigueMult;
 
     payout = Math.round(payout);
 
     // Hard cap: zero coins — check before consuming item charges
     if (m.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
-        return { adjustedPayout: 0, cappedByHard: true, gatheringYield: null };
+        return {
+            adjustedPayout: 0, cappedByHard: true, gatheringYield: null,
+            forfeited: payout, softCapped: true, fatigueMult, artificerRate: artificerBonus,
+        };
     }
 
     // Applies the daily soft cap and clamps to the headroom left under the hard cap.
@@ -364,6 +372,7 @@ function applyPayoutModifiers(user, rawPayout, depth) {
 
     const basePayout    = settle(payout);
     const doubledPayout = settle(payout * 2);
+    const throttles     = { softCapped, fatigueMult, artificerRate: artificerBonus };
 
     // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
     // is active. Only burn the charge when doubling actually pays more — within a
@@ -374,6 +383,8 @@ function applyPayoutModifiers(user, rawPayout, depth) {
         consumeEffect(user, gatherEffect);
         const cfg = EFFECT_CONFIGS[gatherEffect];
         return {
+            ...throttles,
+            forfeited:      Math.max(0, payout * 2 - doubledPayout),
             adjustedPayout: doubledPayout,
             cappedByHard:   false,
             gatheringYield: {
@@ -385,7 +396,23 @@ function applyPayoutModifiers(user, rawPayout, depth) {
         };
     }
 
-    return { adjustedPayout: basePayout, cappedByHard: false, gatheringYield: null };
+    return {
+        ...throttles,
+        forfeited:      Math.max(0, payout - basePayout),
+        adjustedPayout: basePayout,
+        cappedByHard:   false,
+        gatheringYield: null,
+    };
+}
+
+/**
+ * How long until the daily window — caps, fatigue and Energy Tonic allowance —
+ * rolls over. Null when the player has no window open yet.
+ */
+function msUntilDailyReset(user) {
+    const start = user.mining?.dailyWindowStart;
+    if (!start) return null;
+    return Math.max(0, LIMITS.DAILY_WINDOW_MS - (Date.now() - start.getTime()));
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -626,7 +653,10 @@ function executeMine(user, depthId, options = {}) {
 
         const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
         const payoutBeforeMods = Math.round(rawPayout * critMultiplier * streakMult);
-        const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, payoutBeforeMods, depth);
+        const {
+            adjustedPayout, cappedByHard, gatheringYield, forfeited, softCapped, fatigueMult,
+            artificerRate,
+        } = applyPayoutModifiers(user, payoutBeforeMods, depth);
 
         let specialDrop = null;
         const mineDropChance = (isCrit ? ore.specialDrop?.chance * 2 : ore.specialDrop?.chance ?? 0) * (options.marketplaceActive ? 1.10 : 1.0);
@@ -669,7 +699,10 @@ function executeMine(user, depthId, options = {}) {
             levelUp: lvResult.leveledUp ? lvResult : null,
             cappedByHard,
             gatheringYield,
-            streakMult
+            streakMult,
+            // What the daily throttles took, so the embed can account for it rather
+            // than leaving the player to notice their haul shrinking on its own.
+            forfeited, softCapped, fatigueMult, artificerRate,
         });
 
         if (pickaxe.currentDurability <= 0) result.pickaxeBroke = true;
@@ -717,10 +750,21 @@ function executeMine(user, depthId, options = {}) {
         const caveInBlocked = trapActive || ironWillBlocks;
 
         if (caveInRisk > 0 && Math.random() < caveInRisk && !caveInBlocked) {
-            // Cave-in: flag it and store at-risk payout; mine.js resolves interactively
+            // Cave-in: flag it and store at-risk payout; mine.js resolves interactively.
             result.caveIn        = true;
             result.caveInDur     = intensityDurLoss;
+            // What executeMine has already credited, and what mine.js reverses if the
+            // player flees.
             result.caveInPayout  = result.finalPayout ?? 0;
+            // The multiplier the vein read earned is held in escrow, not destroyed.
+            // Cave-in and the multiplier used to be exclusive branches, so reading the
+            // vein perfectly, caving in, and spending a blast charge to dig clear paid
+            // exactly the same as a one-in-three read — the charge bought back a haul
+            // stripped of the very bonus it was risked for. mine.js pays this out only
+            // on a successful escape.
+            result.caveInEscrow  = multiplier !== 1.0 && result.finalPayout
+                ? Math.round(result.finalPayout * (multiplier - 1.0))
+                : 0;
             // Durability loss applied here regardless of player choice
             applyDurabilityLoss(pickaxe, intensityDurLoss);
             if (pickaxe.currentDurability <= 0) { pickaxe.status = 'broken'; result.pickaxeBroke = true; }
@@ -990,6 +1034,7 @@ module.exports = {
     hasOreAtDepth,
     rollFailureSeverity,
     applyPayoutModifiers,
+    msUntilDailyReset,
     applyDurabilityLoss,
     updatePickaxeStatus,
     isCondemned,

@@ -44,6 +44,7 @@ const {
     applyXp,
     updateMineMap,
     renderMineMap,
+    msUntilDailyReset,
     getRaidableMaterials,
     hasRaidableMaterials,
     planRaidHaul,
@@ -664,7 +665,10 @@ async function handleDig(interaction) {
                     `━━━━━━━━━━━━━━━━━━━━━━━\n` +
                     `The tunnel is collapsing around you. Dust fills the air.\n` +
                     `You have seconds to decide.\n\n` +
-                    `⚡ **Ore at stake:** ${(result.caveInPayout ?? 0).toLocaleString()} coins\n\n` +
+                    `⚡ **Ore at stake:** ${((result.caveInPayout ?? 0) + (result.caveInEscrow ?? 0)).toLocaleString()} coins` +
+                    (result.caveInEscrow > 0
+                        ? ` *(includes the ${chosenIntensity.multiplier}× your vein read earned)*\n\n`
+                        : `\n\n`) +
                     (chargesAvailable > 0
                         ? `💥 You have **${chargesAvailable}** blast charge${chargesAvailable !== 1 ? 's' : ''} — enough to blow an escape route.`
                         : `⚠️ You have no blast charges — you'll have to run.`)
@@ -701,6 +705,20 @@ async function handleDig(interaction) {
                 if (chargeType) {
                     m.charges[chargeType] = chargesAvailable - 1;
                     user.markModified('mining');
+                }
+                // Digging clear releases the escrowed intensity bonus — the charge buys
+                // back the whole haul, multiplier included. Clamped to the daily hard
+                // cap the same way the uninterrupted path clamps it.
+                if (result.caveInEscrow > 0) {
+                    const remainingCap = Math.max(0, LIMITS.DAILY_HARD_CAP - m.dailyCoins);
+                    const bonus        = Math.min(result.caveInEscrow, remainingCap);
+                    if (bonus > 0) {
+                        user.balance       += bonus;
+                        m.totalEarned      += bonus;
+                        m.dailyCoins       += bonus;
+                        result.finalPayout  = (result.finalPayout ?? 0) + bonus;
+                        result.caveInBonusPaid = bonus;
+                    }
                 }
                 result.caveInEscaped = true;
             } else {
@@ -752,6 +770,7 @@ async function handleDig(interaction) {
                 user.mining.dailyCoins    += bonus;
                 result.finalPayout        += bonus;
                 result.petYieldBonus       = bonus;
+                result.petYieldPct         = petMineYieldPct;
             }
         }
 
@@ -857,7 +876,11 @@ async function handleDig(interaction) {
         {
             const desc = embed.data.description ?? '';
             const lines = [`> ⛏️ *${finalIcons} — Vein depth ${veinDepth}/3 → ${chosenIntensity.emoji} ${chosenIntensity.name} (${chosenIntensity.multiplier}×)*`];
-            if (result.caveIn && result.caveInEscaped) lines.push(`> 💥 *Cave-in! You used a blast charge — ore saved.*`);
+            if (result.caveIn && result.caveInEscaped) {
+                lines.push(result.caveInBonusPaid > 0
+                    ? `> 💥 *Cave-in! You blasted clear — ore saved, and the ${chosenIntensity.multiplier}× held.*`
+                    : `> 💥 *Cave-in! You used a blast charge — ore saved.*`);
+            }
             else if (result.caveIn) lines.push(`> 💥 *${randomFrom(MINE_CAVE_LINES)}*`);
             embed.setDescription(desc + '\n' + lines.join('\n'));
         }
@@ -1634,15 +1657,21 @@ async function handleQuests(interaction, sub) {
             });
         }
 
-        const remaining = user.quests.filter(q =>
-            q.questId.startsWith('mq_') &&
-            q.expiresAt?.getTime() > now &&
-            q.progress !== -1
-        ).length;
+        const liveQuests = user.quests.filter(q =>
+            q.questId.startsWith('mq_') && q.expiresAt?.getTime() > now
+        );
+        const remaining = liveQuests.filter(q => q.progress !== -1).length;
+
+        // A fresh batch is only assigned once the current one has expired — see the
+        // guard in assign*Quests. Say when that is rather than implying that playing
+        // again brings one sooner, which is what this footer used to promise.
+        const nextSetIn = liveQuests.length
+            ? formatExpiry(Math.min(...liveQuests.map(q => q.expiresAt.getTime())) - now)
+            : null;
 
         embed.setFooter({ text: remaining > 0
             ? `${remaining} quest(s) remaining — use /mine quests view`
-            : 'All quests claimed! Mine again to receive a fresh set.' });
+            : `All quests claimed! A fresh set arrives in ${nextSetIn ?? 'a few hours'}.` });
         embed.setTimestamp();
 
         return interaction.reply({ embeds: [embed] });
@@ -2250,7 +2279,12 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
         const color = isCrit ? '#FFD700' : TIER_COLORS[tier];
 
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
-        const payoutDisplay = cappedByHard ? `~~${currency}${finalPayout}~~ (daily cap reached)` : `**${currency}${finalPayout.toLocaleString()}**`;
+        // At the hard cap finalPayout is already 0, so the old strikethrough rendered
+        // as "~~0~~ (daily cap reached)" — it struck out the wrong number and never
+        // told the player what the cap had actually cost them.
+        const payoutDisplay = cappedByHard
+            ? `~~${currency}${(result.forfeited ?? 0).toLocaleString()}~~ → **${currency}0**`
+            : `**${currency}${finalPayout.toLocaleString()}**`;
 
         const tierNum  = TIER_NUM[tier] ?? 1;
         const isEvent  = tier === 'event';
@@ -2279,12 +2313,34 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
                 { name: 'Stamina',  value: buildStaminaLine(user),                  inline: true }
             );
 
+        // Every multiplicative factor that touched this haul, so the arithmetic on
+        // screen reconciles. This used to list streak and crit, multiply just those
+        // two, and then print the *final* payout — which also carried the intensity
+        // multiplier (up to 3x), the featured depth, the pet, the district and the
+        // Artificer bonus. Players saw "2.52x → +1,340" when the real stack was 5x.
         const mineMultEntries = [];
-        if ((result.streakMult ?? 1) > 1.0) mineMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
-        if (isCrit)                          mineMultEntries.push({ emoji: '⚡', label: `${critMultiplier.toFixed(2)}x crit` });
-        if (mineMultEntries.length > 0) {
-            const mineCombined = (result.streakMult ?? 1) * critMultiplier;
-            embed.addFields({ name: '📈 Multipliers', value: stackBar(mineMultEntries, mineCombined, finalPayout, currency), inline: false });
+        let mineCombined = 1;
+        const addMult = (emoji, label, factor) => {
+            if (!(factor > 0) || Math.abs(factor - 1) < 0.005) return;
+            mineMultEntries.push({ emoji, label });
+            mineCombined *= factor;
+        };
+
+        const intensityMult = result.caveIn && !result.caveInBonusPaid ? 1 : (result.intensityLevel?.multiplier ?? 1);
+        addMult('🔥', `${(result.streakMult ?? 1).toFixed(2)}x`, result.streakMult ?? 1);
+        addMult('⚡', `${critMultiplier.toFixed(2)}x crit`, critMultiplier);
+        addMult(result.intensityLevel?.emoji ?? '⛏️', `${intensityMult.toFixed(2)}x depth`, intensityMult);
+        addMult('🌟', `${(1 + FEATURED_PAYOUT_BONUS).toFixed(2)}x featured`, result.featuredDepthBonus > 0 ? 1 + FEATURED_PAYOUT_BONUS : 1);
+        addMult('💎', `${(1 + (result.petYieldPct ?? 0) / 100).toFixed(2)}x pet`, result.petYieldBonus > 0 ? 1 + (result.petYieldPct ?? 0) / 100 : 1);
+        addMult('🌲', `${(1 + WILDERNESS_YIELD_BONUS).toFixed(2)}x district`, result.wildernessBonus > 0 ? 1 + WILDERNESS_YIELD_BONUS : 1);
+        addMult('⚒️', `${(1 + (result.artificerRate ?? 0)).toFixed(2)}x artificer`, 1 + (result.artificerRate ?? 0));
+        addMult('✨', '2.00x yield', result.gatheringYield ? 2 : 1);
+
+        if (mineMultEntries.length > 0 && finalPayout > 0) {
+            // What the stack itself contributed: the haul, less what a flat 1x roll of
+            // the same ore would have paid.
+            const stackGain = Math.max(0, finalPayout - Math.round(finalPayout / mineCombined));
+            embed.addFields({ name: '📈 Multipliers', value: stackBar(mineMultEntries, mineCombined, stackGain, currency), inline: false });
         }
 
         if (result.gatheringYield) {
@@ -2314,11 +2370,14 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
             embed.addFields({ name: '⚠️ Low Durability', value: `Your **${pickaxe.name}** is nearly worn out (${pickaxe.currentDurability}/${pickaxe.maxDurability}). Repair soon!`, inline: false });
         }
 
+        const throttleField = buildThrottleField(user, result, currency);
+        if (throttleField) embed.addFields(throttleField);
+
         embed.addFields(
             { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`,   inline: true },
             { name: 'Miner XP',  value: buildXpLine(user),                               inline: true }
         );
-        embed.setFooter({ text: `Cooldown: 30s • ${buildActiveConsumablesLine(user)}` });
+        embed.setFooter({ text: `Cooldown: 30s • ${buildDailyProgressLine(user, currency)} • ${buildActiveConsumablesLine(user)}` });
         embed.setTimestamp();
         return embed;
     }
@@ -2369,6 +2428,43 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
     return embed;
 }
 
+/**
+ * A field explaining whichever daily throttle is currently biting, or null when none
+ * is. These are the three things that used to shrink a haul with nothing said: fatigue
+ * past DIM_RETURNS_THRESHOLD_1, the halving past DAILY_SOFT_CAP, and the hard cap.
+ */
+function buildThrottleField(user, result, currency) {
+    const m       = user.mining;
+    const resetIn = msUntilDailyReset(user);
+    const resetNote = resetIn == null ? '' : ` Resets in **${formatMs(resetIn)}**.`;
+
+    if (result.cappedByHard) {
+        return {
+            name: '🛑 Daily Cap Reached',
+            value: `You've earned the daily maximum of ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}. `
+                 + `This haul paid nothing.${resetNote}\nXP, materials and quest progress still count.`,
+            inline: false,
+        };
+    }
+
+    const notes = [];
+    if (result.softCapped) {
+        notes.push(`💰 Past ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} today — **payouts are halved** until the window resets.`);
+    }
+    if ((result.fatigueMult ?? 1) < 1) {
+        notes.push(`😪 **${m.dailyMines}** digs today — **fatigue** has payouts at **${Math.round(result.fatigueMult * 100)}%**.`);
+    }
+    if (!notes.length) return null;
+
+    if (result.forfeited > 0) {
+        notes.push(`This dig gave up ${currency}${result.forfeited.toLocaleString()}.${resetNote}`);
+    } else if (resetNote) {
+        notes.push(resetNote.trim());
+    }
+
+    return { name: '⏳ Daily Throttle', value: notes.join('\n'), inline: false };
+}
+
 function buildFailureTitle(severityId) {
     return {
         clean_miss: '💨 Empty Vein!',
@@ -2389,6 +2485,13 @@ function buildXpLine(user) {
     const toNext = xpToNextLevel(m.level, m.xp);
     if (toNext === null) return `${m.xp.toLocaleString()} XP (MAX)`;
     return `${m.xp.toLocaleString()} XP (${toNext} to Lv.${m.level + 1})`;
+}
+
+/** Running daily earnings against the soft cap — the number the throttles key off. */
+function buildDailyProgressLine(user, currency) {
+    const earned = user.mining.dailyCoins ?? 0;
+    const compact = n => n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : `${n}`;
+    return `Today: ${currency}${compact(earned)}/${compact(LIMITS.DAILY_SOFT_CAP)}`;
 }
 
 function buildActiveConsumablesLine(user) {
