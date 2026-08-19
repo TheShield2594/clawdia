@@ -1113,3 +1113,56 @@ describe('the map names the places you already paid to reach', () => {
         expect(new Set(gates).size).toBe(gates.length);
     });
 });
+
+describe('the featured region rotation', () => {
+    const { getDailyFeatured, FEATURED_REGIONS, FEATURED_PAYOUT_BONUS } = require('../src/data/featuredRotation');
+
+    test('only ever features a region that exists and is always reachable', () => {
+        for (const entry of FEATURED_REGIONS) {
+            const region = REGIONS[entry.id];
+            expect(region).toBeDefined();
+            // Seasonal regions vanish with the calendar; featuring one would
+            // advertise a bonus most of the server cannot collect.
+            expect(region.seasonalEventId).toBeUndefined();
+            expect(entry.name).toBe(region.name);
+            expect(entry.emoji).toBe(region.emoji);
+        }
+    });
+
+    test('every core region is in the rotation', () => {
+        const core = REGION_LIST.filter(r => !r.seasonalEventId).map(r => r.id).sort();
+        expect(FEATURED_REGIONS.map(r => r.id).sort()).toEqual(core);
+    });
+
+    test('the pick is stable for a guild and spread across guilds', () => {
+        expect(getDailyFeatured('guild-a').region.id).toBe(getDailyFeatured('guild-a').region.id);
+        const seen = new Set();
+        for (let i = 0; i < 200; i++) seen.add(getDailyFeatured(`guild-${i}`).region.id);
+        expect(seen.size).toBe(FEATURED_REGIONS.length);
+    });
+
+    test('the bonus rides the coin multiplier, so it lifts pay without raising the cost of failing', () => {
+        // Folding it in anywhere else would mean a featured region also made
+        // encounter losses and traps 25% more expensive.
+        const region = REGIONS.whispering_forest;
+        const user = makeUser();
+        const settings = makeGuildSettings();
+        const plain    = getPayoutMultiplier(user, region, settings, 1, null);
+        const featured = getPayoutMultiplier(user, region, settings, 1 + FEATURED_PAYOUT_BONUS, null);
+        expect(featured).toBeCloseTo(plain * (1 + FEATURED_PAYOUT_BONUS), 6);
+        expect(getPenaltyMultiplier(region)).toBe(region.payoutMultiplier);
+    });
+
+    test('a featured haul is still bound by the daily cap', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+        user.exploration.dailyCoins = LIMITS.DAILY_HARD_CAP;
+        for (let i = 0; i < 60; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            const r = executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(),
+                { coinMultiplier: 1 + FEATURED_PAYOUT_BONUS });
+            if (r.pendingChoice) resolveEncounter(user, REGIONS.whispering_forest, makeGuildSettings(), r, 'observe');
+        }
+        expect(user.exploration.dailyCoins).toBe(LIMITS.DAILY_HARD_CAP);
+    });
+});

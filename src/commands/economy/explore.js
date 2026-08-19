@@ -8,7 +8,7 @@ const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceD
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const {
-    LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST, CORE_REGION_IDS,
+    LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST,
     RELIC_LIST, RELIC_RARITY_ORDER, TOTAL_CORE_RELICS,
     FOOTER_LINES, INJURY_LINES,
 } = require('../../data/exploreData');
@@ -38,7 +38,7 @@ const {
     formatMs,
 } = require('../../services/exploreService');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
-const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { ensureQuests, onExplore, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
 const {
@@ -50,6 +50,7 @@ const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { logTransaction } = require('../../utils/logTransaction');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { progressBar } = require('../../utils/progressBar');
+const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
 
 const REGION_CHOICES = REGION_LIST.map(r => ({
     name: `${r.emoji} ${r.name}${r.seasonalEventId ? ' (seasonal)' : ''}`,
@@ -324,8 +325,17 @@ async function handleGo(interaction) {
     try {
 
         // ── Run the expedition ────────────────────────────────────────────────────
-        const coinMultiplier = getEventCoinMultiplier(guildSettings);
+        // Featured region: folded into the coin multiplier rather than added to
+        // the payout afterwards, so the daily cap still governs the boosted haul
+        // and the encounter prompt quotes the numbers the player will really see.
+        // It rides the coin multiplier deliberately — getPenaltyMultiplier ignores
+        // that, so a featured region pays more without costing more to fail in.
+        const featuredRegion = getDailyFeatured(interaction.guild.id).region;
+        const isFeatured = region.id === featuredRegion.id;
+        const coinMultiplier = getEventCoinMultiplier(guildSettings)
+            * (isFeatured ? 1 + FEATURED_PAYOUT_BONUS : 1);
         const result = executeExplore(user, region, guildSettings, { coinMultiplier });
+        result.featured = isFeatured;
         const firstVisit = result.firstVisit;
 
         // Commit stamina spend + cooldown timestamp now, before the (up to 20s)
@@ -359,11 +369,14 @@ async function handleGo(interaction) {
         const reroutedLine = rerouted
             ? `\n\n🧭 **${rerouted.emoji} ${rerouted.name}** is closed to you right now, so your compass reset to **${region.emoji} ${region.name}**. It'll wait.`
             : '';
+        const featuredLine = isFeatured
+            ? `\n\n🌟 **Featured region today** — everything here pays **+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%** until the rotation turns over.`
+            : '';
         await interaction.reply({
             embeds: [new EmbedBuilder()
                 .setColor(region.color)
                 .setTitle(`${region.emoji} Setting out — ${region.name}`)
-                .setDescription(`*${result.intro}*${reroutedLine}`)
+                .setDescription(`*${result.intro}*${reroutedLine}${featuredLine}`)
                 .setFooter({ text: region.tagline })],
         });
         await delay(2000);
@@ -450,11 +463,14 @@ async function handleGo(interaction) {
         // Season pass daily missions count expeditions, the same way they count
         // hunts and casts. Recorded in memory — the save below carries it.
         recordMissionProgress(user, 'explore', 1, guildSettings);
-        let questsDone = [], questsNear = [];
+        // Expedition quests count the trip; the coin quests count the haul. A
+        // quiet walk still advances the first and rightly not the second.
+        const trip = await onExplore(user, guildSettings);
+        let questsDone = [...trip.completed], questsNear = [...trip.nearComplete];
         if (result.payout > 0) {
             const earn = await onEconomyEarn(user, guildSettings, result.payout);
-            questsDone = earn.completed;
-            questsNear = earn.nearComplete;
+            questsDone.push(...earn.completed);
+            questsNear.push(...earn.nearComplete);
         }
 
         const encounterDelta = detachBalanceDelta(user, balanceBaseline);
@@ -741,6 +757,7 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
 
     // Standing bonuses, shown once they're actually doing something
     const boosts = [];
+    if (result.featured) boosts.push(`🌟 Featured region +${Math.round(FEATURED_PAYOUT_BONUS * 100)}%`);
     if (result.surveyed) boosts.push(`🏅 Fully surveyed +${Math.round(LIMITS.SURVEY_BONUS * 100)}%`);
     const relicBonus = getRelicBonus(user);
     if (relicBonus > 0) boosts.push(`🏺 Relic case +${Math.round(relicBonus * 100)}%`);
@@ -938,6 +955,7 @@ async function handleRegions(interaction) {
     if (!ctx) return;
     const { guildSettings, user, currency } = ctx;
     const e = user.exploration;
+    const todaysFeature = getDailyFeatured(interaction.guild.id).region;
 
     const sections = REGION_LIST
         .filter(r => isRegionEnabled(r, guildSettings))
@@ -945,6 +963,7 @@ async function handleRegions(interaction) {
             const progress = e.regions.find(r => r.regionId === region.id) ?? null;
             const pct = progress ? regionCompletion(region, progress) : 0;
             const active = e.activeRegion === region.id ? ' 🧭 *(active)*' : '';
+            const star   = region.id === todaysFeature.id ? ' 🌟' : '';
 
             let status;
             if (region.seasonalEventId) {
@@ -958,7 +977,7 @@ async function handleRegions(interaction) {
             }
 
             return [
-                `${region.emoji} **${region.name}**${active} — *${region.tagline}*`,
+                `${region.emoji} **${region.name}**${active}${star} — *${region.tagline}*`,
                 `> ${status}`,
                 `> ${progress ? `${pct}% charted · ${progress.expeditions} expeditions` : 'Uncharted'}`,
             ].join('\n');
@@ -968,7 +987,7 @@ async function handleRegions(interaction) {
         .setColor('#2e7d32')
         .setTitle('🧭 Known Regions')
         .setDescription(sections.join('\n\n'))
-        .setFooter({ text: `Seasonal regions come and go with /event seasons. The core ${CORE_REGION_IDS.length} are always out there, being patient.` })
+        .setFooter({ text: `🌟 ${todaysFeature.name} pays +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% today · seasonal regions come and go with /event seasons.` })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });

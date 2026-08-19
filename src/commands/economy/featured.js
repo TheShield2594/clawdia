@@ -43,7 +43,9 @@ module.exports = {
                 `${featured.fishSpot.emoji}  **Fishing Spot — ${featured.fishSpot.name}**\n` +
                 `> Cast at this location with \`/fish cast location:${featured.fishSpot.id}\`.\n\n` +
                 `${featured.mineDepth.emoji}  **Mine Depth — ${featured.mineDepth.name}**\n` +
-                `> Dig here with \`/mine dig depth:${featured.mineDepth.id}\` for the bonus.\n` +
+                `> Dig here with \`/mine dig depth:${featured.mineDepth.id}\` for the bonus.\n\n` +
+                `${featured.region.emoji}  **Region — ${featured.region.name}**\n` +
+                `> Set out with \`/explore go region:${featured.region.id}\` for the bonus.\n` +
                 div
             )
             .setFooter({ text: `${timeBand.emoji} ${timeBand.label}` })
