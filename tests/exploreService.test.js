@@ -1054,6 +1054,43 @@ describe('approaching an encounter is a bet worth taking', () => {
         expect(loss.penalty).toBeLessThanOrEqual(band.max);
     });
 
+    test('the quoted prize shrinks with the daily cap, but the risk does not', () => {
+        // The prompt exists to say what the player will really be credited. Past
+        // the soft cap applyPayout halves the payout, so quoting the pre-cap
+        // figure would advertise a prize the expedition cannot pay.
+        const region = REGIONS.whispering_forest;
+        const settings = makeGuildSettings();
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+
+        let encounter = null;
+        for (let i = 0; i < 2_000 && !encounter; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            const r = executeExplore(user, region, settings, {});
+            if (r.pendingChoice) encounter = r;
+        }
+        expect(encounter).not.toBeNull();
+
+        user.exploration.dailyCoins = 0;
+        const uncapped = getEncounterStakes(user, region, settings, encounter);
+
+        user.exploration.dailyCoins = LIMITS.DAILY_SOFT_CAP;
+        const softened = getEncounterStakes(user, region, settings, encounter);
+        expect(softened.win.max).toBe(Math.round(uncapped.win.max * LIMITS.DAILY_SOFT_CAP_RATE));
+        expect(softened.safe.max).toBe(Math.round(uncapped.safe.max * LIMITS.DAILY_SOFT_CAP_RATE));
+        // A mistake costs what it always cost — the caps govern what exploration
+        // pays out, never what failing it costs.
+        expect(softened.loss).toEqual(uncapped.loss);
+        expect(softened.capped).toBe(false);
+
+        user.exploration.dailyCoins = LIMITS.DAILY_HARD_CAP;
+        const stopped = getEncounterStakes(user, region, settings, encounter);
+        expect(stopped.win.max).toBe(0);
+        expect(stopped.safe.max).toBe(0);
+        expect(stopped.loss).toEqual(uncapped.loss);
+        expect(stopped.capped).toBe(true);
+    });
+
     test('the prompt quotes the coins this player would actually see', () => {
         const region = REGIONS.crumbling_ruins;
         const settings = makeGuildSettings();

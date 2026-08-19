@@ -401,16 +401,22 @@ async function handleGo(interaction) {
                 embeds: [new EmbedBuilder()
                     .setColor(region.color)
                     .setTitle(`${enc.emoji} ${enc.name}`)
-                    .setDescription(`*${enc.intro}*\n\nApproach it, or watch from a safe distance? Bold pays better. Careful always pays.`)
+                    .setDescription(`*${enc.intro}*\n\n` + (stakes.capped
+                        ? 'Approach it, or watch from a safe distance? The daily cap has already taken everything this can pay, so bold buys you nothing but the risk.'
+                        : 'Approach it, or watch from a safe distance? Bold pays better. Careful always pays.'))
                     .addFields(
                         {
                             name: `🤝 Approach — ${odds}%`,
-                            value: `Win: **+${range(stakes.win)}**\nLose: **−${range(stakes.loss)}**, and it may leave a mark.`,
+                            value: stakes.capped
+                                ? `Win: **nothing** — the daily cap has your coins.\nLose: **−${range(stakes.loss)}**, and it may leave a mark.`
+                                : `Win: **+${range(stakes.win)}**\nLose: **−${range(stakes.loss)}**, and it may leave a mark.`,
                             inline: true,
                         },
                         {
                             name: '🌿 Keep Your Distance',
-                            value: `**+${range(stakes.safe)}**, guaranteed.\nNothing risked, nothing broken.`,
+                            value: stakes.capped
+                                ? '**Nothing**, guaranteed — but nothing risked either.'
+                                : `**+${range(stakes.safe)}**, guaranteed.\nNothing risked, nothing broken.`,
                             inline: true,
                         },
                     )
@@ -739,19 +745,19 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     // not the level, so promising one here would be a promise about the weather.
     if (result.explorerLevelUp) {
         const lift = result.explorerLevelUp;
-        const lines = [`Explorer Level **${lift.oldLevel}** → **${lift.newLevel}** — *${lift.newTitle}*`];
+        const liftLines = [`Explorer Level **${lift.oldLevel}** → **${lift.newLevel}** — *${lift.newTitle}*`];
         const opened = REGION_LIST.filter(r =>
             !r.seasonalEventId
             && isRegionEnabled(r, guildSettings)
             && r.unlockLevel > lift.oldLevel
             && r.unlockLevel <= lift.newLevel);
         for (const opening of opened) {
-            lines.push(
+            liftLines.push(
                 `🔓 **${opening.emoji} ${opening.name}** is within reach — `
                 + `\`/explore travel\` opens the route for ${currency}${opening.unlockCost.toLocaleString()}.`
             );
         }
-        embed.addFields({ name: '⬆️ Level Up!', value: lines.join('\n'), inline: false });
+        embed.addFields({ name: '⬆️ Level Up!', value: liftLines.join('\n'), inline: false });
     }
 
     if (result.hardCapped) {
@@ -932,10 +938,13 @@ async function handleTravel(interaction) {
         if (unlockCharged) {
             // The toll is already gone; hand it back rather than charging for a
             // route that was never opened.
+            // A resolved promise is not proof the coins went back — an update
+            // that matched nothing resolves just as happily. Only a matched
+            // document means the toll actually returned.
             refunded = await User.updateOne(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
                 { $inc: { balance: unlockCharged } },
-            ).then(() => true).catch(refundErr => {
+            ).then(res => (res?.matchedCount ?? 0) > 0).catch(refundErr => {
                 console.error('[explore travel] refund after failed save:', refundErr);
                 return false;
             });

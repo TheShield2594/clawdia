@@ -228,8 +228,12 @@ module.exports = {
                 return interaction.reply({ content: "Couldn't apply the upgrade — you may be at the cap already.", flags: MessageFlags.Ephemeral });
             }
 
-            user.inventory = user.inventory.filter(e => e.quantity > 0);
-            await user.save();
+            // The decrement above is already persisted; this only clears the
+            // husk it may have left behind. Done as a targeted $pull rather than
+            // save(), which would write the whole document — balance included —
+            // back from a snapshot that is already seconds stale.
+            await User.updateOne(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } })
+                .catch(err => console.error('[use] stamina upgrade inventory cleanup failed:', err));
 
             const owned = user.staminaUpgrades ?? 0;
             const embed = new EmbedBuilder()

@@ -124,13 +124,16 @@ describe('the Permanent Stamina +1 shop item does something', () => {
         const capped = makeNovice({ staminaUpgrades: MAX_STAMINA_UPGRADES });
         const absurd = makeNovice({ staminaUpgrades: 99 });
         expect(huntService.getMaxStamina(absurd)).toBe(huntService.getMaxStamina(capped));
+        expect(fishService.getMaxStamina(absurd)).toBe(fishService.getMaxStamina(capped));
         expect(mineService.getMaxStamina(absurd)).toBe(mineService.getMaxStamina(capped));
     });
 
     test('a negative count cannot drain stamina', () => {
         const base = makeNovice();
-        expect(huntService.getMaxStamina(makeNovice({ staminaUpgrades: -5 })))
-            .toBe(huntService.getMaxStamina(base));
+        const drained = makeNovice({ staminaUpgrades: -5 });
+        expect(huntService.getMaxStamina(drained)).toBe(huntService.getMaxStamina(base));
+        expect(fishService.getMaxStamina(drained)).toBe(fishService.getMaxStamina(base));
+        expect(mineService.getMaxStamina(drained)).toBe(mineService.getMaxStamina(base));
     });
 
     test('the shop entry tells players how to apply it', () => {

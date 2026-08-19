@@ -539,13 +539,21 @@ function getEncounterStakes(user, region, guildSettings, result) {
     const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress);
     const penaltyMult = getPenaltyMultiplier(region);
     const loss = encounterLossBand(enc);
-    const scale = (n, mult) => Math.round(n * mult);
+    // Payouts are quoted after the daily caps have taken their cut, because that
+    // is what the player will actually be credited. Losses are not: the caps
+    // govern what exploration pays out, never what a mistake costs.
+    const payout = (n, mult) => settleAgainstDailyCap(user, Math.round(n * mult)).granted;
+    const scale  = (n, mult) => Math.round(n * mult);
+    const capped = settleAgainstDailyCap(user, 1).granted === 0;
     return {
         winChance: enc.winChance,
-        win:  { min: scale(enc.reward.min, coinMult), max: scale(enc.reward.max, coinMult) },
-        safe: { min: scale(enc.reward.min, coinMult * LIMITS.ENCOUNTER_SAFE_RATE),
-                max: scale(enc.reward.max, coinMult * LIMITS.ENCOUNTER_SAFE_RATE) },
+        win:  { min: payout(enc.reward.min, coinMult), max: payout(enc.reward.max, coinMult) },
+        safe: { min: payout(enc.reward.min, coinMult * LIMITS.ENCOUNTER_SAFE_RATE),
+                max: payout(enc.reward.max, coinMult * LIMITS.ENCOUNTER_SAFE_RATE) },
         loss: { min: scale(loss.min, penaltyMult), max: scale(loss.max, penaltyMult) },
+        // True once the hard cap leaves nothing to win, so the prompt can say
+        // the bet is all downside rather than silently offering a 0-coin prize.
+        capped,
     };
 }
 
@@ -682,7 +690,15 @@ function getPenaltyMultiplier(region) {
  *
  * Returns the amount actually granted.
  */
-function applyPayout(user, result, amount) {
+/**
+ * What `amount` is actually worth to this player right now, after the rolling
+ * daily caps. Pure — it reads `dailyCoins` and returns, touching nothing.
+ *
+ * Shared with the encounter prompt on purpose: that prompt exists to quote the
+ * coins the player would really see, and quoting a pre-cap figure while the
+ * payout settles at half of it is the one thing it must not do.
+ */
+function settleAgainstDailyCap(user, amount) {
     const e = user.exploration;
     const remaining  = Math.max(0, LIMITS.DAILY_HARD_CAP - e.dailyCoins);
     const softCapped = e.dailyCoins >= LIMITS.DAILY_SOFT_CAP;
@@ -690,7 +706,12 @@ function applyPayout(user, result, amount) {
     // line — same settlement hunting and fishing use, and it keeps the rule
     // something a player can state in one sentence.
     const settled = softCapped ? Math.round(amount * LIMITS.DAILY_SOFT_CAP_RATE) : amount;
-    const granted = Math.min(settled, remaining);
+    return { granted: Math.min(settled, remaining), settled, softCapped };
+}
+
+function applyPayout(user, result, amount) {
+    const e = user.exploration;
+    const { granted, settled, softCapped } = settleAgainstDailyCap(user, amount);
     if (granted > 0) {
         user.balance       += granted;
         e.totalEarned      += granted;

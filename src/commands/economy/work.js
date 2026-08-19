@@ -301,6 +301,7 @@ module.exports = {
             if (coinMult > 1.0)     multEntries.push({ emoji: '💰🚀', label: `${coinMult}x` });
             if (serverMult > 1.0)   multEntries.push({ emoji: '🌐', label: `${serverMult}x` });
             if (petWorkBonus > 1.0) multEntries.push({ emoji: '🐶', label: `${petWorkBonus.toFixed(2)}x` });
+            if (merchantMult > 1.0) multEntries.push({ emoji: '💼', label: `${merchantMult.toFixed(2)}x` });
             const bar = stackBar(multEntries, combined, finalEarned, currency);
             const capNote = capActive ? `\n  ⚠️ capped at ${MAX_COMBINED_MULTIPLIER}x` : '';
             const bonusStr = bar ? `\n  ${bar}${capNote}` : '';

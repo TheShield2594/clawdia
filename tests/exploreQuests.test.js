@@ -62,14 +62,59 @@ describe('the hook that advances them', () => {
             .resolves.toEqual({ completed: [], nearComplete: [] });
     });
 
-    test('it advances exactly the exploration quests', () => {
-        // Guards against a new quest being added to the pool and never wired.
-        const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'questService.js'), 'utf8');
-        const body = src.slice(src.indexOf('async function onExplore'));
-        const listed = [...body.slice(0, body.indexOf('\n}')).matchAll(/'(daily|weekly)_explore_\w+'/g)].map(m => m[0].slice(1, -1));
-        const pooled = [...(DAILY_QUEST_POOL ?? []), ...(WEEKLY_QUEST_POOL ?? [])]
+    // A user holding every exploration quest, unstarted and unexpired.
+    function explorer() {
+        const expiresAt = new Date(Date.now() + 3_600_000);
+        return {
+            xp: 0, balance: 0, questsCompleted: 0,
+            streak: { current: 0 }, season: {},
+            quests: EXPLORE_QUEST_IDS.map(questId => ({ questId, progress: 0, expiresAt, completedAt: null })),
+            markModified: jest.fn(),
+        };
+    }
+
+    test('one expedition advances every exploration quest', async () => {
+        const user = explorer();
+        await questService.onExplore(user, { quests: { enabled: true } });
+        for (const quest of user.quests) expect(quest.progress).toBe(1);
+    });
+
+    test('reaching a target completes it and pays out once', async () => {
+        const user = explorer();
+        const daily3 = () => user.quests.find(q => q.questId === 'daily_explore_3');
+
+        let completed = [];
+        for (let i = 0; i < 3; i++) {
+            completed = (await questService.onExplore(user, { quests: { enabled: true } })).completed;
+        }
+        expect(completed.map(c => c.def?.questId ?? c.questId)).toContain('daily_explore_3');
+        expect(daily3().progress).toBe(3);
+        expect(daily3().completedAt).toBeInstanceOf(Date);
+        expect(user.balance).toBeGreaterThan(0);
+        expect(user.xp).toBeGreaterThan(0);
+
+        // A finished quest is finished — further expeditions must not re-pay it.
+        const paidSoFar = user.balance;
+        const again = await questService.onExplore(user, { quests: { enabled: true } });
+        expect(again.completed.map(c => c.def?.questId ?? c.questId)).not.toContain('daily_explore_3');
+        expect(daily3().progress).toBe(3);
+        expect(user.balance).toBe(paidSoFar);
+    });
+
+    test('an expired quest is left alone', async () => {
+        const user = explorer();
+        user.quests.forEach(q => { q.expiresAt = new Date(Date.now() - 1_000); });
+        await questService.onExplore(user, { quests: { enabled: true } });
+        for (const quest of user.quests) expect(quest.progress).toBe(0);
+    });
+
+    test('the hook covers every exploration quest the pool can deal', () => {
+        // Behavioural counterpart to the wiring check: deal the player the whole
+        // exploration category and confirm the hook moves all of it, so a quest
+        // added to the pool but not to onExplore fails here.
+        const pooled = [...DAILY_QUEST_POOL, ...WEEKLY_QUEST_POOL]
             .filter(q => q.category === 'exploration').map(q => q.questId);
-        expect(listed.sort()).toEqual(pooled.sort());
+        expect(pooled.sort()).toEqual([...EXPLORE_QUEST_IDS].sort());
     });
 
     test('the expedition command calls it', () => {

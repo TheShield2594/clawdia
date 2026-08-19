@@ -83,35 +83,100 @@ function recordMissionProgress(user, event, amount = 1, guildSettings = null) {
 }
 
 /**
+ * The mission-advancing half of `recordMissionProgress`, expressed as an
+ * aggregation pipeline so Mongo applies it to whatever the document holds at
+ * write time.
+ *
+ * The obvious implementation — read the array, mutate it, `$set` it back — loses
+ * a race it is guaranteed to enter. Casino bets, crimes and quiz answers all
+ * advance missions fire-and-forget, so two can be in flight at once and the
+ * second write silently drops the first one's progress. Worse, `/season
+ * claim-mission` marks a mission `claimed` with its own save: land that between
+ * this read and this write and the flag is erased, and the same mission can be
+ * claimed a second time for another payout.
+ *
+ * `$mergeObjects` touches only `progress` and `completed` on the missions
+ * listening for this event, so `claimed` and every other field survive whatever
+ * else is writing at the same moment.
+ */
+function missionAdvancePipeline(event, step) {
+    return [{
+        $set: {
+            seasonMissions: {
+                $map: {
+                    input: { $ifNull: ['$seasonMissions', []] },
+                    as: 'm',
+                    in: {
+                        $cond: [
+                            { $and: [
+                                { $eq: ['$$m.event', event] },
+                                { $ne: ['$$m.completed', true] },
+                            ] },
+                            { $let: {
+                                vars: { next: { $add: [{ $ifNull: ['$$m.progress', 0] }, step] } },
+                                in: {
+                                    $mergeObjects: ['$$m', {
+                                        // min(next, target) and next >= target, in the
+                                        // operators Mongo and the test evaluator share.
+                                        progress:  { $cond: [{ $gt: ['$$next', '$$m.target'] }, '$$m.target', '$$next'] },
+                                        completed: { $not: [{ $gt: ['$$m.target', '$$next'] }] },
+                                    }],
+                                },
+                            } },
+                            '$$m',
+                        ],
+                    },
+                },
+            },
+        },
+    }];
+}
+
+/**
  * `recordMissionProgress` for callers that never hold a saved user document.
  *
  * Crime, quiz, casino and duels all move coins with targeted atomic updates and
  * deliberately never call `doc.save()` — a save writes `balance` as an absolute
  * `$set` of a number read seconds earlier and would erase anything that landed
- * in between. So this reads the mission fields, advances them, and writes back
- * *only* those two paths. Nothing it touches can collide with a balance update.
+ * in between. So this advances the missions in place, server-side, and touches
+ * no other field on the document.
  *
  * @returns {Promise<Array<object>>} the missions that completed on this call
  */
 async function advanceMissions(Model, filter, event, amount = 1, guildSettings = null) {
     if (guildSettings && !guildSettings?.season?.enabled) return [];
-    const doc = await Model.findOne(filter).catch(() => null);
-    if (!doc) return [];
+    const step = Math.floor(amount);
+    if (!(step > 0)) return [];
 
-    const before   = JSON.stringify(doc.seasonMissions ?? null);
-    const finished = recordMissionProgress(doc, event, amount);
-    const after    = JSON.stringify(doc.seasonMissions ?? null);
-    // A fresh daily set counts as a change even when this event advanced nothing.
-    if (before === after) return finished;
-
-    await Model.updateOne(filter, {
-        $set: {
-            seasonMissions:     doc.seasonMissions,
-            seasonMissionsDate: doc.seasonMissionsDate,
+    // Deal today's hand first if the stored one has expired. Guarded on the
+    // stored date so that concurrent callers can't each deal a different three.
+    const today = missionDayStart();
+    await Model.updateOne(
+        {
+            ...filter,
+            $or: [
+                { seasonMissionsDate: null },
+                { seasonMissionsDate: { $exists: false } },
+                { seasonMissionsDate: { $lt: today } },
+            ],
         },
-    }).catch(err => console.error('[seasonMissions] write failed:', err));
+        { $set: { seasonMissions: generateDailyMissions(), seasonMissionsDate: today } },
+    ).catch(err => console.error('[seasonMissions] rollover failed:', err));
 
-    return finished;
+    // `new: false` returns the pre-image, which is the only way to tell which
+    // missions this call is the one to finish — the update itself is applied by
+    // Mongo, so the post-image alone cannot say who got there first.
+    const before = await Model.findOneAndUpdate(filter, missionAdvancePipeline(event, step), { new: false })
+        .catch(err => {
+            console.error('[seasonMissions] write failed:', err);
+            return null;
+        });
+    if (!before) return [];
+
+    return (before.seasonMissions ?? []).filter(m =>
+        m.event === event
+        && m.completed !== true
+        && ((m.progress ?? 0) + step) >= (m.target ?? 0));
 }
 
-module.exports = { ensureMissions, recordMissionProgress, advanceMissions, missionDayStart };
+module.exports = { ensureMissions, recordMissionProgress, advanceMissions, missionAdvancePipeline, missionDayStart };

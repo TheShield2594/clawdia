@@ -129,45 +129,110 @@ describe('the daily deal', () => {
     });
 });
 
-describe('advanceMissions writes missions and nothing else', () => {
+describe('advanceMissions advances server-side and touches nothing else', () => {
+    const { applyPipelineUpdate } = require('./helpers/pipelineUpdate');
+
+    // A model that applies pipeline updates the way Mongo would, so the test
+    // exercises the real expression rather than a paraphrase of it.
     function fakeModel(doc) {
         return {
             writes: [],
-            findOne: () => Promise.resolve(doc),
-            updateOne(filter, update) { this.writes.push(update); return Promise.resolve({}); },
+            updates: [],
+            updateOne(filter, update) {
+                this.writes.push({ filter, update });
+                return Promise.resolve({ matchedCount: 1 });
+            },
+            findOneAndUpdate(filter, update) {
+                const before = JSON.parse(JSON.stringify(doc));
+                this.updates.push(update);
+                applyPipelineUpdate(doc, update);
+                return Promise.resolve(before);
+            },
         };
     }
 
-    test('it persists only the two mission paths, never the balance', async () => {
-        const doc = userWithMission('crime', 1);
-        const Model = fakeModel(doc);
-        const finished = await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings());
+    const missions = () => [
+        { id: 'crime_1',  event: 'crime',  target: 2, progress: 0, completed: false, claimed: false },
+        { id: 'quiz_1',   event: 'quiz',   target: 1, progress: 0, completed: false, claimed: false },
+    ];
+    const doc = (over = {}) => ({ seasonMissions: missions(), seasonMissionsDate: missionDayStart(), ...over });
 
-        expect(finished).toHaveLength(1);
-        expect(Model.writes).toHaveLength(1);
-        expect(Object.keys(Model.writes[0].$set).sort()).toEqual(['seasonMissions', 'seasonMissionsDate']);
-        expect(JSON.stringify(Model.writes[0])).not.toContain('balance');
+    test('it advances only the missions listening for the event', async () => {
+        const d = doc();
+        const Model = fakeModel(d);
+        await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings());
+        expect(d.seasonMissions[0].progress).toBe(1);
+        expect(d.seasonMissions[1].progress).toBe(0);
     });
 
-    test('an event nothing is listening for writes nothing at all', async () => {
-        const doc = userWithMission('crime', 1);
-        const Model = fakeModel(doc);
-        await advanceMissions(Model, { userId: 'u' }, 'casino', 1, settings());
-        expect(Model.writes).toHaveLength(0);
+    test('it reports the mission it was the one to finish, once', async () => {
+        const d = doc();
+        const Model = fakeModel(d);
+        expect(await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings())).toEqual([]);
+        const finished = await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings());
+        expect(finished.map(m => m.id)).toEqual(['crime_1']);
+        expect(d.seasonMissions[0].completed).toBe(true);
+        // Already finished — a later call must not claim the completion again.
+        expect(await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings())).toEqual([]);
+    });
+
+    test('progress never overshoots the target', async () => {
+        const d = doc();
+        const Model = fakeModel(d);
+        await advanceMissions(Model, { userId: 'u' }, 'crime', 99, settings());
+        expect(d.seasonMissions[0].progress).toBe(2);
+        expect(d.seasonMissions[0].completed).toBe(true);
+    });
+
+    test('a claim landing mid-flight survives — the update never rewrites the array', async () => {
+        // The whole reason this is a pipeline. A read-modify-write would carry a
+        // snapshot taken before the claim and hand the mission back unclaimed,
+        // letting it be claimed a second time for another payout.
+        const d = doc();
+        const Model = fakeModel(d);
+        const original = Model.findOneAndUpdate.bind(Model);
+        Model.findOneAndUpdate = (filter, update) => {
+            d.seasonMissions[0].claimed = true;   // /season claim-mission, mid-flight
+            return original(filter, update);
+        };
+        await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings());
+        expect(d.seasonMissions[0].claimed).toBe(true);
+        expect(d.seasonMissions[0].progress).toBe(1);
+    });
+
+    test('it writes no field other than the missions and their date', async () => {
+        const d = doc({ balance: 5_000 });
+        const Model = fakeModel(d);
+        await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings());
+        expect(d.balance).toBe(5_000);
+        for (const update of Model.updates) {
+            expect(JSON.stringify(update)).not.toContain('balance');
+            expect(Object.keys(update[0].$set)).toEqual(['seasonMissions']);
+        }
+    });
+
+    test('a stale hand is redealt under a guard, not blindly overwritten', async () => {
+        const yesterday = new Date(missionDayStart().getTime() - 24 * 3_600_000);
+        const Model = fakeModel(doc({ seasonMissionsDate: yesterday }));
+        await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings());
+        expect(Model.writes).toHaveLength(1);
+        // The guard is what stops two concurrent callers each dealing a hand.
+        expect(JSON.stringify(Model.writes[0].filter)).toContain('seasonMissionsDate');
     });
 
     test('a missing user is a no-op rather than a throw', async () => {
         const Model = fakeModel(null);
+        Model.findOneAndUpdate = () => Promise.resolve(null);
         await expect(advanceMissions(Model, { userId: 'nobody' }, 'crime', 1, settings())).resolves.toEqual([]);
-        expect(Model.writes).toHaveLength(0);
     });
 
-    test('a switched-off season never even reads', async () => {
-        const Model = fakeModel(userWithMission('crime', 1));
-        let read = false;
-        Model.findOne = () => { read = true; return Promise.resolve(null); };
+    test('a switched-off season never writes at all', async () => {
+        const d = doc();
+        const Model = fakeModel(d);
         await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings(false));
-        expect(read).toBe(false);
+        expect(Model.writes).toHaveLength(0);
+        expect(Model.updates).toHaveLength(0);
+        expect(d.seasonMissions[0].progress).toBe(0);
     });
 });
 

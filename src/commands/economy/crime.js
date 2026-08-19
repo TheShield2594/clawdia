@@ -335,11 +335,6 @@ module.exports = {
 
                 logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime', amount: earned, balance: updated.balance, note: `${crime.name} (success, ${execMethod.id})${isFeaturedCrime ? ' [featured]' : ''}` });
 
-                // Season pass: "Attempt a crime". Fire-and-forget — a mission
-                // that fails to tick must not cost the player their payout.
-                advanceMissions(User, userFilter, 'crime', 1, guildSettings)
-                    .catch(err => console.error('[crime] season mission error:', err));
-
                 const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
                 if (earned >= bigWinThreshold) {
                     logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: earned, source: 'crime', details: crime.displayName });
@@ -475,6 +470,14 @@ module.exports = {
                         .setTimestamp();
                 }
             }
+
+            // Season pass: the mission is "Attempt a crime", so it counts the
+            // attempt — every settled outcome, caught or clean, lifesaver or
+            // fine. Placed after both branches so a failure advances it too.
+            // Fire-and-forget: a mission that fails to tick must not cost the
+            // player the result of a job they already ran.
+            advanceMissions(User, userFilter, 'crime', 1, guildSettings)
+                .catch(err => console.error('[crime] season mission error:', err));
 
             // Suspense delay between execution method selection and result reveal
             const suspenseEmbed = new EmbedBuilder()
