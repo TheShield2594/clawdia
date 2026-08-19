@@ -146,6 +146,7 @@ describe('the Permanent Stamina +1 shop item does something', () => {
 
 describe('Merchant pays only while you are carrying something', () => {
     const { getMerchantCoinBonus } = require('../src/services/synergyService');
+    const srcRoot = path.join(__dirname, '..', 'src');
 
     test('an empty bag earns nothing from it', () => {
         expect(getMerchantCoinBonus(makeUser({ inventory: [] }))).toBe(0);
@@ -159,6 +160,23 @@ describe('Merchant pays only while you are carrying something', () => {
     test('someone below the requirements earns nothing either way', () => {
         const user = makeNovice({ inventory: [{ itemId: 'anything', quantity: 1 }] });
         expect(getMerchantCoinBonus(user)).toBe(0);
+    });
+
+    test('the bonus is shown wherever it is paid', () => {
+        // /work and /crime both break their payout down into a stack bar. A
+        // multiplier folded into the credited coins but left out of that bar
+        // makes the breakdown add up to a different number than the one above
+        // it — which is how this bonus shipped in both commands.
+        for (const file of ['work.js', 'crime.js']) {
+            const src = fs.readFileSync(path.join(srcRoot, 'commands', 'economy', file), 'utf8');
+            expect(src).toContain('merchantMult');
+            // It has to appear in the entries the bar renders. The combined
+            // value it is checked against already carries it in both commands —
+            // what was missing, in both, was the entry naming it.
+            const listed = src.split('\n').some(l =>
+                /merchantMult/.test(l) && /[Ee]ntries\.push/.test(l));
+            expect(listed).toBe(true);
+        }
     });
 
     test('the commands that pay it load the levels it is judged on', () => {

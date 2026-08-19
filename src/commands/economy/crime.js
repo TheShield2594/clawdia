@@ -321,7 +321,8 @@ module.exports = {
                 const isFeaturedCrime = crime.name === featured.crime.name;
                 const baseEarned = Math.floor(crime.minPayout + Math.random() * (crime.maxPayout - crime.minPayout));
                 // Merchant synergy: +5% while carrying anything at all.
-                let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult * (1 + getMerchantCoinBonus(user)));
+                const merchantMult = 1 + getMerchantCoinBonus(user);
+                let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult * merchantMult);
                 if (isFeaturedCrime) earned = Math.round(earned * (1 + FEATURED_PAYOUT_BONUS));
 
                 const updated = await User.findOneAndUpdate(
@@ -351,8 +352,11 @@ module.exports = {
                 const crimeMultEntries = [];
                 if (streakMult > 1.0) crimeMultEntries.push({ emoji: '🔥', label: `${streakMult.toFixed(2)}x` });
                 if (execMethod.payoutMult !== 1.0) crimeMultEntries.push({ emoji: '⚡', label: `×${execMethod.payoutMult}` });
+                if (merchantMult > 1.0) crimeMultEntries.push({ emoji: '💼', label: `${merchantMult.toFixed(2)}x` });
                 if (isFeaturedCrime) crimeMultEntries.push({ emoji: '🌟', label: `+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%` });
-                const crimeBar = stackBar(crimeMultEntries, streakMult * execMethod.payoutMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
+                // Every multiplier folded into `earned` above has to be in here too,
+                // or the bar breaks down a number it does not add up to.
+                const crimeBar = stackBar(crimeMultEntries, streakMult * execMethod.payoutMult * merchantMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
 
                 desc += `\n\n────────────────────\n  ${currency} Earned: **${earned.toLocaleString()} coins**`;
                 if (crimeBar) desc += `\n  ${crimeBar}`;
