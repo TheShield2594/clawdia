@@ -253,13 +253,16 @@ module.exports = {
             // leaving anything else the player spent meanwhile intact.
             let questsDone = [], questsNear = [];
             const balanceAfterShift = updated.balance ?? 0;
-            await ensureQuests(updated, guildSettings);
-            if (finalEarned > 0) {
-                const earn = await onEconomyEarn(updated, guildSettings, finalEarned);
-                questsDone = earn.completed;
-                questsNear = earn.nearComplete;
-            }
             try {
+                // Inside the guard, not above it: the shift is already paid and
+                // the cooldown already set, so a quest lookup that throws must
+                // not cost the player the result embed for a shift they worked.
+                await ensureQuests(updated, guildSettings);
+                if (finalEarned > 0) {
+                    const earn = await onEconomyEarn(updated, guildSettings, finalEarned);
+                    questsDone = earn.completed;
+                    questsNear = earn.nearComplete;
+                }
                 await saveWithBalanceDelta(User, updated, balanceAfterShift, {
                     service: 'work',
                     jobName: 'shiftQuestReward',

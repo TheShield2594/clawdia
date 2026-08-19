@@ -804,7 +804,6 @@ async function handleTravel(interaction) {
         unlockCharged = region.unlockCost;
         e.unlockedRegions.push(region.id);
         unlockLine = `\n\n🔓 Route opened for **${currency}${region.unlockCost.toLocaleString()}**. Money well buried.`;
-        logTransaction({ userId: user.userId, guildId: user.guildId, type: 'explore_unlock', amount: -region.unlockCost, balance: user.balance, note: region.name });
     }
 
     e.activeRegion = region.id;
@@ -822,6 +821,13 @@ async function handleTravel(interaction) {
             ).catch(refundErr => console.error('[explore travel] refund after failed save:', refundErr));
         }
         return interaction.reply({ content: 'Something went wrong opening the route — any coins taken were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+    }
+
+    // Logged after the save, not before: the failure path above hands the toll
+    // back, and a ledger entry written first would leave a debit the balance
+    // never made. `user.balance` is already the authoritative post-charge value.
+    if (unlockCharged) {
+        logTransaction({ userId: user.userId, guildId: user.guildId, type: 'explore_unlock', amount: -unlockCharged, balance: user.balance, note: region.name });
     }
 
     return interaction.reply({

@@ -11,6 +11,7 @@ const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
 const { detachBalanceDelta, commitBalanceDelta, saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { chargeExact, refundCharge } = require('../../utils/balanceDebit');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -62,25 +63,14 @@ const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 
 const WILDERNESS_YIELD_BONUS = 0.10;
 
-// Take `cost` coins with a conditional update rather than `user.balance -= cost`
-// followed by a save: the loaded document's balance goes stale the moment any
-// other command pays the player, and saving it back would erase that payout.
-// Returns the updated document, or null when the player can't afford it any more.
-function chargeBalance(interaction, cost) {
-    return User.findOneAndUpdate(
-        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: cost } },
-        { $inc: { balance: -cost } },
-        { new: true, projection: { balance: 1 } },
-    );
-}
+const walletOf = interaction => ({ userId: interaction.user.id, guildId: interaction.guild.id });
 
-// Undo a chargeBalance when the purchase it paid for could not be persisted.
-function refundBalance(interaction, cost) {
-    return User.updateOne(
-        { userId: interaction.user.id, guildId: interaction.guild.id },
-        { $inc: { balance: cost } },
-    ).catch(err => console.error('[huntshop] refund error:', err));
-}
+// One contract for both, shared with the other grind shops: the charge is a
+// conditional update rather than `user.balance -= cost` followed by a save,
+// because the loaded document's balance goes stale the moment any other
+// command pays the player. See src/utils/balanceDebit.js.
+const chargeBalance = (interaction, cost) => chargeExact(User, walletOf(interaction), cost);
+const refundBalance = (interaction, cost) => refundCharge(User, walletOf(interaction), cost, 'huntshop');
 
 // ─── STEALTH APPROACH OPTIONS (per zone) ─────────────────────────────────────
 // Each zone has a hint about the animal's behaviour + 3 approach strategies.
@@ -1087,12 +1077,17 @@ async function executeStart(interaction) {
                 apexQuestsNear = earn.nearComplete;
             }
             freshUser.markModified('hunt');
+            let apexPayoutOwed = 0;
             try {
-                await saveWithBalanceDelta(User, freshUser, apexBalanceAtLoad, {
+                // Same contract as the hunt's own payout: a credit that would not
+                // land is recorded as owed, and has to be said out loud rather
+                // than rendered as a bonus the player was paid.
+                const apexPaid = await saveWithBalanceDelta(User, freshUser, apexBalanceAtLoad, {
                     service: 'hunt',
                     jobName: 'apexBonusPayout',
                     guildId: interaction.guild.id,
                 });
+                if (!apexPaid.credited) apexPayoutOwed = apexResult.bonusPayout;
                 if (apexQuestsDone.length || apexQuestsNear.length) {
                     notifyQuestComplete(guildSettings, interaction.member, apexQuestsDone, interaction.channel, freshUser).catch(() => null);
                     notifyQuestNearComplete(guildSettings, interaction.member, apexQuestsNear, interaction.channel).catch(() => null);
@@ -1133,6 +1128,13 @@ async function executeStart(interaction) {
                     `\n🔧 Weapon wear: -${apexResult.durabilityLost} durability`
                 )
                 .setTimestamp();
+
+            if (apexPayoutOwed > 0) {
+                apexEmbed.addFields({
+                    name: '⚠️ Payout Not Yet Credited',
+                    value: `The **${currency}${apexPayoutOwed.toLocaleString()}** bonus could not be paid out just now and has been recorded as owed — your balance does not include it yet. It will be applied once the problem clears; tell an admin if it does not.`,
+                });
+            }
 
             await state.btn.update({ embeds: [embed, apexEmbed], components: [] }).catch(() => {});
             return;
@@ -2023,11 +2025,20 @@ async function executeQuests(interaction, sub) {
 
         questEntry.progress = -1;
         user.markModified('quests');
-        await saveWithBalanceDelta(User, user, balanceAtLoad, {
-            service: 'hunt',
-            jobName: 'questClaimCoins',
-            guildId: interaction.guild.id,
-        });
+        try {
+            await saveWithBalanceDelta(User, user, balanceAtLoad, {
+                service: 'hunt',
+                jobName: 'questClaimCoins',
+                guildId: interaction.guild.id,
+            });
+        } catch (err) {
+            // The document was loaded at the top of the command and the message,
+            // reaction and command handlers all write to it, so a version
+            // conflict here is ordinary. Nothing was claimed; say so rather than
+            // leaving the interaction unanswered.
+            console.error('[huntquests claim] save error:', err);
+            return interaction.reply({ content: 'Something went wrong claiming that quest. Please try again.', flags: MessageFlags.Ephemeral });
+        }
 
         const embed = new EmbedBuilder()
             .setColor('#2ecc71')

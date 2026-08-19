@@ -1213,18 +1213,30 @@ async function pvpBattle(interaction, ctx) {
             collectPetAchievements(chUser, guildSettings),
             collectPetAchievements(opUser, guildSettings),
         ]);
-        try {
-            await Promise.all([
-                saveWithBalanceDelta(User, chUser, chBalanceBeforeCare, {
-                    service: 'pet', jobName: 'battleQuestReward', guildId,
-                }),
-                saveWithBalanceDelta(User, opUser, opBalanceBeforeCare, {
-                    service: 'pet', jobName: 'battleQuestReward', guildId,
-                }),
-            ]);
-        } catch (err) {
-            console.error('[pet battle] save error:', err);
-        }
+        // allSettled, not all: `all` rejects on the first failure and leaves the
+        // second rejection unobserved, which Node reports as an unhandled
+        // rejection. Both saves have to be waited on and both reported.
+        const [chSaved, opSaved] = await Promise.allSettled([
+            saveWithBalanceDelta(User, chUser, chBalanceBeforeCare, {
+                service: 'pet', jobName: 'battleQuestReward', guildId,
+            }),
+            saveWithBalanceDelta(User, opUser, opBalanceBeforeCare, {
+                service: 'pet', jobName: 'battleQuestReward', guildId,
+            }),
+        ]);
+        if (chSaved.status === 'rejected') console.error('[pet battle] challenger save error:', chSaved.reason);
+        if (opSaved.status === 'rejected') console.error('[pet battle] opponent save error:', opSaved.reason);
+
+        // The wager is already settled — the stakes were escrowed and the pot
+        // paid with `$inc`s above — so the result still stands and is still
+        // reported. What a failed save costs is the pet XP, the win/loss record
+        // and the battle cooldown, and that has to be said rather than shown as
+        // a battle that was fully recorded.
+        const saveFailed = chSaved.status === 'rejected' || opSaved.status === 'rejected';
+        const saveNote = saveFailed
+            ? '\n⚠️ *The battle result could not be saved — pet XP, records and cooldowns were not updated.*'
+            : '';
+
         announcePetAchievements(interaction, chUser, guildSettings, earnedA);
         announcePetAchievements(interaction, opUser, guildSettings, earnedB);
 
@@ -1238,7 +1250,7 @@ async function pvpBattle(interaction, ctx) {
                 petA: aSnap, petB: bSnap, result, currency,
                 payoutLine,
                 xpLineA: petXpLine(da2.titledName, aXp),
-                xpLineB: petXpLine(db2.titledName, bXp),
+                xpLineB: petXpLine(db2.titledName, bXp) + saveNote,
             })],
             components: [],
         }).catch(() => {});

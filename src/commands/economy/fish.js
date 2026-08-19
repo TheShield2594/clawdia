@@ -11,6 +11,7 @@ const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
 const { detachBalanceDelta, commitBalanceDelta, saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { chargeExact, refundCharge } = require('../../utils/balanceDebit');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -71,25 +72,14 @@ const { refundEffectCharge } = require('../../services/effectsService');
 // Rarity score for hourly fish competition (rarest catch wins)
 const WILDERNESS_YIELD_BONUS = 0.10;
 
-// Take `cost` coins with a conditional update rather than `user.balance -= cost`
-// followed by a save: the loaded document's balance goes stale the moment any
-// other command pays the player, and saving it back would erase that payout.
-// Returns the updated document, or null when the player can't afford it any more.
-function chargeBalance(interaction, cost) {
-    return User.findOneAndUpdate(
-        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: cost } },
-        { $inc: { balance: -cost } },
-        { new: true, projection: { balance: 1 } },
-    );
-}
+const walletOf = interaction => ({ userId: interaction.user.id, guildId: interaction.guild.id });
 
-// Undo a chargeBalance when the purchase it paid for could not be persisted.
-function refundBalance(interaction, cost) {
-    return User.updateOne(
-        { userId: interaction.user.id, guildId: interaction.guild.id },
-        { $inc: { balance: cost } },
-    ).catch(err => console.error('[fishshop] refund error:', err));
-}
+// One contract for both, shared with the other grind shops: the charge is a
+// conditional update rather than `user.balance -= cost` followed by a save,
+// because the loaded document's balance goes stale the moment any other
+// command pays the player. See src/utils/balanceDebit.js.
+const chargeBalance = (interaction, cost) => chargeExact(User, walletOf(interaction), cost);
+const refundBalance = (interaction, cost) => refundCharge(User, walletOf(interaction), cost, 'fishshop');
 
 const FISH_TIER_SCORE = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5, event: 6 };
 
@@ -1059,12 +1049,17 @@ async function handleCast(interaction) {
                 bossQuestsNear = earn.nearComplete;
             }
             freshUser.markModified('fishing');
+            let bossPayoutOwed = 0;
             try {
-                await saveWithBalanceDelta(User, freshUser, bossBalanceAtLoad, {
+                // Same contract as the cast's own payout: a credit that would not
+                // land is recorded as owed, and has to be said out loud rather
+                // than rendered as a bonus the player was paid.
+                const bossPaid = await saveWithBalanceDelta(User, freshUser, bossBalanceAtLoad, {
                     service: 'fish',
                     jobName: 'bossBonusPayout',
                     guildId: interaction.guild.id,
                 });
+                if (!bossPaid.credited) bossPayoutOwed = bossResult.bonusPayout;
                 if (bossQuestsDone.length || bossQuestsNear.length) {
                     notifyQuestComplete(guildSettings, interaction.member, bossQuestsDone, interaction.channel, freshUser).catch(() => null);
                     notifyQuestNearComplete(guildSettings, interaction.member, bossQuestsNear, interaction.channel).catch(() => null);
@@ -1115,6 +1110,13 @@ async function handleCast(interaction) {
                     { name: 'Rod Damage',   value: `-${bossResult.durabilityLost} durability`, inline: true }
                 )
                 .setTimestamp();
+
+            if (bossPayoutOwed > 0) {
+                bossResultEmbed.addFields({
+                    name: '⚠️ Payout Not Yet Credited',
+                    value: `The **${currency}${bossPayoutOwed.toLocaleString()}** bonus could not be paid out just now and has been recorded as owed — your balance does not include it yet. It will be applied once the problem clears; tell an admin if it does not.`,
+                });
+            }
 
             await state.btn.update({ embeds: [embed, bossResultEmbed], components: [] });
             return;

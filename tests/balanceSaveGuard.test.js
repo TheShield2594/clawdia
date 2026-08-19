@@ -36,12 +36,17 @@ const FUNCTION_TYPES = new Set([
 // Verified by hand, and only these. Each one moves coins as a delta through a
 // helper this scan cannot follow, so the lexical pairing it sees is not the
 // write that actually lands.
-const REVIEWED = {
+//
+// Keyed by file *and* identifier, not by file: exempting a whole file would wave
+// through the next unsafe pairing someone adds to it. A Map rather than an object
+// literal, so a source file named `constructor.js` cannot inherit an exemption
+// from `Object.prototype`.
+const REVIEWED = new Map([
     // saveRobState turns the robber's and victim's in-memory changes into
     // guarded `$inc`s. The `robber.save()` calls live on the branches that
     // absorbed the fine and moved no coins at all.
-    'commands/economy/rob.js': 'coin movement goes through saveRobState as $inc deltas',
-};
+    ['commands/economy/rob.js|robber', 'coin movement goes through saveRobState as $inc deltas'],
+]);
 
 function sourceFiles(dir) {
     return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
@@ -125,17 +130,22 @@ function scopesIn(ast) {
 
 const risky = [];   // every function pairing a balance write with a save
 const unsafe = [];  // …of those, the ones that never take balance back out
+const parseFailures = [];
 
 for (const file of sourceFiles(SRC)) {
     const relative = path.relative(SRC, file).split(path.sep).join('/');
+    // `errorRecovery` keeps one unparseable file from taking the whole scan
+    // down, but it also means that file is silently under-scanned — so what it
+    // recovered from is collected and asserted on below.
     const ast = parse(fs.readFileSync(file, 'utf8'), { sourceType: 'script', errorRecovery: true });
+    if (ast.errors?.length) parseFailures.push(`${relative}: ${ast.errors[0].reasonCode}`);
 
     for (const scope of scopesIn(ast)) {
         for (const name of scope.assigned) {
             if (!scope.saved.has(name)) continue;
             const where = `${relative}:${scope.node.loc.start.line} (${name})`;
             risky.push(where);
-            if (!scope.cleared.has(name) && !REVIEWED[relative]) unsafe.push(where);
+            if (!scope.cleared.has(name) && !REVIEWED.has(`${relative}|${name}`)) unsafe.push(where);
         }
     }
 }
@@ -155,9 +165,14 @@ describe('`balance` is never a modified path on a save()', () => {
         expect(unsafe).toEqual([]);
     });
 
+    test('every source file parsed cleanly, so nothing was scanned only in part', () => {
+        expect(parseFailures).toEqual([]);
+    });
+
     test('the hand-reviewed exemptions still exist and still move coins as deltas', () => {
         // An exemption that outlives the file it excuses silently widens the rule.
-        for (const relative of Object.keys(REVIEWED)) {
+        for (const key of REVIEWED.keys()) {
+            const [relative] = key.split('|');
             const full = path.join(SRC, relative);
             expect(fs.existsSync(full)).toBe(true);
             expect(fs.readFileSync(full, 'utf8')).toMatch(/\$inc: *\{? *balance|balance: *robberBalDelta|robberInc\.balance/);

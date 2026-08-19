@@ -28,6 +28,12 @@ jest.mock('../src/models/Guild', () => ({
     findOneAndUpdate: jest.fn(),
     updateOne:        jest.fn(),
 }));
+// The real lobby store, but with the creation observable: asserting only that no
+// lobby is left behind would also pass if one was never opened.
+jest.mock('../src/utils/crashLobby', () => {
+    const actual = jest.requireActual('../src/utils/crashLobby');
+    return { ...actual, createLobby: jest.fn(actual.createLobby) };
+});
 
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
@@ -201,7 +207,7 @@ describe.each(GAMES)('/$name — the stake is taken with a compare-and-set', (ga
 });
 
 describe('/crash leaves nothing behind when the host cannot pay', () => {
-    const { getLobby } = require('../src/utils/crashLobby');
+    const { getLobby, createLobby } = require('../src/utils/crashLobby');
 
     test('the lobby it opened for the host is torn down again', async () => {
         // The lobby is created before the debit, and it is one per channel: a
@@ -221,6 +227,8 @@ describe('/crash leaves nothing behind when the host cannot pay', () => {
         const interaction = makeInteraction({ bet: BET, auto_cashout: null });
         await load('crash').execute(interaction, { releaseLock: jest.fn() });
 
+        // Opened for this channel, then gone again — not merely never opened.
+        expect(createLobby).toHaveBeenCalledWith(CHANNEL_ID, USER_ID, BET);
         expect(getLobby(CHANNEL_ID)).toBeFalsy();
         errorSpy.mockRestore();
     });

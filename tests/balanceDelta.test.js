@@ -311,6 +311,29 @@ describe('saveWithBalanceDelta', () => {
         expect(doc.balance).toBe(1_000);
     });
 
+    test('a penalty cannot push the stored balance below zero', async () => {
+        // The seasonal commands (/trickortreat and friends) clamp their penalty
+        // against the balance they read at the cooldown claim. If the player
+        // spends between that read and this write, the clamp is stale — so the
+        // commit routes a net charge through the pipeline debit, which clamps
+        // again against the balance it is actually writing.
+        const updates = [];
+        const Model = {
+            findOneAndUpdate: async (filter, update) => {
+                updates.push(update);
+                return { balance: 30 }; // pre-image: the player spent nearly everything
+            },
+        };
+        const doc = makeSavingDoc(500, []);
+        doc.balance = Math.max(0, doc.balance - 200);   // the trick penalty, clamped to a stale 500
+
+        const result = await saveWithBalanceDelta(Model, doc, 500);
+
+        expect(Array.isArray(updates[0])).toBe(true);   // pipeline clamp, not a bare $inc
+        expect(result.balance).toBe(0);
+        expect(doc.balance).toBe(0);
+    });
+
     test('a flow that moved no coins issues no write', async () => {
         const log = [];
         const doc = makeSavingDoc(1_000, log);
