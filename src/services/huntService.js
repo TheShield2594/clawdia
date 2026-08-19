@@ -131,6 +131,13 @@ function msUntilNextStamina(user) {
 
 // ─── DAILY WINDOW ────────────────────────────────────────────────────────────
 
+/** Ms until the rolling 24h daily window rolls over (0 if it already has). */
+function msUntilDailyReset(h) {
+    if (!h?.dailyWindowStart) return 0;
+    const elapsed = Date.now() - h.dailyWindowStart.getTime();
+    return Math.max(0, LIMITS.DAILY_WINDOW_MS - elapsed);
+}
+
 /**
  * Resets daily counters if the rolling 24h window has expired.
  * Also resets the stamina tonic daily limit.
@@ -304,6 +311,19 @@ function randInt(min, max) {
 // ─── TIER ROLL ───────────────────────────────────────────────────────────────
 
 /**
+ * How many hunts without a rare+ kill before the zone guarantees one.
+ *
+ * Scaled per zone rather than flat: a single global threshold tuned for the
+ * starter zone's 18% rare+ rate is unreachable everywhere else — at Legendary
+ * Peaks' 63% a 50-hunt dry streak is a 1-in-10^16 event, so the promise the
+ * pity bar makes would never once be kept. Each zone's number is set so a dry
+ * streak is a comparably rare tail event wherever you hunt.
+ */
+function getRarePityThreshold(zone) {
+    return zone?.rarePity ?? LIMITS.RARE_PITY_GUARANTEE;
+}
+
+/**
  * Rolls an animal tier from the zone's weighted table.
  * Bait consumables shift weight from common → rare/epic tiers.
  */
@@ -364,8 +384,9 @@ function rollTier(user, zone) {
         w.legendary += scopeShift * 0.1;
     }
 
-    // Pity guarantee: at sinceRare threshold, force rare+ by zeroing out common/uncommon
-    if ((user.hunt.sinceRare ?? 0) >= LIMITS.RARE_PITY_GUARANTEE) {
+    // Pity guarantee: at the zone's sinceRare threshold, force rare+ by zeroing out
+    // common/uncommon.
+    if ((user.hunt.sinceRare ?? 0) >= getRarePityThreshold(zone)) {
         w.common   = 0;
         w.uncommon = 0;
         if ((w.rare ?? 0) + (w.epic ?? 0) + (w.legendary ?? 0) + (w.event ?? 0) === 0) {
@@ -450,9 +471,11 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
 
     payout = Math.round(payout);
 
-    // Hard cap: zero coins — check before consuming item charges
+    // Hard cap: zero coins — check before consuming item charges. Report what the
+    // kill was worth so the embed can name the forfeited amount instead of
+    // striking through a zero.
     if (h.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
-        return { adjustedPayout: 0, cappedByHard: true };
+        return { adjustedPayout: 0, cappedByHard: true, forfeitedPayout: payout };
     }
 
     // Applies the daily soft cap and clamps to the headroom left under the hard cap.
@@ -811,7 +834,7 @@ function executeHunt(user, zoneId, options = {}) {
             result.traitEffects.push({ trait: 'enraged', msg: 'Its fury drove the prize higher (+25% payout).' });
         }
 
-        const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, payoutBeforeMods, zone);
+        const { adjustedPayout, cappedByHard, gatheringYield, forfeitedPayout } = applyPayoutModifiers(user, payoutBeforeMods, zone);
 
         // Special drop
         let specialDrop = null;
@@ -884,6 +907,7 @@ function executeHunt(user, zoneId, options = {}) {
             specialDrop, xpEarned: xpGain,
             levelUp: lvResult.leveledUp ? lvResult : null,
             cappedByHard,
+            forfeitedPayout,
             gatheringYield,
             streakMult
         });
@@ -1099,23 +1123,34 @@ function rollApexType() {
     return APEX_TYPES[keys[Math.floor(Math.random() * keys.length)]];
 }
 
+// Nerve: the duel's second axis. A wrong aggressive read costs two, so two bad
+// guesses end the fight outright even if the third phase lands — which is what
+// makes the 'safe' option a real hedge rather than a slower way to lose. At one
+// nerve per wrong guess the bar could never reach 0 without also leaving zero
+// correct phases, so it decided nothing and the hunter watched a health bar that
+// was pure decoration.
+const APEX_NERVE_MAX  = 3;
+const APEX_NERVE_COST = 2;
+
+/** Nerve left after the given phase results. */
+function apexNerveAfter(phaseResults) {
+    const misreads = phaseResults.filter(p => !p.correct && p.chosen !== 'safe').length;
+    return Math.max(0, APEX_NERVE_MAX - misreads * APEX_NERVE_COST);
+}
+
 /**
  * Resolve the played phases. 'safe' never costs nerve; a wrong aggressive
  * choice does. Returns { phaseResults, nerve } — at 0 nerve you lose the duel.
  */
 function resolveApexPhases(apexType, choicesMade) {
-    let nerve = 3;
     const phaseResults = [];
     for (let i = 0; i < choicesMade.length; i++) {
         const phase   = apexType.phases[i];
         const chosen  = choicesMade[i];
         const correct = chosen === phase.correct;
-        if (!correct && chosen !== 'safe') {
-            nerve = Math.max(0, nerve - 1);
-        }
         phaseResults.push({ correct, chosen, correctChoice: phase.correct });
     }
-    return { phaseResults, nerve };
+    return { phaseResults, nerve: apexNerveAfter(phaseResults) };
 }
 
 /**
@@ -1167,10 +1202,12 @@ module.exports = {
     applyStaminaRegen,
     msUntilNextStamina,
     applyDailyReset,
+    msUntilDailyReset,
     calculateSuccessChance,
     calculateCritChance,
     rollTier,
     rollAnimal,
+    getRarePityThreshold,
     rollFailureSeverity,
     applyPayoutModifiers,
     applyDurabilityLoss,
@@ -1188,6 +1225,8 @@ module.exports = {
     executeHunt,
     rollApexType,
     resolveApexEncounter,
+    apexNerveAfter,
+    APEX_NERVE_MAX,
     assignDailyHuntQuests,
     updateHuntQuestProgress,
     formatMs,

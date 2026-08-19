@@ -30,6 +30,7 @@ const {
     ensureHuntData,
     applyStaminaRegen,
     applyDailyReset,
+    msUntilDailyReset,
     msUntilNextStamina,
     getMaxStamina,
     executeHunt,
@@ -48,6 +49,9 @@ const {
     applyXp,
     rollApexType,
     resolveApexEncounter,
+    apexNerveAfter,
+    APEX_NERVE_MAX,
+    getRarePityThreshold,
     applyPayoutModifiers
 } = require('../../services/huntService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
@@ -448,8 +452,9 @@ async function executeStart(interaction) {
         const regenMs = msUntilNextStamina(user);
         const nextAt  = new Date(Date.now() + regenMs);
         const sinceRare = h.sinceRare ?? 0;
+        const pityCap   = getRarePityThreshold(zone);
         const pityStat  = sinceRare >= 5
-            ? `🎯 ${sinceRare} hunts since last Rare+ • next rare guaranteed around hunt ~50`
+            ? `🎯 ${sinceRare} hunts since last Rare+ • guaranteed at ${pityCap} in ${zone.name}`
             : null;
         return interaction.reply({
             embeds: [buildCooldownEmbed({
@@ -458,7 +463,7 @@ async function executeStart(interaction) {
                 color: '#5a8a3c',
                 nextAt,
                 pityStat,
-                nextRewardPreview: 'Full stamina = 10 hunts · Rare+ drops guaranteed by hunt ~50',
+                nextRewardPreview: `Full stamina = ${getMaxStamina(user)} hunts · Rare+ guaranteed after ${pityCap} dry hunts here`,
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -960,8 +965,8 @@ async function executeStart(interaction) {
 
             const buildApexPhaseEmbed = (phaseIndex, prevResults) => {
                 const phase  = apexType.phases[phaseIndex];
-                const nerve  = 3 - prevResults.filter(p => !p.correct && p.chosen !== 'safe').length;
-                const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(3 - nerve);
+                const nerve     = apexNerveAfter(prevResults);
+                const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(APEX_NERVE_MAX - nerve);
                 const histLines = prevResults.map((p, i) => {
                     const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
                     return `Phase ${i + 1}: ${icon}`;
@@ -979,7 +984,7 @@ async function executeStart(interaction) {
                         (histLines ? `${histLines}\n\n` : '') +
                         `**Choose your move — NOW:**`
                     )
-                    .setFooter({ text: `⏱️ 30 seconds per phase • Outcomes: 3/3=1.5x bonus | 2/3=1x | 1/3=0.4x | 0/3=Nothing` });
+                    .setFooter({ text: `⏱️ 30 seconds per phase • 3/3=1.5x bonus | 2/3=1x | 1/3=0.4x • A wrong read costs 2 nerve — at 0 it escapes. Backing off is safe but never counts.` });
             };
 
             const buildPhaseRow = (phaseIndex) => {
@@ -1153,7 +1158,9 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         const color = isCrit ? '#FFD700' : TIER_COLORS[tier];
 
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
-        const payoutDisplay = cappedByHard ? `~~${currency}${finalPayout}~~ (daily cap reached)` : `**${currency}${finalPayout.toLocaleString()}**`;
+        const payoutDisplay = cappedByHard
+            ? `~~${currency}${(result.forfeitedPayout ?? 0).toLocaleString()}~~\n*Daily cap reached — resets in ${formatMs(msUntilDailyReset(h))}*`
+            : `**${currency}${finalPayout.toLocaleString()}**`;
 
         const qualityLabel = trophyQuality
             ? `${trophyQuality.emoji} **${trophyQuality.label}** (×${trophyQuality.multiplier.toFixed(2)})`
@@ -1231,7 +1238,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         embed.addFields({ name: 'Balance', value: balanceLine, inline: true }, { name: 'Hunter XP', value: xpLine, inline: true });
 
         const sinceRareNow = user.hunt.sinceRare ?? 0;
-        if (sinceRareNow >= 5) embed.addFields(buildPityField(user));
+        if (sinceRareNow >= 5) embed.addFields(buildPityField(user, zone));
 
         embed.setFooter({ text: `Cooldown: 45s • ${buildActiveConsumablesLine(user)}` });
         embed.setTimestamp();
@@ -1304,7 +1311,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     }
 
     const sinceRareNow = user.hunt.sinceRare ?? 0;
-    if (sinceRareNow >= 5) embed.addFields(buildPityField(user));
+    if (sinceRareNow >= 5) embed.addFields(buildPityField(user, zone));
 
     embed.setFooter({ text: 'Tip: Use consumables from /hunt shop to boost your success chance' });
     embed.setTimestamp();
@@ -1352,9 +1359,15 @@ function buildFailureTitle(severityId) {
     return { clean_miss: '💨 Miss!', spooked: '😰 Spooked!', jammed: '🔧 Jammed!', injured: '🤕 Injured!' }[severityId] ?? '❌ Failed Hunt';
 }
 
-function buildPityField(user) {
+// Heat bands as a fraction of the zone's own threshold — the numbers used to be
+// hardcoded against a flat 50, which no longer holds now that each zone sets its
+// own.
+const PITY_HOT_FRACTION  = 0.80;
+const PITY_WARM_FRACTION = 0.50;
+
+function buildPityField(user, zone) {
     const sinceRare  = user.hunt.sinceRare ?? 0;
-    const threshold  = LIMITS.RARE_PITY_GUARANTEE;
+    const threshold  = getRarePityThreshold(zone);
     const filled     = Math.min(sinceRare, threshold);
     const barLen     = 16;
     const filledLen  = Math.round((filled / threshold) * barLen);
@@ -1364,10 +1377,10 @@ function buildPityField(user) {
     if (sinceRare >= threshold) {
         heat  = '⚡';
         label = `**GUARANTEED NEXT HUNT**`;
-    } else if (sinceRare >= 41) {
+    } else if (sinceRare >= threshold * PITY_HOT_FRACTION) {
         heat  = '🔥';
         label = `Getting hot — ~${threshold - sinceRare} more`;
-    } else if (sinceRare >= 26) {
+    } else if (sinceRare >= threshold * PITY_WARM_FRACTION) {
         heat  = '🌡️';
         label = `Warming up — ~${threshold - sinceRare} more`;
     } else {

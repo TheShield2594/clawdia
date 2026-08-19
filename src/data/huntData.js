@@ -207,6 +207,7 @@ const ZONES = {
         unlockLevel: 1, unlockCost: 0, defaultUnlocked: true,
         difficultyMod: 0.00, payoutBonus: 0.00,
         tierWeights: { common: 52, uncommon: 30, rare: 13, epic: 4, legendary: 1, event: 0 },
+        rarePity: 35,   // dry-streak mercy: ~1-in-150 tail at 18% rare+
         description: 'A peaceful forest perfect for new hunters.',
         zoneMaterials: ['rabbits_foot', 'feather', 'down_feather', 'acorn_cache', 'wolf_pelt', 'badger_pelt', 'antler_fragment', 'elk_antler', 'bear_claw', 'moose_rack', 'striped_pelt', 'hardwood_chip', 'crow_feather', 'opossum_pelt']
     },
@@ -215,6 +216,7 @@ const ZONES = {
         unlockLevel: 10, unlockCost: 3000, defaultUnlocked: false,
         difficultyMod: -0.05, payoutBonus: 0.00,
         tierWeights: { common: 42, uncommon: 30, rare: 18, epic: 7, legendary: 2.5, event: 0.5 },
+        rarePity: 21,   // dry-streak mercy: ~1-in-150 tail at 28% rare+
         description: 'Harsh and unforgiving terrain with exotic wildlife.',
         zoneMaterials: ['venom_sac', 'scorpion_claw', 'coyote_fang', 'hyena_fang', 'sand_pelt', 'jackrabbit_foot', 'scavenger_feather', 'lion_tooth']
     },
@@ -223,6 +225,7 @@ const ZONES = {
         unlockLevel: 20, unlockCost: 12000, defaultUnlocked: false,
         difficultyMod: -0.08, payoutBonus: 0.00,
         tierWeights: { common: 35, uncommon: 28, rare: 22, epic: 11, legendary: 3.5, event: 0.5 },
+        rarePity: 15,   // dry-streak mercy: ~1-in-150 tail at 37% rare+
         description: 'Freezing wilderness where rare creatures roam.',
         zoneMaterials: ['mammoth_tusk', 'arctic_fox_pelt', 'wolverine_fur', 'polar_claw', 'saber_fang', 'snowy_feather', 'caribou_antler', 'lynx_fang', 'thick_hide']
     },
@@ -231,6 +234,7 @@ const ZONES = {
         unlockLevel: 30, unlockCost: 30000, defaultUnlocked: false,
         difficultyMod: -0.10, payoutBonus: 0.00,
         tierWeights: { common: 32, uncommon: 27, rare: 22, epic: 13, legendary: 5, event: 1 },
+        rarePity: 14,   // dry-streak mercy: ~1-in-150 tail at 41% rare+
         description: 'Mysterious marshlands hiding dangerous prey.',
         zoneMaterials: ['swamp_scale', 'swamp_gland', 'cottonmouth_venom', 'gator_hide', 'marsh_feather', 'hog_tusk', 'shadow_pelt', 'beaver_pelt', 'slick_skin']
     },
@@ -239,6 +243,7 @@ const ZONES = {
         unlockLevel: 50, unlockCost: 75000, defaultUnlocked: false,
         difficultyMod: -0.12, payoutBonus: 0.20,
         tierWeights: { common: 15, uncommon: 22, rare: 28, epic: 22, legendary: 12, event: 1 },
+        rarePity: 8,   // dry-streak mercy: ~1-in-150 tail at 63% rare+
         description: 'The ultimate hunting ground. Master hunters only.',
         zoneMaterials: ['ancient_relic', 'spirit_essence', 'spirit_pelt', 'ram_horn', 'dire_wolf_fang', 'primal_claw', 'obsidian_antler', 'storm_feather', 'ember_fang', 'megaloceros_crown']
     }
@@ -825,7 +830,7 @@ const LIMITS = {
     STAMINA_TONICS_PER_DAY:  2,
     PITY_CONSECUTIVE_FAILS:  4,             // pity starts on the Nth straight fail, +15% per further fail, max 4 stacks
     PITY_BONUS_PER_STACK:    0.15,
-    RARE_PITY_GUARANTEE:     50             // sinceRare threshold for guaranteed rare+
+    RARE_PITY_GUARANTEE:     35             // fallback sinceRare threshold; zones set their own `rarePity`
 };
 
 // ─── PRESTIGE BONUSES ────────────────────────────────────────────────────────
