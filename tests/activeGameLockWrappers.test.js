@@ -348,5 +348,8 @@ describe('/casino — the lock around a game that outlives execute()', () => {
         const next = interactionFor();
         await casino.execute(next);
         expect(replyContent(next)).toMatch(BUSY);
+        // Turned away by the still-held lease rather than allowed to start a
+        // second hand: the game ran once in total, for the first call.
+        expect(slots.execute).toHaveBeenCalledTimes(1);
     });
 });
