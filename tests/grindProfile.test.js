@@ -126,3 +126,77 @@ describe('saveGrind', () => {
         expect(prof.saved).toBe(1);
     });
 });
+
+describe('a save only writes what the flow changed', () => {
+    // Profiles are persisted by replacing the whole `data` document. Writing back a
+    // system the flow merely attached for a cross-system read would push a load-time
+    // snapshot over anything that changed in between — which is how an unrelated
+    // /fish cast could undo a /mine raid's material transfer.
+    function existing(system, data) {
+        const prof = new GrindProfile({ userId: 'u1', guildId: 'g1', system });
+        prof.data = data;
+        prof.isNew = false;
+        return prof;
+    }
+
+    test('an attached but untouched system is left alone', async () => {
+        GrindProfile.find.mockResolvedValue([
+            existing('fishing', { xp: 1 }),
+            existing('mining', { materials: { gold_nugget: 10 } }),
+        ]);
+        const user = makeUser();
+        await attachGrind(user);
+
+        user.fishing.xp = 2;
+        await user.save();
+
+        expect(user._grindProfiles.fishing.saved).toBe(1);
+        expect(user._grindProfiles.mining.saved).toBe(0);
+        expect(user._grindProfiles.mining.data.materials.gold_nugget).toBe(10);
+    });
+
+    test('a system the flow did change is written', async () => {
+        GrindProfile.find.mockResolvedValue([existing('mining', { materials: { gold_nugget: 10 } })]);
+        const user = makeUser();
+        await attachGrind(user);
+
+        user.mining.materials.gold_nugget = 7;
+        await user.save();
+
+        expect(user._grindProfiles.mining.saved).toBe(1);
+        expect(user._grindProfiles.mining.data.materials.gold_nugget).toBe(7);
+    });
+
+    test('replacing the property wholesale still counts as a change', async () => {
+        GrindProfile.find.mockResolvedValue([existing('mining', { xp: 1 })]);
+        const user = makeUser();
+        await attachGrind(user);
+
+        user.mining = { xp: 1, level: 2 };   // what an ensure*Data rebuild looks like
+        await user.save();
+
+        expect(user._grindProfiles.mining.saved).toBe(1);
+    });
+
+    test('an explicit system list still forces the write', async () => {
+        GrindProfile.find.mockResolvedValue([existing('mining', { xp: 1 })]);
+        const user = makeUser();
+        await attachGrind(user);
+
+        await saveGrind(user, ['mining']);
+        expect(user._grindProfiles.mining.saved).toBe(1);
+    });
+
+    test('a repeat save does not rewrite a profile that has not moved since', async () => {
+        GrindProfile.find.mockResolvedValue([existing('mining', { xp: 1 })]);
+        const user = makeUser();
+        await attachGrind(user);
+
+        user.mining.xp = 2;
+        await user.save();
+        expect(user._grindProfiles.mining.saved).toBe(1);
+
+        await user.save();
+        expect(user._grindProfiles.mining.saved).toBe(1);
+    });
+});

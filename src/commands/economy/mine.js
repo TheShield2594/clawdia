@@ -614,7 +614,7 @@ async function handleDig(interaction) {
                     time: INTENSITY_PICK_MS,
                     max: 1,
                 });
-                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId); });
+                col.on('collect', async i => { await i.deferUpdate().catch(() => {}); resolve(i.customId); });
                 col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
             });
             pickedIntensity = CHOOSABLE_INTENSITY.find(l => `digint_${l.level}` === chosenId) ?? fallbackLevel;
@@ -666,7 +666,7 @@ async function handleDig(interaction) {
                 time: VEIN_ANSWER_MS,
                 max: 1,
             });
-            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('vein_', '')); });
+            col.on('collect', async i => { await i.deferUpdate().catch(() => {}); resolve(i.customId.replace('vein_', '')); });
             col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
         });
 
@@ -716,7 +716,7 @@ async function handleDig(interaction) {
                     `You have seconds to decide.\n\n` +
                     `⚡ **Ore at stake:** ${((result.caveInPayout ?? 0) + (result.caveInEscrow ?? 0)).toLocaleString()} coins` +
                     (result.caveInEscrow > 0
-                        ? ` *(includes the ${chosenIntensity.multiplier}× your vein read earned)*\n\n`
+                        ? ` *(includes the ${chosenIntensity.multiplier}× you ${chosenIntensity.promoted ? 'read out of the seam' : 'dug for'})*\n\n`
                         : `\n\n`) +
                     (chargesAvailable > 0
                         ? `💥 You have **${chargesAvailable}** blast charge${chargesAvailable !== 1 ? 's' : ''} — enough to blow an escape route.`
@@ -745,7 +745,7 @@ async function handleDig(interaction) {
                     time: 20_000,
                     max: 1,
                 });
-                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.endsWith('_blast') ? 'blast' : 'abandon'); });
+                col.on('collect', async i => { await i.deferUpdate().catch(() => {}); resolve(i.customId.endsWith('_blast') ? 'blast' : 'abandon'); });
                 col.on('end', (_, reason) => { if (reason !== 'limit') resolve('abandon'); });
             });
 
@@ -836,6 +836,18 @@ async function handleDig(interaction) {
                 result.finalPayout         += bonus;
                 result.wildernessBonus      = bonus;
             }
+        }
+
+        // At the hard cap every yield bonus above is skipped (they all gate on a
+        // payout above zero), so `forfeited` holds only the ore's value before the
+        // intensity multiplier and the bonuses that would have followed it. Scale it
+        // by what would have applied, or the embed understates the loss several-fold.
+        if (result.cappedByHard && result.forfeited > 0) {
+            const wouldHaveApplied = (chosenIntensity?.multiplier ?? 1)
+                * (isFeaturedDepth ? 1 + FEATURED_PAYOUT_BONUS : 1)
+                * (petMineYieldPct > 0 ? 1 + petMineYieldPct / 100 : 1)
+                * (wildernessActive ? 1 + WILDERNESS_YIELD_BONUS : 1);
+            result.forfeited = Math.round(result.forfeited * wouldHaveApplied);
         }
 
         // bestPayout must reflect what the player actually walked away with, so this
@@ -1412,7 +1424,7 @@ async function handleInv(interaction, sub) {
                     .reduce((n, f) => n + f.value.split('\n').length / 2, 0);
                 embed.addFields({
                     name: '…and more',
-                    value: `${Math.max(0, m.pickaxes.length - Math.round(shown))} further pickaxe(s) not shown — discard the dead ones with \`/mine inv discard\`.`,
+                    value: `${Math.max(0, m.pickaxes.length - Math.round(shown))} further pickaxe(s) not shown. \`/mine inv discard\` clears broken and condemned ones.`,
                     inline: false
                 });
             }

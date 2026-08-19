@@ -10,6 +10,7 @@ const {
     MINER_LEVELS,
     LIMITS,
     INTENSITY_LEVELS,
+    DEFAULT_INTENSITY_LEVEL,
     PRESTIGE_BONUSES,
     MINE_QUEST_TEMPLATES
 } = require('../data/mineData');
@@ -42,7 +43,7 @@ function ensureMineData(user) {
     if (m.activeDepth        == null) m.activeDepth         = 'surface_quarry';
     // The intensity the miner last dug at, used as the default when the pre-dig
     // prompt times out — so an unanswered prompt repeats their own habit.
-    if (m.preferredIntensity == null) m.preferredIntensity  = 2;
+    if (m.preferredIntensity == null) m.preferredIntensity  = DEFAULT_INTENSITY_LEVEL;
     if (!Array.isArray(m.unlockedDepths))       m.unlockedDepths      = ['surface_quarry'];
     if (m.equippedPickaxeIndex == null) m.equippedPickaxeIndex = -1;
     if (!Array.isArray(m.pickaxes))             m.pickaxes            = [];
