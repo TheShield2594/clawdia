@@ -88,6 +88,11 @@ const UNLOCK_CHOICES   = DEPTH_LIST.filter(d => !d.defaultUnlocked).map(d => ({ 
 
 const PRESTIGE_BADGES = ['', '🥉', '🥈', '🥇', '🏆', '💎'];
 
+// Miner Level tops out at the end of the MINER_LEVELS ladder; prestige tops out at
+// the end of the bonus table. Both are derived so the two tables stay the authority.
+const MAX_MINER_LEVEL   = MINER_LEVELS.length;
+const MAX_MINE_PRESTIGE = PRESTIGE_BONUSES.length - 1;
+
 // Depth risk levels for the pre-dig selection prompt
 const INTENSITY_LEVELS = [
     { level: 1, name: 'Surface',  emoji: '☀️',  multiplier: 0.7, caveInRisk: 0.00, durLoss: 1 },
@@ -154,6 +159,9 @@ module.exports = {
                                 .setDescription('Quest to claim')
                                 .setRequired(true)
                                 .addChoices(...MINE_QUEST_TEMPLATES.map(t => ({ name: t.name, value: t.id }))))))
+        .addSubcommand(sub =>
+            sub.setName('prestige')
+                .setDescription('Reset your Miner Level for permanent bonuses (requires Miner Level 50)'))
         .addSubcommand(sub =>
             sub.setName('map')
                 .setDescription('View your persistent mine map — see every cell you have excavated.'))
@@ -242,6 +250,7 @@ module.exports = {
             if (sub === 'profile') return handleProfile(interaction);
             if (sub === 'map')     return handleMap(interaction);
             if (sub === 'raid')    return handleRaid(interaction);
+            if (sub === 'prestige') return handlePrestige(interaction);
         }
         if (group === 'inv')    return handleInv(interaction, sub);
         if (group === 'quests') return handleQuests(interaction, sub);
@@ -325,15 +334,16 @@ async function handleDig(interaction) {
     if (!depth) {
         return interaction.reply({ content: `Unknown depth \`${depthId}\`. Use \`/mine shop list\` to see available depths.`, flags: MessageFlags.Ephemeral });
     }
+    // Access is decided by `unlockedDepths` alone. The level requirement is enforced
+    // once, at `/mine shop unlock`; re-checking it here would lock a prestiged miner
+    // out of depths they already paid for, since prestige resets the level and the
+    // purchase is permanent.
     if (!m.unlockedDepths.includes(depthId)) {
+        const gate = depth.defaultUnlocked
+            ? ''
+            : ` (Miner Level ${depth.unlockLevel}, ${depth.unlockCost.toLocaleString()} coins)`;
         return interaction.reply({
-            content: `You haven't unlocked **${depth.name}** yet. Use \`/mine shop unlock\` to unlock it.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-    if (m.level < depth.unlockLevel) {
-        return interaction.reply({
-            content: `You need to be Miner Level **${depth.unlockLevel}** to mine in **${depth.name}**.`,
+            content: `You haven't unlocked **${depth.name}** yet. Use \`/mine shop unlock\` to unlock it${gate}.`,
             flags: MessageFlags.Ephemeral
         });
     }
@@ -941,6 +951,187 @@ async function handleDig(interaction) {
     }
 }
 
+// ─── PRESTIGE ─────────────────────────────────────────────────────────────────
+//
+// The PRESTIGE_BONUSES table, the badge row and the "Prestige Bonuses" block on
+// /mine profile have all been in place since the mine shipped, but nothing ever
+// incremented mining.prestige — so Miner Level 50 was simply the end, and every
+// bonus in that table was unreachable. This is the way through.
+
+/** Formats one row of PRESTIGE_BONUSES as the lines a player sees. */
+function prestigeBonusLines(bonus) {
+    return [
+        bonus.critBonus    > 0 ? `+${Math.round(bonus.critBonus * 100)}% crit chance`   : null,
+        bonus.staminaBonus > 0 ? `+${bonus.staminaBonus} max stamina`                   : null,
+        bonus.payoutBonus  > 0 ? `+${Math.round(bonus.payoutBonus * 100)}% all payouts` : null,
+        bonus.rarityBonus  > 0 ? `+${Math.round(bonus.rarityBonus * 100)}% rarity boost`: null,
+    ].filter(Boolean);
+}
+
+async function handlePrestige(interaction) {
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    if (guildSettings?.economy?.enabled === false) {
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
+    }
+
+    const user = await User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+        { upsert: true, new: true }
+    );
+    await attachGrind(user);
+    ensureMineData(user);
+
+    const m        = user.mining;
+    const prestige = m.prestige ?? 0;
+    const badge    = PRESTIGE_BADGES[Math.min(prestige, PRESTIGE_BADGES.length - 1)] ?? '';
+
+    if (prestige >= MAX_MINE_PRESTIGE) {
+        return interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setColor('#f39c12')
+                .setTitle(`${badge} Maximum Prestige`)
+                .setDescription(`You are a **P${prestige} Master Miner** — the deepest rank there is.`)
+                .addFields({ name: 'Your Bonuses', value: prestigeBonusLines(PRESTIGE_BONUSES[prestige]).join('\n') || 'None' })
+                .setTimestamp()],
+        });
+    }
+
+    const nextBonus = PRESTIGE_BONUSES[prestige + 1];
+    const nextBadge = PRESTIGE_BADGES[prestige + 1] ?? '';
+
+    if (m.level < MAX_MINER_LEVEL) {
+        return interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setColor('#b5651d')
+                .setTitle(`${badge} Miner Prestige — P${prestige}`)
+                .setDescription(
+                    `Reach **Miner Level ${MAX_MINER_LEVEL}** to ascend to ${nextBadge} **P${prestige + 1}**.\n` +
+                    `You're Level **${m.level}**.`
+                )
+                .addFields(
+                    { name: `${nextBadge} P${prestige + 1} would grant`, value: prestigeBonusLines(nextBonus).join('\n') || 'Nothing new', inline: true },
+                    { name: 'Progress',  value: `${m.xp.toLocaleString()} / ${MINER_LEVELS[MAX_MINER_LEVEL - 1].xpRequired.toLocaleString()} XP`, inline: true },
+                )
+                .setFooter({ text: 'Prestige keeps your pickaxes, depths, materials and stats — only Miner Level and XP reset.' })
+                .setTimestamp()],
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
+    // Losing the level also drops any synergy gated on it, so say so up front rather
+    // than letting a miner discover their stamina pool shrank after ascending.
+    const lostSynergies = getActiveSynergies(user)
+        .filter(syn => (syn.requirements.mining ?? 0) > 1)
+        .map(syn => `${syn.emoji} ${syn.name}`);
+
+    const confirmEmbed = new EmbedBuilder()
+        .setColor('#f39c12')
+        .setTitle(`${nextBadge} Ascend to Prestige ${prestige + 1}?`)
+        .setDescription(
+            `You've reached **Miner Level ${MAX_MINER_LEVEL}**. Ascending is permanent and cannot be undone.\n\n` +
+            `**Resets:** Miner Level → 1, Miner XP → 0\n` +
+            `**Keeps:** pickaxes, unlocked depths, materials, consumables, charges and every lifetime stat`
+        )
+        .addFields({ name: `${nextBadge} P${prestige + 1} bonuses`, value: prestigeBonusLines(nextBonus).join('\n') || 'Nothing new', inline: false });
+
+    if (lostSynergies.length) {
+        confirmEmbed.addFields({
+            name: '⚠️ Synergies you will drop until you re-level',
+            value: lostSynergies.join('\n'),
+            inline: false,
+        });
+    }
+    confirmEmbed.setFooter({ text: 'Confirmation expires in 30 seconds' });
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('mineprestige_confirm').setLabel('Ascend').setStyle(ButtonStyle.Success).setEmoji('⛏️'),
+        new ButtonBuilder().setCustomId('mineprestige_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+    );
+
+    const response = await interaction.reply({ embeds: [confirmEmbed], components: [row], withResponse: true });
+    const reply = response.resource.message;
+    const collector = reply.createMessageComponentCollector({ time: 30_000 });
+
+    let actionPromise = null;
+    collector.on('collect', btn => {
+        if (btn.user.id !== interaction.user.id) {
+            return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
+        }
+        collector.stop();
+
+        if (btn.customId === 'mineprestige_cancel') {
+            return btn.update({ content: 'Ascension cancelled.', embeds: [], components: [] });
+        }
+
+        actionPromise = (async () => {
+            try {
+                await btn.deferUpdate();
+
+                // Make sure the profile exists and carries the prestige field before the
+                // conditional update below tries to match on it.
+                await persistGrindIfNew(user, 'mining');
+                await saveGrind(user, ['mining']);
+
+                // Conditional so a second confirmation cannot ascend twice: the level
+                // requirement and the prestige rank both have to still hold.
+                const ascended = await GrindProfile.findOneAndUpdate(
+                    {
+                        userId: user.userId, guildId: user.guildId, system: 'mining',
+                        'data.level':    { $gte: MAX_MINER_LEVEL },
+                        'data.prestige': prestige,
+                    },
+                    { $set: { 'data.prestige': prestige + 1, 'data.level': 1, 'data.xp': 0 } },
+                    { new: true }
+                ).catch(err => { console.error('[mine prestige] ascend error:', err); return null; });
+
+                if (!ascended) {
+                    return interaction.editReply({
+                        content: 'Your miner changed while that confirmation was open — run `/mine prestige` again.',
+                        embeds: [], components: [],
+                    });
+                }
+
+                m.prestige = prestige + 1;
+                m.level    = 1;
+                m.xp       = 0;
+
+                const embed = new EmbedBuilder()
+                    .setColor('#f39c12')
+                    .setTitle(`${nextBadge} Prestige ${prestige + 1} — ${getLevelData(1).title} Again`)
+                    .setDescription(
+                        `You climb back to the surface, hand in your papers, and start over as a **P${prestige + 1}** miner.\n` +
+                        `The tunnels remember you — everything you own came back up with you.`
+                    )
+                    .addFields(
+                        { name: 'Permanent Bonuses', value: prestigeBonusLines(PRESTIGE_BONUSES[prestige + 1]).join('\n') || 'None', inline: true },
+                        { name: 'Miner Level',       value: `**${MAX_MINER_LEVEL}** → **1**`, inline: true },
+                        { name: 'Kept',              value: `${m.pickaxes.length} pickaxe(s) · ${m.unlockedDepths.length} depth(s)`, inline: true },
+                    )
+                    .setFooter({ text: prestige + 1 >= MAX_MINE_PRESTIGE
+                        ? 'That is the deepest rank there is.'
+                        : `Reach Miner Level ${MAX_MINER_LEVEL} again to ascend to P${prestige + 2}.` })
+                    .setTimestamp();
+
+                await interaction.editReply({ embeds: [embed], components: [] });
+            } catch (err) {
+                console.error('[mine prestige] error:', err);
+                interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
+            }
+        })();
+    });
+
+    return new Promise(resolve => {
+        collector.on('end', async (_, reason) => {
+            if (reason === 'time') {
+                interaction.editReply({ content: 'Ascension timed out.', embeds: [], components: [] }).catch(() => {});
+            }
+            if (actionPromise) await actionPromise.catch(() => {});
+            resolve();
+        });
+    });
+}
+
 // ─── PROFILE ──────────────────────────────────────────────────────────────────
 
 async function handleProfile(interaction) {
@@ -1045,12 +1236,7 @@ async function handleProfile(interaction) {
     if (prestige > 0) {
         embed.addFields({
             name: `${badge} Prestige Bonuses`,
-            value: [
-                pBonus.critBonus    > 0 ? `+${Math.round(pBonus.critBonus    * 100)}% crit chance`  : null,
-                pBonus.staminaBonus > 0 ? `+${pBonus.staminaBonus} max stamina`                     : null,
-                pBonus.payoutBonus  > 0 ? `+${Math.round(pBonus.payoutBonus  * 100)}% all payouts`   : null,
-                pBonus.rarityBonus  > 0 ? `+${Math.round(pBonus.rarityBonus  * 100)}% rarity boost`  : null
-            ].filter(Boolean).join('\n') || 'None yet',
+            value: prestigeBonusLines(pBonus).join('\n') || 'None yet',
             inline: true
         });
     }
@@ -1077,8 +1263,10 @@ async function handleProfile(interaction) {
         });
     }
 
-    if (prestige === 0 && m.level >= 50) {
-        embed.setFooter({ text: 'Max level reached!' });
+    if (m.level >= MAX_MINER_LEVEL && prestige < MAX_MINE_PRESTIGE) {
+        embed.setFooter({ text: `Max Miner Level — use /mine prestige to ascend to P${prestige + 1}` });
+    } else if (prestige >= MAX_MINE_PRESTIGE && m.level >= MAX_MINER_LEVEL) {
+        embed.setFooter({ text: `${PRESTIGE_BADGES[MAX_MINE_PRESTIGE]} Fully prestiged Master Miner — nothing left to prove down there.` });
     } else if (isSelf) {
         embed.setFooter({ text: `Daily: ${m.dailyMines} mines · ${currency}${m.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
     }

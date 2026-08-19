@@ -269,6 +269,36 @@ crafting, pet food, and the market.
 /synergies             - Cross-system bonuses and progress toward them
 ```
 
+**Mining depths** gate the rarity ladder: each depth only ever yields ore it has
+a table for, so progression is what moves the top end.
+
+| Depth | Unlock | Best ore tier |
+|---|---|---|
+| 🪨 Surface Quarry | Level 1 | Rare |
+| 🖤 Coal Tunnels | Level 10 · 3,000 | Rare |
+| 🔩 Iron Mines | Level 20 · 12,000 | Epic |
+| 💠 Crystal Caves | Level 30 · 30,000 | Legendary |
+| 🌑 The Abyss | Level 50 · 75,000 | Legendary, +20% payout |
+
+The ⭐ Event tier sits above Legendary and is the rarest thing in the game. It is
+not part of the depth ladder — a Celestial Fragment can land anywhere from the
+Coal Tunnels down, and the Abyss adds two event ores of its own.
+
+Once a depth is unlocked it stays accessible for good — the level requirement is
+checked at purchase, not every dig.
+
+**Miner prestige** (`/mine prestige`) opens at Miner Level 50 and runs to P5. Each
+rank resets Miner Level and XP and keeps everything else — pickaxes, unlocked
+depths, materials, consumables and lifetime stats:
+
+| Rank | Grants (cumulative) |
+|---|---|
+| 🥉 P1 | +2% crit chance |
+| 🥈 P2 | +1 max stamina |
+| 🥇 P3 | +5% all payouts |
+| 🏆 P4 | +2% rarity boost |
+| 💎 P5 | +10% all payouts |
+
 **`/forge`** spends coins to have the configured AI provider invent a unique
 item, with cost and XP scaling by rarity tier:
 
