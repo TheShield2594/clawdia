@@ -830,7 +830,8 @@ const LIMITS = {
     STAMINA_TONICS_PER_DAY:  2,
     PITY_CONSECUTIVE_FAILS:  4,             // pity starts on the Nth straight fail, +15% per further fail, max 4 stacks
     PITY_BONUS_PER_STACK:    0.15,
-    RARE_PITY_GUARANTEE:     35             // fallback sinceRare threshold; zones set their own `rarePity`
+    RARE_PITY_GUARANTEE:     35,            // fallback sinceRare threshold; zones set their own `rarePity`
+    TOTEM_EVENT_WEIGHT:      0.5            // Stormcaller's Totem: event weight added in every zone
 };
 
 // ─── PRESTIGE BONUSES ────────────────────────────────────────────────────────
@@ -1007,7 +1008,196 @@ const CRAFT_RECIPES = {
         ],
         output: { type: 'permanent', id: 'luckyPaw' },
         unique: true
+    },
+
+    // ── Zone bulk sinks ──────────────────────────────────────────────────────
+    // Repeatable recipes so a zone's ordinary drops keep flowing somewhere. Every
+    // zone's drop table used to dead-end: only the starter zone's materials fed
+    // any recipe, so the deeper a hunter pushed the more worthless their loot
+    // became. These give each zone's spare trophies an ongoing purpose.
+    fletched_rounds_60x: {
+        id: 'fletched_rounds_60x', name: 'Fletched Rounds ×60', emoji: '🪶',
+        description: 'Fletch 60 iron rounds from feathers and hardwood',
+        ingredients: [
+            { material: 'down_feather',  qty: 3 },
+            { material: 'crow_feather',  qty: 3 },
+            { material: 'hardwood_chip', qty: 2 }
+        ],
+        output: { type: 'ammo', id: 'iron_shot', qty: 60 }
+    },
+    trailcraft_focus_5x: {
+        id: 'trailcraft_focus_5x', name: "Hunter's Focus ×5", emoji: '🎯',
+        description: "Sharpen your instincts from a scavenger's spoils",
+        ingredients: [
+            { material: 'lion_tooth',  qty: 2 },
+            { material: 'slick_skin',  qty: 3 },
+            { material: 'bandit_mask', qty: 1 }
+        ],
+        output: { type: 'consumable', id: 'hunters_focus', qty: 5 }
+    },
+    desert_bait_2x: {
+        id: 'desert_bait_2x', name: 'Premium Bait ×2', emoji: '🎣',
+        description: 'Cure desert spoils into potent bait',
+        ingredients: [
+            { material: 'jackrabbit_foot',   qty: 3 },
+            { material: 'scavenger_feather', qty: 3 },
+            { material: 'hyena_fang',        qty: 2 }
+        ],
+        output: { type: 'consumable', id: 'premium_bait', qty: 2 }
+    },
+    tundra_repair_2x: {
+        id: 'tundra_repair_2x', name: 'Repair Kit (Large) ×2', emoji: '🔨',
+        description: 'Bone and horn worked into heavy repair kits',
+        ingredients: [
+            { material: 'caribou_antler', qty: 2 },
+            { material: 'mountain_horn',  qty: 2 },
+            { material: 'snowy_feather',  qty: 3 }
+        ],
+        output: { type: 'consumable', id: 'repair_kit_large', qty: 2 }
+    },
+    composite_rounds_40x: {
+        id: 'composite_rounds_40x', name: 'Composite Rounds ×40', emoji: '🔵',
+        description: 'Forge 40 composite rounds from apex fangs and claws',
+        ingredients: [
+            { material: 'saber_fang',    qty: 2 },
+            { material: 'polar_claw',    qty: 2 },
+            { material: 'wolverine_fur', qty: 2 }
+        ],
+        output: { type: 'ammo', id: 'composite_round', qty: 40 }
+    },
+    swamp_charm_2x: {
+        id: 'swamp_charm_2x', name: 'Luck Charm ×2', emoji: '🍀',
+        description: 'Marsh tokens bound into charms',
+        ingredients: [
+            { material: 'marsh_feather', qty: 3 },
+            { material: 'hog_tusk',      qty: 2 },
+            { material: 'swamp_scale',   qty: 3 }
+        ],
+        output: { type: 'consumable', id: 'luck_charm', qty: 2 }
+    },
+    titanium_rounds_40x: {
+        id: 'titanium_rounds_40x', name: 'Titanium Rounds ×40', emoji: '💎',
+        description: 'Forge 40 titanium rounds from summit trophies',
+        ingredients: [
+            { material: 'dire_wolf_fang', qty: 2 },
+            { material: 'ancient_relic',  qty: 2 },
+            { material: 'primal_claw',    qty: 1 }
+        ],
+        output: { type: 'ammo', id: 'titanium_round', qty: 40 }
+    },
+    summit_scroll_3x: {
+        id: 'summit_scroll_3x', name: 'XP Scroll ×3', emoji: '📜',
+        description: 'Transcribe the summit hunt onto scrolls',
+        ingredients: [
+            { material: 'ram_horn',           qty: 2 },
+            { material: 'megaloceros_crown',  qty: 1 },
+            { material: 'shadow_pelt',        qty: 2 }
+        ],
+        output: { type: 'consumable', id: 'xp_scroll', qty: 3 }
+    },
+
+    // ── Field Trophies: one permanent per zone ───────────────────────────────
+    // Terminal sinks for each zone's signature materials, and the progression
+    // that used to stop dead at Level 50 / Prestige 5. Each is crafted once.
+    woodland_instinct: {
+        id: 'woodland_instinct', name: 'Woodland Instinct', emoji: '🌿',
+        description: 'A permanent upgrade granting +1 max stamina',
+        ingredients: [
+            { material: 'opossum_pelt',  qty: 4 },
+            { material: 'striped_pelt',  qty: 4 },
+            { material: 'hardwood_chip', qty: 3 }
+        ],
+        output: { type: 'hunt_permanent', id: 'woodlandInstinct' },
+        unique: true
+    },
+    venom_ward: {
+        id: 'venom_ward', name: 'Venom Ward', emoji: '🦂',
+        description: 'A permanent upgrade — venomous prey no longer costs extra stamina',
+        ingredients: [
+            { material: 'venom_sac',     qty: 3 },
+            { material: 'scorpion_claw', qty: 4 },
+            { material: 'sand_pelt',     qty: 3 }
+        ],
+        output: { type: 'hunt_permanent', id: 'venomWard' },
+        unique: true
+    },
+    insulated_kit: {
+        id: 'insulated_kit', name: 'Insulated Kit', emoji: '🧊',
+        description: 'A permanent upgrade reducing durability loss by 1 per hunt (minimum 1)',
+        ingredients: [
+            { material: 'thick_hide',      qty: 3 },
+            { material: 'arctic_fox_pelt', qty: 3 },
+            { material: 'mammoth_tusk',    qty: 2 }
+        ],
+        output: { type: 'hunt_permanent', id: 'insulatedKit' },
+        unique: true
+    },
+    swampwalkers_charm: {
+        id: 'swampwalkers_charm', name: "Swampwalker's Charm", emoji: '🐊',
+        description: 'A permanent upgrade — pack prey no longer savages your weapon, and aggressive prey injures you half as often',
+        ingredients: [
+            { material: 'gator_hide',        qty: 3 },
+            { material: 'swamp_gland',       qty: 3 },
+            { material: 'cottonmouth_venom', qty: 3 }
+        ],
+        output: { type: 'hunt_permanent', id: 'swampwalkersCharm' },
+        unique: true
+    },
+    apex_predators_mark: {
+        id: 'apex_predators_mark', name: "Apex Predator's Mark", emoji: '⛰️',
+        description: 'A permanent upgrade — survive one extra misread in every apex duel',
+        ingredients: [
+            { material: 'primal_claw',     qty: 2 },
+            { material: 'obsidian_antler', qty: 2 },
+            { material: 'storm_feather',   qty: 2 },
+            { material: 'ember_fang',      qty: 2 }
+        ],
+        output: { type: 'hunt_permanent', id: 'apexPredatorsMark' },
+        unique: true
+    },
+    stormcallers_totem: {
+        id: 'stormcallers_totem', name: "Stormcaller's Totem", emoji: '⚡',
+        description: 'A permanent upgrade — mythical prey stalks every zone you hunt',
+        ingredients: [
+            { material: 'thunderfeather', qty: 2 },
+            { material: 'spectral_bone',  qty: 2 },
+            { material: 'ancient_claw',   qty: 2 }
+        ],
+        output: { type: 'hunt_permanent', id: 'stormcallersTotem' },
+        unique: true
     }
+};
+
+// ─── FIELD TROPHIES ──────────────────────────────────────────────────────────
+// Permanent, once-only upgrades crafted from a single zone's materials. Keyed by
+// the flag stored on user.hunt, so /craft and /hunt profile describe them the
+// same way.
+
+const FIELD_TROPHIES = {
+    woodlandInstinct: {
+        emoji: '🌿', name: 'Woodland Instinct', zone: 'beginner_forest',
+        effect: 'permanently +1 max stamina',
+    },
+    venomWard: {
+        emoji: '🦂', name: 'Venom Ward', zone: 'desert_wastes',
+        effect: 'venomous prey no longer costs you extra stamina',
+    },
+    insulatedKit: {
+        emoji: '🧊', name: 'Insulated Kit', zone: 'arctic_tundra',
+        effect: 'permanently -1 durability loss per hunt',
+    },
+    swampwalkersCharm: {
+        emoji: '🐊', name: "Swampwalker's Charm", zone: 'murky_swamp',
+        effect: 'pack prey no longer savages your weapon, and aggressive prey injures you half as often',
+    },
+    apexPredatorsMark: {
+        emoji: '⛰️', name: "Apex Predator's Mark", zone: 'legendary_peaks',
+        effect: 'one extra misread before an apex duel breaks your nerve',
+    },
+    stormcallersTotem: {
+        emoji: '⚡', name: "Stormcaller's Totem", zone: null,
+        effect: 'mythical prey now stalks every zone you hunt',
+    },
 };
 
 // ─── HUNT DAILY QUEST TEMPLATES ───────────────────────────────────────────────
@@ -1238,6 +1428,7 @@ module.exports = {
     PRESTIGE_BONUSES,
     MATERIAL_NAMES,
     CRAFT_RECIPES,
+    FIELD_TROPHIES,
     HUNT_QUEST_TEMPLATES,
     TROPHY_QUALITIES,
     APEX_TYPES

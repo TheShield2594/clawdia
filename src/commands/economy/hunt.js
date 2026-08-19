@@ -21,7 +21,7 @@ const {
     CONSUMABLES, AMMO_PACKS,
     WEAPON_TIERS, WEAPON_BY_SLUG, WEAPON_UPGRADES,
     HUNTER_LEVELS, PRESTIGE_BONUSES, HUNT_QUEST_TEMPLATES,
-    ANIMAL_TRAITS, MATERIAL_NAMES
+    ANIMAL_TRAITS, MATERIAL_NAMES, FIELD_TROPHIES
 } = require('../../data/huntData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
@@ -50,7 +50,7 @@ const {
     rollApexType,
     resolveApexEncounter,
     apexNerveAfter,
-    APEX_NERVE_MAX,
+    apexNerveMax,
     getRarePityThreshold,
     applyPayoutModifiers
 } = require('../../services/huntService');
@@ -965,8 +965,9 @@ async function executeStart(interaction) {
 
             const buildApexPhaseEmbed = (phaseIndex, prevResults) => {
                 const phase  = apexType.phases[phaseIndex];
-                const nerve     = apexNerveAfter(prevResults);
-                const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(APEX_NERVE_MAX - nerve);
+                const nerveMax  = apexNerveMax(user);
+                const nerve     = apexNerveAfter(prevResults, user);
+                const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(nerveMax - nerve);
                 const histLines = prevResults.map((p, i) => {
                     const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
                     return `Phase ${i + 1}: ${icon}`;
@@ -1540,6 +1541,9 @@ async function executeProfile(interaction) {
         embed.addFields(buildTrophyField(h.trophies));
     }
 
+    const fieldTrophies = buildFieldTrophyField(h);
+    if (fieldTrophies) embed.addFields(fieldTrophies);
+
     // Cross-system synergies
     const activeSynergies = getActiveSynergies(userData);
     if (activeSynergies.length > 0) {
@@ -1574,6 +1578,28 @@ async function executeProfile(interaction) {
  * stops working entirely at around 56 unique trophies. Show the best ones first
  * (mythic before pristine before good) and count the rest.
  */
+/**
+ * The permanent upgrades a hunter has earned — the progression that carries on
+ * past Level 50 and Prestige 5. Null when they have none yet, so the profile
+ * doesn't carry an empty field.
+ */
+function buildFieldTrophyField(h) {
+    const owned = Object.entries(FIELD_TROPHIES)
+        .filter(([flag]) => h[flag])
+        .map(([, t]) => `${t.emoji} **${t.name}** — ${t.effect}`);
+
+    if (h.luckyPaw)       owned.unshift('🐾 **Lucky Paw** — +1% critical hit chance');
+    if (h.precisionScope) owned.unshift('🔭 **Precision Scope** — +2% rarity boost');
+    if (!owned.length) return null;
+
+    const total = Object.keys(FIELD_TROPHIES).length + 2;
+    return {
+        name:   `🎖️ Permanent Upgrades (${owned.length}/${total})`,
+        value:  owned.join('\n'),
+        inline: false,
+    };
+}
+
 const TROPHY_RANK = { '🟣': 0, '🔷': 1, '🟢': 2 };
 const TROPHY_FIELD_BUDGET = 1024;
 
@@ -1901,9 +1927,11 @@ async function executeInv(interaction, sub) {
             .setTitle('🪨 Crafting Materials')
             .setDescription(entries.length ? entries.join('\n') : 'No materials yet. Hunt rare+ animals to find special drops!');
 
-        if (!entries.length) {
-            embed.setFooter({ text: 'Tip: Use bait from /hunt shop to boost rare animal chances' });
-        }
+        embed.setFooter({
+            text: entries.length
+                ? 'Every material feeds a recipe — see /craft list. Each zone ends in a permanent Field Trophy.'
+                : 'Tip: Use bait from /hunt shop to boost rare animal chances',
+        });
 
         return interaction.reply({ embeds: [embed] });
     }
@@ -2986,7 +3014,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField };
 
 // ── Per-user action lock ──────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent
