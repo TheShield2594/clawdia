@@ -156,27 +156,36 @@ const CONSUMABLES = {
 };
 
 // ─── MINE DEPTHS ─────────────────────────────────────────────────────────────
+//
+// INVARIANT: a depth may only carry weight on a tier it actually has ore for.
+// Epic ore first appears at iron_mines and legendary at crystal_caves (matching
+// the mq_epic_1 / mq_legendary_1 quest level gates), so the three shallow depths
+// carry zero weight there. When those tiers were weighted anyway, rollOre fell
+// back to the unfiltered pool and the starter quarry handed out Abyss-only ore —
+// firing the server-wide legendary announcement and the rare-companion roll from
+// a level-1 depth. rollTier now enforces this at runtime too; the weights and the
+// guard are meant to agree.
 
 const DEPTHS = {
     surface_quarry: {
         id: 'surface_quarry', name: 'Surface Quarry', emoji: '🪨',
         unlockLevel: 1, unlockCost: 0, defaultUnlocked: true,
         difficultyMod: 0.00, payoutBonus: 0.00,
-        tierWeights: { common: 52, uncommon: 30, rare: 13, epic: 4, legendary: 1, event: 0 },
+        tierWeights: { common: 52, uncommon: 32, rare: 16, epic: 0, legendary: 0, event: 0 },
         description: 'A sunlit open-pit quarry. Great for beginners.'
     },
     coal_tunnels: {
         id: 'coal_tunnels', name: 'Coal Tunnels', emoji: '🖤',
         unlockLevel: 10, unlockCost: 3000, defaultUnlocked: false,
         difficultyMod: -0.05, payoutBonus: 0.00,
-        tierWeights: { common: 42, uncommon: 30, rare: 18, epic: 7, legendary: 2.5, event: 0.5 },
+        tierWeights: { common: 42, uncommon: 34.5, rare: 23, epic: 0, legendary: 0, event: 0.5 },
         description: 'Sooty tunnels that hide uncommon veins.'
     },
     iron_mines: {
         id: 'iron_mines', name: 'Iron Mines', emoji: '🔩',
         unlockLevel: 20, unlockCost: 12000, defaultUnlocked: false,
         difficultyMod: -0.08, payoutBonus: 0.00,
-        tierWeights: { common: 35, uncommon: 28, rare: 22, epic: 11, legendary: 3.5, event: 0.5 },
+        tierWeights: { common: 35, uncommon: 28, rare: 23.5, epic: 13, legendary: 0, event: 0.5 },
         description: 'Deep iron deposits where rare gems can form.'
     },
     crystal_caves: {

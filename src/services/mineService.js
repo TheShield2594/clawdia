@@ -76,7 +76,6 @@ function ensureMineData(user) {
     }
     if (m.mineMapRow == null) m.mineMapRow = 5;
     if (m.mineMapCol == null) m.mineMapCol = 5;
-    if (!m.oreStash)          m.oreStash = {};
     if (m.mineLockActive == null) m.mineLockActive = false;
 
     user.markModified('mining');
@@ -215,6 +214,19 @@ function randInt(min, max) {
 
 // ─── TIER ROLL ───────────────────────────────────────────────────────────────
 
+// Ascending rarity. Also the order rollOre walks backwards when a tier turns out
+// to be unavailable at a depth.
+const TIER_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'event'];
+
+/** The ores of `tier` that this depth can actually produce. */
+function oresAtDepth(tier, depthId) {
+    return (ORES_BY_TIER[tier] ?? []).filter(o => o.depths.includes('all') || o.depths.includes(depthId));
+}
+
+function hasOreAtDepth(tier, depthId) {
+    return oresAtDepth(tier, depthId).length > 0;
+}
+
 function rollTier(user, depth) {
     const m = user.mining;
     const w = { ...depth.tierWeights };
@@ -264,23 +276,35 @@ function rollTier(user, depth) {
         w.rare  += shift;
     }
 
-    const tiers = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'event'];
-    const items = tiers.map(t => ({ tier: t, weight: w[t] ?? 0 })).filter(i => i.weight > 0);
+    // Only tiers this depth actually has ore for are eligible. The weight table is
+    // written to agree (see the invariant on DEPTHS), but every boost above adds to
+    // w.rare/w.epic/w.legendary unconditionally, so a rarity boost would otherwise
+    // resurrect a tier the depth was never meant to produce. weightedRoll normalises
+    // by the surviving total, so dropping a tier redistributes rather than voids it.
+    const items = TIER_ORDER
+        .map(t => ({ tier: t, weight: w[t] ?? 0 }))
+        .filter(i => i.weight > 0 && hasOreAtDepth(i.tier, depth.id));
+
+    if (!items.length) return 'common';
     return weightedRoll(items).tier;
 }
 
 // ─── ORE ROLL ────────────────────────────────────────────────────────────────
 
+/**
+ * Picks an ore of `tier` from the depth's own pool. If the depth has no ore at that
+ * tier the roll steps *down* the ladder rather than reaching outside the depth —
+ * the old fallback used the unfiltered pool, which is how the starter quarry ended
+ * up handing out Abyss-only legendaries. Callers should read the returned ore's
+ * own `.tier`, since a downgrade makes it authoritative.
+ */
 function rollOre(tier, depthId) {
-    const pool = (ORES_BY_TIER[tier] ?? []).filter(o =>
-        o.depths.includes('all') || o.depths.includes(depthId)
-    );
-    if (!pool.length) {
-        const fallback = ORES_BY_TIER[tier];
-        if (!fallback?.length) return ORES_BY_TIER['common'][0];
-        return fallback[Math.floor(Math.random() * fallback.length)];
+    const start = TIER_ORDER.indexOf(tier);
+    for (let i = start < 0 ? 0 : start; i >= 0; i--) {
+        const pool = oresAtDepth(TIER_ORDER[i], depthId);
+        if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
     }
-    return pool[Math.floor(Math.random() * pool.length)];
+    return ORES_BY_TIER['common'][0];
 }
 
 // ─── FAILURE SEVERITY ────────────────────────────────────────────────────────
@@ -588,9 +612,13 @@ function executeMine(user, depthId, options = {}) {
     const result = { success, xpEarned: 0, durabilityLost: 0, pickaxeBroke: false };
 
     if (success) {
-        const tier   = rollTier(user, depth);
-        const ore    = rollOre(tier, depthId ?? m.activeDepth);
-        const rawPayout = randInt(ore.payoutMin, ore.payoutMax);
+        const rolledTier = rollTier(user, depth);
+        const ore        = rollOre(rolledTier, depthId ?? m.activeDepth);
+        // The ore's own tier is authoritative: rollOre may have stepped down to stay
+        // inside the depth, and the find counters, quest progress, rarity ribbon and
+        // server announcement all have to describe the ore actually handed out.
+        const tier       = ore.tier;
+        const rawPayout  = randInt(ore.payoutMin, ore.payoutMax);
 
         const critChance     = calculateCritChance(user);
         const isCrit         = Math.random() < critChance;
@@ -863,12 +891,6 @@ function updateMineMap(user, result) {
         m.mineMap[idx] = CELL.CAVE_IN;
     } else if (result.success && result.ore) {
         m.mineMap[idx] = CELL.ORE;
-        // Accumulate ore stash for raiding
-        const matId = result.specialDrop?.itemId;
-        if (matId) {
-            if (!m.oreStash) m.oreStash = {};
-            m.oreStash[matId] = (m.oreStash[matId] ?? 0) + 1;
-        }
     } else {
         m.mineMap[idx] = CELL.DUG;
     }
@@ -909,15 +931,50 @@ function renderMineMap(user) {
     return rows.join('\n');
 }
 
-// ─── ORE STASH ────────────────────────────────────────────────────────────────
+// ─── RAIDABLE MATERIALS ───────────────────────────────────────────────────────
+//
+// Raiding used to take from a separate `oreStash` map that was written alongside
+// `materials` on every drop and never spent by its owner. That made a raid a pure
+// mint: the defender's real material pile — the one `/craft` spends — was untouched
+// while the raider was credited real materials out of nothing, and the Mine Lock
+// they were sold defended a pile that cost nothing to lose.
+//
+// Raids now move materials between two real stocks, so nothing is created. The
+// haul is bounded on both sides: only the defender's largest piles are exposed,
+// no single material gives up more than a few units, and a miner's last unit of
+// anything is never taken.
 
-function getOreStashSummary(user) {
-    const stash = user.mining?.oreStash ?? {};
-    return Object.entries(stash).filter(([, qty]) => qty > 0);
+const RAID_MAX_MATERIAL_TYPES = 5;
+const RAID_MAX_PER_MATERIAL   = 3;
+const RAID_MIN_HOLDING        = 2;
+
+/**
+ * The materials a raid could reach right now: the defender's biggest piles, minus
+ * anything they hold only one of. Sorted largest-first, then by id so the exposure
+ * a defender sees on `/mine map` is the same set a raider hits.
+ */
+function getRaidableMaterials(user) {
+    const materials = user.mining?.materials ?? {};
+    return Object.entries(materials)
+        .filter(([, qty]) => qty >= RAID_MIN_HOLDING)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, RAID_MAX_MATERIAL_TYPES);
 }
 
-function isOreStashEmpty(user) {
-    return getOreStashSummary(user).length === 0;
+function hasRaidableMaterials(user) {
+    return getRaidableMaterials(user).length > 0;
+}
+
+/**
+ * What a raid at `stealFraction` would take, as [{ matId, take }]. Every entry
+ * takes at least 1 (the pile is known to hold 2+) and at most RAID_MAX_PER_MATERIAL,
+ * so a long-standing miner's hoard can be chipped at but never cleaned out.
+ */
+function planRaidHaul(user, stealFraction) {
+    return getRaidableMaterials(user).map(([matId, qty]) => ({
+        matId,
+        take: Math.min(RAID_MAX_PER_MATERIAL, Math.max(1, Math.floor(qty * stealFraction))),
+    }));
 }
 
 module.exports = {
@@ -930,6 +987,7 @@ module.exports = {
     calculateCritChance,
     rollTier,
     rollOre,
+    hasOreAtDepth,
     rollFailureSeverity,
     applyPayoutModifiers,
     applyDurabilityLoss,
@@ -951,6 +1009,10 @@ module.exports = {
     durabilityBar,
     updateMineMap,
     renderMineMap,
-    getOreStashSummary,
-    isOreStashEmpty
+    getRaidableMaterials,
+    hasRaidableMaterials,
+    planRaidHaul,
+    RAID_MAX_MATERIAL_TYPES,
+    RAID_MAX_PER_MATERIAL,
+    RAID_MIN_HOLDING
 };

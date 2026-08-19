@@ -346,20 +346,21 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
     } else {
         await interaction.editReply({ embeds: [fogEmbed] });
         await wait(1500);
-        const midColor = tierNum === 4 ? '#9c27b0' : '#ff9800';
-        const midTitle = tierNum === 4 ? '🔮 Something exceptional breaks the surface...' : '⚡ The line pulls taut with impossible force...';
-        const midTierLabel = tierNum === 4 ? 'EPIC' : 'LEGENDARY';
+        const midColor = tierNum === 6 ? '#e74c3c' : tierNum === 4 ? '#9c27b0' : '#ff9800';
+        const midTitle = tierNum === 6 ? '☄️ The water goes utterly still...' : tierNum === 4 ? '🔮 Something exceptional breaks the surface...' : '⚡ The line pulls taut with impossible force...';
+        const midTierLabel = tierNum === 6 ? 'EVENT' : tierNum === 4 ? 'EPIC' : 'LEGENDARY';
         const midEmbed = new EmbedBuilder()
             .setColor(midColor)
             .setTitle(midTitle)
             .setDescription(`━━━━━━━━━━━━━━━\n❓❓❓  **${midTierLabel}**  ❓❓❓\n━━━━━━━━━━━━━━━`);
         await interaction.editReply({ embeds: [midEmbed] });
         await wait(1500);
-        if (tierNum === 5) {
+        if (tierNum >= 5) {
+            const isEvent = tierNum === 6;
             const fanfareEmbed = new EmbedBuilder()
-                .setColor('#ff9800')
-                .setTitle('⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
-                .setDescription('━━━━━━━━━━━━━━━\n*The ocean holds its breath. This catch defies all odds.*\n━━━━━━━━━━━━━━━');
+                .setColor(isEvent ? '#e74c3c' : '#ff9800')
+                .setTitle(isEvent ? '☄️ 🌊 𝗠 𝗬 𝗧 𝗛 𝗜 𝗖 𝗔 𝗟 🌊 ☄️' : '⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
+                .setDescription(isEvent ? '━━━━━━━━━━━━━━━\n*Sailors tell stories about this one. Now you are the story.*\n━━━━━━━━━━━━━━━' : '━━━━━━━━━━━━━━━\n*The ocean holds its breath. This catch defies all odds.*\n━━━━━━━━━━━━━━━');
             await interaction.editReply({ embeds: [fanfareEmbed] });
             await wait(1500);
         }

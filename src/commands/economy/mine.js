@@ -10,6 +10,7 @@ const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse }          = require('../../utils/shopBrowse');
+const { packFields }             = require('../../utils/embedFields');
 const {
     DEPTHS, DEPTH_LIST, TIER_COLORS, LIMITS, PICKAXE_BY_TIER,
     MATERIAL_NAMES, CONSUMABLES, BLAST_PACKS,
@@ -18,7 +19,7 @@ const {
     RAID_COOLDOWN_MS, RAID_SHIELD_MS, RAID_STEAL_MIN, RAID_STEAL_MAX
 } = require('../../data/mineData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
-const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
+const { TIER_NUM, TIER_RIBBON, TIER_STARS } = require('../../data/materialRarity');
 const { randomFrom, MINE_CAVE_LINES } = require('../../utils/copyLines');
 const { getPityBonus, buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const {
@@ -43,8 +44,10 @@ const {
     applyXp,
     updateMineMap,
     renderMineMap,
-    getOreStashSummary,
-    isOreStashEmpty
+    getRaidableMaterials,
+    hasRaidableMaterials,
+    planRaidHaul,
+    RAID_MAX_PER_MATERIAL
 } = require('../../services/mineService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -124,6 +127,14 @@ module.exports = {
                 .addSubcommand(sub =>
                     sub.setName('equip')
                         .setDescription('Equip a pickaxe from your inventory')
+                        .addIntegerOption(o =>
+                            o.setName('slot')
+                                .setDescription('Pickaxe slot number (use /mine inv view to see slots)')
+                                .setRequired(true)
+                                .setMinValue(1)))
+                .addSubcommand(sub =>
+                    sub.setName('discard')
+                        .setDescription('Discard a broken or condemned pickaxe')
                         .addIntegerOption(o =>
                             o.setName('slot')
                                 .setDescription('Pickaxe slot number (use /mine inv view to see slots)')
@@ -258,20 +269,21 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
     } else {
         await interaction.editReply({ embeds: [fogEmbed] });
         await wait(1500);
-        const midColor = tierNum === 4 ? '#9c27b0' : '#ff9800';
-        const midTitle = tierNum === 4 ? '🔮 A rare vein reveals itself...' : '⚡ The tunnel fills with an impossible glow...';
-        const midTierLabel = tierNum === 4 ? 'EPIC' : 'LEGENDARY';
+        const midColor = tierNum === 6 ? '#e74c3c' : tierNum === 4 ? '#9c27b0' : '#ff9800';
+        const midTitle = tierNum === 6 ? '☄️ The rock itself begins to hum...' : tierNum === 4 ? '🔮 A rare vein reveals itself...' : '⚡ The tunnel fills with an impossible glow...';
+        const midTierLabel = tierNum === 6 ? 'EVENT' : tierNum === 4 ? 'EPIC' : 'LEGENDARY';
         const midEmbed = new EmbedBuilder()
             .setColor(midColor)
             .setTitle(midTitle)
             .setDescription(`━━━━━━━━━━━━━━━\n❓❓❓  **${midTierLabel}**  ❓❓❓\n━━━━━━━━━━━━━━━`);
         await interaction.editReply({ embeds: [midEmbed] });
         await wait(1500);
-        if (tierNum === 5) {
+        if (tierNum >= 5) {
+            const isEvent = tierNum === 6;
             const fanfareEmbed = new EmbedBuilder()
-                .setColor('#ff9800')
-                .setTitle('⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
-                .setDescription('━━━━━━━━━━━━━━━\n*Miners dream of this their whole careers.*\n━━━━━━━━━━━━━━━');
+                .setColor(isEvent ? '#e74c3c' : '#ff9800')
+                .setTitle(isEvent ? '☄️ 🌋 𝗣 𝗥 𝗜 𝗠 𝗢 𝗥 𝗗 𝗜 𝗔 𝗟 🌋 ☄️' : '⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
+                .setDescription(isEvent ? '━━━━━━━━━━━━━━━\n*This ore has no business existing. Nobody will believe you.*\n━━━━━━━━━━━━━━━' : '━━━━━━━━━━━━━━━\n*Miners dream of this their whole careers.*\n━━━━━━━━━━━━━━━');
             await interaction.editReply({ embeds: [fanfareEmbed] });
             await wait(1500);
         }
@@ -817,7 +829,7 @@ async function handleDig(interaction) {
         // Log big win, then await hourly leader update and re-fetch for accurate footer
         if (result.success && result.finalPayout > 0) {
             const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-            if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+            if (result.finalPayout >= bigWinThreshold || ['legendary', 'event'].includes(result.tier)) {
                 logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'mine', details: { itemName: result.ore?.name, rarity: result.tier }, client: interaction.client });
             }
             await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
@@ -884,18 +896,24 @@ async function handleDig(interaction) {
         // Staged loot reveal for rare+ drops
         await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
 
-        if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
+        if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
             const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
             const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-            const isLeg = result.tier === 'legendary';
+            const announceTier = TIER_NUM[result.tier] ?? 4;
+            const ANNOUNCE_COPY = {
+                4: { color: '#9c27b0', title: '🔮 Epic Ore Unearthed!',      line: 'A rare find in these tunnels.' },
+                5: { color: '#ff9800', title: '✨ Legendary Strike! ✨',      line: 'That vein runs deep — and dangerous.' },
+                6: { color: '#e74c3c', title: '☄️ Primordial Strike! ☄️',    line: 'Ore like this is not supposed to exist. The whole server should know.' },
+            };
+            const copy = ANNOUNCE_COPY[announceTier] ?? ANNOUNCE_COPY[4];
             const announcementEmbed = new EmbedBuilder()
-                .setColor(isLeg ? '#ff9800' : '#9c27b0')
-                .setTitle(isLeg ? '✨ Legendary Strike! ✨' : '🔮 Epic Ore Unearthed!')
+                .setColor(copy.color)
+                .setTitle(copy.title)
                 .setDescription(
-                    `<@${interaction.user.id}> just unearthed ${result.ore.emoji} **${result.ore.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
+                    `<@${interaction.user.id}> just unearthed ${result.ore.emoji} **${result.ore.name}** [${TIER_STARS[announceTier]}]\n` +
                     `at the **${depth.name}** depth.\n\n` +
-                    (isLeg ? `That vein runs deep — and dangerous.` : `A rare find in these tunnels.`)
+                    copy.line
                 )
                 .setTimestamp();
             announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
@@ -1101,7 +1119,19 @@ async function handleInv(interaction, sub) {
                 const upgradeStr = p.upgrade ? ` [${p.upgrade.replace(/_/g, ' ')}]` : '';
                 return `**Slot ${i + 1}**${isEquipped ? ' *(equipped)*' : ''} — ${p.name}${upgradeStr} ${pickaxeStatusEmoji(p.status)}\n> ${bar} ${p.currentDurability}/${p.maxDurability}`;
             });
-            embed.addFields({ name: '🪓 Pickaxes', value: lines.join('\n'), inline: false });
+            // Nothing caps how many pickaxes a miner accumulates and each entry runs
+            // ~85 characters, so a single field ran out of room around the twelfth one
+            // and Discord rejected the whole embed. Spill into continuation fields.
+            embed.addFields(...packFields('🪓 Pickaxes', lines));
+
+            const junk = m.pickaxes.filter(p => p.status === 'broken' || p.status === 'condemned').length;
+            if (junk > 0) {
+                embed.addFields({
+                    name: '🗑️ Unusable',
+                    value: `${junk} pickaxe${junk === 1 ? ' is' : 's are'} broken or condemned — clear ${junk === 1 ? 'it' : 'them'} out with \`/mine inv discard\`.`,
+                    inline: false
+                });
+            }
         }
 
         const chargeLines = BLAST_PACKS.map(b => {
@@ -1175,6 +1205,56 @@ async function handleInv(interaction, sub) {
                         { name: 'Status',     value: `${pickaxeStatusEmoji(pickaxe.status)} ${pickaxe.status}`, inline: true },
                         { name: 'Upgrade',    value: pickaxe.upgrade ? pickaxe.upgrade.replace(/_/g, ' ') : 'None', inline: true }
                     )
+                    .setTimestamp()
+            ]
+        });
+    }
+
+    if (sub === 'discard') {
+        const index = interaction.options.getInteger('slot') - 1;
+
+        if (index < 0 || index >= m.pickaxes.length) {
+            return interaction.reply({
+                content: `No pickaxe in slot ${index + 1}. You have ${m.pickaxes.length} pickaxe(s).`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        const pickaxe = m.pickaxes[index];
+        if (pickaxe.status !== 'broken' && pickaxe.status !== 'condemned') {
+            return interaction.reply({
+                content: `**${pickaxe.name}** is not broken or condemned. You can only discard unusable pickaxes.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // Splicing shifts every later slot down by one, so the equipped index has to
+        // move with it or the miner silently ends up wielding a different pickaxe.
+        const wasEquipped = m.equippedPickaxeIndex === index;
+        m.pickaxes.splice(index, 1);
+
+        if (wasEquipped) {
+            m.equippedPickaxeIndex = m.pickaxes.length > 0 ? 0 : -1;
+        } else if (m.equippedPickaxeIndex > index) {
+            m.equippedPickaxeIndex -= 1;
+        }
+
+        user.markModified('mining');
+        await user.save();
+
+        const nowEquipped = m.pickaxes[m.equippedPickaxeIndex];
+        return interaction.reply({
+            embeds: [
+                new EmbedBuilder()
+                    .setColor('#e74c3c')
+                    .setTitle('🗑️ Pickaxe Discarded')
+                    .setDescription(
+                        `**${pickaxe.name}** has been discarded.` +
+                        (wasEquipped && nowEquipped ? `\nYou are now wielding **${nowEquipped.name}**.` : '')
+                    )
+                    .setFooter({ text: m.pickaxes.length === 0
+                        ? 'Buy a new pickaxe with /mine shop pickaxe'
+                        : 'Use /mine inv view to see your remaining pickaxes' })
                     .setTimestamp()
             ]
         });
@@ -1954,13 +2034,18 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
         const payoutDisplay = cappedByHard ? `~~${currency}${finalPayout}~~ (daily cap reached)` : `**${currency}${finalPayout.toLocaleString()}**`;
 
-        const isLegendary = tier === 'legendary';
-        const ribbon = TIER_RIBBON(TIER_NUM[tier] ?? 1);
-        const embedTitle = isLegendary
-            ? `⛏️✨ LEGENDARY STRIKE ✨⛏️`
+        const tierNum  = TIER_NUM[tier] ?? 1;
+        const isEvent  = tier === 'event';
+        const isHeadline = tierNum >= 5;   // legendary and event both get the full treatment
+        const ribbon = TIER_RIBBON(tierNum);
+        const embedTitle = isHeadline
+            ? (isEvent ? `☄️🌋 PRIMORDIAL STRIKE 🌋☄️` : `⛏️✨ LEGENDARY STRIKE ✨⛏️`)
             : `${ore.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${ore.name} ${isCrit ? '✨' : ''}`;
-        const embedDesc = isLegendary
-            ? `${ribbon}\n\nYou struck something impossible in the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${ore.emoji}  **${ore.name}**  [⭐⭐⭐⭐⭐]\n  *${ore.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+        const headlineLede = isEvent
+            ? 'You broke into something that should not be down there.'
+            : 'You struck something impossible in the deep.';
+        const embedDesc = isHeadline
+            ? `${ribbon}\n\n${headlineLede}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${ore.emoji}  **${ore.name}**  [${TIER_STARS[tierNum]}]\n  *${ore.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
             : `${ribbon}\n\n*${ore.flavor}*`;
 
         const embed = new EmbedBuilder()
@@ -2151,7 +2236,7 @@ async function handleMap(interaction) {
     // 0/3 correct pays 0.7× and 3/3 pays 2× (3× on a lucky break into the Abyss).
     const intensityHint = '0.7×–3.0×, set by your vein read';
 
-    const stashLines = getOreStashSummary(user).map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
+    const raidableLines = getRaidableMaterials(user).map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
 
     const embed = new EmbedBuilder()
         .setColor('#8B4513')
@@ -2165,10 +2250,10 @@ async function handleMap(interaction) {
                 inline: true
             },
             {
-                name: '📦 Unprocessed Ore Stash',
-                value: stashLines.length
-                    ? stashLines.join('\n') + '\n*Can be stolen by raiders!*'
-                    : 'Empty — ore stash fills as you mine veins.',
+                name: '📦 Exposed to Raiders',
+                value: raidableLines.length
+                    ? raidableLines.join('\n') + `\n*A raid takes up to ${RAID_MAX_PER_MATERIAL} of each — spend or craft them to shrink the pile.*`
+                    : 'Nothing exposed — raiders can only reach materials you hold 2+ of.',
                 inline: true
             },
             {
@@ -2283,14 +2368,16 @@ async function handleRaid(interaction) {
     }
 
     // Check if there's anything to steal
-    if (isOreStashEmpty(defender)) {
+    if (!hasRaidableMaterials(defender)) {
         return interaction.reply({
-            content: `**${targetUser.username}**'s ore stash is empty — nothing worth raiding.`,
+            content: `**${targetUser.username}** has nothing worth raiding — no material they hold more than one of.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
-    // Execute the raid: steal RAID_STEAL_MIN–RAID_STEAL_MAX of each stash material.
+    // Execute the raid: move RAID_STEAL_MIN–RAID_STEAL_MAX of the defender's largest
+    // material piles across to the raider. The same `data.materials` map is debited
+    // and credited, so a raid transfers value rather than creating it.
     // Defender is updated first; the shield CAS ($or on lastRaidReceived) and
     // per-material $gte guards ensure only one raid commits atomically. Raider
     // update follows sequentially with a cooldown CAS to block duplicate commands.
@@ -2299,21 +2386,21 @@ async function handleRaid(interaction) {
     const defenderInc = {};
     const raiderInc   = {};
 
-    for (const [matId, qty] of Object.entries(defender.mining.oreStash ?? {})) {
-        if (qty <= 0) continue;
-        const take = Math.max(1, Math.floor(qty * stealFraction));
+    for (const { matId, take } of planRaidHaul(defender, stealFraction)) {
         stolen[matId] = take;
-        defenderInc[`data.oreStash.${matId}`] = -take;
-        raiderInc[`data.materials.${matId}`]  = take;
+        defenderInc[`data.materials.${matId}`] = -take;
+        raiderInc[`data.materials.${matId}`]   = take;
     }
 
     // Make sure the raider's mining profile exists before the conditional commit below
     await persistGrindIfNew(raider, 'mining');
 
-    // Condition: each stolen material still exists; defender not under active shield.
+    // Condition: the defender still holds every material being taken; defender not
+    // under active shield. Without the $gte guards a raid racing a craft could push
+    // a material stock negative.
     const defenderCond = { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' };
     for (const [matId, take] of Object.entries(stolen)) {
-        defenderCond[`data.oreStash.${matId}`] = { $gte: take };
+        defenderCond[`data.materials.${matId}`] = { $gte: take };
     }
     defenderCond.$or = [
         { 'data.lastRaidReceived': null },
@@ -2327,7 +2414,7 @@ async function handleRaid(interaction) {
 
     if (!defenderResult) {
         return interaction.reply({
-            content: `**${targetUser.username}**'s ore stash was already raided — nothing left to take.`,
+            content: `**${targetUser.username}**'s stock shifted before you got in — nothing left to take. Try again shortly.`,
             flags: MessageFlags.Ephemeral
         });
     }
@@ -2352,10 +2439,11 @@ async function handleRaid(interaction) {
         .setColor('#e67e22')
         .setTitle('⚔️ Mine Raided!')
         .setDescription(
-            `You broke into **${targetUser.username}**'s mine and made off with **${pct}%** of their ore stash!\n\n` +
-            `**Stolen:**\n${stolenLines}`
+            `You broke into **${targetUser.username}**'s mine and made off with **${pct}%** of their exposed materials!\n\n` +
+            `**Stolen:**\n${stolenLines}\n\n` +
+            `*These are now yours to craft with.*`
         )
-        .setFooter({ text: `${targetUser.username} now has a 1-hour raid shield • Use /mine map to see your stash` })
+        .setFooter({ text: `${targetUser.username} now has a 1-hour raid shield • Use /mine map to see what of yours is exposed` })
         .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
@@ -2366,7 +2454,7 @@ async function handleRaid(interaction) {
         .setTitle('⚠️ Your Mine Was Raided!')
         .setDescription(
             `**${interaction.user.username}** broke into your mine on **${interaction.guild.name}** ` +
-            `and stole **${pct}%** of your ore stash!\n\n` +
+            `and stole **${pct}%** of your exposed crafting materials!\n\n` +
             `**Lost:**\n${stolenLines}\n\n` +
             `Get a **Mine Lock** (\`/mine shop buy item:mine_lock\` or \`/craft make mine_lock_from_obsidian\`) ` +
             `and arm it with \`/mine shop use item:mine_lock\` to block the next raid.`

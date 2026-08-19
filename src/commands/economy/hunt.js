@@ -357,21 +357,22 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
         await interaction.editReply({ embeds: [fogEmbed] });
         await wait(1500);
         // Stage 2 — partial reveal
-        const midColor = tierNum === 4 ? '#9c27b0' : '#ff9800';
-        const midTitle = tierNum === 4 ? '🔮 Something exceptional emerges...' : '⚡ The air crackles with power...';
-        const midTierLabel = tierNum === 4 ? 'EPIC' : 'LEGENDARY';
+        const midColor = tierNum === 6 ? '#e74c3c' : tierNum === 4 ? '#9c27b0' : '#ff9800';
+        const midTitle = tierNum === 6 ? '☄️ Every animal in the forest has gone silent...' : tierNum === 4 ? '🔮 Something exceptional emerges...' : '⚡ The air crackles with power...';
+        const midTierLabel = tierNum === 6 ? 'EVENT' : tierNum === 4 ? 'EPIC' : 'LEGENDARY';
         const midEmbed = new EmbedBuilder()
             .setColor(midColor)
             .setTitle(midTitle)
             .setDescription(`━━━━━━━━━━━━━━━\n❓❓❓  **${midTierLabel}**  ❓❓❓\n━━━━━━━━━━━━━━━`);
         await interaction.editReply({ embeds: [midEmbed] });
         await wait(1500);
-        if (tierNum === 5) {
+        if (tierNum >= 5) {
             // Stage 3 — legendary fanfare
+            const isEvent = tierNum === 6;
             const fanfareEmbed = new EmbedBuilder()
-                .setColor('#ff9800')
-                .setTitle('⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
-                .setDescription('━━━━━━━━━━━━━━━\n*The air crackles. This is once in a lifetime.*\n━━━━━━━━━━━━━━━');
+                .setColor(isEvent ? '#e74c3c' : '#ff9800')
+                .setTitle(isEvent ? '☄️ ⚡ 𝗠 𝗬 𝗧 𝗛 𝗜 𝗖 𝗔 𝗟 ⚡ ☄️' : '⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
+                .setDescription(isEvent ? '━━━━━━━━━━━━━━━\n*Nothing like this has been seen in living memory.*\n━━━━━━━━━━━━━━━' : '━━━━━━━━━━━━━━━\n*The air crackles. This is once in a lifetime.*\n━━━━━━━━━━━━━━━');
             await interaction.editReply({ embeds: [fanfareEmbed] });
             await wait(1500);
         }

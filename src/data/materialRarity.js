@@ -67,17 +67,22 @@ const MATERIAL_RARITY = {
     void_essence:      { tier: 5, emoji: '🌑', label: 'Void Essence',        source: 'mine' }
 };
 
-const TIER_LABELS = { 1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic', 5: 'Legendary' };
-const TIER_STARS  = { 1: '⭐', 2: '⭐⭐', 3: '⭐⭐⭐', 4: '⭐⭐⭐⭐', 5: '⭐⭐⭐⭐⭐' };
-const TIER_COLORS = { 1: '#9e9e9e', 2: '#4caf50', 3: '#2196f3', 4: '#9c27b0', 5: '#ff9800' };
+// Tier 6 is the `event` rarity that hunt, fish and mine all roll (Thunderbird,
+// Leviathan, Void Ore …). No *material* sits at tier 6 — the event catches drop
+// tier-5 materials — but the catch itself outranks legendary, and every presentation
+// path keys off these tables, so the ladder has to carry the rung. Leaving it out is
+// what made the rarest drops in the game render as common.
+const TIER_LABELS = { 1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic', 5: 'Legendary', 6: 'Event' };
+const TIER_STARS  = { 1: '⭐', 2: '⭐⭐', 3: '⭐⭐⭐', 4: '⭐⭐⭐⭐', 5: '⭐⭐⭐⭐⭐', 6: '☀️☀️☀️☀️☀️' };
+const TIER_COLORS = { 1: '#9e9e9e', 2: '#4caf50', 3: '#2196f3', 4: '#9c27b0', 5: '#ff9800', 6: '#e74c3c' };
 
 // Maps tier name strings (used in hunt/fish/mine results) to numeric tier levels.
-const TIER_NUM = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5 };
+const TIER_NUM = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5, event: 6 };
 
-const RIBBON_DOTS = ['🟢', '🔵', '🟣', '🟡', '🌌'];
+const RIBBON_DOTS = ['🟢', '🔵', '🟣', '🟡', '🌌', '☄️'];
 
-// Returns the formatted rarity ribbon for a tier number (1–5).
-// e.g. TIER_RIBBON(3) → "🟢 ─ 🔵 ─ [🟣] ─ 🟡 ─ 🌌"
+// Returns the formatted rarity ribbon for a tier number (1–6).
+// e.g. TIER_RIBBON(3) → "🟢 ─ 🔵 ─ [🟣] ─ 🟡 ─ 🌌 ─ ☄️"
 function TIER_RIBBON(tier) {
     return RIBBON_DOTS.map((dot, i) => {
         const t = i + 1;
