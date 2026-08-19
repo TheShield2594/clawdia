@@ -854,10 +854,16 @@ async function resolveRankedSeasons(client) {
 // large balances inflate the economy unboundedly.
 const INTEREST_BEARING_CAP = 100_000;
 
+// Users are credited in batches rather than one document at a time. A guild with
+// tens of thousands of bankers would otherwise cost that many sequential round
+// trips, and holding every op in one array before sending it trades the round
+// trips for an equally unbounded amount of memory.
+const INTEREST_BATCH_SIZE = 1_000;
+
 async function applyBankInterest(client) {
     const { EmbedBuilder } = require('discord.js');
     const { isDistrictActive } = require('./districtService');
-    const { logTransaction } = require('../utils/logTransaction');
+    const Transaction = require('../models/Transaction');
 
     const now     = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -884,19 +890,38 @@ async function applyBankInterest(client) {
 
             if (!isDistrictActive(guildDoc, 'bank')) continue;
 
-            const users = await User.find({ guildId, bank: { $gt: 0 } });
+            // Projected and lean: the credit needs three fields, and hydrating full
+            // user documents for the whole guild is what makes this job expensive.
+            const users = await User.find({ guildId, bank: { $gt: 0 } })
+                .select('userId bank balance')
+                .lean();
+
+            const note = `5% weekly bank interest (Bank district active, first ${INTEREST_BEARING_CAP.toLocaleString()} coins)`;
             let totalInterestPaid = 0;
+            let credits = [];
+            let ledger  = [];
+
+            const flush = async () => {
+                if (!credits.length) return;
+                await User.bulkWrite(credits, { ordered: false });
+                // The ledger is written after the credit for the same reason the rest of
+                // the economy does it in that order: an entry with no matching credit
+                // claims coins nobody was paid.
+                await Transaction.insertMany(ledger, { ordered: false })
+                    .catch(err => console.error('[scheduler] bank interest ledger write failed:', err.message));
+                credits = [];
+                ledger  = [];
+            };
 
             for (const user of users) {
                 const interest = Math.floor(Math.min(user.bank, INTEREST_BEARING_CAP) * 0.05);
                 if (interest <= 0) continue;
-                await User.findOneAndUpdate(
-                    { _id: user._id },
-                    { $inc: { bank: interest } }
-                );
-                logTransaction({ userId: user.userId, guildId, type: 'bank_interest', amount: interest, balance: user.balance, note: `5% weekly bank interest (Bank district active, first ${INTEREST_BEARING_CAP.toLocaleString()} coins)` });
+                credits.push({ updateOne: { filter: { _id: user._id }, update: { $inc: { bank: interest } } } });
+                ledger.push({ userId: user.userId, guildId, type: 'bank_interest', amount: interest, balance: user.balance, note });
                 totalInterestPaid += interest;
+                if (credits.length >= INTEREST_BATCH_SIZE) await flush();
             }
+            await flush();
 
             if (totalInterestPaid <= 0) continue;
 

@@ -101,6 +101,9 @@ module.exports = {
                 }
             }
 
+            // One read of the author's user document serves the whole handler:
+            // handleLeveling mutates it and hands it back unsaved, handleStreakAndQuests
+            // keeps mutating that same document and performs the single write.
             let sharedUser = null;
             if (guildSettings?.leveling.enabled) {
                 sharedUser = await handleLeveling(message, guildSettings);
@@ -108,7 +111,9 @@ module.exports = {
 
             if (guildSettings?.moderation.enabled) {
                 const blocked = await handleAutoModeration(message, guildSettings);
-                if (blocked) return;
+                // A blocked message never reaches the streak/quest write, so the XP
+                // handleLeveling applied has nothing to ride along on.
+                if (blocked) return await flushPendingUser(sharedUser);
             }
 
             await handleSuggestions(message, guildSettings);
@@ -120,9 +125,11 @@ module.exports = {
             // Natural language reminders — available to everyone, any channel
             await handleNLReminder(message);
 
-            // Streak + quests — fetch independently to avoid operating on a stale,
-            // already-saved Mongoose document from handleLeveling.
-            await handleStreakAndQuests(message, guildSettings);
+            // Streak + quests — reuses the document handleLeveling already loaded and
+            // saves it once. It reports whether that write landed; when it bailed out
+            // early or threw before saving, the XP still has to be persisted.
+            const persisted = await handleStreakAndQuests(message, guildSettings, sharedUser);
+            if (!persisted) await flushPendingUser(sharedUser);
 
             // Ambient chat events (airdrops, crates, trivia) — fire-and-forget
             maybeTriggerChatEvent(message, guildSettings).catch(() => {});
@@ -133,10 +140,27 @@ module.exports = {
     }
 };
 
-async function handleStreakAndQuests(message, guildSettings, existingUser = null) {
+// Backstop for the paths that never reach the streak/quest write: the XP applied
+// by handleLeveling lives only in memory until something saves the document.
+// Only called when that write is known not to have happened, so it can never race
+// the fire-and-forget saves (wealth milestones, achievements) that follow it.
+async function flushPendingUser(user) {
+    if (!user?.isModified?.()) return;
     try {
-        let user = existingUser ?? await User.findOne({ userId: message.author.id, guildId: message.guild.id });
-        if (!user) return;
+        await user.save();
+    } catch (err) {
+        console.error('Pending user save error:', err.message);
+    }
+}
+
+async function handleStreakAndQuests(message, guildSettings, existingUser = null) {
+    // Reported back to the caller so it knows whether the XP handleLeveling
+    // applied has been persisted. Set only once the write has actually landed —
+    // a failure after that point still leaves the document saved.
+    let persisted = false;
+    try {
+        const user = existingUser ?? await User.findOne({ userId: message.author.id, guildId: message.guild.id });
+        if (!user) return false;
 
         // Every coin this path awards — streak milestones, quest completions — is
         // folded into one `$inc` at the save below. `save()` writes `balance` as an
@@ -210,6 +234,7 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
             jobName: 'streakAndQuestRewards',
             guildId: message.guild.id,
         });
+        persisted = true;
 
         // Check wealth milestones after any coins may have been awarded (streak rewards, etc.)
         checkAndBroadcastWealthMilestone(message.client, guildSettings, user, message.channel).catch(() => {});
@@ -241,14 +266,19 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
     } catch (err) {
         console.error('Streak/quest error:', err);
     }
+    return persisted;
 }
 
+// Applies levelling XP in memory and returns the document without saving it.
+// The caller hands the same document to handleStreakAndQuests, which mutates it
+// further and issues the one write that covers both — a second fetch and a second
+// save of the same user on every message is what this avoids.
 async function handleLeveling(message, guildSettings) {
     if (!guildSettings?.leveling?.rewardsEnabled) return null;
     if (guildSettings.leveling?.noXpChannelIds?.includes(message.channel.id)) return null;
     if (message.member?.roles?.cache?.some(role => guildSettings.leveling?.noXpRoleIds?.includes(role.id))) return null;
 
-    let user = await User.findOne({ userId: message.author.id, guildId: message.guild.id });
+    const user = await User.findOne({ userId: message.author.id, guildId: message.guild.id });
 
     const now = Date.now();
     // Return the user even when XP is on cooldown so handleStreakAndQuests can reuse it
@@ -298,7 +328,8 @@ async function handleLeveling(message, guildSettings) {
             await announceLevelUp(user, guildSettings, message.member, message.guild, message.channel);
         }
 
-        await user.save();
+        // Standings are computed from the in-memory values, so they do not need
+        // the write to have landed first.
         checkRivalry(message.client, message.guild, user).catch(() => {});
         return user;
     } else {

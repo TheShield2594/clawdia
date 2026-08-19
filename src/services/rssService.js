@@ -117,7 +117,10 @@ async function fetchSendableChannel(client, channelId) {
 }
 async function checkRssFeeds(client) {
     try {
-        const guilds = await Guild.find({ 'rssFeeds.0': { $exists: true } });
+        // Projected and lean: a full Guild document carries the 3000-entry
+        // analytics.commandUsage array and every shop item's image Buffer, none of
+        // which this job reads.
+        const guilds = await Guild.find({ 'rssFeeds.0': { $exists: true } }, 'guildId rssFeeds').lean();
 
         for (const guild of guilds) {
             for (const feed of guild.rssFeeds) {
@@ -147,8 +150,13 @@ async function checkRssFeeds(client) {
                             await channel.send({ embeds: [embed] });
                         }
 
-                        feed.lastPublished = itemDate;
-                        await guild.save();
+                        // Targets the one subdocument rather than rewriting the whole
+                        // rssFeeds array, which is also what `guild.save()` on a
+                        // projected document could not do.
+                        await Guild.updateOne(
+                            { guildId: guild.guildId, 'rssFeeds._id': feed._id },
+                            { $set: { 'rssFeeds.$.lastPublished': itemDate } }
+                        );
                     }
                 } catch (error) {
                     console.error(`Error parsing RSS feed ${feed.url}:`, error);
@@ -303,7 +311,7 @@ function scheduleProfileJob(client, guildId, profile) {
 }
 
 function scheduleDailyNews(client) {
-    Guild.find({}).then(guilds => {
+    Guild.find({}, 'guildId dailyNewsProfiles dailyNews').lean().then(guilds => {
         for (const guild of guilds) {
             const profiles = getDailyNewsProfiles(guild)
                 .filter(profile => profile.enabled && Array.isArray(profile.feeds) && profile.feeds.length > 0);

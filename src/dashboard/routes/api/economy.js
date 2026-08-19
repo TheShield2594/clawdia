@@ -5,14 +5,28 @@ const User = require('../../../models/User');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
 const { topByNetWorth } = require('../../../utils/netWorth');
+const { cachedAggregate, invalidatePrefix } = require('../../lib/aggregateCache');
+
+// A full Guild document carries every shop item's image Buffer and the
+// 3000-entry analytics.commandUsage array. This route reads command names out of
+// the second and nothing at all out of the first.
+const ECONOMY_GUILD_FIELDS = 'analytics.commandUsage';
 
 router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
+        // The net-worth ranking sorts on a field the aggregation computes, so no index
+        // can serve the ordering — it is a scan of the guild's users every time, as
+        // are the two `$group`s beside it. Memoised on a short TTL so a dashboard
+        // that opens two panels, or a tab left refreshing, does not re-run all three
+        // against data that has not moved. See lib/aggregateCache.
         const [topEarners, totalCoinsAgg, activeUsersCount, guildSettings] = await Promise.all([
-            topByNetWorth(User, guildId, 10),
-            User.aggregate([{ $match: { guildId } }, { $group: { _id: null, total: { $sum: { $add: ['$balance', '$bank'] } } } }]),
-            User.countDocuments({ guildId, $or: [
+            cachedAggregate(`${guildId}:economy:top`, () => topByNetWorth(User, guildId, 10)),
+            cachedAggregate(`${guildId}:economy:total`, () => User.aggregate([
+                { $match: { guildId } },
+                { $group: { _id: null, total: { $sum: { $add: ['$balance', '$bank'] } } } }
+            ])),
+            cachedAggregate(`${guildId}:economy:active`, () => User.countDocuments({ guildId, $or: [
                 { lastWork:  { $gte: new Date(Date.now() - 7 * 864e5) } },
                 { lastDaily: { $gte: new Date(Date.now() - 7 * 864e5) } },
                 { lastFish:  { $gte: new Date(Date.now() - 7 * 864e5) } },
@@ -20,8 +34,8 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
                 { lastCrime: { $gte: new Date(Date.now() - 7 * 864e5) } },
                 { lastHeist: { $gte: new Date(Date.now() - 7 * 864e5) } },
                 { lastRob:   { $gte: new Date(Date.now() - 7 * 864e5) } }
-            ] }),
-            Guild.findOne({ guildId }).lean()
+            ] })),
+            Guild.findOne({ guildId }).select(ECONOMY_GUILD_FIELDS).lean()
         ]);
 
         const commandUsage = guildSettings?.analytics?.commandUsage || [];
@@ -91,6 +105,9 @@ router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, check
         }
 
         const user = await User.findOneAndUpdate(filter, update, { upsert: true, new: true, setDefaultsOnInsert: true });
+        // An admin who has just moved someone's coins expects to see it, and a
+        // thirty-second-old total would read as the adjustment not having applied.
+        invalidatePrefix(`${guildId}:`);
         await logAuditEvent(req, guildId, 'economy_adjust', { targetUserId: String(userId), action, amount: amount ?? null });
         res.json({ success: true, balance: user.balance, bank: user.bank, economyFrozen: user.economyFrozen });
     } catch (error) {

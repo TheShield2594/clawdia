@@ -50,6 +50,10 @@ function evaluate(expr, doc, vars = {}) {
         return getPath(doc, expr.slice(1));
     }
     if (Array.isArray(expr)) return expr.map(e => evaluate(e, doc, vars));
+    // A `Date` is an operand, not an expression object. Falling through would find
+    // no `$`-prefixed key on it and rebuild it as an empty literal, so every
+    // comparison against a date would quietly evaluate against `{}`.
+    if (expr instanceof Date) return expr;
     if (expr === null || typeof expr !== 'object') return expr;
 
     const keys = Object.keys(expr);
@@ -101,6 +105,14 @@ function evaluate(expr, doc, vars = {}) {
         case '$gt': {
             const [a, b] = args();
             return a > b;
+        }
+        case '$gte': {
+            const [a, b] = args();
+            return a >= b;
+        }
+        case '$lte': {
+            const [a, b] = args();
+            return a <= b;
         }
         case '$add': {
             // Mongo propagates null: `$add` over a missing or null operand is

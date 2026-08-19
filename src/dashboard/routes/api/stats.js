@@ -5,21 +5,39 @@ const User = require('../../../models/User');
 const Case = require('../../../models/Case');
 const { checkAuth, checkGuildAccess } = require('../../lib/middleware');
 const { computeRetention, median, parseChannelIdFromJumpUrl } = require('../../lib/apiHelpers');
+const { cachedAggregate } = require('../../lib/aggregateCache');
+
+// A full Guild document carries the 3000-entry analytics.commandUsage array, the
+// analytics this route is actually after — and every shop item's image Buffer,
+// which it is not. Naming the fields keeps the second group out of the response
+// path entirely.
+const STATS_GUILD_FIELDS = 'analytics welcome moderation leveling economy rssFeeds';
+
+// Moderation cases are read for four aggregates over five fields. Hydrating a
+// thousand full case documents to compute them is the expensive half of this
+// route.
+const CASE_FIELDS = 'type createdAt resolvedAt evidence.jumpUrl';
 
 router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
     try {
-        const totalUsers = await User.countDocuments({ guildId });
-        const totalMessages = await User.aggregate([
-            { $match: { guildId } },
-            { $group: { _id: null, total: { $sum: '$messages' } } }
+        // Every one of these touches the guild's whole user collection, and the page
+        // that calls this route also calls /economy/stats, which asks two of the same
+        // questions. Memoised so that costs one scan, not five.
+        const [totalUsers, totalMessages, topLevels, guildSettings] = await Promise.all([
+            cachedAggregate(`${guildId}:stats:users`, () => User.countDocuments({ guildId })),
+            cachedAggregate(`${guildId}:stats:messages`, () => User.aggregate([
+                { $match: { guildId } },
+                { $group: { _id: null, total: { $sum: '$messages' } } }
+            ])),
+            cachedAggregate(`${guildId}:stats:topLevels`, () => User.find({ guildId })
+                .select('userId level xp')
+                .sort({ level: -1, xp: -1 })
+                .limit(10)
+                .lean()),
+            Guild.findOne({ guildId }).select(STATS_GUILD_FIELDS).lean()
         ]);
-
-        const topLevels = await User.find({ guildId })
-            .sort({ level: -1, xp: -1 })
-            .limit(10);
-        const guildSettings = await Guild.findOne({ guildId });
         const memberEvents = guildSettings?.analytics?.memberEvents || [];
         const commandUsage = guildSettings?.analytics?.commandUsage || [];
 
@@ -71,16 +89,20 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
 
         // Economy stats summary
         const [ecoTotalAgg, ecoActiveCount] = await Promise.all([
-            User.aggregate([{ $match: { guildId } }, { $group: { _id: null, total: { $sum: { $add: ['$balance', '$bank'] } }, avgXp: { $avg: '$xp' } } }]),
-            User.countDocuments({ guildId, $or: [
-                { lastWork:  { $gte: new Date(now30 - 7 * 864e5) } },
-                { lastDaily: { $gte: new Date(now30 - 7 * 864e5) } },
-                { lastFish:  { $gte: new Date(now30 - 7 * 864e5) } },
-                { lastMine:  { $gte: new Date(now30 - 7 * 864e5) } },
-                { lastCrime: { $gte: new Date(now30 - 7 * 864e5) } },
-                { lastHeist: { $gte: new Date(now30 - 7 * 864e5) } },
-                { lastRob:   { $gte: new Date(now30 - 7 * 864e5) } }
-            ] })
+            cachedAggregate(`${guildId}:stats:ecoTotal`, () => User.aggregate([
+                { $match: { guildId } },
+                { $group: { _id: null, total: { $sum: { $add: ['$balance', '$bank'] } }, avgXp: { $avg: '$xp' } } }
+            ])),
+            // Same question, same key as /economy/stats asks it under.
+            cachedAggregate(`${guildId}:economy:active`, () => User.countDocuments({ guildId, $or: [
+                { lastWork:  { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastDaily: { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastFish:  { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastMine:  { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastCrime: { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastHeist: { $gte: new Date(Date.now() - 7 * 864e5) } },
+                { lastRob:   { $gte: new Date(Date.now() - 7 * 864e5) } }
+            ] }))
         ]);
 
         res.json({
@@ -124,7 +146,7 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
     const { guildId } = req.params;
 
     try {
-        const guildSettings = await Guild.findOne({ guildId });
+        const guildSettings = await Guild.findOne({ guildId }).select('guildId analytics').lean();
         if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
 
         const memberEvents = guildSettings?.analytics?.memberEvents || [];
@@ -143,7 +165,7 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
         const topActiveHours = [...hourMap].sort((a, b) => b.count - a.count).slice(0, 5);
 
         // Toxic channel hotspot proxy from moderation case evidence jump URLs.
-        const recentCases = await Case.find({ guildId }).sort({ createdAt: -1 }).limit(1000);
+        const recentCases = await Case.find({ guildId }).select(CASE_FIELDS).sort({ createdAt: -1 }).limit(1000).lean();
         const channelToxicity = new Map();
         for (const c of recentCases) {
             const channelId = parseChannelIdFromJumpUrl(c?.evidence?.jumpUrl) || 'unknown';
@@ -174,13 +196,37 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
             .slice(-6);
 
         // Newcomer conversion after 7/30 days based on user activity.
-        const now = Date.now();
-        const users = await User.find({ guildId }).select('createdAt messages level');
-        const cohort7 = users.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= 7 * 864e5);
-        const cohort30 = users.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= 30 * 864e5);
-        const isConverted = (u) => (u.messages || 0) >= 20 || (u.level || 0) >= 2;
-        const converted7 = cohort7.filter(isConverted).length;
-        const converted30 = cohort30.filter(isConverted).length;
+        //
+        // Counted in the pipeline rather than by pulling every user in the guild into
+        // the process and filtering the array four times. The old shape was the one
+        // unbounded read on this route: four counts, and the peak memory to produce
+        // them grew with the size of the server.
+        //
+        // The 30-day cohort is a subset of the 7-day one, so a single `$match` on the
+        // wider window feeds both; `$match` on `createdAt` also drops the documents
+        // the array filters were rejecting for having no `createdAt` at all.
+        const [cohorts] = await cachedAggregate(`${guildId}:insights:cohorts`, () => User.aggregate([
+            { $match: { guildId, createdAt: { $lte: new Date(Date.now() - 7 * 864e5) } } },
+            { $set: {
+                inCohort30: { $lte: ['$createdAt', new Date(Date.now() - 30 * 864e5)] },
+                converted: { $or: [
+                    { $gte: [{ $ifNull: ['$messages', 0] }, 20] },
+                    { $gte: [{ $ifNull: ['$level', 0] }, 2] }
+                ] }
+            } },
+            { $group: {
+                _id: null,
+                cohort7:     { $sum: 1 },
+                converted7:  { $sum: { $cond: ['$converted', 1, 0] } },
+                cohort30:    { $sum: { $cond: ['$inCohort30', 1, 0] } },
+                converted30: { $sum: { $cond: [{ $and: ['$inCohort30', '$converted'] }, 1, 0] } }
+            } }
+        ]));
+
+        const cohort7Size  = cohorts?.cohort7 ?? 0;
+        const cohort30Size = cohorts?.cohort30 ?? 0;
+        const converted7   = cohorts?.converted7 ?? 0;
+        const converted30  = cohorts?.converted30 ?? 0;
 
         res.json({
             retention: {
@@ -203,8 +249,8 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
             },
             newcomerConversion: {
                 definition: 'Converted = at least 20 messages or level 2+',
-                days7: { cohortSize: cohort7.length, converted: converted7, pct: cohort7.length ? Number(((converted7 / cohort7.length) * 100).toFixed(1)) : 0 },
-                days30: { cohortSize: cohort30.length, converted: converted30, pct: cohort30.length ? Number(((converted30 / cohort30.length) * 100).toFixed(1)) : 0 }
+                days7: { cohortSize: cohort7Size, converted: converted7, pct: cohort7Size ? Number(((converted7 / cohort7Size) * 100).toFixed(1)) : 0 },
+                days30: { cohortSize: cohort30Size, converted: converted30, pct: cohort30Size ? Number(((converted30 / cohort30Size) * 100).toFixed(1)) : 0 }
             }
         });
     } catch (error) {
