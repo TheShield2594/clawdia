@@ -1091,6 +1091,38 @@ describe('approaching an encounter is a bet worth taking', () => {
         expect(stopped.capped).toBe(true);
     });
 
+    test('"capped" tracks the headroom, not the rounding of a single coin', () => {
+        // It was derived by settling 1 coin and asking whether anything survived.
+        // Math.round(1 * 0.5) is 1, so that held at today's rate and nowhere below
+        // it: tune the soft rate to 0.4 and a player with the whole hard cap still
+        // to earn would be told the cap had taken everything.
+        const region = REGIONS.whispering_forest;
+        const settings = makeGuildSettings();
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+
+        let encounter = null;
+        for (let i = 0; i < 2_000 && !encounter; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            const r = executeExplore(user, region, settings, {});
+            if (r.pendingChoice) encounter = r;
+        }
+
+        const originalRate = LIMITS.DAILY_SOFT_CAP_RATE;
+        try {
+            for (const rate of [0.5, 0.45, 0.4, 0.25]) {
+                LIMITS.DAILY_SOFT_CAP_RATE = rate;
+                user.exploration.dailyCoins = LIMITS.DAILY_SOFT_CAP;
+                const stakes = getEncounterStakes(user, region, settings, encounter);
+                // Past the soft cap but nowhere near the hard one — still winnable.
+                expect(stakes.capped).toBe(false);
+                expect(stakes.win.max).toBeGreaterThan(0);
+            }
+        } finally {
+            LIMITS.DAILY_SOFT_CAP_RATE = originalRate;
+        }
+    });
+
     test('the prompt quotes the coins this player would actually see', () => {
         const region = REGIONS.crumbling_ruins;
         const settings = makeGuildSettings();

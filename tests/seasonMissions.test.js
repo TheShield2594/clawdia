@@ -132,17 +132,38 @@ describe('the daily deal', () => {
 describe('advanceMissions advances server-side and touches nothing else', () => {
     const { applyPipelineUpdate } = require('./helpers/pipelineUpdate');
 
-    // A model that applies pipeline updates the way Mongo would, so the test
-    // exercises the real expression rather than a paraphrase of it.
+    // Enough of a filter matcher for the rollover guard: null / missing / $lt on
+    // seasonMissionsDate. Without it `updateOne` would accept every write and the
+    // guard this service leans on would go untested.
+    function guardMatches(filter, target) {
+        const clauses = filter.$or;
+        if (!clauses) return true;
+        const stamped = target.seasonMissionsDate;
+        return clauses.some(clause => {
+            const cond = clause.seasonMissionsDate;
+            if (cond === null) return stamped === null || stamped === undefined;
+            if (cond?.$exists === false) return stamped === undefined;
+            if (cond?.$lt !== undefined) {
+                return stamped != null && new Date(stamped).getTime() < new Date(cond.$lt).getTime();
+            }
+            return false;
+        });
+    }
+
+    // A model that evaluates the guard and applies pipeline updates the way Mongo
+    // would, so the tests exercise the real expressions rather than a paraphrase.
     function fakeModel(doc) {
         return {
             writes: [],
             updates: [],
             updateOne(filter, update) {
                 this.writes.push({ filter, update });
+                if (!doc || !guardMatches(filter, doc)) return Promise.resolve({ matchedCount: 0 });
+                Object.assign(doc, update.$set ?? {});
                 return Promise.resolve({ matchedCount: 1 });
             },
             findOneAndUpdate(filter, update) {
+                if (!doc) return Promise.resolve(null);
                 const before = JSON.parse(JSON.stringify(doc));
                 this.updates.push(update);
                 applyPipelineUpdate(doc, update);
@@ -211,13 +232,36 @@ describe('advanceMissions advances server-side and touches nothing else', () => 
         }
     });
 
-    test('a stale hand is redealt under a guard, not blindly overwritten', async () => {
+    test('a stale hand is redealt, and the new one is what gets advanced', async () => {
         const yesterday = new Date(missionDayStart().getTime() - 24 * 3_600_000);
-        const Model = fakeModel(doc({ seasonMissionsDate: yesterday }));
+        const stale = doc({ seasonMissionsDate: yesterday });
+        stale.seasonMissions[0].progress = 99;   // yesterday's progress
+        const Model = fakeModel(stale);
+
         await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings());
+
         expect(Model.writes).toHaveLength(1);
-        // The guard is what stops two concurrent callers each dealing a hand.
-        expect(JSON.stringify(Model.writes[0].filter)).toContain('seasonMissionsDate');
+        expect(new Date(stale.seasonMissionsDate).getTime()).toBe(missionDayStart().getTime());
+        // A real hand from the pool, not yesterday's carried over.
+        expect(stale.seasonMissions).toHaveLength(3);
+        const ids = new Set(MISSION_TEMPLATES.map(t => t.id));
+        for (const m of stale.seasonMissions) expect(ids.has(m.id)).toBe(true);
+        expect(stale.seasonMissions.some(m => m.progress === 99)).toBe(false);
+    });
+
+    test('a hand dealt today is left alone by the guard', async () => {
+        const fresh = doc();
+        const Model = fakeModel(fresh);
+        const dealtAt = fresh.seasonMissionsDate;
+
+        await advanceMissions(Model, { userId: 'u' }, 'crime', 1, settings());
+
+        // The rollover write is still issued; the guard is what refuses it, which
+        // is exactly what stops two concurrent callers dealing different hands.
+        expect(Model.writes).toHaveLength(1);
+        expect(fresh.seasonMissionsDate).toBe(dealtAt);
+        expect(fresh.seasonMissions.map(m => m.id)).toEqual(['crime_1', 'quiz_1']);
+        expect(fresh.seasonMissions[0].progress).toBe(1);
     });
 
     test('a missing user is a no-op rather than a throw', async () => {

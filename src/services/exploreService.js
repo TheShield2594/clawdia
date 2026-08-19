@@ -544,7 +544,10 @@ function getEncounterStakes(user, region, guildSettings, result) {
     // govern what exploration pays out, never what a mistake costs.
     const payout = (n, mult) => settleAgainstDailyCap(user, Math.round(n * mult)).granted;
     const scale  = (n, mult) => Math.round(n * mult);
-    const capped = settleAgainstDailyCap(user, 1).granted === 0;
+    // Read the headroom directly rather than probing with a coin: at a soft rate
+    // below 0.5, Math.round would settle that coin to nothing and call a player
+    // capped while they can still win thousands.
+    const capped = settleAgainstDailyCap(user, 0).remaining === 0;
     return {
         winChance: enc.winChance,
         win:  { min: payout(enc.reward.min, coinMult), max: payout(enc.reward.max, coinMult) },
@@ -706,7 +709,7 @@ function settleAgainstDailyCap(user, amount) {
     // line — same settlement hunting and fishing use, and it keeps the rule
     // something a player can state in one sentence.
     const settled = softCapped ? Math.round(amount * LIMITS.DAILY_SOFT_CAP_RATE) : amount;
-    return { granted: Math.min(settled, remaining), settled, softCapped };
+    return { granted: Math.min(settled, remaining), settled, softCapped, remaining };
 }
 
 function applyPayout(user, result, amount) {
