@@ -832,3 +832,145 @@ describe('relic collection', () => {
         expect(result.relicIsNew).toBe(true);
     });
 });
+
+describe('explorer level-ups are reported, not swallowed', () => {
+    test('an expedition that crosses a level records it on the result', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+        // One XP short of Level 2, so any event type at all tips it over.
+        user.exploration.xp = EXPLORER_LEVELS[1].xpRequired - 1;
+
+        const result = executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {});
+        if (result.pendingChoice) {
+            resolveEncounter(user, REGIONS.whispering_forest, makeGuildSettings(), result, 'observe');
+        }
+
+        expect(result.explorerLevelUp).toBeDefined();
+        expect(result.explorerLevelUp.oldLevel).toBe(1);
+        expect(result.explorerLevelUp.newLevel).toBe(user.exploration.level);
+        expect(result.explorerLevelUp.newTitle).toBe(getLevelData(user.exploration.level).title);
+    });
+
+    test('an expedition that crosses no level records nothing', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+
+        const result = executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {});
+        if (result.pendingChoice) {
+            resolveEncounter(user, REGIONS.whispering_forest, makeGuildSettings(), result, 'observe');
+        }
+
+        expect(result.explorerLevelUp).toBeUndefined();
+        expect(user.exploration.level).toBe(1);
+    });
+
+    test('a run that grants twice keeps the level it started at', () => {
+        // Finishing a region pays the survey bonus on top of the event's own XP,
+        // so the record has to span both grants rather than the last one only.
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+        const region = REGIONS.whispering_forest;
+        const progress = chartRegion(user, region, { lore: false });
+        progress.loreFound = region.lore.slice(1).map(l => l.id);
+
+        // Roll until the lore slot comes up — it is the only unfinished category
+        // left, so finding it completes the survey in the same expedition. The
+        // level is rewound before every attempt so the run that finally lands is
+        // one XP short of Level 2, whatever the earlier attempts paid out.
+        let result = null;
+        for (let i = 0; i < 500 && !result; i++) {
+            user.exploration.level = 1;
+            user.exploration.xp = EXPLORER_LEVELS[1].xpRequired - 1;
+            const candidate = executeExplore(user, region, makeGuildSettings(), {});
+            if (candidate.regionCompleted) result = candidate;
+            else if (candidate.pendingChoice) {
+                resolveEncounter(user, region, makeGuildSettings(), candidate, 'observe');
+            }
+        }
+
+        expect(result).not.toBeNull();
+        expect(result.explorerLevelUp.oldLevel).toBe(1);
+        expect(result.explorerLevelUp.newLevel).toBe(user.exploration.level);
+        expect(user.exploration.level).toBeGreaterThan(1);
+    });
+});
+
+describe('the daily cap ramps down instead of falling off', () => {
+    test('the soft cap sits below the hard cap', () => {
+        expect(LIMITS.DAILY_SOFT_CAP).toBeLessThan(LIMITS.DAILY_HARD_CAP);
+        expect(LIMITS.DAILY_SOFT_CAP_RATE).toBeGreaterThan(0);
+        expect(LIMITS.DAILY_SOFT_CAP_RATE).toBeLessThan(1);
+    });
+
+    test('below the soft cap a payout is paid in full', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+
+        let paid = null;
+        for (let i = 0; i < 400 && !paid; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            const r = executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {});
+            if (r.pendingChoice) resolveEncounter(user, REGIONS.whispering_forest, makeGuildSettings(), r, 'observe');
+            if (r.payout > 0) paid = r;
+        }
+
+        expect(paid).not.toBeNull();
+        expect(paid.payout).toBe(paid.grossPayout);
+        expect(paid.softCapped).toBeUndefined();
+        expect(paid.cappedByDailyCap).toBeUndefined();
+    });
+
+    test('between the caps a payout is trimmed to the soft rate, not to zero', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+        user.exploration.dailyCoins = LIMITS.DAILY_SOFT_CAP;
+
+        let trimmed = null;
+        for (let i = 0; i < 400 && !trimmed; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            const r = executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {});
+            if (r.pendingChoice) resolveEncounter(user, REGIONS.whispering_forest, makeGuildSettings(), r, 'observe');
+            if (r.payout > 0 && r.softCapped) trimmed = r;
+        }
+
+        expect(trimmed).not.toBeNull();
+        expect(trimmed.payout).toBeGreaterThan(0);
+        expect(trimmed.payout).toBeLessThan(trimmed.grossPayout);
+        expect(trimmed.payout).toBe(Math.round(trimmed.grossPayout * LIMITS.DAILY_SOFT_CAP_RATE));
+        expect(trimmed.hardCapped).toBeUndefined();
+        expect(trimmed.cappedByDailyCap).toBe(true);
+    });
+
+    test('at the hard cap the coins stop and say so', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+        user.exploration.dailyCoins = LIMITS.DAILY_HARD_CAP;
+
+        let stopped = null;
+        for (let i = 0; i < 400 && !stopped; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            const r = executeExplore(user, REGIONS.whispering_forest, makeGuildSettings(), {});
+            if (r.pendingChoice) resolveEncounter(user, REGIONS.whispering_forest, makeGuildSettings(), r, 'observe');
+            if (r.grossPayout > 0) stopped = r;
+        }
+
+        expect(stopped).not.toBeNull();
+        expect(stopped.payout).toBe(0);
+        expect(stopped.hardCapped).toBe(true);
+        expect(stopped.cappedByDailyCap).toBe(true);
+    });
+
+    test('daily earnings never exceed the hard cap', () => {
+        const user = makeUser();
+        user.exploration.dailyWindowStart = new Date();
+        user.exploration.dailyCoins = LIMITS.DAILY_HARD_CAP - 200;
+
+        for (let i = 0; i < 200; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            const r = executeExplore(user, REGIONS.starfall_wastes, makeGuildSettings(), {});
+            if (r.pendingChoice) resolveEncounter(user, REGIONS.starfall_wastes, makeGuildSettings(), r, 'observe');
+        }
+
+        expect(user.exploration.dailyCoins).toBeLessThanOrEqual(LIMITS.DAILY_HARD_CAP);
+    });
+});

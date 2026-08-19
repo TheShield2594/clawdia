@@ -13,7 +13,16 @@ const LIMITS = {
     STAMINA_REGEN_MS:     5 * 60_000,
     MAX_STAMINA:          10,
     DAILY_WINDOW_MS:      24 * 3_600_000,
-    DAILY_HARD_CAP:       100_000,
+    // The first DAILY_SOFT_CAP coins of a rolling 24h window pay in full. Past
+    // it the wilds keep paying, just worse — SOFT_CAP_RATE of face value — until
+    // DAILY_HARD_CAP, where they stop. Hunting, fishing and mining all ramp down
+    // this way; exploration used to drop straight from full rate to nothing at
+    // 100k, which walled a deep-region player about two hours into a session.
+    // The soft cap sits exactly where the old hard cap did, so no expedition
+    // pays less than it used to — the cliff just grew a slope on the far side.
+    DAILY_SOFT_CAP:       100_000,
+    DAILY_SOFT_CAP_RATE:  0.5,
+    DAILY_HARD_CAP:       150_000,
     JOURNAL_CAP:          20,
     // Secret pity: each expedition without a secret adds bonus weight to the
     // secret slot, so long droughts self-correct. Only expeditions into a

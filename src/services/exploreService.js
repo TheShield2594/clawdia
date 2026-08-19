@@ -435,7 +435,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             e.landmarksDiscovered += 1;
             result.landmark = landmark;
             result.payout = applyPayout(user, result, Math.round(randInt(300, 700) * coinMult));
-            result.xp = grantXp(user, EVENT_XP.discovery);
+            result.xp = grantXp(user, EVENT_XP.discovery, result);
             break;
         }
 
@@ -449,7 +449,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             e.loreCollected += 1;
             result.lore = fragment;
             result.payout = applyPayout(user, result, Math.round(randInt(150, 400) * coinMult));
-            result.xp = grantXp(user, EVENT_XP.lore);
+            result.xp = grantXp(user, EVENT_XP.lore, result);
             break;
         }
 
@@ -461,7 +461,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             e.sinceSecret = 0;
             result.secret = secret;
             result.payout = applyPayout(user, result, Math.round(secret.reward * coinMult));
-            result.xp = grantXp(user, EVENT_XP.secret);
+            result.xp = grantXp(user, EVENT_XP.secret, result);
             break;
         }
 
@@ -479,7 +479,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             e.trapsSprung += 1;
             result.trap = trap;
             result.penalty = penalty;
-            result.xp = grantXp(user, EVENT_XP.trap);
+            result.xp = grantXp(user, EVENT_XP.trap, result);
             if (Math.random() < trap.injuryChance) {
                 e.injuryUntil = new Date(Date.now() + LIMITS.INJURY_PENALTY_MS);
                 result.injured = true;
@@ -501,7 +501,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             // the boot leather; it does not also cost a stamina point.
             result.type = 'quiet';
             result.quietLine = randomFrom(QUIET_LINES);
-            result.xp = grantXp(user, EVENT_XP.quiet);
+            result.xp = grantXp(user, EVENT_XP.quiet, result);
             e.stamina = Math.min(LIMITS.MAX_STAMINA, e.stamina + 1);
             result.staminaSpared = true;
             break;
@@ -536,7 +536,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
             result.outcome = 'win';
             e.encountersWon += 1;
             result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult));
-            result.xp = grantXp(user, EVENT_XP.encounter_win);
+            result.xp = grantXp(user, EVENT_XP.encounter_win, result);
         } else {
             result.outcome = 'loss';
             // Losses scale with the region only. Folding the event coin bonus
@@ -546,7 +546,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
             const penalty = Math.min(Math.round(randInt(200, 600) * penaltyMult), Math.max(0, user.balance));
             user.balance -= penalty;
             result.penalty = penalty;
-            result.xp = grantXp(user, EVENT_XP.encounter_loss);
+            result.xp = grantXp(user, EVENT_XP.encounter_loss, result);
             if (Math.random() < 0.15) {
                 e.injuryUntil = new Date(Date.now() + LIMITS.INJURY_PENALTY_MS);
                 result.injured = true;
@@ -555,7 +555,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
     } else {
         result.outcome = 'safe';
         result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult * 0.35));
-        result.xp = grantXp(user, EVENT_XP.encounter_safe);
+        result.xp = grantXp(user, EVENT_XP.encounter_safe, result);
     }
 
     countTowardPity(user, result);
@@ -582,7 +582,7 @@ function finishAsTreasure(user, region, progress, result, coinMult, { fallback =
     result.treasureTier = tier;
     result.treasureLine = randomFrom(region.treasureLines);
     result.payout = applyPayout(user, result, Math.round(randInt(tier.min, tier.max) * coinMult));
-    result.xp = grantXp(user, EVENT_XP.treasure);
+    result.xp = grantXp(user, EVENT_XP.treasure, result);
     e.treasuresFound += 1;
 
     // Rare+ treasures may carry a relic into the player's inventory
@@ -636,15 +636,27 @@ function getPenaltyMultiplier(region) {
 }
 
 /**
- * Credit coins, respecting the rolling daily hard cap. Records the gross amount
- * and a `cappedByDailyCap` flag on the result so the embed can say what the cap
- * ate — otherwise a legendary haul renders with no coin line and no explanation.
+ * Credit coins, respecting the rolling daily caps. Past the soft cap the payout
+ * settles at `DAILY_SOFT_CAP_RATE` of face value; past the hard cap it settles
+ * at nothing. Records the gross amount and which cap bit, so the embed can say
+ * what happened — otherwise a legendary haul renders with a halved coin line, or
+ * none at all, and no explanation.
+ *
+ * `cappedByDailyCap` stays the umbrella "the cap took something" flag it has
+ * always been; `softCapped` and `hardCapped` say which one, for callers that
+ * need to word it.
+ *
  * Returns the amount actually granted.
  */
 function applyPayout(user, result, amount) {
     const e = user.exploration;
-    const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - e.dailyCoins);
-    const granted = Math.min(amount, remaining);
+    const remaining  = Math.max(0, LIMITS.DAILY_HARD_CAP - e.dailyCoins);
+    const softCapped = e.dailyCoins >= LIMITS.DAILY_SOFT_CAP;
+    // The soft rate applies to the whole payout, not just the part above the
+    // line — same settlement hunting and fishing use, and it keeps the rule
+    // something a player can state in one sentence.
+    const settled = softCapped ? Math.round(amount * LIMITS.DAILY_SOFT_CAP_RATE) : amount;
+    const granted = Math.min(settled, remaining);
     if (granted > 0) {
         user.balance       += granted;
         e.totalEarned      += granted;
@@ -652,14 +664,33 @@ function applyPayout(user, result, amount) {
     }
     if (result) {
         result.grossPayout = (result.grossPayout ?? 0) + amount;
-        if (granted < amount) result.cappedByDailyCap = true;
+        if (softCapped && amount > 0)  result.softCapped = true;
+        if (granted < settled)         result.hardCapped = true;
+        if (granted < amount)          result.cappedByDailyCap = true;
     }
     return granted;
 }
 
-// Explorer XP + report the amount so the command layer can mirror it into guild XP
-function grantXp(user, amount) {
-    applyExplorerXp(user, amount);
+/**
+ * Explorer XP + report the amount so the command layer can mirror it into guild XP.
+ *
+ * Crossing an explorer level is recorded on `result` rather than dropped on the
+ * floor: explorer level is what gates every region unlock, so a player who is
+ * never told they levelled has no idea a new region just came within reach. One
+ * expedition can grant twice (the event, then the survey bonus) and can cross
+ * more than one level, so the record keeps the level they started at and the
+ * level they ended on.
+ */
+function grantXp(user, amount, result = null) {
+    const before = user.exploration.level;
+    const { leveled, newLevel, newTitle } = applyExplorerXp(user, amount);
+    if (leveled && result) {
+        result.explorerLevelUp = {
+            oldLevel: result.explorerLevelUp?.oldLevel ?? before,
+            newLevel,
+            newTitle,
+        };
+    }
     return amount;
 }
 
@@ -691,7 +722,7 @@ function finalizeStats(user, region, progress, result, wasFullyCharted) {
         result.regionCompleted = true;
         result.surveyBonus = LIMITS.SURVEY_BONUS;
         e.regionsSurveyed = (e.regionsSurveyed ?? 0) + 1;
-        result.xp = (result.xp ?? 0) + grantXp(user, EVENT_XP.survey);
+        result.xp = (result.xp ?? 0) + grantXp(user, EVENT_XP.survey, result);
     }
 }
 

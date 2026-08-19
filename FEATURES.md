@@ -458,6 +458,8 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 - **Fully surveyed** — chart every landmark, lore fragment and secret in a region and everything it pays you afterwards carries a standing +15%
 - **Relic case** — each distinct relic is worth +1% on exploration coins, up to +10%. Treasure prefers relics you don't own yet, so the case fills instead of stacking duplicates
 - **Quiet expeditions** cost the cooldown but refund the stamina point — a blank walk isn't charged for
+- **Level-ups are announced** on the result embed, and name any region the new Explorer Level just brought within reach
+- **Daily coin caps ramp** — the first 100,000 coins in a rolling 24h window pay in full, everything up to 150,000 pays at 50%, and past that expeditions still chart the map and pay Explorer XP but stop paying cash
 - Losses scale with how deep the region is, and deliberately *not* with the seasonal coin bonus or the admin drop-rate knob
 
 **Integration:**

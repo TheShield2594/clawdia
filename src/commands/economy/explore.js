@@ -481,7 +481,7 @@ async function handleGo(interaction) {
         if (payoutOwed > 0) {
             embed.addFields({
                 name: '⚠️ Payout Not Yet Credited',
-                value: `The **${currency}${payoutOwed.toLocaleString()}** from this expedition could not be paid out just now and has been recorded as owed — the balance shown below does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
+                value: `The **${currency}${payoutOwed.toLocaleString()}** from this expedition could not be paid out just now and has been recorded as owed, so your wallet is short by that much until it lands. It will be applied once the problem clears; tell an admin if it does not.`,
             });
         }
 
@@ -671,11 +671,40 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     }
     if (gains.length) embed.addFields({ name: '🎒 The Haul', value: gains.join('  ·  '), inline: false });
 
-    if (result.cappedByDailyCap) {
+    // Crossing an explorer level is the only thing that opens new regions, so it
+    // gets said out loud — and if the new level actually put one within reach,
+    // it gets named. Seasonal regions are left out: the calendar gates those,
+    // not the level, so promising one here would be a promise about the weather.
+    if (result.explorerLevelUp) {
+        const lift = result.explorerLevelUp;
+        const lines = [`Explorer Level **${lift.oldLevel}** → **${lift.newLevel}** — *${lift.newTitle}*`];
+        const opened = REGION_LIST.filter(r =>
+            !r.seasonalEventId
+            && isRegionEnabled(r, guildSettings)
+            && r.unlockLevel > lift.oldLevel
+            && r.unlockLevel <= lift.newLevel);
+        for (const opening of opened) {
+            lines.push(
+                `🔓 **${opening.emoji} ${opening.name}** is within reach — `
+                + `\`/explore travel\` opens the route for ${currency}${opening.unlockCost.toLocaleString()}.`
+            );
+        }
+        embed.addFields({ name: '⬆️ Level Up!', value: lines.join('\n'), inline: false });
+    }
+
+    if (result.hardCapped) {
         embed.addFields({
             name: '🧾 Daily Cap Reached',
             value: `You've banked ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()} from exploring in the last 24 hours, which is where the coins stop. `
                  + `Expeditions still chart the map and still pay Explorer XP — the wilds just stop paying cash until the window rolls over.`,
+            inline: false,
+        });
+    } else if (result.softCapped) {
+        embed.addFields({
+            name: '🧾 Past the Soft Cap',
+            value: `You're over ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} for the last 24 hours, so hauls settle at `
+                 + `**${Math.round(LIMITS.DAILY_SOFT_CAP_RATE * 100)}%** from here — down to ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}, `
+                 + `where they stop entirely. Charting and Explorer XP are untouched.`,
             inline: false,
         });
     }
@@ -812,15 +841,27 @@ async function handleTravel(interaction) {
         await user.save();
     } catch (err) {
         console.error('[explore travel] save error:', err);
+        let refunded = false;
         if (unlockCharged) {
             // The toll is already gone; hand it back rather than charging for a
             // route that was never opened.
-            await User.updateOne(
+            refunded = await User.updateOne(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
                 { $inc: { balance: unlockCharged } },
-            ).catch(refundErr => console.error('[explore travel] refund after failed save:', refundErr));
+            ).then(() => true).catch(refundErr => {
+                console.error('[explore travel] refund after failed save:', refundErr);
+                return false;
+            });
         }
-        return interaction.reply({ content: 'Something went wrong opening the route — any coins taken were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+        return interaction.reply({
+            // Only promise the refund that actually landed. Saying "refunded"
+            // when the refund itself threw sends the player away satisfied while
+            // their coins are still gone.
+            content: unlockCharged && !refunded
+                ? `Something went wrong opening the route, and the **${currency}${unlockCharged.toLocaleString()}** taken could not be returned automatically. Tell an admin — it is recoverable.`
+                : 'Something went wrong opening the route — any coins taken were refunded. Please try again.',
+            flags: MessageFlags.Ephemeral,
+        });
     }
 
     // Logged after the save, not before: the failure path above hands the toll
@@ -1089,7 +1130,11 @@ async function handleProfile(interaction) {
     }
 
     if (isSelf) {
-        embed.setFooter({ text: `Daily: ${e.dailyExpeditions} expeditions · ${currency}${e.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
+        embed.setFooter({
+            text: `Daily: ${e.dailyExpeditions} expeditions · ${currency}${e.dailyCoins.toLocaleString()} earned `
+                + `(full rate to ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()}, `
+                + `${Math.round(LIMITS.DAILY_SOFT_CAP_RATE * 100)}% to ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})`,
+        });
     }
 
     return interaction.reply({ embeds: [embed] });
