@@ -803,12 +803,19 @@ function renderMap(user, guildSettings) {
         if (region.seasonalEventId && !progress && !inSeason) continue;
 
         if (!progress) {
+            // A region whose route you have already paid to open is not a
+            // mystery — you know its name, you just haven't walked it. Redacting
+            // it turned every unentered region into the same anonymous "???" row.
+            const known = region.seasonalEventId ? inSeason : e.unlockedRegions.includes(region.id);
             const gate = region.seasonalEventId
                 ? 'in season now — go look'
-                : e.unlockedRegions.includes(region.id)
-                    ? 'unlocked — never entered'
+                : known
+                    ? 'route open — never entered'
                     : `locked · Explorer Lv ${region.unlockLevel}`;
-            lines.push(`🌫️ **??? — uncharted**\n> \`▒▒▒▒▒▒▒▒▒▒\` *${gate}*`);
+            const head = known
+                ? `${region.emoji} **${region.name}** — uncharted`
+                : '🌫️ **??? — uncharted**';
+            lines.push(`${head}\n> \`▒▒▒▒▒▒▒▒▒▒\` *${gate}*`);
             continue;
         }
 

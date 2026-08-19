@@ -600,7 +600,13 @@ function buildSecretPityField(user, region, guildSettings) {
 
 function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings) {
     const e = user.exploration;
-    const embed = new EmbedBuilder().setTimestamp();
+    // The "Setting out — <region>" embed is edited away by this one, so without
+    // an author line the message a player scrolls back to never says where any
+    // of this happened. The titles below are landmark and creature names; only
+    // the embed colour hinted at the region, which is not something you can read.
+    const embed = new EmbedBuilder()
+        .setAuthor({ name: `${region.emoji} ${region.name}` })
+        .setTimestamp();
     const lines = [];
 
     switch (result.type) {
@@ -745,8 +751,29 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     }
 
     const staminaNote = result.staminaSpared ? ' *(a blank walk costs no stamina)*' : '';
-    embed.setFooter({ text: `⚡ ${e.stamina}/${LIMITS.MAX_STAMINA} stamina${staminaNote} · ${randomFrom(FOOTER_LINES)}` });
+    embed.setFooter({ text: `⚡ ${e.stamina}/${LIMITS.MAX_STAMINA} stamina${staminaNote} · ${nextExpeditionNote(user)} · ${randomFrom(FOOTER_LINES)}` });
     return embed;
+}
+
+/**
+ * When they can set out again — every other detail of the run is on the embed
+ * except the one thing that decides what they do next. Whichever gate is further
+ * out wins: an injury outlasts the cooldown by minutes, and quoting the cooldown
+ * while a trap has them sitting down would be a lie with a countdown on it.
+ */
+function nextExpeditionNote(user) {
+    const e = user.exploration;
+    const now = Date.now();
+    const cooldownLeft = e.lastExplore ? (e.lastExplore.getTime() + LIMITS.EXPLORE_COOLDOWN_MS) - now : 0;
+    const injuryLeft   = e.injuryUntil ? e.injuryUntil.getTime() - now : 0;
+
+    if (injuryLeft > cooldownLeft && injuryLeft > 0) return `🤕 walking again in ${formatMs(injuryLeft)}`;
+    if (e.stamina <= 0) {
+        const staminaLeft = msUntilNextStamina(user);
+        if (staminaLeft > cooldownLeft) return `😮‍💨 stamina back in ${formatMs(staminaLeft)}`;
+    }
+    if (cooldownLeft > 0) return `🥾 ready in ${formatMs(cooldownLeft)}`;
+    return '🥾 ready now';
 }
 
 // ─── MAP ──────────────────────────────────────────────────────────────────────
@@ -1027,6 +1054,7 @@ async function handleRelics(interaction) {
     ].filter(Boolean).join('\n');
 
     const distinct = collection.length;
+    const missingField = buildMissingRelicsField(collection, isSelf, target.username);
     const bonus = getRelicBonus(userData);
     const atCap = bonus >= LIMITS.RELIC_BONUS_MAX;
     const caseValue = collection.reduce((sum, r) => sum + r.value * r.quantity, 0);
@@ -1043,6 +1071,7 @@ async function handleRelics(interaction) {
                      + `Case value: **${currency}${caseValue.toLocaleString()}**`,
                 inline: false,
             },
+            ...(missingField ? [missingField] : []),
             {
                 name: '📈 What It Earns You',
                 value: `**+${Math.round(bonus * 100)}%** on every coin exploration pays you`
@@ -1056,6 +1085,50 @@ async function handleRelics(interaction) {
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
+}
+
+/**
+ * What the case is still missing. Rare treasure deliberately prefers relics the
+ * player doesn't own yet, so "12 of 25" without naming the other 13 hides the
+ * one number the drop table is actually built around. Returns null once there is
+ * nothing left to want.
+ *
+ * Seasonal relics are listed apart from core ones: they only drop while their
+ * event runs, so a checklist that mixed them in would read as thirteen things
+ * you could go get today, and some of them are months away.
+ */
+function buildMissingRelicsField(collection, isSelf, username) {
+    const owned = new Set(collection.map(r => r.itemId));
+    const missing = RELIC_LIST.filter(r => !owned.has(r.itemId));
+    if (!missing.length) {
+        return {
+            name: '🔍 Still Out There',
+            value: isSelf
+                ? '**Nothing.** Every relic the wilds have ever let go of is on that shelf. Including the ones that were statues when you picked them up.'
+                : `**Nothing.** ${username} has the complete set.`,
+            inline: false,
+        };
+    }
+
+    const core     = missing.filter(r => !REGIONS[r.regionId].seasonalEventId);
+    const seasonal = missing.filter(r =>  REGIONS[r.regionId].seasonalEventId);
+
+    // A field value caps at 1024 characters and discord.js throws rather than
+    // truncating, so the list gets trimmed to fit with a count of what it dropped.
+    const BUDGET = 900;
+    const render = list => list.map(r => `${REGIONS[r.regionId].emoji} ${r.itemId}`);
+    const { text, omitted } = fitDescription(render(core), { limit: BUDGET, separator: ' · ' });
+
+    const lines = [];
+    if (core.length) {
+        lines.push(text);
+        if (omitted > 0) lines.push(`*…and ${omitted} more out in the core regions.*`);
+    }
+    if (seasonal.length) {
+        lines.push(`*Plus ${seasonal.length} that only turn up while their season is running.*`);
+    }
+
+    return { name: `🔍 Still Out There — ${missing.length}`, value: lines.join('\n'), inline: false };
 }
 
 // ─── PROFILE ──────────────────────────────────────────────────────────────────
@@ -1147,6 +1220,27 @@ async function handleProfile(interaction) {
         if (surveyed > 0)   boosts.push(`🏅 **+${Math.round(LIMITS.SURVEY_BONUS * 100)}%** in ${surveyed} fully surveyed region${surveyed === 1 ? '' : 's'}`);
         if (relicBonus > 0) boosts.push(`🏺 **+${Math.round(relicBonus * 100)}%** everywhere, from the relic case`);
         embed.addFields({ name: '📈 Standing Bonuses', value: boosts.join('\n'), inline: false });
+    }
+
+    // Where the road goes next. Explorer level gates every region, and nothing
+    // anywhere told a player how close the next one was — the level bar measures
+    // progress toward a number, not toward a place.
+    const nextGate = REGION_LIST
+        .filter(r => !r.seasonalEventId
+            && isRegionEnabled(r, guildSettings)
+            && !e.unlockedRegions.includes(r.id))
+        .sort((a, b) => a.unlockLevel - b.unlockLevel)[0];
+    if (isSelf && nextGate) {
+        const short = nextGate.unlockLevel - e.level;
+        embed.addFields({
+            name: '🔭 Next Horizon',
+            value: short > 0
+                ? `**${nextGate.emoji} ${nextGate.name}** — Explorer Lv ${nextGate.unlockLevel} and ${currency}${nextGate.unlockCost.toLocaleString()}. `
+                  + `You're ${short} level${short === 1 ? '' : 's'} short.`
+                : `**${nextGate.emoji} ${nextGate.name}** — the level is yours. `
+                  + `${currency}${nextGate.unlockCost.toLocaleString()} opens the route via \`/explore travel\`.`,
+            inline: false,
+        });
     }
 
     if (isSelf) {

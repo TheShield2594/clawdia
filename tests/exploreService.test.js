@@ -1087,3 +1087,29 @@ describe('approaching an encounter is a bet worth taking', () => {
         expect(richStakes.loss).toEqual(plainStakes.loss);
     });
 });
+
+describe('the map names the places you already paid to reach', () => {
+    test('an unlocked but unentered region is named, not redacted', () => {
+        const user = makeUser();
+        user.exploration.unlockedRegions.push('crumbling_ruins');
+        const text = renderMap(user, makeGuildSettings()).join('\n');
+        expect(text).toContain('Crumbling Ruins');
+        expect(text).toContain('route open — never entered');
+    });
+
+    test('a region still behind its level gate stays redacted', () => {
+        const user = makeUser();
+        const text = renderMap(user, makeGuildSettings()).join('\n');
+        expect(text).not.toContain('Starfall Wastes');
+        expect(text).toContain(`locked · Explorer Lv ${REGIONS.starfall_wastes.unlockLevel}`);
+    });
+
+    test('every locked region is still told apart by its own gate', () => {
+        const user = makeUser();
+        const gates = renderMap(user, makeGuildSettings())
+            .filter(line => line.includes('???'))
+            .map(line => line.slice(line.indexOf('locked')));
+        expect(gates.length).toBeGreaterThan(1);
+        expect(new Set(gates).size).toBe(gates.length);
+    });
+});
