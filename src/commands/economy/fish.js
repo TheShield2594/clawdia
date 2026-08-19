@@ -10,6 +10,7 @@ const {
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
+const { detachBalanceDelta, applyBalanceDelta } = require('../../utils/balanceDelta');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -546,6 +547,15 @@ async function handleCast(interaction) {
     // result is persisted the player has nothing to show for the cooldown they
     // just paid for. Hand the slot back on the way out unless the cast committed.
     let castCommitted = false;
+
+    // Everything below runs across the bite delay and the reel-in prompt — up to
+    // ~8 seconds during which the player can spend coins somewhere else. The
+    // cast's own coin movement is collected as a delta against this reading and
+    // applied as an atomic `$inc` at the save, so `save()` never writes an
+    // absolute balance read before that window. See src/utils/balanceDelta.js.
+    const balanceAtLoad = user.balance ?? 0;
+    const balanceFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+
     try {
 
         // Bait comes out only once the cooldown slot is ours, so a lost race never
@@ -797,9 +807,18 @@ async function handleCast(interaction) {
 
         const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
+        // Hand the cast's coin movement to an atomic `$inc` and take `balance`
+        // out of the save. An escape reverses its own mutations, so that path
+        // simply produces a delta of zero and issues no write.
+        const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
+
         try {
             await user.save();
             castCommitted = true;
+            // Only after the save has landed: a credit applied before a save that
+            // then failed would pay for a cast the player could take again.
+            await applyBalanceDelta(User, balanceFilter, user, balanceDelta)
+                .catch(err => console.error('[fish] payout $inc failed:', err));
             if (fishAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, user, interaction.member, fishAchievements).catch(() => null);
             }

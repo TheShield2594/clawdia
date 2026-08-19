@@ -1,5 +1,7 @@
 'use strict';
 
+const { expectNonNegativeBalance } = require('./helpers/balanceInvariant');
+
 // Exercises /shop buy's quantity option end to end: the confirm flow, the
 // atomic charge/stock/inventory writes, and the guards that reject a bulk buy
 // before any coins move.
@@ -273,4 +275,9 @@ test('a price drop between quote and confirm is honoured at the lower total', as
 
     expect(mockWorld.balanceWrites).toEqual([-2000]);
     expect(mockWorld.user.inventory).toEqual([{ itemId: 'pet_food', quantity: 10 }]);
+});
+
+// Every purchase path — including the sold-out refunds — leaves the buyer solvent.
+afterEach(() => {
+    expectNonNegativeBalance(mockWorld.user, 'shop buy');
 });

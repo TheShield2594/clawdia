@@ -1,5 +1,7 @@
 'use strict';
 
+const { expectNonNegativeBalance } = require('./helpers/balanceInvariant');
+
 // /rob used to write the robber's balance as an absolute $set guarded only by a
 // lastRob compare-and-set — so any credit landing between the read and the write
 // was silently erased. The victim side of the same function already used deltas.
@@ -256,4 +258,9 @@ describe('rollback when the victim write fails', () => {
         expect(mockStore.robber.lastRob).toBe(foreign);   // not stomped
         expect(mockStore.robber.balance).toBe(origBefore); // balance still reversed
     });
+});
+
+// Every /rob outcome moves coins between two users; neither side may end below zero.
+afterEach(() => {
+    expectNonNegativeBalance(mockStore, 'rob');
 });

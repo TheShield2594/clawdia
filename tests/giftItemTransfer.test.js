@@ -1,9 +1,13 @@
 'use strict';
 
+const { expectNonNegativeBalance } = require('./helpers/balanceInvariant');
+
 // /gift item used to write both sides with Promise.all([sender.save(), recipient.save()]):
 // if the sender's save lost and the recipient's won, the item was duplicated.
 // These tests drive the transfer against an in-memory User mockStore that implements
 // the specific query shapes the command issues.
+
+const { applyPipelineUpdate } = require('./helpers/pipelineUpdate');
 
 let mockStore;   // userId -> document
 let mockWrites;  // ordered log of the inventory mockWrites the command performed
@@ -34,6 +38,18 @@ function mockMatches(doc, query) {
 }
 
 function mockApplyUpdate(doc, update, options = {}) {
+    // Inventory credits now go through a single aggregation-pipeline update
+    // instead of a bump-or-push pair, so the mock has to be able to run one.
+    if (Array.isArray(update)) {
+        const before = doc.inventory.map(s => ({ ...s }));
+        applyPipelineUpdate(doc, update);
+        for (const slot of doc.inventory) {
+            const prior = before.find(s => s.itemId === slot.itemId);
+            const delta = slot.quantity - (prior?.quantity ?? 0);
+            if (delta !== 0) mockWrites.push({ user: doc.userId, itemId: slot.itemId, delta });
+        }
+        return;
+    }
     if (update.$inc) {
         for (const [path, delta] of Object.entries(update.$inc)) {
             if (path === 'inventory.$[slot].quantity') {
@@ -85,7 +101,7 @@ jest.mock('../src/models/User', () => ({
         if (query['inventory.itemId'] !== undefined && query['inventory.itemId'].$ne === undefined) {
             doc._matchedIndex = doc.inventory.findIndex(s => s.itemId === query['inventory.itemId']);
         }
-        if (mockFailCreditFor && doc.userId === mockFailCreditFor && (update.$inc || update.$push)) {
+        if (mockFailCreditFor && doc.userId === mockFailCreditFor && (Array.isArray(update) || update.$inc || update.$push)) {
             throw new Error('simulated write failure');
         }
         mockApplyUpdate(doc, update, options);
@@ -240,4 +256,9 @@ test('a slot too small to cover the gift is skipped for one that can', async () 
         { itemId: 'pet_food', quantity: 2 },
     ]);
     expect(mockTotalHeld('pet_food')).toBe(7);
+});
+
+// A gift debits one side and credits the other; neither may end below zero.
+afterEach(() => {
+    expectNonNegativeBalance(mockStore, 'gift');
 });

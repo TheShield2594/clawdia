@@ -11,6 +11,7 @@ const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const FALLBACK_QUESTIONS = require('../../data/quizFallback');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const { debitUpTo } = require('../../utils/balanceDebit');
 
 const THUMB         = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f393.png';
 const TIMER_SECONDS = 30;
@@ -324,10 +325,12 @@ async function runQuiz(interaction, diffChoice) {
             netChange = rewards.win;
             updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: rewards.win } }, { new: true });
         } else {
-            const freshUser = await User.findOne(userFilter);
-            const penalty   = Math.min(rewards.lose, freshUser?.balance ?? 0);
-            netChange = -penalty;
-            updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
+            // Clamped inside the update rather than against a separate read: a
+            // read-then-clamp-then-$inc takes the amount the read justified even
+            // if the wallet emptied in between, which walks the balance negative.
+            const { taken, balance } = await debitUpTo(User, userFilter, rewards.lose);
+            netChange = -taken;
+            updated   = { balance };
         }
 
         // No replay button: quiz is a net-positive income command, so a replay
@@ -342,9 +345,11 @@ async function runQuiz(interaction, diffChoice) {
         clearInterval(timerInterval);
         if (reason === 'limit') return;
 
-        const freshUser = await User.findOne(userFilter);
-        const penalty   = Math.min(rewards.lose, freshUser?.balance ?? 0);
-        const updated   = await User.findOneAndUpdate(userFilter, { $inc: { balance: -penalty } }, { new: true });
+        // Same clamp-in-the-update as the wrong-answer branch. This one runs
+        // after the whole question window, so the read it replaced was stale by
+        // however long the player sat on the prompt.
+        const { taken: penalty, balance } = await debitUpTo(User, userFilter, rewards.lose);
+        const updated = { balance };
 
         await interaction.editReply({
             embeds:     [timeoutEmbed(interaction, question, correctAnswer, difficulty, penalty, updated?.balance ?? 0)],

@@ -5,6 +5,8 @@ const { createWarVictoryBanner, createSeasonRecapCard } = require('../utils/card
 const { PET_DEFINITIONS, heartBar } = require('./petService');
 const { ensurePricingFields, nextPrice, decayDemand, pushHistory, trendBucket } = require('../utils/dynamicPricing');
 const { softResetElo, tierFor, makeSeasonId } = require('../utils/duelElo');
+const { topByNetWorth } = require('../utils/netWorth');
+const { grantInventoryItem } = require('../utils/inventoryGrant');
 
 const WAR_BOOSTER_DURATION_MS = 24 * 60 * 60 * 1000;
 const WAR_BADGE_DURATION_MS   = 30 * 24 * 60 * 60 * 1000;
@@ -364,7 +366,11 @@ async function awardWeeklyLeaderboardBadges(client) {
 
             const categories = [
                 { key: 'levels',       sort: { level: -1, xp: -1 },            label: '📈 Top Level' },
-                { key: 'economy',      sort: { balance: -1 },                   label: '💰 Wealthiest' },
+                // Wealth ranks on balance + bank, same as every other wealth surface —
+                // sorting on `balance` alone crowned whoever kept the most cash out
+                // of the bank rather than whoever actually had the most. `netWorth`
+                // routes this one through the shared aggregation instead of `sort`.
+                { key: 'economy',      netWorth: true,                          label: '💰 Wealthiest' },
                 { key: 'streaks',      sort: { 'streak.current': -1 },          label: '🔥 Longest Streak' },
                 { key: 'duels',        sort: { duelWins: -1 },                  label: '⚔️ Duel Champion' },
                 { key: 'achievements', sort: { achievementsCount: -1 },         label: '🏅 Achievement Hunter' },
@@ -375,7 +381,9 @@ async function awardWeeklyLeaderboardBadges(client) {
             const discordGuild = await client.guilds.fetch(guildId).catch(() => null);
 
             for (const cat of categories) {
-                const top = await User.findOne({ guildId }).sort(cat.sort).select('userId').lean();
+                const top = cat.netWorth
+                    ? (await topByNetWorth(User, guildId, 1))[0]
+                    : await User.findOne({ guildId }).sort(cat.sort).select('userId').lean();
                 if (!top) continue;
 
                 // Award badge (deduplicate: remove existing #1 badge for this category first)
@@ -926,24 +934,10 @@ async function returnExpiredMarketListings() {
 
     for (const listing of expired) {
         try {
-            // Return items to seller atomically
-            const credited = await User.findOneAndUpdate(
-                {
-                    userId:  listing.sellerId,
-                    guildId: listing.guildId,
-                    'inventory.itemId': listing.itemId,
-                },
-                { $inc: { 'inventory.$.quantity': listing.quantity } }
-            );
-
-            if (!credited) {
-                // Item not in seller's inventory yet — push a new slot
-                await User.findOneAndUpdate(
-                    { userId: listing.sellerId, guildId: listing.guildId },
-                    { $push: { inventory: { itemId: listing.itemId, quantity: listing.quantity } } },
-                    { upsert: true }
-                );
-            }
+            // Return items to the seller in one atomic update — the match-then-push
+            // it replaced could hand two expiring listings of the same item their
+            // own slot each, stranding one of them.
+            await grantInventoryItem(listing.sellerId, listing.guildId, listing.itemId, listing.quantity, { upsert: true });
 
             await MarketListing.deleteOne({ _id: listing._id });
             processed++;

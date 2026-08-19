@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { logTransaction } = require('../../utils/logTransaction');
+const { debitUpTo } = require('../../utils/balanceDebit');
 const {
     hasActiveEvent,
     getEventCurrencyId,
@@ -119,19 +120,14 @@ module.exports = {
                     { new: true },
                 );
                 if (!defender) {
-                    const freshDefender = await User.findOne({ userId: target.id, guildId: interaction.guild.id });
-                    const fallbackSteal = Math.min(stolen, freshDefender?.balance ?? 0);
-                    if (fallbackSteal > 0) {
-                        defender = await User.findOneAndUpdate(
-                            { userId: target.id, guildId: interaction.guild.id },
-                            { $inc: { balance: -fallbackSteal } },
-                            { new: true },
-                        );
-                        stolen = fallbackSteal;
-                    } else {
-                        stolen = 0;
-                        defender = freshDefender;
-                    }
+                    // The guarded debit missed because the wallet shrank. Take
+                    // what is left with the clamp inside the update — reading the
+                    // balance again and clamping against that is the same race one
+                    // round deeper, and its $inc would still overshoot.
+                    const defenderFilter = { userId: target.id, guildId: interaction.guild.id };
+                    const { taken } = await debitUpTo(User, defenderFilter, stolen);
+                    stolen = taken;
+                    defender = await User.findOne(defenderFilter);
                 }
             } else {
                 stolen = 0;

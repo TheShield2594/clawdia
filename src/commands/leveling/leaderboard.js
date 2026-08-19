@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const { netWorthOf, topByNetWorth, netWorthRank } = require('../../utils/netWorth');
 
 module.exports = {
     cooldown: 10,
@@ -55,11 +56,16 @@ module.exports = {
                     .limit(10);
                 title = '🏅 Achievement Leaderboard';
                 descriptionHeader = 'Top 10 by Total Achievements Earned';
-            } else {
-                const sortField = type === 'levels' ? { level: -1, xp: -1 } : { balance: -1, bank: -1 };
-                users = await User.find({ guildId: interaction.guild.id }).sort(sortField).limit(10);
+            } else if (type === 'economy') {
+                // Ranked by the same balance + bank total the rows below display,
+                // and by the same total the dashboard and newspaper rank on.
+                users = await topByNetWorth(User, interaction.guild.id, 10);
                 title = '🏆 Leaderboard';
-                descriptionHeader = type === 'levels' ? 'Top 10 by Level' : 'Top 10 by Balance';
+                descriptionHeader = 'Top 10 by Net Worth';
+            } else {
+                users = await User.find({ guildId: interaction.guild.id }).sort({ level: -1, xp: -1 }).limit(10);
+                title = '🏆 Leaderboard';
+                descriptionHeader = 'Top 10 by Level';
             }
 
             if (users.length === 0) {
@@ -109,8 +115,7 @@ module.exports = {
                 if (type === 'levels') {
                     description += `${medal} ${discordUser.tag} — Level ${user.level} (${user.xp} XP)\n`;
                 } else if (type === 'economy') {
-                    const total = user.balance + user.bank;
-                    description += `${medal} ${discordUser.tag} — ${total.toLocaleString()} coins\n`;
+                    description += `${medal} ${discordUser.tag} — ${user.netWorth.toLocaleString()} coins\n`;
                 } else if (type === 'streaks') {
                     const days    = user.streak?.current ?? 0;
                     const freezes = user.streak?.freezes ?? 0;
@@ -152,11 +157,8 @@ module.exports = {
                         }) + 1;
                         callerDisplay = `Lv${callerUser.level} (${callerUser.xp} XP)`;
                     } else if (type === 'economy') {
-                        const callerTotal = (callerUser.balance ?? 0) + (callerUser.bank ?? 0);
-                        callerRank = await User.countDocuments({
-                            guildId: interaction.guild.id,
-                            $expr: { $gt: [{ $add: ['$balance', '$bank'] }, callerTotal] },
-                        }) + 1;
+                        const callerTotal = netWorthOf(callerUser);
+                        callerRank = await netWorthRank(User, interaction.guild.id, callerTotal);
                         callerDisplay = `${callerTotal.toLocaleString()} coins`;
                     } else if (type === 'duels') {
                         const callerWins = callerUser.duelWins ?? 0;
