@@ -287,6 +287,26 @@ Coal Tunnels down, and the Abyss adds two event ores of its own.
 Once a depth is unlocked it stays accessible for good — the level requirement is
 checked at purchase, not every dig.
 
+**A dig** is a risk choice followed by a vein read. You pick how hard to push —
+the choice is yours, and it is the only thing that sets the danger:
+
+| Push | Payout | Cave-in risk | Pickaxe wear |
+|---|---:|---:|---:|
+| ☀️ Surface | 0.7× | 0% | 1 |
+| 🪨 Shallow | 1.0× | 5% | 1 |
+| 🔩 Mid | 1.4× | 12% | 2 |
+| 💎 Deep | 2.0× | 20% | 3 |
+
+Then the tunnel shows you where the seam runs, the dust settles, and you call it.
+A correct read promotes the payout one rung — Deep pays the Abyss's **3×** — at the
+risk you already chose. 🌑 Abyss cannot be selected; it is only ever earned.
+
+Pass `intensity:` on the command to skip the prompt and dig straight away. An
+unanswered prompt repeats whatever you dug last.
+
+Cave in and you choose again: spend a blast charge to dig clear and keep the whole
+haul, multiplier included, or flee and lose it.
+
 **Miner prestige** (`/mine prestige`) opens at Miner Level 50 and runs to P5. Each
 rank resets Miner Level and XP and keeps everything else — pickaxes, unlocked
 depths, materials, consumables and lifetime stats:

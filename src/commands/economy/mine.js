@@ -15,6 +15,7 @@ const {
     DEPTHS, DEPTH_LIST, TIER_COLORS, LIMITS, PICKAXE_BY_TIER,
     MATERIAL_NAMES, CONSUMABLES, BLAST_PACKS,
     PICKAXE_TIERS, PICKAXE_BY_SLUG, PICKAXE_UPGRADES,
+    CHOOSABLE_INTENSITY, DEFAULT_INTENSITY_LEVEL,
     MINER_LEVELS, PRESTIGE_BONUSES, MINE_QUEST_TEMPLATES,
     RAID_COOLDOWN_MS, RAID_SHIELD_MS, RAID_STEAL_MIN, RAID_STEAL_MAX
 } = require('../../data/mineData');
@@ -29,6 +30,7 @@ const {
     msUntilNextStamina,
     getMaxStamina,
     executeMine,
+    promoteIntensity,
     assignDailyMineQuests,
     updateMineQuestProgress,
     formatMs,
@@ -94,14 +96,12 @@ const PRESTIGE_BADGES = ['', '🥉', '🥈', '🥇', '🏆', '💎'];
 const MAX_MINER_LEVEL   = MINER_LEVELS.length;
 const MAX_MINE_PRESTIGE = PRESTIGE_BONUSES.length - 1;
 
-// Depth risk levels for the pre-dig selection prompt
-const INTENSITY_LEVELS = [
-    { level: 1, name: 'Surface',  emoji: '☀️',  multiplier: 0.7, caveInRisk: 0.00, durLoss: 1 },
-    { level: 2, name: 'Shallow',  emoji: '🪨',  multiplier: 1.0, caveInRisk: 0.05, durLoss: 1 },
-    { level: 3, name: 'Mid',      emoji: '🔩',  multiplier: 1.4, caveInRisk: 0.12, durLoss: 2 },
-    { level: 4, name: 'Deep',     emoji: '💎',  multiplier: 2.0, caveInRisk: 0.20, durLoss: 3 },
-    { level: 5, name: 'Abyss',    emoji: '🌑',  multiplier: 3.0, caveInRisk: 0.30, durLoss: 4 },
-];
+// Presentation timings for the pre-dig prompt and the vein read. The ladder itself
+// and the promotion rule live with the rest of the mine's rules, in mineData and
+// mineService.
+const INTENSITY_PICK_MS = 20_000;
+const VEIN_FLASH_MS     = 1_400;
+const VEIN_ANSWER_MS    = 10_000;
 
 module.exports = {
     cooldown: 5,
@@ -116,7 +116,15 @@ module.exports = {
                     o.setName('depth')
                         .setDescription('Depth to mine in (defaults to your active depth).')
                         .setRequired(false)
-                        .addChoices(...DEPTH_CHOICES)))
+                        .addChoices(...DEPTH_CHOICES))
+                .addIntegerOption(o =>
+                    o.setName('intensity')
+                        .setDescription('How hard to push. Higher pays more and risks a cave-in. Skips the prompt.')
+                        .setRequired(false)
+                        .addChoices(...CHOOSABLE_INTENSITY.map(l => ({
+                            name:  `${l.emoji} ${l.name} — ${l.multiplier}× payout, ${Math.round(l.caveInRisk * 100)}% cave-in`,
+                            value: l.level,
+                        })))))
         .addSubcommand(sub =>
             sub.setName('profile')
                 .setDescription("View your or another player's miner profile")
@@ -372,7 +380,7 @@ async function handleDig(interaction) {
                 description: 'You just came up from a dig.\nTake a short break before heading back down.',
                 color: '#b5651d',
                 nextAt,
-                nextRewardPreview: 'Read the vein 3/3 on your next dig and the haul pays 2× — 3× if it opens into the Abyss',
+                nextRewardPreview: 'Pick how hard to push next dig — up to 2×, and 3× if you read the vein right',
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -516,16 +524,15 @@ async function handleDig(interaction) {
             user.markModified('mining');
         }
 
-        // ── Vein-Following Puzzle ──────────────────────────────────────────────────
-        // 3 rounds of directional navigation through a mine tunnel.
-        // Each round: a 3×3 emoji grid shows the current position (⛏️) and a mineral
-        // trace in one of the 4 adjacent cells. Player picks the matching direction.
-        // Correct directions accumulate depth; final depth maps to intensity level.
-        //   0/3 correct → Surface  (0.7×, 0% cave-in)
-        //   1/3 correct → Shallow  (1.0×, 5% cave-in)
-        //   2/3 correct → Mid      (1.4×, 12% cave-in)
-        //   3/3 correct → Deep     (2.0×, 20% cave-in)
-        //   3/3 + lucky → Abyss    (3.0×, 30% cave-in)  10% chance on a perfect run
+        // ── Risk choice, then one vein read ────────────────────────────────────────
+        // The miner picks how hard to push; a correct vein read promotes the payout
+        // one rung without touching the risk they accepted.
+        //
+        // This replaced three rounds of a puzzle that displayed its own answer — the
+        // grid marked the ore cell with ✨ and asked which direction it was, so every
+        // attentive player scored 3/3 and every dig funnelled to Deep. The five-rung
+        // risk ladder existed but nothing ever chose from it, and the only way to dig
+        // more safely was to answer deliberately wrong, which nothing explained.
 
         const featured         = getDailyFeatured(interaction.guild.id);
         const isFeaturedDepth  = depthId === featured.mineDepth.id;
@@ -539,15 +546,17 @@ async function handleDig(interaction) {
             { id: 'E', label: '➡️ East',  row: 1, col: 2 },
         ];
 
-        // Build a 3×3 grid string highlighting the ore direction
+        /** The 3×3 tunnel view. With `oreDir` the trace shows; without it, it doesn't. */
         function buildGrid(oreDir) {
             const grid = [
                 ['🪨', '🪨', '🪨'],
                 ['🪨', '⛏️', '🪨'],
                 ['🪨', '🪨', '🪨'],
             ];
-            const d = DIRS.find(d => d.id === oreDir);
-            grid[d.row][d.col] = '✨';
+            if (oreDir) {
+                const d = DIRS.find(d => d.id === oreDir);
+                grid[d.row][d.col] = '✨';
+            }
             return grid.map(row => row.join(' ')).join('\n');
         }
 
@@ -555,89 +564,129 @@ async function handleDig(interaction) {
             ? `\n🌟 **Featured Depth!** +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout active.`
             : '';
 
+        // Pushing hard for coins that the daily throttle will swallow is all risk and
+        // no reward, so say so before the choice rather than after the cave-in.
+        const throttleWarning =
+            m.dailyCoins >= LIMITS.DAILY_HARD_CAP
+                ? `\n🛑 **Daily cap reached** — this dig pays no coins. Cave-in risk is still real.`
+                : m.dailyCoins >= LIMITS.DAILY_SOFT_CAP
+                ? `\n⚠️ Past the daily soft cap — payouts are halved until it resets.`
+                : '';
+
+        // ── 1. How hard to push ────────────────────────────────────────────────────
+        const requestedIntensity = interaction.options.getInteger('intensity');
+        let pickedIntensity = CHOOSABLE_INTENSITY.find(l => l.level === requestedIntensity) ?? null;
+
+        const intensityRow = new ActionRowBuilder().addComponents(
+            ...CHOOSABLE_INTENSITY.map(l => new ButtonBuilder()
+                .setCustomId(`digint_${l.level}`)
+                .setLabel(`${l.name} · ${l.multiplier}× · ${Math.round(l.caveInRisk * 100)}%`)
+                .setEmoji(l.emoji)
+                .setStyle(l.level >= 4 ? ButtonStyle.Danger : l.level === 3 ? ButtonStyle.Primary : ButtonStyle.Secondary)
+            )
+        );
+
+        const fallbackLevel = CHOOSABLE_INTENSITY.find(l => l.level === (m.preferredIntensity ?? DEFAULT_INTENSITY_LEVEL))
+            ?? CHOOSABLE_INTENSITY.find(l => l.level === DEFAULT_INTENSITY_LEVEL);
+
         await interaction.reply({
             embeds: [new EmbedBuilder()
                 .setColor(isFeaturedDepth ? '#FFD700' : '#8B4513')
                 .setTitle(`⛏️ Entering ${depth.emoji} ${depth.name}…`)
                 .setDescription(
                     `*You lower yourself into the shaft. Dust settles. Your lamp catches a glint…*\n\n` +
-                    `**Follow the vein** — 3 rounds of directional choices. The deeper you follow it, the richer the haul.${featuredDepthNote}`
+                    (pickedIntensity
+                        ? `**${pickedIntensity.emoji} ${pickedIntensity.name}** — ${pickedIntensity.multiplier}× payout, ${Math.round(pickedIntensity.caveInRisk * 100)}% cave-in risk.`
+                        : `**How hard do you want to push?** Deeper pays more and risks bringing the roof down.`) +
+                    featuredDepthNote + throttleWarning
                 )
-                .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · 15 seconds per choice — miss a round and you stop there.` })],
-            components: [],
+                .setFooter({ text: pickedIntensity
+                    ? `${timeBand.emoji} ${timeBand.label}`
+                    : `${timeBand.emoji} ${timeBand.label} · ${INTENSITY_PICK_MS / 1000}s to choose — defaults to ${fallbackLevel.name}. Pass \`intensity:\` to skip this.` })],
+            components: pickedIntensity ? [] : [intensityRow],
         });
         const mineMsg = await interaction.fetchReply();
-        await delay(1500);
 
-        let veinDepth = 0;
-        const roundLog = [];
+        if (!pickedIntensity) {
+            const chosenId = await new Promise(resolve => {
+                const col = mineMsg.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith('digint_'),
+                    time: INTENSITY_PICK_MS,
+                    max: 1,
+                });
+                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId); });
+                col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
+            });
+            pickedIntensity = CHOOSABLE_INTENSITY.find(l => `digint_${l.level}` === chosenId) ?? fallbackLevel;
+        }
 
-        for (let round = 0; round < 3; round++) {
-            const oreDir  = DIRS[Math.floor(Math.random() * DIRS.length)];
-            const grid    = buildGrid(oreDir.id);
-            const prevLog = roundLog.map((r, i) => r ? `✅` : `❌`).join(' ');
+        // Remembered so the timeout default is the miner's own habit, not ours.
+        if (m.preferredIntensity !== pickedIntensity.level) {
+            m.preferredIntensity = pickedIntensity.level;
+            user.markModified('mining');
+        }
 
-            const veinEmbed = new EmbedBuilder()
+        // ── 2. One vein read, and a real one ───────────────────────────────────────
+        const oreDir = DIRS[Math.floor(Math.random() * DIRS.length)];
+
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
                 .setColor('#B8860B')
-                .setTitle(`⛏️ Vein Read — Round ${round + 1}/3`)
+                .setTitle('⛏️ Reading the vein…')
                 .setDescription(
-                    `${prevLog ? prevLog + '\n\n' : ''}` +
-                    `*Mineral trace spotted — which way does the vein run?*\n\n` +
-                    `\`\`\`\n${grid}\n\`\`\``
+                    `*A mineral trace catches the lamplight. Mark where it runs.*\n\n` +
+                    `\`\`\`\n${buildGrid(oreDir.id)}\n\`\`\``
                 )
-                .setFooter({ text: '15 seconds to choose a direction.' });
+                .setFooter({ text: 'Remember it — the dust is about to settle.' })],
+            components: [],
+        });
+        await delay(VEIN_FLASH_MS);
 
-            const dirRow = new ActionRowBuilder().addComponents(
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setColor('#8B4513')
+                .setTitle('⛏️ Which way did it run?')
+                .setDescription(
+                    `*Dust swallows the seam. Call it.*\n\n` +
+                    `\`\`\`\n${buildGrid(null)}\n\`\`\``
+                )
+                .setFooter({ text: `${VEIN_ANSWER_MS / 1000}s · a correct read pays one rung higher at the same risk.` })],
+            components: [new ActionRowBuilder().addComponents(
                 ...DIRS.map(d => new ButtonBuilder()
                     .setCustomId(`vein_${d.id}`)
                     .setLabel(d.label)
                     .setStyle(ButtonStyle.Primary)
                 )
-            );
+            )],
+        });
 
-            await interaction.editReply({ embeds: [veinEmbed], components: [dirRow] });
-
-            const picked = await new Promise(resolve => {
-                const col = mineMsg.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith('vein_'),
-                    time: 15_000,
-                    max: 1,
-                });
-                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('vein_', '')); });
-                col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+        const picked = await new Promise(resolve => {
+            const col = mineMsg.createMessageComponentCollector({
+                filter: i => i.user.id === interaction.user.id && i.customId.startsWith('vein_'),
+                time: VEIN_ANSWER_MS,
+                max: 1,
             });
+            col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('vein_', '')); });
+            col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
+        });
 
-            const correct = picked === oreDir.id;
-            roundLog.push(correct);
-            if (correct) veinDepth++;
+        const veinRead = picked === oreDir.id;
+        const chosenIntensity = veinRead ? promoteIntensity(pickedIntensity) : pickedIntensity;
 
-            const roundResult = new EmbedBuilder()
-                .setColor(correct ? '#00CC55' : picked ? '#CC4400' : '#888888')
-                .setTitle(correct ? '✅ Vein found!' : picked ? '❌ Dead end — rubble.' : '⏰ Hesitated…')
-                .setDescription(
-                    correct
-                        ? `You followed the vein **${oreDir.label}**. It runs deeper here.`
-                        : picked
-                        ? `The vein ran **${oreDir.label}** — you hit rubble instead.`
-                        : `The vein ran **${oreDir.label}** — you didn't move in time.`
-                );
-            await interaction.editReply({ embeds: [roundResult], components: [] });
-            if (round < 2) await delay(900);
-        }
-
-        // Map vein depth to intensity level
-        let intensityIndex = veinDepth; // 0→L1, 1→L2, 2→L3, 3→L4
-        if (veinDepth === 3 && Math.random() < 0.10) intensityIndex = 4; // lucky Abyss
-        const chosenIntensity = INTENSITY_LEVELS[intensityIndex];
-
-        const finalIcons = roundLog.map(r => r ? '✅' : '❌').join(' ');
         const confirmEmbed = new EmbedBuilder()
-            .setColor(chosenIntensity.level >= 4 ? '#FF4444' : chosenIntensity.level >= 3 ? '#FFA500' : '#00AA55')
-            .setTitle(`${chosenIntensity.emoji} Digging ${chosenIntensity.name}…`)
+            .setColor(veinRead ? '#00CC55' : picked ? '#CC4400' : '#888888')
+            .setTitle(veinRead
+                ? `✅ Vein read — digging ${chosenIntensity.emoji} ${chosenIntensity.name}`
+                : picked
+                ? `❌ Misread the seam — digging ${chosenIntensity.emoji} ${chosenIntensity.name}`
+                : `⏰ Too slow — digging ${chosenIntensity.emoji} ${chosenIntensity.name}`)
             .setDescription(
-                `${finalIcons}\n\n` +
-                `Vein depth reached: **${veinDepth}/3 correct**\n` +
-                `**${chosenIntensity.multiplier}×** payout  |  **${(chosenIntensity.caveInRisk * 100).toFixed(0)}%** cave-in risk`
+                (veinRead
+                    ? `The vein ran **${oreDir.label}** and you called it. The seam is richer than it looked.\n\n`
+                    : `The vein ran **${oreDir.label}**.\n\n`) +
+                `**${chosenIntensity.multiplier}×** payout` +
+                (veinRead ? ` *(up from ${pickedIntensity.multiplier}×)*` : '') +
+                `  |  **${(chosenIntensity.caveInRisk * 100).toFixed(0)}%** cave-in risk`
             );
         await interaction.editReply({ embeds: [confirmEmbed], components: [] });
 
@@ -875,7 +924,10 @@ async function handleDig(interaction) {
         }
         {
             const desc = embed.data.description ?? '';
-            const lines = [`> ⛏️ *${finalIcons} — Vein depth ${veinDepth}/3 → ${chosenIntensity.emoji} ${chosenIntensity.name} (${chosenIntensity.multiplier}×)*`];
+            const lines = [
+                `> ${chosenIntensity.emoji} *Dug **${chosenIntensity.name}** — ${chosenIntensity.multiplier}× at ${(chosenIntensity.caveInRisk * 100).toFixed(0)}% risk`
+                + (veinRead ? ` · vein read ✅ (up from ${pickedIntensity.multiplier}×)*` : `*`),
+            ];
             if (result.caveIn && result.caveInEscaped) {
                 lines.push(result.caveInBonusPaid > 0
                     ? `> 💥 *Cave-in! You blasted clear — ore saved, and the ${chosenIntensity.multiplier}× held.*`
@@ -2557,9 +2609,9 @@ async function handleMap(interaction) {
     const explored = (m.mineMap ?? []).filter(c => c !== 0).length;
     const total    = mapSize * mapSize;
 
-    // Yield multiplier comes from the vein-reading rounds, not from miner level:
-    // 0/3 correct pays 0.7× and 3/3 pays 2× (3× on a lucky break into the Abyss).
-    const intensityHint = '0.7×–3.0×, set by your vein read';
+    // Yield multiplier comes from the intensity the miner picks before digging, with
+    // a correct vein read promoting it one rung at the same risk.
+    const intensityHint = '0.7×–3.0×, set by the risk you choose';
 
     const raidableLines = getRaidableMaterials(user).map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
 

@@ -9,6 +9,7 @@ const {
     ORES_BY_TIER,
     MINER_LEVELS,
     LIMITS,
+    INTENSITY_LEVELS,
     PRESTIGE_BONUSES,
     MINE_QUEST_TEMPLATES
 } = require('../data/mineData');
@@ -39,6 +40,9 @@ function ensureMineData(user) {
     if (m.lastMine           == null) m.lastMine            = null;
     if (m.injuryUntil        == null) m.injuryUntil         = null;
     if (m.activeDepth        == null) m.activeDepth         = 'surface_quarry';
+    // The intensity the miner last dug at, used as the default when the pre-dig
+    // prompt times out — so an unanswered prompt repeats their own habit.
+    if (m.preferredIntensity == null) m.preferredIntensity  = 2;
     if (!Array.isArray(m.unlockedDepths))       m.unlockedDepths      = ['surface_quarry'];
     if (m.equippedPickaxeIndex == null) m.equippedPickaxeIndex = -1;
     if (!Array.isArray(m.pickaxes))             m.pickaxes            = [];
@@ -616,6 +620,18 @@ function tickConsumables(user) {
     user.markModified('mining');
 }
 
+/**
+ * A correct vein read promotes the payout to the next rung's multiplier while the
+ * cave-in risk and durability cost stay where the miner put them. Reading the seam
+ * makes it richer; it does not make the tunnel more dangerous. Keeping the risk
+ * fixed is the point: the danger is chosen deliberately, and only ever by the
+ * player — never handed to them by the outcome of a minigame.
+ */
+function promoteIntensity(level) {
+    const next = INTENSITY_LEVELS.find(l => l.level === level.level + 1);
+    return next ? { ...level, multiplier: next.multiplier, promoted: true } : level;
+}
+
 // ─── FULL MINE EXECUTION ─────────────────────────────────────────────────────
 
 function executeMine(user, depthId, options = {}) {
@@ -1066,6 +1082,7 @@ module.exports = {
     applyXp,
     activateConsumable,
     tickConsumables,
+    promoteIntensity,
     executeMine,
     assignDailyMineQuests,
     updateMineQuestProgress,

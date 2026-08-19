@@ -474,6 +474,24 @@ const LIMITS = {
     PITY_BONUS_PER_STACK:    0.15
 };
 
+// ─── DIG INTENSITY ───────────────────────────────────────────────────────────
+//
+// How hard the miner pushes on a given dig: more payout for more chance of the roof
+// coming down, and more wear on the pickaxe either way.
+
+const INTENSITY_LEVELS = [
+    { level: 1, name: 'Surface',  emoji: '☀️',  multiplier: 0.7, caveInRisk: 0.00, durLoss: 1 },
+    { level: 2, name: 'Shallow',  emoji: '🪨',  multiplier: 1.0, caveInRisk: 0.05, durLoss: 1 },
+    { level: 3, name: 'Mid',      emoji: '🔩',  multiplier: 1.4, caveInRisk: 0.12, durLoss: 2 },
+    { level: 4, name: 'Deep',     emoji: '💎',  multiplier: 2.0, caveInRisk: 0.20, durLoss: 3 },
+    { level: 5, name: 'Abyss',    emoji: '🌑',  multiplier: 3.0, caveInRisk: 0.30, durLoss: 4 },
+];
+
+// The rungs a miner may choose before digging. The Abyss is not among them: its 3×
+// is what a correct vein read pays someone already working Deep, not a selection.
+const CHOOSABLE_INTENSITY     = INTENSITY_LEVELS.filter(l => l.level <= 4);
+const DEFAULT_INTENSITY_LEVEL = 2;
+
 // ─── PRESTIGE BONUSES ────────────────────────────────────────────────────────
 
 const PRESTIGE_BONUSES = [
@@ -728,6 +746,9 @@ module.exports = {
     MINER_LEVELS,
     TIER_COLORS,
     LIMITS,
+    INTENSITY_LEVELS,
+    CHOOSABLE_INTENSITY,
+    DEFAULT_INTENSITY_LEVEL,
     PRESTIGE_BONUSES,
     MATERIAL_NAMES,
     CRAFT_RECIPES,
