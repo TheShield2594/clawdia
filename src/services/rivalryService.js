@@ -1,6 +1,6 @@
 const User = require('../models/User');
 
-// guildId -> { entries: [{userId, level, xp}], updatedAt }
+// guildId -> { entries: [{userId, level, xp}], index: Map(userId -> position), updatedAt }
 const rankCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const MAX_RANK = 100;             // only notify users within top 100
@@ -10,17 +10,107 @@ const NOTIFY_COOLDOWN = 60 * 60 * 1000; // 1 notification per user per hour
 // Significant rank thresholds that trigger the optional "climbed" DM
 const CLIMB_THRESHOLDS = [10, 50, 100];
 
+/** The leaderboard order: level first, XP as the tiebreak — the `find` sort below. */
+function compare(a, b) {
+    return b.level - a.level || b.xp - a.xp;
+}
+
+function buildIndex(entries) {
+    const index = new Map();
+    for (let i = 0; i < entries.length; i++) index.set(entries[i].userId, i);
+    return index;
+}
+
 async function getLeaderboard(guildId) {
     const cached = rankCache.get(guildId);
     if (cached && Date.now() - cached.updatedAt < CACHE_TTL) {
-        return cached.entries;
+        return cached;
     }
     const users = await User.find({ guildId })
         .sort({ level: -1, xp: -1 })
         .select('userId level xp')
         .lean();
-    rankCache.set(guildId, { entries: users, updatedAt: Date.now() });
-    return users;
+    const entry = { entries: users, index: buildIndex(users), updatedAt: Date.now() };
+    rankCache.set(guildId, entry);
+    return entry;
+}
+
+/**
+ * Moves the entry at `from` to the position its new level/XP earns, shifting the
+ * entries it passes by one and keeping the index in step.
+ *
+ * The array is already sorted apart from this one entry, so the move only ever
+ * touches the span between the old and new positions — an XP gain shifts a
+ * player past the handful of people they actually overtook, not past everyone.
+ * That is the whole point: this runs on every XP-earning message, and the sort
+ * it replaces rebuilt and re-ordered the entire guild each time (14 ms at 50k
+ * members, synchronously, on the event loop).
+ *
+ * Returns the entry's new position.
+ */
+function reposition(entries, index, from) {
+    const moved = entries[from];
+    let i = from;
+
+    while (i > 0 && compare(moved, entries[i - 1]) < 0) {
+        entries[i] = entries[i - 1];
+        index.set(entries[i].userId, i);
+        i--;
+    }
+    if (i === from) {
+        while (i < entries.length - 1 && compare(moved, entries[i + 1]) > 0) {
+            entries[i] = entries[i + 1];
+            index.set(entries[i].userId, i);
+            i++;
+        }
+    }
+
+    entries[i] = moved;
+    index.set(moved.userId, i);
+    return i;
+}
+
+/**
+ * Folds a saved user's new level/XP into the cached leaderboard.
+ *
+ * The update happens in place rather than on a copy. Nothing here awaits, so no
+ * concurrent caller can observe a half-shifted array — and a caller that is
+ * suspended mid-notification wants the current standings anyway, not the ones
+ * from before its own await.
+ *
+ * Returns `{ oldRank, newRank, overtaken }`, where `overtaken` lists the players
+ * this user passed together with the rank each of them now holds.
+ */
+function applyStanding(board, savedUser) {
+    const { entries, index } = board;
+    const oldIdx = index.get(savedUser.userId) ?? -1;
+
+    let from;
+    if (oldIdx === -1) {
+        from = entries.length;
+        entries.push({ userId: savedUser.userId, level: savedUser.level, xp: savedUser.xp });
+        index.set(savedUser.userId, from);
+    } else {
+        from = oldIdx;
+        entries[from].level = savedUser.level;
+        entries[from].xp    = savedUser.xp;
+    }
+
+    const newIdx = reposition(entries, index, from);
+    board.updatedAt = Date.now();
+
+    // Everyone between the new and old positions was shifted down by exactly
+    // one, so their ranks are known without searching for them again.
+    const overtaken = [];
+    for (let i = newIdx + 1; i <= from; i++) {
+        overtaken.push({ userId: entries[i].userId, rank: i + 1 });
+    }
+
+    return {
+        oldRank: oldIdx === -1 ? null : oldIdx + 1,
+        newRank: newIdx + 1,
+        overtaken,
+    };
 }
 
 /**
@@ -33,49 +123,22 @@ async function getLeaderboard(guildId) {
  */
 async function checkRivalry(client, guild, savedUser) {
     try {
-        const cached = await getLeaderboard(guild.id);
-
-        // Capture old rank from the unmodified snapshot
-        const oldIdx = cached.findIndex(e => e.userId === savedUser.userId);
-        const oldRank = oldIdx === -1 ? null : oldIdx + 1;
-
-        // Build a new sorted array — never mutate the cached reference so
-        // concurrent calls always see a consistent snapshot
-        const updated = cached.map(e =>
-            e.userId === savedUser.userId
-                ? { userId: savedUser.userId, level: savedUser.level, xp: savedUser.xp }
-                : e
-        );
-        if (oldIdx === -1) {
-            updated.push({ userId: savedUser.userId, level: savedUser.level, xp: savedUser.xp });
-        }
-        updated.sort((a, b) => b.level - a.level || b.xp - a.xp);
-
-        // Replace the cache entry atomically with the fully-built array
-        rankCache.set(guild.id, { entries: updated, updatedAt: Date.now() });
-
-        const newIdx = updated.findIndex(e => e.userId === savedUser.userId);
-        const newRank = newIdx + 1;
+        const board = await getLeaderboard(guild.id);
+        const { oldRank, newRank, overtaken } = applyStanding(board, savedUser);
 
         if (newRank > MAX_RANK) return;
         if (!oldRank || newRank >= oldRank) return;
 
-        // Number of positions gained — used to derive the overtaken slice
-        const climbCount = oldRank - newRank;
         const now = Date.now();
 
         const climberDiscord = await client.users.fetch(savedUser.userId).catch(() => null);
         const climberTag = climberDiscord?.tag || 'Someone';
 
-        // After sorting, overtaken users occupy the climbCount slots directly
-        // below the climber's new position
-        const overtakenSlice = updated.slice(newIdx + 1, newIdx + 1 + climbCount);
-        for (const entry of overtakenSlice) {
-            const overtakenRank = updated.findIndex(e => e.userId === entry.userId) + 1;
-            if (overtakenRank - newRank > MAX_RANK_DIFF) continue;
+        for (const passed of overtaken) {
+            if (passed.rank - newRank > MAX_RANK_DIFF) continue;
 
             const overtakenDoc = await User.findOne(
-                { userId: entry.userId, guildId: guild.id },
+                { userId: passed.userId, guildId: guild.id },
                 { 'notifications.leaderboard.overtaken': 1, 'leaderboard.lastOvertakenNotification': 1 }
             ).lean();
             if (!overtakenDoc) continue;
@@ -86,16 +149,16 @@ async function checkRivalry(client, guild, savedUser) {
             const lastNotif = overtakenDoc.leaderboard?.lastOvertakenNotification;
             if (lastNotif && now - new Date(lastNotif).getTime() < NOTIFY_COOLDOWN) continue;
 
-            const target = await client.users.fetch(entry.userId).catch(() => null);
+            const target = await client.users.fetch(passed.userId).catch(() => null);
             if (!target) continue;
 
             await target.send(
                 `📉 **${climberTag}** just passed you on the **${guild.name}** leaderboard! ` +
-                `They're now rank **#${newRank}** and you're **#${overtakenRank}**. Time to catch up!`
+                `They're now rank **#${newRank}** and you're **#${passed.rank}**. Time to catch up!`
             ).catch(() => {});
 
             await User.updateOne(
-                { userId: entry.userId, guildId: guild.id },
+                { userId: passed.userId, guildId: guild.id },
                 { $set: { 'leaderboard.lastOvertakenNotification': new Date() } }
             ).catch(err => console.error('[rivalry] lastOvertakenNotification update failed:', err.message));
         }
@@ -129,4 +192,4 @@ async function checkRivalry(client, guild, savedUser) {
     }
 }
 
-module.exports = { checkRivalry };
+module.exports = { checkRivalry, __test__: { applyStanding, reposition, compare, buildIndex, rankCache } };
