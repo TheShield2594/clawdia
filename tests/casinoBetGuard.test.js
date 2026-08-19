@@ -65,7 +65,10 @@ function makeInteraction(options) {
 
     const message = {
         createMessageComponentCollector: () => ({ on() { return this; }, stop() {} }),
-        awaitMessageComponent: () => new Promise(() => {}),
+        // Nobody presses anything in these tests. A rejection is what discord.js
+        // hands back when the window closes, and the games all treat it as "no
+        // response"; a promise that never settles would just hang them.
+        awaitMessageComponent: () => Promise.reject(new Error('no response')),
         edit: record,
     };
 
@@ -240,11 +243,14 @@ describe('/blackjack — the second stake is guarded too', () => {
     /**
      * Deals a hand and hands back the collector's collect handler.
      *
-     * A natural blackjack settles immediately and never opens a collector, so a
-     * deal that ends that way is re-dealt rather than asserted on.
+     * Double down is only offered on a two-card total of 9, 10 or 11 — about one
+     * hand in seven — and a natural blackjack settles before any collector opens.
+     * So the deal is repeated until one is playable rather than reaching into the
+     * shuffle: at ~15% a hand, 400 deals miss only once in every 10^28 runs, and
+     * a whole deal costs well under a millisecond.
      */
     async function dealUntilPlayable() {
-        for (let attempt = 0; attempt < 25; attempt++) {
+        for (let attempt = 0; attempt < 400; attempt++) {
             jest.clearAllMocks();
             User.findOne.mockResolvedValue(walletDoc());
             User.create.mockResolvedValue(walletDoc());
@@ -261,7 +267,7 @@ describe('/blackjack — the second stake is guarded too', () => {
             const interaction = makeInteraction({ bet: BET });
             interaction.fetchReply.mockResolvedValue({
                 createMessageComponentCollector: () => collector,
-                awaitMessageComponent: () => new Promise(() => {}),
+                awaitMessageComponent: () => Promise.reject(new Error('no response')),
             });
 
             await load('blackjack').execute(interaction, { releaseLock: jest.fn() });
