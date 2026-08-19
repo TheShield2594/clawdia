@@ -518,6 +518,38 @@ function executeExplore(user, region, guildSettings, opts = {}) {
 }
 
 /**
+ * The raw coin band a lost encounter costs, before region depth is applied.
+ * Priced off the encounter's own average reward — see LIMITS.ENCOUNTER_LOSS_RATE.
+ */
+function encounterLossBand(enc) {
+    const avgReward = (enc.reward.min + enc.reward.max) / 2;
+    const base = avgReward * LIMITS.ENCOUNTER_LOSS_RATE;
+    return { min: Math.round(base * 0.75), max: Math.round(base * 1.25) };
+}
+
+/**
+ * What each option in an encounter is actually worth, in the coins this player
+ * would see — every multiplier already applied. Display-only: the prompt used to
+ * offer a blind choice between two pieces of flavour text, which is not a
+ * decision so much as a coin toss with extra reading.
+ */
+function getEncounterStakes(user, region, guildSettings, result) {
+    const enc = result.encounter;
+    const progress = getRegionProgress(user, region.id);
+    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress);
+    const penaltyMult = getPenaltyMultiplier(region);
+    const loss = encounterLossBand(enc);
+    const scale = (n, mult) => Math.round(n * mult);
+    return {
+        winChance: enc.winChance,
+        win:  { min: scale(enc.reward.min, coinMult), max: scale(enc.reward.max, coinMult) },
+        safe: { min: scale(enc.reward.min, coinMult * LIMITS.ENCOUNTER_SAFE_RATE),
+                max: scale(enc.reward.max, coinMult * LIMITS.ENCOUNTER_SAFE_RATE) },
+        loss: { min: scale(loss.min, penaltyMult), max: scale(loss.max, penaltyMult) },
+    };
+}
+
+/**
  * Resolve a pending encounter after the player chose.
  * @param {string} choice - 'approach' | 'observe' | null (timeout = observe)
  */
@@ -539,11 +571,13 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
             result.xp = grantXp(user, EVENT_XP.encounter_win, result);
         } else {
             result.outcome = 'loss';
-            // Losses scale with the region only. Folding the event coin bonus
-            // or the admin drop-rate knob in here would mean a "double coins"
-            // weekend also doubled the beating, and a generous admin made
-            // failure five times more expensive.
-            const penalty = Math.min(Math.round(randInt(200, 600) * penaltyMult), Math.max(0, user.balance));
+            // Losses scale with the region and with what was on the table, and
+            // deliberately with nothing else. Folding the event coin bonus or the
+            // admin drop-rate knob in here would mean a "double coins" weekend
+            // also doubled the beating, and a generous admin made failure five
+            // times more expensive.
+            const band = encounterLossBand(enc);
+            const penalty = Math.min(Math.round(randInt(band.min, band.max) * penaltyMult), Math.max(0, user.balance));
             user.balance -= penalty;
             result.penalty = penalty;
             result.xp = grantXp(user, EVENT_XP.encounter_loss, result);
@@ -554,7 +588,7 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
         }
     } else {
         result.outcome = 'safe';
-        result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult * 0.35));
+        result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult * LIMITS.ENCOUNTER_SAFE_RATE));
         result.xp = grantXp(user, EVENT_XP.encounter_safe, result);
     }
 
@@ -834,6 +868,8 @@ module.exports = {
     getPenaltyMultiplier,
     executeExplore,
     resolveEncounter,
+    encounterLossBand,
+    getEncounterStakes,
     addJournalEntry,
     regionCompletion,
     renderMap,

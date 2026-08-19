@@ -20,6 +20,8 @@ const {
     getPenaltyMultiplier,
     executeExplore,
     resolveEncounter,
+    encounterLossBand,
+    getEncounterStakes,
     addJournalEntry,
     regionCompletion,
     renderMap,
@@ -470,10 +472,13 @@ describe('losses do not scale with generosity', () => {
         boostedSettings.__coinMult = 3;
         const boostedLoss = forceLoss(boosted, region, boostedSettings);
 
+        // Both maxed their penalty roll, so each should land exactly on its own
+        // encounter's ceiling — the generous settings must not have moved it.
+        // (Whispering Forest's region multiplier is 1.0, so the band is the raw one.)
         expect(plainLoss.outcome).toBe('loss');
         expect(boostedLoss.outcome).toBe('loss');
-        expect(boostedLoss.penalty).toBe(plainLoss.penalty);
-        expect(plainLoss.penalty).toBe(600); // max roll × 1.0 region multiplier
+        expect(plainLoss.penalty).toBe(encounterLossBand(plainLoss.encounter).max);
+        expect(boostedLoss.penalty).toBe(encounterLossBand(boostedLoss.encounter).max);
     });
 
     test('a deeper region still costs more to fail in', () => {
@@ -972,5 +977,113 @@ describe('the daily cap ramps down instead of falling off', () => {
         }
 
         expect(user.exploration.dailyCoins).toBeLessThanOrEqual(LIMITS.DAILY_HARD_CAP);
+    });
+});
+
+describe('approaching an encounter is a bet worth taking', () => {
+    // The choice offered by /explore go is the only interactive decision in the
+    // game. It is only a decision if bold actually pays better than careful —
+    // otherwise the prompt is asking players to volunteer for a worse outcome.
+    const safeRate = LIMITS.ENCOUNTER_SAFE_RATE;
+
+    function expectedValues(region, enc) {
+        const avgReward = (enc.reward.min + enc.reward.max) / 2;
+        const band = encounterLossBand(enc);
+        const avgLoss = (band.min + band.max) / 2;
+        const m = region.payoutMultiplier;
+        return {
+            approach: enc.winChance * avgReward * m - (1 - enc.winChance) * avgLoss * m,
+            observe:  avgReward * m * safeRate,
+        };
+    }
+
+    test('every encounter in the game pays better for approaching', () => {
+        const losers = [];
+        for (const region of REGION_LIST) {
+            for (const enc of region.encounters) {
+                const { approach, observe } = expectedValues(region, enc);
+                if (approach <= observe) losers.push(`${region.name} / ${enc.name}`);
+            }
+        }
+        expect(losers).toEqual([]);
+    });
+
+    test('the margin is real but not a formality', () => {
+        for (const region of REGION_LIST) {
+            for (const enc of region.encounters) {
+                const { approach, observe } = expectedValues(region, enc);
+                const ratio = approach / observe;
+                // Worth taking, without making "keep your distance" pointless.
+                expect(ratio).toBeGreaterThan(1.2);
+                expect(ratio).toBeLessThan(2);
+            }
+        }
+    });
+
+    test('losing is priced off what was on the table, not a flat fee', () => {
+        // A flat penalty is what made the long-odds, big-prize encounters the
+        // ones you should never take: the downside stayed put while the upside
+        // grew, and "keep your distance" pays a share of that same upside.
+        for (const region of REGION_LIST) {
+            for (const enc of region.encounters) {
+                const avgReward = (enc.reward.min + enc.reward.max) / 2;
+                const band = encounterLossBand(enc);
+                expect(band.min).toBeLessThan(band.max);
+                // Rounding each end can shift the midpoint by half a coin.
+                const mid = (band.min + band.max) / 2;
+                expect(Math.abs(mid - avgReward * LIMITS.ENCOUNTER_LOSS_RATE)).toBeLessThanOrEqual(1);
+            }
+        }
+    });
+
+    test('a loss lands inside the encounter\'s own band', () => {
+        const region = REGIONS.whispering_forest;
+        const user = makeUser();
+        let loss = null;
+        for (let i = 0; i < 2_000 && !loss; i++) {
+            user.exploration.stamina = LIMITS.MAX_STAMINA;
+            user.exploration.dailyCoins = 0;
+            const r = executeExplore(user, region, makeGuildSettings(), {});
+            if (!r.pendingChoice) continue;
+            const settled = resolveEncounter(user, region, makeGuildSettings(), r, 'approach');
+            if (settled.outcome === 'loss') loss = settled;
+        }
+        expect(loss).not.toBeNull();
+        const band = encounterLossBand(loss.encounter);
+        expect(loss.penalty).toBeGreaterThanOrEqual(band.min);
+        expect(loss.penalty).toBeLessThanOrEqual(band.max);
+    });
+
+    test('the prompt quotes the coins this player would actually see', () => {
+        const region = REGIONS.crumbling_ruins;
+        const settings = makeGuildSettings();
+        // A relic case lifts payouts, so the quoted win band has to move with it.
+        const plain = makeUser();
+        const collector = makeUser({ inventory: RELIC_LIST.slice(0, 8).map(r => ({ itemId: r.itemId, quantity: 1 })) });
+
+        const encounterFor = user => {
+            for (let i = 0; i < 2_000; i++) {
+                user.exploration.stamina = LIMITS.MAX_STAMINA;
+                user.exploration.dailyCoins = 0;
+                const r = executeExplore(user, region, settings, {});
+                if (r.pendingChoice) return r;
+            }
+            throw new Error('no encounter rolled');
+        };
+
+        const plainResult = encounterFor(plain);
+        const plainStakes = getEncounterStakes(plain, region, settings, plainResult);
+        expect(plainStakes.winChance).toBe(plainResult.encounter.winChance);
+        expect(plainStakes.win.min).toBeGreaterThan(plainStakes.safe.min);
+        expect(plainStakes.safe.min).toBe(
+            Math.round(plainResult.encounter.reward.min * region.payoutMultiplier * safeRate));
+
+        // Same encounter definition, richer explorer → a bigger quoted prize.
+        const richResult = encounterFor(collector);
+        richResult.encounter = plainResult.encounter;
+        const richStakes = getEncounterStakes(collector, region, settings, richResult);
+        expect(richStakes.win.max).toBeGreaterThan(plainStakes.win.max);
+        // The downside tracks region depth only, so generosity never inflates it.
+        expect(richStakes.loss).toEqual(plainStakes.loss);
     });
 });

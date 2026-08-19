@@ -30,6 +30,7 @@ const {
     getSecretOdds,
     executeExplore,
     resolveEncounter,
+    getEncounterStakes,
     addJournalEntry,
     regionCompletion,
     renderMap,
@@ -369,9 +370,16 @@ async function handleGo(interaction) {
         // ── Encounter choice ──────────────────────────────────────────────────────
         if (result.pendingChoice) {
             const enc = result.encounter;
+            // Both options are priced out in the coins THIS player would see —
+            // relic case, survey bonus, region depth and any event multiplier
+            // already folded in. A choice between two pieces of flavour text is
+            // not a decision, it's a coin toss with extra reading.
+            const stakes = getEncounterStakes(user, region, guildSettings, result);
+            const odds = Math.round(stakes.winChance * 100);
+            const range = band => `${currency}${band.min.toLocaleString()}–${currency}${band.max.toLocaleString()}`;
             const encId = `explore_${interaction.id}`;
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`${encId}_approach`).setLabel('🤝 Approach').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`${encId}_approach`).setLabel(`🤝 Approach (${odds}%)`).setStyle(ButtonStyle.Primary),
                 new ButtonBuilder().setCustomId(`${encId}_observe`).setLabel('🌿 Keep Your Distance').setStyle(ButtonStyle.Secondary),
             );
             await interaction.editReply({
@@ -379,6 +387,18 @@ async function handleGo(interaction) {
                     .setColor(region.color)
                     .setTitle(`${enc.emoji} ${enc.name}`)
                     .setDescription(`*${enc.intro}*\n\nApproach it, or watch from a safe distance? Bold pays better. Careful always pays.`)
+                    .addFields(
+                        {
+                            name: `🤝 Approach — ${odds}%`,
+                            value: `Win: **+${range(stakes.win)}**\nLose: **−${range(stakes.loss)}**, and it may leave a mark.`,
+                            inline: true,
+                        },
+                        {
+                            name: '🌿 Keep Your Distance',
+                            value: `**+${range(stakes.safe)}**, guaranteed.\nNothing risked, nothing broken.`,
+                            inline: true,
+                        },
+                    )
                     .setFooter({ text: '20 seconds to decide. Hesitation counts as keeping your distance, which is honest of it.' })],
                 components: [row],
             });
