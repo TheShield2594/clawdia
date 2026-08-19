@@ -820,10 +820,30 @@ function assignDailyMineQuests(user) {
     const activeCount = user.quests.filter(q => q.questId.startsWith('mq_')).length;
     if (activeCount > 0) return;
 
-    const eligible = MINE_QUEST_TEMPLATES.filter(t =>
-        m.level >= t.minLevel &&
-        (t.type !== 'depth_mines' || m.unlockedDepths.includes(t.depth))
+    // Tier quests need a depth that can actually produce the tier, not just the level.
+    // Epic ore starts at the Iron Mines and legendary at the Crystal Caves, so a miner
+    // who has hit the level gate but not yet bought the depth would otherwise be handed
+    // a quest they cannot complete — which also blocks the next batch for a full day,
+    // since a batch is only reissued once the current one expires.
+    // The `event` tier is deliberately left out of these lists. It sits above
+    // legendary and technically satisfies every "or better" quest, but it is a ~0.5%
+    // freak roll at the shallow depths — treating it as a way to clear an epic quest
+    // would put the quest back on the board in all but name.
+    const QUEST_TIER_REQUIREMENT = {
+        rare_plus_finds:      ['rare', 'epic', 'legendary'],
+        epic_plus_finds:      ['epic', 'legendary'],
+        legendary_plus_finds: ['legendary'],
+    };
+    const canReachTier = tiers => m.unlockedDepths.some(depthId =>
+        tiers.some(tier => (DEPTHS[depthId]?.tierWeights?.[tier] ?? 0) > 0)
     );
+
+    const eligible = MINE_QUEST_TEMPLATES.filter(t => {
+        if (m.level < t.minLevel) return false;
+        if (t.type === 'depth_mines') return m.unlockedDepths.includes(t.depth);
+        const required = QUEST_TIER_REQUIREMENT[t.type];
+        return !required || canReachTier(required);
+    });
 
     const shuffled  = eligible.slice().sort(() => Math.random() - 0.5);
     const toAssign  = shuffled.slice(0, DAILY_QUEST_COUNT);

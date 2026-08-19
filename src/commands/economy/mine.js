@@ -168,7 +168,7 @@ module.exports = {
                 .setDescription('View your persistent mine map — see every cell you have excavated.'))
         .addSubcommand(sub =>
             sub.setName('raid')
-                .setDescription('Raid another miner\'s mine and steal unprocessed ore (requires pickaxe equipped)')
+                .setDescription('Raid another miner and steal some of their crafting materials (requires pickaxe equipped)')
                 .addUserOption(o =>
                     o.setName('target')
                         .setDescription('The miner to raid')
@@ -1819,9 +1819,9 @@ async function handleShop(interaction, sub) {
             if (btn.user.id !== interaction.user.id) {
                 return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
             }
-            collector.stop();
 
             if (btn.customId === 'minepickaxe_cancel') {
+                collector.stop();
                 return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
             }
 
@@ -1899,6 +1899,8 @@ async function handleShop(interaction, sub) {
                 interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
             })();
+
+            collector.stop();
         });
 
         return new Promise(resolve => {
@@ -2018,9 +2020,9 @@ async function handleShop(interaction, sub) {
             if (btn.user.id !== interaction.user.id) {
                 return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
             }
-            collector.stop();
 
             if (btn.customId === 'minebuy_cancel') {
+                collector.stop();
                 return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
             }
 
@@ -2091,6 +2093,8 @@ async function handleShop(interaction, sub) {
                 interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
             })();
+
+            collector.stop();
         });
 
         return new Promise(resolve => {
@@ -2696,93 +2700,120 @@ async function handleRaid(interaction) {
         });
     }
 
-    // Execute the raid: move RAID_STEAL_MIN–RAID_STEAL_MAX of the defender's largest
-    // material piles across to the raider. The same `data.materials` map is debited
-    // and credited, so a raid transfers value rather than creating it.
-    // Defender is updated first; the shield CAS ($or on lastRaidReceived) and
-    // per-material $gte guards ensure only one raid commits atomically. Raider
-    // update follows sequentially with a cooldown CAS to block duplicate commands.
-    const stealFraction = RAID_STEAL_MIN + Math.random() * (RAID_STEAL_MAX - RAID_STEAL_MIN);
-    const stolen      = {};
-    const defenderInc = {};
-    const raiderInc   = {};
-
-    for (const { matId, take } of planRaidHaul(defender, stealFraction)) {
-        stolen[matId] = take;
-        defenderInc[`data.materials.${matId}`] = -take;
-        raiderInc[`data.materials.${matId}`]   = take;
-    }
-
-    // Make sure the raider's mining profile exists before the conditional commit below
-    await persistGrindIfNew(raider, 'mining');
-
-    // Condition: the defender still holds every material being taken; defender not
-    // under active shield. Without the $gte guards a raid racing a craft could push
-    // a material stock negative.
-    const defenderCond = { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' };
-    for (const [matId, take] of Object.entries(stolen)) {
-        defenderCond[`data.materials.${matId}`] = { $gte: take };
-    }
-    defenderCond.$or = [
-        { 'data.lastRaidReceived': null },
-        { 'data.lastRaidReceived': { $lte: new Date(Date.now() - RAID_SHIELD_MS) } },
-    ];
-
-    const defenderResult = await GrindProfile.findOneAndUpdate(
-        defenderCond,
-        { $inc: defenderInc, $set: { 'data.lastRaidReceived': new Date() } }
-    ).catch(err => { console.error('[mine raid] defender save error:', err); return null; });
-
-    if (!defenderResult) {
+    // The transfer below is a pair of $inc updates, but a grind profile is saved as a
+    // whole `data` document (see utils/grindProfile) — so a defender part-way through
+    // their own /mine dig would write their pre-raid snapshot straight back over the
+    // debit, keeping their materials while the raider kept the credit. A dig holds
+    // this lock for its entire interactive run, which is seconds wide, so take the
+    // defender's lock for the transfer rather than racing it.
+    //
+    // tryAcquire never blocks, so two miners raiding each other simultaneously cannot
+    // deadlock — one or both are simply turned away.
+    const defenderLockKey = `grind:mine:${interaction.guild.id}:${defender.userId}`;
+    const defenderLock    = await _lockAcquire(defenderLockKey, 30_000);
+    if (!defenderLock) {
         return interaction.reply({
-            content: `**${targetUser.username}**'s stock shifted before you got in — nothing left to take. Try again shortly.`,
+            content: `**${targetUser.username}** is down in the mine right now — you can't get in behind them. Try again in a moment.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
-    // The credit half of the transfer. Its result cannot be discarded: the debit
-    // above has already landed, and there is no transaction to tie the two together
-    // on a standalone mongod. If the credit does not land — the cooldown CAS lost a
-    // race, or the write errored — the materials would simply cease to exist while
-    // both players were told the raid succeeded. Put them back instead.
-    const credited = await GrindProfile.findOneAndUpdate(
-        {
-            userId: raider.userId,
-            guildId: interaction.guild.id,
-            system: 'mining',
-            $or: [
-                { 'data.lastRaidSent': null },
-                { 'data.lastRaidSent': { $lte: new Date(Date.now() - RAID_COOLDOWN_MS) } },
-            ],
-        },
-        { $inc: raiderInc, $set: { 'data.lastRaidSent': new Date() } }
-    ).catch(err => { console.error('[mine raid] raider save error:', err); return null; });
+    // The haul, declared out here because the embed and the defender's DM below
+    // both read it after the lock has been released.
+    const stolen = {};
 
-    if (!credited) {
-        // Compensate: hand the defender's materials back and restore the raid shield
-        // to what it was, so a failed raid does not leave them sheltered for an hour
-        // over a raid that never happened.
-        const rollback = {};
-        for (const [matId, take] of Object.entries(stolen)) rollback[`data.materials.${matId}`] = take;
-        await GrindProfile.updateOne(
-            { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' },
-            { $inc: rollback, $set: { 'data.lastRaidReceived': defenderResult.data?.lastRaidReceived ?? null } }
-        ).catch(err => console.error('[mine raid] rollback failed — defender owed:', Object.keys(stolen).join(','), err));
+    try {
 
-        return interaction.reply({
-            content: 'Your raid was interrupted — nothing was taken, and nothing was lost. Try again in a moment.',
-            flags: MessageFlags.Ephemeral
-        });
+        // Execute the raid: move RAID_STEAL_MIN–RAID_STEAL_MAX of the defender's largest
+        // material piles across to the raider. The same `data.materials` map is debited
+        // and credited, so a raid transfers value rather than creating it.
+        // Defender is updated first; the shield CAS ($or on lastRaidReceived) and
+        // per-material $gte guards ensure only one raid commits atomically. Raider
+        // update follows sequentially with a cooldown CAS to block duplicate commands.
+        const stealFraction = RAID_STEAL_MIN + Math.random() * (RAID_STEAL_MAX - RAID_STEAL_MIN);
+        const defenderInc = {};
+        const raiderInc   = {};
+
+        for (const { matId, take } of planRaidHaul(defender, stealFraction)) {
+            stolen[matId] = take;
+            defenderInc[`data.materials.${matId}`] = -take;
+            raiderInc[`data.materials.${matId}`]   = take;
+        }
+
+        // Make sure the raider's mining profile exists before the conditional commit below
+        await persistGrindIfNew(raider, 'mining');
+
+        // Condition: the defender still holds every material being taken; defender not
+        // under active shield. Without the $gte guards a raid racing a craft could push
+        // a material stock negative.
+        const defenderCond = { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' };
+        for (const [matId, take] of Object.entries(stolen)) {
+            defenderCond[`data.materials.${matId}`] = { $gte: take };
+        }
+        defenderCond.$or = [
+            { 'data.lastRaidReceived': null },
+            { 'data.lastRaidReceived': { $lte: new Date(Date.now() - RAID_SHIELD_MS) } },
+        ];
+
+        const defenderResult = await GrindProfile.findOneAndUpdate(
+            defenderCond,
+            { $inc: defenderInc, $set: { 'data.lastRaidReceived': new Date() } }
+        ).catch(err => { console.error('[mine raid] defender save error:', err); return null; });
+
+        if (!defenderResult) {
+            return interaction.reply({
+                content: `**${targetUser.username}**'s stock shifted before you got in — nothing left to take. Try again shortly.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // The credit half of the transfer. Its result cannot be discarded: the debit
+        // above has already landed, and there is no transaction to tie the two together
+        // on a standalone mongod. If the credit does not land — the cooldown CAS lost a
+        // race, or the write errored — the materials would simply cease to exist while
+        // both players were told the raid succeeded. Put them back instead.
+        const credited = await GrindProfile.findOneAndUpdate(
+            {
+                userId: raider.userId,
+                guildId: interaction.guild.id,
+                system: 'mining',
+                $or: [
+                    { 'data.lastRaidSent': null },
+                    { 'data.lastRaidSent': { $lte: new Date(Date.now() - RAID_COOLDOWN_MS) } },
+                ],
+            },
+            { $inc: raiderInc, $set: { 'data.lastRaidSent': new Date() } }
+        ).catch(err => { console.error('[mine raid] raider save error:', err); return null; });
+
+        if (!credited) {
+            // Compensate: hand the defender's materials back and restore the raid shield
+            // to what it was, so a failed raid does not leave them sheltered for an hour
+            // over a raid that never happened.
+            const rollback = {};
+            for (const [matId, take] of Object.entries(stolen)) rollback[`data.materials.${matId}`] = take;
+            await GrindProfile.updateOne(
+                { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' },
+                { $inc: rollback, $set: { 'data.lastRaidReceived': defenderResult.data?.lastRaidReceived ?? null } }
+            ).catch(err => console.error('[mine raid] rollback failed — defender owed:', Object.keys(stolen).join(','), err));
+
+            return interaction.reply({
+                content: 'Your raid was interrupted — nothing was taken, and nothing was lost. Try again in a moment.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+    } finally {
+        await _lockRelease(defenderLockKey, defenderLock);
     }
 
     const stolenLines = Object.entries(stolen).map(([id, qty]) => `• ${MATERIAL_NAMES[id] ?? id} ×${qty}`).join('\n');
-    const pct = Math.round(stealFraction * 100);
+    const stolenCount = Object.values(stolen).reduce((sum, qty) => sum + qty, 0);
 
     const embed = new EmbedBuilder()
         .setColor('#e67e22')
         .setTitle('⚔️ Mine Raided!')
         .setDescription(
-            `You broke into **${targetUser.username}**'s mine and made off with **${pct}%** of their exposed materials!\n\n` +
+            `You broke into **${targetUser.username}**'s mine and made off with **${stolenCount}** material${stolenCount === 1 ? '' : 's'}!\n\n` +
             `**Stolen:**\n${stolenLines}\n\n` +
             `*These are now yours to craft with.*`
         )
@@ -2797,7 +2828,7 @@ async function handleRaid(interaction) {
         .setTitle('⚠️ Your Mine Was Raided!')
         .setDescription(
             `**${interaction.user.username}** broke into your mine on **${interaction.guild.name}** ` +
-            `and stole **${pct}%** of your exposed crafting materials!\n\n` +
+            `and stole **${stolenCount}** of your crafting material${stolenCount === 1 ? '' : 's'}!\n\n` +
             `**Lost:**\n${stolenLines}\n\n` +
             `Get a **Mine Lock** (\`/mine shop buy item:mine_lock\` or \`/craft make mine_lock_from_obsidian\`) ` +
             `and arm it with \`/mine shop use item:mine_lock\` to block the next raid.`
