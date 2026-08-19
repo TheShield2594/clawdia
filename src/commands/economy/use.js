@@ -57,6 +57,22 @@ module.exports = {
         const itemName = interaction.options.getString('item').trim();
         const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
+        /**
+         * Drop inventory slots the decrement above emptied.
+         *
+         * Not `user.inventory = filter(...)` followed by `save()`: save() writes
+         * each modified path as a `$set`, and `inventory` is an array, so that
+         * writes the whole list back from a snapshot taken a moment earlier —
+         * erasing anything bought, gifted or dropped into the bag in between.
+         * `$pull` removes exactly the emptied entries and leaves the rest alone.
+         * (`balance` is never at risk here; save() only writes paths that were
+         * actually touched.)
+         */
+        const dropEmptyInventorySlots = () => User.updateOne(
+            userFilter,
+            { $pull: { inventory: { quantity: { $lte: 0 } } } },
+        ).catch(err => console.error('[use] inventory cleanup failed:', err));
+
         // Read first to resolve item identity (itemId casing, effect checks)
         const [preview, guildSettings] = await Promise.all([
             User.findOne(userFilter),
@@ -98,9 +114,12 @@ module.exports = {
             }
 
             const effect = addEffect(user, effectType);
-            // Clean up zero-quantity entries and save effect
+            // The save is here for the effect, not the inventory — unmark the
+            // array so it is not written back wholesale alongside it.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
+            user.unmarkModified('inventory');
             await user.save();
+            await dropEmptyInventorySlots();
 
             const embed = new EmbedBuilder()
                 .setColor('#2ecc71')
@@ -149,8 +168,10 @@ module.exports = {
                 return interaction.reply({ content: `Couldn't bank the freeze — you may be at the cap already.`, flags: MessageFlags.Ephemeral });
             }
 
+            // Local copy stays filtered for anything rendered below; the stored
+            // one is corrected by a targeted $pull.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            await user.save();
+            await dropEmptyInventorySlots();
 
             const newFreezes = user.streak?.freezes ?? 0;
             const embed = new EmbedBuilder()
@@ -190,8 +211,10 @@ module.exports = {
                 return interaction.reply({ content: `Couldn't apply the contract — you may be at the max stacks already.`, flags: MessageFlags.Ephemeral });
             }
 
+            // Local copy stays filtered for anything rendered below; the stored
+            // one is corrected by a targeted $pull.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            await user.save();
+            await dropEmptyInventorySlots();
 
             const newStacks = user.crimeContractStacks ?? 0;
             const embed = new EmbedBuilder()
@@ -229,11 +252,8 @@ module.exports = {
             }
 
             // The decrement above is already persisted; this only clears the
-            // husk it may have left behind. Done as a targeted $pull rather than
-            // save(), which would write the whole document — balance included —
-            // back from a snapshot that is already seconds stale.
-            await User.updateOne(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } })
-                .catch(err => console.error('[use] stamina upgrade inventory cleanup failed:', err));
+            // husk it may have left behind.
+            await dropEmptyInventorySlots();
 
             const owned = user.staminaUpgrades ?? 0;
             const embed = new EmbedBuilder()
@@ -270,8 +290,10 @@ module.exports = {
                 return interaction.reply({ content: "Couldn't add the slot — you may be at the cap already.", flags: MessageFlags.Ephemeral });
             }
 
+            // Local copy stays filtered for anything rendered below; the stored
+            // one is corrected by a targeted $pull.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            await user.save();
+            await dropEmptyInventorySlots();
 
             const embed = new EmbedBuilder()
                 .setColor('#8e44ad')
@@ -345,9 +367,12 @@ module.exports = {
             delete revived._id;
             delete revived.diedAt;
             user.pets.push(revived);
+            // The save is here for the pet — keep the inventory array out of it.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
+            user.unmarkModified('inventory');
             user.markModified('pets');
             await user.save();
+            await dropEmptyInventorySlots();
 
             const def  = PET_DEFINITIONS[fallen.petId];
             const name = fallen.name || def?.name || fallen.petId;
@@ -392,8 +417,7 @@ module.exports = {
             // when two boxes opened at once, stranding the second slot's quantity.
             await grantInventoryItem(userFilter.userId, userFilter.guildId, won.itemId, 1);
 
-            // Clean up zero-quantity entries
-            await User.findOneAndUpdate(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } });
+            await dropEmptyInventorySlots();
 
             const boxRemaining = (user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 1) - 1;
 
@@ -421,8 +445,7 @@ module.exports = {
             return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
         }
 
-        // Clean up zero-quantity entries
-        await User.findOneAndUpdate(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } });
+        await dropEmptyInventorySlots();
 
         let roleGranted = false;
         if (shopItem?.roleId) {
