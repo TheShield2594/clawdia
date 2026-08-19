@@ -10,7 +10,8 @@ const {
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
-const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceDelta');
+const { detachBalanceDelta, commitBalanceDelta, saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { chargeExact, refundCharge } = require('../../utils/balanceDebit');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -70,6 +71,15 @@ const { refundEffectCharge } = require('../../services/effectsService');
 
 // Rarity score for hourly fish competition (rarest catch wins)
 const WILDERNESS_YIELD_BONUS = 0.10;
+
+const walletOf = interaction => ({ userId: interaction.user.id, guildId: interaction.guild.id });
+
+// One contract for both, shared with the other grind shops: the charge is a
+// conditional update rather than `user.balance -= cost` followed by a save,
+// because the loaded document's balance goes stale the moment any other
+// command pays the player. See src/utils/balanceDebit.js.
+const chargeBalance = (interaction, cost) => chargeExact(User, walletOf(interaction), cost);
+const refundBalance = (interaction, cost) => refundCharge(User, walletOf(interaction), cost, 'fishshop');
 
 const FISH_TIER_SCORE = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5, event: 6 };
 
@@ -1017,6 +1027,12 @@ async function handleCast(interaction) {
             ensureFishingData(freshUser);
             const bossResult = resolveBossEncounter(freshUser, result.bossEncounter.fish, result.bossEncounter.tier, choicesMade, bossType);
 
+            // The reload above is already seconds old by the time the fight
+            // resolves, and `save()` writes `balance` as an absolute `$set` — so
+            // the bonus is applied as its own `$inc` and `balance` stays out of
+            // the save, exactly as the cast itself does.
+            const bossBalanceAtLoad = freshUser.balance ?? 0;
+
             let bossQuestsDone = [], bossQuestsNear = [];
             if (bossResult.bonusPayout > 0) {
                 const bossLocation = LOCATIONS[freshUser.fishing.activeLocation] ?? location;
@@ -1033,8 +1049,17 @@ async function handleCast(interaction) {
                 bossQuestsNear = earn.nearComplete;
             }
             freshUser.markModified('fishing');
+            let bossPayoutOwed = 0;
             try {
-                await freshUser.save();
+                // Same contract as the cast's own payout: a credit that would not
+                // land is recorded as owed, and has to be said out loud rather
+                // than rendered as a bonus the player was paid.
+                const bossPaid = await saveWithBalanceDelta(User, freshUser, bossBalanceAtLoad, {
+                    service: 'fish',
+                    jobName: 'bossBonusPayout',
+                    guildId: interaction.guild.id,
+                });
+                if (!bossPaid.credited) bossPayoutOwed = bossResult.bonusPayout;
                 if (bossQuestsDone.length || bossQuestsNear.length) {
                     notifyQuestComplete(guildSettings, interaction.member, bossQuestsDone, interaction.channel, freshUser).catch(() => null);
                     notifyQuestNearComplete(guildSettings, interaction.member, bossQuestsNear, interaction.channel).catch(() => null);
@@ -1085,6 +1110,13 @@ async function handleCast(interaction) {
                     { name: 'Rod Damage',   value: `-${bossResult.durabilityLost} durability`, inline: true }
                 )
                 .setTimestamp();
+
+            if (bossPayoutOwed > 0) {
+                bossResultEmbed.addFields({
+                    name: '⚠️ Payout Not Yet Credited',
+                    value: `The **${currency}${bossPayoutOwed.toLocaleString()}** bonus could not be paid out just now and has been recorded as owed — your balance does not include it yet. It will be applied once the problem clears; tell an admin if it does not.`,
+                });
+            }
 
             await state.btn.update({ embeds: [embed, bossResultEmbed], components: [] });
             return;
@@ -1976,6 +2008,9 @@ async function claimQuest(interaction, user, currency) {
         });
     }
 
+    // Same rule as the cast itself: the claim pays a delta, never a snapshot of
+    // the balance this command happened to read.
+    const balanceAtLoad = user.balance ?? 0;
     const oldLevel      = user.fishing.level;
     user.balance       += template.reward.coins;
     questEntry.progress = -1;
@@ -1987,7 +2022,11 @@ async function claimQuest(interaction, user, currency) {
     user.markModified('fishing');
 
     try {
-        await user.save();
+        await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'fish',
+            jobName: 'questClaimCoins',
+            guildId: interaction.guild.id,
+        });
     } catch (err) {
         console.error('[fishquests claim] save error:', err);
         return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
@@ -2668,14 +2707,24 @@ async function handleRepair(interaction, user, currency) {
     }
 
     const result = applyRepair(rod, requestedAmount);
-    user.balance -= result.cost;
+    const charged = await chargeBalance(interaction, result.cost);
+    if (!charged) {
+        return interaction.reply({
+            content: `Repairing **${result.restoredAmount}** durability costs **${currency}${result.cost.toLocaleString()}** — you no longer have enough. Check \`/balance\` and try again.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+    // Take the authoritative balance and keep the save off that path.
+    user.balance = charged.balance;
+    user.unmarkModified('balance');
     user.markModified('fishing');
 
     try {
         await user.save();
     } catch (err) {
         console.error('[fishshop repair shop] save error:', err);
-        return interaction.reply({ content: 'Something went wrong. Please try again.', flags: MessageFlags.Ephemeral });
+        await refundBalance(interaction, result.cost);
+        return interaction.reply({ content: 'The repair failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
     }
 
     const embed = new EmbedBuilder()

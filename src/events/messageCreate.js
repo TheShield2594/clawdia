@@ -14,6 +14,7 @@ const { maybeTriggerChatEvent } = require('../services/chatEventService');
 const { applyXpGain, announceLevelUp } = require('../utils/applyXpGain');
 const BASE_BAD_WORDS = require('../data/profanityList');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 
 // Pre-compile base word regexes once at module load — avoids per-message regex construction
 const BASE_BAD_WORD_REGEXES = BASE_BAD_WORDS.map(word => {
@@ -137,6 +138,12 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
         let user = existingUser ?? await User.findOne({ userId: message.author.id, guildId: message.guild.id });
         if (!user) return;
 
+        // Every coin this path awards — streak milestones, quest completions — is
+        // folded into one `$inc` at the save below. `save()` writes `balance` as an
+        // absolute `$set`, and a message handler runs on every message: a casino
+        // debit landing between this read and that save would simply be erased.
+        const balanceAtLoad = user.balance ?? 0;
+
         const now = new Date();
         const todayUTC = now.toISOString().slice(0, 10);
 
@@ -198,7 +205,11 @@ async function handleStreakAndQuests(message, guildSettings, existingUser = null
 
         const newlyEarned = await checkAndAward(user, guildSettings).catch(() => []);
 
-        await user.save();
+        await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'messageCreate',
+            jobName: 'streakAndQuestRewards',
+            guildId: message.guild.id,
+        });
 
         // Check wealth milestones after any coins may have been awarded (streak rewards, etc.)
         checkAndBroadcastWealthMilestone(message.client, guildSettings, user, message.channel).catch(() => {});

@@ -10,6 +10,7 @@ const { isVersionError } = require('../../utils/versionRetry');
 const { rewardReveal } = require('../../utils/rewardReveal');
 const { logTransaction } = require('../../utils/logTransaction');
 const { awardSeasonXp } = require('../../services/questService');
+const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 
 // Reset a user's season sub-document to the fresh shape when their stored
 // seasonId is stale (a new season started). Prevents carrying old xp / claimed
@@ -190,14 +191,27 @@ async function executeClaim(interaction) {
     const reward = rewardFor(tier, wantsPremium);
     if (!reward) return interaction.reply({ content: 'Invalid tier.', flags: MessageFlags.Ephemeral });
 
+    // The reward coins ride out as an `$inc`, not as part of the save: `save()`
+    // writes `balance` as an absolute `$set` computed from the read at the top of
+    // this command, which would erase anything the player earned or spent since.
+    const balanceAtLoad = user.balance ?? 0;
+
     if (reward.coins > 0) user.balance += reward.coins;
     if (reward.itemId) user.inventory.push({ itemId: reward.itemId, quantity: 1 });
     (wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers).push(tier);
     user.markModified('season');
     if (reward.itemId) user.markModified('inventory');
 
+    let coinsOwed = 0;
     try {
-        await user.save();
+        // A credit the retries could not land is recorded as owed rather than
+        // paid, so the claim must not be reported as coins in the wallet.
+        const paid = await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'season',
+            jobName: 'tierRewardCoins',
+            guildId: interaction.guild.id,
+        });
+        if (!paid.credited) coinsOwed = reward.coins ?? 0;
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
@@ -223,7 +237,11 @@ async function executeClaim(interaction) {
         .setDescription(
             `> *${lore}*\n\n` +
             `You received: **${reward.label}**` +
-            (reward.coins > 0 ? `\n+**${reward.coins.toLocaleString()} ${currency}** added to your wallet` : '')
+            (reward.coins > 0
+                ? (coinsOwed > 0
+                    ? `\n⚠️ **${reward.coins.toLocaleString()} ${currency}** could not be credited just now and has been recorded as owed — your wallet does not include it yet.`
+                    : `\n+**${reward.coins.toLocaleString()} ${currency}** added to your wallet`)
+                : '')
         );
 
     if (nextTier && nextReward) {
@@ -386,6 +404,8 @@ async function executeClaimMission(interaction) {
     if (!isDone) return interaction.reply({ content: 'Mission not completed yet.', flags: MessageFlags.Ephemeral });
     if (mission.claimed) return interaction.reply({ content: 'Already claimed!', flags: MessageFlags.Ephemeral });
 
+    const balanceAtLoad = user.balance ?? 0;
+
     user.seasonMissions[missionIndex].claimed = true;
     normalizeSeason(user, season.seasonId);
     // Route through the shared grant so the weekly XP cap and rollover apply.
@@ -395,15 +415,26 @@ async function executeClaimMission(interaction) {
     user.markModified('seasonMissions');
     user.markModified('season');
 
+    let missionCoinsOwed = 0;
     try {
-        await user.save();
+        // Same reasoning as the tier claim: the coin reward is a delta, not a
+        // snapshot of the balance this command happened to read — and a delta
+        // that would not land is recorded as owed, not paid.
+        const paid = await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'season',
+            jobName: 'missionRewardCoins',
+            guildId: interaction.guild.id,
+        });
+        if (!paid.credited) missionCoinsOwed = mission.coinReward ?? 0;
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
 
     return interaction.reply({
-        content: `✅ Mission claimed! +**${grantedXp} Season XP** and +**${mission.coinReward.toLocaleString()} ${currency}**`,
+        content: missionCoinsOwed > 0
+            ? `✅ Mission claimed! +**${grantedXp} Season XP**. ⚠️ The **${missionCoinsOwed.toLocaleString()} ${currency}** could not be credited just now and has been recorded as owed — your wallet does not include it yet.`
+            : `✅ Mission claimed! +**${grantedXp} Season XP** and +**${mission.coinReward.toLocaleString()} ${currency}**`,
         flags: MessageFlags.Ephemeral
     });
 }
@@ -452,6 +483,7 @@ async function executeClaimAll(interaction) {
         });
     }
 
+    const balanceAtLoad = user.balance ?? 0;
     let totalCoins = 0;
     const itemsClaimed = [];
 
@@ -483,8 +515,17 @@ async function executeClaimAll(interaction) {
 
     user.markModified('season');
 
+    let batchCoinsOwed = 0;
     try {
-        await user.save();
+        // The whole batch of tier coins goes out as one `$inc`. If that `$inc`
+        // will not land it is recorded as owed, and a batch this size is exactly
+        // the one a player would notice missing — so it is reported, not assumed.
+        const paid = await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'season',
+            jobName: 'claimAllRewardCoins',
+            guildId: interaction.guild.id,
+        });
+        if (!paid.credited) batchCoinsOwed = totalCoins;
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
@@ -497,7 +538,11 @@ async function executeClaimAll(interaction) {
         : `Tiers ${tierNums[0]}–${tierNums[tierNums.length - 1]}`;
 
     const lines = [`Claimed **${claimable.length}** reward${claimable.length !== 1 ? 's' : ''}:`];
-    if (totalCoins > 0) lines.push(`💰 +**${totalCoins.toLocaleString()} ${currency}**`);
+    if (totalCoins > 0) {
+        lines.push(batchCoinsOwed > 0
+            ? `⚠️ **${totalCoins.toLocaleString()} ${currency}** could not be credited just now and has been recorded as owed — your wallet does not include it yet.`
+            : `💰 +**${totalCoins.toLocaleString()} ${currency}**`);
+    }
     if (itemsClaimed.length > 0) lines.push(`🎁 Items: ${itemsClaimed.join(', ')}`);
 
     const embed = new EmbedBuilder()

@@ -60,4 +60,38 @@ async function debitUpTo(Model, filter, amount, extraSet = {}) {
     return { taken, balance: prior - taken, matched: true };
 }
 
-module.exports = { clampedDebitExpr, incExpr, debitUpTo };
+/**
+ * "Take exactly N coins, but only if they are still there" — the all-or-nothing
+ * charge behind every purchase, as opposed to the clamped debit above.
+ *
+ * The balance a command reads to decide whether the player can afford something
+ * goes stale the moment anything else pays or charges them, and `save()` would
+ * write that stale value back as an absolute `$set`, erasing whatever landed in
+ * between. Folding the check into the update's filter closes that window: if the
+ * money moved, the filter matches nothing and the purchase simply does not
+ * happen.
+ *
+ * Returns the updated document (balance only), or null when the player can no
+ * longer afford it. The caller is expected to take `balance` from the result and
+ * clear the path with `unmarkModified('balance')` before saving anything else.
+ */
+function chargeExact(Model, filter, cost) {
+    return Model.findOneAndUpdate(
+        { ...filter, balance: { $gte: cost } },
+        { $inc: { balance: -cost } },
+        { new: true, projection: { balance: 1 } },
+    );
+}
+
+/**
+ * Undoes a `chargeExact` when the purchase it paid for could not be persisted.
+ *
+ * `tag` names the caller in the log line, since a refund that itself fails is
+ * the point at which a human has to go looking.
+ */
+function refundCharge(Model, filter, cost, tag = 'balance') {
+    return Model.updateOne(filter, { $inc: { balance: cost } })
+        .catch(err => console.error(`[${tag}] refund error:`, err));
+}
+
+module.exports = { clampedDebitExpr, incExpr, debitUpTo, chargeExact, refundCharge };

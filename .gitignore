@@ -6,3 +6,4 @@ logs/
 dist/
 .DS_Store
 config/mcp-servers.json
+coverage/

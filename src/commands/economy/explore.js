@@ -770,6 +770,7 @@ async function handleTravel(interaction) {
     }
 
     let unlockLine = '';
+    let unlockCharged = 0;
     if (!region.seasonalEventId && !e.unlockedRegions.includes(region.id)) {
         if (e.level < region.unlockLevel) {
             return interaction.reply({
@@ -783,15 +784,51 @@ async function handleTravel(interaction) {
                 flags: MessageFlags.Ephemeral,
             });
         }
-        user.balance -= region.unlockCost;
+        // The toll is a conditional update, not `balance -= cost` followed by a
+        // save: the balance read above goes stale the moment anything else pays
+        // this player, and saving it back would erase that payout.
+        const charged = await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: region.unlockCost } },
+            { $inc: { balance: -region.unlockCost } },
+            { new: true, projection: { balance: 1 } },
+        );
+        if (!charged) {
+            return interaction.reply({
+                content: `Opening the route to **${region.emoji} ${region.name}** costs **${currency}${region.unlockCost.toLocaleString()}** — you no longer have enough. Check \`/balance\` and try again.`,
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+        // Take the authoritative balance and keep the save off that path.
+        user.balance = charged.balance;
+        user.unmarkModified('balance');
+        unlockCharged = region.unlockCost;
         e.unlockedRegions.push(region.id);
         unlockLine = `\n\n🔓 Route opened for **${currency}${region.unlockCost.toLocaleString()}**. Money well buried.`;
-        logTransaction({ userId: user.userId, guildId: user.guildId, type: 'explore_unlock', amount: -region.unlockCost, balance: user.balance, note: region.name });
     }
 
     e.activeRegion = region.id;
     user.markModified('exploration');
-    await user.save();
+    try {
+        await user.save();
+    } catch (err) {
+        console.error('[explore travel] save error:', err);
+        if (unlockCharged) {
+            // The toll is already gone; hand it back rather than charging for a
+            // route that was never opened.
+            await User.updateOne(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: unlockCharged } },
+            ).catch(refundErr => console.error('[explore travel] refund after failed save:', refundErr));
+        }
+        return interaction.reply({ content: 'Something went wrong opening the route — any coins taken were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+    }
+
+    // Logged after the save, not before: the failure path above hands the toll
+    // back, and a ledger entry written first would leave a debit the balance
+    // never made. `user.balance` is already the authoritative post-charge value.
+    if (unlockCharged) {
+        logTransaction({ userId: user.userId, guildId: user.guildId, type: 'explore_unlock', amount: -unlockCharged, balance: user.balance, note: region.name });
+    }
 
     return interaction.reply({
         embeds: [new EmbedBuilder()

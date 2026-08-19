@@ -13,6 +13,7 @@ const { buildCooldownEmbed, getNextStreakMilestone } = require('../../utils/cool
 const { getTimeBand } = require('../../utils/timeBand');
 const { claimStarterKit } = require('../../utils/starterKit');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -353,8 +354,12 @@ module.exports = {
                 note: `streak ${user.streak?.current ?? 0}, mult ${combined.toFixed(2)}${capActive ? ' (capped)' : ''}`
             });
 
-            // Quest progress for coins earned from today's claim
+            // Quest progress for coins earned from today's claim. Any quest coins
+            // go out as their own `$inc`: `save()` would write `balance` as an
+            // absolute `$set` and erase whatever else the player spent or won
+            // between the claim above and this write.
             try {
+                const balanceAfterClaim = updated.balance ?? 0;
                 await ensureQuests(updated, guildSettings);
                 let questsDone = [], questsNear = [];
                 if (actualAmount > 0) {
@@ -362,7 +367,11 @@ module.exports = {
                     questsDone = earn.completed;
                     questsNear = earn.nearComplete;
                 }
-                await updated.save();
+                await saveWithBalanceDelta(User, updated, balanceAfterClaim, {
+                    service: 'daily',
+                    jobName: 'dailyQuestReward',
+                    guildId: interaction.guild.id,
+                });
                 if (questsDone.length || questsNear.length) {
                     notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, updated).catch(() => null);
                     notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
@@ -563,10 +572,15 @@ module.exports = {
                     });
 
                     if (bonusUpdated && bonusAmount > 0) {
+                        const balanceAfterBonus = bonusUpdated.balance ?? 0;
                         await ensureQuests(bonusUpdated, guildSettings);
                         const bonusEarn = await onEconomyEarn(bonusUpdated, guildSettings, bonusAmount);
                         try {
-                            await bonusUpdated.save();
+                            await saveWithBalanceDelta(User, bonusUpdated, balanceAfterBonus, {
+                                service: 'daily',
+                                jobName: 'challengeBonusQuestReward',
+                                guildId: interaction.guild.id,
+                            });
                             if (bonusEarn.completed.length || bonusEarn.nearComplete.length) {
                                 notifyQuestComplete(guildSettings, interaction.member, bonusEarn.completed, interaction.channel, bonusUpdated).catch(() => null);
                                 notifyQuestNearComplete(guildSettings, interaction.member, bonusEarn.nearComplete, interaction.channel).catch(() => null);

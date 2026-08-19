@@ -48,6 +48,7 @@ const {
 const { generatePetSprite } = require('../../utils/cardGenerator');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
 const { logTransaction } = require('../../utils/logTransaction');
+const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { MATERIAL_RARITY } = require('../../data/materialRarity');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { onPetCare, notifyQuestComplete } = require('../../services/questService');
@@ -426,7 +427,24 @@ async function executeAdopt(interaction) {
         });
     }
 
-    user.balance -= def.cost;
+    // The adoption fee is a conditional update, not `balance -= cost` followed by
+    // a save: the balance read above goes stale the moment anything else pays or
+    // charges this player, and saving it back would erase that write.
+    const charged = await User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: def.cost } },
+        { $inc: { balance: -def.cost } },
+        { new: true, projection: { balance: 1 } },
+    );
+    if (!charged) {
+        return interaction.reply({
+            content: `Adopting this pet costs **${def.cost.toLocaleString()}** ${currency} — you no longer have enough. Check \`/balance\` and try again.`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+    // Take the authoritative balance and keep the save off that path.
+    user.balance = charged.balance;
+    user.unmarkModified('balance');
+
     const newPet = createPet(petId, { name: petName });
     user.pets.push(newPet);
     user.markModified('pets');
@@ -437,7 +455,13 @@ async function executeAdopt(interaction) {
     try {
         await user.save();
     } catch (err) {
-        if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — please try again.', flags: MessageFlags.Ephemeral });
+        // The fee is already gone; hand it back rather than charging for a pet
+        // that was never adopted.
+        await User.updateOne(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            { $inc: { balance: def.cost } },
+        ).catch(refundErr => console.error('[pet adopt] refund after failed save:', refundErr));
+        if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
         throw err;
     }
     announcePetAchievements(interaction, user, guildSettings, earned);
@@ -540,10 +564,19 @@ async function executeStatus(interaction) {
             freshUser.pets[idx].lastPlay           = new Date();
             freshUser.pets[idx].weeklyInteractions = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
+            // A completed pet-care quest pays coins. `save()` writes `balance` as an
+            // absolute `$set`, so the credit is folded out of the save and applied as
+            // its own `$inc` — otherwise this write erases anything the player spent
+            // between loading the document and here.
+            const balanceBeforeCare = freshUser.balance ?? 0;
             await creditPetCare(interaction, freshUser, guildSettings);
 
             try {
-                await freshUser.save();
+                await saveWithBalanceDelta(User, freshUser, balanceBeforeCare, {
+                    service: 'pet',
+                    jobName: 'playQuestReward',
+                    guildId: interaction.guild.id,
+                });
             } catch (err) {
                 if (isVersionError(err)) {
                     return btn.reply({ content: '⚠️ Action conflict — please try again.', flags: MessageFlags.Ephemeral });
@@ -581,10 +614,19 @@ async function executeStatus(interaction) {
             freshUser.pets[idx].restUntil           = new Date(Date.now() + REST_DURATION_MS);
             freshUser.pets[idx].weeklyInteractions  = (freshUser.pets[idx].weeklyInteractions || 0) + 1;
             freshUser.markModified('pets');
+            // A completed pet-care quest pays coins. `save()` writes `balance` as an
+            // absolute `$set`, so the credit is folded out of the save and applied as
+            // its own `$inc` — otherwise this write erases anything the player spent
+            // between loading the document and here.
+            const balanceBeforeCare = freshUser.balance ?? 0;
             await creditPetCare(interaction, freshUser, guildSettings);
 
             try {
-                await freshUser.save();
+                await saveWithBalanceDelta(User, freshUser, balanceBeforeCare, {
+                    service: 'pet',
+                    jobName: 'restQuestReward',
+                    guildId: interaction.guild.id,
+                });
             } catch (err) {
                 if (isVersionError(err)) {
                     return btn.reply({ content: '⚠️ Action conflict — please try again.', flags: MessageFlags.Ephemeral });
@@ -709,11 +751,20 @@ async function executeFeed(interaction) {
     const feedXp = applyPetXp(user.pets[petIndex], result.isFavorite ? XP_FEED_FAVORITE : XP_FEED_OTHER);
     user.markModified('pets');
 
+    // A completed pet-care quest pays coins. `save()` writes `balance` as an
+    // absolute `$set`, so the credit is folded out of the save and applied as its
+    // own `$inc` — otherwise this write erases anything the player spent between
+    // loading the document and here.
+    const balanceBeforeCare = user.balance ?? 0;
     await creditPetCare(interaction, user, guildSettings);
     const earned = await collectPetAchievements(user, guildSettings);
 
     try {
-        await user.save();
+        await saveWithBalanceDelta(User, user, balanceBeforeCare, {
+            service: 'pet',
+            jobName: 'feedQuestReward',
+            guildId: interaction.guild.id,
+        });
     } catch (err) {
         if (isVersionError(err)) return interaction.editReply('Edit conflict — please try again.');
         throw err;
@@ -1005,10 +1056,19 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
     if (won) myPet.battleWins   = (myPet.battleWins ?? 0) + 1;
     else     myPet.battleLosses = (myPet.battleLosses ?? 0) + 1;
     user.markModified('pets');
+    // A completed pet-care quest pays coins. `save()` writes `balance` as an
+    // absolute `$set`, so the credit is folded out of the save and applied as its
+    // own `$inc` — otherwise this write erases anything the player spent between
+    // loading the document and here.
+    const balanceBeforeCare = user.balance ?? 0;
     await creditPetCare(interaction, user, guildSettings);
     const earned = await collectPetAchievements(user, guildSettings);
     try {
-        await user.save();
+        await saveWithBalanceDelta(User, user, balanceBeforeCare, {
+            service: 'pet',
+            jobName: 'battleQuestReward',
+            guildId: interaction.guild.id,
+        });
     } catch (err) {
         if (isVersionError(err)) return interaction.editReply({ content: 'Edit conflict — please try again.', embeds: [] });
         throw err;
@@ -1141,17 +1201,42 @@ async function pvpBattle(interaction, ctx) {
                 (houseCut > 0 ? `  *(house kept ${Math.round(houseCut * 100)}%)*` : '');
         }
 
+        // Both documents are post-escrow, and the winner's pot was just paid with
+        // an `$inc`. Saving either one with a modified `balance` would write that
+        // stale snapshot back over the payout, so quest coins go out as their own
+        // `$inc` too and `balance` stays out of both saves.
+        const chBalanceBeforeCare = chUser.balance ?? 0;
+        const opBalanceBeforeCare = opUser.balance ?? 0;
         await creditPetCare(interaction, chUser, guildSettings);
         await creditPetCare(interaction, opUser, guildSettings);
         const [earnedA, earnedB] = await Promise.all([
             collectPetAchievements(chUser, guildSettings),
             collectPetAchievements(opUser, guildSettings),
         ]);
-        try {
-            await Promise.all([chUser.save(), opUser.save()]);
-        } catch (err) {
-            console.error('[pet battle] save error:', err);
-        }
+        // allSettled, not all: `all` rejects on the first failure and leaves the
+        // second rejection unobserved, which Node reports as an unhandled
+        // rejection. Both saves have to be waited on and both reported.
+        const [chSaved, opSaved] = await Promise.allSettled([
+            saveWithBalanceDelta(User, chUser, chBalanceBeforeCare, {
+                service: 'pet', jobName: 'battleQuestReward', guildId,
+            }),
+            saveWithBalanceDelta(User, opUser, opBalanceBeforeCare, {
+                service: 'pet', jobName: 'battleQuestReward', guildId,
+            }),
+        ]);
+        if (chSaved.status === 'rejected') console.error('[pet battle] challenger save error:', chSaved.reason);
+        if (opSaved.status === 'rejected') console.error('[pet battle] opponent save error:', opSaved.reason);
+
+        // The wager is already settled — the stakes were escrowed and the pot
+        // paid with `$inc`s above — so the result still stands and is still
+        // reported. What a failed save costs is the pet XP, the win/loss record
+        // and the battle cooldown, and that has to be said rather than shown as
+        // a battle that was fully recorded.
+        const saveFailed = chSaved.status === 'rejected' || opSaved.status === 'rejected';
+        const saveNote = saveFailed
+            ? '\n⚠️ *The battle result could not be saved — pet XP, records and cooldowns were not updated.*'
+            : '';
+
         announcePetAchievements(interaction, chUser, guildSettings, earnedA);
         announcePetAchievements(interaction, opUser, guildSettings, earnedB);
 
@@ -1165,7 +1250,7 @@ async function pvpBattle(interaction, ctx) {
                 petA: aSnap, petB: bSnap, result, currency,
                 payoutLine,
                 xpLineA: petXpLine(da2.titledName, aXp),
-                xpLineB: petXpLine(db2.titledName, bXp),
+                xpLineB: petXpLine(db2.titledName, bXp) + saveNote,
             })],
             components: [],
         }).catch(() => {});
