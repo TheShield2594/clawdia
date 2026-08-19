@@ -25,7 +25,8 @@ const { getCurrentWeather } = require('./weatherService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
 const { ensureHuntData, getMaxStamina: getHuntMaxStamina } = require('./huntService');
-const { getFishSynergyStaminaBonus } = require('./synergyService');
+const { getFishSynergyStaminaBonus, getFishDeepProspectorStaminaBonus } = require('./synergyService');
+const { MAX_STAMINA_UPGRADES } = require('../data/crossSystemData');
 const { getBonusMultipliers } = require('../utils/prestige');
 const { getGatheringYieldEffect, consumeEffect } = require('./effectsService');
 
@@ -87,8 +88,12 @@ function ensureFishingData(user) {
 function getMaxStamina(user) {
     const prestige = user.fishing?.prestige ?? 0;
     const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
-    const synergyBonus = getFishSynergyStaminaBonus(user);
-    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus;
+    // Outdoorsman and Deep Prospector each promise +1 max fishing stamina;
+    // only the first was ever read, so Deep Prospector granted nothing.
+    const synergyBonus = getFishSynergyStaminaBonus(user) + getFishDeepProspectorStaminaBonus(user);
+    // Permanent Stamina +1 from the shop, applied through /use.
+    const purchased = Math.min(Math.max(0, user?.staminaUpgrades ?? 0), MAX_STAMINA_UPGRADES);
+    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus + purchased;
 }
 
 function applyStaminaRegen(user) {

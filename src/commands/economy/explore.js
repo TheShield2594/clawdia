@@ -8,7 +8,7 @@ const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceD
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const {
-    LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST, CORE_REGION_IDS,
+    LIMITS, EXPLORER_LEVELS, TIER_COLORS, REGIONS, REGION_LIST,
     RELIC_LIST, RELIC_RARITY_ORDER, TOTAL_CORE_RELICS,
     FOOTER_LINES, INJURY_LINES,
 } = require('../../data/exploreData');
@@ -30,6 +30,7 @@ const {
     getSecretOdds,
     executeExplore,
     resolveEncounter,
+    getEncounterStakes,
     addJournalEntry,
     regionCompletion,
     renderMap,
@@ -37,7 +38,8 @@ const {
     formatMs,
 } = require('../../services/exploreService');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
-const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { ensureQuests, onExplore, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
 const {
     getEventXpMultiplier, getEventCoinMultiplier,
@@ -47,7 +49,9 @@ const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { logTransaction } = require('../../utils/logTransaction');
 const { logBigWin } = require('../../utils/bigWinLogger');
+const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { progressBar } = require('../../utils/progressBar');
+const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
 
 const REGION_CHOICES = REGION_LIST.map(r => ({
     name: `${r.emoji} ${r.name}${r.seasonalEventId ? ' (seasonal)' : ''}`,
@@ -322,8 +326,17 @@ async function handleGo(interaction) {
     try {
 
         // ── Run the expedition ────────────────────────────────────────────────────
-        const coinMultiplier = getEventCoinMultiplier(guildSettings);
+        // Featured region: folded into the coin multiplier rather than added to
+        // the payout afterwards, so the daily cap still governs the boosted haul
+        // and the encounter prompt quotes the numbers the player will really see.
+        // It rides the coin multiplier deliberately — getPenaltyMultiplier ignores
+        // that, so a featured region pays more without costing more to fail in.
+        const featuredRegion = getDailyFeatured(interaction.guild.id).region;
+        const isFeatured = region.id === featuredRegion.id;
+        const coinMultiplier = getEventCoinMultiplier(guildSettings)
+            * (isFeatured ? 1 + FEATURED_PAYOUT_BONUS : 1);
         const result = executeExplore(user, region, guildSettings, { coinMultiplier });
+        result.featured = isFeatured;
         const firstVisit = result.firstVisit;
 
         // Commit stamina spend + cooldown timestamp now, before the (up to 20s)
@@ -357,11 +370,14 @@ async function handleGo(interaction) {
         const reroutedLine = rerouted
             ? `\n\n🧭 **${rerouted.emoji} ${rerouted.name}** is closed to you right now, so your compass reset to **${region.emoji} ${region.name}**. It'll wait.`
             : '';
+        const featuredLine = isFeatured
+            ? `\n\n🌟 **Featured region today** — everything here pays **+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%** until the rotation turns over.`
+            : '';
         await interaction.reply({
             embeds: [new EmbedBuilder()
                 .setColor(region.color)
                 .setTitle(`${region.emoji} Setting out — ${region.name}`)
-                .setDescription(`*${result.intro}*${reroutedLine}`)
+                .setDescription(`*${result.intro}*${reroutedLine}${featuredLine}`)
                 .setFooter({ text: region.tagline })],
         });
         await delay(2000);
@@ -369,16 +385,41 @@ async function handleGo(interaction) {
         // ── Encounter choice ──────────────────────────────────────────────────────
         if (result.pendingChoice) {
             const enc = result.encounter;
+            // Both options are priced out in the coins THIS player would see —
+            // relic case, survey bonus, region depth and any event multiplier
+            // already folded in. A choice between two pieces of flavour text is
+            // not a decision, it's a coin toss with extra reading.
+            const stakes = getEncounterStakes(user, region, guildSettings, result);
+            const odds = Math.round(stakes.winChance * 100);
+            const range = band => `${currency}${band.min.toLocaleString()}–${currency}${band.max.toLocaleString()}`;
             const encId = `explore_${interaction.id}`;
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`${encId}_approach`).setLabel('🤝 Approach').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`${encId}_approach`).setLabel(`🤝 Approach (${odds}%)`).setStyle(ButtonStyle.Primary),
                 new ButtonBuilder().setCustomId(`${encId}_observe`).setLabel('🌿 Keep Your Distance').setStyle(ButtonStyle.Secondary),
             );
             await interaction.editReply({
                 embeds: [new EmbedBuilder()
                     .setColor(region.color)
                     .setTitle(`${enc.emoji} ${enc.name}`)
-                    .setDescription(`*${enc.intro}*\n\nApproach it, or watch from a safe distance? Bold pays better. Careful always pays.`)
+                    .setDescription(`*${enc.intro}*\n\n` + (stakes.capped
+                        ? 'Approach it, or watch from a safe distance? The daily cap has already taken everything this can pay, so bold buys you nothing but the risk.'
+                        : 'Approach it, or watch from a safe distance? Bold pays better. Careful always pays.'))
+                    .addFields(
+                        {
+                            name: `🤝 Approach — ${odds}%`,
+                            value: stakes.capped
+                                ? `Win: **nothing** — the daily cap has your coins.\nLose: **−${range(stakes.loss)}**, and it may leave a mark.`
+                                : `Win: **+${range(stakes.win)}**\nLose: **−${range(stakes.loss)}**, and it may leave a mark.`,
+                            inline: true,
+                        },
+                        {
+                            name: '🌿 Keep Your Distance',
+                            value: stakes.capped
+                                ? '**Nothing**, guaranteed — but nothing risked either.'
+                                : `**+${range(stakes.safe)}**, guaranteed.\nNothing risked, nothing broken.`,
+                            inline: true,
+                        },
+                    )
                     .setFooter({ text: '20 seconds to decide. Hesitation counts as keeping your distance, which is honest of it.' })],
                 components: [row],
             });
@@ -426,11 +467,17 @@ async function handleGo(interaction) {
         });
 
         await ensureQuests(user, guildSettings);
-        let questsDone = [], questsNear = [];
+        // Season pass daily missions count expeditions, the same way they count
+        // hunts and casts. Recorded in memory — the save below carries it.
+        recordMissionProgress(user, 'explore', 1, guildSettings);
+        // Expedition quests count the trip; the coin quests count the haul. A
+        // quiet walk still advances the first and rightly not the second.
+        const trip = await onExplore(user, guildSettings);
+        let questsDone = [...trip.completed], questsNear = [...trip.nearComplete];
         if (result.payout > 0) {
             const earn = await onEconomyEarn(user, guildSettings, result.payout);
-            questsDone = earn.completed;
-            questsNear = earn.nearComplete;
+            questsDone.push(...earn.completed);
+            questsNear.push(...earn.nearComplete);
         }
 
         const encounterDelta = detachBalanceDelta(user, balanceBaseline);
@@ -475,13 +522,28 @@ async function handleGo(interaction) {
             logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.payout, source: 'explore', details: result.secret?.name ?? `${region.name} legendary treasure` });
         }
 
+        // Hourly micro-competition: richest expedition of the hour, same shape as
+        // the biggest dig and the largest haul. Only a paying run can compete —
+        // a trap or a quiet walk has nothing to enter.
+        if (result.payout > 0) {
+            await tryUpdateHourlyWinner({
+                guildId:  interaction.guild.id,
+                category: 'explore',
+                userId:   interaction.user.id,
+                username: interaction.user.username,
+                value:    result.payout,
+                details:  `${region.emoji} ${summarizeResult(result, currency)}`,
+            }).catch(() => null);
+        }
+        const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'explore').catch(() => null);
+
         // ── Result embed ──────────────────────────────────────────────────────────
-        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings);
+        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, hourlyLeader);
 
         if (payoutOwed > 0) {
             embed.addFields({
                 name: '⚠️ Payout Not Yet Credited',
-                value: `The **${currency}${payoutOwed.toLocaleString()}** from this expedition could not be paid out just now and has been recorded as owed — the balance shown below does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
+                value: `The **${currency}${payoutOwed.toLocaleString()}** from this expedition could not be paid out just now and has been recorded as owed, so your wallet is short by that much until it lands. It will be applied once the problem clears; tell an admin if it does not.`,
             });
         }
 
@@ -578,9 +640,15 @@ function buildSecretPityField(user, region, guildSettings) {
     };
 }
 
-function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings) {
+function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, hourlyLeader = null) {
     const e = user.exploration;
-    const embed = new EmbedBuilder().setTimestamp();
+    // The "Setting out — <region>" embed is edited away by this one, so without
+    // an author line the message a player scrolls back to never says where any
+    // of this happened. The titles below are landmark and creature names; only
+    // the embed colour hinted at the region, which is not something you can read.
+    const embed = new EmbedBuilder()
+        .setAuthor({ name: `${region.emoji} ${region.name}` })
+        .setTimestamp();
     const lines = [];
 
     switch (result.type) {
@@ -671,17 +739,47 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     }
     if (gains.length) embed.addFields({ name: '🎒 The Haul', value: gains.join('  ·  '), inline: false });
 
-    if (result.cappedByDailyCap) {
+    // Crossing an explorer level is the only thing that opens new regions, so it
+    // gets said out loud — and if the new level actually put one within reach,
+    // it gets named. Seasonal regions are left out: the calendar gates those,
+    // not the level, so promising one here would be a promise about the weather.
+    if (result.explorerLevelUp) {
+        const lift = result.explorerLevelUp;
+        const liftLines = [`Explorer Level **${lift.oldLevel}** → **${lift.newLevel}** — *${lift.newTitle}*`];
+        const opened = REGION_LIST.filter(r =>
+            !r.seasonalEventId
+            && isRegionEnabled(r, guildSettings)
+            && r.unlockLevel > lift.oldLevel
+            && r.unlockLevel <= lift.newLevel);
+        for (const opening of opened) {
+            liftLines.push(
+                `🔓 **${opening.emoji} ${opening.name}** is within reach — `
+                + `\`/explore travel\` opens the route for ${currency}${opening.unlockCost.toLocaleString()}.`
+            );
+        }
+        embed.addFields({ name: '⬆️ Level Up!', value: liftLines.join('\n'), inline: false });
+    }
+
+    if (result.hardCapped) {
         embed.addFields({
             name: '🧾 Daily Cap Reached',
             value: `You've banked ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()} from exploring in the last 24 hours, which is where the coins stop. `
                  + `Expeditions still chart the map and still pay Explorer XP — the wilds just stop paying cash until the window rolls over.`,
             inline: false,
         });
+    } else if (result.softCapped) {
+        embed.addFields({
+            name: '🧾 Past the Soft Cap',
+            value: `You're over ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} for the last 24 hours, so hauls settle at `
+                 + `**${Math.round(LIMITS.DAILY_SOFT_CAP_RATE * 100)}%** from here — down to ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}, `
+                 + `where they stop entirely. Charting and Explorer XP are untouched.`,
+            inline: false,
+        });
     }
 
     // Standing bonuses, shown once they're actually doing something
     const boosts = [];
+    if (result.featured) boosts.push(`🌟 Featured region +${Math.round(FEATURED_PAYOUT_BONUS * 100)}%`);
     if (result.surveyed) boosts.push(`🏅 Fully surveyed +${Math.round(LIMITS.SURVEY_BONUS * 100)}%`);
     const relicBonus = getRelicBonus(user);
     if (relicBonus > 0) boosts.push(`🏺 Relic case +${Math.round(relicBonus * 100)}%`);
@@ -696,8 +794,32 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     }
 
     const staminaNote = result.staminaSpared ? ' *(a blank walk costs no stamina)*' : '';
-    embed.setFooter({ text: `⚡ ${e.stamina}/${LIMITS.MAX_STAMINA} stamina${staminaNote} · ${randomFrom(FOOTER_LINES)}` });
+    const leaderNote = hourlyLeader
+        ? `🏆 Richest this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? `${currency}${hourlyLeader.value.toLocaleString()}`}`
+        : randomFrom(FOOTER_LINES);
+    embed.setFooter({ text: `⚡ ${e.stamina}/${LIMITS.MAX_STAMINA} stamina${staminaNote} · ${nextExpeditionNote(user)} · ${leaderNote}` });
     return embed;
+}
+
+/**
+ * When they can set out again — every other detail of the run is on the embed
+ * except the one thing that decides what they do next. Whichever gate is further
+ * out wins: an injury outlasts the cooldown by minutes, and quoting the cooldown
+ * while a trap has them sitting down would be a lie with a countdown on it.
+ */
+function nextExpeditionNote(user) {
+    const e = user.exploration;
+    const now = Date.now();
+    const cooldownLeft = e.lastExplore ? (e.lastExplore.getTime() + LIMITS.EXPLORE_COOLDOWN_MS) - now : 0;
+    const injuryLeft   = e.injuryUntil ? e.injuryUntil.getTime() - now : 0;
+
+    if (injuryLeft > cooldownLeft && injuryLeft > 0) return `🤕 walking again in ${formatMs(injuryLeft)}`;
+    if (e.stamina <= 0) {
+        const staminaLeft = msUntilNextStamina(user);
+        if (staminaLeft > cooldownLeft) return `😮‍💨 stamina back in ${formatMs(staminaLeft)}`;
+    }
+    if (cooldownLeft > 0) return `🥾 ready in ${formatMs(cooldownLeft)}`;
+    return '🥾 ready now';
 }
 
 // ─── MAP ──────────────────────────────────────────────────────────────────────
@@ -812,15 +934,30 @@ async function handleTravel(interaction) {
         await user.save();
     } catch (err) {
         console.error('[explore travel] save error:', err);
+        let refunded = false;
         if (unlockCharged) {
             // The toll is already gone; hand it back rather than charging for a
             // route that was never opened.
-            await User.updateOne(
+            // A resolved promise is not proof the coins went back — an update
+            // that matched nothing resolves just as happily. Only a matched
+            // document means the toll actually returned.
+            refunded = await User.updateOne(
                 { userId: interaction.user.id, guildId: interaction.guild.id },
                 { $inc: { balance: unlockCharged } },
-            ).catch(refundErr => console.error('[explore travel] refund after failed save:', refundErr));
+            ).then(res => (res?.matchedCount ?? 0) > 0).catch(refundErr => {
+                console.error('[explore travel] refund after failed save:', refundErr);
+                return false;
+            });
         }
-        return interaction.reply({ content: 'Something went wrong opening the route — any coins taken were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+        return interaction.reply({
+            // Only promise the refund that actually landed. Saying "refunded"
+            // when the refund itself threw sends the player away satisfied while
+            // their coins are still gone.
+            content: unlockCharged && !refunded
+                ? `Something went wrong opening the route, and the **${currency}${unlockCharged.toLocaleString()}** taken could not be returned automatically. Tell an admin — it is recoverable.`
+                : 'Something went wrong opening the route — any coins taken were refunded. Please try again.',
+            flags: MessageFlags.Ephemeral,
+        });
     }
 
     // Logged after the save, not before: the failure path above hands the toll
@@ -846,6 +983,7 @@ async function handleRegions(interaction) {
     if (!ctx) return;
     const { guildSettings, user, currency } = ctx;
     const e = user.exploration;
+    const todaysFeature = getDailyFeatured(interaction.guild.id).region;
 
     const sections = REGION_LIST
         .filter(r => isRegionEnabled(r, guildSettings))
@@ -853,6 +991,7 @@ async function handleRegions(interaction) {
             const progress = e.regions.find(r => r.regionId === region.id) ?? null;
             const pct = progress ? regionCompletion(region, progress) : 0;
             const active = e.activeRegion === region.id ? ' 🧭 *(active)*' : '';
+            const star   = region.id === todaysFeature.id ? ' 🌟' : '';
 
             let status;
             if (region.seasonalEventId) {
@@ -866,7 +1005,7 @@ async function handleRegions(interaction) {
             }
 
             return [
-                `${region.emoji} **${region.name}**${active} — *${region.tagline}*`,
+                `${region.emoji} **${region.name}**${active}${star} — *${region.tagline}*`,
                 `> ${status}`,
                 `> ${progress ? `${pct}% charted · ${progress.expeditions} expeditions` : 'Uncharted'}`,
             ].join('\n');
@@ -876,7 +1015,7 @@ async function handleRegions(interaction) {
         .setColor('#2e7d32')
         .setTitle('🧭 Known Regions')
         .setDescription(sections.join('\n\n'))
-        .setFooter({ text: `Seasonal regions come and go with /event seasons. The core ${CORE_REGION_IDS.length} are always out there, being patient.` })
+        .setFooter({ text: `🌟 ${todaysFeature.name} pays +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% today · seasonal regions come and go with /event seasons.` })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -966,6 +1105,7 @@ async function handleRelics(interaction) {
     ].filter(Boolean).join('\n');
 
     const distinct = collection.length;
+    const missingField = buildMissingRelicsField(collection, isSelf, target.username);
     const bonus = getRelicBonus(userData);
     const atCap = bonus >= LIMITS.RELIC_BONUS_MAX;
     const caseValue = collection.reduce((sum, r) => sum + r.value * r.quantity, 0);
@@ -982,6 +1122,7 @@ async function handleRelics(interaction) {
                      + `Case value: **${currency}${caseValue.toLocaleString()}**`,
                 inline: false,
             },
+            ...(missingField ? [missingField] : []),
             {
                 name: '📈 What It Earns You',
                 value: `**+${Math.round(bonus * 100)}%** on every coin exploration pays you`
@@ -995,6 +1136,50 @@ async function handleRelics(interaction) {
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
+}
+
+/**
+ * What the case is still missing. Rare treasure deliberately prefers relics the
+ * player doesn't own yet, so "12 of 25" without naming the other 13 hides the
+ * one number the drop table is actually built around. Returns null once there is
+ * nothing left to want.
+ *
+ * Seasonal relics are listed apart from core ones: they only drop while their
+ * event runs, so a checklist that mixed them in would read as thirteen things
+ * you could go get today, and some of them are months away.
+ */
+function buildMissingRelicsField(collection, isSelf, username) {
+    const owned = new Set(collection.map(r => r.itemId));
+    const missing = RELIC_LIST.filter(r => !owned.has(r.itemId));
+    if (!missing.length) {
+        return {
+            name: '🔍 Still Out There',
+            value: isSelf
+                ? '**Nothing.** Every relic the wilds have ever let go of is on that shelf. Including the ones that were statues when you picked them up.'
+                : `**Nothing.** ${username} has the complete set.`,
+            inline: false,
+        };
+    }
+
+    const core     = missing.filter(r => !REGIONS[r.regionId].seasonalEventId);
+    const seasonal = missing.filter(r =>  REGIONS[r.regionId].seasonalEventId);
+
+    // A field value caps at 1024 characters and discord.js throws rather than
+    // truncating, so the list gets trimmed to fit with a count of what it dropped.
+    const BUDGET = 900;
+    const render = list => list.map(r => `${REGIONS[r.regionId].emoji} ${r.itemId}`);
+    const { text, omitted } = fitDescription(render(core), { limit: BUDGET, separator: ' · ' });
+
+    const lines = [];
+    if (core.length) {
+        lines.push(text);
+        if (omitted > 0) lines.push(`*…and ${omitted} more out in the core regions.*`);
+    }
+    if (seasonal.length) {
+        lines.push(`*Plus ${seasonal.length} that only turn up while their season is running.*`);
+    }
+
+    return { name: `🔍 Still Out There — ${missing.length}`, value: lines.join('\n'), inline: false };
 }
 
 // ─── PROFILE ──────────────────────────────────────────────────────────────────
@@ -1088,8 +1273,33 @@ async function handleProfile(interaction) {
         embed.addFields({ name: '📈 Standing Bonuses', value: boosts.join('\n'), inline: false });
     }
 
+    // Where the road goes next. Explorer level gates every region, and nothing
+    // anywhere told a player how close the next one was — the level bar measures
+    // progress toward a number, not toward a place.
+    const nextGate = REGION_LIST
+        .filter(r => !r.seasonalEventId
+            && isRegionEnabled(r, guildSettings)
+            && !e.unlockedRegions.includes(r.id))
+        .sort((a, b) => a.unlockLevel - b.unlockLevel)[0];
+    if (isSelf && nextGate) {
+        const short = nextGate.unlockLevel - e.level;
+        embed.addFields({
+            name: '🔭 Next Horizon',
+            value: short > 0
+                ? `**${nextGate.emoji} ${nextGate.name}** — Explorer Lv ${nextGate.unlockLevel} and ${currency}${nextGate.unlockCost.toLocaleString()}. `
+                  + `You're ${short} level${short === 1 ? '' : 's'} short.`
+                : `**${nextGate.emoji} ${nextGate.name}** — the level is yours. `
+                  + `${currency}${nextGate.unlockCost.toLocaleString()} opens the route via \`/explore travel\`.`,
+            inline: false,
+        });
+    }
+
     if (isSelf) {
-        embed.setFooter({ text: `Daily: ${e.dailyExpeditions} expeditions · ${currency}${e.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
+        embed.setFooter({
+            text: `Daily: ${e.dailyExpeditions} expeditions · ${currency}${e.dailyCoins.toLocaleString()} earned `
+                + `(full rate to ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()}, `
+                + `${Math.round(LIMITS.DAILY_SOFT_CAP_RATE * 100)}% to ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})`,
+        });
     }
 
     return interaction.reply({ embeds: [embed] });

@@ -36,6 +36,17 @@ const FEATURED_MINE_DEPTHS = [
     { id: 'the_abyss',      name: 'The Abyss',      emoji: '🌑' },
 ];
 
+// Core exploration regions only. Seasonal regions come and go with the calendar,
+// and featuring one that is out of season would advertise a bonus nobody can
+// collect — the rotation has to be somewhere every player can actually walk.
+const FEATURED_REGIONS = [
+    { id: 'whispering_forest', name: 'Whispering Forest', emoji: '🌲' },
+    { id: 'crumbling_ruins',   name: 'Crumbling Ruins',   emoji: '🏛️' },
+    { id: 'crystal_caves',     name: 'Crystal Caves',     emoji: '💎' },
+    { id: 'sunken_docks',      name: 'Sunken Docks',      emoji: '⚓' },
+    { id: 'starfall_wastes',   name: 'Starfall Wastes',   emoji: '🌠' },
+];
+
 const FEATURED_PAYOUT_BONUS = 0.25;   // +25% payout when using featured option
 const FEATURED_RARE_BONUS   = 0.10;   // +10% rare chance when using featured option
 
@@ -67,6 +78,7 @@ function getDailyFeatured(guildId) {
         huntZone:  seededPick(FEATURED_HUNT_ZONES,   seed + ':hunt'),
         fishSpot:  seededPick(FEATURED_FISH_SPOTS,   seed + ':fish'),
         mineDepth: seededPick(FEATURED_MINE_DEPTHS,  seed + ':mine'),
+        region:    seededPick(FEATURED_REGIONS,      seed + ':explore'),
         payoutBonus: FEATURED_PAYOUT_BONUS,
         rareBonus:   FEATURED_RARE_BONUS,
     };
@@ -77,6 +89,7 @@ module.exports = {
     FEATURED_HUNT_ZONES,
     FEATURED_FISH_SPOTS,
     FEATURED_MINE_DEPTHS,
+    FEATURED_REGIONS,
     FEATURED_PAYOUT_BONUS,
     FEATURED_RARE_BONUS,
     getDailyFeatured,

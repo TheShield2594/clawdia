@@ -5,6 +5,8 @@ const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getSalaryMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
+const { getMerchantCoinBonus } = require('../../services/synergyService');
+const { attachGrind } = require('../../utils/grindProfile');
 const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
@@ -15,6 +17,7 @@ const { stackBar } = require('../../utils/rewardReveal');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { recordMissionProgress } = require('../../services/seasonMissionService');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -145,6 +148,11 @@ module.exports = {
                 Guild.findOne({ guildId: interaction.guild.id })
             ]);
 
+            // Synergy requirements read hunt/fishing/mining levels, and those
+            // live in GrindProfile — they are simply absent from a bare User
+            // document, so the Merchant bonus below would silently never fire.
+            await attachGrind(user, ['hunt', 'fishing', 'mining']);
+
             const now = Date.now();
             // Streak-based cooldown reduction: 7–29 day streak → 50min, 30+ → 45min
             const streakDays = user.streak?.current ?? 0;
@@ -185,7 +193,10 @@ module.exports = {
             const coinMult    = getCoinMultiplier(user);
             const serverMult  = getServerCoinMultiplier(guildSettings);
             const petWorkBonus = 1 + getTotalBonus(user.pets || [], 'work_earnings') / 100;
-            const rawCombined = streakMult * salaryMult * coinMult * serverMult * petWorkBonus;
+            // Merchant synergy: +5% while carrying anything at all. Defined and
+            // exported since the synergies shipped, and never once read.
+            const merchantMult = 1 + getMerchantCoinBonus(user);
+            const rawCombined = streakMult * salaryMult * coinMult * serverMult * petWorkBonus * merchantMult;
             const combined    = clampMultiplier(rawCombined);
             const capActive   = rawCombined > MAX_COMBINED_MULTIPLIER;
             const earned      = Math.round(basedEarned * combined);
@@ -263,6 +274,9 @@ module.exports = {
                     questsDone = earn.completed;
                     questsNear = earn.nearComplete;
                 }
+                // Season pass daily missions advance on the same shift. Recorded
+                // in memory; the save below carries it.
+                recordMissionProgress(updated, 'work', 1, guildSettings);
                 await saveWithBalanceDelta(User, updated, balanceAfterShift, {
                     service: 'work',
                     jobName: 'shiftQuestReward',
@@ -287,6 +301,7 @@ module.exports = {
             if (coinMult > 1.0)     multEntries.push({ emoji: '💰🚀', label: `${coinMult}x` });
             if (serverMult > 1.0)   multEntries.push({ emoji: '🌐', label: `${serverMult}x` });
             if (petWorkBonus > 1.0) multEntries.push({ emoji: '🐶', label: `${petWorkBonus.toFixed(2)}x` });
+            if (merchantMult > 1.0) multEntries.push({ emoji: '💼', label: `${merchantMult.toFixed(2)}x` });
             const bar = stackBar(multEntries, combined, finalEarned, currency);
             const capNote = capActive ? `\n  ⚠️ capped at ${MAX_COMBINED_MULTIPLIER}x` : '';
             const bonusStr = bar ? `\n  ${bar}${capNote}` : '';

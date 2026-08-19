@@ -567,6 +567,10 @@ const HOURLY_CATEGORY_LABELS = {
     fish: { title: '🎣 Rarest Catch Last Hour',  reward: 500,  emoji: '🐟' },
     mine: { title: '⛏️ Biggest Dig Last Hour',    reward: 500,  emoji: '💎' },
     hunt: { title: '🏹 Largest Haul Last Hour',   reward: 500,  emoji: '🦌' },
+    // A category with no entry here is skipped when the hour is announced — the
+    // winner is still paid, just never named — so a new competition has to be
+    // added in both places or it wins in silence.
+    explore: { title: '🧭 Richest Expedition Last Hour', reward: 500, emoji: '🗺️' },
 };
 
 async function announceHourlyWinners(client) {
@@ -627,7 +631,7 @@ async function announceHourlyWinners(client) {
                 .setColor('#FFD700')
                 .setTitle('🏆 Last Hour\'s Champions')
                 .setDescription(lines.join('\n\n'))
-                .setFooter({ text: 'Hourly micro-competitions reset each hour. Hunt, fish, and mine to compete!' })
+                .setFooter({ text: 'Hourly micro-competitions reset each hour. Hunt, fish, mine and explore to compete!' })
                 .setTimestamp();
 
             await postAnnouncement(client, guildId, channelId, embed);

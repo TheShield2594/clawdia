@@ -8,6 +8,7 @@ const {
 } = require('discord.js');
 const { randomInt } = require('crypto');
 const User = require('../../models/User');
+const { advanceMissions } = require('../../services/seasonMissionService');
 const Guild = require('../../models/Guild');
 const { isDistrictActive } = require('../../services/districtService');
 const { RANK_TIERS, START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duelElo');
@@ -228,6 +229,12 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
             User.updateOne({ userId: winnerId, guildId }, baseWinnerInc),
             User.updateOne({ userId: loserId,  guildId }, baseLoserInc),
         ]);
+
+        // Season pass: "Win a duel" — the winner only, and only once the payout
+        // has actually settled. Fire-and-forget; a mission that fails to tick
+        // must not take the duel result down with it.
+        advanceMissions(User, { userId: winnerId, guildId }, 'duel_win', 1, guildDoc)
+            .catch(err => console.error('[duel] season mission error:', err));
         const arenaStr = arenaActive ? ` + ⚔️ Arena bonus: ${currency}${arenaBonus.toLocaleString()}` : '';
         description = `${gameResult}\n\n**${winnerName}** wins **${currency}${netGain.toLocaleString()}** net (${Math.round(houseCut * 100)}% house cut${arenaStr})!${eloLine}`;
     }

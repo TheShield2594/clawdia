@@ -2,8 +2,8 @@ const { Schema, model } = require('mongoose');
 
 // Tracks the current leader per guild+hour+category for micro-competitions.
 // hour format: 'YYYY-MM-DDTHH' (UTC)
-// category: 'fish' | 'mine' | 'hunt'
-// value: rarity score (fish) or payout coins (mine/hunt)
+// category: 'fish' | 'mine' | 'hunt' | 'explore'
+// value: rarity score (fish) or payout coins (mine/hunt/explore)
 const hourlyWinnerSchema = new Schema({
     guildId:   { type: String, required: true },
     hour:      { type: String, required: true },

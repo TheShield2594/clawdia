@@ -63,6 +63,7 @@ const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { isDistrictActive } = require('../../services/districtService');
 const { ensureQuests, onHunt, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 
@@ -803,6 +804,8 @@ async function executeStart(interaction) {
         updateHuntQuestProgress(user, result, zoneId);
         await ensureQuests(user, guildSettings);
         const { completed: questsDone, nearComplete: questsNear } = await onHunt(user, guildSettings);
+        // Season pass daily missions listen for the same actions quests do.
+        recordMissionProgress(user, 'hunt', 1, guildSettings);
         if (result.success && result.finalPayout > 0) {
             const earn = await onEconomyEarn(user, guildSettings, result.finalPayout);
             questsDone.push(...earn.completed);

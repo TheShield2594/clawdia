@@ -8,6 +8,7 @@ const {
 } = require('discord.js');
 const axios = require('axios');
 const User  = require('../../models/User');
+const { advanceMissions } = require('../../services/seasonMissionService');
 const Guild = require('../../models/Guild');
 const FALLBACK_QUESTIONS = require('../../data/quizFallback');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
@@ -225,11 +226,11 @@ module.exports = {
         }
         const diffChoice = interaction.options.getString('difficulty') ?? 'any';
         await interaction.deferReply();
-        await runQuiz(interaction, diffChoice);
+        await runQuiz(interaction, diffChoice, guildSettings);
     },
 };
 
-async function runQuiz(interaction, diffChoice) {
+async function runQuiz(interaction, diffChoice, guildSettings = null) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
     await User.findOneAndUpdate(userFilter, { $setOnInsert: userFilter }, { upsert: true, new: true });
@@ -266,10 +267,10 @@ async function runQuiz(interaction, diffChoice) {
         });
     }
 
-    return runQuizWithUser(interaction, diffChoice, user);
+    return runQuizWithUser(interaction, diffChoice, user, guildSettings);
 }
 
-async function runQuizWithUser(interaction, diffChoice, user) {
+async function runQuizWithUser(interaction, diffChoice, user, guildSettings = null) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
     let raw, offline;
@@ -373,6 +374,10 @@ async function runQuizWithUser(interaction, diffChoice, user) {
             netChange = -taken;
             updated   = { balance };
         }
+
+        // Season pass: "Answer a quiz question" counts the answer, not the score.
+        advanceMissions(User, userFilter, 'quiz', 1, guildSettings)
+            .catch(err => console.error('[quiz] season mission error:', err));
 
         // No replay button: quiz is a net-positive income command, so a replay
         // chain would bypass the command cooldown and become an unbounded faucet.

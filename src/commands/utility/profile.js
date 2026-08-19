@@ -159,6 +159,8 @@ module.exports = {
             const totalHunts = userData.hunt?.totalHunts ?? 0;
             const totalCasts = userData.fishing?.totalCasts ?? 0;
             const totalMines = userData.mining?.totalMines ?? 0;
+            const exploreLevel = userData.exploration?.level ?? 1;
+            const totalTrips   = userData.exploration?.totalExpeditions ?? 0;
             const msgCount   = userData.messages ?? 0;
 
             const prestigeRank   = userData.accountPrestige?.rank ?? 0;
@@ -182,14 +184,15 @@ module.exports = {
                 { name: 'Hunting',   count: totalHunts },
                 { name: 'Fishing',   count: totalCasts },
                 { name: 'Mining',    count: totalMines },
+                { name: 'Exploring', count: totalTrips },
                 { name: 'Messaging', count: msgCount },
             ];
             const favorite = activities.reduce((a, b) => b.count > a.count ? b : a);
 
             const statsLines = [
                 prestigeLine,
-                `**Hunt Lv:** ${huntLevel}  ·  **Fish Lv:** ${fishLevel}  ·  **Mine Lv:** ${mineLevel}`,
-                `**Hunts:** ${totalHunts.toLocaleString()}  ·  **Catches:** ${totalCasts.toLocaleString()}  ·  **Mines:** ${totalMines.toLocaleString()}`,
+                `**Hunt Lv:** ${huntLevel}  ·  **Fish Lv:** ${fishLevel}  ·  **Mine Lv:** ${mineLevel}  ·  **Explorer Lv:** ${exploreLevel}`,
+                `**Hunts:** ${totalHunts.toLocaleString()}  ·  **Catches:** ${totalCasts.toLocaleString()}  ·  **Mines:** ${totalMines.toLocaleString()}  ·  **Expeditions:** ${totalTrips.toLocaleString()}`,
                 synergyLine,
                 petLine,
                 `**Favorite Activity:** ${favorite.name} (${favorite.count.toLocaleString()})`,

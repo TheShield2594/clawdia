@@ -2,6 +2,9 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
+const { getMerchantCoinBonus } = require('../../services/synergyService');
+const { advanceMissions } = require('../../services/seasonMissionService');
+const { attachGrind } = require('../../utils/grindProfile');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
 const { logTransaction } = require('../../utils/logTransaction');
@@ -170,6 +173,10 @@ module.exports = {
         }
 
         const user = claimed;
+        // Synergy requirements read hunt/fishing/mining levels, and those live in
+        // GrindProfile — absent from a bare User document, so the Merchant bonus
+        // on the payout below would silently never fire.
+        await attachGrind(user, ['hunt', 'fishing', 'mining']);
 
         // ── Step 1: Choose the crime ────────────────────────────────────────────
         const featured = getDailyFeatured(interaction.guild.id);
@@ -313,7 +320,9 @@ module.exports = {
             if (success) {
                 const isFeaturedCrime = crime.name === featured.crime.name;
                 const baseEarned = Math.floor(crime.minPayout + Math.random() * (crime.maxPayout - crime.minPayout));
-                let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult);
+                // Merchant synergy: +5% while carrying anything at all.
+                const merchantMult = 1 + getMerchantCoinBonus(user);
+                let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult * merchantMult);
                 if (isFeaturedCrime) earned = Math.round(earned * (1 + FEATURED_PAYOUT_BONUS));
 
                 const updated = await User.findOneAndUpdate(
@@ -343,8 +352,11 @@ module.exports = {
                 const crimeMultEntries = [];
                 if (streakMult > 1.0) crimeMultEntries.push({ emoji: '🔥', label: `${streakMult.toFixed(2)}x` });
                 if (execMethod.payoutMult !== 1.0) crimeMultEntries.push({ emoji: '⚡', label: `×${execMethod.payoutMult}` });
+                if (merchantMult > 1.0) crimeMultEntries.push({ emoji: '💼', label: `${merchantMult.toFixed(2)}x` });
                 if (isFeaturedCrime) crimeMultEntries.push({ emoji: '🌟', label: `+${Math.round(FEATURED_PAYOUT_BONUS * 100)}%` });
-                const crimeBar = stackBar(crimeMultEntries, streakMult * execMethod.payoutMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
+                // Every multiplier folded into `earned` above has to be in here too,
+                // or the bar breaks down a number it does not add up to.
+                const crimeBar = stackBar(crimeMultEntries, streakMult * execMethod.payoutMult * merchantMult * (isFeaturedCrime ? 1 + FEATURED_PAYOUT_BONUS : 1), earned, currency);
 
                 desc += `\n\n────────────────────\n  ${currency} Earned: **${earned.toLocaleString()} coins**`;
                 if (crimeBar) desc += `\n  ${crimeBar}`;
@@ -462,6 +474,14 @@ module.exports = {
                         .setTimestamp();
                 }
             }
+
+            // Season pass: the mission is "Attempt a crime", so it counts the
+            // attempt — every settled outcome, caught or clean, lifesaver or
+            // fine. Placed after both branches so a failure advances it too.
+            // Fire-and-forget: a mission that fails to tick must not cost the
+            // player the result of a job they already ran.
+            advanceMissions(User, userFilter, 'crime', 1, guildSettings)
+                .catch(err => console.error('[crime] season mission error:', err));
 
             // Suspense delay between execution method selection and result reveal
             const suspenseEmbed = new EmbedBuilder()

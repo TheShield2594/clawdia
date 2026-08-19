@@ -435,7 +435,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             e.landmarksDiscovered += 1;
             result.landmark = landmark;
             result.payout = applyPayout(user, result, Math.round(randInt(300, 700) * coinMult));
-            result.xp = grantXp(user, EVENT_XP.discovery);
+            result.xp = grantXp(user, EVENT_XP.discovery, result);
             break;
         }
 
@@ -449,7 +449,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             e.loreCollected += 1;
             result.lore = fragment;
             result.payout = applyPayout(user, result, Math.round(randInt(150, 400) * coinMult));
-            result.xp = grantXp(user, EVENT_XP.lore);
+            result.xp = grantXp(user, EVENT_XP.lore, result);
             break;
         }
 
@@ -461,7 +461,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             e.sinceSecret = 0;
             result.secret = secret;
             result.payout = applyPayout(user, result, Math.round(secret.reward * coinMult));
-            result.xp = grantXp(user, EVENT_XP.secret);
+            result.xp = grantXp(user, EVENT_XP.secret, result);
             break;
         }
 
@@ -479,7 +479,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             e.trapsSprung += 1;
             result.trap = trap;
             result.penalty = penalty;
-            result.xp = grantXp(user, EVENT_XP.trap);
+            result.xp = grantXp(user, EVENT_XP.trap, result);
             if (Math.random() < trap.injuryChance) {
                 e.injuryUntil = new Date(Date.now() + LIMITS.INJURY_PENALTY_MS);
                 result.injured = true;
@@ -501,7 +501,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             // the boot leather; it does not also cost a stamina point.
             result.type = 'quiet';
             result.quietLine = randomFrom(QUIET_LINES);
-            result.xp = grantXp(user, EVENT_XP.quiet);
+            result.xp = grantXp(user, EVENT_XP.quiet, result);
             e.stamina = Math.min(LIMITS.MAX_STAMINA, e.stamina + 1);
             result.staminaSpared = true;
             break;
@@ -515,6 +515,49 @@ function executeExplore(user, region, guildSettings, opts = {}) {
     finalizeStats(user, region, progress, result, wasFullyCharted);
     user.markModified('exploration');
     return result;
+}
+
+/**
+ * The raw coin band a lost encounter costs, before region depth is applied.
+ * Priced off the encounter's own average reward — see LIMITS.ENCOUNTER_LOSS_RATE.
+ */
+function encounterLossBand(enc) {
+    const avgReward = (enc.reward.min + enc.reward.max) / 2;
+    const base = avgReward * LIMITS.ENCOUNTER_LOSS_RATE;
+    return { min: Math.round(base * 0.75), max: Math.round(base * 1.25) };
+}
+
+/**
+ * What each option in an encounter is actually worth, in the coins this player
+ * would see — every multiplier already applied. Display-only: the prompt used to
+ * offer a blind choice between two pieces of flavour text, which is not a
+ * decision so much as a coin toss with extra reading.
+ */
+function getEncounterStakes(user, region, guildSettings, result) {
+    const enc = result.encounter;
+    const progress = getRegionProgress(user, region.id);
+    const coinMult    = getPayoutMultiplier(user, region, guildSettings, result.coinMultiplier ?? 1, progress);
+    const penaltyMult = getPenaltyMultiplier(region);
+    const loss = encounterLossBand(enc);
+    // Payouts are quoted after the daily caps have taken their cut, because that
+    // is what the player will actually be credited. Losses are not: the caps
+    // govern what exploration pays out, never what a mistake costs.
+    const payout = (n, mult) => settleAgainstDailyCap(user, Math.round(n * mult)).granted;
+    const scale  = (n, mult) => Math.round(n * mult);
+    // Read the headroom directly rather than probing with a coin: at a soft rate
+    // below 0.5, Math.round would settle that coin to nothing and call a player
+    // capped while they can still win thousands.
+    const capped = settleAgainstDailyCap(user, 0).remaining === 0;
+    return {
+        winChance: enc.winChance,
+        win:  { min: payout(enc.reward.min, coinMult), max: payout(enc.reward.max, coinMult) },
+        safe: { min: payout(enc.reward.min, coinMult * LIMITS.ENCOUNTER_SAFE_RATE),
+                max: payout(enc.reward.max, coinMult * LIMITS.ENCOUNTER_SAFE_RATE) },
+        loss: { min: scale(loss.min, penaltyMult), max: scale(loss.max, penaltyMult) },
+        // True once the hard cap leaves nothing to win, so the prompt can say
+        // the bet is all downside rather than silently offering a 0-coin prize.
+        capped,
+    };
 }
 
 /**
@@ -536,17 +579,19 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
             result.outcome = 'win';
             e.encountersWon += 1;
             result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult));
-            result.xp = grantXp(user, EVENT_XP.encounter_win);
+            result.xp = grantXp(user, EVENT_XP.encounter_win, result);
         } else {
             result.outcome = 'loss';
-            // Losses scale with the region only. Folding the event coin bonus
-            // or the admin drop-rate knob in here would mean a "double coins"
-            // weekend also doubled the beating, and a generous admin made
-            // failure five times more expensive.
-            const penalty = Math.min(Math.round(randInt(200, 600) * penaltyMult), Math.max(0, user.balance));
+            // Losses scale with the region and with what was on the table, and
+            // deliberately with nothing else. Folding the event coin bonus or the
+            // admin drop-rate knob in here would mean a "double coins" weekend
+            // also doubled the beating, and a generous admin made failure five
+            // times more expensive.
+            const band = encounterLossBand(enc);
+            const penalty = Math.min(Math.round(randInt(band.min, band.max) * penaltyMult), Math.max(0, user.balance));
             user.balance -= penalty;
             result.penalty = penalty;
-            result.xp = grantXp(user, EVENT_XP.encounter_loss);
+            result.xp = grantXp(user, EVENT_XP.encounter_loss, result);
             if (Math.random() < 0.15) {
                 e.injuryUntil = new Date(Date.now() + LIMITS.INJURY_PENALTY_MS);
                 result.injured = true;
@@ -554,8 +599,8 @@ function resolveEncounter(user, region, guildSettings, result, choice) {
         }
     } else {
         result.outcome = 'safe';
-        result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult * 0.35));
-        result.xp = grantXp(user, EVENT_XP.encounter_safe);
+        result.payout = applyPayout(user, result, Math.round(randInt(enc.reward.min, enc.reward.max) * coinMult * LIMITS.ENCOUNTER_SAFE_RATE));
+        result.xp = grantXp(user, EVENT_XP.encounter_safe, result);
     }
 
     countTowardPity(user, result);
@@ -582,7 +627,7 @@ function finishAsTreasure(user, region, progress, result, coinMult, { fallback =
     result.treasureTier = tier;
     result.treasureLine = randomFrom(region.treasureLines);
     result.payout = applyPayout(user, result, Math.round(randInt(tier.min, tier.max) * coinMult));
-    result.xp = grantXp(user, EVENT_XP.treasure);
+    result.xp = grantXp(user, EVENT_XP.treasure, result);
     e.treasuresFound += 1;
 
     // Rare+ treasures may carry a relic into the player's inventory
@@ -636,15 +681,40 @@ function getPenaltyMultiplier(region) {
 }
 
 /**
- * Credit coins, respecting the rolling daily hard cap. Records the gross amount
- * and a `cappedByDailyCap` flag on the result so the embed can say what the cap
- * ate — otherwise a legendary haul renders with no coin line and no explanation.
+ * Credit coins, respecting the rolling daily caps. Past the soft cap the payout
+ * settles at `DAILY_SOFT_CAP_RATE` of face value; past the hard cap it settles
+ * at nothing. Records the gross amount and which cap bit, so the embed can say
+ * what happened — otherwise a legendary haul renders with a halved coin line, or
+ * none at all, and no explanation.
+ *
+ * `cappedByDailyCap` stays the umbrella "the cap took something" flag it has
+ * always been; `softCapped` and `hardCapped` say which one, for callers that
+ * need to word it.
+ *
  * Returns the amount actually granted.
  */
+/**
+ * What `amount` is actually worth to this player right now, after the rolling
+ * daily caps. Pure — it reads `dailyCoins` and returns, touching nothing.
+ *
+ * Shared with the encounter prompt on purpose: that prompt exists to quote the
+ * coins the player would really see, and quoting a pre-cap figure while the
+ * payout settles at half of it is the one thing it must not do.
+ */
+function settleAgainstDailyCap(user, amount) {
+    const e = user.exploration;
+    const remaining  = Math.max(0, LIMITS.DAILY_HARD_CAP - e.dailyCoins);
+    const softCapped = e.dailyCoins >= LIMITS.DAILY_SOFT_CAP;
+    // The soft rate applies to the whole payout, not just the part above the
+    // line — same settlement hunting and fishing use, and it keeps the rule
+    // something a player can state in one sentence.
+    const settled = softCapped ? Math.round(amount * LIMITS.DAILY_SOFT_CAP_RATE) : amount;
+    return { granted: Math.min(settled, remaining), settled, softCapped, remaining };
+}
+
 function applyPayout(user, result, amount) {
     const e = user.exploration;
-    const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - e.dailyCoins);
-    const granted = Math.min(amount, remaining);
+    const { granted, settled, softCapped } = settleAgainstDailyCap(user, amount);
     if (granted > 0) {
         user.balance       += granted;
         e.totalEarned      += granted;
@@ -652,14 +722,33 @@ function applyPayout(user, result, amount) {
     }
     if (result) {
         result.grossPayout = (result.grossPayout ?? 0) + amount;
-        if (granted < amount) result.cappedByDailyCap = true;
+        if (softCapped && amount > 0)  result.softCapped = true;
+        if (granted < settled)         result.hardCapped = true;
+        if (granted < amount)          result.cappedByDailyCap = true;
     }
     return granted;
 }
 
-// Explorer XP + report the amount so the command layer can mirror it into guild XP
-function grantXp(user, amount) {
-    applyExplorerXp(user, amount);
+/**
+ * Explorer XP + report the amount so the command layer can mirror it into guild XP.
+ *
+ * Crossing an explorer level is recorded on `result` rather than dropped on the
+ * floor: explorer level is what gates every region unlock, so a player who is
+ * never told they levelled has no idea a new region just came within reach. One
+ * expedition can grant twice (the event, then the survey bonus) and can cross
+ * more than one level, so the record keeps the level they started at and the
+ * level they ended on.
+ */
+function grantXp(user, amount, result = null) {
+    const before = user.exploration.level;
+    const { leveled, newLevel, newTitle } = applyExplorerXp(user, amount);
+    if (leveled && result) {
+        result.explorerLevelUp = {
+            oldLevel: result.explorerLevelUp?.oldLevel ?? before,
+            newLevel,
+            newTitle,
+        };
+    }
     return amount;
 }
 
@@ -691,7 +780,7 @@ function finalizeStats(user, region, progress, result, wasFullyCharted) {
         result.regionCompleted = true;
         result.surveyBonus = LIMITS.SURVEY_BONUS;
         e.regionsSurveyed = (e.regionsSurveyed ?? 0) + 1;
-        result.xp = (result.xp ?? 0) + grantXp(user, EVENT_XP.survey);
+        result.xp = (result.xp ?? 0) + grantXp(user, EVENT_XP.survey, result);
     }
 }
 
@@ -738,12 +827,19 @@ function renderMap(user, guildSettings) {
         if (region.seasonalEventId && !progress && !inSeason) continue;
 
         if (!progress) {
+            // A region whose route you have already paid to open is not a
+            // mystery — you know its name, you just haven't walked it. Redacting
+            // it turned every unentered region into the same anonymous "???" row.
+            const known = region.seasonalEventId ? inSeason : e.unlockedRegions.includes(region.id);
             const gate = region.seasonalEventId
                 ? 'in season now — go look'
-                : e.unlockedRegions.includes(region.id)
-                    ? 'unlocked — never entered'
+                : known
+                    ? 'route open — never entered'
                     : `locked · Explorer Lv ${region.unlockLevel}`;
-            lines.push(`🌫️ **??? — uncharted**\n> \`▒▒▒▒▒▒▒▒▒▒\` *${gate}*`);
+            const head = known
+                ? `${region.emoji} **${region.name}** — uncharted`
+                : '🌫️ **??? — uncharted**';
+            lines.push(`${head}\n> \`▒▒▒▒▒▒▒▒▒▒\` *${gate}*`);
             continue;
         }
 
@@ -803,6 +899,8 @@ module.exports = {
     getPenaltyMultiplier,
     executeExplore,
     resolveEncounter,
+    encounterLossBand,
+    getEncounterStakes,
     addJournalEntry,
     regionCompletion,
     renderMap,

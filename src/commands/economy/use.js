@@ -12,6 +12,7 @@ const { getItemLore } = require('../../data/defaultShopItems');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
 const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../services/petService');
+const { MAX_STAMINA_UPGRADES } = require('../../data/crossSystemData');
 
 // itemId of a seasonal loot box -> the event definition that owns it
 const LOOT_BOX_EVENTS = new Map(
@@ -56,6 +57,22 @@ module.exports = {
         const itemName = interaction.options.getString('item').trim();
         const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
+        /**
+         * Drop inventory slots the decrement above emptied.
+         *
+         * Not `user.inventory = filter(...)` followed by `save()`: save() writes
+         * each modified path as a `$set`, and `inventory` is an array, so that
+         * writes the whole list back from a snapshot taken a moment earlier —
+         * erasing anything bought, gifted or dropped into the bag in between.
+         * `$pull` removes exactly the emptied entries and leaves the rest alone.
+         * (`balance` is never at risk here; save() only writes paths that were
+         * actually touched.)
+         */
+        const dropEmptyInventorySlots = () => User.updateOne(
+            userFilter,
+            { $pull: { inventory: { quantity: { $lte: 0 } } } },
+        ).catch(err => console.error('[use] inventory cleanup failed:', err));
+
         // Read first to resolve item identity (itemId casing, effect checks)
         const [preview, guildSettings] = await Promise.all([
             User.findOne(userFilter),
@@ -97,9 +114,12 @@ module.exports = {
             }
 
             const effect = addEffect(user, effectType);
-            // Clean up zero-quantity entries and save effect
+            // The save is here for the effect, not the inventory — unmark the
+            // array so it is not written back wholesale alongside it.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
+            user.unmarkModified('inventory');
             await user.save();
+            await dropEmptyInventorySlots();
 
             const embed = new EmbedBuilder()
                 .setColor('#2ecc71')
@@ -148,8 +168,10 @@ module.exports = {
                 return interaction.reply({ content: `Couldn't bank the freeze — you may be at the cap already.`, flags: MessageFlags.Ephemeral });
             }
 
+            // Local copy stays filtered for anything rendered below; the stored
+            // one is corrected by a targeted $pull.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            await user.save();
+            await dropEmptyInventorySlots();
 
             const newFreezes = user.streak?.freezes ?? 0;
             const embed = new EmbedBuilder()
@@ -189,8 +211,10 @@ module.exports = {
                 return interaction.reply({ content: `Couldn't apply the contract — you may be at the max stacks already.`, flags: MessageFlags.Ephemeral });
             }
 
+            // Local copy stays filtered for anything rendered below; the stored
+            // one is corrected by a targeted $pull.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            await user.save();
+            await dropEmptyInventorySlots();
 
             const newStacks = user.crimeContractStacks ?? 0;
             const embed = new EmbedBuilder()
@@ -199,6 +223,45 @@ module.exports = {
                 .setDescription(
                     `A permanent +5% crime success bonus has been added to your record.\n\n` +
                     `**Contract stacks:** ${newStacks} / ${MAX_STACKS} (+${newStacks * 5}% total bonus)`
+                )
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        // ── Permanent Stamina +1 ───────────────────────────────────────────────
+        if (canonicalId.toLowerCase() === 'permanent_stamina') {
+            if ((preview.staminaUpgrades ?? 0) >= MAX_STAMINA_UPGRADES) {
+                return interaction.reply({
+                    content: `⚡ You already have all **${MAX_STAMINA_UPGRADES}** stamina upgrades. There is no more endurance to buy.`,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            const user = await User.findOneAndUpdate(
+                {
+                    ...userFilter,
+                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
+                    staminaUpgrades: { $lt: MAX_STAMINA_UPGRADES },
+                },
+                { $inc: { 'inventory.$.quantity': -1, staminaUpgrades: 1 } },
+                { new: true }
+            );
+            if (!user) {
+                return interaction.reply({ content: "Couldn't apply the upgrade — you may be at the cap already.", flags: MessageFlags.Ephemeral });
+            }
+
+            // The decrement above is already persisted; this only clears the
+            // husk it may have left behind.
+            await dropEmptyInventorySlots();
+
+            const owned = user.staminaUpgrades ?? 0;
+            const embed = new EmbedBuilder()
+                .setColor('#f1c40f')
+                .setTitle('⚡ Stamina Raised')
+                .setDescription(
+                    `Your maximum stamina in hunting, fishing and mining is now **+${owned}**.\n\n` +
+                    `**Upgrades:** ${owned} / ${MAX_STAMINA_UPGRADES}`
                 )
                 .setTimestamp();
 
@@ -227,8 +290,10 @@ module.exports = {
                 return interaction.reply({ content: "Couldn't add the slot — you may be at the cap already.", flags: MessageFlags.Ephemeral });
             }
 
+            // Local copy stays filtered for anything rendered below; the stored
+            // one is corrected by a targeted $pull.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
-            await user.save();
+            await dropEmptyInventorySlots();
 
             const embed = new EmbedBuilder()
                 .setColor('#8e44ad')
@@ -302,9 +367,12 @@ module.exports = {
             delete revived._id;
             delete revived.diedAt;
             user.pets.push(revived);
+            // The save is here for the pet — keep the inventory array out of it.
             user.inventory = user.inventory.filter(e => e.quantity > 0);
+            user.unmarkModified('inventory');
             user.markModified('pets');
             await user.save();
+            await dropEmptyInventorySlots();
 
             const def  = PET_DEFINITIONS[fallen.petId];
             const name = fallen.name || def?.name || fallen.petId;
@@ -349,8 +417,7 @@ module.exports = {
             // when two boxes opened at once, stranding the second slot's quantity.
             await grantInventoryItem(userFilter.userId, userFilter.guildId, won.itemId, 1);
 
-            // Clean up zero-quantity entries
-            await User.findOneAndUpdate(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } });
+            await dropEmptyInventorySlots();
 
             const boxRemaining = (user.inventory.find(e => e.itemId === canonicalId)?.quantity ?? 1) - 1;
 
@@ -378,8 +445,7 @@ module.exports = {
             return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
         }
 
-        // Clean up zero-quantity entries
-        await User.findOneAndUpdate(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } });
+        await dropEmptyInventorySlots();
 
         let roleGranted = false;
         if (shopItem?.roleId) {
