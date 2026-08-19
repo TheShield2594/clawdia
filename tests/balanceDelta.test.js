@@ -236,24 +236,41 @@ describe('commitBalanceDelta', () => {
     });
 });
 
+// The same read-to-save window exists in every grind command, not just /fish:
+// /hunt and /mine wait on approach prompts, and /explore holds an encounter
+// prompt for up to 20 seconds and writes coins twice around it. All four are
+// converted; these assertions are what keeps them that way.
+describe.each(['fish', 'hunt', 'mine', 'explore'])('/%s keeps balance out of its save', (command) => {
+    const source = fs.readFileSync(
+        path.join(__dirname, '..', 'src', 'commands', 'economy', `${command}.js`), 'utf8',
+    );
+
+    test('detaches the balance and commits it as a delta', () => {
+        expect(source).toMatch(/detachBalanceDelta\(user, balance(AtLoad|Baseline)\)/);
+        expect(source).toMatch(/commitBalanceDelta\(User, balanceFilter, user,/);
+    });
+
+    test('the delta is committed after the save, never before', () => {
+        // Credit-then-save would pay for a run a failed save lets the player take
+        // again; save-then-credit at worst owes coins, which is recoverable.
+        const detachAt = source.indexOf('detachBalanceDelta(user, balance');
+        const saveAt   = source.indexOf('await user.save();', detachAt);
+        const commitAt = source.indexOf('commitBalanceDelta(User, balanceFilter', detachAt);
+        expect(detachAt).toBeGreaterThan(-1);
+        expect(saveAt).toBeGreaterThan(detachAt);
+        expect(commitAt).toBeGreaterThan(saveAt);
+    });
+
+    test('an uncredited payout is shown to the player, not swallowed', () => {
+        expect(source).toMatch(/payoutOwed/);
+        expect(source).toMatch(/Payout Not Yet Credited/);
+    });
+});
+
 describe('/fish uses the helper', () => {
     const source = fs.readFileSync(
         path.join(__dirname, '..', 'src', 'commands', 'economy', 'fish.js'), 'utf8',
     );
-
-    test('the cast captures a balance reading and applies a delta', () => {
-        expect(source).toMatch(/detachBalanceDelta\(user, balanceAtLoad\)/);
-        expect(source).toMatch(/commitBalanceDelta\(User, balanceFilter, user, balanceDelta/);
-    });
-
-    test('the delta is applied after the save, not before it', () => {
-        const saveAt   = source.indexOf('const balanceDelta = detachBalanceDelta');
-        const applyAt  = source.indexOf('commitBalanceDelta(User, balanceFilter');
-        const userSave = source.indexOf('await user.save();', saveAt);
-        expect(saveAt).toBeGreaterThan(-1);
-        expect(userSave).toBeGreaterThan(saveAt);
-        expect(applyAt).toBeGreaterThan(userSave);
-    });
 
     test('a credit that will not land is surfaced, not swallowed', () => {
         // The failure mode this guards: save lands, $inc does not, and the player
