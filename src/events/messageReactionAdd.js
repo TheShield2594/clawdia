@@ -2,6 +2,7 @@ const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 const User = require('../models/User');
 const { ensureQuests, onReaction, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
+const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 
 module.exports = {
     name: 'messageReactionAdd',
@@ -36,9 +37,19 @@ async function handleReactionQuests(reaction, discordUser, guild, guildSettings)
         { upsert: true, new: true }
     );
     if (!userDoc) return;
+
+    // Quest coins are credited with an `$inc` at the save: `save()` writes
+    // `balance` as an absolute `$set`, and a reaction handler has no idea what
+    // else the player is doing in another channel.
+    const balanceAtLoad = userDoc.balance ?? 0;
+
     await ensureQuests(userDoc, guildSettings);
     const { completed, nearComplete } = await onReaction(userDoc, guildSettings);
-    await userDoc.save();
+    await saveWithBalanceDelta(User, userDoc, balanceAtLoad, {
+        service: 'messageReactionAdd',
+        jobName: 'reactionQuestReward',
+        guildId: guild.id,
+    });
     const member = await guild.members.fetch(discordUser.id).catch(() => null);
     if (member) {
         await notifyQuestComplete(guildSettings, member, completed, reaction.message.channel);

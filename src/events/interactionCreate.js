@@ -13,6 +13,7 @@ const {
 } = require('../commands/fun/8ball');
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 // Giveaway entry/withdrawal.
 //
 // Entrants are toggled directly in the Guild document with $addToSet/$pull
@@ -98,9 +99,18 @@ async function trackQuestCommandUse(interaction) {
         user = await User.create({ userId: interaction.user.id, guildId: interaction.guild.id });
     }
 
+    // A quest completing here pays coins, and this runs after every command —
+    // so the reward goes out as an `$inc` rather than riding the save as an
+    // absolute `$set` that would erase whatever the command itself just paid.
+    const balanceAtLoad = user.balance ?? 0;
+
     await ensureQuests(user, guildSettings);
     const { completed, nearComplete } = await onCommandUse(user, guildSettings);
-    await user.save();
+    await saveWithBalanceDelta(User, user, balanceAtLoad, {
+        service: 'interactionCreate',
+        jobName: 'commandQuestReward',
+        guildId: interaction.guild.id,
+    });
 
     await notifyQuestComplete(guildSettings, interaction.member, completed, interaction.channel, user);
     await notifyQuestNearComplete(guildSettings, interaction.member, nearComplete, interaction.channel);

@@ -10,7 +10,7 @@ const {
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
-const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceDelta');
+const { detachBalanceDelta, commitBalanceDelta, saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -61,6 +61,26 @@ const { getActiveSynergies } = require('../../services/synergyService');
 const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 
 const WILDERNESS_YIELD_BONUS = 0.10;
+
+// Take `cost` coins with a conditional update rather than `user.balance -= cost`
+// followed by a save: the loaded document's balance goes stale the moment any
+// other command pays the player, and saving it back would erase that payout.
+// Returns the updated document, or null when the player can't afford it any more.
+function chargeBalance(interaction, cost) {
+    return User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: cost } },
+        { $inc: { balance: -cost } },
+        { new: true, projection: { balance: 1 } },
+    );
+}
+
+// Undo a chargeBalance when the purchase it paid for could not be persisted.
+function refundBalance(interaction, cost) {
+    return User.updateOne(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        { $inc: { balance: cost } },
+    ).catch(err => console.error('[huntshop] refund error:', err));
+}
 
 // ─── STEALTH APPROACH OPTIONS (per zone) ─────────────────────────────────────
 // Each zone has a hint about the animal's behaviour + 3 approach strategies.
@@ -1039,6 +1059,12 @@ async function executeStart(interaction) {
             ensureHuntData(freshUser);
             const apexResult = resolveApexEncounter(freshUser, result.apexEncounter.animal, result.apexEncounter.tier, choicesMade, apexType, apexWeaponIndex);
 
+            // The reload above is already seconds old by the time the fight
+            // resolves, and `save()` writes `balance` as an absolute `$set` — so
+            // the bonus is applied as its own `$inc` and `balance` stays out of
+            // the save, exactly as the hunt itself does.
+            const apexBalanceAtLoad = freshUser.balance ?? 0;
+
             let apexQuestsDone = [], apexQuestsNear = [];
             if (apexResult.bonusPayout > 0) {
                 const apexZone = ZONES[freshUser.hunt.activeZone] ?? zone;
@@ -1062,7 +1088,11 @@ async function executeStart(interaction) {
             }
             freshUser.markModified('hunt');
             try {
-                await freshUser.save();
+                await saveWithBalanceDelta(User, freshUser, apexBalanceAtLoad, {
+                    service: 'hunt',
+                    jobName: 'apexBonusPayout',
+                    guildId: interaction.guild.id,
+                });
                 if (apexQuestsDone.length || apexQuestsNear.length) {
                     notifyQuestComplete(guildSettings, interaction.member, apexQuestsDone, interaction.channel, freshUser).catch(() => null);
                     notifyQuestNearComplete(guildSettings, interaction.member, apexQuestsNear, interaction.channel).catch(() => null);
@@ -1984,12 +2014,20 @@ async function executeQuests(interaction, sub) {
             });
         }
 
+        // The claim's coins are applied as an `$inc` after the save. `save()`
+        // writes `balance` as an absolute `$set`, which would put back the value
+        // read at the top of the command and erase anything paid since.
+        const balanceAtLoad = user.balance ?? 0;
         user.balance += template.reward.coins;
         const lvResult = applyXp(user, template.reward.xp);
 
         questEntry.progress = -1;
         user.markModified('quests');
-        await user.save();
+        await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'hunt',
+            jobName: 'questClaimCoins',
+            guildId: interaction.guild.id,
+        });
 
         const embed = new EmbedBuilder()
             .setColor('#2ecc71')
@@ -2329,10 +2367,26 @@ async function handleBuyUpgrade(interaction, user, currency) {
         });
     }
 
-    user.balance   -= cost;
+    const charged = await chargeBalance(interaction, cost);
+    if (!charged) {
+        return interaction.reply({
+            content: `This upgrade costs ${currency}${cost.toLocaleString()} — you no longer have enough. Check \`/balance\` and try again.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+    // Take the authoritative balance and keep the save off that path.
+    user.balance   = charged.balance;
+    user.unmarkModified('balance');
     weapon.upgrade  = moduleId;
     user.markModified('hunt');
-    await user.save();
+    try {
+        await user.save();
+    } catch (err) {
+        console.error('[huntshop upgrade] save error:', err);
+        weapon.upgrade = null;
+        await refundBalance(interaction, cost);
+        return interaction.reply({ content: 'Installing the upgrade failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+    }
 
     return interaction.reply({
         embeds: [
@@ -2620,9 +2674,23 @@ async function handleRepair(interaction, user, currency) {
         return interaction.reply({ content: result.error, flags: MessageFlags.Ephemeral });
     }
 
-    user.balance -= result.cost;
+    const chargedRepair = await chargeBalance(interaction, result.cost);
+    if (!chargedRepair) {
+        return interaction.reply({
+            content: `Repair costs ${currency}${result.cost.toLocaleString()} — you no longer have enough. Check \`/balance\` and try again.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+    user.balance = chargedRepair.balance;
+    user.unmarkModified('balance');
     user.markModified('hunt');
-    await user.save();
+    try {
+        await user.save();
+    } catch (err) {
+        console.error('[huntshop repair] save error:', err);
+        await refundBalance(interaction, result.cost);
+        return interaction.reply({ content: 'The repair failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+    }
 
     const statusIcon = weaponStatusEmoji(result.newStatus);
     const embed = new EmbedBuilder()
@@ -2674,10 +2742,25 @@ async function handleUnlock(interaction, user, currency) {
         });
     }
 
-    user.balance      -= zone.unlockCost;
+    const chargedUnlock = await chargeBalance(interaction, zone.unlockCost);
+    if (!chargedUnlock) {
+        return interaction.reply({
+            content: `Unlocking **${zone.name}** costs ${currency}${zone.unlockCost.toLocaleString()} — you no longer have enough. Check \`/balance\` and try again.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+    user.balance = chargedUnlock.balance;
+    user.unmarkModified('balance');
     h.unlockedZones.push(zoneId);
     user.markModified('hunt');
-    await user.save();
+    try {
+        await user.save();
+    } catch (err) {
+        console.error('[hunt unlock] save error:', err);
+        h.unlockedZones = h.unlockedZones.filter(z => z !== zoneId);
+        await refundBalance(interaction, zone.unlockCost);
+        return interaction.reply({ content: 'Unlocking the zone failed — your coins were refunded. Please try again.', flags: MessageFlags.Ephemeral });
+    }
 
     const tierStr = Object.entries(zone.tierWeights)
         .filter(([, w]) => w > 0)

@@ -123,4 +123,29 @@ async function commitBalanceDelta(Model, filter, user, delta, context = {}) {
     return { credited: false, balance: user.balance ?? 0 };
 }
 
-module.exports = { detachBalanceDelta, applyBalanceDelta, commitBalanceDelta };
+/**
+ * The whole read-mutate-save shape in one call, for the many flows that load a
+ * user, let a service credit it (a quest completion, a streak milestone, a
+ * mission reward) and then save.
+ *
+ * `balanceAtLoad` is the balance the flow started from — capture it before the
+ * first mutation, not after. The save runs first for the same reason as in
+ * `commitBalanceDelta`, and its failure propagates: nothing has been credited at
+ * that point, so the caller's existing error handling is still correct.
+ *
+ * Returns `{ credited, balance }` from the credit, or `{ credited: true }` with
+ * the untouched balance when the flow moved no coins at all.
+ */
+async function saveWithBalanceDelta(Model, user, balanceAtLoad, context = {}) {
+    const delta = detachBalanceDelta(user, balanceAtLoad);
+    await user.save();
+    return commitBalanceDelta(
+        Model,
+        { userId: user.userId, guildId: user.guildId },
+        user,
+        delta,
+        context,
+    );
+}
+
+module.exports = { detachBalanceDelta, applyBalanceDelta, commitBalanceDelta, saveWithBalanceDelta };

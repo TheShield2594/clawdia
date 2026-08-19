@@ -14,6 +14,7 @@ const { randomFrom, WORK_ROUGH_LINES, WORK_EXCEPTIONAL_LINES } = require('../../
 const { stackBar } = require('../../utils/rewardReveal');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
+const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -246,8 +247,12 @@ module.exports = {
                 note: `${job.name} (${performance.label})${capActive ? ', mult capped' : ''}${challengeFires ? ', challenge' : ''}`
             });
 
-            // Quest progress for coins earned this shift
+            // Quest progress for coins earned this shift. A quest completing here
+            // pays coins, and `save()` writes `balance` as an absolute `$set` — so
+            // the reward is folded out of the save and applied as its own `$inc`,
+            // leaving anything else the player spent meanwhile intact.
             let questsDone = [], questsNear = [];
+            const balanceAfterShift = updated.balance ?? 0;
             await ensureQuests(updated, guildSettings);
             if (finalEarned > 0) {
                 const earn = await onEconomyEarn(updated, guildSettings, finalEarned);
@@ -255,7 +260,11 @@ module.exports = {
                 questsNear = earn.nearComplete;
             }
             try {
-                await updated.save();
+                await saveWithBalanceDelta(User, updated, balanceAfterShift, {
+                    service: 'work',
+                    jobName: 'shiftQuestReward',
+                    guildId: interaction.guild.id,
+                });
                 if (questsDone.length || questsNear.length) {
                     notifyQuestComplete(guildSettings, interaction.member, questsDone, interaction.channel, updated).catch(() => null);
                     notifyQuestNearComplete(guildSettings, interaction.member, questsNear, interaction.channel).catch(() => null);
@@ -342,9 +351,14 @@ module.exports = {
 
                         if (bonusUpdated && bonusEarned > 0) {
                             try {
+                                const balanceAfterBonus = bonusUpdated.balance ?? 0;
                                 await ensureQuests(bonusUpdated, guildSettings);
                                 const earn = await onEconomyEarn(bonusUpdated, guildSettings, bonusEarned);
-                                await bonusUpdated.save();
+                                await saveWithBalanceDelta(User, bonusUpdated, balanceAfterBonus, {
+                                    service: 'work',
+                                    jobName: 'challengeBonusQuestReward',
+                                    guildId: interaction.guild.id,
+                                });
                                 if (earn.completed.length || earn.nearComplete.length) {
                                     notifyQuestComplete(guildSettings, interaction.member, earn.completed, interaction.channel, bonusUpdated).catch(() => null);
                                     notifyQuestNearComplete(guildSettings, interaction.member, earn.nearComplete, interaction.channel).catch(() => null);

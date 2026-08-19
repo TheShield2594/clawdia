@@ -4,7 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew, saveGrind } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
-const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceDelta');
+const { detachBalanceDelta, commitBalanceDelta, saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -1304,12 +1304,18 @@ async function handleQuests(interaction, sub) {
             });
         }
 
+        // Same rule as everywhere else: the claim pays a delta, never a snapshot.
+        const balanceAtLoad = user.balance ?? 0;
         user.balance += template.reward.coins;
         const lvResult = applyXp(user, template.reward.xp);
 
         questEntry.progress = -1;
         user.markModified('quests');
-        await user.save();
+        await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'mine',
+            jobName: 'questClaimCoins',
+            guildId: interaction.guild.id,
+        });
 
         const embed = new EmbedBuilder()
             .setColor('#2ecc71')
@@ -1605,7 +1611,9 @@ async function handleShop(interaction, sub) {
         if (!charged) {
             return interaction.reply({ content: `This upgrade costs ${currency}${cost.toLocaleString()} — you no longer have enough. Check \`/balance\` and try again.`, flags: MessageFlags.Ephemeral });
         }
+        // Take the authoritative balance and keep any later save off that path.
         user.balance = charged.balance;
+        user.unmarkModified('balance');
 
         pickaxe.upgrade = moduleId;
         user.markModified('mining');
@@ -1817,6 +1825,7 @@ async function handleShop(interaction, sub) {
                 return interaction.reply({ content: `Repair costs ${currency}${quote.cost.toLocaleString()} — you no longer have enough. Check \`/balance\` and try again.`, flags: MessageFlags.Ephemeral });
             }
             user.balance = charged.balance;
+            user.unmarkModified('balance');
 
             const repairResult = applyRepair(pickaxe, null);
             user.markModified('mining');
@@ -1906,6 +1915,7 @@ async function handleShop(interaction, sub) {
             return interaction.reply({ content: `Unlocking **${depthDef.name}** costs ${currency}${depthDef.unlockCost.toLocaleString()} — you no longer have enough. Check \`/balance\` and try again.`, flags: MessageFlags.Ephemeral });
         }
         user.balance = charged.balance;
+        user.unmarkModified('balance');
 
         const priorDepth = m.activeDepth;
         m.unlockedDepths.push(depthId);

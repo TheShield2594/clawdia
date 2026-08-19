@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { logTransaction } = require('../../utils/logTransaction');
+const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const {
     hasActiveEvent,
     getEventCurrencyId,
@@ -93,6 +94,11 @@ module.exports = {
             user = new User({ userId: interaction.user.id, guildId: interaction.guild.id, lastSandcastle: new Date() });
         }
 
+        // Coins move as a delta, not as a snapshot: `save()` writes `balance` as an
+        // absolute `$set`, so a casino bet or a gift landing between the read above
+        // and this write would simply be erased. See src/utils/balanceDelta.js.
+        const balanceAtLoad = user.balance ?? 0;
+
         const isWave = Math.random() < WAVE_CHANCE;
         let embed;
         let logPayload;
@@ -164,7 +170,11 @@ module.exports = {
                 .setTimestamp();
         }
 
-        await user.save();
+        await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'sandcastle',
+            jobName: 'buildPayout',
+            guildId: interaction.guild.id,
+        });
         logTransaction(logPayload);
         return interaction.editReply({ embeds: [embed] });
     }

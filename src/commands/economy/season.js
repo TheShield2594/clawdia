@@ -10,6 +10,7 @@ const { isVersionError } = require('../../utils/versionRetry');
 const { rewardReveal } = require('../../utils/rewardReveal');
 const { logTransaction } = require('../../utils/logTransaction');
 const { awardSeasonXp } = require('../../services/questService');
+const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 
 // Reset a user's season sub-document to the fresh shape when their stored
 // seasonId is stale (a new season started). Prevents carrying old xp / claimed
@@ -190,6 +191,11 @@ async function executeClaim(interaction) {
     const reward = rewardFor(tier, wantsPremium);
     if (!reward) return interaction.reply({ content: 'Invalid tier.', flags: MessageFlags.Ephemeral });
 
+    // The reward coins ride out as an `$inc`, not as part of the save: `save()`
+    // writes `balance` as an absolute `$set` computed from the read at the top of
+    // this command, which would erase anything the player earned or spent since.
+    const balanceAtLoad = user.balance ?? 0;
+
     if (reward.coins > 0) user.balance += reward.coins;
     if (reward.itemId) user.inventory.push({ itemId: reward.itemId, quantity: 1 });
     (wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers).push(tier);
@@ -197,7 +203,11 @@ async function executeClaim(interaction) {
     if (reward.itemId) user.markModified('inventory');
 
     try {
-        await user.save();
+        await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'season',
+            jobName: 'tierRewardCoins',
+            guildId: interaction.guild.id,
+        });
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
@@ -386,6 +396,8 @@ async function executeClaimMission(interaction) {
     if (!isDone) return interaction.reply({ content: 'Mission not completed yet.', flags: MessageFlags.Ephemeral });
     if (mission.claimed) return interaction.reply({ content: 'Already claimed!', flags: MessageFlags.Ephemeral });
 
+    const balanceAtLoad = user.balance ?? 0;
+
     user.seasonMissions[missionIndex].claimed = true;
     normalizeSeason(user, season.seasonId);
     // Route through the shared grant so the weekly XP cap and rollover apply.
@@ -396,7 +408,13 @@ async function executeClaimMission(interaction) {
     user.markModified('season');
 
     try {
-        await user.save();
+        // Same reasoning as the tier claim: the coin reward is a delta, not a
+        // snapshot of the balance this command happened to read.
+        await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'season',
+            jobName: 'missionRewardCoins',
+            guildId: interaction.guild.id,
+        });
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
@@ -452,6 +470,7 @@ async function executeClaimAll(interaction) {
         });
     }
 
+    const balanceAtLoad = user.balance ?? 0;
     let totalCoins = 0;
     const itemsClaimed = [];
 
@@ -484,7 +503,12 @@ async function executeClaimAll(interaction) {
     user.markModified('season');
 
     try {
-        await user.save();
+        // The whole batch of tier coins goes out as one `$inc`.
+        await saveWithBalanceDelta(User, user, balanceAtLoad, {
+            service: 'season',
+            jobName: 'claimAllRewardCoins',
+            guildId: interaction.guild.id,
+        });
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;

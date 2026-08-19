@@ -13,7 +13,9 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { detachBalanceDelta, applyBalanceDelta, commitBalanceDelta } = require('../src/utils/balanceDelta');
+const {
+    detachBalanceDelta, applyBalanceDelta, commitBalanceDelta, saveWithBalanceDelta,
+} = require('../src/utils/balanceDelta');
 
 /** Minimal stand-in for the parts of a mongoose document these helpers touch. */
 function makeDoc(balance) {
@@ -233,6 +235,87 @@ describe('commitBalanceDelta', () => {
         const create = jest.spyOn(FailedJob, 'create').mockRejectedValue(new Error('also down'));
         await expect(commitBalanceDelta(failing(), {}, makeDoc(1_000), 250)).resolves.toMatchObject({ credited: false });
         create.mockRestore();
+    });
+});
+
+describe('saveWithBalanceDelta', () => {
+    /** A document that records when it was saved, relative to the credit. */
+    function makeSavingDoc(balance, log, { failSave = false } = {}) {
+        const doc = makeDoc(balance);
+        doc.userId  = 'u1';
+        doc.guildId = 'g1';
+        doc.save = async () => {
+            if (failSave) throw new Error('write conflict');
+            log.push(`save:${doc.balance}`);
+        };
+        return doc;
+    }
+
+    function makeLoggingModel(stored, log) {
+        return {
+            state: { balance: stored },
+            findOneAndUpdate: async (filter, update) => {
+                log.push(`inc:${update.$inc.balance}`);
+                return { balance: (stored += update.$inc.balance) };
+            },
+        };
+    }
+
+    test('saves without balance, then credits the change as an $inc', async () => {
+        const log = [];
+        const doc = makeSavingDoc(1_000, log);
+        doc.balance += 250;                       // a quest completed on this message
+
+        const result = await saveWithBalanceDelta(makeLoggingModel(1_000, log), doc, 1_000);
+
+        // The save carries the pre-flow balance — i.e. nothing for this path —
+        // and only then does the reward land.
+        expect(log).toEqual(['save:1000', 'inc:250']);
+        expect(result).toEqual({ credited: true, balance: 1_250 });
+    });
+
+    test('a concurrent debit during the flow survives the save', async () => {
+        const log = [];
+        const doc = makeSavingDoc(1_000, log);
+        doc.balance += 250;
+        // A casino bet placed while the handler was awaiting quest work.
+        const Model = makeLoggingModel(200, log);
+
+        await saveWithBalanceDelta(Model, doc, 1_000);
+
+        expect(doc.balance).toBe(450);            // 200 left + the 250 reward
+        expect(doc.modified.has('balance')).toBe(false);
+    });
+
+    test('addresses the credit at the document it just saved', async () => {
+        const seen = [];
+        const doc = makeSavingDoc(1_000, []);
+        doc.balance += 10;
+        await saveWithBalanceDelta({
+            findOneAndUpdate: async (filter) => { seen.push(filter); return { balance: 1_010 }; },
+        }, doc, 1_000);
+        expect(seen).toEqual([{ userId: 'u1', guildId: 'g1' }]);
+    });
+
+    test('a failed save credits nothing and leaves the rewind in place', async () => {
+        const log = [];
+        const doc = makeSavingDoc(1_000, log, { failSave: true });
+        doc.balance += 250;
+
+        await expect(saveWithBalanceDelta(makeLoggingModel(1_000, log), doc, 1_000))
+            .rejects.toThrow('write conflict');
+
+        // Nothing was paid, and the caller's error branch sees the balance it
+        // started with rather than a reward it never persisted.
+        expect(log).toEqual([]);
+        expect(doc.balance).toBe(1_000);
+    });
+
+    test('a flow that moved no coins issues no write', async () => {
+        const log = [];
+        const doc = makeSavingDoc(1_000, log);
+        await saveWithBalanceDelta(makeLoggingModel(1_000, log), doc, 1_000);
+        expect(log).toEqual(['save:1000']);
     });
 });
 
