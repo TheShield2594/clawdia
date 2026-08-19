@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew, saveGrind } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
+const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceDelta');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -475,6 +476,15 @@ async function handleDig(interaction) {
     // is persisted the player has nothing to show for the cooldown they just paid
     // for. Hand the slot back on the way out unless the dig committed.
     let mineCommitted = false;
+
+    // Everything below runs across the interactive prompts, during which the
+    // player can spend coins elsewhere. The run's own coin movement is
+    // collected as a delta against this reading and applied as an atomic
+    // `$inc` at the save, so `save()` never writes an absolute balance read
+    // before that window. See src/utils/balanceDelta.js.
+    const balanceAtLoad = user.balance ?? 0;
+    const balanceFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+
     try {
 
         // The charge comes out only once the cooldown slot is ours, so a lost race
@@ -776,9 +786,26 @@ async function handleDig(interaction) {
 
         const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
+        // Hand the run's coin movement to an atomic `$inc` and take `balance` out
+        // of the save. A path that reverses its own reward nets to zero and
+        // issues no write.
+        const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
+
+        let payoutOwed = 0;
         try {
             await user.save();
             mineCommitted = true;
+            // Only after the save has landed: a credit applied before a save that
+            // then failed would pay for a run the player could take again. The two
+            // cannot be one write on a standalone mongod, so a credit that will
+            // not land is recorded as owed and said out loud rather than logged
+            // and forgotten.
+            const payout = await commitBalanceDelta(User, balanceFilter, user, balanceDelta, {
+                service: 'mine',
+                jobName: 'minePayout',
+                guildId: interaction.guild.id,
+            });
+            if (!payout.credited) payoutOwed = balanceDelta;
             if (mineAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, user, interaction.member, mineAchievements).catch(() => null);
             }
@@ -805,6 +832,13 @@ async function handleDig(interaction) {
         const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'mine').catch(() => null);
 
         const embed = buildMineEmbed(result, user, depth, pickaxe, currency, interaction.user);
+
+        if (payoutOwed > 0) {
+            embed.addFields({
+                name: '⚠️ Payout Not Yet Credited',
+                value: `The **${currency}${payoutOwed.toLocaleString()}** from this haul could not be paid out just now and has been recorded as owed — the balance shown below does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
+            });
+        }
         {
             const desc = embed.data.description ?? '';
             const lines = [`> ⛏️ *${finalIcons} — Vein depth ${veinDepth}/3 → ${chosenIntensity.emoji} ${chosenIntensity.name} (${chosenIntensity.multiplier}×)*`];
@@ -2340,7 +2374,7 @@ const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils
 const _mineExecute = module.exports.execute;
 module.exports.execute = async function (interaction) {
     const lockKey   = `grind:mine:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = _lockAcquire(lockKey, 120_000);
+    const lockToken = await _lockAcquire(lockKey, 120_000);
     if (!lockToken) {
         return interaction.reply({
             content: '⛏️ You already have a mining action in progress — finish it first.',
@@ -2350,6 +2384,6 @@ module.exports.execute = async function (interaction) {
     try {
         return await _mineExecute(interaction);
     } finally {
-        _lockRelease(lockKey, lockToken);
+        await _lockRelease(lockKey, lockToken);
     }
 };

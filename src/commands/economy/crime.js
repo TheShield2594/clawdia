@@ -5,6 +5,7 @@ const { hasEffect, consumeEffect } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
 const { logTransaction } = require('../../utils/logTransaction');
+const { debitUpTo, incExpr } = require('../../utils/balanceDebit');
 const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, CRIME_WIN_LINES, CRIME_BUST_LINES, getCrimeFlavorText } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -398,19 +399,16 @@ module.exports = {
                         .setTimestamp();
                 } else if (isCriticalFailure) {
                     const lossRate = DEATH_LOSS_MIN + Math.random() * (DEATH_LOSS_MAX - DEATH_LOSS_MIN);
-                    const lost = Math.floor(user.balance * lossRate);
-                    const critSet = { lastCrime: crimeTime };
+                    const critSet = { lastCrime: crimeTime, 'crimeRecord.totalCrimes': incExpr('crimeRecord.totalCrimes', 1) };
                     if (wantedUntil) critSet.wantedUntil = wantedUntil;
-                    const updated = await User.findOneAndUpdate(
-                        userFilter,
-                        {
-                            $inc: { balance: -lost, 'crimeRecord.totalCrimes': 1 },
-                            $set: critSet,
-                        },
-                        { new: true }
+                    // The share is computed from a balance that may already have
+                    // moved, so the seizure is clamped inside the update rather
+                    // than against the read — `lost` is what was really taken.
+                    const { taken: lost, balance: critBalance } = await debitUpTo(
+                        User, userFilter, Math.floor((user.balance ?? 0) * lossRate), critSet,
                     );
 
-                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: updated.balance, note: `${crime.name} (critical failure, ${Math.round(lossRate * 100)}% seized, ${execMethod.id})` });
+                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_critical_fail', amount: -lost, balance: critBalance, note: `${crime.name} (critical failure, ${Math.round(lossRate * 100)}% seized, ${execMethod.id})` });
 
                     const critNarrative = getCrimeFlavorText(crime.name, 'fail')
                         .replace('{fine}', lost.toLocaleString())
@@ -419,7 +417,7 @@ module.exports = {
                         `${critNarrative}\n\n> *${flavorText}*\n\n` +
                         `────────────────────\n` +
                         `  💸 Seized: ${currency}${lost.toLocaleString()} coins  (${Math.round(lossRate * 100)}% of wallet)\n` +
-                        `  💰 Remaining: ${updated.balance.toLocaleString()} coins\n` +
+                        `  💰 Remaining: ${critBalance.toLocaleString()} coins\n` +
                         `────────────────────` +
                         wantedStr;
 
@@ -436,21 +434,16 @@ module.exports = {
                     let fine = Math.min(rawFine, maxFine);
                     fine = Math.round(fine * execMethod.fineMult);
                     if (undergroundActive) fine = Math.floor(fine * 0.85);
-                    const paid = Math.min(fine, user.balance);
-
-                    const setFields = { lastCrime: crimeTime };
+                    const setFields = { lastCrime: crimeTime, 'crimeRecord.totalCrimes': incExpr('crimeRecord.totalCrimes', 1) };
                     if (wantedUntil) setFields.wantedUntil = wantedUntil;
 
-                    const updated = await User.findOneAndUpdate(
-                        userFilter,
-                        {
-                            $inc: { balance: -paid, 'crimeRecord.totalCrimes': 1 },
-                            $set: setFields,
-                        },
-                        { new: true }
+                    // Clamped inside the update: the wallet the fine was sized
+                    // against may have emptied since. `paid` is the real figure.
+                    const { taken: paid, balance: finedBalance } = await debitUpTo(
+                        User, userFilter, fine, setFields,
                     );
 
-                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_fine', amount: -paid, balance: updated.balance, note: `${crime.name} (busted, ${execMethod.id})` });
+                    logTransaction({ userId: interaction.user.id, guildId: interaction.guild.id, type: 'crime_fine', amount: -paid, balance: finedBalance, note: `${crime.name} (busted, ${execMethod.id})` });
 
                     const bustNarrative = getCrimeFlavorText(crime.name, 'fail')
                         .replace('{fine}', paid.toLocaleString())
@@ -463,7 +456,7 @@ module.exports = {
                         .setDescription(`${bustNarrative}\n\n> *${flavorText}*${undergroundStr}${wantedStr}`)
                         .addFields(
                             { name: 'Fine Paid', value: `${currency}${paid.toLocaleString()}`, inline: true },
-                            { name: 'Balance',   value: `${currency}${updated.balance.toLocaleString()}`, inline: true }
+                            { name: 'Balance',   value: `${currency}${finedBalance.toLocaleString()}`, inline: true }
                         )
                         .setFooter({ text: `${execMethod.label} · Cooldown: 1.5h` })
                         .setTimestamp();

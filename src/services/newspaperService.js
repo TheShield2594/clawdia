@@ -5,6 +5,7 @@ const Case         = require('../models/Case');
 const Transaction  = require('../models/Transaction');
 const GrindProfile = require('../models/GrindProfile');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
+const { topByNetWorth } = require('../utils/netWorth');
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -13,11 +14,9 @@ async function collectStats(guildId, sections) {
     const data = {};
 
     if (sections.topEarners !== false) {
-        data.topEarners = await User.find({ guildId })
-            .sort({ balance: -1 })
-            .limit(5)
-            .select('userId balance')
-            .lean();
+        // Ranked on balance + bank so the paper's rich list matches the one
+        // `/leaderboard economy` and the dashboard print.
+        data.topEarners = await topByNetWorth(User, guildId, 5);
     }
 
     if (sections.levelUps !== false) {
@@ -89,9 +88,9 @@ function buildDataSummary(stats, usernameMap, currency, sections) {
     const lines = [];
 
     if (stats.topEarners?.length && sections.topEarners !== false) {
-        lines.push('TOP EARNERS (ALL-TIME BALANCE):');
+        lines.push('TOP EARNERS (NET WORTH — BALANCE + BANK):');
         stats.topEarners.forEach((u, i) =>
-            lines.push(`  ${i + 1}. ${usernameMap[u.userId] || 'Unknown'} — ${(u.balance || 0).toLocaleString()} ${currency}`)
+            lines.push(`  ${i + 1}. ${usernameMap[u.userId] || 'Unknown'} — ${(u.netWorth || 0).toLocaleString()} ${currency}`)
         );
     }
 
@@ -211,7 +210,7 @@ function buildFallbackNewspaper(stats, usernameMap, currency, sections, guildNam
         lines.push('**💰 Top Earners**');
         stats.topEarners.slice(0, 3).forEach((u, i) => {
             const medals = ['🥇', '🥈', '🥉'];
-            lines.push(`${medals[i]} **${usernameMap[u.userId] || 'Unknown'}** — ${(u.balance || 0).toLocaleString()} ${currency}`);
+            lines.push(`${medals[i]} **${usernameMap[u.userId] || 'Unknown'}** — ${(u.netWorth || 0).toLocaleString()} ${currency}`);
         });
         lines.push('');
     }

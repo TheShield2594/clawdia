@@ -37,6 +37,13 @@ const client = new Client({
 });
 
 client.commands = new Collection();
+// Process-local, and correctly so: this is a UX pre-check that answers "you are
+// on cooldown" without a database round trip on every interaction. It is not
+// what enforces a cooldown — every command that pays out claims its own window
+// atomically in Mongo (`lastWork`/`lastDaily`/`lastCrime`/`lastRob` in the
+// update filter, `data.lastCast` on GrindProfile for the grinds), which is what
+// a second process or a restart would still be bound by. See
+// tests/economyCooldownClaims.test.js, which holds that line.
 client.cooldowns = new Collection();
 
 async function loadCommands() {

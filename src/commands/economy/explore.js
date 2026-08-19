@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
+const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceDelta');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const {
@@ -308,6 +309,16 @@ async function handleGo(interaction) {
     // that save lands the player has nothing to show for the cooldown they just
     // paid for. Hand the slot back on the way out unless the expedition committed.
     let exploreCommitted = false;
+
+    // The expedition writes coins twice — once for the find, once after the (up
+    // to 20s) encounter prompt — and `save()` writes `balance` as an absolute
+    // `$set`. Both movements are collected as deltas against this baseline and
+    // applied as atomic `$inc`s, so neither save can flatten coins spent
+    // elsewhere in between. See src/utils/balanceDelta.js.
+    let balanceBaseline = user.balance ?? 0;
+    const balanceFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+    let payoutOwed = 0;
+
     try {
 
         // ── Run the expedition ────────────────────────────────────────────────────
@@ -318,9 +329,19 @@ async function handleGo(interaction) {
         // Commit stamina spend + cooldown timestamp now, before the (up to 20s)
         // encounter prompt below. Once this lands the expedition is real, so the
         // cooldown slot is earned and must not be handed back on a later failure.
+        const findDelta = detachBalanceDelta(user, balanceBaseline);
         try {
             await user.save();
             exploreCommitted = true;
+            const paid = await commitBalanceDelta(User, balanceFilter, user, findDelta, {
+                service: 'explore',
+                jobName: 'findPayout',
+                guildId: interaction.guild.id,
+            });
+            if (!paid.credited) payoutOwed += findDelta;
+            // The credit moved the balance; the encounter's delta is measured
+            // from here, not from what was read before the expedition ran.
+            balanceBaseline = user.balance ?? 0;
         } catch (err) {
             // Nothing was saved, so give the cooldown slot back before telling them to retry.
             await releaseExploreClaim();
@@ -412,8 +433,15 @@ async function handleGo(interaction) {
             questsNear = earn.nearComplete;
         }
 
+        const encounterDelta = detachBalanceDelta(user, balanceBaseline);
         try {
             await user.save();
+            const paid = await commitBalanceDelta(User, balanceFilter, user, encounterDelta, {
+                service: 'explore',
+                jobName: 'encounterPayout',
+                guildId: interaction.guild.id,
+            });
+            if (!paid.credited) payoutOwed += encounterDelta;
         } catch (err) {
             if (isVersionError(err)) {
                 return interaction.editReply({ content: 'A simultaneous request tangled your expedition log. Try `/explore go` again.', embeds: [], components: [] });
@@ -449,6 +477,14 @@ async function handleGo(interaction) {
 
         // ── Result embed ──────────────────────────────────────────────────────────
         const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings);
+
+        if (payoutOwed > 0) {
+            embed.addFields({
+                name: '⚠️ Payout Not Yet Credited',
+                value: `The **${currency}${payoutOwed.toLocaleString()}** from this expedition could not be paid out just now and has been recorded as owed — the balance shown below does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
+            });
+        }
+
         await interaction.editReply({ embeds: [embed], components: [] });
 
         // Server-wide whisper for secrets
@@ -1030,7 +1066,7 @@ const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils
 const _exploreExecute = module.exports.execute;
 module.exports.execute = async function (interaction) {
     const lockKey   = `grind:explore:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = _lockAcquire(lockKey, 120_000);
+    const lockToken = await _lockAcquire(lockKey, 120_000);
     if (!lockToken) {
         return interaction.reply({
             content: '🥾 You already have an exploration action in progress — finish it first.',
@@ -1040,6 +1076,6 @@ module.exports.execute = async function (interaction) {
     try {
         return await _exploreExecute(interaction);
     } finally {
-        _lockRelease(lockKey, lockToken);
+        await _lockRelease(lockKey, lockToken);
     }
 };

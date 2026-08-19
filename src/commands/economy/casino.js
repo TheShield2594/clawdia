@@ -99,7 +99,7 @@ module.exports = {
         // One active casino game per user — prevents concurrent sessions from racing
         // each other's debits, effects, and jackpot snapshots.
         const lockKey   = `casino:${interaction.guild.id}:${interaction.user.id}`;
-        const lockToken = tryAcquire(lockKey);
+        const lockToken = await tryAcquire(lockKey);
         if (!lockToken) {
             return interaction.reply({
                 content: '🎰 You already have a casino game in progress — finish it first.',
@@ -120,11 +120,14 @@ module.exports = {
         // early-return path, the lock's own TTL (10 min) frees the slot —
         // worst case the player is blocked from a second casino game for
         // that long, never permanently.
+        // Fire-and-forget: the games call this from collector callbacks that
+        // cannot await, and a release that loses its round trip is covered by
+        // the lease's own TTL.
         let released = false;
         const releaseLock = () => {
             if (released) return;
             released = true;
-            release(lockKey, lockToken);
+            release(lockKey, lockToken).catch(err => console.error('[casino] lock release failed:', err));
         };
 
         try {

@@ -4,18 +4,13 @@ const Guild = require('../../../models/Guild');
 const User = require('../../../models/User');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
+const { topByNetWorth } = require('../../../utils/netWorth');
 
 router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
         const [topEarners, totalCoinsAgg, activeUsersCount, guildSettings] = await Promise.all([
-            User.aggregate([
-                { $match: { guildId } },
-                { $addFields: { total: { $add: ['$balance', '$bank'] } } },
-                { $sort: { total: -1 } },
-                { $limit: 10 },
-                { $project: { _id: 0, userId: 1, balance: 1, bank: 1, total: 1 } }
-            ]),
+            topByNetWorth(User, guildId, 10),
             User.aggregate([{ $match: { guildId } }, { $group: { _id: null, total: { $sum: { $add: ['$balance', '$bank'] } } } }]),
             User.countDocuments({ guildId, $or: [
                 { lastWork:  { $gte: new Date(Date.now() - 7 * 864e5) } },
@@ -54,7 +49,7 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
                 userTag: ecoUserMap[u.userId]?.tag || null,
                 avatarUrl: ecoUserMap[u.userId]?.avatarUrl || null,
                 balance: u.balance, bank: u.bank,
-                total: (u.balance || 0) + (u.bank || 0)
+                total: u.netWorth
             })),
             commandFrequency: Object.entries(commandFrequency).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([cmd, count]) => ({ cmd, count }))
         });

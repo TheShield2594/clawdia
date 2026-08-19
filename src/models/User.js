@@ -43,10 +43,18 @@ const userSchema = new Schema({
     messages: { type: Number, default: 0 },
     lastXpGain: { type: Date, default: null },
 
-    balance: { type: Number, default: 0 },
-    bank: { type: Number, default: 0 },
+    // `min: 0` is a backstop, not the guard. Mongoose only runs validators on
+    // `save()` and on updates that opt in with `runValidators`, and nearly every
+    // economy write is a bare `$inc` / `findOneAndUpdate` that does neither — so
+    // this catches a read-modify-`save()` path going negative and nothing else.
+    // The real protection is the `balance: { $gte: cost }` filter on each debit
+    // (checked across the codebase by tests/balanceDebitGuard.test.js) and the
+    // clamp-inside-the-update in src/utils/balanceDebit.js.
+    balance: { type: Number, default: 0, min: 0 },
+    bank: { type: Number, default: 0, min: 0 },
     lastDaily: { type: Date, default: null },
     lastWork: { type: Date, default: null },
+    lastQuiz: { type: Date, default: null },
     lastSnowball: { type: Date, default: null },
     lastTrickOrTreat: { type: Date, default: null },
     lastSandcastle: { type: Date, default: null },

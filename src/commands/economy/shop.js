@@ -14,6 +14,7 @@ const { ensureDefaultShopItems, getItemLore, getItemRarity, isPrestigeItem, isBl
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse } = require('../../utils/shopBrowse');
 const { logTransaction } = require('../../utils/logTransaction');
+const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { ensurePricingFields, trendBucket } = require('../../utils/dynamicPricing');
 const { hasUnlock } = require('../../utils/prestige');
 
@@ -567,37 +568,8 @@ module.exports = {
                 // otherwise append a new entry. Done in one call so concurrent buys
                 // can't race between an unsuccessful $inc and a guarded $push and
                 // lose units.
-                const stockedUser = await User.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id },
-                    [{
-                        $set: {
-                            inventory: {
-                                $cond: {
-                                    if: { $in: [inventoryId, { $ifNull: ['$inventory.itemId', []] }] },
-                                    then: {
-                                        $map: {
-                                            input: '$inventory',
-                                            as: 'slot',
-                                            in: {
-                                                $cond: [
-                                                    { $eq: ['$$slot.itemId', inventoryId] },
-                                                    { itemId: '$$slot.itemId', quantity: { $add: ['$$slot.quantity', quantity] } },
-                                                    '$$slot'
-                                                ]
-                                            }
-                                        }
-                                    },
-                                    else: {
-                                        $concatArrays: [
-                                            { $ifNull: ['$inventory', []] },
-                                            [{ itemId: inventoryId, quantity }]
-                                        ]
-                                    }
-                                }
-                            }
-                        }
-                    }],
-                    { new: true }
+                const stockedUser = await grantInventoryItem(
+                    interaction.user.id, interaction.guild.id, inventoryId, quantity
                 ).catch(err => {
                     console.error('[shop] inventory grant failed:', err);
                     return null;

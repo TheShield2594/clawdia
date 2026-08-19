@@ -6,6 +6,7 @@ const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getSalaryMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
+const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
 const { generateWorkChallenge } = require('../../utils/workChallenge');
 const { getTotalBonus } = require('../../services/petService');
@@ -229,21 +230,11 @@ module.exports = {
                 return interaction.reply({ content: "You're already working a shift right now!", flags: MessageFlags.Ephemeral });
             }
 
-            // Inventory update for lucky find (separate, non-financial — no race risk)
+            // Inventory update for lucky find. The slot test and the write happen
+            // inside one atomic update — the read-then-push it replaced let two
+            // concurrent finds both push and strand a quantity in the second slot.
             if (specialEvent?.item) {
-                const itemId = specialEvent.item.itemId;
-                const hasItem = user.inventory?.some(i => i.itemId === itemId);
-                if (hasItem) {
-                    await User.findOneAndUpdate(
-                        { userId: interaction.user.id, guildId: interaction.guild.id, 'inventory.itemId': itemId },
-                        { $inc: { 'inventory.$.quantity': 1 } }
-                    );
-                } else {
-                    await User.findOneAndUpdate(
-                        { userId: interaction.user.id, guildId: interaction.guild.id },
-                        { $push: { inventory: { itemId, quantity: 1 } } }
-                    );
-                }
+                await grantInventoryItem(interaction.user.id, interaction.guild.id, specialEvent.item.itemId, 1);
             }
 
             logTransaction({

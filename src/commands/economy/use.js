@@ -9,6 +9,7 @@ const {
     timeRemaining,
 } = require('../../services/effectsService');
 const { getItemLore } = require('../../data/defaultShopItems');
+const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
 const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../services/petService');
 
@@ -343,18 +344,10 @@ module.exports = {
                 return interaction.reply({ content: `You don't have **${itemName}** in your inventory.`, flags: MessageFlags.Ephemeral });
             }
 
-            // Credit the won item atomically, then clean up zeros
-            await User.findOneAndUpdate(
-                { ...userFilter, 'inventory.itemId': won.itemId },
-                { $inc: { 'inventory.$.quantity': 1 } }
-            ).then(async matched => {
-                if (!matched) {
-                    await User.findOneAndUpdate(
-                        userFilter,
-                        { $push: { inventory: { itemId: won.itemId, quantity: 1 } } }
-                    );
-                }
-            });
+            // Credit the won item in one atomic update, then clean up zeros. The
+            // match-then-push it replaced could leave two slots for the same item
+            // when two boxes opened at once, stranding the second slot's quantity.
+            await grantInventoryItem(userFilter.userId, userFilter.guildId, won.itemId, 1);
 
             // Clean up zero-quantity entries
             await User.findOneAndUpdate(userFilter, { $pull: { inventory: { quantity: { $lte: 0 } } } });

@@ -15,6 +15,7 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
+const { grantInventoryItem } = require('../utils/inventoryGrant');
 const QUIZ_FALLBACK = require('../data/quizFallback');
 
 const EVENT_CHANCE         = 0.04;
@@ -186,18 +187,10 @@ async function spawnCrate(message, guildSettings) {
         // Reserve before the first await; only stop the collector once persisted.
         claimed = true;
         try {
-            // Increment existing inventory slot, or push a new one
-            const res = await User.updateOne(
-                { userId: i.user.id, guildId: message.guild.id, 'inventory.itemId': item.itemId },
-                { $inc: { 'inventory.$.quantity': 1 } }
-            );
-            if (res.matchedCount === 0) {
-                await User.updateOne(
-                    { userId: i.user.id, guildId: message.guild.id },
-                    { $push: { inventory: { itemId: item.itemId, quantity: 1 } }, $setOnInsert: { userId: i.user.id, guildId: message.guild.id } },
-                    { upsert: true }
-                );
-            }
+            // One atomic update: bumps the existing slot or appends one. The
+            // match-then-push it replaced let two claimants both miss the slot
+            // and both push, stranding a unit in the duplicate.
+            await grantInventoryItem(i.user.id, message.guild.id, item.itemId, 1, { upsert: true });
         } catch (err) {
             claimed = false;
             console.error('[chatEvent] crate award failed:', err);

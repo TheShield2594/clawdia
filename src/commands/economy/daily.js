@@ -4,6 +4,7 @@ const Guild = require('../../models/Guild');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
+const { inventoryAddExpr } = require('../../utils/inventoryGrant');
 const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
 const { generateDailyChallenge } = require('../../utils/dailyChallenge');
 const { DROP_TABLE, RARE_DROP_TABLE, DROP_MILESTONES, DROP_BASE_CHANCE, weightedRandom } = require('../../data/dailyDropTable');
@@ -380,16 +381,26 @@ module.exports = {
             if (rollDrop) {
                 droppedItem = weightedRandom(isMilestone ? RARE_DROP_TABLE : DROP_TABLE);
 
-                const dropUpdate = droppedItem.streakFlag
-                    ? { $set: { 'streak.revivalToken': true } }
-                    : { $push: { inventory: { itemId: droppedItem.itemId, quantity: 1 } } };
-
+                // One atomic pipeline update so the drop and the milestone claim
+                // commit together. The bare `$push` this replaced added a second
+                // slot whenever the user already held the item, stranding the
+                // quantity in it — every reader takes the first matching slot.
+                //
+                // `$setUnion` is the pipeline form of `$addToSet`: operator-syntax
+                // updates can't be mixed into an aggregation-pipeline update.
+                const dropSet = {};
+                if (droppedItem.streakFlag) dropSet['streak.revivalToken'] = true;
                 if (isMilestone) {
-                    dropUpdate.$addToSet = { 'streak.claimedDropMilestones': streakCurrent };
+                    dropSet['streak.claimedDropMilestones'] = {
+                        $setUnion: [{ $ifNull: ['$streak.claimedDropMilestones', []] }, [streakCurrent]],
+                    };
                 }
                 await User.findOneAndUpdate(
                     { userId: interaction.user.id, guildId: interaction.guild.id },
-                    dropUpdate
+                    [{ $set: {
+                        ...(droppedItem.streakFlag ? {} : { inventory: inventoryAddExpr(droppedItem.itemId, 1) }),
+                        ...dropSet,
+                    } }]
                 );
 
                 logTransaction({

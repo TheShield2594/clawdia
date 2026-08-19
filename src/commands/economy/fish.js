@@ -10,6 +10,7 @@ const {
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
+const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceDelta');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
@@ -546,6 +547,15 @@ async function handleCast(interaction) {
     // result is persisted the player has nothing to show for the cooldown they
     // just paid for. Hand the slot back on the way out unless the cast committed.
     let castCommitted = false;
+
+    // Everything below runs across the bite delay and the reel-in prompt — up to
+    // ~8 seconds during which the player can spend coins somewhere else. The
+    // cast's own coin movement is collected as a delta against this reading and
+    // applied as an atomic `$inc` at the save, so `save()` never writes an
+    // absolute balance read before that window. See src/utils/balanceDelta.js.
+    const balanceAtLoad = user.balance ?? 0;
+    const balanceFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
+
     try {
 
         // Bait comes out only once the cooldown slot is ours, so a lost race never
@@ -797,9 +807,26 @@ async function handleCast(interaction) {
 
         const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
+        // Hand the cast's coin movement to an atomic `$inc` and take `balance`
+        // out of the save. An escape reverses its own mutations, so that path
+        // simply produces a delta of zero and issues no write.
+        const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
+
+        let payoutOwed = 0;
         try {
             await user.save();
             castCommitted = true;
+            // Only after the save has landed: a credit applied before a save that
+            // then failed would pay for a cast the player could take again. The
+            // save and the credit cannot be one write on a standalone mongod, so
+            // a credit that will not land is recorded as owed and said out loud
+            // rather than logged and forgotten.
+            const payout = await commitBalanceDelta(User, balanceFilter, user, balanceDelta, {
+                service: 'fish',
+                jobName: 'castPayout',
+                guildId: interaction.guild.id,
+            });
+            if (!payout.credited) payoutOwed = balanceDelta;
             if (fishAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, user, interaction.member, fishAchievements).catch(() => null);
             }
@@ -853,6 +880,13 @@ async function handleCast(interaction) {
         }
 
         const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
+
+        if (payoutOwed > 0) {
+            embed.addFields({
+                name: '⚠️ Payout Not Yet Credited',
+                value: `The **${currency}${payoutOwed.toLocaleString()}** from this catch could not be paid out just now and has been recorded as owed — the balance shown below does not include it. It will be applied once the problem clears; tell an admin if it does not.`,
+            });
+        }
 
         if (result.petYieldBonus > 0) {
             embed.addFields({ name: '🐠 Pet Bonus', value: `+${result.petYieldBonus.toLocaleString()} coins (${petFishYieldPct}% yield)`, inline: true });
@@ -2147,11 +2181,24 @@ async function handleBuyRod(interaction, user, currency) {
         await attachGrind(freshUser);
         ensureFishingData(freshUser);
 
-        if (freshUser.balance < rodData.cost) {
+        // The charge is a guarded atomic debit, not `balance -= cost` followed by
+        // a save. This runs in a button callback up to 30 seconds after the
+        // confirmation was drawn, and `save()` writes balance as an absolute
+        // `$set` — long enough for a casino bet in another channel to be wiped by
+        // a rod purchase. The lock the command holds does not help: casino takes
+        // a different key.
+        const debited = await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: rodData.cost } },
+            { $inc: { balance: -rodData.cost } },
+            { new: true, projection: { balance: 1 } },
+        );
+        if (!debited) {
             return btn.update({ content: `Insufficient funds. You need ${currency}${rodData.cost.toLocaleString()}.`, embeds: [], components: [] });
         }
 
-        freshUser.balance -= rodData.cost;
+        // Take the authoritative balance and keep the save off that path.
+        freshUser.balance = debited.balance;
+        freshUser.unmarkModified('balance');
         freshUser.fishing.rods.push({
             name:              rodData.name,
             tier:              rodData.tier,
@@ -2169,7 +2216,13 @@ async function handleBuyRod(interaction, user, currency) {
             await freshUser.save();
         } catch (err) {
             console.error('[fishshop rod] save error:', err);
-            return btn.update({ content: 'Something went wrong. Please try again.', embeds: [], components: [] });
+            // The coins are already gone; hand them back rather than charging for
+            // a rod that was never added.
+            await User.updateOne(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: rodData.cost } },
+            ).catch(refundErr => console.error('[fishshop rod] refund after failed save:', refundErr));
+            return btn.update({ content: 'Something went wrong and your coins were refunded. Please try again.', embeds: [], components: [] });
         }
 
         const rodIndex = freshUser.fishing.rods.length;
@@ -2259,10 +2312,6 @@ async function handleBuyUpgrade(interaction, user, currency) {
         await attachGrind(freshUser);
         ensureFishingData(freshUser);
 
-        if (freshUser.balance < cost) {
-            return btn.update({ content: 'Insufficient funds.', embeds: [], components: [] });
-        }
-
         const freshRod = freshUser.fishing.rods[targetRodIndex];
         if (!freshRod) {
             return btn.update({ content: 'That rod is no longer in your inventory.', embeds: [], components: [] });
@@ -2271,7 +2320,21 @@ async function handleBuyUpgrade(interaction, user, currency) {
             return btn.update({ content: `**${freshRod.name}** already has an upgrade installed.`, embeds: [], components: [] });
         }
 
-        freshUser.balance -= cost;
+        // Guarded atomic debit for the same reason as the rod purchase above: this
+        // lands up to 30 seconds after the prompt, and a `save()` would write an
+        // absolute balance over anything spent in between. Charged only once the
+        // rod is known to be upgradeable, so a rejected install costs nothing.
+        const debited = await User.findOneAndUpdate(
+            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: cost } },
+            { $inc: { balance: -cost } },
+            { new: true, projection: { balance: 1 } },
+        );
+        if (!debited) {
+            return btn.update({ content: 'Insufficient funds.', embeds: [], components: [] });
+        }
+
+        freshUser.balance = debited.balance;
+        freshUser.unmarkModified('balance');
         freshRod.upgrade   = upgradeId;
         freshUser.markModified('fishing');
 
@@ -2279,7 +2342,13 @@ async function handleBuyUpgrade(interaction, user, currency) {
             await freshUser.save();
         } catch (err) {
             console.error('[fishshop upgrade] save error:', err);
-            return btn.update({ content: 'Something went wrong. Please try again.', embeds: [], components: [] });
+            // The coins are already gone; hand them back rather than charging for
+            // an upgrade that was never installed.
+            await User.updateOne(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                { $inc: { balance: cost } },
+            ).catch(refundErr => console.error('[fishshop upgrade] refund after failed save:', refundErr));
+            return btn.update({ content: 'Something went wrong and your coins were refunded. Please try again.', embeds: [], components: [] });
         }
 
         return btn.update({
@@ -3176,7 +3245,7 @@ const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils
 const _fishExecute = module.exports.execute;
 module.exports.execute = async function (interaction) {
     const lockKey   = `grind:fish:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = _lockAcquire(lockKey, 120_000);
+    const lockToken = await _lockAcquire(lockKey, 120_000);
     if (!lockToken) {
         return interaction.reply({
             content: '🎣 You already have a fishing action in progress — finish it first.',
@@ -3186,6 +3255,6 @@ module.exports.execute = async function (interaction) {
     try {
         return await _fishExecute(interaction);
     } finally {
-        _lockRelease(lockKey, lockToken);
+        await _lockRelease(lockKey, lockToken);
     }
 };

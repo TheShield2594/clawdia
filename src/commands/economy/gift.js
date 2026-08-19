@@ -3,6 +3,7 @@ const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getItemLore } = require('../../data/defaultShopItems');
 const { logTransaction } = require('../../utils/logTransaction');
+const { grantInventoryItem } = require('../../utils/inventoryGrant');
 
 const DAILY_COIN_CAP = 10_000;
 // Incoming cap is higher than the outgoing cap (several friends can legitimately
@@ -14,32 +15,12 @@ const MIN_ACCOUNT_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 // Items that cannot be gifted (soulbound — matches market.js)
 const SOULBOUND_ITEMS = new Set(['lifesaver', 'streak_shield']);
 
-// Add `qty` of `itemId` to a user's inventory without reading it first: bump the
-// existing slot if there is one, otherwise push a new slot, guarding the push so
-// two concurrent credits can never create duplicate slots for the same item.
+// Add `qty` of `itemId` to a user's inventory without reading it first. The
+// three-step bump/guarded-push/bump dance this used to spell out is now one
+// atomic pipeline update shared with every other credit site.
 // Returns the updated document, or null if the user document does not exist.
-async function addInventoryItem(userId, guildId, itemId, qty) {
-    const bumped = await User.findOneAndUpdate(
-        { userId, guildId, 'inventory.itemId': itemId },
-        { $inc: { 'inventory.$.quantity': qty } },
-        { new: true }
-    );
-    if (bumped) return bumped;
-
-    const pushed = await User.findOneAndUpdate(
-        { userId, guildId, 'inventory.itemId': { $ne: itemId } },
-        { $push: { inventory: { itemId, quantity: qty } } },
-        { new: true }
-    );
-    if (pushed) return pushed;
-
-    // A concurrent write created the slot between the two calls — bump it now.
-    return User.findOneAndUpdate(
-        { userId, guildId, 'inventory.itemId': itemId },
-        { $inc: { 'inventory.$.quantity': qty } },
-        { new: true }
-    );
-}
+const addInventoryItem = (userId, guildId, itemId, qty) =>
+    grantInventoryItem(userId, guildId, itemId, qty);
 
 module.exports = {
     data: new SlashCommandBuilder()

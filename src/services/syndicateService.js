@@ -1,5 +1,11 @@
 // In-memory state for active syndicate heist lobbies, keyed by guildId.
 // Only one syndicate heist can run per guild at a time.
+//
+// Process-bound for the same reason as src/services/heistService.js: the run is
+// a chain of collector-driven prompts on live messages. A second process would
+// allow two concurrent runs per guild and a restart abandons one; the payout is
+// an `$inc` per participant at the end, so neither pays anyone twice. Money is
+// gated by the Mongo-backed per-user lock in src/utils/activeGameLock.js.
 
 const activeSyndicateHeists = new Map();
 
