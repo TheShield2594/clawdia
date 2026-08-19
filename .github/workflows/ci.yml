@@ -16,6 +16,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Without this a hung step runs until GitHub's 6-hour default. One did: an
+    # apt mirror stopped responding and the job sat for 49 minutes before anyone
+    # looked, with the tests never started. The suite itself takes ~10s.
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,10 +36,26 @@ jobs:
       # normally needs no toolchain. These headers are kept as a fallback: if a
       # future Node ABI or platform has no prebuild, node-gyp compiles from
       # source and needs them, and a missing header here is a confusing failure.
+      #
+      # Because it is a fallback, it must never be able to decide the run.
+      # `continue-on-error` is the point of this step's configuration, not the
+      # timeouts: a bounded step that still fails the job would turn every apt
+      # outage into a red PR, when the packages are usually not needed at all.
+      # If a build genuinely needs them, `npm ci` fails on the next step with a
+      # node-gyp error naming the missing header, which is the clearer signal.
+      #
+      # The apt options bound each mirror connection rather than letting it hang
+      # forever, which is the failure that prompted all of this.
       - name: Install native build dependencies for canvas (fallback path)
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          APT_OPTS: -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+          sudo apt-get $APT_OPTS update
+          sudo apt-get $APT_OPTS install -y \
+            libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
 
       - name: Install dependencies
         run: npm ci
