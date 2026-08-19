@@ -19,6 +19,7 @@ const { hasEffect, consumeEffect, getEffect, getGatheringYieldEffect, EFFECT_CON
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
 const { getHuntSynergyStaminaBonus } = require('./synergyService');
+const { MAX_STAMINA_UPGRADES } = require('../data/crossSystemData');
 const { getBonusMultipliers } = require('../utils/prestige');
 
 // Zones where a critical failure can destroy your weapon (death event)
@@ -97,7 +98,9 @@ function getMaxStamina(user) {
     const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
     const synergyBonus = getHuntSynergyStaminaBonus(user);
     const trophyBonus  = user.hunt?.woodlandInstinct ? 1 : 0;
-    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus + trophyBonus;
+    // Permanent Stamina +1 from the shop, applied through /use.
+    const purchased = Math.min(Math.max(0, user?.staminaUpgrades ?? 0), MAX_STAMINA_UPGRADES);
+    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus + trophyBonus + purchased;
 }
 
 /**

@@ -5,6 +5,8 @@ const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { getCoinMultiplier, getSalaryMultiplier, getServerCoinMultiplier } = require('../../services/effectsService');
+const { getMerchantCoinBonus } = require('../../services/synergyService');
+const { attachGrind } = require('../../utils/grindProfile');
 const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { MAX_COMBINED_MULTIPLIER, clampMultiplier } = require('../../config/economy');
@@ -145,6 +147,11 @@ module.exports = {
                 Guild.findOne({ guildId: interaction.guild.id })
             ]);
 
+            // Synergy requirements read hunt/fishing/mining levels, and those
+            // live in GrindProfile — they are simply absent from a bare User
+            // document, so the Merchant bonus below would silently never fire.
+            await attachGrind(user, ['hunt', 'fishing', 'mining']);
+
             const now = Date.now();
             // Streak-based cooldown reduction: 7–29 day streak → 50min, 30+ → 45min
             const streakDays = user.streak?.current ?? 0;
@@ -185,7 +192,10 @@ module.exports = {
             const coinMult    = getCoinMultiplier(user);
             const serverMult  = getServerCoinMultiplier(guildSettings);
             const petWorkBonus = 1 + getTotalBonus(user.pets || [], 'work_earnings') / 100;
-            const rawCombined = streakMult * salaryMult * coinMult * serverMult * petWorkBonus;
+            // Merchant synergy: +5% while carrying anything at all. Defined and
+            // exported since the synergies shipped, and never once read.
+            const merchantMult = 1 + getMerchantCoinBonus(user);
+            const rawCombined = streakMult * salaryMult * coinMult * serverMult * petWorkBonus * merchantMult;
             const combined    = clampMultiplier(rawCombined);
             const capActive   = rawCombined > MAX_COMBINED_MULTIPLIER;
             const earned      = Math.round(basedEarned * combined);

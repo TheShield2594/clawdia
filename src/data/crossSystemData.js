@@ -123,9 +123,14 @@ const SYNERGIES = {
 
 const SYNERGY_LIST = Object.values(SYNERGIES);
 
+// How many "Permanent Stamina +1" shop items one player can stack. Mirrors the
+// max on User.staminaUpgrades, and matches the other stackable permanent buys.
+const MAX_STAMINA_UPGRADES = 3;
+
 module.exports = {
     CROSS_CONSUMABLES,
     CROSS_CRAFT_RECIPES,
     SYNERGIES,
-    SYNERGY_LIST
+    SYNERGY_LIST,
+    MAX_STAMINA_UPGRADES
 };

@@ -281,6 +281,9 @@ const userSchema = new Schema({
 
     // Permanent crime success bonus stacks from Black Market Contract (max 3)
     crimeContractStacks: { type: Number, default: 0, min: 0, max: 3 },
+    // Permanent Stamina +1, consumed from the shop item via /use. Adds to the
+    // max stamina of every grind system that has one.
+    staminaUpgrades:     { type: Number, default: 0, min: 0, max: 3 },
 
     // Transient social badges (war victor, leaderboard #1, etc.) with optional expiry
     badges: [{

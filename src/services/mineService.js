@@ -14,7 +14,8 @@ const {
 } = require('../data/mineData');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
-const { hasIronWill } = require('./synergyService');
+const { hasIronWill, getMineDeepProspectorStaminaBonus, getArtificerMineStaminaBonus, getArtificerMineYieldBonus } = require('./synergyService');
+const { MAX_STAMINA_UPGRADES } = require('../data/crossSystemData');
 const { getBonusMultipliers } = require('../utils/prestige');
 const { getGatheringYieldEffect, consumeEffect, getEffect, EFFECT_CONFIGS } = require('./effectsService');
 
@@ -86,7 +87,12 @@ function ensureMineData(user) {
 function getMaxStamina(user) {
     const prestige = user.mining?.prestige ?? 0;
     const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
-    return LIMITS.MAX_STAMINA_BASE + bonus;
+    // Deep Prospector and Artificer both advertise +1 max mining stamina. Neither
+    // was ever read here, so both delivered nothing.
+    const synergyBonus = getMineDeepProspectorStaminaBonus(user) + getArtificerMineStaminaBonus(user);
+    // Permanent Stamina +1 from the shop, applied through /use.
+    const purchased = Math.min(Math.max(0, user?.staminaUpgrades ?? 0), MAX_STAMINA_UPGRADES);
+    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus + purchased;
 }
 
 function applyStaminaRegen(user) {
@@ -307,6 +313,10 @@ function applyPayoutModifiers(user, rawPayout, depth) {
     const p = Math.min(m.prestige, PRESTIGE_BONUSES.length - 1);
     const presBonus = PRESTIGE_BONUSES[p].payoutBonus;
     if (presBonus > 0) payout *= (1 + presBonus);
+
+    // Artificer advertises +5% ore yield. Nothing read it until now.
+    const artificerBonus = getArtificerMineYieldBonus(user);
+    if (artificerBonus > 0) payout *= (1 + artificerBonus);
 
     if (m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_3) {
         payout *= 0.55;

@@ -12,6 +12,7 @@ const { getItemLore } = require('../../data/defaultShopItems');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
 const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../services/petService');
+const { MAX_STAMINA_UPGRADES } = require('../../data/crossSystemData');
 
 // itemId of a seasonal loot box -> the event definition that owns it
 const LOOT_BOX_EVENTS = new Map(
@@ -199,6 +200,44 @@ module.exports = {
                 .setDescription(
                     `A permanent +5% crime success bonus has been added to your record.\n\n` +
                     `**Contract stacks:** ${newStacks} / ${MAX_STACKS} (+${newStacks * 5}% total bonus)`
+                )
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        // ── Permanent Stamina +1 ───────────────────────────────────────────────
+        if (canonicalId.toLowerCase() === 'permanent_stamina') {
+            if ((preview.staminaUpgrades ?? 0) >= MAX_STAMINA_UPGRADES) {
+                return interaction.reply({
+                    content: `⚡ You already have all **${MAX_STAMINA_UPGRADES}** stamina upgrades. There is no more endurance to buy.`,
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            const user = await User.findOneAndUpdate(
+                {
+                    ...userFilter,
+                    inventory: { $elemMatch: { itemId: canonicalId, quantity: { $gt: 0 } } },
+                    staminaUpgrades: { $lt: MAX_STAMINA_UPGRADES },
+                },
+                { $inc: { 'inventory.$.quantity': -1, staminaUpgrades: 1 } },
+                { new: true }
+            );
+            if (!user) {
+                return interaction.reply({ content: "Couldn't apply the upgrade — you may be at the cap already.", flags: MessageFlags.Ephemeral });
+            }
+
+            user.inventory = user.inventory.filter(e => e.quantity > 0);
+            await user.save();
+
+            const owned = user.staminaUpgrades ?? 0;
+            const embed = new EmbedBuilder()
+                .setColor('#f1c40f')
+                .setTitle('⚡ Stamina Raised')
+                .setDescription(
+                    `Your maximum stamina in hunting, fishing and mining is now **+${owned}**.\n\n` +
+                    `**Upgrades:** ${owned} / ${MAX_STAMINA_UPGRADES}`
                 )
                 .setTimestamp();
 

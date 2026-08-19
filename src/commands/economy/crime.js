@@ -2,6 +2,8 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasEffect, consumeEffect } = require('../../services/effectsService');
+const { getMerchantCoinBonus } = require('../../services/synergyService');
+const { attachGrind } = require('../../utils/grindProfile');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { clampMultiplier } = require('../../config/economy');
 const { logTransaction } = require('../../utils/logTransaction');
@@ -170,6 +172,10 @@ module.exports = {
         }
 
         const user = claimed;
+        // Synergy requirements read hunt/fishing/mining levels, and those live in
+        // GrindProfile — absent from a bare User document, so the Merchant bonus
+        // on the payout below would silently never fire.
+        await attachGrind(user, ['hunt', 'fishing', 'mining']);
 
         // ── Step 1: Choose the crime ────────────────────────────────────────────
         const featured = getDailyFeatured(interaction.guild.id);
@@ -313,7 +319,8 @@ module.exports = {
             if (success) {
                 const isFeaturedCrime = crime.name === featured.crime.name;
                 const baseEarned = Math.floor(crime.minPayout + Math.random() * (crime.maxPayout - crime.minPayout));
-                let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult);
+                // Merchant synergy: +5% while carrying anything at all.
+                let earned = Math.round(baseEarned * streakMult * execMethod.payoutMult * (1 + getMerchantCoinBonus(user)));
                 if (isFeaturedCrime) earned = Math.round(earned * (1 + FEATURED_PAYOUT_BONUS));
 
                 const updated = await User.findOneAndUpdate(
