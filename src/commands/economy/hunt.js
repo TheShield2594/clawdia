@@ -1524,7 +1524,7 @@ async function executeProfile(interaction) {
     embed.addFields({ name: '🗺️ Unlocked Zones', value: zoneList || 'Beginner Forest only', inline: true });
 
     if (h.trophies?.length) {
-        embed.addFields({ name: '🏆 Trophies', value: h.trophies.join(', '), inline: true });
+        embed.addFields(buildTrophyField(h.trophies));
     }
 
     // Cross-system synergies
@@ -1551,6 +1551,39 @@ async function executeProfile(interaction) {
 
     embed.setTimestamp();
     return interaction.reply({ embeds: [embed] });
+}
+
+/**
+ * The trophy case, clamped to Discord's 1024-character field limit.
+ *
+ * Trophies accumulate forever and are never pruned, so a veteran hunter's list
+ * outgrows the field and Discord rejects the whole profile embed — the command
+ * stops working entirely at around 56 unique trophies. Show the best ones first
+ * (mythic before pristine before good) and count the rest.
+ */
+const TROPHY_RANK = { '🟣': 0, '🔷': 1, '🟢': 2 };
+const TROPHY_FIELD_BUDGET = 1024;
+
+function buildTrophyField(trophies) {
+    const ranked = trophies.slice().sort((a, b) =>
+        (TROPHY_RANK[a.slice(0, 2)] ?? 9) - (TROPHY_RANK[b.slice(0, 2)] ?? 9));
+
+    const shown = [];
+    let used = 0;
+    for (const trophy of ranked) {
+        // +2 for the ", " separator, and leave room for the "+N more" tail.
+        const tail = `, +${ranked.length - shown.length} more`;
+        if (used + trophy.length + 2 + tail.length > TROPHY_FIELD_BUDGET) break;
+        used += trophy.length + (shown.length ? 2 : 0);
+        shown.push(trophy);
+    }
+
+    const hidden = ranked.length - shown.length;
+    return {
+        name:   `🏆 Trophies (${ranked.length})`,
+        value:  shown.join(', ') + (hidden > 0 ? `, +${hidden} more` : ''),
+        inline: true,
+    };
 }
 
 function buildXpBar(h, toNext) {
@@ -2940,7 +2973,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField };
 
 // ── Per-user action lock ──────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent
