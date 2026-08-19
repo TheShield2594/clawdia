@@ -49,6 +49,7 @@ const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { logTransaction } = require('../../utils/logTransaction');
 const { logBigWin } = require('../../utils/bigWinLogger');
+const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { progressBar } = require('../../utils/progressBar');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
 
@@ -515,8 +516,23 @@ async function handleGo(interaction) {
             logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.payout, source: 'explore', details: result.secret?.name ?? `${region.name} legendary treasure` });
         }
 
+        // Hourly micro-competition: richest expedition of the hour, same shape as
+        // the biggest dig and the largest haul. Only a paying run can compete —
+        // a trap or a quiet walk has nothing to enter.
+        if (result.payout > 0) {
+            await tryUpdateHourlyWinner({
+                guildId:  interaction.guild.id,
+                category: 'explore',
+                userId:   interaction.user.id,
+                username: interaction.user.username,
+                value:    result.payout,
+                details:  `${region.emoji} ${summarizeResult(result, currency)}`,
+            }).catch(() => null);
+        }
+        const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'explore').catch(() => null);
+
         // ── Result embed ──────────────────────────────────────────────────────────
-        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings);
+        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, hourlyLeader);
 
         if (payoutOwed > 0) {
             embed.addFields({
@@ -618,7 +634,7 @@ function buildSecretPityField(user, region, guildSettings) {
     };
 }
 
-function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings) {
+function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, hourlyLeader = null) {
     const e = user.exploration;
     // The "Setting out — <region>" embed is edited away by this one, so without
     // an author line the message a player scrolls back to never says where any
@@ -772,7 +788,10 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     }
 
     const staminaNote = result.staminaSpared ? ' *(a blank walk costs no stamina)*' : '';
-    embed.setFooter({ text: `⚡ ${e.stamina}/${LIMITS.MAX_STAMINA} stamina${staminaNote} · ${nextExpeditionNote(user)} · ${randomFrom(FOOTER_LINES)}` });
+    const leaderNote = hourlyLeader
+        ? `🏆 Richest this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? `${currency}${hourlyLeader.value.toLocaleString()}`}`
+        : randomFrom(FOOTER_LINES);
+    embed.setFooter({ text: `⚡ ${e.stamina}/${LIMITS.MAX_STAMINA} stamina${staminaNote} · ${nextExpeditionNote(user)} · ${leaderNote}` });
     return embed;
 }
 

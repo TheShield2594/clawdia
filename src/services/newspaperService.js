@@ -53,12 +53,13 @@ async function collectStats(guildId, sections) {
                 .sort({ 'data.xp': -1 }).select('userId data').lean()
                 // Preserve the legacy { userId, <system>: data } shape for the renderers
                 .then(p => (p ? { userId: p.userId, [system]: p.data } : null));
-        const [topHunter, topFisher, topMiner] = await Promise.all([
+        const [topHunter, topFisher, topMiner, topExplorer] = await Promise.all([
             topBySystem('hunt'),
             topBySystem('fishing'),
             topBySystem('mining'),
+            topBySystem('exploration'),
         ]);
-        data.gameStandouts = { topHunter, topFisher, topMiner };
+        data.gameStandouts = { topHunter, topFisher, topMiner, topExplorer };
     }
 
     if (sections.newMembers !== false) {
@@ -115,11 +116,12 @@ function buildDataSummary(stats, usernameMap, currency, sections) {
     }
 
     if (stats.gameStandouts && sections.gameStandouts !== false) {
-        const { topHunter, topFisher, topMiner } = stats.gameStandouts;
+        const { topHunter, topFisher, topMiner, topExplorer } = stats.gameStandouts;
         const parts = [];
         if (topHunter) parts.push(`🏹 ${usernameMap[topHunter.userId] || 'Unknown'} leads hunting at level ${topHunter.hunt?.level ?? 1}`);
         if (topFisher) parts.push(`🎣 ${usernameMap[topFisher.userId] || 'Unknown'} leads fishing at level ${topFisher.fishing?.level ?? 1}`);
         if (topMiner)  parts.push(`⛏️ ${usernameMap[topMiner.userId]  || 'Unknown'} leads mining at level ${topMiner.mining?.level ?? 1}`);
+        if (topExplorer) parts.push(`🧭 ${usernameMap[topExplorer.userId] || 'Unknown'} leads exploration at level ${topExplorer.exploration?.level ?? 1}`);
         if (parts.length) lines.push('\nGAME STANDOUTS:\n  ' + parts.join('\n  '));
     }
 
@@ -149,6 +151,7 @@ async function generateNewspaper(client, guildDoc, preloadedGuild) {
     if (stats.gameStandouts?.topHunter) userIds.add(stats.gameStandouts.topHunter.userId);
     if (stats.gameStandouts?.topFisher) userIds.add(stats.gameStandouts.topFisher.userId);
     if (stats.gameStandouts?.topMiner)  userIds.add(stats.gameStandouts.topMiner.userId);
+    if (stats.gameStandouts?.topExplorer) userIds.add(stats.gameStandouts.topExplorer.userId);
 
     const usernameMap = await resolveUsernames(discordGuild, [...userIds]);
     const dataSummary = buildDataSummary(stats, usernameMap, currency, sections);
@@ -236,11 +239,12 @@ function buildFallbackNewspaper(stats, usernameMap, currency, sections, guildNam
     }
 
     if (stats.gameStandouts && sections.gameStandouts !== false) {
-        const { topHunter, topFisher, topMiner } = stats.gameStandouts;
+        const { topHunter, topFisher, topMiner, topExplorer } = stats.gameStandouts;
         lines.push('**🎮 Game Standouts**');
         if (topHunter) lines.push(`🏹 **${usernameMap[topHunter.userId] || 'Unknown'}** — Hunt Level ${topHunter.hunt?.level ?? 1}`);
         if (topFisher) lines.push(`🎣 **${usernameMap[topFisher.userId] || 'Unknown'}** — Fishing Level ${topFisher.fishing?.level ?? 1}`);
         if (topMiner)  lines.push(`⛏️ **${usernameMap[topMiner.userId]  || 'Unknown'}** — Mining Level ${topMiner.mining?.level ?? 1}`);
+        if (topExplorer) lines.push(`🧭 **${usernameMap[topExplorer.userId] || 'Unknown'}** — Explorer Level ${topExplorer.exploration?.level ?? 1}`);
         lines.push('');
     }
 

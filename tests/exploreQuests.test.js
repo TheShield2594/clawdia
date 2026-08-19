@@ -83,3 +83,51 @@ describe('the hook that advances them', () => {
         expect(hookAt).toBeLessThan(payoutAt);
     });
 });
+
+describe('exploration competes in the hourly micro-competition', () => {
+    const fsx  = require('fs');
+    const pathx = require('path');
+    const read = (...p) => fsx.readFileSync(pathx.join(__dirname, '..', 'src', ...p), 'utf8');
+
+    test('the scheduler can name an explore winner', () => {
+        // A category with no label entry is skipped at announcement time — the
+        // winner is paid and never mentioned, which reads as the reward being
+        // broken. Every category something records must have a label.
+        const scheduler = read('services', 'schedulerService.js');
+        const labels = scheduler.slice(scheduler.indexOf('HOURLY_CATEGORY_LABELS'));
+        const declared = new Set(
+            [...labels.slice(0, labels.indexOf('};')).matchAll(/^\s+(\w+):\s*\{/gm)].map(m => m[1])
+        );
+
+        const commands = ['hunt.js', 'fish.js', 'mine.js', 'explore.js']
+            .map(f => read('commands', 'economy', f)).join('\n');
+        const recorded = new Set(
+            [...commands.matchAll(/category:\s*'(\w+)'/g)].map(m => m[1])
+        );
+
+        expect(recorded.has('explore')).toBe(true);
+        for (const category of recorded) expect(declared.has(category)).toBe(true);
+    });
+
+    test('only a paying expedition enters', () => {
+        const src = read('commands', 'economy', 'explore.js');
+        const guardAt  = src.indexOf('if (result.payout > 0) {\n            await tryUpdateHourlyWinner');
+        expect(guardAt).toBeGreaterThan(-1);
+    });
+});
+
+describe('exploration appears in the weekly newspaper', () => {
+    const fsx  = require('fs');
+    const pathx = require('path');
+
+    test('the top explorer is queried, resolved to a name, and rendered', () => {
+        const src = fsx.readFileSync(pathx.join(__dirname, '..', 'src', 'services', 'newspaperService.js'), 'utf8');
+        // Queried from the grind profiles...
+        expect(src).toContain("topBySystem('exploration')");
+        // ...added to the id set the usernames are fetched for (without this it
+        // renders as "Unknown")...
+        expect(src).toContain('userIds.add(stats.gameStandouts.topExplorer.userId)');
+        // ...and rendered in both the plain-text and embed builders.
+        expect(src.match(/topExplorer\.exploration\?\.level/g) ?? []).toHaveLength(2);
+    });
+});
