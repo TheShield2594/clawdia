@@ -1130,12 +1130,21 @@ describe('approaching an encounter is a bet worth taking', () => {
         const plain = makeUser();
         const collector = makeUser({ inventory: RELIC_LIST.slice(0, 8).map(r => ({ itemId: r.itemId, quantity: 1 })) });
 
-        const encounterFor = user => {
+        // Rolling an encounter means actually walking the region, and an
+        // expedition hands back relics and charts landmarks along the way —
+        // both of which lift the payout multiplier. Put each explorer back in
+        // the case it was set up for before quoting, or the "plain" one quietly
+        // becomes a collector and the quoted band drifts off the constant below.
+        const encounterFor = (user, relics = []) => {
             for (let i = 0; i < 2_000; i++) {
                 user.exploration.stamina = LIMITS.MAX_STAMINA;
                 user.exploration.dailyCoins = 0;
                 const r = executeExplore(user, region, settings, {});
-                if (r.pendingChoice) return r;
+                if (r.pendingChoice) {
+                    user.inventory = relics.map(relic => ({ itemId: relic.itemId, quantity: 1 }));
+                    user.exploration.regions = [];
+                    return r;
+                }
             }
             throw new Error('no encounter rolled');
         };
@@ -1148,7 +1157,7 @@ describe('approaching an encounter is a bet worth taking', () => {
             Math.round(plainResult.encounter.reward.min * region.payoutMultiplier * safeRate));
 
         // Same encounter definition, richer explorer → a bigger quoted prize.
-        const richResult = encounterFor(collector);
+        const richResult = encounterFor(collector, RELIC_LIST.slice(0, 8));
         richResult.encounter = plainResult.encounter;
         const richStakes = getEncounterStakes(collector, region, settings, richResult);
         expect(richStakes.win.max).toBeGreaterThan(plainStakes.win.max);
