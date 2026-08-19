@@ -24,7 +24,7 @@ const {
     ANIMAL_TRAITS, MATERIAL_NAMES, FIELD_TROPHIES
 } = require('../../data/huntData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
-const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
+const { TIER_NUM, TIER_RIBBON, TIER_STARS } = require('../../data/materialRarity');
 const { randomFrom, HUNT_EMPTY_LINES } = require('../../utils/copyLines');
 const {
     ensureHuntData,
@@ -858,7 +858,7 @@ async function executeStart(interaction) {
         // Log big win, then await hourly leader update and re-fetch for accurate footer
         if (result.success && result.finalPayout > 0) {
             const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-            if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+            if (result.finalPayout >= bigWinThreshold || ['legendary', 'event'].includes(result.tier)) {
                 logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'hunt', details: { itemName: result.animal?.name, rarity: result.tier }, client: interaction.client });
             }
             await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'hunt', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.animal ? `${result.animal.emoji} ${result.animal.name} (${currency}${result.finalPayout.toLocaleString()})` : null }).catch(() => null);
@@ -942,18 +942,24 @@ async function executeStart(interaction) {
         // Staged loot reveal for rare+ drops
         await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
 
-        if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
+        if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
             const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
             const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-            const isLeg = result.tier === 'legendary';
+            const announceTier = TIER_NUM[result.tier] ?? 4;
+            const ANNOUNCE_COPY = {
+                4: { color: '#9c27b0', title: '🔮 Epic Find!',              line: 'A rare moment in the wild.' },
+                5: { color: '#ff9800', title: '✨ Legendary Trophy! ✨',     line: 'Only a handful of hunters have ever managed that.' },
+                6: { color: '#e74c3c', title: '☄️ Mythical Quarry! ☄️',     line: 'Nothing like it has been seen in living memory.' },
+            };
+            const copy = ANNOUNCE_COPY[announceTier] ?? ANNOUNCE_COPY[4];
             const announcementEmbed = new EmbedBuilder()
-                .setColor(isLeg ? '#ff9800' : '#9c27b0')
-                .setTitle(isLeg ? '✨ Legendary Trophy! ✨' : '🔮 Epic Find!')
+                .setColor(copy.color)
+                .setTitle(copy.title)
                 .setDescription(
-                    `<@${interaction.user.id}> just brought down ${result.animal.emoji} **${result.animal.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
+                    `<@${interaction.user.id}> just brought down ${result.animal.emoji} **${result.animal.name}** [${TIER_STARS[announceTier]}]\n` +
                     `deep in the **${zone.name}**.\n\n` +
-                    (isLeg ? `Only a handful of hunters have ever managed that.` : `A rare moment in the wild.`)
+                    copy.line
                 )
                 .setTimestamp();
             announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
@@ -1172,13 +1178,18 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             ? `${trophyQuality.emoji} **${trophyQuality.label}** (×${trophyQuality.multiplier.toFixed(2)})`
             : '—';
 
-        const isLegendary = tier === 'legendary';
-        const ribbon = TIER_RIBBON(TIER_NUM[tier] ?? 1);
-        const embedTitle = isLegendary
-            ? `🌟✨ LEGENDARY FIND ✨🌟`
+        const tierNum    = TIER_NUM[tier] ?? 1;
+        const isEvent    = tier === 'event';
+        const isHeadline = tierNum >= 5;   // legendary and event both get the full treatment
+        const ribbon = TIER_RIBBON(tierNum);
+        const embedTitle = isHeadline
+            ? (isEvent ? `☄️⚡ MYTHICAL FIND ⚡☄️` : `🌟✨ LEGENDARY FIND ✨🌟`)
             : `${animal.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${trophyQuality ? trophyQuality.label + ' ' : ''}${animal.name}${isCrit ? ' ✨' : ''}`;
-        const embedDesc = isLegendary
-            ? `${ribbon}\n\nYou found something impossible in the wild.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${animal.emoji}  **${animal.name}**  [⭐⭐⭐⭐⭐]\n  *${animal.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+        const headlineLede = isEvent
+            ? 'Something walked out of the treeline that has no business existing.'
+            : 'You found something impossible in the wild.';
+        const embedDesc = isHeadline
+            ? `${ribbon}\n\n${headlineLede}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${animal.emoji}  **${animal.name}**  [${TIER_STARS[tierNum]}]\n  *${animal.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
             : `${ribbon}\n\n*${animal.flavor}*`;
 
         const embed = new EmbedBuilder()

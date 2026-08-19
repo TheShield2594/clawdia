@@ -1058,28 +1058,39 @@ async function handlePrestige(interaction) {
         if (btn.user.id !== interaction.user.id) {
             return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
         }
-        collector.stop();
 
         if (btn.customId === 'mineprestige_cancel') {
+            collector.stop();
             return btn.update({ content: 'Ascension cancelled.', embeds: [], components: [] });
         }
 
+        // Assigned before collector.stop(): stop() emits 'end' synchronously, so an
+        // assignment after it would leave the handler below awaiting a null and let
+        // the command — and the per-user mining lock with it — resolve while this
+        // write was still in flight.
         actionPromise = (async () => {
             try {
                 await btn.deferUpdate();
 
-                // Make sure the profile exists and carries the prestige field before the
-                // conditional update below tries to match on it.
-                await persistGrindIfNew(user, 'mining');
-                await saveGrind(user, ['mining']);
+                // Nothing is written from the in-memory snapshot here. It was read
+                // before a 30-second confirmation window during which a raid, a craft
+                // or another dig may have moved this profile, and a save() would put
+                // all of that back. The ascension is the conditional update alone.
+                //
+                // `data.prestige` is absent on profiles that predate the field, so a
+                // first ascension has to match that shape too — ensureMineData only
+                // defaulted it in memory.
+                const rankMatches = prestige === 0
+                    ? [{ 'data.prestige': 0 }, { 'data.prestige': { $exists: false } }, { 'data.prestige': null }]
+                    : [{ 'data.prestige': prestige }];
 
                 // Conditional so a second confirmation cannot ascend twice: the level
                 // requirement and the prestige rank both have to still hold.
                 const ascended = await GrindProfile.findOneAndUpdate(
                     {
                         userId: user.userId, guildId: user.guildId, system: 'mining',
-                        'data.level':    { $gte: MAX_MINER_LEVEL },
-                        'data.prestige': prestige,
+                        'data.level': { $gte: MAX_MINER_LEVEL },
+                        $or: rankMatches,
                     },
                     { $set: { 'data.prestige': prestige + 1, 'data.level': 1, 'data.xp': 0 } },
                     { new: true }
@@ -1119,6 +1130,8 @@ async function handlePrestige(interaction) {
                 interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
         })();
+
+        collector.stop();
     });
 
     return new Promise(resolve => {
@@ -1263,10 +1276,14 @@ async function handleProfile(interaction) {
         });
     }
 
-    if (m.level >= MAX_MINER_LEVEL && prestige < MAX_MINE_PRESTIGE) {
-        embed.setFooter({ text: `Max Miner Level — use /mine prestige to ascend to P${prestige + 1}` });
-    } else if (prestige >= MAX_MINE_PRESTIGE && m.level >= MAX_MINER_LEVEL) {
+    // Only nudge the player who can act on it; someone else's maxed miner just gets
+    // the standing, and the daily-cap line stays a self-only stat either way.
+    if (m.level >= MAX_MINER_LEVEL && prestige >= MAX_MINE_PRESTIGE) {
         embed.setFooter({ text: `${PRESTIGE_BADGES[MAX_MINE_PRESTIGE]} Fully prestiged Master Miner — nothing left to prove down there.` });
+    } else if (isSelf && m.level >= MAX_MINER_LEVEL) {
+        embed.setFooter({ text: `Max Miner Level — use /mine prestige to ascend to P${prestige + 1}` });
+    } else if (m.level >= MAX_MINER_LEVEL) {
+        embed.setFooter({ text: 'Max Miner Level' });
     } else if (isSelf) {
         embed.setFooter({ text: `Daily: ${m.dailyMines} mines · ${currency}${m.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
     }
@@ -1309,8 +1326,21 @@ async function handleInv(interaction, sub) {
             });
             // Nothing caps how many pickaxes a miner accumulates and each entry runs
             // ~85 characters, so a single field ran out of room around the twelfth one
-            // and Discord rejected the whole embed. Spill into continuation fields.
-            embed.addFields(...packFields('🪓 Pickaxes', lines));
+            // and Discord rejected the whole embed. Spill into continuation fields —
+            // but only so many: an embed also has a 6,000-character budget across all
+            // of its fields, which unbounded spilling would eventually blow instead.
+            const PICKAXE_FIELDS = 3;
+            const fields = packFields('🪓 Pickaxes', lines);
+            embed.addFields(...fields.slice(0, PICKAXE_FIELDS));
+            if (fields.length > PICKAXE_FIELDS) {
+                const shown = fields.slice(0, PICKAXE_FIELDS)
+                    .reduce((n, f) => n + f.value.split('\n').length / 2, 0);
+                embed.addFields({
+                    name: '…and more',
+                    value: `${Math.max(0, m.pickaxes.length - Math.round(shown))} further pickaxe(s) not shown — discard the dead ones with \`/mine inv discard\`.`,
+                    inline: false
+                });
+            }
 
             const junk = m.pickaxes.filter(p => p.status === 'broken' || p.status === 'condemned').length;
             if (junk > 0) {
@@ -2607,7 +2637,12 @@ async function handleRaid(interaction) {
         });
     }
 
-    await GrindProfile.findOneAndUpdate(
+    // The credit half of the transfer. Its result cannot be discarded: the debit
+    // above has already landed, and there is no transaction to tie the two together
+    // on a standalone mongod. If the credit does not land — the cooldown CAS lost a
+    // race, or the write errored — the materials would simply cease to exist while
+    // both players were told the raid succeeded. Put them back instead.
+    const credited = await GrindProfile.findOneAndUpdate(
         {
             userId: raider.userId,
             guildId: interaction.guild.id,
@@ -2618,7 +2653,24 @@ async function handleRaid(interaction) {
             ],
         },
         { $inc: raiderInc, $set: { 'data.lastRaidSent': new Date() } }
-    ).catch(err => console.error('[mine raid] raider save error:', err));
+    ).catch(err => { console.error('[mine raid] raider save error:', err); return null; });
+
+    if (!credited) {
+        // Compensate: hand the defender's materials back and restore the raid shield
+        // to what it was, so a failed raid does not leave them sheltered for an hour
+        // over a raid that never happened.
+        const rollback = {};
+        for (const [matId, take] of Object.entries(stolen)) rollback[`data.materials.${matId}`] = take;
+        await GrindProfile.updateOne(
+            { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' },
+            { $inc: rollback, $set: { 'data.lastRaidReceived': defenderResult.data?.lastRaidReceived ?? null } }
+        ).catch(err => console.error('[mine raid] rollback failed — defender owed:', Object.keys(stolen).join(','), err));
+
+        return interaction.reply({
+            content: 'Your raid was interrupted — nothing was taken, and nothing was lost. Try again in a moment.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
 
     const stolenLines = Object.entries(stolen).map(([id, qty]) => `• ${MATERIAL_NAMES[id] ?? id} ×${qty}`).join('\n');
     const pct = Math.round(stealFraction * 100);

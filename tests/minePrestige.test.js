@@ -72,17 +72,30 @@ describe('prestige bonuses actually apply', () => {
         expect(bonused).toBeGreaterThan(plain);
     });
 
-    test('the rarity bonus shifts weight toward rare ore', () => {
-        const depth = DEPTHS.the_abyss;
-        const rareRate = prestige => {
+    test('the rarity bonus shifts weight off common', () => {
+        // P4 adds a 2% rarity bonus, which moves 2% of the depth's *common* weight
+        // into rare. On the Abyss that is a third of a percentage point — far too
+        // small to separate by sampling — so probe the boundary instead. rollTier
+        // consumes exactly one Math.random(), and weightedRoll walks the tiers in
+        // ascending rarity, so the largest random value that still returns 'common'
+        // is that tier's share of the roll.
+        const commonShare = prestige => {
             const user = miner({ prestige });
-            let rare = 0;
-            for (let i = 0; i < 40_000; i++) {
-                if (['rare', 'epic', 'legendary', 'event'].includes(rollTier(user, depth))) rare++;
+            const spy = jest.spyOn(Math, 'random');
+            let lo = 0;
+            let hi = 1;
+            for (let i = 0; i < 50; i++) {
+                const mid = (lo + hi) / 2;
+                spy.mockReturnValue(mid);
+                if (rollTier(user, DEPTHS.surface_quarry) === 'common') lo = mid;
+                else hi = mid;
             }
-            return rare / 40_000;
+            spy.mockRestore();
+            return lo;
         };
-        expect(rareRate(4)).toBeGreaterThan(rareRate(3));
+
+        expect(commonShare(4)).toBeLessThan(commonShare(3));
+        expect(commonShare(3)).toEqual(commonShare(0));   // no rarity bonus below P4
     });
 
     test('rank is clamped so a rank past the table cannot crash the lookups', () => {
