@@ -9,7 +9,10 @@ async function checkSeasonalEvents(client) {
     const now = new Date();
     const currentSeasonal = getActiveSeasonalEvent();
 
-    const guilds = await Guild.find({}).lean();
+    // Hourly, across every guild. Projected because a full Guild document drags in
+    // the 3000-entry analytics.commandUsage array and the shop's image Buffers, and
+    // this job reads none of it — only the active event and where to announce it.
+    const guilds = await Guild.find({}, 'guildId activeEvent economy.announcementChannelId').lean();
 
     for (const guild of guilds) {
         const discordGuild = client.guilds.cache.get(guild.guildId);
