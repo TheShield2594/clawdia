@@ -4,7 +4,10 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -12,6 +15,10 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   test:
@@ -62,3 +69,61 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # Publishing lives here, behind `needs: test`, rather than in its own
+  # workflow. It used to be a separate file triggered on `push: main`, which
+  # ran alongside the tests instead of after them: a commit that broke the
+  # suite still got built and pushed as `:latest`, and `:latest` is the tag
+  # portainer-stack.yml deploys. Red tests now stop the image existing at all.
+  #
+  # `workflow_run` would also have worked, but it runs against the default
+  # branch and re-resolves the commit, which is a sharper edge than a job that
+  # simply depends on the one before it in the same run.
+  publish:
+    name: Build and publish Docker image
+    needs: test
+    # Pull requests build nothing: they have no push credentials worth using
+    # and no tag that anything deploys. Pushes to main and to v* tags do.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

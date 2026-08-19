@@ -31,7 +31,6 @@ const CATEGORIES = [
             { name: 'rob',            description: 'Try to rob another member\'s wallet' },
             { name: 'mine',           description: 'Dig for ore in the mines (2h cooldown)' },
             { name: 'explore',        description: 'Set out on narrated expeditions — chart regions, find treasure, lore, and secrets' },
-            { name: 'map',            description: "Unroll your Explorer's Map and see every region you've charted" },
             { name: 'hunt',           description: 'Hunt animals, manage gear, quests, zones, and prestige — all in one place' },
             { name: 'craft',          description: 'Craft items from hunting materials' },
             { name: 'fish',           description: 'Fishing: cast lines, manage gear, shop, craft, quests, locations, and prestige' },

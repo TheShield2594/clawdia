@@ -155,7 +155,6 @@ npm start
 - `/craft` - Craft items from gathered materials
 - `/forge` - Spend coins to have the AI forge a one-of-a-kind item
 - `/explore` - Narrated expeditions across regions (go, travel, regions, journal, relics, profile, map)
-- `/map` - Shortcut for `/explore map`
 - `/pet` - Adopt, name, feed, rename, and release pets
 - `/showcase` - Trophy card of a player's rarest items and top achievements
 

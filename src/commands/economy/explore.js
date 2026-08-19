@@ -116,7 +116,7 @@ module.exports = {
         if (sub === 'profile') return handleProfile(interaction);
     },
 
-    // Exposed so /map can render the same Explorer's Map
+    // Exposed so sibling commands can render the same Explorer's Map
     handleMap,
 };
 
