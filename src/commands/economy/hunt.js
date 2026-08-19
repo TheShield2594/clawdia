@@ -21,7 +21,7 @@ const {
     CONSUMABLES, AMMO_PACKS,
     WEAPON_TIERS, WEAPON_BY_SLUG, WEAPON_UPGRADES,
     HUNTER_LEVELS, PRESTIGE_BONUSES, HUNT_QUEST_TEMPLATES,
-    ANIMAL_TRAITS, MATERIAL_NAMES
+    ANIMAL_TRAITS, MATERIAL_NAMES, FIELD_TROPHIES
 } = require('../../data/huntData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
@@ -30,6 +30,7 @@ const {
     ensureHuntData,
     applyStaminaRegen,
     applyDailyReset,
+    msUntilDailyReset,
     msUntilNextStamina,
     getMaxStamina,
     executeHunt,
@@ -48,6 +49,10 @@ const {
     applyXp,
     rollApexType,
     resolveApexEncounter,
+    apexNerveAfter,
+    apexNerveMax,
+    getRarePityThreshold,
+    getDiminishingReturns,
     applyPayoutModifiers
 } = require('../../services/huntService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
@@ -448,8 +453,9 @@ async function executeStart(interaction) {
         const regenMs = msUntilNextStamina(user);
         const nextAt  = new Date(Date.now() + regenMs);
         const sinceRare = h.sinceRare ?? 0;
+        const pityCap   = getRarePityThreshold(zone);
         const pityStat  = sinceRare >= 5
-            ? `🎯 ${sinceRare} hunts since last Rare+ • next rare guaranteed around hunt ~50`
+            ? `🎯 ${sinceRare} hunts since last Rare+ • guaranteed at ${pityCap} in ${zone.name}`
             : null;
         return interaction.reply({
             embeds: [buildCooldownEmbed({
@@ -458,7 +464,7 @@ async function executeStart(interaction) {
                 color: '#5a8a3c',
                 nextAt,
                 pityStat,
-                nextRewardPreview: 'Full stamina = 10 hunts · Rare+ drops guaranteed by hunt ~50',
+                nextRewardPreview: `Full stamina = ${getMaxStamina(user)} hunts · Rare+ guaranteed after ${pityCap} dry hunts here`,
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -960,8 +966,9 @@ async function executeStart(interaction) {
 
             const buildApexPhaseEmbed = (phaseIndex, prevResults) => {
                 const phase  = apexType.phases[phaseIndex];
-                const nerve  = 3 - prevResults.filter(p => !p.correct && p.chosen !== 'safe').length;
-                const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(3 - nerve);
+                const nerveMax  = apexNerveMax(user);
+                const nerve     = apexNerveAfter(prevResults, user);
+                const nerveBar  = '❤️'.repeat(nerve) + '🖤'.repeat(nerveMax - nerve);
                 const histLines = prevResults.map((p, i) => {
                     const icon = p.correct ? '✅' : p.chosen === 'safe' ? '🛡️' : '❌';
                     return `Phase ${i + 1}: ${icon}`;
@@ -979,7 +986,7 @@ async function executeStart(interaction) {
                         (histLines ? `${histLines}\n\n` : '') +
                         `**Choose your move — NOW:**`
                     )
-                    .setFooter({ text: `⏱️ 30 seconds per phase • Outcomes: 3/3=1.5x bonus | 2/3=1x | 1/3=0.4x | 0/3=Nothing` });
+                    .setFooter({ text: `⏱️ 30 seconds per phase • 3/3=1.5x bonus | 2/3=1x | 1/3=0.4x • A wrong read costs 2 nerve — at 0 it escapes. Backing off is safe but never counts.` });
             };
 
             const buildPhaseRow = (phaseIndex) => {
@@ -1153,7 +1160,9 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         const color = isCrit ? '#FFD700' : TIER_COLORS[tier];
 
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
-        const payoutDisplay = cappedByHard ? `~~${currency}${finalPayout}~~ (daily cap reached)` : `**${currency}${finalPayout.toLocaleString()}**`;
+        const payoutDisplay = cappedByHard
+            ? `~~${currency}${(result.forfeitedPayout ?? 0).toLocaleString()}~~\n*Daily cap reached — resets in ${formatMs(msUntilDailyReset(h))}*`
+            : `**${currency}${finalPayout.toLocaleString()}**`;
 
         const qualityLabel = trophyQuality
             ? `${trophyQuality.emoji} **${trophyQuality.label}** (×${trophyQuality.multiplier.toFixed(2)})`
@@ -1204,6 +1213,9 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             embed.addFields({ name: '⚡ Trait Effects', value: effectLines, inline: false });
         }
 
+        const dailyToll = buildDailyTollField(result, user, currency);
+        if (dailyToll) embed.addFields(dailyToll);
+
         if (specialDrop) {
             embed.addFields({ name: '🎁 Special Drop!', value: `You found **${specialDrop.name}**!`, inline: false });
         }
@@ -1231,7 +1243,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
         embed.addFields({ name: 'Balance', value: balanceLine, inline: true }, { name: 'Hunter XP', value: xpLine, inline: true });
 
         const sinceRareNow = user.hunt.sinceRare ?? 0;
-        if (sinceRareNow >= 5) embed.addFields(buildPityField(user));
+        if (sinceRareNow >= 5) embed.addFields(buildPityField(user, zone));
 
         embed.setFooter({ text: `Cooldown: 45s • ${buildActiveConsumablesLine(user)}` });
         embed.setTimestamp();
@@ -1304,7 +1316,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     }
 
     const sinceRareNow = user.hunt.sinceRare ?? 0;
-    if (sinceRareNow >= 5) embed.addFields(buildPityField(user));
+    if (sinceRareNow >= 5) embed.addFields(buildPityField(user, zone));
 
     embed.setFooter({ text: 'Tip: Use consumables from /hunt shop to boost your success chance' });
     embed.setTimestamp();
@@ -1342,6 +1354,40 @@ function buildBonusLines(result, petYieldPct, petXpPct) {
     return lines;
 }
 
+/**
+ * What the day's own limits took out of this payout, and when they lift.
+ *
+ * The soft cap halves every payout past 80k and diminishing returns cut it by up
+ * to 45% more, so a heavy session's rewards could shrink by nearly three
+ * quarters with nothing on screen to explain it — it read as bad luck, or as a
+ * silent nerf. Only the hard cap ever said anything. Null when nothing bit.
+ */
+function buildDailyTollField(result, user, currency) {
+    const report = result.dailyReport;
+    if (!report || report.lostToDaily <= 0) return null;
+
+    const h = user.hunt;
+    const lines = [];
+
+    if (report.dimReturns) {
+        const pct = Math.round((1 - report.dimReturns.multiplier) * 100);
+        lines.push(`📉 **Diminishing returns** −${pct}% · ${h.dailyHunts} hunts today (past ${report.dimReturns.threshold})`
+            + (report.dimReturns.nextAt
+                ? `\n> Drops again at ${report.dimReturns.nextAt} hunts.`
+                : ''));
+    }
+    if (report.softCapped) {
+        lines.push(`🪙 **Daily soft cap** −50% · past ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} earned today`);
+    }
+    if (report.headroomClamped) {
+        lines.push(`🧱 **Hard cap in sight** — only ${currency}${Math.max(0, LIMITS.DAILY_HARD_CAP - h.dailyCoins).toLocaleString()} of headroom left`);
+    }
+
+    lines.push(`*Worth ${currency}${report.grossPayout.toLocaleString()} on a fresh day — ${currency}${report.lostToDaily.toLocaleString()} withheld. Resets in ${formatMs(msUntilDailyReset(h))}.*`);
+
+    return { name: '⚖️ Daily Limits', value: lines.join('\n'), inline: false };
+}
+
 function buildBrokenWeaponNote(weapon) {
     return isCondemned(weapon)
         ? `Your **${weapon.name}** has broken, and it's condemned — too many shop repairs have worn it out, so it can't be fixed. Replace it with \`/hunt shop weapon\`.`
@@ -1352,9 +1398,15 @@ function buildFailureTitle(severityId) {
     return { clean_miss: '💨 Miss!', spooked: '😰 Spooked!', jammed: '🔧 Jammed!', injured: '🤕 Injured!' }[severityId] ?? '❌ Failed Hunt';
 }
 
-function buildPityField(user) {
+// Heat bands as a fraction of the zone's own threshold — the numbers used to be
+// hardcoded against a flat 50, which no longer holds now that each zone sets its
+// own.
+const PITY_HOT_FRACTION  = 0.80;
+const PITY_WARM_FRACTION = 0.50;
+
+function buildPityField(user, zone) {
     const sinceRare  = user.hunt.sinceRare ?? 0;
-    const threshold  = LIMITS.RARE_PITY_GUARANTEE;
+    const threshold  = getRarePityThreshold(zone);
     const filled     = Math.min(sinceRare, threshold);
     const barLen     = 16;
     const filledLen  = Math.round((filled / threshold) * barLen);
@@ -1364,10 +1416,10 @@ function buildPityField(user) {
     if (sinceRare >= threshold) {
         heat  = '⚡';
         label = `**GUARANTEED NEXT HUNT**`;
-    } else if (sinceRare >= 41) {
+    } else if (sinceRare >= threshold * PITY_HOT_FRACTION) {
         heat  = '🔥';
         label = `Getting hot — ~${threshold - sinceRare} more`;
-    } else if (sinceRare >= 26) {
+    } else if (sinceRare >= threshold * PITY_WARM_FRACTION) {
         heat  = '🌡️';
         label = `Warming up — ~${threshold - sinceRare} more`;
     } else {
@@ -1524,8 +1576,11 @@ async function executeProfile(interaction) {
     embed.addFields({ name: '🗺️ Unlocked Zones', value: zoneList || 'Beginner Forest only', inline: true });
 
     if (h.trophies?.length) {
-        embed.addFields({ name: '🏆 Trophies', value: h.trophies.join(', '), inline: true });
+        embed.addFields(buildTrophyField(h.trophies));
     }
+
+    const fieldTrophies = buildFieldTrophyField(h);
+    if (fieldTrophies) embed.addFields(fieldTrophies);
 
     // Cross-system synergies
     const activeSynergies = getActiveSynergies(userData);
@@ -1543,14 +1598,101 @@ async function executeProfile(interaction) {
         });
     }
 
+    if (isSelf) embed.addFields(buildTodayField(h, currency));
+
     if (prestige === 0 && h.level >= 50) {
         embed.setFooter({ text: 'Max level reached! Use /hunt prestige to reset and unlock new bonuses.' });
-    } else if (isSelf) {
-        embed.setFooter({ text: `Daily: ${h.dailyHunts} hunts · ${currency}${h.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
     }
 
     embed.setTimestamp();
     return interaction.reply({ embeds: [embed] });
+}
+
+/**
+ * The trophy case, clamped to Discord's 1024-character field limit.
+ *
+ * Trophies accumulate forever and are never pruned, so a veteran hunter's list
+ * outgrows the field and Discord rejects the whole profile embed — the command
+ * stops working entirely at around 56 unique trophies. Show the best ones first
+ * (mythic before pristine before good) and count the rest.
+ */
+/**
+ * The permanent upgrades a hunter has earned — the progression that carries on
+ * past Level 50 and Prestige 5. Null when they have none yet, so the profile
+ * doesn't carry an empty field.
+ */
+function buildFieldTrophyField(h) {
+    const owned = Object.entries(FIELD_TROPHIES)
+        .filter(([flag]) => h[flag])
+        .map(([, t]) => `${t.emoji} **${t.name}** — ${t.effect}`);
+
+    if (h.luckyPaw)       owned.unshift('🐾 **Lucky Paw** — +1% critical hit chance');
+    if (h.precisionScope) owned.unshift('🔭 **Precision Scope** — +2% rarity boost');
+    if (!owned.length) return null;
+
+    const total = Object.keys(FIELD_TROPHIES).length + 2;
+    return {
+        name:   `🎖️ Permanent Upgrades (${owned.length}/${total})`,
+        value:  owned.join('\n'),
+        inline: false,
+    };
+}
+
+const TROPHY_RANK = { '🟣': 0, '🔷': 1, '🟢': 2 };
+const TROPHY_FIELD_BUDGET = 1024;
+
+function buildTrophyField(trophies) {
+    const ranked = trophies.slice().sort((a, b) =>
+        (TROPHY_RANK[a.slice(0, 2)] ?? 9) - (TROPHY_RANK[b.slice(0, 2)] ?? 9));
+
+    const shown = [];
+    let used = 0;
+    for (const trophy of ranked) {
+        // +2 for the ", " separator, and leave room for the "+N more" tail.
+        const tail = `, +${ranked.length - shown.length} more`;
+        if (used + trophy.length + 2 + tail.length > TROPHY_FIELD_BUDGET) break;
+        used += trophy.length + (shown.length ? 2 : 0);
+        shown.push(trophy);
+    }
+
+    const hidden = ranked.length - shown.length;
+    return {
+        name:   `🏆 Trophies (${ranked.length})`,
+        value:  shown.join(', ') + (hidden > 0 ? `, +${hidden} more` : ''),
+        inline: true,
+    };
+}
+
+/**
+ * Where today's earnings stand against the limits that quietly throttle them.
+ *
+ * The profile used to report only the hard cap, so a hunter had no way to see
+ * the −50% soft cap or the diminishing-returns band coming before it landed.
+ */
+function buildTodayField(h, currency) {
+    const dim   = getDiminishingReturns(h.dailyHunts ?? 0);
+    const coins = h.dailyCoins ?? 0;
+
+    const barLen    = 12;
+    const filledLen = Math.min(barLen, Math.round((coins / LIMITS.DAILY_HARD_CAP) * barLen));
+    const bar       = '█'.repeat(filledLen) + '░'.repeat(barLen - filledLen);
+
+    const lines = [
+        `\`${bar}\` ${currency}${coins.toLocaleString()} / ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}`,
+        `🏹 ${(h.dailyHunts ?? 0).toLocaleString()} hunts · payout ×${dim.multiplier.toFixed(2)}`,
+    ];
+
+    if (dim.nextAt) {
+        lines.push(`📉 Drops to ×${dim.nextMultiplier.toFixed(2)} at ${dim.nextAt} hunts`);
+    }
+    if (coins >= LIMITS.DAILY_SOFT_CAP) {
+        lines.push(`🪙 Past the soft cap — payouts halved`);
+    } else {
+        lines.push(`🪙 Soft cap (−50%) at ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()}`);
+    }
+    lines.push(`🕛 Resets in ${formatMs(msUntilDailyReset(h))}`);
+
+    return { name: '📅 Today', value: lines.join('\n'), inline: false };
 }
 
 function buildXpBar(h, toNext) {
@@ -1855,9 +1997,11 @@ async function executeInv(interaction, sub) {
             .setTitle('🪨 Crafting Materials')
             .setDescription(entries.length ? entries.join('\n') : 'No materials yet. Hunt rare+ animals to find special drops!');
 
-        if (!entries.length) {
-            embed.setFooter({ text: 'Tip: Use bait from /hunt shop to boost rare animal chances' });
-        }
+        embed.setFooter({
+            text: entries.length
+                ? 'Every material feeds a recipe — see /craft list. Each zone ends in a permanent Field Trophy.'
+                : 'Tip: Use bait from /hunt shop to boost rare animal chances',
+        });
 
         return interaction.reply({ embeds: [embed] });
     }
@@ -2940,7 +3084,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField };
 
 // ── Per-user action lock ──────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent

@@ -23,6 +23,8 @@ function maximalUser() {
         hunt: {
             level: 25, xp: 13_000, prestige: 3, stamina: 7,
             consecutiveFails: 0, sinceRare: 49,
+            dailyHunts: 140, dailyCoins: 149_000,
+            dailyWindowStart: new Date(Date.now() - 3600_000),
             trophies: [], activeBait: 'premium_bait', activeBaitHuntsLeft: 1,
             activeCharm: 'luck_charm', activeCharmHuntsLeft: 1,
             activeFocus: true, activeXpScroll: true,
@@ -51,6 +53,15 @@ function maximalSuccessResult() {
         xpEarned: 260,
         levelUp: { oldLevel: 24, newLevel: 25 },
         cappedByHard: false,
+        // Every daily penalty biting at once, so the budget test counts the
+        // "Daily Limits" field too.
+        dailyReport: {
+            grossPayout: 15_000,
+            dimReturns:  { multiplier: 0.55, threshold: 120, nextAt: null, nextMultiplier: null },
+            softCapped:  true,
+            headroomClamped: true,
+            lostToDaily: 10_679,
+        },
         streakMult: 1.5,
         expiredBait: 'premium_bait',
         expiredCharm: 'luck_charm',
@@ -163,5 +174,45 @@ describe('hunt failure embed field budget', () => {
         for (const field of fieldsOf(embed)) {
             expect(field.value.length).toBeLessThanOrEqual(MAX_FIELD_VALUE);
         }
+    });
+});
+
+describe('trophy case', () => {
+    const { buildTrophyField } = __test__;
+    const QUALITIES = TROPHY_QUALITIES.filter(q => q.id !== 'poor' && q.id !== 'normal');
+
+    /** Every trophy string the game can ever store, in discovery order. */
+    function everyTrophy() {
+        const all = [];
+        for (const animal of Object.values(ANIMALS)) {
+            for (const q of QUALITIES) all.push(`${q.emoji} ${q.label} ${animal.name}`);
+        }
+        return all;
+    }
+
+    it('keeps the field inside Discord limits for a full collection', () => {
+        const field = buildTrophyField(everyTrophy());
+        expect(field.value.length).toBeLessThanOrEqual(MAX_FIELD_VALUE);
+        expect(field.name.length).toBeLessThanOrEqual(MAX_FIELD_NAME);
+    });
+
+    it('reports the full count even when the list is trimmed', () => {
+        const all   = everyTrophy();
+        const field = buildTrophyField(all);
+        expect(field.name).toContain(String(all.length));
+        expect(field.value).toMatch(/\+\d+ more$/);
+    });
+
+    it('shows the best trophies first', () => {
+        const mythic   = `🟣 Mythic ${ANIMALS.rabbit.name}`;
+        const field    = buildTrophyField([...everyTrophy(), mythic].reverse());
+        expect(field.value.startsWith('🟣')).toBe(true);
+    });
+
+    it('lists a small collection in full with no tail', () => {
+        const few = ['🟢 Good Rabbit', '🔷 Pristine Wolf'];
+        const field = buildTrophyField(few);
+        expect(field.value).toBe('🔷 Pristine Wolf, 🟢 Good Rabbit');
+        expect(field.name).toBe('🏆 Trophies (2)');
     });
 });

@@ -8,7 +8,8 @@ const { CRAFT_RECIPES: HUNT_RECIPES, CONSUMABLES: HUNT_CONSUMABLES, MATERIAL_NAM
 const { CRAFT_RECIPES: MINE_RECIPES, CONSUMABLES: MINE_CONSUMABLES, MATERIAL_NAMES: MINE_MAT_NAMES } = require('../../data/mineData');
 const { FISH_CRAFT_RECIPES, CONSUMABLES: FISH_CONSUMABLES, MATERIAL_NAMES: FISH_MAT_NAMES } = require('../../data/fishData');
 const { CROSS_CRAFT_RECIPES, CROSS_CONSUMABLES } = require('../../data/crossSystemData');
-const { ensureHuntData } = require('../../services/huntService');
+const { ensureHuntData, FIELD_TROPHY_FLAGS } = require('../../services/huntService');
+const { FIELD_TROPHIES } = require('../../data/huntData');
 const { ensureMineData } = require('../../services/mineService');
 const { ensureFishingData } = require('../../services/fishService');
 
@@ -149,7 +150,12 @@ module.exports = {
                 }));
             }
 
-            const huntLines  = recipeLines(HUNT_RECIPES,  { luckyPaw: h.luckyPaw });
+            // Every unique hunt upgrade the player already owns, so /craft list can
+            // mark it rather than offering a recipe that will be refused.
+            const huntOwned = { luckyPaw: h.luckyPaw };
+            for (const flag of FIELD_TROPHY_FLAGS) huntOwned[flag] = Boolean(h[flag]);
+
+            const huntLines  = recipeLines(HUNT_RECIPES, huntOwned);
             const mineLines  = recipeLines(MINE_RECIPES);
             const fishLines  = recipeLines(FISH_CRAFT_RECIPES, { luckyHook: f.luckyHook });
             const crossLines = recipeLines(CROSS_CRAFT_RECIPES, { precisionScope: h.precisionScope });
@@ -187,6 +193,9 @@ module.exports = {
                 if (recipe.output.id === 'luckyPaw'       && h.luckyPaw)       return interaction.reply({ content: 'You already have the **🐾 Lucky Paw** upgrade!',       flags: MessageFlags.Ephemeral });
                 if (recipe.output.id === 'luckyHook'      && f.luckyHook)      return interaction.reply({ content: 'You already have the **🎣 Lucky Hook** upgrade!',      flags: MessageFlags.Ephemeral });
                 if (recipe.output.id === 'precisionScope' && h.precisionScope) return interaction.reply({ content: 'You already have the **🔭 Precision Scope** upgrade!', flags: MessageFlags.Ephemeral });
+                if (FIELD_TROPHY_FLAGS.includes(recipe.output.id) && h[recipe.output.id]) {
+                    return interaction.reply({ content: `You already have the **${recipe.emoji} ${recipe.name}** upgrade!`, flags: MessageFlags.Ephemeral });
+                }
             }
 
             // Stack limit guards
@@ -258,6 +267,9 @@ module.exports = {
                 if (out.id === 'precisionScope') {
                     h.precisionScope = true;
                     outputDesc = '🔭 **Precision Scope** — permanently +2% rarity boost on all hunts!';
+                } else if (FIELD_TROPHY_FLAGS.includes(out.id)) {
+                    h[out.id] = true;
+                    outputDesc = `${recipe.emoji} **${recipe.name}** — ${FIELD_TROPHIES[out.id].effect}!`;
                 }
 
             } else if (out.type === 'mine_consumable') {

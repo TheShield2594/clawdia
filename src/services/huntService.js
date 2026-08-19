@@ -12,7 +12,8 @@ const {
     PRESTIGE_BONUSES,
     HUNT_QUEST_TEMPLATES,
     TROPHY_QUALITIES,
-    APEX_TYPES
+    APEX_TYPES,
+    FIELD_TROPHIES
 } = require('../data/huntData');
 const { hasEffect, consumeEffect, getEffect, getGatheringYieldEffect, EFFECT_CONFIGS } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
@@ -25,6 +26,11 @@ const DANGEROUS_ZONE_IDS = new Set(['desert_wastes', 'arctic_tundra', 'murky_swa
 const HUNT_DEATH_RATE = 0.08;
 
 const DAILY_QUEST_COUNT = 3;
+
+// Field Trophies: permanent, once-only upgrades crafted from a zone's own
+// materials. Each zone's drop table terminates in one of these, which is what
+// gives the deeper zones' trophies a reason to exist.
+const FIELD_TROPHY_FLAGS = Object.keys(FIELD_TROPHIES);
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
@@ -61,6 +67,10 @@ function ensureHuntData(user) {
     if (h.activeXpScroll       == null) h.activeXpScroll       = false;
     if (h.luckyPaw             == null) h.luckyPaw             = false;
     if (h.precisionScope       == null) h.precisionScope       = false;
+    // Field Trophies — one permanent per zone, crafted from that zone's materials.
+    for (const flag of FIELD_TROPHY_FLAGS) {
+        if (h[flag] == null) h[flag] = false;
+    }
     if (h.totalHunts           == null) h.totalHunts           = 0;
     if (h.successfulHunts      == null) h.successfulHunts      = 0;
     if (h.totalEarned          == null) h.totalEarned          = 0;
@@ -86,7 +96,8 @@ function getMaxStamina(user) {
     const prestige = user.hunt?.prestige ?? 0;
     const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
     const synergyBonus = getHuntSynergyStaminaBonus(user);
-    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus;
+    const trophyBonus  = user.hunt?.woodlandInstinct ? 1 : 0;
+    return LIMITS.MAX_STAMINA_BASE + bonus + synergyBonus + trophyBonus;
 }
 
 /**
@@ -130,6 +141,13 @@ function msUntilNextStamina(user) {
 }
 
 // ─── DAILY WINDOW ────────────────────────────────────────────────────────────
+
+/** Ms until the rolling 24h daily window rolls over (0 if it already has). */
+function msUntilDailyReset(h) {
+    if (!h?.dailyWindowStart) return 0;
+    const elapsed = Date.now() - h.dailyWindowStart.getTime();
+    return Math.max(0, LIMITS.DAILY_WINDOW_MS - elapsed);
+}
 
 /**
  * Resets daily counters if the rolling 24h window has expired.
@@ -304,6 +322,19 @@ function randInt(min, max) {
 // ─── TIER ROLL ───────────────────────────────────────────────────────────────
 
 /**
+ * How many hunts without a rare+ kill before the zone guarantees one.
+ *
+ * Scaled per zone rather than flat: a single global threshold tuned for the
+ * starter zone's 18% rare+ rate is unreachable everywhere else — at Legendary
+ * Peaks' 63% a 50-hunt dry streak is a 1-in-10^16 event, so the promise the
+ * pity bar makes would never once be kept. Each zone's number is set so a dry
+ * streak is a comparably rare tail event wherever you hunt.
+ */
+function getRarePityThreshold(zone) {
+    return zone?.rarePity ?? LIMITS.RARE_PITY_GUARANTEE;
+}
+
+/**
  * Rolls an animal tier from the zone's weighted table.
  * Bait consumables shift weight from common → rare/epic tiers.
  */
@@ -355,6 +386,12 @@ function rollTier(user, zone) {
         w.rare  += shift;
     }
 
+    // Stormcaller's Totem: mythical prey stalks every zone, including the starter
+    // forest where the event weight is otherwise zero.
+    if (h.stormcallersTotem) {
+        w.event = (w.event ?? 0) + LIMITS.TOTEM_EVENT_WEIGHT;
+    }
+
     // Precision Scope permanent upgrade (+2% rarity boost)
     if (h.precisionScope) {
         const scopeShift = w.common * 0.02;
@@ -364,8 +401,9 @@ function rollTier(user, zone) {
         w.legendary += scopeShift * 0.1;
     }
 
-    // Pity guarantee: at sinceRare threshold, force rare+ by zeroing out common/uncommon
-    if ((user.hunt.sinceRare ?? 0) >= LIMITS.RARE_PITY_GUARANTEE) {
+    // Pity guarantee: at the zone's sinceRare threshold, force rare+ by zeroing out
+    // common/uncommon.
+    if ((user.hunt.sinceRare ?? 0) >= getRarePityThreshold(zone)) {
         w.common   = 0;
         w.uncommon = 0;
         if ((w.rare ?? 0) + (w.epic ?? 0) + (w.legendary ?? 0) + (w.event ?? 0) === 0) {
@@ -413,6 +451,25 @@ function rollFailureSeverity() {
 
 // ─── PAYOUT CALCULATION ───────────────────────────────────────────────────────
 
+// Payout decay by daily hunt count, steepest band first.
+const DIM_RETURNS_BANDS = [
+    { threshold: LIMITS.DIM_RETURNS_THRESHOLD_3, multiplier: 0.55 },
+    { threshold: LIMITS.DIM_RETURNS_THRESHOLD_2, multiplier: 0.70 },
+    { threshold: LIMITS.DIM_RETURNS_THRESHOLD_1, multiplier: 0.85 },
+];
+
+/** The diminishing-returns band a hunter is in, and where the next one starts. */
+function getDiminishingReturns(dailyHunts) {
+    const band = DIM_RETURNS_BANDS.find(b => dailyHunts >= b.threshold);
+    const next = [...DIM_RETURNS_BANDS].reverse().find(b => dailyHunts < b.threshold);
+    return {
+        multiplier: band?.multiplier ?? 1,
+        threshold:  band?.threshold ?? 0,
+        nextAt:     next?.threshold ?? null,
+        nextMultiplier: next?.multiplier ?? null,
+    };
+}
+
 /**
  * Applies anti-exploit modifiers to a raw payout:
  *   - Prestige payout bonus
@@ -439,20 +496,22 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
     const presBonus = PRESTIGE_BONUSES[p].payoutBonus;
     if (presBonus > 0) payout *= (1 + presBonus);
 
+    // What the kill is worth before the day's own penalties take their cut. Kept
+    // so the embed can show the hunter what was taken and why — a payout that
+    // quietly shrinks by up to 72% reads as bad luck or a stealth nerf.
+    const grossPayout = Math.round(payout);
+
     // Diminishing returns based on daily hunt count
-    if (h.dailyHunts >= LIMITS.DIM_RETURNS_THRESHOLD_3) {
-        payout *= 0.55;
-    } else if (h.dailyHunts >= LIMITS.DIM_RETURNS_THRESHOLD_2) {
-        payout *= 0.70;
-    } else if (h.dailyHunts >= LIMITS.DIM_RETURNS_THRESHOLD_1) {
-        payout *= 0.85;
-    }
+    const dimReturns = getDiminishingReturns(h.dailyHunts);
+    payout *= dimReturns.multiplier;
 
     payout = Math.round(payout);
 
-    // Hard cap: zero coins — check before consuming item charges
+    // Hard cap: zero coins — check before consuming item charges. Report what the
+    // kill was worth so the embed can name the forfeited amount instead of
+    // striking through a zero.
     if (h.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
-        return { adjustedPayout: 0, cappedByHard: true };
+        return { adjustedPayout: 0, cappedByHard: true, forfeitedPayout: grossPayout };
     }
 
     // Applies the daily soft cap and clamps to the headroom left under the hard cap.
@@ -463,9 +522,29 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
     const basePayout    = settle(payout);
     const doubledPayout = settle(payout * 2);
 
+    /** Which of the day's penalties actually bit, and by how much. */
+    const reportFor = (net, doubled) => {
+        const gross = doubled ? grossPayout * 2 : grossPayout;
+        return {
+            grossPayout: gross,
+            dimReturns:  dimReturns.multiplier < 1 ? dimReturns : null,
+            softCapped,
+            // The headroom clamp only shows up as its own line when it took more
+            // than the soft cap already had.
+            headroomClamped: net < (softCapped ? Math.round((doubled ? payout * 2 : payout) * 0.50)
+                                              : (doubled ? payout * 2 : payout)),
+            lostToDaily: Math.max(0, gross - net),
+        };
+    };
+
     // A doubling already paid for earlier this hunt — no second charge.
     if (options.reuseGatheringYield) {
-        return { adjustedPayout: doubledPayout, cappedByHard: false, gatheringYield: null };
+        return {
+            adjustedPayout: doubledPayout,
+            cappedByHard:   false,
+            gatheringYield: null,
+            dailyReport:    reportFor(doubledPayout, true),
+        };
     }
 
     // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
@@ -485,23 +564,33 @@ function applyPayoutModifiers(user, rawPayout, zone, options = {}) {
                 emoji:       cfg?.emoji ?? '✨',
                 chargesLeft: getEffect(user, gatherEffect)?.charges ?? 0,
             },
+            dailyReport: reportFor(doubledPayout, true),
         };
     }
 
-    return { adjustedPayout: basePayout, cappedByHard: false, gatheringYield: null };
+    return {
+        adjustedPayout: basePayout,
+        cappedByHard:   false,
+        gatheringYield: null,
+        dailyReport:    reportFor(basePayout, false),
+    };
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
 
 /**
  * Deducts durability from a weapon after a hunt.
- * Reinforced stock upgrade reduces loss by 1 (min 1).
+ *
+ * The reinforced stock upgrade and `extraReduction` (the Insulated Kit field
+ * trophy) each shave a point off; the floor of 1 applies once, after both, so
+ * owning them together is worth more than either alone.
  */
-function applyDurabilityLoss(weapon, baseLoss) {
+function applyDurabilityLoss(weapon, baseLoss, extraReduction = 0) {
     let loss = baseLoss;
     if (weapon.upgrade === 'reinforced_stock') {
-        loss = Math.max(1, loss - WEAPON_UPGRADES.reinforced_stock.effect.durabilityReduction);
+        loss -= WEAPON_UPGRADES.reinforced_stock.effect.durabilityReduction;
     }
+    loss = Math.max(1, loss - extraReduction);
     weapon.currentDurability = Math.max(0, weapon.currentDurability - loss);
     updateWeaponStatus(weapon);
 }
@@ -775,6 +864,9 @@ function executeHunt(user, zoneId, options = {}) {
     const baitBefore  = h.activeBait;
     const charmBefore = h.activeCharm;
 
+    // Insulated Kit shaves a point off every durability hit, win or lose.
+    const insulation = h.insulatedKit ? 1 : 0;
+
     const result = {
         success,
         animal,
@@ -811,7 +903,7 @@ function executeHunt(user, zoneId, options = {}) {
             result.traitEffects.push({ trait: 'enraged', msg: 'Its fury drove the prize higher (+25% payout).' });
         }
 
-        const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, payoutBeforeMods, zone);
+        const { adjustedPayout, cappedByHard, gatheringYield, forfeitedPayout, dailyReport } = applyPayoutModifiers(user, payoutBeforeMods, zone);
 
         // Special drop
         let specialDrop = null;
@@ -838,17 +930,23 @@ function executeHunt(user, zoneId, options = {}) {
             durLoss += 1;
             result.traitEffects.push({ trait: 'giant', msg: 'The sheer mass of the beast wore your weapon harder.' });
         }
-        applyDurabilityLoss(weapon, durLoss);
+        applyDurabilityLoss(weapon, durLoss, insulation);
         result.durabilityLost = durLoss;
 
-        // Trait: venomous — costs an extra stamina
+        // Trait: venomous — costs an extra stamina, unless warded
         if (traits.includes('venomous')) {
-            h.stamina = Math.max(0, h.stamina - 1);
-            result.traitEffects.push({ trait: 'venomous', msg: 'Its venom sapped your strength (-1 extra stamina).' });
+            if (h.venomWard) {
+                result.traitEffects.push({ trait: 'venomous', msg: '🦂 Your Venom Ward neutralised the toxin — no stamina lost.' });
+            } else {
+                h.stamina = Math.max(0, h.stamina - 1);
+                result.traitEffects.push({ trait: 'venomous', msg: 'Its venom sapped your strength (-1 extra stamina).' });
+            }
         }
 
-        // Trait: aggressive — 30% chance to injure even on success
-        if (traits.includes('aggressive') && Math.random() < 0.30) {
+        // Trait: aggressive — 30% chance to injure even on success, halved by the
+        // Swampwalker's Charm
+        const injuryChance = h.swampwalkersCharm ? 0.15 : 0.30;
+        if (traits.includes('aggressive') && Math.random() < injuryChance) {
             h.injuryUntil = new Date(Date.now() + LIMITS.INJURY_PENALTY_MS);
             result.traitEffects.push({ trait: 'aggressive', msg: 'It lashed out while falling, injuring you (+15 min cooldown).' });
         }
@@ -884,6 +982,8 @@ function executeHunt(user, zoneId, options = {}) {
             specialDrop, xpEarned: xpGain,
             levelUp: lvResult.leveledUp ? lvResult : null,
             cappedByHard,
+            forfeitedPayout,
+            dailyReport,
             gatheringYield,
             streakMult
         });
@@ -905,10 +1005,14 @@ function executeHunt(user, zoneId, options = {}) {
         // Trait: pack_hunter — extra durability damage on failure
         let failDurLoss = severity.durLoss;
         if (traits.includes('pack_hunter')) {
-            failDurLoss += 3;
-            result.traitEffects.push({ trait: 'pack_hunter', msg: 'The pack descended on you, battering your weapon.' });
+            if (h.swampwalkersCharm) {
+                result.traitEffects.push({ trait: 'pack_hunter', msg: "🐊 The pack circled but kept its distance — your Swampwalker's Charm held them off." });
+            } else {
+                failDurLoss += 3;
+                result.traitEffects.push({ trait: 'pack_hunter', msg: 'The pack descended on you, battering your weapon.' });
+            }
         }
-        applyDurabilityLoss(weapon, failDurLoss);
+        applyDurabilityLoss(weapon, failDurLoss, insulation);
         result.durabilityLost = failDurLoss;
 
         if (severity.injuryMs > 0) {
@@ -1099,23 +1203,43 @@ function rollApexType() {
     return APEX_TYPES[keys[Math.floor(Math.random() * keys.length)]];
 }
 
+// Nerve: the duel's second axis. A wrong aggressive read costs two, so two bad
+// guesses end the fight outright even if the third phase lands — which is what
+// makes the 'safe' option a real hedge rather than a slower way to lose. At one
+// nerve per wrong guess the bar could never reach 0 without also leaving zero
+// correct phases, so it decided nothing and the hunter watched a health bar that
+// was pure decoration.
+const APEX_NERVE_MAX  = 3;
+const APEX_NERVE_COST = 2;
+
+/**
+ * How much nerve a hunter brings to a duel. The Apex Predator's Mark is worth a
+ * whole extra misread — granting a single point would round away to nothing,
+ * since nerve is only ever spent two at a time.
+ */
+function apexNerveMax(user) {
+    return APEX_NERVE_MAX + (user?.hunt?.apexPredatorsMark ? APEX_NERVE_COST : 0);
+}
+
+/** Nerve left after the given phase results. */
+function apexNerveAfter(phaseResults, user) {
+    const misreads = phaseResults.filter(p => !p.correct && p.chosen !== 'safe').length;
+    return Math.max(0, apexNerveMax(user) - misreads * APEX_NERVE_COST);
+}
+
 /**
  * Resolve the played phases. 'safe' never costs nerve; a wrong aggressive
  * choice does. Returns { phaseResults, nerve } — at 0 nerve you lose the duel.
  */
-function resolveApexPhases(apexType, choicesMade) {
-    let nerve = 3;
+function resolveApexPhases(apexType, choicesMade, user) {
     const phaseResults = [];
     for (let i = 0; i < choicesMade.length; i++) {
         const phase   = apexType.phases[i];
         const chosen  = choicesMade[i];
         const correct = chosen === phase.correct;
-        if (!correct && chosen !== 'safe') {
-            nerve = Math.max(0, nerve - 1);
-        }
         phaseResults.push({ correct, chosen, correctChoice: phase.correct });
     }
-    return { phaseResults, nerve };
+    return { phaseResults, nerve: apexNerveAfter(phaseResults, user) };
 }
 
 /**
@@ -1126,7 +1250,7 @@ function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponI
     const idx    = weaponIndex ?? user.hunt.equippedWeaponIndex;
     const weapon = user.hunt?.weapons[idx];
     const at     = apexType ?? rollApexType();
-    const { phaseResults, nerve } = resolveApexPhases(at, choicesMade);
+    const { phaseResults, nerve } = resolveApexPhases(at, choicesMade, user);
 
     const correctCount = phaseResults.filter(p => p.correct).length;
     const broken       = nerve <= 0;
@@ -1167,12 +1291,15 @@ module.exports = {
     applyStaminaRegen,
     msUntilNextStamina,
     applyDailyReset,
+    msUntilDailyReset,
     calculateSuccessChance,
     calculateCritChance,
     rollTier,
     rollAnimal,
+    getRarePityThreshold,
     rollFailureSeverity,
     applyPayoutModifiers,
+    getDiminishingReturns,
     applyDurabilityLoss,
     updateWeaponStatus,
     isCondemned,
@@ -1188,6 +1315,10 @@ module.exports = {
     executeHunt,
     rollApexType,
     resolveApexEncounter,
+    apexNerveAfter,
+    apexNerveMax,
+    APEX_NERVE_MAX,
+    FIELD_TROPHY_FLAGS,
     assignDailyHuntQuests,
     updateHuntQuestProgress,
     formatMs,
