@@ -13,7 +13,7 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { detachBalanceDelta, applyBalanceDelta } = require('../src/utils/balanceDelta');
+const { detachBalanceDelta, applyBalanceDelta, commitBalanceDelta } = require('../src/utils/balanceDelta');
 
 /** Minimal stand-in for the parts of a mongoose document these helpers touch. */
 function makeDoc(balance) {
@@ -125,6 +125,33 @@ describe('applyBalanceDelta', () => {
         expect(doc.modified.has('balance')).toBe(false);
     });
 
+    test('a net charge is clamped at zero rather than run through a bare $inc', async () => {
+        // `$inc` walks straight past zero. A flow whose net change is a charge
+        // has no more claim on funds it read seconds ago than any other debit.
+        const Model = {
+            updates: [],
+            findOneAndUpdate: async function (filter, update) {
+                this.updates.push(update);
+                return { balance: 100 }; // pre-image: less than the charge
+            },
+        };
+        const doc = makeDoc(1_000);
+        const result = await applyBalanceDelta(Model, {}, doc, -400);
+
+        // A pipeline update carrying the clamp, not `{ $inc: { balance: -400 } }`.
+        expect(Array.isArray(Model.updates[0])).toBe(true);
+        expect(result).toBe(0);
+        expect(doc.balance).toBe(0);
+    });
+
+    test('a charge smaller than the balance takes exactly its amount', async () => {
+        const Model = {
+            findOneAndUpdate: async () => ({ balance: 1_000 }),
+        };
+        const doc = makeDoc(1_000);
+        await expect(applyBalanceDelta(Model, {}, doc, -400)).resolves.toBe(600);
+    });
+
     test('falls back to local arithmetic when the update matches no document', async () => {
         const Model = { findOneAndUpdate: async () => null };
         const doc = makeDoc(1_000);
@@ -150,6 +177,65 @@ describe('applyBalanceDelta', () => {
     });
 });
 
+describe('commitBalanceDelta', () => {
+    const failing = () => ({ findOneAndUpdate: async () => { throw new Error('connection lost'); } });
+
+    let errorSpy;
+    beforeEach(() => { errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {}); });
+    afterEach(() => errorSpy.mockRestore());
+
+    test('reports success when the credit lands', async () => {
+        const Model = makeModel(1_000);
+        const doc = makeDoc(1_000);
+        await expect(commitBalanceDelta(Model, {}, doc, 250)).resolves.toEqual({ credited: true, balance: 1_250 });
+    });
+
+    test('a zero delta is a no-op success', async () => {
+        const Model = makeModel(1_000);
+        const doc = makeDoc(1_000);
+        await expect(commitBalanceDelta(Model, {}, doc, 0)).resolves.toEqual({ credited: true, balance: 1_000 });
+        expect(Model.state.updates).toEqual([]);
+    });
+
+    test('retries before giving up', async () => {
+        let calls = 0;
+        const Model = {
+            findOneAndUpdate: async () => {
+                calls++;
+                if (calls < 3) throw new Error('transient');
+                return { balance: 1_250 };
+            },
+        };
+        await expect(commitBalanceDelta(Model, {}, makeDoc(1_000), 250)).resolves.toMatchObject({ credited: true });
+        expect(calls).toBe(3);
+    });
+
+    test('records the credit as owed rather than losing it', async () => {
+        const FailedJob = require('../src/models/FailedJob');
+        const create = jest.spyOn(FailedJob, 'create').mockResolvedValue({});
+
+        const result = await commitBalanceDelta(failing(), { userId: 'u1', guildId: 'g1' }, makeDoc(1_000), 250, {
+            service: 'fish', jobName: 'castPayout', guildId: 'g1',
+        });
+
+        expect(result.credited).toBe(false);
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(create.mock.calls[0][0]).toMatchObject({
+            service: 'fish',
+            jobName: 'castPayout',
+            payload: { userId: 'u1', guildId: 'g1', delta: 250 },
+        });
+        create.mockRestore();
+    });
+
+    test('a dead-letter write that itself fails does not throw at the caller', async () => {
+        const FailedJob = require('../src/models/FailedJob');
+        const create = jest.spyOn(FailedJob, 'create').mockRejectedValue(new Error('also down'));
+        await expect(commitBalanceDelta(failing(), {}, makeDoc(1_000), 250)).resolves.toMatchObject({ credited: false });
+        create.mockRestore();
+    });
+});
+
 describe('/fish uses the helper', () => {
     const source = fs.readFileSync(
         path.join(__dirname, '..', 'src', 'commands', 'economy', 'fish.js'), 'utf8',
@@ -157,15 +243,22 @@ describe('/fish uses the helper', () => {
 
     test('the cast captures a balance reading and applies a delta', () => {
         expect(source).toMatch(/detachBalanceDelta\(user, balanceAtLoad\)/);
-        expect(source).toMatch(/applyBalanceDelta\(User, balanceFilter, user, balanceDelta\)/);
+        expect(source).toMatch(/commitBalanceDelta\(User, balanceFilter, user, balanceDelta/);
     });
 
     test('the delta is applied after the save, not before it', () => {
         const saveAt   = source.indexOf('const balanceDelta = detachBalanceDelta');
-        const applyAt  = source.indexOf('applyBalanceDelta(User, balanceFilter');
+        const applyAt  = source.indexOf('commitBalanceDelta(User, balanceFilter');
         const userSave = source.indexOf('await user.save();', saveAt);
         expect(saveAt).toBeGreaterThan(-1);
         expect(userSave).toBeGreaterThan(saveAt);
         expect(applyAt).toBeGreaterThan(userSave);
+    });
+
+    test('a credit that will not land is surfaced, not swallowed', () => {
+        // The failure mode this guards: save lands, $inc does not, and the player
+        // is shown a catch they were never paid for.
+        expect(source).toMatch(/if \(!payout\.credited\) payoutOwed = balanceDelta;/);
+        expect(source).toMatch(/Payout Not Yet Credited/);
     });
 });

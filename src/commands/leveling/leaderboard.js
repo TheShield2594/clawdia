@@ -158,7 +158,7 @@ module.exports = {
                         callerDisplay = `Lv${callerUser.level} (${callerUser.xp} XP)`;
                     } else if (type === 'economy') {
                         const callerTotal = netWorthOf(callerUser);
-                        callerRank = await netWorthRank(User, interaction.guild.id, callerTotal);
+                        callerRank = await netWorthRank(User, interaction.guild.id, callerTotal, callerUser._id);
                         callerDisplay = `${callerTotal.toLocaleString()} coins`;
                     } else if (type === 'duels') {
                         const callerWins = callerUser.duelWins ?? 0;

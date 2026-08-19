@@ -49,13 +49,14 @@ jest.mock('../src/models/Guild', () => ({
 
 jest.mock('../src/models/User', () => ({
     findOneAndUpdate: jest.fn(async (query, update) => {
-        // Inventory grant is an aggregation-pipeline update.
+        // Inventory grant is an aggregation-pipeline update. Run it rather than
+        // reading values out of its shape: reaching into the expression coupled
+        // this mock to one spelling of the pipeline, and it broke the moment the
+        // credit was rewritten to stop paying into every duplicate slot.
         if (Array.isArray(update)) {
-            const appended = update[0].$set.inventory.$cond.else.$concatArrays[1][0];
-            const { itemId, quantity } = appended;
-            const slot = mockWorld.user.inventory.find(s => s.itemId === itemId);
-            if (slot) slot.quantity += quantity;
-            else mockWorld.user.inventory.push({ itemId, quantity });
+            // Required inside the factory: jest forbids a mock factory from
+            // closing over an out-of-scope binding.
+            require('./helpers/pipelineUpdate').applyPipelineUpdate(mockWorld.user, update);
             return mockWorld.user;
         }
         // Balance charge / refund.

@@ -41,15 +41,26 @@ async function topByNetWorth(User, guildId, limit, extraProject = {}) {
 }
 
 /**
- * 1-based rank of `netWorth` within `guildId` — the count of users strictly
- * richer, plus one. Matches the ordering `topByNetWorth` produces.
+ * 1-based rank of a user within `guildId`, matching the position
+ * `topByNetWorth` would list them at.
+ *
+ * Counting only users strictly richer would give every tied user the same rank,
+ * which reads fine in isolation but contradicts the list printed directly above
+ * it: two users on the same total occupy two different rows there. Passing the
+ * caller's `_id` applies the same `_id`-ascending tie-break the sort uses, so
+ * "You: #4" always names the row the caller is actually on.
  */
-async function netWorthRank(User, guildId, netWorth) {
-    const richer = await User.countDocuments({
+async function netWorthRank(User, guildId, netWorth, id) {
+    const ahead = await User.countDocuments({
         guildId,
-        $expr: { $gt: [NET_WORTH_EXPR, netWorth] },
+        $or: [
+            { $expr: { $gt: [NET_WORTH_EXPR, netWorth] } },
+            ...(id === undefined || id === null
+                ? []
+                : [{ $expr: { $eq: [NET_WORTH_EXPR, netWorth] }, _id: { $lt: id } }]),
+        ],
     });
-    return richer + 1;
+    return ahead + 1;
 }
 
 module.exports = { NET_WORTH_EXPR, netWorthOf, topByNetWorth, netWorthRank };

@@ -8,6 +8,9 @@ const { Schema, model } = require('mongoose');
  * the unique index on `key` is what does the work there, so it is not optional.
  */
 const activeLockSchema = new Schema({
+    // `unique` here declares the intent; migration 012 is what guarantees it.
+    // Mongoose's own index build is asynchronous and unordered against the first
+    // query, which is too weak for an index the lock's correctness rests on.
     key:       { type: String, required: true, unique: true },
     token:     { type: String, required: true },
     expiresAt: { type: Date,   required: true },

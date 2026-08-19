@@ -934,12 +934,31 @@ async function returnExpiredMarketListings() {
 
     for (const listing of expired) {
         try {
+            // Claim the listing by deleting it before crediting anything. The
+            // listing document is the only record that this return is owed, so
+            // whoever deletes it owns the credit: a second worker, or this job's
+            // next tick after a crash, finds nothing and does nothing.
+            //
+            // Crediting first and deleting after inverts that — a delete that
+            // fails leaves the listing to be found and credited again on the next
+            // tick, minting items. Losing a return is recoverable from this log;
+            // silently doubling one is not.
+            const claimed = await MarketListing.findOneAndDelete({ _id: listing._id });
+            if (!claimed) continue;
+
             // Return items to the seller in one atomic update — the match-then-push
             // it replaced could hand two expiring listings of the same item their
             // own slot each, stranding one of them.
-            await grantInventoryItem(listing.sellerId, listing.guildId, listing.itemId, listing.quantity, { upsert: true });
-
-            await MarketListing.deleteOne({ _id: listing._id });
+            try {
+                await grantInventoryItem(listing.sellerId, listing.guildId, listing.itemId, listing.quantity, { upsert: true });
+            } catch (creditErr) {
+                console.error(
+                    `[scheduler] listing ${listing._id} was claimed but crediting ` +
+                    `${listing.quantity}x ${listing.itemId} to ${listing.sellerId} failed — ` +
+                    'items owed and must be returned by hand:', creditErr.message,
+                );
+                continue;
+            }
             processed++;
         } catch (err) {
             console.error(`[scheduler] returnExpiredMarketListings failed for listing ${listing._id}:`, err.message);

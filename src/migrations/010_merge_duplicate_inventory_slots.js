@@ -47,15 +47,41 @@ module.exports = {
         };
 
         for await (const doc of cursor) {
-            const totals = new Map();
+            // Fold into the first slot seen for each itemId, keeping that slot's
+            // own object — entries are subdocuments with their own `_id`, and
+            // rebuilding them as bare `{ itemId, quantity }` would discard it.
+            const firstFor = new Map(); // itemId -> slot object kept in `slots`
+            const slots = [];
+            let mergedSlots = 0;
+
             for (const slot of doc.inventory ?? []) {
                 const id = slot?.itemId;
-                if (id === undefined || id === null) continue;
-                totals.set(id, (totals.get(id) ?? 0) + (slot.quantity ?? 0));
+
+                // A slot with no itemId is not a duplicate of anything and is not
+                // this migration's to interpret. Dropping it would destroy items;
+                // it is carried through untouched for someone to look at.
+                if (id === undefined || id === null) {
+                    slots.push(slot);
+                    continue;
+                }
+
+                const first = firstFor.get(id);
+                if (first) {
+                    first.quantity = (first.quantity ?? 0) + (slot.quantity ?? 0);
+                    mergedSlots++;
+                } else {
+                    const kept = { ...slot, quantity: slot.quantity ?? 0 };
+                    firstFor.set(id, kept);
+                    slots.push(kept);
+                }
             }
 
-            const inventory = [...totals].map(([itemId, quantity]) => ({ itemId, quantity }));
-            ops.push({ updateOne: { filter: { _id: doc._id }, update: { $set: { inventory } } } });
+            // The cursor's filter also matches documents whose only "duplication"
+            // is slots missing an itemId, which nothing above merged. Rewriting
+            // those would be a no-op write at best.
+            if (mergedSlots === 0) continue;
+
+            ops.push({ updateOne: { filter: { _id: doc._id }, update: { $set: { inventory: slots } } } });
             merged++;
 
             if (ops.length >= 500) await flush();

@@ -102,8 +102,44 @@ function evaluate(expr, doc, vars = {}) {
             const [a, b] = args();
             return a > b;
         }
-        case '$add':
-            return args().reduce((sum, n) => sum + (n ?? 0), 0);
+        case '$add': {
+            // Mongo propagates null: `$add` over a missing or null operand is
+            // null, not a silent zero. Treating it as zero here would hide the
+            // bug where a legacy slot without a quantity gets wiped.
+            const operands = args();
+            if (operands.some(n => n === null || n === undefined)) return null;
+            return operands.reduce((sum, n) => sum + n, 0);
+        }
+        case '$subtract': {
+            const [a, b] = args();
+            if (a === null || a === undefined || b === null || b === undefined) return null;
+            return a - b;
+        }
+        case '$max':
+            return args().reduce((best, n) => (n === null || n === undefined ? best : Math.max(best, n)), -Infinity);
+        case '$not':
+            return !args()[0];
+        case '$and':
+            return (Array.isArray(arg) ? arg : [arg]).every(e => Boolean(evaluate(e, doc, vars)));
+        case '$or':
+            return (Array.isArray(arg) ? arg : [arg]).some(e => Boolean(evaluate(e, doc, vars)));
+        case '$mergeObjects':
+            return args().reduce((out, obj) => Object.assign(out, obj ?? {}), {});
+        case '$let': {
+            const bound = { ...vars };
+            for (const [name, expr2] of Object.entries(arg.vars ?? {})) {
+                bound[name] = evaluate(expr2, doc, bound);
+            }
+            return evaluate(arg.in, doc, bound);
+        }
+        case '$reduce': {
+            const input = evaluate(arg.input, doc, vars) ?? [];
+            let value = evaluate(arg.initialValue, doc, vars);
+            for (const element of input) {
+                value = evaluate(arg.in, doc, { ...vars, this: element, value });
+            }
+            return value;
+        }
         case '$concatArrays':
             return args().reduce((out, arr) => out.concat(arr ?? []), []);
         case '$setUnion': {

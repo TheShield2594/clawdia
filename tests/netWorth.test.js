@@ -45,8 +45,13 @@ function fakeUserModel(docs) {
         },
         countDocuments: async (query) => docs.filter(d => {
             if (d.guildId !== query.guildId) return false;
-            const [, threshold] = query.$expr.$gt;
-            return evaluate(NET_WORTH_EXPR, d) > threshold;
+            const worth = evaluate(NET_WORTH_EXPR, d);
+            // Either strictly richer, or level with the caller and ahead on the
+            // `_id` tie-break the sort uses.
+            return query.$or.some(clause => (
+                clause.$expr.$gt ? worth > clause.$expr.$gt[1]
+                    : worth === clause.$expr.$eq[1] && d._id < clause._id.$lt
+            ));
         }).length,
     };
 }
@@ -116,12 +121,38 @@ describe('netWorthRank', () => {
         const Model = fakeUserModel(POPULATION);
         const rows = await topByNetWorth(Model, GUILD, 10);
         for (const [index, row] of rows.entries()) {
-            expect(await netWorthRank(Model, GUILD, row.netWorth)).toBe(index + 1);
+            const doc = POPULATION.find(d => d.userId === row.userId);
+            expect(await netWorthRank(Model, GUILD, row.netWorth, doc._id)).toBe(index + 1);
         }
     });
 
+    test('tied users get the ranks their rows occupy, not one shared rank', async () => {
+        // The self-rank line prints directly beneath the top-ten list, so giving
+        // three tied users "#1" each would contradict the three rows above it.
+        const tied = [
+            { _id: 3, userId: 'c', guildId: GUILD, balance: 0,   bank: 100 },
+            { _id: 1, userId: 'a', guildId: GUILD, balance: 100, bank: 0 },
+            { _id: 2, userId: 'b', guildId: GUILD, balance: 50,  bank: 50 },
+        ];
+        const Model = fakeUserModel(tied);
+        const rows  = await topByNetWorth(Model, GUILD, 10);
+        expect(rows.map(r => r.userId)).toEqual(['a', 'b', 'c']);
+
+        expect(await netWorthRank(Model, GUILD, 100, 1)).toBe(1);
+        expect(await netWorthRank(Model, GUILD, 100, 2)).toBe(2);
+        expect(await netWorthRank(Model, GUILD, 100, 3)).toBe(3);
+    });
+
+    test('without an id, ties fall back to a shared competition rank', async () => {
+        const tied = [
+            { _id: 1, userId: 'a', guildId: GUILD, balance: 100, bank: 0 },
+            { _id: 2, userId: 'b', guildId: GUILD, balance: 100, bank: 0 },
+        ];
+        expect(await netWorthRank(fakeUserModel(tied), GUILD, 100)).toBe(1);
+    });
+
     test('a user richer than everyone ranks first', async () => {
-        expect(await netWorthRank(fakeUserModel(POPULATION), GUILD, 10_000_000)).toBe(1);
+        expect(await netWorthRank(fakeUserModel(POPULATION), GUILD, 10_000_000, 99)).toBe(1);
     });
 });
 
@@ -144,5 +175,11 @@ describe('every wealth surface goes through the shared helper', () => {
 
     test.each(SURFACES)('%s no longer sorts on balance alone', (rel) => {
         expect(read(rel)).not.toMatch(/\.sort\(\{\s*balance:\s*-1/);
+    });
+
+    // Importing it proves nothing on its own — a surface could import the helper
+    // and still rank its own way.
+    test.each(SURFACES)('%s actually calls the shared ranking helper', (rel) => {
+        expect(read(rel)).toMatch(/(topByNetWorth|netWorthRank)\(/);
     });
 });

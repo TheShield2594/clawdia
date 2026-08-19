@@ -52,12 +52,30 @@ describe('inventoryAddExpr', () => {
         expect(doc.inventory.filter(s => s.itemId === 'crate')).toHaveLength(1);
     });
 
-    test('an existing duplicate is not made worse, and its first slot takes the credit', () => {
+    test('an existing duplicate is credited once, not once per slot', () => {
         // Documents written before the fix can still hold two slots; migration 010
-        // folds those together. Until it runs, a credit must not add a third.
+        // folds those together. Until it runs a credit must not add a third slot,
+        // and — the sharper trap — must not pay into both: crediting every match
+        // turns 5 units into 10 on a document that already lost track of itself.
         const doc = { inventory: [{ itemId: 'x', quantity: 1 }, { itemId: 'x', quantity: 9 }] };
         credit(doc, 'x', 5);
-        expect(slots(doc)).toEqual(['x:6', 'x:14']);
+        expect(slots(doc)).toEqual(['x:6', 'x:9']);
+    });
+
+    test('a legacy slot with no quantity is credited, not wiped', () => {
+        // `$add` propagates null in Mongo, so adding to a missing quantity would
+        // set the slot to null and lose the item entirely.
+        const doc = { inventory: [{ itemId: 'old' }] };
+        credit(doc, 'old', 3);
+        expect(slots(doc)).toEqual(['old:3']);
+    });
+
+    test('keeps the slot subdocument rather than rebuilding it', () => {
+        // Inventory entries are subdocuments with their own `_id`; a credit that
+        // rebuilt `{ itemId, quantity }` would silently drop it.
+        const doc = { inventory: [{ _id: 'slot-1', itemId: 'y', quantity: 2 }] };
+        credit(doc, 'y', 1);
+        expect(doc.inventory[0]).toEqual({ _id: 'slot-1', itemId: 'y', quantity: 3 });
     });
 });
 

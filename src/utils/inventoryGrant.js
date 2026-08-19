@@ -22,32 +22,60 @@ const DEFAULT_USER = require('../models/User');
 
 /**
  * Pipeline `$set` expression that adds `quantity` of `itemId` to `$inventory`:
- * bumps the matching slot when one exists, appends a slot when it does not.
+ * credits the first slot whose itemId matches, or appends a slot when there is
+ * none.
+ *
+ * "First" matters. A `$map` that credits every matching slot turns one credit
+ * into N on a document that still carries pre-fix duplicates — buying 5 of an
+ * item you hold in two slots would hand you 10. The fold below takes the credit
+ * once and copies the rest through untouched, so a duplicate is left for
+ * migration 010 to merge rather than being silently inflated.
+ *
+ * `$mergeObjects` rather than a rebuilt `{ itemId, quantity }` literal: the slot
+ * is a subdocument with its own `_id`, and rebuilding it would discard that.
  *
  * Exported on its own so callers that need to fold other updates into the same
  * atomic write can compose it into their own `$set` stage.
  */
 function inventoryAddExpr(itemId, quantity) {
     return {
-        $cond: {
-            if: { $in: [itemId, { $ifNull: ['$inventory.itemId', []] }] },
-            then: {
-                $map: {
-                    input: '$inventory',
-                    as: 'slot',
-                    in: {
-                        $cond: [
-                            { $eq: ['$$slot.itemId', itemId] },
-                            { itemId: '$$slot.itemId', quantity: { $add: ['$$slot.quantity', quantity] } },
-                            '$$slot',
-                        ],
+        $let: {
+            vars: {
+                folded: {
+                    $reduce: {
+                        input: { $ifNull: ['$inventory', []] },
+                        initialValue: { slots: [], credited: false },
+                        in: {
+                            $cond: [
+                                { $and: [
+                                    { $not: ['$$value.credited'] },
+                                    { $eq: ['$$this.itemId', itemId] },
+                                ] },
+                                {
+                                    slots: { $concatArrays: ['$$value.slots', [
+                                        // `$ifNull` on the quantity: a legacy slot
+                                        // written without one would make `$add`
+                                        // evaluate to null and wipe the count.
+                                        { $mergeObjects: ['$$this', {
+                                            quantity: { $add: [{ $ifNull: ['$$this.quantity', 0] }, quantity] },
+                                        }] },
+                                    ]] },
+                                    credited: true,
+                                },
+                                {
+                                    slots: { $concatArrays: ['$$value.slots', ['$$this']] },
+                                    credited: '$$value.credited',
+                                },
+                            ],
+                        },
                     },
                 },
             },
-            else: {
-                $concatArrays: [
-                    { $ifNull: ['$inventory', []] },
-                    [{ itemId, quantity }],
+            in: {
+                $cond: [
+                    '$$folded.credited',
+                    '$$folded.slots',
+                    { $concatArrays: ['$$folded.slots', [{ itemId, quantity }]] },
                 ],
             },
         },
