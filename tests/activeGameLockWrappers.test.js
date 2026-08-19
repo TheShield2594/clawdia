@@ -82,6 +82,22 @@ async function until(predicate, label) {
     throw new Error(`timed out waiting for: ${label}`);
 }
 
+/**
+ * Waits until the lease on `key` is actually gone.
+ *
+ * Casino releases fire-and-forget — `release(...).catch(...)`, never awaited —
+ * so `execute()` resolving does not mean the delete has landed. Asserting
+ * immediately after it only passes while the fake happens to delete
+ * synchronously, which is a property of the fake rather than of the code under
+ * test: give the fake a round trip and three of these tests fail.
+ *
+ * The predicate reads the lock store rather than calling `tryAcquire`, which
+ * would take the lock as a side effect of asking whether it was free.
+ */
+function releaseLanded(key) {
+    return until(() => !fakeLocks.__locks.has(key), `the lease on ${key} to be released`);
+}
+
 function makeInteraction({ userId = 'u1', guildId = 'g1', sub }) {
     return {
         guild: { id: guildId },
@@ -278,6 +294,7 @@ describe('/casino — the lock around a game that outlives execute()', () => {
 
         await expect(casino.execute(interactionFor())).rejects.toThrow('dealer exploded');
 
+        await releaseLanded(KEY);
         const token = await tryAcquire(KEY);
         expect(token).toBeTruthy();
         await release(KEY, token);
@@ -290,6 +307,7 @@ describe('/casino — the lock around a game that outlives execute()', () => {
 
         await casino.execute(interactionFor());
 
+        await releaseLanded(KEY);
         const token = await tryAcquire(KEY);
         expect(token).toBeTruthy();
         await release(KEY, token);
@@ -306,6 +324,7 @@ describe('/casino — the lock around a game that outlives execute()', () => {
 
         // A second release must not have freed a lock someone else took in the
         // meantime; the key is simply free, and takeable exactly once.
+        await releaseLanded(KEY);
         const token = await tryAcquire(KEY);
         expect(token).toBeTruthy();
         await expect(tryAcquire(KEY)).resolves.toBeNull();
@@ -321,6 +340,9 @@ describe('/casino — the lock around a game that outlives execute()', () => {
 
         await casino.execute(interactionFor());
 
+        // The hand ran and simply did not release — that is the case under
+        // test, not a game that never started and so never took the lock.
+        expect(slots.execute).toHaveBeenCalledTimes(1);
         await expect(tryAcquire(KEY)).resolves.toBeNull();
 
         const next = interactionFor();
