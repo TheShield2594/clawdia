@@ -1087,7 +1087,7 @@ async function handleJournal(interaction) {
             filterRegion ? `entries from ${filterRegion.emoji} **${filterRegion.name}**` : 'entries',
         ].join(' ');
         return interaction.reply({
-            content: `No ${wanted} in the last ${journal.length} pages of your journal. The wilds keep their own schedule.`,
+            content: `No ${wanted} in the last ${journal.length} journal entries. The wilds keep their own schedule.`,
             flags: MessageFlags.Ephemeral,
         });
     }
