@@ -5,6 +5,7 @@ const User    = require('../../models/User');
 const Guild   = require('../../models/Guild');
 const AiItem  = require('../../models/AiItem');
 const { resolveProviderConfig, getCompletion } = require('../../services/aiService');
+const { grantInventoryItem } = require('../../utils/inventoryGrant');
 
 const RARITY_CONFIG = {
     common:    { label: 'Common',    emoji: '⚪', color: 0xAAAAAA, cost: 500,   xpReward: 25  },
@@ -177,10 +178,15 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
                 createdBy: interaction.user.id, guildId: interaction.guild.id,
             });
 
-            chargedUser.inventory = chargedUser.inventory || [];
-            chargedUser.inventory.push({ itemId, quantity: 1 });
-            chargedUser.xp = (chargedUser.xp || 0) + cfg.xpReward;
-            await chargedUser.save();
+            // One atomic update for the item and the XP: a mutate-then-save here
+            // would write inventory and xp as absolute values read before the
+            // (multi-second) AI call, flattening anything credited in between.
+            // The itemId is freshly minted so no slot can exist yet, but the
+            // shared upsert keeps every credit site the same shape.
+            const granted = await grantInventoryItem(interaction.user.id, interaction.guild.id, itemId, 1, {
+                extraSet: { xp: { $add: [{ $ifNull: ['$xp', 0] }, cfg.xpReward] } },
+            });
+            if (!granted) throw new Error('user document not found');
         } catch (err) {
             console.error('[FORGE] Persistence failed:', err?.message || err);
             await User.updateOne(

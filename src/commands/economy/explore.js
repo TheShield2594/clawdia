@@ -5,6 +5,7 @@ const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
 const { detachBalanceDelta, commitBalanceDelta } = require('../../utils/balanceDelta');
+const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const {
@@ -343,9 +344,22 @@ async function handleGo(interaction) {
         // encounter prompt below. Once this lands the expedition is real, so the
         // cooldown slot is earned and must not be handed back on a later failure.
         const findDelta = detachBalanceDelta(user, balanceBaseline);
+        // A recovered relic stays in the in-memory inventory — the encounter
+        // stakes and the reply both read it — but must not ride the save:
+        // `save()` writes the whole array as read at load, flattening any credit
+        // that landed in between, so the relic is re-applied as an atomic upsert
+        // right after (src/utils/inventoryGrant.js). A brand-new document
+        // inserts its whole inventory in one piece, so there is nothing to
+        // detach or re-apply there.
+        const relicDetached = Boolean(result.relic) && !user.isNew;
+        if (relicDetached) user.unmarkModified('inventory');
         try {
             await user.save();
             exploreCommitted = true;
+            if (relicDetached) {
+                await grantInventoryItem(user.userId, user.guildId, result.relic.itemId, 1)
+                    .catch(err => console.error(`[explore] relic ${result.relic.itemId} owed to ${user.userId} — grant failed:`, err));
+            }
             const paid = await commitBalanceDelta(User, balanceFilter, user, findDelta, {
                 service: 'explore',
                 jobName: 'findPayout',
