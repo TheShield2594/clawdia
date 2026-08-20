@@ -1421,6 +1421,9 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
                 { name: 'Stamina',  value: buildStaminaLine(user),                inline: true }
             );
 
+        const ammoField = buildAmmoField(user, weapon);
+        if (ammoField) embed.addFields(ammoField);
+
         const huntMultEntries = [];
         if ((result.streakMult ?? 1) > 1.0) huntMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
         if (isCrit)                          huntMultEntries.push({ emoji: '⚡', label: `${critMultiplier.toFixed(2)}x crit` });
@@ -1468,6 +1471,9 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
             embed.addFields({ name: '⚠️ Low Durability', value: `Your **${weapon.name}** is nearly worn out (${weapon.currentDurability}/${weapon.maxDurability}). Repair soon!`, inline: false });
         }
 
+        const lowAmmoField = buildLowAmmoField(user, weapon);
+        if (lowAmmoField) embed.addFields(lowAmmoField);
+
         const balanceLine = `${currency}${user.balance.toLocaleString()}`;
         const xpLine = buildXpLine(user);
         embed.addFields({ name: 'Balance', value: balanceLine, inline: true }, { name: 'Hunter XP', value: xpLine, inline: true });
@@ -1498,6 +1504,9 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
                 inline: true
             }
         );
+
+    const failAmmoField = buildAmmoField(user, weapon);
+    if (failAmmoField) embed.addFields(failAmmoField);
 
     if ((user.hunt.consecutiveFails ?? 0) > 0) {
         embed.addFields(buildPityStreakField(user.hunt.consecutiveFails, LIMITS, PITY_COPY.hunt));
@@ -1544,6 +1553,9 @@ function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
     if (weapon.status === 'broken' && !result.deathEvent) {
         embed.addFields({ name: '❌ Weapon Broke!', value: buildBrokenWeaponNote(weapon), inline: false });
     }
+
+    const failLowAmmoField = buildLowAmmoField(user, weapon);
+    if (failLowAmmoField) embed.addFields(failLowAmmoField);
 
     const sinceRareNow = user.hunt.sinceRare ?? 0;
     if (sinceRareNow >= 5) embed.addFields(buildPityField(user, zone));
@@ -1664,6 +1676,41 @@ function buildStaminaLine(user) {
     const h   = user.hunt;
     const max = getMaxStamina(user);
     return `${h.stamina}/${max} ⚡`;
+}
+
+// A hunt spends three consumables: durability, stamina, and — from T2 up — a
+// round of ammo. The first two have always been on the result embed; ammo was
+// only ever surfaced as the ephemeral refusal on the *next* hunt, after the
+// cooldown had already been claimed. These two fields give it the same
+// treatment durability gets: a running count on every result, and a warning
+// naming the pack to buy before the well runs dry mid-session.
+const AMMO_LOW_THRESHOLD = 5;
+
+function ammoContext(user, weapon) {
+    const weaponData = WEAPON_BY_TIER[weapon.tier];
+    if (!weaponData?.requiresAmmo) return null;
+    const pack = AMMO_PACKS.find(p => p.ammoType === weaponData.ammoType);
+    return {
+        remaining: user.hunt.ammo?.[weaponData.ammoType] ?? 0,
+        label: weaponData.ammoType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        emoji: pack?.emoji ?? '🔶',
+        packName: pack?.name ?? weaponData.ammoType.replace(/_/g, ' '),
+    };
+}
+
+function buildAmmoField(user, weapon) {
+    const ammo = ammoContext(user, weapon);
+    if (!ammo) return null;
+    return { name: 'Ammo', value: `${ammo.emoji} ${ammo.label} ×${ammo.remaining}`, inline: true };
+}
+
+function buildLowAmmoField(user, weapon) {
+    const ammo = ammoContext(user, weapon);
+    if (!ammo || ammo.remaining > AMMO_LOW_THRESHOLD) return null;
+    const value = ammo.remaining <= 0
+        ? `That was your last **${ammo.label}** round! Buy **${ammo.packName}** with \`/hunt shop buy\` before your next hunt.`
+        : `Only **${ammo.remaining}** ${ammo.label} round${ammo.remaining === 1 ? '' : 's'} left. Stock up on **${ammo.packName}** with \`/hunt shop buy\`.`;
+    return { name: '⚠️ Low Ammo', value, inline: false };
 }
 
 function buildXpLine(user) {
@@ -3519,7 +3566,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, runAimPhase, AIM_WINDOW_MS, AIM_LATE_MS, isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS, APPROACH_PROFILES, TRAIT_PROFILE_ORDER, GENERIC_PROFILE_IDS, pickApproachProfile };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildAmmoField, buildLowAmmoField, AMMO_LOW_THRESHOLD, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, runAimPhase, AIM_WINDOW_MS, AIM_LATE_MS, isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS, APPROACH_PROFILES, TRAIT_PROFILE_ORDER, GENERIC_PROFILE_IDS, pickApproachProfile };
 
 // ── Per-user economy lock ─────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent

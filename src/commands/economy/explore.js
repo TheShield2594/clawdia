@@ -13,7 +13,8 @@ const {
     RELIC_LIST, RELIC_RARITY_ORDER, TOTAL_CORE_RELICS,
     FOOTER_LINES, INJURY_LINES,
 } = require('../../data/exploreData');
-const { fitDescription, EMBED_LIMITS } = require('../../utils/embedFields');
+const { fitDescription, chunkByLength, EMBED_LIMITS } = require('../../utils/embedFields');
+const { paginate } = require('../../utils/paginator');
 const {
     ensureExploreData,
     getMaxStamina,
@@ -65,6 +66,16 @@ const EVENT_TYPE_EMOJI = {
     trap: '🪤', encounter: '👁️', quiet: '🌫️',
 };
 
+const EVENT_TYPE_CHOICES = Object.entries(EVENT_TYPE_EMOJI).map(([id, emoji]) => ({
+    name: `${emoji} ${id.charAt(0).toUpperCase()}${id.slice(1)}`,
+    value: id,
+}));
+
+// Entries per journal page. Ten timestamped lines sit far under the 4096
+// description budget even when every summary runs long; chunkByLength backstops
+// the pathological case regardless.
+const JOURNAL_PAGE_SIZE = 10;
+
 module.exports = {
     cooldown: 5,
 
@@ -95,7 +106,17 @@ module.exports = {
                 .setDescription('Browse every known region — requirements, season windows, and your progress.'))
         .addSubcommand(sub =>
             sub.setName('journal')
-                .setDescription('Reread your expedition journal — your most recent finds, in order.'))
+                .setDescription('Reread your expedition journal — your most recent finds, in order.')
+                .addStringOption(o =>
+                    o.setName('region')
+                        .setDescription('Only show entries written in this region')
+                        .setRequired(false)
+                        .addChoices(...REGION_CHOICES))
+                .addStringOption(o =>
+                    o.setName('type')
+                        .setDescription('Only show one kind of find')
+                        .setRequired(false)
+                        .addChoices(...EVENT_TYPE_CHOICES)))
         .addSubcommand(sub =>
             sub.setName('relics')
                 .setDescription('Open your relic case — everything the wilds let you keep, and what it earns you.')
@@ -1051,20 +1072,50 @@ async function handleJournal(interaction) {
         });
     }
 
-    const lines = journal.slice(0, LIMITS.JOURNAL_CAP).map(entry => {
+    // Both filters run on data every entry already carries — the type each find
+    // was tagged with at write time, and the region it was written in.
+    const regionFilter = interaction.options.getString('region');
+    const typeFilter   = interaction.options.getString('type');
+    const entries = journal.slice(0, LIMITS.JOURNAL_CAP).filter(entry =>
+        (!regionFilter || entry.regionId === regionFilter)
+        && (!typeFilter || entry.eventType === typeFilter));
+
+    if (!entries.length) {
+        const filterRegion = REGIONS[regionFilter];
+        const wanted = [
+            typeFilter ? `${EVENT_TYPE_EMOJI[typeFilter]} ${typeFilter}` : 'matching',
+            filterRegion ? `entries from ${filterRegion.emoji} **${filterRegion.name}**` : 'entries',
+        ].join(' ');
+        return interaction.reply({
+            content: `No ${wanted} in the last ${journal.length} journal entries. The wilds keep their own schedule.`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
+    const lines = entries.map(entry => {
         const region = REGIONS[entry.regionId];
         const stamp = `<t:${Math.floor(new Date(entry.at).getTime() / 1000)}:R>`;
         return `${EVENT_TYPE_EMOJI[entry.eventType] ?? '🥾'} ${region?.emoji ?? ''} **${region?.name ?? entry.regionId}** — ${entry.summary} *(${stamp})*`;
     });
 
-    const embed = new EmbedBuilder()
-        .setColor('#8d6e63')
-        .setTitle(`📔 Expedition Journal — ${interaction.user.username}`)
-        .setDescription(lines.join('\n'))
-        .setFooter({ text: `The last ${LIMITS.JOURNAL_CAP} entries are kept. The rest live in the retelling.` })
-        .setTimestamp();
+    const filterNote = [
+        typeFilter ? `${typeFilter} only` : null,
+        REGIONS[regionFilter] ? `${REGIONS[regionFilter].name} only` : null,
+    ].filter(Boolean).join(' · ');
+    const footer = `${filterNote ? `${filterNote} • ` : ''}The last ${LIMITS.JOURNAL_CAP} entries are kept. The rest live in the retelling.`;
 
-    return interaction.reply({ embeds: [embed] });
+    // chunkByLength keeps each page inside the description budget even if a run
+    // of long relic and secret summaries stacks up — discord.js throws rather
+    // than truncating, so this used to be a latent way to lose the whole command.
+    const pages = chunkByLength(lines, { maxPerChunk: JOURNAL_PAGE_SIZE }).map(pageLines =>
+        new EmbedBuilder()
+            .setColor('#8d6e63')
+            .setTitle(`📔 Expedition Journal — ${interaction.user.username}`)
+            .setDescription(pageLines.join('\n'))
+            .setFooter({ text: footer })
+            .setTimestamp());
+
+    return paginate(interaction, pages);
 }
 
 // ─── RELICS ───────────────────────────────────────────────────────────────────

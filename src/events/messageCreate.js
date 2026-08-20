@@ -15,6 +15,7 @@ const { applyXpGain, announceLevelUp } = require('../utils/applyXpGain');
 const BASE_BAD_WORDS = require('../data/profanityList');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
+const { BoundedRateLimiter } = require('../utils/boundedRateLimiter');
 
 // Pre-compile base word regexes once at module load — avoids per-message regex construction
 const BASE_BAD_WORD_REGEXES = BASE_BAD_WORDS.map(word => {
@@ -116,20 +117,30 @@ module.exports = {
                 if (blocked) return await flushPendingUser(sharedUser);
             }
 
-            await handleSuggestions(message, guildSettings);
-
-            if (guildSettings?.bibleVerse?.autoRespond) {
-                await handleBibleVerseDetection(message, guildSettings);
+            // Automod was the only handler with a say over the ones below — past
+            // that gate they touch different data and issue unrelated writes, so
+            // they run concurrently instead of queueing behind whichever happens
+            // to be slowest.
+            const settled = await Promise.allSettled([
+                // Streak + quests — reuses the document handleLeveling already loaded
+                // and saves it once. It reports whether that write landed; when it
+                // bailed out early or threw before saving, the XP still has to be
+                // persisted. The flush stays inside this chain so it can never race
+                // the fire-and-forget saves that follow a landed write.
+                (async () => {
+                    const persisted = await handleStreakAndQuests(message, guildSettings, sharedUser);
+                    if (!persisted) await flushPendingUser(sharedUser);
+                })(),
+                handleSuggestions(message, guildSettings),
+                guildSettings?.bibleVerse?.autoRespond
+                    ? handleBibleVerseDetection(message, guildSettings)
+                    : null,
+                // Natural language reminders — available to everyone, any channel
+                handleNLReminder(message),
+            ]);
+            for (const outcome of settled) {
+                if (outcome.status === 'rejected') console.error('Error in messageCreate:', outcome.reason);
             }
-
-            // Natural language reminders — available to everyone, any channel
-            await handleNLReminder(message);
-
-            // Streak + quests — reuses the document handleLeveling already loaded and
-            // saves it once. It reports whether that write landed; when it bailed out
-            // early or threw before saving, the XP still has to be persisted.
-            const persisted = await handleStreakAndQuests(message, guildSettings, sharedUser);
-            if (!persisted) await flushPendingUser(sharedUser);
 
             // Ambient chat events (airdrops, crates, trivia) — fire-and-forget
             maybeTriggerChatEvent(message, guildSettings).catch(() => {});
@@ -680,7 +691,12 @@ function resolveAbsoluteTime(hour, min, ampm, tomorrow) {
 const NL_REMINDER_MAX_TEXT = 200;
 const NL_REMINDER_MAX_PENDING = 10;
 const NL_REMINDER_COOLDOWN_MS = 30_000; // 30 seconds between NL-created reminders per user
-const nlReminderLastUsed = new Map(); // userId → timestamp
+// One key per user who recently tripped the cooldown. A plain Map here grew an
+// entry per user forever; the bounded limiter FIFO-evicts at the cap, and the
+// sweep drops keys whose window has fully aged out (same shape as aiService's).
+const NL_REMINDER_MAX_KEYS = 10_000;
+const nlReminderLimiter = new BoundedRateLimiter(NL_REMINDER_MAX_KEYS);
+setInterval(() => nlReminderLimiter.cleanup(NL_REMINDER_COOLDOWN_MS), 15 * 60 * 1000).unref();
 
 function sanitizeReminderText(text) {
     // Normalize first to prevent Unicode normalization attacks / length bypass tricks.
@@ -721,9 +737,10 @@ async function handleNLReminder(message, contentOverride) {
         const reminderText = sanitizeReminderText(parsed.text);
         if (!reminderText) continue;
 
-        // Per-user cooldown
-        const lastUsed = nlReminderLastUsed.get(message.author.id) || 0;
-        if (Date.now() - lastUsed < NL_REMINDER_COOLDOWN_MS) return false;
+        // Per-user cooldown. The limiter records the attempt as it checks it, so
+        // a create that fails downstream still counts — the cooldown paces how
+        // often a user can *trigger* the path, not how often they succeed.
+        if (!nlReminderLimiter.check(message.author.id, NL_REMINDER_COOLDOWN_MS, 1)) return false;
 
         // Cap pending reminders per user
         const pending = await Reminder.countDocuments({ userId: message.author.id, completed: false }).catch(() => NL_REMINDER_MAX_PENDING);
@@ -737,8 +754,6 @@ async function handleNLReminder(message, contentOverride) {
                 message:   reminderText,
                 remindAt
             });
-
-            nlReminderLastUsed.set(message.author.id, Date.now());
 
             const unixTs = Math.floor(remindAt.getTime() / 1000);
             await message.reply({ content: `✅ Got it! I'll remind you <t:${unixTs}:R> about: **${reminderText}**`, allowedMentions: { parse: [] } }).catch(() => {});
