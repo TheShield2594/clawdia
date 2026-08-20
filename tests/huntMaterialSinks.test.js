@@ -211,11 +211,18 @@ describe('field trophies', () => {
             expect(plain.length).toBeGreaterThan(0);
             expect(charmed.length).toBeGreaterThan(0);
 
-            // The pack adds 3 durability damage on top of the failure severity,
-            // whose worst case is 5.
-            expect(plain.some(m => m.durability > 5)).toBe(true);
+            // The pack adds 3 durability damage on top of the failure severity.
+            // Asserted as invariants of every observed failure rather than as a
+            // some() over the severity roll: the old check needed at least one
+            // severity ≥ 3 among a handful of pack failures, which flaked when
+            // the sample ran unlucky (CI run 127). Uncharmed, every pack
+            // failure pays at least the minimum severity (1) plus the pack's 3;
+            // charmed, the pack never piles on, so the loss stays within the
+            // plain severity table (worst case 5).
+            expect(plain.every(m => m.durability >= 4)).toBe(true);
+            expect(plain.every(m => m.effects.some(msg => msg.includes('pack descended')))).toBe(true);
             expect(charmed.every(m => m.durability <= 5)).toBe(true);
-            expect(charmed.some(m => m.effects.some(msg => msg.includes('Swampwalker')))).toBe(true);
+            expect(charmed.every(m => m.effects.some(msg => msg.includes('Swampwalker')))).toBe(true);
         });
 
         it('halves how often aggressive prey injures a successful hunter', () => {
