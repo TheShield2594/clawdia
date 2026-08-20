@@ -53,6 +53,7 @@ const {
     apexNerveMax,
     getRarePityThreshold,
     getDiminishingReturns,
+    recordBestPayout,
     applyPayoutModifiers
 } = require('../../services/huntService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
@@ -331,6 +332,9 @@ module.exports = {
         .addSubcommand(sub =>
             sub.setName('prestige')
                 .setDescription('Reset your hunter level for permanent prestige bonuses (requires Level 50)'))
+        .addSubcommand(sub =>
+            sub.setName('records')
+                .setDescription("View the server's all-time hunting records"))
         .addSubcommandGroup(group =>
             group.setName('inv')
                 .setDescription('View and manage your hunt inventory')
@@ -479,6 +483,7 @@ module.exports = {
             if (sub === 'start')    return executeStart(interaction);
             if (sub === 'profile')  return executeProfile(interaction);
             if (sub === 'prestige') return executePrestige(interaction);
+            if (sub === 'records')  return executeRecords(interaction);
         }
         if (group === 'inv')    return executeInv(interaction, sub);
         if (group === 'quests') return executeQuests(interaction, sub);
@@ -907,7 +912,9 @@ async function executeStart(interaction) {
                 result.wildernessBonus  = bonus;
             }
         }
-        if (result.success && result.finalPayout > user.hunt.bestPayout) user.hunt.bestPayout = result.finalPayout;
+        if (result.success) {
+            recordBestPayout(user.hunt, result.finalPayout, { animal: result.animal, tier: result.tier, zoneId });
+        }
 
         updateHuntQuestProgress(user, result, zoneId);
         await ensureQuests(user, guildSettings);
@@ -1194,7 +1201,11 @@ async function executeStart(interaction) {
                 freshUser.balance          += adjustedPayout;
                 freshUser.hunt.totalEarned += adjustedPayout;
                 freshUser.hunt.dailyCoins  += adjustedPayout;
-                if (adjustedPayout > freshUser.hunt.bestPayout) freshUser.hunt.bestPayout = adjustedPayout;
+                recordBestPayout(freshUser.hunt, adjustedPayout, {
+                    animal: result.apexEncounter.animal,
+                    tier:   result.apexEncounter.tier,
+                    zoneId: freshUser.hunt.activeZone,
+                });
 
                 await ensureQuests(freshUser, guildSettings);
                 const earn = await onEconomyEarn(freshUser, guildSettings, adjustedPayout);
@@ -1972,6 +1983,82 @@ async function executePrestige(interaction) {
                 .catch(() => {});
         }
     });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RECORDS — server-wide all-time hunting records
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const RECORD_MEDALS = ['🥇', '🥈', '🥉'];
+
+/**
+ * Top hunters for one stat, rendered as medal lines. `line` maps a lean
+ * GrindProfile to the text after the mention; sorting happens in the query so
+ * the whole guild is never loaded.
+ */
+async function topHuntersBy(guildId, sort, filter, line, limit = 3) {
+    const profs = await GrindProfile.find(
+        { guildId, system: 'hunt', ...filter },
+        { userId: 1, data: 1 },
+    ).sort(sort).limit(limit).lean();
+    return profs.map((p, i) => `${RECORD_MEDALS[i] ?? `**${i + 1}.**`} <@${p.userId}> — ${line(p.data)}`).join('\n');
+}
+
+async function executeRecords(interaction) {
+    await interaction.deferReply();
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }, 'economy').lean().catch(() => null);
+    const currency = guildSettings?.economy?.currency ?? '💰';
+    const guildId  = interaction.guild.id;
+
+    const describeBest = d => {
+        const meta  = d.bestPayoutMeta;
+        const base  = `**${currency}${(d.bestPayout ?? 0).toLocaleString()}**`;
+        if (!meta?.animalName) return base;
+        const zone     = ZONES[meta.zoneId];
+        const tierName = meta.tier ? meta.tier.charAt(0).toUpperCase() + meta.tier.slice(1) : null;
+        const parts = [
+            `${meta.animalEmoji ?? ''} ${tierName ? `${tierName} ` : ''}${meta.animalName}`.trim(),
+            zone ? `${zone.emoji} ${zone.name}` : null,
+            meta.at ? `<t:${Math.floor(new Date(meta.at).getTime() / 1000)}:d>` : null,
+        ].filter(Boolean);
+        return `${base} · ${parts.join(' · ')}`;
+    };
+
+    const [bestPayout, legendary, mythical, veterans, volume, earned] = await Promise.all([
+        topHuntersBy(guildId, { 'data.bestPayout': -1 },     { 'data.bestPayout':     { $gt: 0 } }, describeBest),
+        topHuntersBy(guildId, { 'data.legendaryKills': -1 }, { 'data.legendaryKills': { $gt: 0 } }, d => `**${d.legendaryKills.toLocaleString()}** legendary kills`),
+        topHuntersBy(guildId, { 'data.eventKills': -1 },     { 'data.eventKills':     { $gt: 0 } }, d => `**${d.eventKills.toLocaleString()}** mythical kills`),
+        topHuntersBy(guildId, { 'data.prestige': -1, 'data.level': -1 }, { 'data.totalHunts': { $gt: 0 } },
+            d => `${(d.prestige ?? 0) > 0 ? `${PRESTIGE_BADGES[Math.min(d.prestige, PRESTIGE_BADGES.length - 1)]} P${d.prestige} · ` : ''}Level **${d.level ?? 1}**`),
+        topHuntersBy(guildId, { 'data.totalHunts': -1 },  { 'data.totalHunts':  { $gt: 0 } }, d => `**${d.totalHunts.toLocaleString()}** hunts`),
+        topHuntersBy(guildId, { 'data.totalEarned': -1 }, { 'data.totalEarned': { $gt: 0 } }, d => `**${currency}${d.totalEarned.toLocaleString()}** earned`),
+    ]);
+
+    if (!bestPayout && !volume) {
+        return interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setColor('#3b1f04')
+                .setTitle('🏹 Server Hunting Records')
+                .setDescription('No records yet — head out with `/hunt start` and claim the top spot!')
+                .setTimestamp()],
+        });
+    }
+
+    const embed = new EmbedBuilder()
+        .setColor('#c0392b')
+        .setTitle('🏹 Server Hunting Records')
+        .setDescription('The all-time boards. The hourly leader resets every hour — these never do.')
+        .setFooter({ text: 'Records never reset · Your own numbers live in /hunt profile' })
+        .setTimestamp();
+
+    if (bestPayout) embed.addFields({ name: '💰 Biggest Single Hunt',  value: bestPayout, inline: false });
+    if (legendary)  embed.addFields({ name: '⚡ Legendary Hunters',    value: legendary,  inline: false });
+    if (mythical)   embed.addFields({ name: '☄️ Mythical Hunters',     value: mythical,   inline: false });
+    if (veterans)   embed.addFields({ name: '🎖️ Highest Rank',        value: veterans,   inline: false });
+    if (volume)     embed.addFields({ name: '🏹 Most Hunts',           value: volume,     inline: false });
+    if (earned)     embed.addFields({ name: '💵 Career Earnings',      value: earned,     inline: false });
+
+    return interaction.editReply({ embeds: [embed] });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3339,7 +3426,7 @@ const { withEconomyLock, exceptReadOnly } = require('../../utils/economyLock');
 // exceptReadOnly. Everything else, including /hunt inv equip and discard,
 // still locks.
 const HUNT_READ_ONLY = [
-    'profile',
+    'profile', 'records',
     'inv weapons', 'inv ammo', 'inv consumables', 'inv materials',
     'shop list',
     'zone list',

@@ -823,6 +823,27 @@ function tickConsumables(user) {
     user.markModified('hunt');
 }
 
+// ─── BEST PAYOUT ─────────────────────────────────────────────────────────────
+
+/**
+ * Raises h.bestPayout when beaten, and remembers what the record hunt actually
+ * was. The number alone has always been kept; the context (which animal, what
+ * tier, where) is what /hunt records needs to make the board worth reading.
+ * Older records that predate this carry no meta and render as the bare amount.
+ */
+function recordBestPayout(h, amount, { animal, tier, zoneId } = {}) {
+    if (!(amount > (h.bestPayout ?? 0))) return false;
+    h.bestPayout = amount;
+    h.bestPayoutMeta = {
+        animalName:  animal?.name  ?? null,
+        animalEmoji: animal?.emoji ?? null,
+        tier:        tier          ?? null,
+        zoneId:      zoneId        ?? null,
+        at:          new Date(),
+    };
+    return true;
+}
+
 // ─── FULL HUNT EXECUTION ─────────────────────────────────────────────────────
 
 /**
@@ -974,7 +995,7 @@ function executeHunt(user, zoneId, options = {}) {
         user.balance         += adjustedPayout;
         h.totalEarned        += adjustedPayout;
         h.dailyCoins         += adjustedPayout;
-        if (adjustedPayout > h.bestPayout) h.bestPayout = adjustedPayout;
+        recordBestPayout(h, adjustedPayout, { animal, tier, zoneId: zone.id });
 
         // Statistics
         h.successfulHunts    += 1;
@@ -1320,6 +1341,7 @@ module.exports = {
     rollFailureSeverity,
     applyPayoutModifiers,
     getDiminishingReturns,
+    recordBestPayout,
     applyDurabilityLoss,
     updateWeaponStatus,
     isCondemned,
