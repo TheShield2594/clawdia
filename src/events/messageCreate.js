@@ -116,20 +116,30 @@ module.exports = {
                 if (blocked) return await flushPendingUser(sharedUser);
             }
 
-            await handleSuggestions(message, guildSettings);
-
-            if (guildSettings?.bibleVerse?.autoRespond) {
-                await handleBibleVerseDetection(message, guildSettings);
+            // Automod was the only handler with a say over the ones below — past
+            // that gate they touch different data and issue unrelated writes, so
+            // they run concurrently instead of queueing behind whichever happens
+            // to be slowest.
+            const settled = await Promise.allSettled([
+                // Streak + quests — reuses the document handleLeveling already loaded
+                // and saves it once. It reports whether that write landed; when it
+                // bailed out early or threw before saving, the XP still has to be
+                // persisted. The flush stays inside this chain so it can never race
+                // the fire-and-forget saves that follow a landed write.
+                (async () => {
+                    const persisted = await handleStreakAndQuests(message, guildSettings, sharedUser);
+                    if (!persisted) await flushPendingUser(sharedUser);
+                })(),
+                handleSuggestions(message, guildSettings),
+                guildSettings?.bibleVerse?.autoRespond
+                    ? handleBibleVerseDetection(message, guildSettings)
+                    : null,
+                // Natural language reminders — available to everyone, any channel
+                handleNLReminder(message),
+            ]);
+            for (const outcome of settled) {
+                if (outcome.status === 'rejected') console.error('Error in messageCreate:', outcome.reason);
             }
-
-            // Natural language reminders — available to everyone, any channel
-            await handleNLReminder(message);
-
-            // Streak + quests — reuses the document handleLeveling already loaded and
-            // saves it once. It reports whether that write landed; when it bailed out
-            // early or threw before saving, the XP still has to be persisted.
-            const persisted = await handleStreakAndQuests(message, guildSettings, sharedUser);
-            if (!persisted) await flushPendingUser(sharedUser);
 
             // Ambient chat events (airdrops, crates, trivia) — fire-and-forget
             maybeTriggerChatEvent(message, guildSettings).catch(() => {});
