@@ -13,6 +13,16 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    # Unbounded, mongod sizes its WiredTiger cache from *host* RAM — half of
+    # (host RAM - 1g) — so on a big host it will happily grow past anything the
+    # bot leaves it and take the machine down with it. mongod reads the cgroup
+    # limit, so this ceiling is also what tells it to cap the cache at the 256m
+    # floor. Raise both together if the working set outgrows it.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
 
   bot:
     build: .
@@ -51,9 +61,19 @@ services:
       timeout: 10s
       retries: 3
       start_period: 90s
+    # Compose v2 applies `limits` to the container's cgroup on a plain
+    # `docker compose up`. `reservations` is a scheduling hint that only Swarm
+    # acts on: it is kept as a record of the intended floor, not as something
+    # the daemon enforces here.
     deploy:
       resources:
         limits:
+          # Canvas rendering (shop banners, profile cards, the 8ball image) is
+          # synchronous and single-threaded, so a burst of those commands pegs a
+          # core for as long as it takes. With no ceiling that contends with
+          # mongod and anything else sharing the host; two cores lets a render
+          # run flat out while the event loop keeps answering on the other.
+          cpus: '2.0'
           memory: 1g
         reservations:
           memory: 256m
