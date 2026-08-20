@@ -6,12 +6,13 @@ jest.mock('../src/models/GrindProfile', () => ({ find: jest.fn(), findOneAndUpda
 
 const { __test__ } = require('../src/commands/economy/hunt');
 const { buildHuntEmbed, buildBonusLines } = __test__;
-const { ZONES, ANIMALS, TROPHY_QUALITIES, LIMITS } = require('../src/data/huntData');
+const { ZONES, ANIMALS, TROPHY_QUALITIES, LIMITS, WEAPON_TIERS, WEAPON_UPGRADES } = require('../src/data/huntData');
 
 // Discord's hard limits.
 const MAX_FIELDS      = 25;
 const MAX_FIELD_VALUE = 1024;
 const MAX_FIELD_NAME  = 256;
+const MAX_DESCRIPTION = 4096;
 
 // executeStart appends at most two further fields after buildHuntEmbed returns:
 // the consolidated "Bonuses" field and the rare-companion drop.
@@ -214,5 +215,87 @@ describe('trophy case', () => {
         const field = buildTrophyField(few);
         expect(field.value).toBe('🔷 Pristine Wolf, 🟢 Good Rabbit');
         expect(field.name).toBe('🏆 Trophies (2)');
+    });
+});
+
+describe('weapon inventory pages', () => {
+    const { buildWeaponPages, WEAPON_SEPARATOR } = __test__;
+
+    /**
+     * The longest entry the renderer can ever produce for a tier: the longest
+     * weapon name, the longest upgrade label, and the widest durability and
+     * repair-count numbers a real weapon reaches.
+     */
+    function weapon(tier, overrides = {}) {
+        const def = WEAPON_TIERS.find(w => w.tier === tier);
+        const longestUpgrade = Object.keys(WEAPON_UPGRADES)
+            .sort((a, b) => b.length - a.length)[0];
+        return {
+            tier,
+            name: def.name,
+            status: 'condemned',
+            currentDurability: def.baseDurability,
+            maxDurability: def.baseDurability,
+            baseDurability: def.baseDurability,
+            repairCount: 99,
+            upgrade: longestUpgrade,
+            ...overrides,
+        };
+    }
+
+    /**
+     * The worst inventory the game can produce. `/hunt inv discard` only accepts
+     * broken or condemned weapons and `/hunt shop weapon` caps nothing, so a
+     * player who replaces working weapons accumulates them permanently — there
+     * is no upper bound to test against, only "far past where it used to break".
+     */
+    function hoarder(count) {
+        return {
+            equippedWeaponIndex: count - 1,
+            weapons: Array.from({ length: count }, (_, i) =>
+                weapon(WEAPON_TIERS[i % WEAPON_TIERS.length].tier)),
+        };
+    }
+
+    it('keeps every page inside the description limit for a hoarded inventory', () => {
+        // 200 is an order of magnitude past the ~22 that used to fail the API
+        // call outright and take the whole command down with it.
+        for (const page of buildWeaponPages(hoarder(200))) {
+            expect(page.join(WEAPON_SEPARATOR).length).toBeLessThanOrEqual(MAX_DESCRIPTION);
+        }
+    });
+
+    it('loses no weapon to paging — every number is still reachable', () => {
+        const h = hoarder(200);
+        const shown = buildWeaponPages(h).flat()
+            .map(line => Number(line.match(/^\*\*#(\d+) /)[1]));
+
+        expect(shown.slice().sort((a, b) => a - b))
+            .toEqual(Array.from({ length: 200 }, (_, i) => i + 1));
+    });
+
+    it('numbers each weapon by its index in the inventory, not its position on the page', () => {
+        // /hunt inv equip and /hunt inv discard address weapons by that index,
+        // so a display order that renumbered them would equip the wrong rifle.
+        const h = hoarder(30);
+        const equipped = buildWeaponPages(h)[0][0];
+        expect(equipped).toContain(`#${h.equippedWeaponIndex + 1} `);
+        expect(equipped).toContain('[EQUIPPED]');
+    });
+
+    it('puts the equipped weapon first and the rest by tier descending', () => {
+        const h = {
+            equippedWeaponIndex: 2,
+            weapons: [weapon(12), weapon(1), weapon(5)],
+        };
+        const tiers = buildWeaponPages(h).flat()
+            .map(line => Number(line.match(/^\*\*#(\d+) /)[1]));
+
+        expect(tiers).toEqual([3, 1, 2]); // equipped (#3), then T12 (#1), then T1 (#2)
+    });
+
+    it('fits a normal inventory on one page', () => {
+        expect(buildWeaponPages(hoarder(8))).toHaveLength(1);
+        expect(buildWeaponPages(hoarder(9))).toHaveLength(2);
     });
 });

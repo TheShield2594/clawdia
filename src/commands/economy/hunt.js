@@ -66,6 +66,10 @@ const { ensureQuests, onHunt, onEconomyEarn, notifyQuestComplete, notifyQuestNea
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
+const { chunkByLength } = require('../../utils/embedFields');
+const { paginate } = require('../../utils/paginator');
+
+const WEAPON_SEPARATOR = '\n\n';
 
 const WILDERNESS_YIELD_BONUS = 0.10;
 
@@ -1870,6 +1874,52 @@ async function executePrestige(interaction) {
 // INV (was /huntinv)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * The weapon list, split into pages that each fit an embed description.
+ *
+ * This used to be one `lines.join('\n\n')` straight into `setDescription`. At
+ * roughly 180 characters an entry that overflows Discord's 4096-character cap
+ * at about 22 weapons, and the API rejects the whole embed — so the command
+ * stopped working entirely for the player who owned the most. The same defect
+ * broke `/hunt profile` at 56 trophies.
+ *
+ * Paged rather than trimmed, because the number in each heading is what
+ * `/hunt inv equip <#>` and `/hunt inv discard <#>` take: a weapon cut off the
+ * end of a `+N more` tail could never be equipped or thrown away again, and
+ * `/hunt inv discard` only accepts broken or condemned weapons — so the pile a
+ * trimmed list would hide is exactly the pile you cannot clear.
+ *
+ * Ordered equipped-first, then by tier descending, so page one is the one
+ * worth reading. The displayed number stays the weapon's index in `h.weapons`,
+ * which is what the other subcommands address it by.
+ */
+function buildWeaponPages(h) {
+    const ordered = h.weapons
+        .map((w, index) => ({ w, index }))
+        .sort((a, b) => {
+            if (a.index === h.equippedWeaponIndex) return -1;
+            if (b.index === h.equippedWeaponIndex) return 1;
+            return (b.w.tier ?? 0) - (a.w.tier ?? 0);
+        });
+
+    const lines = ordered.map(({ w, index }) => {
+        const wd         = WEAPON_BY_TIER[w.tier];
+        const statusIcon = weaponStatusEmoji(w.status);
+        const bar        = durabilityBar(w.currentDurability, w.maxDurability, 12);
+        const upgrade    = w.upgrade ? `[${w.upgrade.replace(/_/g, ' ')}]` : '';
+        const equipped   = index === h.equippedWeaponIndex ? ' **[EQUIPPED]**' : '';
+        return [
+            `**#${index + 1} — ${wd?.emoji ?? '🔫'} ${w.name}**${equipped}`,
+            `> ${statusIcon} ${w.status.toUpperCase()} · ${bar} ${w.currentDurability}/${w.maxDurability} dur`,
+            `> Repairs: ${w.repairCount} · Max: ${w.maxDurability}/${w.baseDurability} · ${upgrade || 'No upgrade'}`
+        ].join('\n');
+    });
+
+    // A page cap as well as a character budget: eight entries is a screenful,
+    // and a list that fills 4096 characters before it pages is one nobody reads.
+    return chunkByLength(lines, { separator: WEAPON_SEPARATOR, maxPerChunk: 8 });
+}
+
 async function executeInv(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
@@ -1893,27 +1943,13 @@ async function executeInv(interaction, sub) {
             });
         }
 
-        const lines = h.weapons.map((w, i) => {
-            const isEquipped = i === h.equippedWeaponIndex;
-            const wd         = WEAPON_BY_TIER[w.tier];
-            const statusIcon = weaponStatusEmoji(w.status);
-            const bar        = durabilityBar(w.currentDurability, w.maxDurability, 12);
-            const upgrade    = w.upgrade ? `[${w.upgrade.replace(/_/g, ' ')}]` : '';
-            const equipped   = isEquipped ? ' **[EQUIPPED]**' : '';
-            return [
-                `**#${i + 1} — ${wd?.emoji ?? '🔫'} ${w.name}**${equipped}`,
-                `> ${statusIcon} ${w.status.toUpperCase()} · ${bar} ${w.currentDurability}/${w.maxDurability} dur`,
-                `> Repairs: ${w.repairCount} · Max: ${w.maxDurability}/${w.baseDurability} · ${upgrade || 'No upgrade'}`
-            ].join('\n');
-        });
-
-        const embed = new EmbedBuilder()
+        const pages = buildWeaponPages(h).map((lines, page, all) => new EmbedBuilder()
             .setColor('#3498db')
-            .setTitle('🔫 Your Weapons')
-            .setDescription(lines.join('\n\n'))
-            .setFooter({ text: 'Use /hunt inv equip <#> to change weapon • /hunt shop repair to restore durability • /hunt shop upgrade for modules' });
+            .setTitle(all.length > 1 ? `🔫 Your Weapons (${h.weapons.length})` : '🔫 Your Weapons')
+            .setDescription(lines.join(WEAPON_SEPARATOR))
+            .setFooter({ text: 'Use /hunt inv equip <#> to change weapon • /hunt shop repair to restore durability • /hunt shop upgrade for modules' }));
 
-        return interaction.reply({ embeds: [embed] });
+        return paginate(interaction, pages);
     }
 
     if (sub === 'equip') {
@@ -2010,18 +2046,26 @@ async function executeInv(interaction, sub) {
             .filter(([, qty]) => qty > 0)
             .map(([id, qty]) => `• **${MATERIAL_NAMES[id] ?? id}** ×${qty}`);
 
-        const embed = new EmbedBuilder()
-            .setColor('#1abc9c')
-            .setTitle('🪨 Crafting Materials')
-            .setDescription(entries.length ? entries.join('\n') : 'No materials yet. Hunt rare+ animals to find special drops!');
+        const footer = entries.length
+            ? 'Every material feeds a recipe — see /craft list. Each zone ends in a permanent Field Trophy.'
+            : 'Tip: Use bait from /hunt shop to boost rare animal chances';
 
-        embed.setFooter({
-            text: entries.length
-                ? 'Every material feeds a recipe — see /craft list. Each zone ends in a permanent Field Trophy.'
-                : 'Tip: Use bait from /hunt shop to boost rare animal chances',
-        });
+        // Bounded by the 58 material ids to about 1,700 characters, so this
+        // fits today — but it is the same join-and-hope shape the weapon list
+        // broke on, and the material table only ever grows.
+        const pages = entries.length
+            ? chunkByLength(entries).map(lines => new EmbedBuilder()
+                .setColor('#1abc9c')
+                .setTitle('🪨 Crafting Materials')
+                .setDescription(lines.join('\n'))
+                .setFooter({ text: footer }))
+            : [new EmbedBuilder()
+                .setColor('#1abc9c')
+                .setTitle('🪨 Crafting Materials')
+                .setDescription('No materials yet. Hunt rare+ animals to find special drops!')
+                .setFooter({ text: footer })];
 
-        return interaction.reply({ embeds: [embed] });
+        return paginate(interaction, pages);
     }
 
     if (sub === 'discard') {
@@ -3108,7 +3152,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR };
 
 // ── Per-user economy lock ─────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent

@@ -1,6 +1,6 @@
 'use strict';
 
-const { EMBED_LIMITS, packFields, fitDescription, truncate } = require('../src/utils/embedFields');
+const { EMBED_LIMITS, packFields, fitDescription, chunkByLength, truncate } = require('../src/utils/embedFields');
 const { RELIC_LIST } = require('../src/data/exploreData');
 
 describe('truncate', () => {
@@ -95,5 +95,42 @@ describe('relic views stay inside Discord budgets', () => {
         const { text, omitted } = fitDescription(render(false));
         expect(text.length).toBeLessThanOrEqual(EMBED_LIMITS.DESCRIPTION);
         expect(omitted).toBe(0);
+    });
+});
+
+describe('chunkByLength', () => {
+    test('keeps a list that fits in a single chunk', () => {
+        expect(chunkByLength(['one', 'two'])).toEqual([['one', 'two']]);
+    });
+
+    test('gives nothing back for nothing', () => {
+        expect(chunkByLength([])).toEqual([]);
+    });
+
+    test('every chunk joins to within the limit', () => {
+        const lines  = Array.from({ length: 200 }, (_, i) => `${'x'.repeat(180)}${i}`);
+        const chunks = chunkByLength(lines, { separator: '\n\n' });
+
+        for (const chunk of chunks) {
+            expect(chunk.join('\n\n').length).toBeLessThanOrEqual(EMBED_LIMITS.DESCRIPTION);
+        }
+    });
+
+    test('loses no line while chunking — the point of paging over trimming', () => {
+        const lines = Array.from({ length: 200 }, (_, i) => `${'x'.repeat(180)}${i}`);
+        expect(chunkByLength(lines, { separator: '\n\n' }).flat()).toEqual(lines);
+    });
+
+    test('honours a per-chunk count as well as the character budget', () => {
+        expect(chunkByLength(['a', 'b', 'c', 'd', 'e'], { maxPerChunk: 2 }))
+            .toEqual([['a', 'b'], ['c', 'd'], ['e']]);
+    });
+
+    test('truncates an oversized line into its own chunk rather than dropping it', () => {
+        const chunks = chunkByLength(['short', 'y'.repeat(EMBED_LIMITS.DESCRIPTION + 500)]);
+
+        expect(chunks).toHaveLength(2);
+        expect(chunks[1][0]).toHaveLength(EMBED_LIMITS.DESCRIPTION);
+        expect(chunks[1][0].endsWith('…')).toBe(true);
     });
 });
