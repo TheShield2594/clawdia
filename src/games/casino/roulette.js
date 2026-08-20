@@ -6,6 +6,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
+const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
@@ -144,7 +145,6 @@ module.exports = {
     name: 'roulette',
     description: 'Bet on Red/Black, Odd/Even, dozens, columns, or a specific number.',
     cooldown: 5,
-    betOptionName: 'amount',
     configure: sub => sub
         .addStringOption(opt =>
             opt.setName('bet')
@@ -178,7 +178,7 @@ module.exports = {
                 .setMaxValue(36)
                 .setRequired(false)),
 
-    async execute(interaction, { releaseLock } = {}) {
+    async execute(interaction, { releaseLock, onWager } = {}) {
         if (!interaction.guild) {
             releaseLock?.();
             return interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
@@ -207,14 +207,14 @@ module.exports = {
         const { shouldProceed: rProceed, alreadyReplied: rReplied } = await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings);
         if (!rProceed) { releaseLock?.(); return; }
         if (!rReplied) await interaction.deferReply();
-        await playRoulette(interaction, betKey, bet, target, releaseLock);
+        await playRoulette(interaction, betKey, bet, target, releaseLock, onWager);
     },
 };
 
 // releaseLock is called once the spin settles into a result — "Spin Again"
 // starts a brand-new hand with its own atomic debit, so it doesn't need the
 // lock re-held.
-async function playRoulette(interaction, betKey, bet, target, releaseLock) {
+async function playRoulette(interaction, betKey, bet, target, releaseLock, onWager) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -232,11 +232,7 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock) {
             { upsert: true, new: true, setDefaultsOnInsert: true },
         );
 
-        debited = await User.findOneAndUpdate(
-            { ...userFilter, balance: { $gte: bet } },
-            { $inc: { balance: -bet } },
-            { new: true },
-        );
+        debited = await placeWager(userFilter, bet, { onWager });
 
         if (!debited) {
             releaseLock?.();
@@ -326,7 +322,7 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock) {
         const wallet = user?.balance ?? 0;
         if (!await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings)) return;
 
-        await playRoulette(interaction, betKey, bet, target, null);
+        await playRoulette(interaction, betKey, bet, target, null, onWager);
         });
         collector.on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});

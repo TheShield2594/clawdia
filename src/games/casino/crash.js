@@ -6,6 +6,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
+const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
@@ -257,7 +258,7 @@ module.exports = {
                 .setMaxValue(99.99)
                 .setRequired(false)),
 
-    async execute(interaction, { releaseLock } = {}) {
+    async execute(interaction, { releaseLock, onWager } = {}) {
         const bet         = interaction.options.getInteger('bet');
         const autoCashout = interaction.options.getNumber('auto_cashout') ?? null;
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -270,7 +271,7 @@ module.exports = {
         const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user?.balance ?? 0, 'Crash', guildSettings);
         if (!shouldProceed) { releaseLock?.(); return; }
         if (!alreadyReplied) await interaction.deferReply();
-        await openLobby(interaction, bet, autoCashout, releaseLock);
+        await openLobby(interaction, bet, autoCashout, releaseLock, onWager);
     },
 };
 
@@ -278,7 +279,7 @@ module.exports = {
 // is created and the host's debit succeeds) — the host's casino lock isn't
 // held through the lobby wait + the multiplayer game itself, since their
 // stake is already atomically deducted and can't be double-spent.
-async function openLobby(interaction, bet, hostAutoCashout, releaseLock) {
+async function openLobby(interaction, bet, hostAutoCashout, releaseLock, onWager) {
     const channelId = interaction.channel.id;
     const lobbyId   = `${channelId}_${Date.now()}`;
 
@@ -293,10 +294,10 @@ async function openLobby(interaction, bet, hostAutoCashout, releaseLock) {
         return interaction.editReply({ content: 'A crash lobby is already open in this channel.', components: [] });
     }
 
-    const deducted = await User.findOneAndUpdate(
-        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
-        { $inc: { balance: -bet, pendingCrashRefund: bet } },
-        { new: true }
+    const deducted = await placeWager(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        bet,
+        { extraInc: { pendingCrashRefund: bet }, onWager },
     );
     if (!deducted) {
         deleteLobby(channelId);
@@ -352,10 +353,14 @@ async function openLobby(interaction, bet, hostAutoCashout, releaseLock) {
             return i.reply({ content: 'Lobby is full.', flags: MessageFlags.Ephemeral });
         }
 
-        const deducted = await User.findOneAndUpdate(
-            { userId: i.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
-            { $inc: { balance: -bet, pendingCrashRefund: bet } },
-            { new: true }
+        // A joiner stakes their own coins on somebody else's command, so the
+        // wager is reported against them — the jackpot is credited to whoever
+        // wins it and the mission ticks for the player who actually bet. Their
+        // button interaction carries the channel a jackpot would announce in.
+        const deducted = await placeWager(
+            { userId: i.user.id, guildId: interaction.guild.id },
+            bet,
+            { extraInc: { pendingCrashRefund: bet }, onWager, user: i.user, source: i },
         );
         if (!deducted) {
             return i.reply({ content: `You need **${bet.toLocaleString()}** coins to join.`, flags: MessageFlags.Ephemeral });

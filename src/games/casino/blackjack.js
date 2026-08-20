@@ -6,6 +6,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
+const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
@@ -200,7 +201,7 @@ module.exports = {
                 .setMinValue(MIN_BET)
                 .setMaxValue(1_000_000_000)),
 
-    async execute(interaction, { releaseLock } = {}) {
+    async execute(interaction, { releaseLock, onWager } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false || guildSettings?.economy?.blackjackEnabled === false) {
             releaseLock?.();
@@ -227,11 +228,13 @@ module.exports = {
         if (!shouldProceed) { releaseLock?.(); return; }
         const sendInitial = (payload) => alreadyReplied ? interaction.editReply(payload) : interaction.reply(payload);
 
-        // Atomic debit — re-validates balance at write time to prevent race conditions
-        const debited = await User.findOneAndUpdate(
-            { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
-            { $inc: { balance: -bet, lifetimeGambled: bet } },
-            { new: true },
+        // The opening wager, and the only debit of this hand that reports one:
+        // insurance, a split and a double down below are all further money on
+        // the same hand, not another game played.
+        const debited = await placeWager(
+            { userId: interaction.user.id, guildId: interaction.guild.id },
+            bet,
+            { extraInc: { lifetimeGambled: bet }, onWager },
         );
         if (!debited) {
             releaseLock?.();
@@ -314,10 +317,10 @@ module.exports = {
                         time: 15_000,
                     });
                     await insI.deferUpdate();
-                    const peekUpdated = await User.findOneAndUpdate(
-                        { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: insuranceCost } },
-                        { $inc: { balance: -insuranceCost, lifetimeGambled: insuranceCost } },
-                        { new: true },
+                    const peekUpdated = await placeWager(
+                        { userId: interaction.user.id, guildId: interaction.guild.id },
+                        insuranceCost,
+                        { extraInc: { lifetimeGambled: insuranceCost } },
                     );
                     if (peekUpdated) peekInsuranceBet = insuranceCost;
                 } catch {
@@ -383,10 +386,10 @@ module.exports = {
             // ── Insurance ──────────────────────────────────────────────────────────
             if (i.customId === `bj_insurance_${gameId}`) {
                 insuranceAvailable = false;
-                const updated = await User.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: insuranceCost } },
-                    { $inc: { balance: -insuranceCost, lifetimeGambled: insuranceCost } },
-                    { new: true },
+                const updated = await placeWager(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    insuranceCost,
+                    { extraInc: { lifetimeGambled: insuranceCost } },
                 );
                 if (updated) insuranceBet = insuranceCost;
                 const statusMsg = updated
@@ -400,10 +403,10 @@ module.exports = {
             if (i.customId === `bj_double_${gameId}`) {
                 doubleAvailable = false;
                 splitAvailable  = false;
-                const updated = await User.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
-                    { $inc: { balance: -bet, lifetimeGambled: bet } },
-                    { new: true },
+                const updated = await placeWager(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    bet,
+                    { extraInc: { lifetimeGambled: bet } },
                 );
                 if (!updated) {
                     const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, `⚠️ Not enough balance for double down · Your turn`, '#5865F2', true);
@@ -430,10 +433,10 @@ module.exports = {
             if (i.customId === `bj_split_${gameId}`) {
                 doubleAvailable = false;
                 splitAvailable  = false;
-                const updated = await User.findOneAndUpdate(
-                    { userId: interaction.user.id, guildId: interaction.guild.id, balance: { $gte: bet } },
-                    { $inc: { balance: -bet, lifetimeGambled: bet } },
-                    { new: true },
+                const updated = await placeWager(
+                    { userId: interaction.user.id, guildId: interaction.guild.id },
+                    bet,
+                    { extraInc: { lifetimeGambled: bet } },
                 );
                 if (!updated) {
                     const embed = buildEmbed(interaction, playerHand, dealerHand, activeBet, currency, `⚠️ Not enough balance for split · Your turn`, '#5865F2', true);

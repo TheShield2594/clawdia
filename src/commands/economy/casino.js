@@ -138,30 +138,42 @@ module.exports = {
             release(lockKey, lockToken).catch(err => console.error('[casino] lock release failed:', err));
         };
 
-        try {
-            // Progressive jackpot: contribute a share of each bet to the pool and check for a win.
+        // What a bet *is*, for everything that wants to know one happened.
+        //
+        // This used to read the bet straight off the command options and fire on
+        // `bet > 0` — before game.execute had validated anything. A bet larger
+        // than the wallet, or over the guild's casinoMaxBet, or refused for any
+        // other game-level reason still contributed to the jackpot pool and
+        // still ticked "Play 5 casino games", for a hand that never happened.
+        //
+        // Now the games report it: utils/placeWager calls this once the coins
+        // have actually moved, and only for the wager that opens a hand — a
+        // double-down or a poker raise is more money on a hand already counted,
+        // not another game played. `user` and `source` are the player and the
+        // interaction to announce through, which differ from the invoker for a
+        // crash lobby: joiners stake their own coins on someone else's command.
+        const onWager = ({ amount, user = null, source = null }) => {
+            const better = user ?? interaction.user;
+
             // Fire-and-forget — the service handles pool reset, user credit, and logging.
-            const bet = interaction.options.getInteger(game.betOptionName ?? 'bet') ?? 0;
-            if (bet > 0) {
-                processJackpotBet({
-                    guildId:  interaction.guild.id,
-                    userId:   interaction.user.id,
-                    username: interaction.user.username,
-                    bet,
-                    interaction,
-                }).catch(err => console.error('[CasinoJackpot] error:', err));
+            processJackpotBet({
+                guildId:  interaction.guild.id,
+                userId:   better.id,
+                username: better.username,
+                bet:      amount,
+                interaction: source ?? interaction,
+            }).catch(err => console.error('[CasinoJackpot] error:', err));
 
-                // Season pass: "Play 5 casino games". Counted here rather than at
-                // subcommand dispatch so a hand that never got a bet down — bad
-                // amount, empty wallet — isn't scored as a game played.
-                advanceMissions(
-                    User,
-                    { userId: interaction.user.id, guildId: interaction.guild.id },
-                    'casino', 1, guildSettings,
-                ).catch(err => console.error('[casino] season mission error:', err));
-            }
+            // Season pass: "Play 5 casino games".
+            advanceMissions(
+                User,
+                { userId: better.id, guildId: interaction.guild.id },
+                'casino', 1, guildSettings,
+            ).catch(err => console.error('[casino] season mission error:', err));
+        };
 
-            return await game.execute(interaction, { releaseLock });
+        try {
+            return await game.execute(interaction, { releaseLock, onWager });
         } catch (err) {
             releaseLock();
             throw err;

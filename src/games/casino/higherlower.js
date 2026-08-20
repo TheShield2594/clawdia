@@ -6,6 +6,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
+const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
@@ -196,7 +197,7 @@ module.exports = {
                 .setMaxValue(1_000_000_000)
                 .setRequired(true)),
 
-    async execute(interaction, { releaseLock } = {}) {
+    async execute(interaction, { releaseLock, onWager } = {}) {
         const bet = interaction.options.getInteger('bet');
         const [user, guildSettings] = await Promise.all([
             User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }),
@@ -228,11 +229,7 @@ module.exports = {
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             );
 
-            const debited = await User.findOneAndUpdate(
-                { ...userFilter, balance: { $gte: bet } },
-                { $inc: { balance: -bet } },
-                { new: true }
-            );
+            const debited = await placeWager(userFilter, bet, { onWager });
 
             if (!debited) {
                 releaseLock?.();
@@ -241,7 +238,7 @@ module.exports = {
                 });
             }
 
-            await playHigherLower(interaction, bet, userFilter, guildSettings, [], 0, releaseLock);
+            await playHigherLower(interaction, bet, userFilter, guildSettings, [], 0, releaseLock, onWager);
 
         } catch (err) {
             console.error('[HigherLower] error:', err);
@@ -257,7 +254,7 @@ module.exports = {
 // loss/cash-out/timeout) — NOT held through "Play Again", since a replay
 // re-runs the same atomic debit as any fresh bet and can't double-spend even
 // if another casino game starts in parallel once this hand has settled.
-async function playHigherLower(interaction, bet, userFilter, guildSettings, history, streak, releaseLock) {
+async function playHigherLower(interaction, bet, userFilter, guildSettings, history, streak, releaseLock, onWager) {
     const current = rollCard();
     const canHigh = probabilities(current.value).higher > 0;
     const canLow  = probabilities(current.value).lower  > 0;
@@ -308,7 +305,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                 // Tie: push — refund this round and continue session without changing streak
                 const newHistory = [...history, current];
                 await i.deferUpdate();
-                await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), streak, releaseLock);
+                await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), streak, releaseLock, onWager);
                 return;
             }
 
@@ -329,7 +326,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                         .setTimestamp()],
                     components: [playAgainRow(replayId)],
                 });
-                attachReplay(message, replayId, interaction, bet, userFilter, guildSettings);
+                attachReplay(message, replayId, interaction, bet, userFilter, guildSettings, onWager);
                 releaseLock?.();
                 return;
             }
@@ -349,7 +346,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                         .setTimestamp()],
                     components: [playAgainRow(replayId)],
                 });
-                attachReplay(message, replayId, interaction, bet, userFilter, guildSettings);
+                attachReplay(message, replayId, interaction, bet, userFilter, guildSettings, onWager);
                 releaseLock?.();
                 return;
             }
@@ -362,7 +359,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                     embeds:     [lossEmbed(interaction, current, next, pickedHigher, bet, updated?.balance ?? 0)],
                     components: [playAgainRow(replayId)],
                 });
-                attachReplay(message, replayId, interaction, bet, userFilter, guildSettings);
+                attachReplay(message, replayId, interaction, bet, userFilter, guildSettings, onWager);
                 releaseLock?.();
                 return;
             }
@@ -417,12 +414,12 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                             embeds:     [cashOutEmbed(interaction, bet, rawPayout, updated?.balance ?? 0, newStreak)],
                             components: [playAgainRow(replayId)],
                         });
-                        attachReplay(riskMsg, replayId, interaction, bet, userFilter, guildSettings);
+                        attachReplay(riskMsg, replayId, interaction, bet, userFilter, guildSettings, onWager);
                         releaseLock?.();
                     } else {
                         // Risk another card — recurse without paying out
                         await r.deferUpdate();
-                        await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), newStreak, releaseLock);
+                        await playHigherLower(interaction, bet, userFilter, guildSettings, newHistory.slice(-5), newStreak, releaseLock, onWager);
                     }
                 } catch (riskErr) {
                     console.error('[HigherLower] risk collect error:', riskErr);
@@ -443,7 +440,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                     embeds:     [cashOutEmbed(interaction, bet, rawPayout, updated?.balance ?? 0, newStreak)],
                     components: [playAgainRow(replayId)],
                 }).catch(() => {});
-                attachReplay(riskMsg, replayId, interaction, bet, userFilter, guildSettings);
+                attachReplay(riskMsg, replayId, interaction, bet, userFilter, guildSettings, onWager);
                 releaseLock?.();
             });
 
@@ -467,18 +464,17 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
     });
 }
 
-function attachReplay(message, replayId, interaction, bet, userFilter, guildSettings) {
+function attachReplay(message, replayId, interaction, bet, userFilter, guildSettings, onWager) {
     message.createMessageComponentCollector({
         filter: ri => ri.user.id === interaction.user.id && ri.customId === replayId,
         max: 1,
         time: 60_000,
     }).on('collect', async ri => {
         try {
-            const newDebited = await User.findOneAndUpdate(
-                { ...userFilter, balance: { $gte: bet } },
-                { $inc: { balance: -bet } },
-                { new: true }
-            );
+            // A replay is a fresh hand paid for with fresh coins, so it reports
+            // its own wager rather than riding on the one that opened the
+            // original — the jackpot and the season mission both count it.
+            const newDebited = await placeWager(userFilter, bet, { onWager });
             if (!newDebited) {
                 const fresh = await User.findOne(userFilter);
                 return ri.update({
@@ -487,7 +483,7 @@ function attachReplay(message, replayId, interaction, bet, userFilter, guildSett
                 });
             }
             await ri.deferUpdate();
-            await playHigherLower(interaction, bet, userFilter, guildSettings, [], 0);
+            await playHigherLower(interaction, bet, userFilter, guildSettings, [], 0, null, onWager);
         } catch (replayErr) {
             console.error('[HigherLower] replay error:', replayErr);
             await interaction.editReply({ content: 'Something went wrong on replay.', embeds: [], components: [] }).catch(() => {});

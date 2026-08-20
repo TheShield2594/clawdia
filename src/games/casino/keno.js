@@ -6,6 +6,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
+const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
@@ -83,7 +84,7 @@ function phaseTitle(hits, total) {
 // releaseLock is called once the draw settles into a result — replays/
 // rerolls don't need it re-held since they re-debit atomically like any
 // fresh bet.
-async function playKeno(interaction, bet, picked, alreadyDebited = false, releaseLock) {
+async function playKeno(interaction, bet, picked, alreadyDebited = false, releaseLock, onWager) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -94,11 +95,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         if (alreadyDebited) {
             debited = await User.findOne(userFilter);
         } else {
-            debited = await User.findOneAndUpdate(
-                { ...userFilter, balance: { $gte: bet } },
-                { $inc: { balance: -bet } },
-                { new: true }
-            );
+            debited = await placeWager(userFilter, bet, { onWager });
 
             if (!debited) {
                 releaseLock?.();
@@ -374,20 +371,18 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
             time: 60_000,
         }).on('collect', async i => {
             if (i.customId === rerollId) {
-                // Quick reroll at 50% cost with same picks
-                const rerollDebited = await User.findOneAndUpdate(
-                    { ...userFilter, balance: { $gte: rerollCost } },
-                    { $inc: { balance: -rerollCost } },
-                    { new: true }
-                );
+                // Quick reroll at 50% cost with same picks. A discounted draw is
+                // still a fresh draw paid for with fresh coins, so it reports its
+                // own wager — at the reroll price, not the original bet.
+                const rerollDebited = await placeWager(userFilter, rerollCost, { onWager });
                 if (!rerollDebited) {
                     return i.update({ content: `❌ Not enough coins for the quick reroll (need **${rerollCost.toLocaleString()}** coins).`, embeds: [], components: [] });
                 }
                 await i.deferUpdate();
-                await playKeno(interaction, rerollCost, picked, true, null);
+                await playKeno(interaction, rerollCost, picked, true, null, onWager);
             } else {
                 await i.deferUpdate();
-                await playKeno(interaction, bet, picked, false, null);
+                await playKeno(interaction, bet, picked, false, null, onWager);
             }
         }).on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
@@ -420,7 +415,7 @@ module.exports = {
                 .setDescription('Your 5 numbers from 1–40, space-separated (e.g. 3 12 21 33 39)')
                 .setRequired(true)),
 
-    async execute(interaction, { releaseLock } = {}) {
+    async execute(interaction, { releaseLock, onWager } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
             releaseLock?.();
@@ -465,6 +460,6 @@ module.exports = {
         const { shouldProceed: knProceed, alreadyReplied: knReplied } = await confirmBet(interaction, bet, user.balance, 'Keno', guildSettings);
         if (!knProceed) { releaseLock?.(); return; }
         if (!knReplied) await interaction.deferReply();
-        await playKeno(interaction, bet, uniquePicked.sort((a, b) => a - b), false, releaseLock);
+        await playKeno(interaction, bet, uniquePicked.sort((a, b) => a - b), false, releaseLock, onWager);
     },
 };

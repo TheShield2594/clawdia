@@ -37,24 +37,9 @@ jest.mock('../src/utils/crashLobby', () => {
 
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
-
-const GUILD_ID   = 'guild-1';
-const USER_ID    = 'user-1';
-const CHANNEL_ID = 'channel-1';
-const BET        = 100;
-// Comfortably above the bet: every game reads this first and decides the player
-// can afford the hand. That stale "yes" is the premise of the race.
-const WALLET     = 10_000;
-
-/** The stale read every game starts from. */
-const walletDoc = () => ({
-    userId: USER_ID,
-    guildId: GUILD_ID,
-    balance: WALLET,
-    activeEffects: [],
-    casinoStats: {},
-    save: jest.fn().mockResolvedValue(undefined),
-});
+const {
+    GUILD_ID, USER_ID, CHANNEL_ID, BET, WALLET, walletDoc, makeInteraction, GAMES, stakeFor,
+} = require('./helpers/casinoInteraction');
 
 /** True for the compare-and-set that takes a stake. */
 const isGuardedDebit = filter => filter?.balance?.$gte !== undefined;
@@ -65,59 +50,9 @@ function credits(update) {
     return typeof inc === 'number' && inc > 0;
 }
 
-function makeInteraction(options) {
-    const replies = [];
-    const record = payload => { replies.push(payload); return Promise.resolve(payload); };
-
-    const message = {
-        createMessageComponentCollector: () => ({ on() { return this; }, stop() {} }),
-        // Nobody presses anything in these tests. A rejection is what discord.js
-        // hands back when the window closes, and the games all treat it as "no
-        // response"; a promise that never settles would just hang them.
-        awaitMessageComponent: () => Promise.reject(new Error('no response')),
-        edit: record,
-    };
-
-    return {
-        replies,
-        id: 'interaction-1',
-        // discord.js validates author icons as real URLs, so this has to look like one.
-        user:    { id: USER_ID, username: 'player', displayAvatarURL: () => 'https://cdn.discordapp.com/avatar.png' },
-        member:  { displayName: 'player' },
-        guild:   { id: GUILD_ID, name: 'Guild' },
-        channel: { id: CHANNEL_ID, send: record },
-        client:  { users: { fetch: () => Promise.resolve(null) } },
-        options: {
-            getInteger: name => options[name] ?? null,
-            getString:  name => options[name] ?? null,
-            getNumber:  name => options[name] ?? null,
-        },
-        deferReply:  jest.fn().mockResolvedValue(undefined),
-        reply:       jest.fn(record),
-        editReply:   jest.fn(record),
-        followUp:    jest.fn(record),
-        fetchReply:  jest.fn().mockResolvedValue(message),
-    };
-}
-
 // Loaded once: `jest.mock` replaces the models for every module in this file, so
 // the games see the same mocks the assertions read.
 const load = name => require(`../src/games/casino/${name}`);
-
-// Every game's opening bet, with whatever options it reads to get there.
-const GAMES = [
-    { name: 'blackjack',   options: { bet: BET } },
-    { name: 'crash',       options: { bet: BET, auto_cashout: null } },
-    { name: 'cupgame',     options: { bet: BET } },
-    { name: 'higherlower', options: { bet: BET } },
-    { name: 'keno',        options: { bet: BET, numbers: '3 12 21 33 39' } },
-    { name: 'poker',       options: { bet: BET } },
-    { name: 'roulette',    options: { bet: 'red', amount: BET, number: null } },
-    { name: 'slots',       options: { bet: BET } },
-];
-
-/** The wager each game's guard must cover — roulette takes its amount elsewhere. */
-const stakeFor = game => (game.name === 'roulette' ? game.options.amount : game.options.bet);
 
 describe.each(GAMES)('/$name — the stake is taken with a compare-and-set', (game) => {
     const stake = stakeFor(game);
