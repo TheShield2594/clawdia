@@ -26,22 +26,26 @@ const { rarityRibbon, stackBar, rewardReveal } = require('../src/utils/rewardRev
 
 // ─── rarityRibbon ─────────────────────────────────────────────────────────────
 
+// The ladder runs to 6: hunt, fish and mine all roll an `event` tier above legendary.
+const LADDER_RUNGS = 6;
+
 describe('rarityRibbon', () => {
     test('highlights the correct tier and leaves others plain', () => {
-        expect(rarityRibbon(1)).toBe('[🟢] ─ 🔵 ─ 🟣 ─ 🟡 ─ 🌌');
-        expect(rarityRibbon(3)).toBe('🟢 ─ 🔵 ─ [🟣] ─ 🟡 ─ 🌌');
-        expect(rarityRibbon(5)).toBe('🟢 ─ 🔵 ─ 🟣 ─ 🟡 ─ [🌌]');
+        expect(rarityRibbon(1)).toBe('[🟢] ─ 🔵 ─ 🟣 ─ 🟡 ─ 🌌 ─ ☄️');
+        expect(rarityRibbon(3)).toBe('🟢 ─ 🔵 ─ [🟣] ─ 🟡 ─ 🌌 ─ ☄️');
+        expect(rarityRibbon(5)).toBe('🟢 ─ 🔵 ─ 🟣 ─ 🟡 ─ [🌌] ─ ☄️');
+        expect(rarityRibbon(6)).toBe('🟢 ─ 🔵 ─ 🟣 ─ 🟡 ─ 🌌 ─ [☄️]');
     });
 
-    test('contains exactly 5 segments separated by " ─ "', () => {
-        for (let tier = 1; tier <= 5; tier++) {
+    test(`contains exactly ${LADDER_RUNGS} segments separated by " ─ "`, () => {
+        for (let tier = 1; tier <= LADDER_RUNGS; tier++) {
             const segments = rarityRibbon(tier).split(' ─ ');
-            expect(segments).toHaveLength(5);
+            expect(segments).toHaveLength(LADDER_RUNGS);
         }
     });
 
     test('exactly one segment is wrapped in brackets per tier', () => {
-        for (let tier = 1; tier <= 5; tier++) {
+        for (let tier = 1; tier <= LADDER_RUNGS; tier++) {
             const bracketed = rarityRibbon(tier).match(/\[.*?\]/g);
             expect(bracketed).toHaveLength(1);
         }

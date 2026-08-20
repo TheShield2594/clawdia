@@ -54,7 +54,7 @@ const {
 const { getCurrentWeather } = require('../../services/weatherService');
 const { FISH_TRAITS, TIME_OF_DAY_BONUSES, getTimeOfDay } = require('../../data/fishData');
 const { ensureHuntData } = require('../../services/huntService');
-const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
+const { TIER_NUM, TIER_RIBBON, TIER_STARS } = require('../../data/materialRarity');
 const { randomFrom, FISH_MISS_POOL } = require('../../utils/copyLines');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -346,20 +346,21 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
     } else {
         await interaction.editReply({ embeds: [fogEmbed] });
         await wait(1500);
-        const midColor = tierNum === 4 ? '#9c27b0' : '#ff9800';
-        const midTitle = tierNum === 4 ? '🔮 Something exceptional breaks the surface...' : '⚡ The line pulls taut with impossible force...';
-        const midTierLabel = tierNum === 4 ? 'EPIC' : 'LEGENDARY';
+        const midColor = tierNum === 6 ? '#e74c3c' : tierNum === 4 ? '#9c27b0' : '#ff9800';
+        const midTitle = tierNum === 6 ? '☄️ The water goes utterly still...' : tierNum === 4 ? '🔮 Something exceptional breaks the surface...' : '⚡ The line pulls taut with impossible force...';
+        const midTierLabel = tierNum === 6 ? 'EVENT' : tierNum === 4 ? 'EPIC' : 'LEGENDARY';
         const midEmbed = new EmbedBuilder()
             .setColor(midColor)
             .setTitle(midTitle)
             .setDescription(`━━━━━━━━━━━━━━━\n❓❓❓  **${midTierLabel}**  ❓❓❓\n━━━━━━━━━━━━━━━`);
         await interaction.editReply({ embeds: [midEmbed] });
         await wait(1500);
-        if (tierNum === 5) {
+        if (tierNum >= 5) {
+            const isEvent = tierNum === 6;
             const fanfareEmbed = new EmbedBuilder()
-                .setColor('#ff9800')
-                .setTitle('⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
-                .setDescription('━━━━━━━━━━━━━━━\n*The ocean holds its breath. This catch defies all odds.*\n━━━━━━━━━━━━━━━');
+                .setColor(isEvent ? '#e74c3c' : '#ff9800')
+                .setTitle(isEvent ? '☄️ 🌊 𝗠 𝗬 𝗧 𝗛 𝗜 𝗖 𝗔 𝗟 🌊 ☄️' : '⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
+                .setDescription(isEvent ? '━━━━━━━━━━━━━━━\n*Sailors tell stories about this one. Now you are the story.*\n━━━━━━━━━━━━━━━' : '━━━━━━━━━━━━━━━\n*The ocean holds its breath. This catch defies all odds.*\n━━━━━━━━━━━━━━━');
             await interaction.editReply({ embeds: [fanfareEmbed] });
             await wait(1500);
         }
@@ -1128,7 +1129,7 @@ async function handleCast(interaction) {
         // Non-boss path: log big win after all payouts finalized
         if (result.success) {
             const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-            if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+            if (result.finalPayout >= bigWinThreshold || ['legendary', 'event'].includes(result.tier)) {
                 logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'fish', details: { itemName: result.fish?.name, rarity: result.tier }, client: interaction.client });
             }
         }
@@ -1161,18 +1162,24 @@ async function handleCast(interaction) {
         // Staged loot reveal for rare+ drops
         await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
 
-        if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
+        if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
             const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
             const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-            const isLeg = result.tier === 'legendary';
+            const announceTier = TIER_NUM[result.tier] ?? 4;
+            const ANNOUNCE_COPY = {
+                4: { color: '#9c27b0', title: '🔮 Epic Catch!',             line: 'A remarkable catch.' },
+                5: { color: '#ff9800', title: '✨ Legendary Catch! ✨',      line: "That's incredibly rare." },
+                6: { color: '#e74c3c', title: '☄️ Mythical Catch! ☄️',      line: 'Sailors tell stories about this one.' },
+            };
+            const copy = ANNOUNCE_COPY[announceTier] ?? ANNOUNCE_COPY[4];
             const announcementEmbed = new EmbedBuilder()
-                .setColor(isLeg ? '#ff9800' : '#9c27b0')
-                .setTitle(isLeg ? '✨ Legendary Catch! ✨' : '🔮 Epic Catch!')
+                .setColor(copy.color)
+                .setTitle(copy.title)
                 .setDescription(
-                    `<@${interaction.user.id}> just pulled ${result.fish.emoji} **${result.fish.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
+                    `<@${interaction.user.id}> just pulled ${result.fish.emoji} **${result.fish.name}** [${TIER_STARS[announceTier]}]\n` +
                     `while fishing in the **${location.name}**.\n\n` +
-                    (isLeg ? `That's incredibly rare.` : `A remarkable catch.`)
+                    copy.line
                 )
                 .setTimestamp();
             announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
@@ -1236,7 +1243,10 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
 
         // Fish catch
         const { fish, tier, isCrit, critMultiplier, sizeLabel, specialDrop } = result;
-        const color      = isCrit ? '#FFD700' : TIER_COLORS[tier];
+        // An event catch keeps its own colour even on a critical: the tier is the
+        // rarer fact of the two, and the title already announces it as one. Without
+        // this a critical event drop rendered crit-gold under a MYTHICAL headline.
+        const color = tier === 'event' ? TIER_COLORS.event : isCrit ? '#FFD700' : TIER_COLORS[tier];
         const tierLabel  = tier.charAt(0).toUpperCase() + tier.slice(1);
         const weightStr  = result.weightLbs > 0 ? ` (${result.weightLbs} lbs)` : '';
         const sizeStr    = sizeLabel ? ` [${sizeLabel}${weightStr}]` : '';
@@ -1254,22 +1264,25 @@ function buildCastEmbed(result, user, location, rod, currency, discordUser) {
         const weatherNote  = buildWeatherNote(weather, location.id);
         const weatherBanner = weatherNote ? `> ${weatherNote}\n\n` : '';
 
-        // Tier-specific title decoration — each rarity bracket has a distinct visual signature
-        const embedTitle = isLegendary
+        // Tier-specific title decoration — each rarity bracket has a distinct visual
+        // signature. Event outranks legendary, so it is checked first, and both sit
+        // ahead of the crit decoration: a critical event catch is still an event catch.
+        const embedTitle = isEvent
+            ? `☄️🌊 MYTHICAL CATCH 🌊☄️`
+            : isLegendary
             ? `🌊✨ LEGENDARY CATCH ✨🌊`
             : isCrit
             ? `${fish.emoji} ✨ CRITICAL! ${fish.name}${sizeStr} ✨`
-            : isEvent
-            ? `🌟 ${fish.emoji} ${fish.name}${sizeStr} 🌟`
             : isEpic
             ? `⚡ ${fish.emoji} ${fish.name}${sizeStr} ⚡`
             : `${fish.emoji} ${fish.name}${sizeStr}`;
 
         // Tier-specific description — escalates in drama with rarity
-        const embedDesc = isLegendary
-            ? `${weatherBanner}${ribbon}\n\nYou pulled something impossible from the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${fish.emoji}  **${fish.name}**${sizeStr}  [⭐⭐⭐⭐⭐]\n  *${fish.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
-            : isEvent
-            ? `${weatherBanner}${ribbon}\n\nSomething that shouldn't exist rises from below.\n\n*${fish.flavor}*`
+        const headlineStars = TIER_STARS[TIER_NUM[tier] ?? 5];
+        const embedDesc = isEvent
+            ? `${weatherBanner}${ribbon}\n\nSomething that shouldn't exist rises from below.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${fish.emoji}  **${fish.name}**${sizeStr}  [${headlineStars}]\n  *${fish.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+            : isLegendary
+            ? `${weatherBanner}${ribbon}\n\nYou pulled something impossible from the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${fish.emoji}  **${fish.name}**${sizeStr}  [${headlineStars}]\n  *${fish.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
             : isEpic
             ? `${weatherBanner}${ribbon}\n\nAn exceptional catch that tests every fibre of your rod.\n\n*${fish.flavor}*`
             : `${weatherBanner}${ribbon}\n\n*${fish.flavor}*`;

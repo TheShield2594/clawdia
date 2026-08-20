@@ -10,15 +10,17 @@ const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
 const { getItemImageAttachment } = require('../../utils/itemImageHelper');
 const { runShopBrowse }          = require('../../utils/shopBrowse');
+const { packFields }             = require('../../utils/embedFields');
 const {
     DEPTHS, DEPTH_LIST, TIER_COLORS, LIMITS, PICKAXE_BY_TIER,
     MATERIAL_NAMES, CONSUMABLES, BLAST_PACKS,
     PICKAXE_TIERS, PICKAXE_BY_SLUG, PICKAXE_UPGRADES,
+    CHOOSABLE_INTENSITY, DEFAULT_INTENSITY_LEVEL,
     MINER_LEVELS, PRESTIGE_BONUSES, MINE_QUEST_TEMPLATES,
     RAID_COOLDOWN_MS, RAID_SHIELD_MS, RAID_STEAL_MIN, RAID_STEAL_MAX
 } = require('../../data/mineData');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
-const { TIER_NUM, TIER_RIBBON } = require('../../data/materialRarity');
+const { TIER_NUM, TIER_RIBBON, TIER_STARS } = require('../../data/materialRarity');
 const { randomFrom, MINE_CAVE_LINES } = require('../../utils/copyLines');
 const { getPityBonus, buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const {
@@ -28,6 +30,7 @@ const {
     msUntilNextStamina,
     getMaxStamina,
     executeMine,
+    promoteIntensity,
     assignDailyMineQuests,
     updateMineQuestProgress,
     formatMs,
@@ -43,8 +46,11 @@ const {
     applyXp,
     updateMineMap,
     renderMineMap,
-    getOreStashSummary,
-    isOreStashEmpty
+    msUntilDailyReset,
+    getRaidableMaterials,
+    hasRaidableMaterials,
+    planRaidHaul,
+    RAID_MAX_PER_MATERIAL
 } = require('../../services/mineService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -85,14 +91,17 @@ const UNLOCK_CHOICES   = DEPTH_LIST.filter(d => !d.defaultUnlocked).map(d => ({ 
 
 const PRESTIGE_BADGES = ['', '🥉', '🥈', '🥇', '🏆', '💎'];
 
-// Depth risk levels for the pre-dig selection prompt
-const INTENSITY_LEVELS = [
-    { level: 1, name: 'Surface',  emoji: '☀️',  multiplier: 0.7, caveInRisk: 0.00, durLoss: 1 },
-    { level: 2, name: 'Shallow',  emoji: '🪨',  multiplier: 1.0, caveInRisk: 0.05, durLoss: 1 },
-    { level: 3, name: 'Mid',      emoji: '🔩',  multiplier: 1.4, caveInRisk: 0.12, durLoss: 2 },
-    { level: 4, name: 'Deep',     emoji: '💎',  multiplier: 2.0, caveInRisk: 0.20, durLoss: 3 },
-    { level: 5, name: 'Abyss',    emoji: '🌑',  multiplier: 3.0, caveInRisk: 0.30, durLoss: 4 },
-];
+// Miner Level tops out at the end of the MINER_LEVELS ladder; prestige tops out at
+// the end of the bonus table. Both are derived so the two tables stay the authority.
+const MAX_MINER_LEVEL   = MINER_LEVELS.length;
+const MAX_MINE_PRESTIGE = PRESTIGE_BONUSES.length - 1;
+
+// Presentation timings for the pre-dig prompt and the vein read. The ladder itself
+// and the promotion rule live with the rest of the mine's rules, in mineData and
+// mineService.
+const INTENSITY_PICK_MS = 20_000;
+const VEIN_FLASH_MS     = 1_400;
+const VEIN_ANSWER_MS    = 10_000;
 
 module.exports = {
     cooldown: 5,
@@ -107,7 +116,15 @@ module.exports = {
                     o.setName('depth')
                         .setDescription('Depth to mine in (defaults to your active depth).')
                         .setRequired(false)
-                        .addChoices(...DEPTH_CHOICES)))
+                        .addChoices(...DEPTH_CHOICES))
+                .addIntegerOption(o =>
+                    o.setName('intensity')
+                        .setDescription('How hard to push. Higher pays more and risks a cave-in. Skips the prompt.')
+                        .setRequired(false)
+                        .addChoices(...CHOOSABLE_INTENSITY.map(l => ({
+                            name:  `${l.emoji} ${l.name} — ${l.multiplier}× payout, ${Math.round(l.caveInRisk * 100)}% cave-in`,
+                            value: l.level,
+                        })))))
         .addSubcommand(sub =>
             sub.setName('profile')
                 .setDescription("View your or another player's miner profile")
@@ -128,6 +145,14 @@ module.exports = {
                             o.setName('slot')
                                 .setDescription('Pickaxe slot number (use /mine inv view to see slots)')
                                 .setRequired(true)
+                                .setMinValue(1)))
+                .addSubcommand(sub =>
+                    sub.setName('discard')
+                        .setDescription('Discard a broken or condemned pickaxe')
+                        .addIntegerOption(o =>
+                            o.setName('slot')
+                                .setDescription('Pickaxe slot number (use /mine inv view to see slots)')
+                                .setRequired(true)
                                 .setMinValue(1))))
         .addSubcommandGroup(group =>
             group.setName('quests')
@@ -144,11 +169,14 @@ module.exports = {
                                 .setRequired(true)
                                 .addChoices(...MINE_QUEST_TEMPLATES.map(t => ({ name: t.name, value: t.id }))))))
         .addSubcommand(sub =>
+            sub.setName('prestige')
+                .setDescription('Reset your Miner Level for permanent bonuses (requires Miner Level 50)'))
+        .addSubcommand(sub =>
             sub.setName('map')
                 .setDescription('View your persistent mine map — see every cell you have excavated.'))
         .addSubcommand(sub =>
             sub.setName('raid')
-                .setDescription('Raid another miner\'s mine and steal unprocessed ore (requires pickaxe equipped)')
+                .setDescription('Raid another miner and steal some of their crafting materials (requires pickaxe equipped)')
                 .addUserOption(o =>
                     o.setName('target')
                         .setDescription('The miner to raid')
@@ -231,6 +259,7 @@ module.exports = {
             if (sub === 'profile') return handleProfile(interaction);
             if (sub === 'map')     return handleMap(interaction);
             if (sub === 'raid')    return handleRaid(interaction);
+            if (sub === 'prestige') return handlePrestige(interaction);
         }
         if (group === 'inv')    return handleInv(interaction, sub);
         if (group === 'quests') return handleQuests(interaction, sub);
@@ -258,20 +287,21 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
     } else {
         await interaction.editReply({ embeds: [fogEmbed] });
         await wait(1500);
-        const midColor = tierNum === 4 ? '#9c27b0' : '#ff9800';
-        const midTitle = tierNum === 4 ? '🔮 A rare vein reveals itself...' : '⚡ The tunnel fills with an impossible glow...';
-        const midTierLabel = tierNum === 4 ? 'EPIC' : 'LEGENDARY';
+        const midColor = tierNum === 6 ? '#e74c3c' : tierNum === 4 ? '#9c27b0' : '#ff9800';
+        const midTitle = tierNum === 6 ? '☄️ The rock itself begins to hum...' : tierNum === 4 ? '🔮 A rare vein reveals itself...' : '⚡ The tunnel fills with an impossible glow...';
+        const midTierLabel = tierNum === 6 ? 'EVENT' : tierNum === 4 ? 'EPIC' : 'LEGENDARY';
         const midEmbed = new EmbedBuilder()
             .setColor(midColor)
             .setTitle(midTitle)
             .setDescription(`━━━━━━━━━━━━━━━\n❓❓❓  **${midTierLabel}**  ❓❓❓\n━━━━━━━━━━━━━━━`);
         await interaction.editReply({ embeds: [midEmbed] });
         await wait(1500);
-        if (tierNum === 5) {
+        if (tierNum >= 5) {
+            const isEvent = tierNum === 6;
             const fanfareEmbed = new EmbedBuilder()
-                .setColor('#ff9800')
-                .setTitle('⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
-                .setDescription('━━━━━━━━━━━━━━━\n*Miners dream of this their whole careers.*\n━━━━━━━━━━━━━━━');
+                .setColor(isEvent ? '#e74c3c' : '#ff9800')
+                .setTitle(isEvent ? '☄️ 🌋 𝗣 𝗥 𝗜 𝗠 𝗢 𝗥 𝗗 𝗜 𝗔 𝗟 🌋 ☄️' : '⚡ ✨ 𝗟 𝗘 𝗚 𝗘 𝗡 𝗗 𝗔 𝗥 𝗬 ✨ ⚡')
+                .setDescription(isEvent ? '━━━━━━━━━━━━━━━\n*This ore has no business existing. Nobody will believe you.*\n━━━━━━━━━━━━━━━' : '━━━━━━━━━━━━━━━\n*Miners dream of this their whole careers.*\n━━━━━━━━━━━━━━━');
             await interaction.editReply({ embeds: [fanfareEmbed] });
             await wait(1500);
         }
@@ -313,15 +343,16 @@ async function handleDig(interaction) {
     if (!depth) {
         return interaction.reply({ content: `Unknown depth \`${depthId}\`. Use \`/mine shop list\` to see available depths.`, flags: MessageFlags.Ephemeral });
     }
+    // Access is decided by `unlockedDepths` alone. The level requirement is enforced
+    // once, at `/mine shop unlock`; re-checking it here would lock a prestiged miner
+    // out of depths they already paid for, since prestige resets the level and the
+    // purchase is permanent.
     if (!m.unlockedDepths.includes(depthId)) {
+        const gate = depth.defaultUnlocked
+            ? ''
+            : ` (Miner Level ${depth.unlockLevel}, ${depth.unlockCost.toLocaleString()} coins)`;
         return interaction.reply({
-            content: `You haven't unlocked **${depth.name}** yet. Use \`/mine shop unlock\` to unlock it.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-    if (m.level < depth.unlockLevel) {
-        return interaction.reply({
-            content: `You need to be Miner Level **${depth.unlockLevel}** to mine in **${depth.name}**.`,
+            content: `You haven't unlocked **${depth.name}** yet. Use \`/mine shop unlock\` to unlock it${gate}.`,
             flags: MessageFlags.Ephemeral
         });
     }
@@ -349,7 +380,7 @@ async function handleDig(interaction) {
                 description: 'You just came up from a dig.\nTake a short break before heading back down.',
                 color: '#b5651d',
                 nextAt,
-                nextRewardPreview: 'Read the vein 3/3 on your next dig and the haul pays 2× — 3× if it opens into the Abyss',
+                nextRewardPreview: 'Pick how hard to push next dig — up to 2×, and 3× if you read the vein right',
             })],
             flags: MessageFlags.Ephemeral,
         });
@@ -493,16 +524,15 @@ async function handleDig(interaction) {
             user.markModified('mining');
         }
 
-        // ── Vein-Following Puzzle ──────────────────────────────────────────────────
-        // 3 rounds of directional navigation through a mine tunnel.
-        // Each round: a 3×3 emoji grid shows the current position (⛏️) and a mineral
-        // trace in one of the 4 adjacent cells. Player picks the matching direction.
-        // Correct directions accumulate depth; final depth maps to intensity level.
-        //   0/3 correct → Surface  (0.7×, 0% cave-in)
-        //   1/3 correct → Shallow  (1.0×, 5% cave-in)
-        //   2/3 correct → Mid      (1.4×, 12% cave-in)
-        //   3/3 correct → Deep     (2.0×, 20% cave-in)
-        //   3/3 + lucky → Abyss    (3.0×, 30% cave-in)  10% chance on a perfect run
+        // ── Risk choice, then one vein read ────────────────────────────────────────
+        // The miner picks how hard to push; a correct vein read promotes the payout
+        // one rung without touching the risk they accepted.
+        //
+        // This replaced three rounds of a puzzle that displayed its own answer — the
+        // grid marked the ore cell with ✨ and asked which direction it was, so every
+        // attentive player scored 3/3 and every dig funnelled to Deep. The five-rung
+        // risk ladder existed but nothing ever chose from it, and the only way to dig
+        // more safely was to answer deliberately wrong, which nothing explained.
 
         const featured         = getDailyFeatured(interaction.guild.id);
         const isFeaturedDepth  = depthId === featured.mineDepth.id;
@@ -516,15 +546,17 @@ async function handleDig(interaction) {
             { id: 'E', label: '➡️ East',  row: 1, col: 2 },
         ];
 
-        // Build a 3×3 grid string highlighting the ore direction
+        /** The 3×3 tunnel view. With `oreDir` the trace shows; without it, it doesn't. */
         function buildGrid(oreDir) {
             const grid = [
                 ['🪨', '🪨', '🪨'],
                 ['🪨', '⛏️', '🪨'],
                 ['🪨', '🪨', '🪨'],
             ];
-            const d = DIRS.find(d => d.id === oreDir);
-            grid[d.row][d.col] = '✨';
+            if (oreDir) {
+                const d = DIRS.find(d => d.id === oreDir);
+                grid[d.row][d.col] = '✨';
+            }
             return grid.map(row => row.join(' ')).join('\n');
         }
 
@@ -532,89 +564,129 @@ async function handleDig(interaction) {
             ? `\n🌟 **Featured Depth!** +${Math.round(FEATURED_PAYOUT_BONUS * 100)}% payout active.`
             : '';
 
+        // Pushing hard for coins that the daily throttle will swallow is all risk and
+        // no reward, so say so before the choice rather than after the cave-in.
+        const throttleWarning =
+            m.dailyCoins >= LIMITS.DAILY_HARD_CAP
+                ? `\n🛑 **Daily cap reached** — this dig pays no coins. Cave-in risk is still real.`
+                : m.dailyCoins >= LIMITS.DAILY_SOFT_CAP
+                ? `\n⚠️ Past the daily soft cap — payouts are halved until it resets.`
+                : '';
+
+        // ── 1. How hard to push ────────────────────────────────────────────────────
+        const requestedIntensity = interaction.options.getInteger('intensity');
+        let pickedIntensity = CHOOSABLE_INTENSITY.find(l => l.level === requestedIntensity) ?? null;
+
+        const intensityRow = new ActionRowBuilder().addComponents(
+            ...CHOOSABLE_INTENSITY.map(l => new ButtonBuilder()
+                .setCustomId(`digint_${l.level}`)
+                .setLabel(`${l.name} · ${l.multiplier}× · ${Math.round(l.caveInRisk * 100)}%`)
+                .setEmoji(l.emoji)
+                .setStyle(l.level >= 4 ? ButtonStyle.Danger : l.level === 3 ? ButtonStyle.Primary : ButtonStyle.Secondary)
+            )
+        );
+
+        const fallbackLevel = CHOOSABLE_INTENSITY.find(l => l.level === (m.preferredIntensity ?? DEFAULT_INTENSITY_LEVEL))
+            ?? CHOOSABLE_INTENSITY.find(l => l.level === DEFAULT_INTENSITY_LEVEL);
+
         await interaction.reply({
             embeds: [new EmbedBuilder()
                 .setColor(isFeaturedDepth ? '#FFD700' : '#8B4513')
                 .setTitle(`⛏️ Entering ${depth.emoji} ${depth.name}…`)
                 .setDescription(
                     `*You lower yourself into the shaft. Dust settles. Your lamp catches a glint…*\n\n` +
-                    `**Follow the vein** — 3 rounds of directional choices. The deeper you follow it, the richer the haul.${featuredDepthNote}`
+                    (pickedIntensity
+                        ? `**${pickedIntensity.emoji} ${pickedIntensity.name}** — ${pickedIntensity.multiplier}× payout, ${Math.round(pickedIntensity.caveInRisk * 100)}% cave-in risk.`
+                        : `**How hard do you want to push?** Deeper pays more and risks bringing the roof down.`) +
+                    featuredDepthNote + throttleWarning
                 )
-                .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · 15 seconds per choice — miss a round and you stop there.` })],
-            components: [],
+                .setFooter({ text: pickedIntensity
+                    ? `${timeBand.emoji} ${timeBand.label}`
+                    : `${timeBand.emoji} ${timeBand.label} · ${INTENSITY_PICK_MS / 1000}s to choose — defaults to ${fallbackLevel.name}. Pass \`intensity:\` to skip this.` })],
+            components: pickedIntensity ? [] : [intensityRow],
         });
         const mineMsg = await interaction.fetchReply();
-        await delay(1500);
 
-        let veinDepth = 0;
-        const roundLog = [];
+        if (!pickedIntensity) {
+            const chosenId = await new Promise(resolve => {
+                const col = mineMsg.createMessageComponentCollector({
+                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith('digint_'),
+                    time: INTENSITY_PICK_MS,
+                    max: 1,
+                });
+                col.on('collect', async i => { await i.deferUpdate().catch(() => {}); resolve(i.customId); });
+                col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
+            });
+            pickedIntensity = CHOOSABLE_INTENSITY.find(l => `digint_${l.level}` === chosenId) ?? fallbackLevel;
+        }
 
-        for (let round = 0; round < 3; round++) {
-            const oreDir  = DIRS[Math.floor(Math.random() * DIRS.length)];
-            const grid    = buildGrid(oreDir.id);
-            const prevLog = roundLog.map((r, i) => r ? `✅` : `❌`).join(' ');
+        // Remembered so the timeout default is the miner's own habit, not ours.
+        if (m.preferredIntensity !== pickedIntensity.level) {
+            m.preferredIntensity = pickedIntensity.level;
+            user.markModified('mining');
+        }
 
-            const veinEmbed = new EmbedBuilder()
+        // ── 2. One vein read, and a real one ───────────────────────────────────────
+        const oreDir = DIRS[Math.floor(Math.random() * DIRS.length)];
+
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
                 .setColor('#B8860B')
-                .setTitle(`⛏️ Vein Read — Round ${round + 1}/3`)
+                .setTitle('⛏️ Reading the vein…')
                 .setDescription(
-                    `${prevLog ? prevLog + '\n\n' : ''}` +
-                    `*Mineral trace spotted — which way does the vein run?*\n\n` +
-                    `\`\`\`\n${grid}\n\`\`\``
+                    `*A mineral trace catches the lamplight. Mark where it runs.*\n\n` +
+                    `\`\`\`\n${buildGrid(oreDir.id)}\n\`\`\``
                 )
-                .setFooter({ text: '15 seconds to choose a direction.' });
+                .setFooter({ text: 'Remember it — the dust is about to settle.' })],
+            components: [],
+        });
+        await delay(VEIN_FLASH_MS);
 
-            const dirRow = new ActionRowBuilder().addComponents(
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setColor('#8B4513')
+                .setTitle('⛏️ Which way did it run?')
+                .setDescription(
+                    `*Dust swallows the seam. Call it.*\n\n` +
+                    `\`\`\`\n${buildGrid(null)}\n\`\`\``
+                )
+                .setFooter({ text: `${VEIN_ANSWER_MS / 1000}s · a correct read pays one rung higher at the same risk.` })],
+            components: [new ActionRowBuilder().addComponents(
                 ...DIRS.map(d => new ButtonBuilder()
                     .setCustomId(`vein_${d.id}`)
                     .setLabel(d.label)
                     .setStyle(ButtonStyle.Primary)
                 )
-            );
+            )],
+        });
 
-            await interaction.editReply({ embeds: [veinEmbed], components: [dirRow] });
-
-            const picked = await new Promise(resolve => {
-                const col = mineMsg.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith('vein_'),
-                    time: 15_000,
-                    max: 1,
-                });
-                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.replace('vein_', '')); });
-                col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+        const picked = await new Promise(resolve => {
+            const col = mineMsg.createMessageComponentCollector({
+                filter: i => i.user.id === interaction.user.id && i.customId.startsWith('vein_'),
+                time: VEIN_ANSWER_MS,
+                max: 1,
             });
+            col.on('collect', async i => { await i.deferUpdate().catch(() => {}); resolve(i.customId.replace('vein_', '')); });
+            col.on('end', (_, reason) => { if (reason !== 'limit') resolve(null); });
+        });
 
-            const correct = picked === oreDir.id;
-            roundLog.push(correct);
-            if (correct) veinDepth++;
+        const veinRead = picked === oreDir.id;
+        const chosenIntensity = veinRead ? promoteIntensity(pickedIntensity) : pickedIntensity;
 
-            const roundResult = new EmbedBuilder()
-                .setColor(correct ? '#00CC55' : picked ? '#CC4400' : '#888888')
-                .setTitle(correct ? '✅ Vein found!' : picked ? '❌ Dead end — rubble.' : '⏰ Hesitated…')
-                .setDescription(
-                    correct
-                        ? `You followed the vein **${oreDir.label}**. It runs deeper here.`
-                        : picked
-                        ? `The vein ran **${oreDir.label}** — you hit rubble instead.`
-                        : `The vein ran **${oreDir.label}** — you didn't move in time.`
-                );
-            await interaction.editReply({ embeds: [roundResult], components: [] });
-            if (round < 2) await delay(900);
-        }
-
-        // Map vein depth to intensity level
-        let intensityIndex = veinDepth; // 0→L1, 1→L2, 2→L3, 3→L4
-        if (veinDepth === 3 && Math.random() < 0.10) intensityIndex = 4; // lucky Abyss
-        const chosenIntensity = INTENSITY_LEVELS[intensityIndex];
-
-        const finalIcons = roundLog.map(r => r ? '✅' : '❌').join(' ');
         const confirmEmbed = new EmbedBuilder()
-            .setColor(chosenIntensity.level >= 4 ? '#FF4444' : chosenIntensity.level >= 3 ? '#FFA500' : '#00AA55')
-            .setTitle(`${chosenIntensity.emoji} Digging ${chosenIntensity.name}…`)
+            .setColor(veinRead ? '#00CC55' : picked ? '#CC4400' : '#888888')
+            .setTitle(veinRead
+                ? `✅ Vein read — digging ${chosenIntensity.emoji} ${chosenIntensity.name}`
+                : picked
+                ? `❌ Misread the seam — digging ${chosenIntensity.emoji} ${chosenIntensity.name}`
+                : `⏰ Too slow — digging ${chosenIntensity.emoji} ${chosenIntensity.name}`)
             .setDescription(
-                `${finalIcons}\n\n` +
-                `Vein depth reached: **${veinDepth}/3 correct**\n` +
-                `**${chosenIntensity.multiplier}×** payout  |  **${(chosenIntensity.caveInRisk * 100).toFixed(0)}%** cave-in risk`
+                (veinRead
+                    ? `The vein ran **${oreDir.label}** and you called it. The seam is richer than it looked.\n\n`
+                    : `The vein ran **${oreDir.label}**.\n\n`) +
+                `**${chosenIntensity.multiplier}×** payout` +
+                (veinRead ? ` *(up from ${pickedIntensity.multiplier}×)*` : '') +
+                `  |  **${(chosenIntensity.caveInRisk * 100).toFixed(0)}%** cave-in risk`
             );
         await interaction.editReply({ embeds: [confirmEmbed], components: [] });
 
@@ -642,7 +714,10 @@ async function handleDig(interaction) {
                     `━━━━━━━━━━━━━━━━━━━━━━━\n` +
                     `The tunnel is collapsing around you. Dust fills the air.\n` +
                     `You have seconds to decide.\n\n` +
-                    `⚡ **Ore at stake:** ${(result.caveInPayout ?? 0).toLocaleString()} coins\n\n` +
+                    `⚡ **Ore at stake:** ${((result.caveInPayout ?? 0) + (result.caveInEscrow ?? 0)).toLocaleString()} coins` +
+                    (result.caveInEscrow > 0
+                        ? ` *(includes the ${chosenIntensity.multiplier}× you ${chosenIntensity.promoted ? 'read out of the seam' : 'dug for'})*\n\n`
+                        : `\n\n`) +
                     (chargesAvailable > 0
                         ? `💥 You have **${chargesAvailable}** blast charge${chargesAvailable !== 1 ? 's' : ''} — enough to blow an escape route.`
                         : `⚠️ You have no blast charges — you'll have to run.`)
@@ -670,7 +745,7 @@ async function handleDig(interaction) {
                     time: 20_000,
                     max: 1,
                 });
-                col.on('collect', async i => { await i.deferUpdate(); resolve(i.customId.endsWith('_blast') ? 'blast' : 'abandon'); });
+                col.on('collect', async i => { await i.deferUpdate().catch(() => {}); resolve(i.customId.endsWith('_blast') ? 'blast' : 'abandon'); });
                 col.on('end', (_, reason) => { if (reason !== 'limit') resolve('abandon'); });
             });
 
@@ -679,6 +754,20 @@ async function handleDig(interaction) {
                 if (chargeType) {
                     m.charges[chargeType] = chargesAvailable - 1;
                     user.markModified('mining');
+                }
+                // Digging clear releases the escrowed intensity bonus — the charge buys
+                // back the whole haul, multiplier included. Clamped to the daily hard
+                // cap the same way the uninterrupted path clamps it.
+                if (result.caveInEscrow > 0) {
+                    const remainingCap = Math.max(0, LIMITS.DAILY_HARD_CAP - m.dailyCoins);
+                    const bonus        = Math.min(result.caveInEscrow, remainingCap);
+                    if (bonus > 0) {
+                        user.balance       += bonus;
+                        m.totalEarned      += bonus;
+                        m.dailyCoins       += bonus;
+                        result.finalPayout  = (result.finalPayout ?? 0) + bonus;
+                        result.caveInBonusPaid = bonus;
+                    }
                 }
                 result.caveInEscaped = true;
             } else {
@@ -730,6 +819,7 @@ async function handleDig(interaction) {
                 user.mining.dailyCoins    += bonus;
                 result.finalPayout        += bonus;
                 result.petYieldBonus       = bonus;
+                result.petYieldPct         = petMineYieldPct;
             }
         }
 
@@ -746,6 +836,18 @@ async function handleDig(interaction) {
                 result.finalPayout         += bonus;
                 result.wildernessBonus      = bonus;
             }
+        }
+
+        // At the hard cap every yield bonus above is skipped (they all gate on a
+        // payout above zero), so `forfeited` holds only the ore's value before the
+        // intensity multiplier and the bonuses that would have followed it. Scale it
+        // by what would have applied, or the embed understates the loss several-fold.
+        if (result.cappedByHard && result.forfeited > 0) {
+            const wouldHaveApplied = (chosenIntensity?.multiplier ?? 1)
+                * (isFeaturedDepth ? 1 + FEATURED_PAYOUT_BONUS : 1)
+                * (petMineYieldPct > 0 ? 1 + petMineYieldPct / 100 : 1)
+                * (wildernessActive ? 1 + WILDERNESS_YIELD_BONUS : 1);
+            result.forfeited = Math.round(result.forfeited * wouldHaveApplied);
         }
 
         // bestPayout must reflect what the player actually walked away with, so this
@@ -817,7 +919,7 @@ async function handleDig(interaction) {
         // Log big win, then await hourly leader update and re-fetch for accurate footer
         if (result.success && result.finalPayout > 0) {
             const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
-            if (result.finalPayout >= bigWinThreshold || result.tier === 'legendary') {
+            if (result.finalPayout >= bigWinThreshold || ['legendary', 'event'].includes(result.tier)) {
                 logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'mine', details: { itemName: result.ore?.name, rarity: result.tier }, client: interaction.client });
             }
             await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'mine', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.ore ? `${result.ore.emoji ?? ''} ${result.ore.name} (${currency}${result.finalPayout.toLocaleString()})`.trim() : `${currency}${result.finalPayout.toLocaleString()}` }).catch(() => null);
@@ -834,8 +936,15 @@ async function handleDig(interaction) {
         }
         {
             const desc = embed.data.description ?? '';
-            const lines = [`> ⛏️ *${finalIcons} — Vein depth ${veinDepth}/3 → ${chosenIntensity.emoji} ${chosenIntensity.name} (${chosenIntensity.multiplier}×)*`];
-            if (result.caveIn && result.caveInEscaped) lines.push(`> 💥 *Cave-in! You used a blast charge — ore saved.*`);
+            const lines = [
+                `> ${chosenIntensity.emoji} *Dug **${chosenIntensity.name}** — ${chosenIntensity.multiplier}× at ${(chosenIntensity.caveInRisk * 100).toFixed(0)}% risk`
+                + (veinRead ? ` · vein read ✅ (up from ${pickedIntensity.multiplier}×)*` : `*`),
+            ];
+            if (result.caveIn && result.caveInEscaped) {
+                lines.push(result.caveInBonusPaid > 0
+                    ? `> 💥 *Cave-in! You blasted clear — ore saved, and the ${chosenIntensity.multiplier}× held.*`
+                    : `> 💥 *Cave-in! You used a blast charge — ore saved.*`);
+            }
             else if (result.caveIn) lines.push(`> 💥 *${randomFrom(MINE_CAVE_LINES)}*`);
             embed.setDescription(desc + '\n' + lines.join('\n'));
         }
@@ -884,18 +993,24 @@ async function handleDig(interaction) {
         // Staged loot reveal for rare+ drops
         await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
 
-        if (result.success && ['epic', 'legendary'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
+        if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
             const resolved = announceChannelId ? interaction.guild.channels.cache.get(announceChannelId) : null;
             const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
-            const isLeg = result.tier === 'legendary';
+            const announceTier = TIER_NUM[result.tier] ?? 4;
+            const ANNOUNCE_COPY = {
+                4: { color: '#9c27b0', title: '🔮 Epic Ore Unearthed!',      line: 'A rare find in these tunnels.' },
+                5: { color: '#ff9800', title: '✨ Legendary Strike! ✨',      line: 'That vein runs deep — and dangerous.' },
+                6: { color: '#e74c3c', title: '☄️ Primordial Strike! ☄️',    line: 'Ore like this is not supposed to exist. The whole server should know.' },
+            };
+            const copy = ANNOUNCE_COPY[announceTier] ?? ANNOUNCE_COPY[4];
             const announcementEmbed = new EmbedBuilder()
-                .setColor(isLeg ? '#ff9800' : '#9c27b0')
-                .setTitle(isLeg ? '✨ Legendary Strike! ✨' : '🔮 Epic Ore Unearthed!')
+                .setColor(copy.color)
+                .setTitle(copy.title)
                 .setDescription(
-                    `<@${interaction.user.id}> just unearthed ${result.ore.emoji} **${result.ore.name}** [${isLeg ? '⭐⭐⭐⭐⭐' : '⭐⭐⭐⭐'}]\n` +
+                    `<@${interaction.user.id}> just unearthed ${result.ore.emoji} **${result.ore.name}** [${TIER_STARS[announceTier]}]\n` +
                     `at the **${depth.name}** depth.\n\n` +
-                    (isLeg ? `That vein runs deep — and dangerous.` : `A rare find in these tunnels.`)
+                    copy.line
                 )
                 .setTimestamp();
             announceChannel.send({ embeds: [announcementEmbed] }).catch(() => null);
@@ -921,6 +1036,200 @@ async function handleDig(interaction) {
         if (!mineCommitted) await releaseMineClaim();
         throw err;
     }
+}
+
+// ─── PRESTIGE ─────────────────────────────────────────────────────────────────
+//
+// The PRESTIGE_BONUSES table, the badge row and the "Prestige Bonuses" block on
+// /mine profile have all been in place since the mine shipped, but nothing ever
+// incremented mining.prestige — so Miner Level 50 was simply the end, and every
+// bonus in that table was unreachable. This is the way through.
+
+/** Formats one row of PRESTIGE_BONUSES as the lines a player sees. */
+function prestigeBonusLines(bonus) {
+    return [
+        bonus.critBonus    > 0 ? `+${Math.round(bonus.critBonus * 100)}% crit chance`   : null,
+        bonus.staminaBonus > 0 ? `+${bonus.staminaBonus} max stamina`                   : null,
+        bonus.payoutBonus  > 0 ? `+${Math.round(bonus.payoutBonus * 100)}% all payouts` : null,
+        bonus.rarityBonus  > 0 ? `+${Math.round(bonus.rarityBonus * 100)}% rarity boost`: null,
+    ].filter(Boolean);
+}
+
+async function handlePrestige(interaction) {
+    const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+    if (guildSettings?.economy?.enabled === false) {
+        return interaction.reply({ content: 'The economy is disabled on this server.', flags: MessageFlags.Ephemeral });
+    }
+
+    const user = await User.findOneAndUpdate(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        { $setOnInsert: { userId: interaction.user.id, guildId: interaction.guild.id } },
+        { upsert: true, new: true }
+    );
+    await attachGrind(user);
+    ensureMineData(user);
+
+    const m        = user.mining;
+    const prestige = m.prestige ?? 0;
+    const badge    = PRESTIGE_BADGES[Math.min(prestige, PRESTIGE_BADGES.length - 1)] ?? '';
+
+    if (prestige >= MAX_MINE_PRESTIGE) {
+        return interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setColor('#f39c12')
+                .setTitle(`${badge} Maximum Prestige`)
+                .setDescription(`You are a **P${prestige} Master Miner** — the deepest rank there is.`)
+                .addFields({ name: 'Your Bonuses', value: prestigeBonusLines(PRESTIGE_BONUSES[prestige]).join('\n') || 'None' })
+                .setTimestamp()],
+        });
+    }
+
+    const nextBonus = PRESTIGE_BONUSES[prestige + 1];
+    const nextBadge = PRESTIGE_BADGES[prestige + 1] ?? '';
+
+    if (m.level < MAX_MINER_LEVEL) {
+        return interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setColor('#b5651d')
+                .setTitle(`${badge} Miner Prestige — P${prestige}`)
+                .setDescription(
+                    `Reach **Miner Level ${MAX_MINER_LEVEL}** to ascend to ${nextBadge} **P${prestige + 1}**.\n` +
+                    `You're Level **${m.level}**.`
+                )
+                .addFields(
+                    { name: `${nextBadge} P${prestige + 1} would grant`, value: prestigeBonusLines(nextBonus).join('\n') || 'Nothing new', inline: true },
+                    { name: 'Progress',  value: `${m.xp.toLocaleString()} / ${MINER_LEVELS[MAX_MINER_LEVEL - 1].xpRequired.toLocaleString()} XP`, inline: true },
+                )
+                .setFooter({ text: 'Prestige keeps your pickaxes, depths, materials and stats — only Miner Level and XP reset.' })
+                .setTimestamp()],
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
+    // Losing the level also drops any synergy gated on it, so say so up front rather
+    // than letting a miner discover their stamina pool shrank after ascending.
+    const lostSynergies = getActiveSynergies(user)
+        .filter(syn => (syn.requirements.mining ?? 0) > 1)
+        .map(syn => `${syn.emoji} ${syn.name}`);
+
+    const confirmEmbed = new EmbedBuilder()
+        .setColor('#f39c12')
+        .setTitle(`${nextBadge} Ascend to Prestige ${prestige + 1}?`)
+        .setDescription(
+            `You've reached **Miner Level ${MAX_MINER_LEVEL}**. Ascending is permanent and cannot be undone.\n\n` +
+            `**Resets:** Miner Level → 1, Miner XP → 0\n` +
+            `**Keeps:** pickaxes, unlocked depths, materials, consumables, charges and every lifetime stat`
+        )
+        .addFields({ name: `${nextBadge} P${prestige + 1} bonuses`, value: prestigeBonusLines(nextBonus).join('\n') || 'Nothing new', inline: false });
+
+    if (lostSynergies.length) {
+        confirmEmbed.addFields({
+            name: '⚠️ Synergies you will drop until you re-level',
+            value: lostSynergies.join('\n'),
+            inline: false,
+        });
+    }
+    confirmEmbed.setFooter({ text: 'Confirmation expires in 30 seconds' });
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('mineprestige_confirm').setLabel('Ascend').setStyle(ButtonStyle.Success).setEmoji('⛏️'),
+        new ButtonBuilder().setCustomId('mineprestige_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+    );
+
+    const response = await interaction.reply({ embeds: [confirmEmbed], components: [row], withResponse: true });
+    const reply = response.resource.message;
+    const collector = reply.createMessageComponentCollector({ time: 30_000 });
+
+    let actionPromise = null;
+    collector.on('collect', btn => {
+        if (btn.user.id !== interaction.user.id) {
+            return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
+        }
+
+        if (btn.customId === 'mineprestige_cancel') {
+            collector.stop();
+            return btn.update({ content: 'Ascension cancelled.', embeds: [], components: [] });
+        }
+
+        // Assigned before collector.stop(): stop() emits 'end' synchronously, so an
+        // assignment after it would leave the handler below awaiting a null and let
+        // the command — and the per-user mining lock with it — resolve while this
+        // write was still in flight.
+        actionPromise = (async () => {
+            try {
+                await btn.deferUpdate();
+
+                // Nothing is written from the in-memory snapshot here. It was read
+                // before a 30-second confirmation window during which a raid, a craft
+                // or another dig may have moved this profile, and a save() would put
+                // all of that back. The ascension is the conditional update alone.
+                //
+                // `data.prestige` is absent on profiles that predate the field, so a
+                // first ascension has to match that shape too — ensureMineData only
+                // defaulted it in memory.
+                const rankMatches = prestige === 0
+                    ? [{ 'data.prestige': 0 }, { 'data.prestige': { $exists: false } }, { 'data.prestige': null }]
+                    : [{ 'data.prestige': prestige }];
+
+                // Conditional so a second confirmation cannot ascend twice: the level
+                // requirement and the prestige rank both have to still hold.
+                const ascended = await GrindProfile.findOneAndUpdate(
+                    {
+                        userId: user.userId, guildId: user.guildId, system: 'mining',
+                        'data.level': { $gte: MAX_MINER_LEVEL },
+                        $or: rankMatches,
+                    },
+                    { $set: { 'data.prestige': prestige + 1, 'data.level': 1, 'data.xp': 0 } },
+                    { new: true }
+                ).catch(err => { console.error('[mine prestige] ascend error:', err); return null; });
+
+                if (!ascended) {
+                    return interaction.editReply({
+                        content: 'Your miner changed while that confirmation was open — run `/mine prestige` again.',
+                        embeds: [], components: [],
+                    });
+                }
+
+                m.prestige = prestige + 1;
+                m.level    = 1;
+                m.xp       = 0;
+
+                const embed = new EmbedBuilder()
+                    .setColor('#f39c12')
+                    .setTitle(`${nextBadge} Prestige ${prestige + 1} — ${getLevelData(1).title} Again`)
+                    .setDescription(
+                        `You climb back to the surface, hand in your papers, and start over as a **P${prestige + 1}** miner.\n` +
+                        `The tunnels remember you — everything you own came back up with you.`
+                    )
+                    .addFields(
+                        { name: 'Permanent Bonuses', value: prestigeBonusLines(PRESTIGE_BONUSES[prestige + 1]).join('\n') || 'None', inline: true },
+                        { name: 'Miner Level',       value: `**${MAX_MINER_LEVEL}** → **1**`, inline: true },
+                        { name: 'Kept',              value: `${m.pickaxes.length} pickaxe(s) · ${m.unlockedDepths.length} depth(s)`, inline: true },
+                    )
+                    .setFooter({ text: prestige + 1 >= MAX_MINE_PRESTIGE
+                        ? 'That is the deepest rank there is.'
+                        : `Reach Miner Level ${MAX_MINER_LEVEL} again to ascend to P${prestige + 2}.` })
+                    .setTimestamp();
+
+                await interaction.editReply({ embeds: [embed], components: [] });
+            } catch (err) {
+                console.error('[mine prestige] error:', err);
+                interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
+            }
+        })();
+
+        collector.stop();
+    });
+
+    return new Promise(resolve => {
+        collector.on('end', async (_, reason) => {
+            if (reason === 'time') {
+                interaction.editReply({ content: 'Ascension timed out.', embeds: [], components: [] }).catch(() => {});
+            }
+            if (actionPromise) await actionPromise.catch(() => {});
+            resolve();
+        });
+    });
 }
 
 // ─── PROFILE ──────────────────────────────────────────────────────────────────
@@ -1027,12 +1336,7 @@ async function handleProfile(interaction) {
     if (prestige > 0) {
         embed.addFields({
             name: `${badge} Prestige Bonuses`,
-            value: [
-                pBonus.critBonus    > 0 ? `+${Math.round(pBonus.critBonus    * 100)}% crit chance`  : null,
-                pBonus.staminaBonus > 0 ? `+${pBonus.staminaBonus} max stamina`                     : null,
-                pBonus.payoutBonus  > 0 ? `+${Math.round(pBonus.payoutBonus  * 100)}% all payouts`   : null,
-                pBonus.rarityBonus  > 0 ? `+${Math.round(pBonus.rarityBonus  * 100)}% rarity boost`  : null
-            ].filter(Boolean).join('\n') || 'None yet',
+            value: prestigeBonusLines(pBonus).join('\n') || 'None yet',
             inline: true
         });
     }
@@ -1059,8 +1363,14 @@ async function handleProfile(interaction) {
         });
     }
 
-    if (prestige === 0 && m.level >= 50) {
-        embed.setFooter({ text: 'Max level reached!' });
+    // Only nudge the player who can act on it; someone else's maxed miner just gets
+    // the standing, and the daily-cap line stays a self-only stat either way.
+    if (m.level >= MAX_MINER_LEVEL && prestige >= MAX_MINE_PRESTIGE) {
+        embed.setFooter({ text: `${PRESTIGE_BADGES[MAX_MINE_PRESTIGE]} Fully prestiged Master Miner — nothing left to prove down there.` });
+    } else if (isSelf && m.level >= MAX_MINER_LEVEL) {
+        embed.setFooter({ text: `Max Miner Level — use /mine prestige to ascend to P${prestige + 1}` });
+    } else if (m.level >= MAX_MINER_LEVEL) {
+        embed.setFooter({ text: 'Max Miner Level' });
     } else if (isSelf) {
         embed.setFooter({ text: `Daily: ${m.dailyMines} mines · ${currency}${m.dailyCoins.toLocaleString()} earned (cap: ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()})` });
     }
@@ -1101,7 +1411,32 @@ async function handleInv(interaction, sub) {
                 const upgradeStr = p.upgrade ? ` [${p.upgrade.replace(/_/g, ' ')}]` : '';
                 return `**Slot ${i + 1}**${isEquipped ? ' *(equipped)*' : ''} — ${p.name}${upgradeStr} ${pickaxeStatusEmoji(p.status)}\n> ${bar} ${p.currentDurability}/${p.maxDurability}`;
             });
-            embed.addFields({ name: '🪓 Pickaxes', value: lines.join('\n'), inline: false });
+            // Nothing caps how many pickaxes a miner accumulates and each entry runs
+            // ~85 characters, so a single field ran out of room around the twelfth one
+            // and Discord rejected the whole embed. Spill into continuation fields —
+            // but only so many: an embed also has a 6,000-character budget across all
+            // of its fields, which unbounded spilling would eventually blow instead.
+            const PICKAXE_FIELDS = 3;
+            const fields = packFields('🪓 Pickaxes', lines);
+            embed.addFields(...fields.slice(0, PICKAXE_FIELDS));
+            if (fields.length > PICKAXE_FIELDS) {
+                const shown = fields.slice(0, PICKAXE_FIELDS)
+                    .reduce((n, f) => n + f.value.split('\n').length / 2, 0);
+                embed.addFields({
+                    name: '…and more',
+                    value: `${Math.max(0, m.pickaxes.length - Math.round(shown))} further pickaxe(s) not shown. \`/mine inv discard\` clears broken and condemned ones.`,
+                    inline: false
+                });
+            }
+
+            const junk = m.pickaxes.filter(p => p.status === 'broken' || p.status === 'condemned').length;
+            if (junk > 0) {
+                embed.addFields({
+                    name: '🗑️ Unusable',
+                    value: `${junk} pickaxe${junk === 1 ? ' is' : 's are'} broken or condemned — clear ${junk === 1 ? 'it' : 'them'} out with \`/mine inv discard\`.`,
+                    inline: false
+                });
+            }
         }
 
         const chargeLines = BLAST_PACKS.map(b => {
@@ -1175,6 +1510,56 @@ async function handleInv(interaction, sub) {
                         { name: 'Status',     value: `${pickaxeStatusEmoji(pickaxe.status)} ${pickaxe.status}`, inline: true },
                         { name: 'Upgrade',    value: pickaxe.upgrade ? pickaxe.upgrade.replace(/_/g, ' ') : 'None', inline: true }
                     )
+                    .setTimestamp()
+            ]
+        });
+    }
+
+    if (sub === 'discard') {
+        const index = interaction.options.getInteger('slot') - 1;
+
+        if (index < 0 || index >= m.pickaxes.length) {
+            return interaction.reply({
+                content: `No pickaxe in slot ${index + 1}. You have ${m.pickaxes.length} pickaxe(s).`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        const pickaxe = m.pickaxes[index];
+        if (pickaxe.status !== 'broken' && pickaxe.status !== 'condemned') {
+            return interaction.reply({
+                content: `**${pickaxe.name}** is not broken or condemned. You can only discard unusable pickaxes.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // Splicing shifts every later slot down by one, so the equipped index has to
+        // move with it or the miner silently ends up wielding a different pickaxe.
+        const wasEquipped = m.equippedPickaxeIndex === index;
+        m.pickaxes.splice(index, 1);
+
+        if (wasEquipped) {
+            m.equippedPickaxeIndex = m.pickaxes.length > 0 ? 0 : -1;
+        } else if (m.equippedPickaxeIndex > index) {
+            m.equippedPickaxeIndex -= 1;
+        }
+
+        user.markModified('mining');
+        await user.save();
+
+        const nowEquipped = m.pickaxes[m.equippedPickaxeIndex];
+        return interaction.reply({
+            embeds: [
+                new EmbedBuilder()
+                    .setColor('#e74c3c')
+                    .setTitle('🗑️ Pickaxe Discarded')
+                    .setDescription(
+                        `**${pickaxe.name}** has been discarded.` +
+                        (wasEquipped && nowEquipped ? `\nYou are now wielding **${nowEquipped.name}**.` : '')
+                    )
+                    .setFooter({ text: m.pickaxes.length === 0
+                        ? 'Buy a new pickaxe with /mine shop pickaxe'
+                        : 'Use /mine inv view to see your remaining pickaxes' })
                     .setTimestamp()
             ]
         });
@@ -1336,15 +1721,21 @@ async function handleQuests(interaction, sub) {
             });
         }
 
-        const remaining = user.quests.filter(q =>
-            q.questId.startsWith('mq_') &&
-            q.expiresAt?.getTime() > now &&
-            q.progress !== -1
-        ).length;
+        const liveQuests = user.quests.filter(q =>
+            q.questId.startsWith('mq_') && q.expiresAt?.getTime() > now
+        );
+        const remaining = liveQuests.filter(q => q.progress !== -1).length;
+
+        // A fresh batch is only assigned once the current one has expired — see the
+        // guard in assign*Quests. Say when that is rather than implying that playing
+        // again brings one sooner, which is what this footer used to promise.
+        const nextSetIn = liveQuests.length
+            ? formatExpiry(Math.min(...liveQuests.map(q => q.expiresAt.getTime())) - now)
+            : null;
 
         embed.setFooter({ text: remaining > 0
             ? `${remaining} quest(s) remaining — use /mine quests view`
-            : 'All quests claimed! Mine again to receive a fresh set.' });
+            : `All quests claimed! A fresh set arrives in ${nextSetIn ?? 'a few hours'}.` });
         embed.setTimestamp();
 
         return interaction.reply({ embeds: [embed] });
@@ -1492,9 +1883,9 @@ async function handleShop(interaction, sub) {
             if (btn.user.id !== interaction.user.id) {
                 return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
             }
-            collector.stop();
 
             if (btn.customId === 'minepickaxe_cancel') {
+                collector.stop();
                 return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
             }
 
@@ -1572,6 +1963,8 @@ async function handleShop(interaction, sub) {
                 interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
             })();
+
+            collector.stop();
         });
 
         return new Promise(resolve => {
@@ -1691,9 +2084,9 @@ async function handleShop(interaction, sub) {
             if (btn.user.id !== interaction.user.id) {
                 return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
             }
-            collector.stop();
 
             if (btn.customId === 'minebuy_cancel') {
+                collector.stop();
                 return btn.update({ content: 'Purchase cancelled.', embeds: [], components: [] });
             }
 
@@ -1764,6 +2157,8 @@ async function handleShop(interaction, sub) {
                 interaction.editReply({ content: 'Something went wrong. Please try again.', embeds: [], components: [] }).catch(() => {});
             }
             })();
+
+            collector.stop();
         });
 
         return new Promise(resolve => {
@@ -1949,18 +2344,31 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
 
     if (result.success) {
         const { ore, tier, finalPayout, isCrit, critMultiplier, specialDrop, xpEarned, levelUp, cappedByHard } = result;
-        const color = isCrit ? '#FFD700' : TIER_COLORS[tier];
+        // An event catch keeps its own colour even on a critical: the tier is the
+        // rarer fact of the two, and the title already announces it as one. Without
+        // this a critical event drop rendered crit-gold under a MYTHICAL headline.
+        const color = tier === 'event' ? TIER_COLORS.event : isCrit ? '#FFD700' : TIER_COLORS[tier];
 
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
-        const payoutDisplay = cappedByHard ? `~~${currency}${finalPayout}~~ (daily cap reached)` : `**${currency}${finalPayout.toLocaleString()}**`;
+        // At the hard cap finalPayout is already 0, so the old strikethrough rendered
+        // as "~~0~~ (daily cap reached)" — it struck out the wrong number and never
+        // told the player what the cap had actually cost them.
+        const payoutDisplay = cappedByHard
+            ? `~~${currency}${(result.forfeited ?? 0).toLocaleString()}~~ → **${currency}0**`
+            : `**${currency}${finalPayout.toLocaleString()}**`;
 
-        const isLegendary = tier === 'legendary';
-        const ribbon = TIER_RIBBON(TIER_NUM[tier] ?? 1);
-        const embedTitle = isLegendary
-            ? `⛏️✨ LEGENDARY STRIKE ✨⛏️`
+        const tierNum  = TIER_NUM[tier] ?? 1;
+        const isEvent  = tier === 'event';
+        const isHeadline = tierNum >= 5;   // legendary and event both get the full treatment
+        const ribbon = TIER_RIBBON(tierNum);
+        const embedTitle = isHeadline
+            ? (isEvent ? `☄️🌋 PRIMORDIAL STRIKE 🌋☄️` : `⛏️✨ LEGENDARY STRIKE ✨⛏️`)
             : `${ore.emoji} ${isCrit ? '✨ CRITICAL! ' : ''}${ore.name} ${isCrit ? '✨' : ''}`;
-        const embedDesc = isLegendary
-            ? `${ribbon}\n\nYou struck something impossible in the deep.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${ore.emoji}  **${ore.name}**  [⭐⭐⭐⭐⭐]\n  *${ore.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
+        const headlineLede = isEvent
+            ? 'You broke into something that should not be down there.'
+            : 'You struck something impossible in the deep.';
+        const embedDesc = isHeadline
+            ? `${ribbon}\n\n${headlineLede}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n  ${ore.emoji}  **${ore.name}**  [${TIER_STARS[tierNum]}]\n  *${ore.flavor}*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAdded to your inventory.`
             : `${ribbon}\n\n*${ore.flavor}*`;
 
         const embed = new EmbedBuilder()
@@ -1976,12 +2384,34 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
                 { name: 'Stamina',  value: buildStaminaLine(user),                  inline: true }
             );
 
+        // Every multiplicative factor that touched this haul, so the arithmetic on
+        // screen reconciles. This used to list streak and crit, multiply just those
+        // two, and then print the *final* payout — which also carried the intensity
+        // multiplier (up to 3x), the featured depth, the pet, the district and the
+        // Artificer bonus. Players saw "2.52x → +1,340" when the real stack was 5x.
         const mineMultEntries = [];
-        if ((result.streakMult ?? 1) > 1.0) mineMultEntries.push({ emoji: '🔥', label: `${(result.streakMult).toFixed(2)}x` });
-        if (isCrit)                          mineMultEntries.push({ emoji: '⚡', label: `${critMultiplier.toFixed(2)}x crit` });
-        if (mineMultEntries.length > 0) {
-            const mineCombined = (result.streakMult ?? 1) * critMultiplier;
-            embed.addFields({ name: '📈 Multipliers', value: stackBar(mineMultEntries, mineCombined, finalPayout, currency), inline: false });
+        let mineCombined = 1;
+        const addMult = (emoji, label, factor) => {
+            if (!(factor > 0) || Math.abs(factor - 1) < 0.005) return;
+            mineMultEntries.push({ emoji, label });
+            mineCombined *= factor;
+        };
+
+        const intensityMult = result.caveIn && !result.caveInBonusPaid ? 1 : (result.intensityLevel?.multiplier ?? 1);
+        addMult('🔥', `${(result.streakMult ?? 1).toFixed(2)}x`, result.streakMult ?? 1);
+        addMult('⚡', `${critMultiplier.toFixed(2)}x crit`, critMultiplier);
+        addMult(result.intensityLevel?.emoji ?? '⛏️', `${intensityMult.toFixed(2)}x depth`, intensityMult);
+        addMult('🌟', `${(1 + FEATURED_PAYOUT_BONUS).toFixed(2)}x featured`, result.featuredDepthBonus > 0 ? 1 + FEATURED_PAYOUT_BONUS : 1);
+        addMult('💎', `${(1 + (result.petYieldPct ?? 0) / 100).toFixed(2)}x pet`, result.petYieldBonus > 0 ? 1 + (result.petYieldPct ?? 0) / 100 : 1);
+        addMult('🌲', `${(1 + WILDERNESS_YIELD_BONUS).toFixed(2)}x district`, result.wildernessBonus > 0 ? 1 + WILDERNESS_YIELD_BONUS : 1);
+        addMult('⚒️', `${(1 + (result.artificerRate ?? 0)).toFixed(2)}x artificer`, 1 + (result.artificerRate ?? 0));
+        addMult('✨', '2.00x yield', result.gatheringYield ? 2 : 1);
+
+        if (mineMultEntries.length > 0 && finalPayout > 0) {
+            // What the stack itself contributed: the haul, less what a flat 1x roll of
+            // the same ore would have paid.
+            const stackGain = Math.max(0, finalPayout - Math.round(finalPayout / mineCombined));
+            embed.addFields({ name: '📈 Multipliers', value: stackBar(mineMultEntries, mineCombined, stackGain, currency), inline: false });
         }
 
         if (result.gatheringYield) {
@@ -2011,11 +2441,14 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
             embed.addFields({ name: '⚠️ Low Durability', value: `Your **${pickaxe.name}** is nearly worn out (${pickaxe.currentDurability}/${pickaxe.maxDurability}). Repair soon!`, inline: false });
         }
 
+        const throttleField = buildThrottleField(user, result, currency);
+        if (throttleField) embed.addFields(throttleField);
+
         embed.addFields(
             { name: 'Balance',   value: `${currency}${user.balance.toLocaleString()}`,   inline: true },
             { name: 'Miner XP',  value: buildXpLine(user),                               inline: true }
         );
-        embed.setFooter({ text: `Cooldown: 30s • ${buildActiveConsumablesLine(user)}` });
+        embed.setFooter({ text: `Cooldown: 30s • ${buildDailyProgressLine(user, currency)} • ${buildActiveConsumablesLine(user)}` });
         embed.setTimestamp();
         return embed;
     }
@@ -2066,6 +2499,43 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
     return embed;
 }
 
+/**
+ * A field explaining whichever daily throttle is currently biting, or null when none
+ * is. These are the three things that used to shrink a haul with nothing said: fatigue
+ * past DIM_RETURNS_THRESHOLD_1, the halving past DAILY_SOFT_CAP, and the hard cap.
+ */
+function buildThrottleField(user, result, currency) {
+    const m       = user.mining;
+    const resetIn = msUntilDailyReset(user);
+    const resetNote = resetIn == null ? '' : ` Resets in **${formatMs(resetIn)}**.`;
+
+    if (result.cappedByHard) {
+        return {
+            name: '🛑 Daily Cap Reached',
+            value: `You've earned the daily maximum of ${currency}${LIMITS.DAILY_HARD_CAP.toLocaleString()}. `
+                 + `This haul paid nothing.${resetNote}\nXP, materials and quest progress still count.`,
+            inline: false,
+        };
+    }
+
+    const notes = [];
+    if (result.softCapped) {
+        notes.push(`💰 Past ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} today — **payouts are halved** until the window resets.`);
+    }
+    if ((result.fatigueMult ?? 1) < 1) {
+        notes.push(`😪 **${m.dailyMines}** digs today — **fatigue** has payouts at **${Math.round(result.fatigueMult * 100)}%**.`);
+    }
+    if (!notes.length) return null;
+
+    if (result.forfeited > 0) {
+        notes.push(`This dig gave up ${currency}${result.forfeited.toLocaleString()}.${resetNote}`);
+    } else if (resetNote) {
+        notes.push(resetNote.trim());
+    }
+
+    return { name: '⏳ Daily Throttle', value: notes.join('\n'), inline: false };
+}
+
 function buildFailureTitle(severityId) {
     return {
         clean_miss: '💨 Empty Vein!',
@@ -2086,6 +2556,13 @@ function buildXpLine(user) {
     const toNext = xpToNextLevel(m.level, m.xp);
     if (toNext === null) return `${m.xp.toLocaleString()} XP (MAX)`;
     return `${m.xp.toLocaleString()} XP (${toNext} to Lv.${m.level + 1})`;
+}
+
+/** Running daily earnings against the soft cap — the number the throttles key off. */
+function buildDailyProgressLine(user, currency) {
+    const earned = user.mining.dailyCoins ?? 0;
+    const compact = n => n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : `${n}`;
+    return `Today: ${currency}${compact(earned)}/${compact(LIMITS.DAILY_SOFT_CAP)}`;
 }
 
 function buildActiveConsumablesLine(user) {
@@ -2147,11 +2624,11 @@ async function handleMap(interaction) {
     const explored = (m.mineMap ?? []).filter(c => c !== 0).length;
     const total    = mapSize * mapSize;
 
-    // Yield multiplier comes from the vein-reading rounds, not from miner level:
-    // 0/3 correct pays 0.7× and 3/3 pays 2× (3× on a lucky break into the Abyss).
-    const intensityHint = '0.7×–3.0×, set by your vein read';
+    // Yield multiplier comes from the intensity the miner picks before digging, with
+    // a correct vein read promoting it one rung at the same risk.
+    const intensityHint = '0.7×–3.0×, set by the risk you choose';
 
-    const stashLines = getOreStashSummary(user).map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
+    const raidableLines = getRaidableMaterials(user).map(([id, qty]) => `${MATERIAL_NAMES[id] ?? id}: **${qty}**`);
 
     const embed = new EmbedBuilder()
         .setColor('#8B4513')
@@ -2165,10 +2642,10 @@ async function handleMap(interaction) {
                 inline: true
             },
             {
-                name: '📦 Unprocessed Ore Stash',
-                value: stashLines.length
-                    ? stashLines.join('\n') + '\n*Can be stolen by raiders!*'
-                    : 'Empty — ore stash fills as you mine veins.',
+                name: '📦 Exposed to Raiders',
+                value: raidableLines.length
+                    ? raidableLines.join('\n') + `\n*A raid takes up to ${RAID_MAX_PER_MATERIAL} of each — spend or craft them to shrink the pile.*`
+                    : 'Nothing exposed — raiders can only reach materials you hold 2+ of.',
                 inline: true
             },
             {
@@ -2283,79 +2760,131 @@ async function handleRaid(interaction) {
     }
 
     // Check if there's anything to steal
-    if (isOreStashEmpty(defender)) {
+    if (!hasRaidableMaterials(defender)) {
         return interaction.reply({
-            content: `**${targetUser.username}**'s ore stash is empty — nothing worth raiding.`,
+            content: `**${targetUser.username}** has nothing worth raiding — no material they hold more than one of.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
-    // Execute the raid: steal RAID_STEAL_MIN–RAID_STEAL_MAX of each stash material.
-    // Defender is updated first; the shield CAS ($or on lastRaidReceived) and
-    // per-material $gte guards ensure only one raid commits atomically. Raider
-    // update follows sequentially with a cooldown CAS to block duplicate commands.
-    const stealFraction = RAID_STEAL_MIN + Math.random() * (RAID_STEAL_MAX - RAID_STEAL_MIN);
-    const stolen      = {};
-    const defenderInc = {};
-    const raiderInc   = {};
-
-    for (const [matId, qty] of Object.entries(defender.mining.oreStash ?? {})) {
-        if (qty <= 0) continue;
-        const take = Math.max(1, Math.floor(qty * stealFraction));
-        stolen[matId] = take;
-        defenderInc[`data.oreStash.${matId}`] = -take;
-        raiderInc[`data.materials.${matId}`]  = take;
-    }
-
-    // Make sure the raider's mining profile exists before the conditional commit below
-    await persistGrindIfNew(raider, 'mining');
-
-    // Condition: each stolen material still exists; defender not under active shield.
-    const defenderCond = { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' };
-    for (const [matId, take] of Object.entries(stolen)) {
-        defenderCond[`data.oreStash.${matId}`] = { $gte: take };
-    }
-    defenderCond.$or = [
-        { 'data.lastRaidReceived': null },
-        { 'data.lastRaidReceived': { $lte: new Date(Date.now() - RAID_SHIELD_MS) } },
-    ];
-
-    const defenderResult = await GrindProfile.findOneAndUpdate(
-        defenderCond,
-        { $inc: defenderInc, $set: { 'data.lastRaidReceived': new Date() } }
-    ).catch(err => { console.error('[mine raid] defender save error:', err); return null; });
-
-    if (!defenderResult) {
+    // The transfer below is a pair of $inc updates, but a grind profile is saved as a
+    // whole `data` document (see utils/grindProfile) — so a defender part-way through
+    // their own /mine dig would write their pre-raid snapshot straight back over the
+    // debit, keeping their materials while the raider kept the credit. A dig holds
+    // this lock for its entire interactive run, which is seconds wide, so take the
+    // defender's lock for the transfer rather than racing it.
+    //
+    // tryAcquire never blocks, so two miners raiding each other simultaneously cannot
+    // deadlock — one or both are simply turned away.
+    const defenderLockKey = `grind:mine:${interaction.guild.id}:${defender.userId}`;
+    const defenderLock    = await _lockAcquire(defenderLockKey, 30_000);
+    if (!defenderLock) {
         return interaction.reply({
-            content: `**${targetUser.username}**'s ore stash was already raided — nothing left to take.`,
+            content: `**${targetUser.username}** is down in the mine right now — you can't get in behind them. Try again in a moment.`,
             flags: MessageFlags.Ephemeral
         });
     }
 
-    await GrindProfile.findOneAndUpdate(
-        {
-            userId: raider.userId,
-            guildId: interaction.guild.id,
-            system: 'mining',
-            $or: [
-                { 'data.lastRaidSent': null },
-                { 'data.lastRaidSent': { $lte: new Date(Date.now() - RAID_COOLDOWN_MS) } },
-            ],
-        },
-        { $inc: raiderInc, $set: { 'data.lastRaidSent': new Date() } }
-    ).catch(err => console.error('[mine raid] raider save error:', err));
+    // The haul, declared out here because the embed and the defender's DM below
+    // both read it after the lock has been released.
+    const stolen = {};
+
+    try {
+
+        // Execute the raid: move RAID_STEAL_MIN–RAID_STEAL_MAX of the defender's largest
+        // material piles across to the raider. The same `data.materials` map is debited
+        // and credited, so a raid transfers value rather than creating it.
+        // Defender is updated first; the shield CAS ($or on lastRaidReceived) and
+        // per-material $gte guards ensure only one raid commits atomically. Raider
+        // update follows sequentially with a cooldown CAS to block duplicate commands.
+        const stealFraction = RAID_STEAL_MIN + Math.random() * (RAID_STEAL_MAX - RAID_STEAL_MIN);
+        const defenderInc = {};
+        const raiderInc   = {};
+
+        for (const { matId, take } of planRaidHaul(defender, stealFraction)) {
+            stolen[matId] = take;
+            defenderInc[`data.materials.${matId}`] = -take;
+            raiderInc[`data.materials.${matId}`]   = take;
+        }
+
+        // Make sure the raider's mining profile exists before the conditional commit below
+        await persistGrindIfNew(raider, 'mining');
+
+        // Condition: the defender still holds every material being taken; defender not
+        // under active shield. Without the $gte guards a raid racing a craft could push
+        // a material stock negative.
+        const defenderCond = { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' };
+        for (const [matId, take] of Object.entries(stolen)) {
+            defenderCond[`data.materials.${matId}`] = { $gte: take };
+        }
+        defenderCond.$or = [
+            { 'data.lastRaidReceived': null },
+            { 'data.lastRaidReceived': { $lte: new Date(Date.now() - RAID_SHIELD_MS) } },
+        ];
+
+        const defenderResult = await GrindProfile.findOneAndUpdate(
+            defenderCond,
+            { $inc: defenderInc, $set: { 'data.lastRaidReceived': new Date() } }
+        ).catch(err => { console.error('[mine raid] defender save error:', err); return null; });
+
+        if (!defenderResult) {
+            return interaction.reply({
+                content: `**${targetUser.username}**'s stock shifted before you got in — nothing left to take. Try again shortly.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // The credit half of the transfer. Its result cannot be discarded: the debit
+        // above has already landed, and there is no transaction to tie the two together
+        // on a standalone mongod. If the credit does not land — the cooldown CAS lost a
+        // race, or the write errored — the materials would simply cease to exist while
+        // both players were told the raid succeeded. Put them back instead.
+        const credited = await GrindProfile.findOneAndUpdate(
+            {
+                userId: raider.userId,
+                guildId: interaction.guild.id,
+                system: 'mining',
+                $or: [
+                    { 'data.lastRaidSent': null },
+                    { 'data.lastRaidSent': { $lte: new Date(Date.now() - RAID_COOLDOWN_MS) } },
+                ],
+            },
+            { $inc: raiderInc, $set: { 'data.lastRaidSent': new Date() } }
+        ).catch(err => { console.error('[mine raid] raider save error:', err); return null; });
+
+        if (!credited) {
+            // Compensate: hand the defender's materials back and restore the raid shield
+            // to what it was, so a failed raid does not leave them sheltered for an hour
+            // over a raid that never happened.
+            const rollback = {};
+            for (const [matId, take] of Object.entries(stolen)) rollback[`data.materials.${matId}`] = take;
+            await GrindProfile.updateOne(
+                { userId: defender.userId, guildId: interaction.guild.id, system: 'mining' },
+                { $inc: rollback, $set: { 'data.lastRaidReceived': defenderResult.data?.lastRaidReceived ?? null } }
+            ).catch(err => console.error('[mine raid] rollback failed — defender owed:', Object.keys(stolen).join(','), err));
+
+            return interaction.reply({
+                content: 'Your raid was interrupted — nothing was taken, and nothing was lost. Try again in a moment.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+    } finally {
+        await _lockRelease(defenderLockKey, defenderLock);
+    }
 
     const stolenLines = Object.entries(stolen).map(([id, qty]) => `• ${MATERIAL_NAMES[id] ?? id} ×${qty}`).join('\n');
-    const pct = Math.round(stealFraction * 100);
+    const stolenCount = Object.values(stolen).reduce((sum, qty) => sum + qty, 0);
 
     const embed = new EmbedBuilder()
         .setColor('#e67e22')
         .setTitle('⚔️ Mine Raided!')
         .setDescription(
-            `You broke into **${targetUser.username}**'s mine and made off with **${pct}%** of their ore stash!\n\n` +
-            `**Stolen:**\n${stolenLines}`
+            `You broke into **${targetUser.username}**'s mine and made off with **${stolenCount}** material${stolenCount === 1 ? '' : 's'}!\n\n` +
+            `**Stolen:**\n${stolenLines}\n\n` +
+            `*These are now yours to craft with.*`
         )
-        .setFooter({ text: `${targetUser.username} now has a 1-hour raid shield • Use /mine map to see your stash` })
+        .setFooter({ text: `${targetUser.username} now has a 1-hour raid shield • Use /mine map to see what of yours is exposed` })
         .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
@@ -2366,7 +2895,7 @@ async function handleRaid(interaction) {
         .setTitle('⚠️ Your Mine Was Raided!')
         .setDescription(
             `**${interaction.user.username}** broke into your mine on **${interaction.guild.name}** ` +
-            `and stole **${pct}%** of your ore stash!\n\n` +
+            `and stole **${stolenCount}** of your crafting material${stolenCount === 1 ? '' : 's'}!\n\n` +
             `**Lost:**\n${stolenLines}\n\n` +
             `Get a **Mine Lock** (\`/mine shop buy item:mine_lock\` or \`/craft make mine_lock_from_obsidian\`) ` +
             `and arm it with \`/mine shop use item:mine_lock\` to block the next raid.`

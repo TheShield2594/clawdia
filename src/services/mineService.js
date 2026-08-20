@@ -9,6 +9,8 @@ const {
     ORES_BY_TIER,
     MINER_LEVELS,
     LIMITS,
+    INTENSITY_LEVELS,
+    DEFAULT_INTENSITY_LEVEL,
     PRESTIGE_BONUSES,
     MINE_QUEST_TEMPLATES
 } = require('../data/mineData');
@@ -39,6 +41,9 @@ function ensureMineData(user) {
     if (m.lastMine           == null) m.lastMine            = null;
     if (m.injuryUntil        == null) m.injuryUntil         = null;
     if (m.activeDepth        == null) m.activeDepth         = 'surface_quarry';
+    // The intensity the miner last dug at, used as the default when the pre-dig
+    // prompt times out — so an unanswered prompt repeats their own habit.
+    if (m.preferredIntensity == null) m.preferredIntensity  = DEFAULT_INTENSITY_LEVEL;
     if (!Array.isArray(m.unlockedDepths))       m.unlockedDepths      = ['surface_quarry'];
     if (m.equippedPickaxeIndex == null) m.equippedPickaxeIndex = -1;
     if (!Array.isArray(m.pickaxes))             m.pickaxes            = [];
@@ -76,7 +81,6 @@ function ensureMineData(user) {
     }
     if (m.mineMapRow == null) m.mineMapRow = 5;
     if (m.mineMapCol == null) m.mineMapCol = 5;
-    if (!m.oreStash)          m.oreStash = {};
     if (m.mineLockActive == null) m.mineLockActive = false;
 
     user.markModified('mining');
@@ -215,6 +219,19 @@ function randInt(min, max) {
 
 // ─── TIER ROLL ───────────────────────────────────────────────────────────────
 
+// Ascending rarity. Also the order rollOre walks backwards when a tier turns out
+// to be unavailable at a depth.
+const TIER_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'event'];
+
+/** The ores of `tier` that this depth can actually produce. */
+function oresAtDepth(tier, depthId) {
+    return (ORES_BY_TIER[tier] ?? []).filter(o => o.depths.includes('all') || o.depths.includes(depthId));
+}
+
+function hasOreAtDepth(tier, depthId) {
+    return oresAtDepth(tier, depthId).length > 0;
+}
+
 function rollTier(user, depth) {
     const m = user.mining;
     const w = { ...depth.tierWeights };
@@ -264,23 +281,35 @@ function rollTier(user, depth) {
         w.rare  += shift;
     }
 
-    const tiers = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'event'];
-    const items = tiers.map(t => ({ tier: t, weight: w[t] ?? 0 })).filter(i => i.weight > 0);
+    // Only tiers this depth actually has ore for are eligible. The weight table is
+    // written to agree (see the invariant on DEPTHS), but every boost above adds to
+    // w.rare/w.epic/w.legendary unconditionally, so a rarity boost would otherwise
+    // resurrect a tier the depth was never meant to produce. weightedRoll normalises
+    // by the surviving total, so dropping a tier redistributes rather than voids it.
+    const items = TIER_ORDER
+        .map(t => ({ tier: t, weight: w[t] ?? 0 }))
+        .filter(i => i.weight > 0 && hasOreAtDepth(i.tier, depth.id));
+
+    if (!items.length) return 'common';
     return weightedRoll(items).tier;
 }
 
 // ─── ORE ROLL ────────────────────────────────────────────────────────────────
 
+/**
+ * Picks an ore of `tier` from the depth's own pool. If the depth has no ore at that
+ * tier the roll steps *down* the ladder rather than reaching outside the depth —
+ * the old fallback used the unfiltered pool, which is how the starter quarry ended
+ * up handing out Abyss-only legendaries. Callers should read the returned ore's
+ * own `.tier`, since a downgrade makes it authoritative.
+ */
 function rollOre(tier, depthId) {
-    const pool = (ORES_BY_TIER[tier] ?? []).filter(o =>
-        o.depths.includes('all') || o.depths.includes(depthId)
-    );
-    if (!pool.length) {
-        const fallback = ORES_BY_TIER[tier];
-        if (!fallback?.length) return ORES_BY_TIER['common'][0];
-        return fallback[Math.floor(Math.random() * fallback.length)];
+    const start = TIER_ORDER.indexOf(tier);
+    for (let i = start < 0 ? 0 : start; i >= 0; i--) {
+        const pool = oresAtDepth(TIER_ORDER[i], depthId);
+        if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
     }
-    return pool[Math.floor(Math.random() * pool.length)];
+    return ORES_BY_TIER['common'][0];
 }
 
 // ─── FAILURE SEVERITY ────────────────────────────────────────────────────────
@@ -301,8 +330,15 @@ function rollFailureSeverity() {
 // ─── PAYOUT CALCULATION ───────────────────────────────────────────────────────
 
 /**
- * Returns { adjustedPayout, cappedByHard, gatheringYield }, where gatheringYield
- * is { effect, label, emoji, chargesLeft } when a charge was spent here.
+ * Returns { adjustedPayout, cappedByHard, gatheringYield, forfeited, softCapped,
+ * fatigueMult }, where gatheringYield is { effect, label, emoji, chargesLeft } when
+ * a charge was spent here.
+ *
+ * The three throttles below — fatigue past DIM_RETURNS_THRESHOLD_1, the halving past
+ * DAILY_SOFT_CAP, and the DAILY_HARD_CAP floor — used to apply with nothing said. A
+ * player's haul quietly shrank by 15%, then 50%, then to zero with no explanation
+ * anywhere in the embed, which reads as the bot cheating rather than as a design.
+ * `forfeited` is what the cap swallowed, so the caller can show it.
  */
 function applyPayoutModifiers(user, rawPayout, depth) {
     const m = user.mining;
@@ -318,19 +354,20 @@ function applyPayoutModifiers(user, rawPayout, depth) {
     const artificerBonus = getArtificerMineYieldBonus(user);
     if (artificerBonus > 0) payout *= (1 + artificerBonus);
 
-    if (m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_3) {
-        payout *= 0.55;
-    } else if (m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_2) {
-        payout *= 0.70;
-    } else if (m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_1) {
-        payout *= 0.85;
-    }
+    const fatigueMult =
+        m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_3 ? 0.55 :
+        m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_2 ? 0.70 :
+        m.dailyMines >= LIMITS.DIM_RETURNS_THRESHOLD_1 ? 0.85 : 1.00;
+    payout *= fatigueMult;
 
     payout = Math.round(payout);
 
     // Hard cap: zero coins — check before consuming item charges
     if (m.dailyCoins >= LIMITS.DAILY_HARD_CAP) {
-        return { adjustedPayout: 0, cappedByHard: true, gatheringYield: null };
+        return {
+            adjustedPayout: 0, cappedByHard: true, gatheringYield: null,
+            forfeited: payout, softCapped: true, fatigueMult, artificerRate: artificerBonus,
+        };
     }
 
     // Applies the daily soft cap and clamps to the headroom left under the hard cap.
@@ -340,6 +377,7 @@ function applyPayoutModifiers(user, rawPayout, depth) {
 
     const basePayout    = settle(payout);
     const doubledPayout = settle(payout * 2);
+    const throttles     = { softCapped, fatigueMult, artificerRate: artificerBonus };
 
     // Silvered Talisman / Voidsteel Cache: 2x yield, consume 1 charge from whichever
     // is active. Only burn the charge when doubling actually pays more — within a
@@ -350,6 +388,8 @@ function applyPayoutModifiers(user, rawPayout, depth) {
         consumeEffect(user, gatherEffect);
         const cfg = EFFECT_CONFIGS[gatherEffect];
         return {
+            ...throttles,
+            forfeited:      Math.max(0, payout * 2 - doubledPayout),
             adjustedPayout: doubledPayout,
             cappedByHard:   false,
             gatheringYield: {
@@ -361,7 +401,23 @@ function applyPayoutModifiers(user, rawPayout, depth) {
         };
     }
 
-    return { adjustedPayout: basePayout, cappedByHard: false, gatheringYield: null };
+    return {
+        ...throttles,
+        forfeited:      Math.max(0, payout - basePayout),
+        adjustedPayout: basePayout,
+        cappedByHard:   false,
+        gatheringYield: null,
+    };
+}
+
+/**
+ * How long until the daily window — caps, fatigue and Energy Tonic allowance —
+ * rolls over. Null when the player has no window open yet.
+ */
+function msUntilDailyReset(user) {
+    const start = user.mining?.dailyWindowStart;
+    if (!start) return null;
+    return Math.max(0, LIMITS.DAILY_WINDOW_MS - (Date.now() - start.getTime()));
 }
 
 // ─── DURABILITY ───────────────────────────────────────────────────────────────
@@ -565,6 +621,18 @@ function tickConsumables(user) {
     user.markModified('mining');
 }
 
+/**
+ * A correct vein read promotes the payout to the next rung's multiplier while the
+ * cave-in risk and durability cost stay where the miner put them. Reading the seam
+ * makes it richer; it does not make the tunnel more dangerous. Keeping the risk
+ * fixed is the point: the danger is chosen deliberately, and only ever by the
+ * player — never handed to them by the outcome of a minigame.
+ */
+function promoteIntensity(level) {
+    const next = INTENSITY_LEVELS.find(l => l.level === level.level + 1);
+    return next ? { ...level, multiplier: next.multiplier, promoted: true } : level;
+}
+
 // ─── FULL MINE EXECUTION ─────────────────────────────────────────────────────
 
 function executeMine(user, depthId, options = {}) {
@@ -588,9 +656,13 @@ function executeMine(user, depthId, options = {}) {
     const result = { success, xpEarned: 0, durabilityLost: 0, pickaxeBroke: false };
 
     if (success) {
-        const tier   = rollTier(user, depth);
-        const ore    = rollOre(tier, depthId ?? m.activeDepth);
-        const rawPayout = randInt(ore.payoutMin, ore.payoutMax);
+        const rolledTier = rollTier(user, depth);
+        const ore        = rollOre(rolledTier, depthId ?? m.activeDepth);
+        // The ore's own tier is authoritative: rollOre may have stepped down to stay
+        // inside the depth, and the find counters, quest progress, rarity ribbon and
+        // server announcement all have to describe the ore actually handed out.
+        const tier       = ore.tier;
+        const rawPayout  = randInt(ore.payoutMin, ore.payoutMax);
 
         const critChance     = calculateCritChance(user);
         const isCrit         = Math.random() < critChance;
@@ -598,7 +670,10 @@ function executeMine(user, depthId, options = {}) {
 
         const streakMult = getStreakMultiplier(user.streak?.current ?? 0);
         const payoutBeforeMods = Math.round(rawPayout * critMultiplier * streakMult);
-        const { adjustedPayout, cappedByHard, gatheringYield } = applyPayoutModifiers(user, payoutBeforeMods, depth);
+        const {
+            adjustedPayout, cappedByHard, gatheringYield, forfeited, softCapped, fatigueMult,
+            artificerRate,
+        } = applyPayoutModifiers(user, payoutBeforeMods, depth);
 
         let specialDrop = null;
         const mineDropChance = (isCrit ? ore.specialDrop?.chance * 2 : ore.specialDrop?.chance ?? 0) * (options.marketplaceActive ? 1.10 : 1.0);
@@ -641,7 +716,10 @@ function executeMine(user, depthId, options = {}) {
             levelUp: lvResult.leveledUp ? lvResult : null,
             cappedByHard,
             gatheringYield,
-            streakMult
+            streakMult,
+            // What the daily throttles took, so the embed can account for it rather
+            // than leaving the player to notice their haul shrinking on its own.
+            forfeited, softCapped, fatigueMult, artificerRate,
         });
 
         if (pickaxe.currentDurability <= 0) result.pickaxeBroke = true;
@@ -689,10 +767,21 @@ function executeMine(user, depthId, options = {}) {
         const caveInBlocked = trapActive || ironWillBlocks;
 
         if (caveInRisk > 0 && Math.random() < caveInRisk && !caveInBlocked) {
-            // Cave-in: flag it and store at-risk payout; mine.js resolves interactively
+            // Cave-in: flag it and store at-risk payout; mine.js resolves interactively.
             result.caveIn        = true;
             result.caveInDur     = intensityDurLoss;
+            // What executeMine has already credited, and what mine.js reverses if the
+            // player flees.
             result.caveInPayout  = result.finalPayout ?? 0;
+            // The multiplier the vein read earned is held in escrow, not destroyed.
+            // Cave-in and the multiplier used to be exclusive branches, so reading the
+            // vein perfectly, caving in, and spending a blast charge to dig clear paid
+            // exactly the same as a one-in-three read — the charge bought back a haul
+            // stripped of the very bonus it was risked for. mine.js pays this out only
+            // on a successful escape.
+            result.caveInEscrow  = multiplier !== 1.0 && result.finalPayout
+                ? Math.round(result.finalPayout * (multiplier - 1.0))
+                : 0;
             // Durability loss applied here regardless of player choice
             applyDurabilityLoss(pickaxe, intensityDurLoss);
             if (pickaxe.currentDurability <= 0) { pickaxe.status = 'broken'; result.pickaxeBroke = true; }
@@ -748,10 +837,30 @@ function assignDailyMineQuests(user) {
     const activeCount = user.quests.filter(q => q.questId.startsWith('mq_')).length;
     if (activeCount > 0) return;
 
-    const eligible = MINE_QUEST_TEMPLATES.filter(t =>
-        m.level >= t.minLevel &&
-        (t.type !== 'depth_mines' || m.unlockedDepths.includes(t.depth))
+    // Tier quests need a depth that can actually produce the tier, not just the level.
+    // Epic ore starts at the Iron Mines and legendary at the Crystal Caves, so a miner
+    // who has hit the level gate but not yet bought the depth would otherwise be handed
+    // a quest they cannot complete — which also blocks the next batch for a full day,
+    // since a batch is only reissued once the current one expires.
+    // The `event` tier is deliberately left out of these lists. It sits above
+    // legendary and technically satisfies every "or better" quest, but it is a ~0.5%
+    // freak roll at the shallow depths — treating it as a way to clear an epic quest
+    // would put the quest back on the board in all but name.
+    const QUEST_TIER_REQUIREMENT = {
+        rare_plus_finds:      ['rare', 'epic', 'legendary'],
+        epic_plus_finds:      ['epic', 'legendary'],
+        legendary_plus_finds: ['legendary'],
+    };
+    const canReachTier = tiers => m.unlockedDepths.some(depthId =>
+        tiers.some(tier => (DEPTHS[depthId]?.tierWeights?.[tier] ?? 0) > 0)
     );
+
+    const eligible = MINE_QUEST_TEMPLATES.filter(t => {
+        if (m.level < t.minLevel) return false;
+        if (t.type === 'depth_mines') return m.unlockedDepths.includes(t.depth);
+        const required = QUEST_TIER_REQUIREMENT[t.type];
+        return !required || canReachTier(required);
+    });
 
     const shuffled  = eligible.slice().sort(() => Math.random() - 0.5);
     const toAssign  = shuffled.slice(0, DAILY_QUEST_COUNT);
@@ -863,12 +972,6 @@ function updateMineMap(user, result) {
         m.mineMap[idx] = CELL.CAVE_IN;
     } else if (result.success && result.ore) {
         m.mineMap[idx] = CELL.ORE;
-        // Accumulate ore stash for raiding
-        const matId = result.specialDrop?.itemId;
-        if (matId) {
-            if (!m.oreStash) m.oreStash = {};
-            m.oreStash[matId] = (m.oreStash[matId] ?? 0) + 1;
-        }
     } else {
         m.mineMap[idx] = CELL.DUG;
     }
@@ -909,15 +1012,50 @@ function renderMineMap(user) {
     return rows.join('\n');
 }
 
-// ─── ORE STASH ────────────────────────────────────────────────────────────────
+// ─── RAIDABLE MATERIALS ───────────────────────────────────────────────────────
+//
+// Raiding used to take from a separate `oreStash` map that was written alongside
+// `materials` on every drop and never spent by its owner. That made a raid a pure
+// mint: the defender's real material pile — the one `/craft` spends — was untouched
+// while the raider was credited real materials out of nothing, and the Mine Lock
+// they were sold defended a pile that cost nothing to lose.
+//
+// Raids now move materials between two real stocks, so nothing is created. The
+// haul is bounded on both sides: only the defender's largest piles are exposed,
+// no single material gives up more than a few units, and a miner's last unit of
+// anything is never taken.
 
-function getOreStashSummary(user) {
-    const stash = user.mining?.oreStash ?? {};
-    return Object.entries(stash).filter(([, qty]) => qty > 0);
+const RAID_MAX_MATERIAL_TYPES = 5;
+const RAID_MAX_PER_MATERIAL   = 3;
+const RAID_MIN_HOLDING        = 2;
+
+/**
+ * The materials a raid could reach right now: the defender's biggest piles, minus
+ * anything they hold only one of. Sorted largest-first, then by id so the exposure
+ * a defender sees on `/mine map` is the same set a raider hits.
+ */
+function getRaidableMaterials(user) {
+    const materials = user.mining?.materials ?? {};
+    return Object.entries(materials)
+        .filter(([, qty]) => qty >= RAID_MIN_HOLDING)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, RAID_MAX_MATERIAL_TYPES);
 }
 
-function isOreStashEmpty(user) {
-    return getOreStashSummary(user).length === 0;
+function hasRaidableMaterials(user) {
+    return getRaidableMaterials(user).length > 0;
+}
+
+/**
+ * What a raid at `stealFraction` would take, as [{ matId, take }]. Every entry
+ * takes at least 1 (the pile is known to hold 2+) and at most RAID_MAX_PER_MATERIAL,
+ * so a long-standing miner's hoard can be chipped at but never cleaned out.
+ */
+function planRaidHaul(user, stealFraction) {
+    return getRaidableMaterials(user).map(([matId, qty]) => ({
+        matId,
+        take: Math.min(RAID_MAX_PER_MATERIAL, Math.max(1, Math.floor(qty * stealFraction))),
+    }));
 }
 
 module.exports = {
@@ -930,8 +1068,10 @@ module.exports = {
     calculateCritChance,
     rollTier,
     rollOre,
+    hasOreAtDepth,
     rollFailureSeverity,
     applyPayoutModifiers,
+    msUntilDailyReset,
     applyDurabilityLoss,
     updatePickaxeStatus,
     isCondemned,
@@ -943,6 +1083,7 @@ module.exports = {
     applyXp,
     activateConsumable,
     tickConsumables,
+    promoteIntensity,
     executeMine,
     assignDailyMineQuests,
     updateMineQuestProgress,
@@ -951,6 +1092,10 @@ module.exports = {
     durabilityBar,
     updateMineMap,
     renderMineMap,
-    getOreStashSummary,
-    isOreStashEmpty
+    getRaidableMaterials,
+    hasRaidableMaterials,
+    planRaidHaul,
+    RAID_MAX_MATERIAL_TYPES,
+    RAID_MAX_PER_MATERIAL,
+    RAID_MIN_HOLDING
 };

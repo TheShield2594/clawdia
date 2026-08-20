@@ -18,6 +18,11 @@
  *   before persisting.
  * - Profiles that were never touched (no data after the action) are not
  *   persisted, so casual users don't accumulate empty documents.
+ * - A save only writes the systems the flow actually marked. `prof.data` is
+ *   replaced wholesale, so writing an untouched system would push a snapshot read
+ *   at load time back over anything that changed in between — which is how a
+ *   /mine raid's material transfer could be undone by an unrelated /fish cast
+ *   that merely had the mining profile attached for a cross-system read.
  */
 
 const GrindProfile = require('../models/GrindProfile');
@@ -47,6 +52,8 @@ async function attachGrind(user, systems = SYSTEMS) {
                 ?? new GrindProfile({ guildId: user.guildId, userId: user.userId, system });
             user._grindProfiles[system] = prof;
             user[system] = prof.data;
+            user._grindSnapshots ??= {};
+            user._grindSnapshots[system] = snapshot(prof.data);
         }
     }
 
@@ -54,10 +61,44 @@ async function attachGrind(user, systems = SYSTEMS) {
     return user;
 }
 
-/** Persists the attached profiles for `user` (subset via `systems`). */
-async function saveGrind(user, systems = SYSTEMS) {
+/**
+ * Snapshot of a profile's data as loaded, used to tell a flow that changed a system
+ * from one that merely had it attached for a cross-system read.
+ */
+function snapshot(data) {
+    try {
+        return JSON.stringify(data ?? null);
+    } catch {
+        // Anything uncomparable is treated as changed — a redundant write is safe,
+        // a skipped one is not.
+        return null;
+    }
+}
+
+function grindChanged(user, system) {
+    const before = user._grindSnapshots?.[system];
+    if (before === undefined) return true;
+    const after = snapshot(user[system]);
+    return after === null || after !== before;
+}
+
+/**
+ * Persists the attached profiles for `user`.
+ *
+ * With no `systems` argument this writes only the profiles whose data actually
+ * differs from what was loaded. `prof.data` is replaced wholesale, so writing back
+ * an untouched system would push a load-time snapshot over anything that changed in
+ * the meantime — which is how a /mine raid's material transfer could be undone by
+ * an unrelated /fish cast that had the mining profile attached only to read it.
+ *
+ * Comparison is by content rather than by markModified: a mutation site that forgot
+ * to mark would otherwise stop persisting silently, which is a worse failure than a
+ * redundant write. Pass `systems` explicitly to force a write regardless.
+ */
+async function saveGrind(user, systems = null) {
     if (!user?._grindProfiles) return;
-    for (const system of systems) {
+    const targets = systems ?? SYSTEMS.filter(system => grindChanged(user, system));
+    for (const system of targets) {
         const prof = user._grindProfiles[system];
         if (!prof) continue;
         prof.data = user[system];
@@ -66,6 +107,7 @@ async function saveGrind(user, systems = SYSTEMS) {
         if (prof.data == null || (prof.isNew && Object.keys(prof.data).length === 0)) continue;
         prof.markModified('data');
         await prof.save();
+        if (user._grindSnapshots) user._grindSnapshots[system] = snapshot(prof.data);
     }
 }
 
@@ -83,6 +125,7 @@ async function persistGrindIfNew(user, system) {
 function wrapSave(user) {
     if (user._grindSaveWrapped || typeof user.save !== 'function') return;
     user._grindSaveWrapped = true;
+
     const origSave = user.save.bind(user);
     user.save = async function (...args) {
         const res = await origSave(...args);

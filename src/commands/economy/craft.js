@@ -337,3 +337,34 @@ module.exports = {
         }
     }
 };
+
+
+// ── Per-user mining lock for the craft flow ───────────────────────────────────
+// Crafting spends mining materials, and a grind profile is persisted by replacing
+// its whole `data` document — so the lock has to cover the *read* as well as the
+// write. Taking it only around user.save() left the window that matters open: a
+// /mine raid landing between attachGrind and the save was simply overwritten by
+// the snapshot this flow had already loaded, and the raider kept their credit.
+//
+// So the whole `make` flow runs under the same key /mine holds, from before the
+// profiles are attached until after they are saved. `list` is read-only and is
+// left alone, so browsing recipes never blocks a raid.
+const { tryAcquire: _craftLockAcquire, release: _craftLockRelease } = require('../../utils/activeGameLock');
+const _craftExecute = module.exports.execute;
+module.exports.execute = async function (interaction) {
+    if (interaction.options.getSubcommand() !== 'make') return _craftExecute(interaction);
+
+    const lockKey   = `grind:mine:${interaction.guild?.id}:${interaction.user.id}`;
+    const lockToken = await _craftLockAcquire(lockKey, 60_000);
+    if (!lockToken) {
+        return interaction.reply({
+            content: '⛏️ You have a mining action in progress — finish it before crafting.',
+            flags: MessageFlags.Ephemeral,
+        }).catch(() => {});
+    }
+    try {
+        return await _craftExecute(interaction);
+    } finally {
+        await _craftLockRelease(lockKey, lockToken);
+    }
+};
