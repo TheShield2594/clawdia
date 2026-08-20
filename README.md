@@ -62,7 +62,7 @@ command sets put together.
 
 ## Prerequisites
 
-- Node.js 22.12+
+- Node.js 24.19+
 - MongoDB (local or cloud)
 - Discord Application with Bot & OAuth2 scopes enabled
 - (Optional) An AI provider — OpenAI, Google Gemini, Anthropic, or OpenRouter API key, or a local Ollama instance
