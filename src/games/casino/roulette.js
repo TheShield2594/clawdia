@@ -317,17 +317,29 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
             time: 60_000,
         });
         collector.on('collect', async i => {
-            await i.deferUpdate();
             const user   = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             const wallet = user?.balance ?? 0;
 
-            // confirmBet answers `{ shouldProceed, alreadyReplied }`, which is
-            // always truthy — so testing the object itself never caught a
-            // cancellation, and a player who pressed Cancel on the large-bet
-            // prompt had the replay spun and their coins taken anyway.
-            const { shouldProceed } = await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings);
+            // Confirm against the button press, not the original command.
+            // confirmBet prompts with `interaction.reply`, and the original was
+            // deferred and edited several times before this collector was ever
+            // attached — so replaying a bet big enough to need confirming threw
+            // InteractionAlreadyReplied out of the collector callback and the
+            // replay silently did nothing. The button press is unacknowledged
+            // and can carry the prompt.
+            //
+            // It answers `{ shouldProceed, alreadyReplied }`, which is always
+            // truthy — so testing the object itself never caught a cancellation
+            // either, and a player who pressed Cancel had the replay spun and
+            // their coins taken anyway.
+            const { shouldProceed, alreadyReplied } = await confirmBet(i, bet, wallet, 'Roulette', guildSettings);
             if (!shouldProceed) return;
+            // Prompting already acknowledged the press; without one it still
+            // needs acknowledging, or the button sits spinning.
+            if (!alreadyReplied) await i.deferUpdate();
 
+            // The spin still renders on the original command's reply, which is
+            // the message the wheel has been drawn on all along.
             await playRoulette(interaction, betKey, bet, target, null, onWager);
         });
         collector.on('end', (_, reason) => {

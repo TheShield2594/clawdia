@@ -130,6 +130,96 @@ function gradeShot(shotMs, openAtMs) {
 }
 
 
+/**
+ * The aim phase: hold the shot, take it when the target lines up.
+ *
+ * The Fire button is attached with the "sights" embed, not after it, so the
+ * shot can genuinely be taken early — which is what the footer has always
+ * warned about. The button used to arrive only once the wait had elapsed, so
+ * firing early was impossible and the grade was decided purely by how fast the
+ * click came back: under 800ms of round trip paid +18% crit, anything slower
+ * +8%. That scored the player's connection, not their play, and paid at least
+ * +8% for any click at all.
+ *
+ * Now the wait is the mechanic. The window opens at a random moment the player
+ * cannot anticipate and stays open long enough that a slow connection still
+ * comfortably clears it — so what separates the outcomes is *when* you fire,
+ * not how fast the wire is.
+ *
+ * Lives out here rather than inline in executeStart so the timing can be driven
+ * by a test: it is the one part of a hunt whose result depends on when things
+ * happen rather than on what they are.
+ *
+ * @returns the grade from `gradeShot`.
+ */
+async function runAimPhase(interaction, huntMsg) {
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+
+    const aimWaitMs = 1000 + Math.floor(Math.random() * 1001);
+
+    const fireId = `hunt_fire_${interaction.id}`;
+    const aimRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(fireId).setLabel('🔫 Fire!').setStyle(ButtonStyle.Danger)
+    );
+    const aimSightsEmbed = new EmbedBuilder()
+        .setColor('#8B0000')
+        .setTitle('🎯 Target in Sights…')
+        .setDescription('*Hold your breath… wait for the shot to line up.*')
+        .setFooter({ text: 'Fire when the shot is called — rush it and you spoil the shot.' });
+
+    await interaction.editReply({ embeds: [aimSightsEmbed], components: [aimRow] });
+    const aimTime = Date.now();
+
+    const collector = huntMsg.createMessageComponentCollector({
+        filter: i => i.user.id === interaction.user.id && i.customId === fireId,
+        time: aimWaitMs + AIM_LATE_MS,
+        max: 1,
+    });
+
+    let shotTaken = false;
+    const shot = new Promise(resolve => {
+        collector.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - aimTime); });
+        collector.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+    }).then(ms => { shotTaken = ms !== null; return ms; });
+
+    // Call the shot when the window opens — unless it has already been taken,
+    // in which case editing to "FIRE!" would tell a player who jumped the gun
+    // that they were right on time.
+    //
+    // The window is timed from when the call is actually on screen, not from
+    // when the wait elapsed: the edit is a round trip of its own, and charging
+    // it to the player would put the latency straight back into the grade this
+    // phase exists to take it out of.
+    let windowOpensAt = aimWaitMs;
+    await Promise.race([shot, delay(aimWaitMs)]);
+    if (!shotTaken) {
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('💥 FIRE!')
+                .setDescription('**Take the shot — NOW!**')],
+            components: [aimRow],
+        });
+        windowOpensAt = Date.now() - aimTime;
+
+        // Re-arm for the same reason the window is timed from here. The
+        // collector was armed before the edit went out, so its deadline counts
+        // the edit's round trip against the player's grace period — a slow
+        // connection got less time to take a late shot than a fast one, which
+        // is the latency-decides-the-grade problem again at the other end of
+        // the window. AIM_LATE_MS is a promise about time after the call.
+        if (!shotTaken) collector.resetTimer({ time: AIM_LATE_MS });
+    }
+
+    const shotMs = await shot;
+    const aim    = gradeShot(shotMs, windowOpensAt);
+
+    await interaction.editReply({ embeds: [aim.embed()], components: [] });
+    await delay(600);
+
+    return aim;
+}
+
 const WILDERNESS_YIELD_BONUS = 0.10;
 
 const walletOf = interaction => ({ userId: interaction.user.id, guildId: interaction.guild.id });
@@ -738,73 +828,7 @@ async function executeStart(interaction) {
             await interaction.editReply({ embeds: [stealthResultEmbed], components: [] });
             await delay(800);
 
-            // ── Aim Phase ──────────────────────────────────────────────────────────
-            // The Fire button is attached with the "sights" embed, not after it,
-            // so the shot can genuinely be taken early — which is what the
-            // footer has always warned about. The button used to arrive only
-            // once the wait had elapsed, so firing early was impossible and the
-            // grade was decided purely by how fast the click came back: under
-            // 800ms of round trip paid +18% crit, anything slower +8%. That
-            // scored the player's connection, not their play, and paid at least
-            // +8% for any click at all.
-            //
-            // Now the wait is the mechanic. The window opens at a random moment
-            // the player cannot anticipate and stays open long enough that a
-            // slow connection still comfortably clears it — so what separates
-            // the outcomes is *when* you fire, not how fast the wire is.
-            const aimWaitMs = 1000 + Math.floor(Math.random() * 1001);
-
-            const fireId  = `hunt_fire_${interaction.id}`;
-            const aimRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(fireId).setLabel('🔫 Fire!').setStyle(ButtonStyle.Danger)
-            );
-            const aimSightsEmbed = new EmbedBuilder()
-                .setColor('#8B0000')
-                .setTitle('🎯 Target in Sights…')
-                .setDescription('*Hold your breath… wait for the shot to line up.*')
-                .setFooter({ text: 'Fire when the shot is called — rush it and you spoil the shot.' });
-
-            await interaction.editReply({ embeds: [aimSightsEmbed], components: [aimRow] });
-            const aimTime = Date.now();
-
-            let shotTaken = false;
-            const shot = new Promise(resolve => {
-                const col = huntMsg.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && i.customId === fireId,
-                    time: aimWaitMs + AIM_LATE_MS,
-                    max: 1,
-                });
-                col.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - aimTime); });
-                col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
-            }).then(ms => { shotTaken = ms !== null; return ms; });
-
-            // Call the shot when the window opens — unless it has already been
-            // taken, in which case editing to "FIRE!" would tell a player who
-            // jumped the gun that they were right on time.
-            //
-            // The window is timed from when the call is actually on screen, not
-            // from when the wait elapsed: the edit is a round trip of its own,
-            // and charging it to the player would put the latency straight back
-            // into the grade this phase exists to take it out of.
-            let windowOpensAt = aimWaitMs;
-            await Promise.race([shot, delay(aimWaitMs)]);
-            if (!shotTaken) {
-                await interaction.editReply({
-                    embeds: [new EmbedBuilder()
-                        .setColor('#FF0000')
-                        .setTitle('💥 FIRE!')
-                        .setDescription('**Take the shot — NOW!**')],
-                    components: [aimRow],
-                });
-                windowOpensAt = Date.now() - aimTime;
-            }
-
-            const shotMs = await shot;
-            const aim    = gradeShot(shotMs, windowOpensAt);
-            aimBonus     = aim.bonus;
-
-            await interaction.editReply({ embeds: [aim.embed()], components: [] });
-            await delay(600);
+            aimBonus = (await runAimPhase(interaction, huntMsg)).bonus;
 
         } else {
             await interaction.deferReply();
@@ -3303,7 +3327,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, AIM_WINDOW_MS, AIM_LATE_MS, isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, runAimPhase, AIM_WINDOW_MS, AIM_LATE_MS, isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS };
 
 // ── Per-user economy lock ─────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent
