@@ -341,6 +341,7 @@ gathering tracks. `/synergies` shows progress toward each:
 | ⚒️ Artificer | Mining 50 | +5% ore yield, +1 max mining stamina |
 | ⚙️ Iron Will | Mining 50, Hunt 50 | Blocks cave-ins below 50% pickaxe durability |
 | 💼 Merchant | Hunt/Fishing/Mining 20 each | +5% coins from `/work` and `/crime` while carrying items |
+| 🧭 Wayfinder | Hunt 30, Exploration 20 | +1 max stamina in Exploration and Hunting |
 
 **Pets** are passive-bonus companions with their own hunger, mood, level, and
 evolution track.

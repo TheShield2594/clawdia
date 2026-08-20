@@ -18,7 +18,7 @@ const {
 const { hasEffect, consumeEffect, getEffect, getGatheringYieldEffect, EFFECT_CONFIGS } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
-const { getHuntSynergyStaminaBonus } = require('./synergyService');
+const { getHuntSynergyStaminaBonus, getHuntWayfinderStaminaBonus } = require('./synergyService');
 const { MAX_STAMINA_UPGRADES } = require('../data/crossSystemData');
 const { getBonusMultipliers } = require('../utils/prestige');
 
@@ -66,6 +66,7 @@ function ensureHuntData(user) {
     if (h.activeCharmHuntsLeft == null) h.activeCharmHuntsLeft = 0;
     if (h.activeFocus          == null) h.activeFocus          = false;
     if (h.activeXpScroll       == null) h.activeXpScroll       = false;
+    if (h.quickHunt            == null) h.quickHunt            = false;
     if (h.luckyPaw             == null) h.luckyPaw             = false;
     if (h.precisionScope       == null) h.precisionScope       = false;
     // Field Trophies — one permanent per zone, crafted from that zone's materials.
@@ -96,7 +97,9 @@ function ensureHuntData(user) {
 function getMaxStamina(user) {
     const prestige = user.hunt?.prestige ?? 0;
     const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
-    const synergyBonus = getHuntSynergyStaminaBonus(user);
+    // Outdoorsman and Wayfinder both advertise +1 max hunt stamina; they stack,
+    // exactly as Deep Prospector and Artificer do on mining.
+    const synergyBonus = getHuntSynergyStaminaBonus(user) + getHuntWayfinderStaminaBonus(user);
     const trophyBonus  = user.hunt?.woodlandInstinct ? 1 : 0;
     // Permanent Stamina +1 from the shop, applied through /use.
     const purchased = Math.min(Math.max(0, user?.staminaUpgrades ?? 0), MAX_STAMINA_UPGRADES);
@@ -435,6 +438,26 @@ function rollTier(user, zone) {
 }
 
 // ─── ANIMAL ROLL ─────────────────────────────────────────────────────────────
+
+/**
+ * Rolls the prey for a hunt — tier first, then a specific animal — *before*
+ * the approach prompt, so the prompt can describe the animal that is actually
+ * there and key its correct answer on that animal's traits. The roll used to
+ * live inside executeHunt, which runs after the prompt was answered: the hint
+ * described a deer while the player shot a squirrel, a crow, or a Golden Fox.
+ *
+ * Pass the result to executeHunt as options.encounter.
+ */
+function rollHuntEncounter(user, zoneId) {
+    const resolvedZoneId = zoneId ?? user.hunt.activeZone;
+    const zone = ZONES[resolvedZoneId];
+    // Same contract as quoteRepair's unknown tier: callers validate the zone
+    // first, so an unknown one here is a programming error — fail loudly
+    // rather than dereferencing undefined inside rollTier.
+    if (!zone) throw new Error(`Unknown hunt zone: ${resolvedZoneId}`);
+    const tier = rollTier(user, zone);
+    return { tier, animal: rollAnimal(tier, resolvedZoneId) };
+}
 
 /**
  * Picks a specific animal from the resolved tier that can spawn in this zone.
@@ -821,6 +844,27 @@ function tickConsumables(user) {
     user.markModified('hunt');
 }
 
+// ─── BEST PAYOUT ─────────────────────────────────────────────────────────────
+
+/**
+ * Raises h.bestPayout when beaten, and remembers what the record hunt actually
+ * was. The number alone has always been kept; the context (which animal, what
+ * tier, where) is what /hunt records needs to make the board worth reading.
+ * Older records that predate this carry no meta and render as the bare amount.
+ */
+function recordBestPayout(h, amount, { animal, tier, zoneId } = {}) {
+    if (!(amount > (h.bestPayout ?? 0))) return false;
+    h.bestPayout = amount;
+    h.bestPayoutMeta = {
+        animalName:  animal?.name  ?? null,
+        animalEmoji: animal?.emoji ?? null,
+        tier:        tier          ?? null,
+        zoneId:      zoneId        ?? null,
+        at:          new Date(),
+    };
+    return true;
+}
+
 // ─── FULL HUNT EXECUTION ─────────────────────────────────────────────────────
 
 /**
@@ -862,11 +906,20 @@ function executeHunt(user, zoneId, options = {}) {
         };
     }
 
-    // Roll the animal upfront so traits can influence the success check
-    let tier = rollTier(user, zone);
-    // Stealth bonus: patient approach upgrades common prey to uncommon ~30% of the time
-    if (options.stealthBonus > 0 && tier === 'common' && Math.random() < 0.30) tier = 'uncommon';
-    const animal = rollAnimal(tier, zoneId ?? h.activeZone);
+    // The encounter is normally pre-rolled by the caller (rollHuntEncounter)
+    // before the approach prompt, so the prompt describes the real animal. The
+    // internal roll remains for callers that skip the prompt entirely.
+    let tier, animal;
+    if (options.encounter?.animal) {
+        ({ tier, animal } = options.encounter);
+    } else {
+        tier = rollTier(user, zone);
+        // Stealth bonus: patient approach upgrades common prey to uncommon ~30% of
+        // the time. Pre-rolled encounters apply this upgrade caller-side, after the
+        // stealth outcome is known.
+        if (options.stealthBonus > 0 && tier === 'common' && Math.random() < 0.30) tier = 'uncommon';
+        animal = rollAnimal(tier, zoneId ?? h.activeZone);
+    }
     const traits = animal.traits ?? [];
 
     // Base success chance + trait adjustments
@@ -972,7 +1025,7 @@ function executeHunt(user, zoneId, options = {}) {
         user.balance         += adjustedPayout;
         h.totalEarned        += adjustedPayout;
         h.dailyCoins         += adjustedPayout;
-        if (adjustedPayout > h.bestPayout) h.bestPayout = adjustedPayout;
+        recordBestPayout(h, adjustedPayout, { animal, tier, zoneId: zone.id });
 
         // Statistics
         h.successfulHunts    += 1;
@@ -1215,9 +1268,27 @@ function durabilityBar(current, max, length = 10) {
 
 // ─── APEX ENCOUNTER RESOLUTION ───────────────────────────────────────────────
 
+const APEX_PHASES_PER_DUEL = 3;
+
+/**
+ * One duel's worth of phases: a random draw of APEX_PHASES_PER_DUEL from the
+ * apex's phase pool, in a random order. Every phase carries its own correct
+ * answer with the tell in its hint, so recognising the apex no longer hands
+ * over the whole duel — the sequence isn't memorisable either, because it
+ * differs encounter to encounter.
+ */
+function buildApexEncounter(base) {
+    const pool = [...base.phasePool];
+    for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return { ...base, phases: pool.slice(0, APEX_PHASES_PER_DUEL) };
+}
+
 function rollApexType() {
     const keys = Object.keys(APEX_TYPES);
-    return APEX_TYPES[keys[Math.floor(Math.random() * keys.length)]];
+    return buildApexEncounter(APEX_TYPES[keys[Math.floor(Math.random() * keys.length)]]);
 }
 
 // Nerve: the duel's second axis. A wrong aggressive read costs two, so two bad
@@ -1314,10 +1385,12 @@ module.exports = {
     applyAimBonus,
     rollTier,
     rollAnimal,
+    rollHuntEncounter,
     getRarePityThreshold,
     rollFailureSeverity,
     applyPayoutModifiers,
     getDiminishingReturns,
+    recordBestPayout,
     applyDurabilityLoss,
     updateWeaponStatus,
     isCondemned,
@@ -1332,6 +1405,8 @@ module.exports = {
     rollTrophyQuality,
     executeHunt,
     rollApexType,
+    buildApexEncounter,
+    APEX_PHASES_PER_DUEL,
     resolveApexEncounter,
     apexNerveAfter,
     apexNerveMax,

@@ -1305,36 +1305,63 @@ const TROPHY_QUALITIES = [
 // strategy players learn over time: match its moves, hold your ground, or
 // wait it out. 'safe' choices never cost nerve but only the correct choice
 // counts toward the reward.
+// Each apex carries a pool of phases; a duel draws three of them in a random
+// order (huntService.rollApexType). Every phase has its own correct answer,
+// and the tell for it lives in the hint — a feint carries no weight behind it
+// (mirror it), a committed attack does (plant against it). The old shape had
+// one `strategy` repeated across all three phases, so knowing the apex's name
+// made the 1.5x bonus free and the hints were flavour dressed as information
+// (issue #740). `safe` stays the always-available hedge: never correct, never
+// costs nerve — the choice you make when you can't read the tell.
 const APEX_TYPES = {
     dire_alpha: {
         name: 'Dire Alpha',
         emoji: '🐺',
-        strategy: 'match', // mirror its feints
-        phases: [
+        // The read: does the attack carry its weight? A probe wants you to
+        // flinch — move with it. A committed strike must be met standing.
+        phasePool: [
             {
-                hint: '**THE DIRE ALPHA** feints LEFT, hackles raised!',
+                hint: '**THE DIRE ALPHA** feints LEFT — its paws never leave the ground. It wants you to flinch first.',
                 choices: {
-                    match: { label: '🎯 Mirror it — sidestep LEFT', risk: 'high' },
-                    hold:  { label: '🛑 Stand your ground',          risk: 'high' },
-                    safe:  { label: '🌿 Back away slowly',           risk: 'none' }
+                    match: { label: '🎯 Mirror the feint — step LEFT', risk: 'high' },
+                    hold:  { label: '🛑 Stand your ground',            risk: 'high' },
+                    safe:  { label: '🌿 Back away slowly',             risk: 'none' }
                 },
                 correct: 'match'
             },
             {
-                hint: 'It lunges RIGHT, snapping at your flank!',
+                hint: 'It darts RIGHT, snapping at air — a probe, not a strike. Its weight is still centred.',
                 choices: {
-                    match: { label: '🎯 Pivot RIGHT with it',  risk: 'high' },
-                    hold:  { label: '🛑 Brace for the hit',    risk: 'high' },
-                    safe:  { label: '🌿 Give ground',          risk: 'none' }
+                    match: { label: '🎯 Pivot RIGHT with it', risk: 'high' },
+                    hold:  { label: '🛑 Brace for the hit',   risk: 'high' },
+                    safe:  { label: '🌿 Give ground',         risk: 'none' }
                 },
                 correct: 'match'
             },
             {
-                hint: '**It rears for a final pounce** — read the angle.',
+                hint: 'It charges dead-on — ears pinned, weight low. **This one is real.**',
                 choices: {
-                    match: { label: '💪 Strike as it commits',     risk: 'high' },
-                    hold:  { label: '🛑 Plant and counter',        risk: 'high' },
-                    safe:  { label: '🌿 Wait for an opening',      risk: 'none' }
+                    match: { label: '🎯 Sidestep and swing',   risk: 'high' },
+                    hold:  { label: '🛑 Plant and meet it',    risk: 'high' },
+                    safe:  { label: '🌿 Dive clear',           risk: 'none' }
+                },
+                correct: 'hold'
+            },
+            {
+                hint: 'It circles you slowly, hackles up, testing whether you\'ll turn your back.',
+                choices: {
+                    match: { label: '🎯 Turn with it, blade out',        risk: 'high' },
+                    hold:  { label: '🛑 Hold your ground, eyes on it',   risk: 'high' },
+                    safe:  { label: '🌿 Back toward a tree',             risk: 'none' }
+                },
+                correct: 'hold'
+            },
+            {
+                hint: 'It rears for a pounce — but its hips swing LEFT. The leap is a feint into a flank strike.',
+                choices: {
+                    match: { label: '🎯 Slide LEFT to meet the flank', risk: 'high' },
+                    hold:  { label: '🛑 Set your stance',              risk: 'high' },
+                    safe:  { label: '🌿 Wait for an opening',          risk: 'none' }
                 },
                 correct: 'match'
             }
@@ -1343,66 +1370,106 @@ const APEX_TYPES = {
     phantom_stag: {
         name: 'Phantom Stag',
         emoji: '🦌',
-        strategy: 'safe', // it cannot be forced — patience wins
-        phases: [
+        // The read: which image is flesh? Shadows, tracks and breath betray
+        // the real stag — hold on the true one, swing when the truth is
+        // elsewhere.
+        phasePool: [
             {
-                hint: 'The **Phantom Stag** flickers between the trees — your eyes can\'t track it!',
+                hint: 'The **Phantom Stag** steps into a moonbeam — breath misting, hooves pressing real tracks into the moss. **This one is flesh.**',
                 choices: {
-                    match: { label: '🎯 Chase the afterimage',  risk: 'high' },
-                    hold:  { label: '🛑 Take the shot anyway',  risk: 'high' },
-                    safe:  { label: '🌿 Stay still and watch',  risk: 'none' }
+                    match: { label: '🎯 Swing to the flicker beside it', risk: 'high' },
+                    hold:  { label: '🛑 Hold your aim on it',            risk: 'high' },
+                    safe:  { label: '🌿 Lower your weapon',              risk: 'none' }
                 },
-                correct: 'safe'
+                correct: 'hold'
             },
             {
-                hint: 'It freezes… antlers shimmering… then it\'s somewhere else entirely.',
+                hint: 'It flickers ahead of you — but the bright shape casts no shadow. The true stag is the dim one at your flank.',
                 choices: {
-                    match: { label: '🎯 Swing to the new spot', risk: 'high' },
-                    hold:  { label: '🛑 Hold your aim',         risk: 'high' },
-                    safe:  { label: '🌿 Lower your weapon',     risk: 'none' }
+                    match: { label: '🎯 Turn on the shadowed shape',   risk: 'high' },
+                    hold:  { label: '🛑 Keep aim on the bright one',   risk: 'high' },
+                    safe:  { label: '🌿 Stay still and watch',         risk: 'none' }
                 },
-                correct: 'safe'
+                correct: 'match'
             },
             {
-                hint: 'The stag steps into a moonbeam and **looks straight at you**.',
+                hint: 'Three stags shimmer between the trees — only the middle one\'s antlers scrape off bark that actually falls.',
                 choices: {
-                    match: { label: '🎯 Take the shot NOW',      risk: 'high' },
-                    hold:  { label: '🛑 Steady... steady...',    risk: 'high' },
-                    safe:  { label: '🌿 Let it come closer',     risk: 'none' }
+                    match: { label: '🎯 Track the nearest image',        risk: 'high' },
+                    hold:  { label: '🛑 Stay locked on the middle one',  risk: 'high' },
+                    safe:  { label: '🌿 Let them drift past',            risk: 'none' }
                 },
-                correct: 'safe'
+                correct: 'hold'
+            },
+            {
+                hint: 'It freezes before you… but its reflection in the pool is looking somewhere else. The body in front of you is the echo.',
+                choices: {
+                    match: { label: '🎯 Follow the reflection\'s gaze', risk: 'high' },
+                    hold:  { label: '🛑 Trust your eyes and hold',      risk: 'high' },
+                    safe:  { label: '🌿 Lower your weapon',             risk: 'none' }
+                },
+                correct: 'match'
+            },
+            {
+                hint: 'The air folds, and the stag blinks ten paces LEFT — mist still curling where it is about to land.',
+                choices: {
+                    match: { label: '🎯 Lead it — swing LEFT now',   risk: 'high' },
+                    hold:  { label: '🛑 Hold on where it stood',     risk: 'high' },
+                    safe:  { label: '🌿 Wait for it to settle',      risk: 'none' }
+                },
+                correct: 'match'
             }
         ]
     },
     ironhide_boar: {
         name: 'Ironhide Boar',
         emoji: '🐗',
-        strategy: 'hold', // it only respects an unmoving hunter
-        phases: [
+        // The read: which way do the tusks come? A straight ram is met
+        // planted; a hooking or scything attack is beaten by stepping around
+        // it.
+        phasePool: [
             {
-                hint: '**THE IRONHIDE BOAR** charges head-on, tusks down!',
+                hint: '**THE IRONHIDE BOAR** charges dead straight, tusks low — a battering ram with exactly one line.',
                 choices: {
-                    match: { label: '🎯 Dodge and strike',     risk: 'high' },
-                    hold:  { label: '🛑 Plant your feet',      risk: 'high' },
-                    safe:  { label: '🌿 Dive clear',           risk: 'none' }
+                    match: { label: '🎯 Dodge and strike',            risk: 'high' },
+                    hold:  { label: '🛑 Plant your feet and meet it', risk: 'high' },
+                    safe:  { label: '🌿 Dive clear',                  risk: 'none' }
                 },
                 correct: 'hold'
             },
             {
-                hint: 'It wheels around, pawing the dirt for another charge!',
+                hint: 'It wheels mid-run, hooking WIDE to catch you on the turn — its cracked flank swings into reach.',
                 choices: {
-                    match: { label: '🎯 Flank it',             risk: 'high' },
-                    hold:  { label: '🛑 Hold the line',        risk: 'high' },
-                    safe:  { label: '🌿 Put a tree between you', risk: 'none' }
+                    match: { label: '🎯 Sidestep and hit the flank', risk: 'high' },
+                    hold:  { label: '🛑 Hold the line',              risk: 'high' },
+                    safe:  { label: '🌿 Put a tree between you',     risk: 'none' }
+                },
+                correct: 'match'
+            },
+            {
+                hint: 'It paws the dirt, drops its head, and commits — dead-on. It only respects an unmoving hunter.',
+                choices: {
+                    match: { label: '🎯 Flank it',           risk: 'high' },
+                    hold:  { label: '🛑 Hold your ground',   risk: 'high' },
+                    safe:  { label: '🌿 Stand aside',        risk: 'none' }
                 },
                 correct: 'hold'
             },
             {
-                hint: '**Its armored hide is cracked** — it charges one last time.',
+                hint: 'It stops short and swings its head in a scything arc — the tusks come sideways, not forward.',
                 choices: {
-                    match: { label: '🎯 Sidestep and slash',   risk: 'high' },
-                    hold:  { label: '🛑 Meet it head-on',      risk: 'high' },
-                    safe:  { label: '🌿 Stand aside',          risk: 'none' }
+                    match: { label: '🎯 Step inside the arc and strike', risk: 'high' },
+                    hold:  { label: '🛑 Brace against the swing',        risk: 'high' },
+                    safe:  { label: '🌿 Jump back',                      risk: 'none' }
+                },
+                correct: 'match'
+            },
+            {
+                hint: 'One last charge — straight, ragged, hide heaving. Everything it has left, on a single line.',
+                choices: {
+                    match: { label: '🎯 Sidestep and slash', risk: 'high' },
+                    hold:  { label: '🛑 Meet it head-on',    risk: 'high' },
+                    safe:  { label: '🌿 Stand aside',        risk: 'none' }
                 },
                 correct: 'hold'
             }

@@ -16,6 +16,7 @@ const {
 const { fitDescription, EMBED_LIMITS } = require('../../utils/embedFields');
 const {
     ensureExploreData,
+    getMaxStamina,
     applyStaminaRegen,
     applyDailyReset,
     msUntilNextStamina,
@@ -811,7 +812,7 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     const leaderNote = hourlyLeader
         ? `🏆 Richest this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? `${currency}${hourlyLeader.value.toLocaleString()}`}`
         : randomFrom(FOOTER_LINES);
-    embed.setFooter({ text: `⚡ ${e.stamina}/${LIMITS.MAX_STAMINA} stamina${staminaNote} · ${nextExpeditionNote(user)} · ${leaderNote}` });
+    embed.setFooter({ text: `⚡ ${e.stamina}/${getMaxStamina(user)} stamina${staminaNote} · ${nextExpeditionNote(user)} · ${leaderNote}` });
     return embed;
 }
 
@@ -1227,7 +1228,8 @@ async function handleProfile(interaction) {
     const activeRegion = REGIONS[e.activeRegion];
     const nextThreshold = EXPLORER_LEVELS.find(l => l.level === e.level + 1)?.xpRequired;
 
-    const stamBar = '⚡'.repeat(e.stamina) + '▪️'.repeat(Math.max(0, LIMITS.MAX_STAMINA - e.stamina));
+    const maxStam = getMaxStamina(userData);
+    const stamBar = '⚡'.repeat(e.stamina) + '▪️'.repeat(Math.max(0, maxStam - e.stamina));
     const regenMs = msUntilNextStamina(userData);
 
     const embed = new EmbedBuilder()
@@ -1254,7 +1256,7 @@ async function handleProfile(interaction) {
             },
             {
                 name: '⚡ Stamina',
-                value: `${stamBar}\n${e.stamina}/${LIMITS.MAX_STAMINA}${e.stamina < LIMITS.MAX_STAMINA ? `\nNext regen: ${formatMs(regenMs)}` : '\nFull!'}`,
+                value: `${stamBar}\n${e.stamina}/${maxStam}${e.stamina < maxStam ? `\nNext regen: ${formatMs(regenMs)}` : '\nFull!'}`,
                 inline: true,
             },
             {

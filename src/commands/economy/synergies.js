@@ -8,6 +8,7 @@ const { SYNERGY_LIST } = require('../../data/crossSystemData');
 const { ensureHuntData }    = require('../../services/huntService');
 const { ensureFishingData } = require('../../services/fishService');
 const { ensureMineData }    = require('../../services/mineService');
+const { ensureExploreData } = require('../../services/exploreService');
 
 module.exports = {
     cooldown: 5,
@@ -31,17 +32,20 @@ module.exports = {
         ensureHuntData(user);
         ensureFishingData(user);
         ensureMineData(user);
+        ensureExploreData(user);
 
-        const huntLevel  = user.hunt?.level    ?? 0;
-        const fishLevel  = user.fishing?.level ?? 0;
-        const mineLevel  = user.mining?.level  ?? 0;
+        const huntLevel    = user.hunt?.level        ?? 0;
+        const fishLevel    = user.fishing?.level     ?? 0;
+        const mineLevel    = user.mining?.level      ?? 0;
+        const exploreLevel = user.exploration?.level ?? 0;
 
         const lines = SYNERGY_LIST.map(syn => {
             const req = syn.requirements;
             const checks = [];
-            if (req.hunt)    checks.push({ label: `Hunt Lv.${req.hunt}`,   have: huntLevel,  need: req.hunt  });
-            if (req.fishing) checks.push({ label: `Fish Lv.${req.fishing}`, have: fishLevel,  need: req.fishing });
-            if (req.mining)  checks.push({ label: `Mine Lv.${req.mining}`,  have: mineLevel,  need: req.mining  });
+            if (req.hunt)        checks.push({ label: `Hunt Lv.${req.hunt}`,          have: huntLevel,    need: req.hunt        });
+            if (req.fishing)     checks.push({ label: `Fish Lv.${req.fishing}`,       have: fishLevel,    need: req.fishing     });
+            if (req.mining)      checks.push({ label: `Mine Lv.${req.mining}`,        have: mineLevel,    need: req.mining      });
+            if (req.exploration) checks.push({ label: `Explore Lv.${req.exploration}`, have: exploreLevel, need: req.exploration });
 
             const unlocked = checks.every(c => c.have >= c.need);
 
@@ -65,8 +69,8 @@ module.exports = {
             .setColor('#1abc9c')
             .setTitle('🔗 Cross-System Synergies')
             .setDescription(
-                'Reach level milestones across **Hunt**, **Fish**, and **Mine** to unlock ' +
-                'permanent passive bonuses that work across all three systems.\n​'
+                'Reach level milestones across **Hunt**, **Fish**, **Mine**, and **Explore** to unlock ' +
+                'permanent passive bonuses that work across systems.\n​'
             )
             .addFields({ name: '​', value: lines.join('\n\n'), inline: false })
             .addFields({
@@ -75,6 +79,7 @@ module.exports = {
                     `🏹 Hunt: **${huntLevel}**`,
                     `🎣 Fish: **${fishLevel}**`,
                     `⛏️ Mine: **${mineLevel}**`,
+                    `🧭 Explore: **${exploreLevel}**`,
                 ].join('  ·  '),
                 inline: false,
             })

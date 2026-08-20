@@ -10,6 +10,7 @@ const {
     RELIC_INDEX,
     QUIET_LINES,
 } = require('../data/exploreData');
+const { getExploreWayfinderStaminaBonus } = require('./synergyService');
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
@@ -83,10 +84,21 @@ function getRegionProgress(user, regionId, { create = false } = {}) {
 
 // ─── STAMINA / DAILY WINDOW ──────────────────────────────────────────────────
 
+/**
+ * Max exploration stamina for a user. The other three grind systems each grew a
+ * per-user getter when synergies started lifting their caps; exploration's was
+ * still the flat constant, which is why no synergy could pay out into it.
+ * The Permanent Stamina +1 shop item stays out of this on purpose — it is sold
+ * as hunt/fish/mine only.
+ */
+function getMaxStamina(user) {
+    return LIMITS.MAX_STAMINA + getExploreWayfinderStaminaBonus(user);
+}
+
 /** @returns {boolean} true if anything was written */
 function applyStaminaRegen(user) {
     const e = user.exploration;
-    const max = LIMITS.MAX_STAMINA;
+    const max = getMaxStamina(user);
 
     if (e.stamina >= max) {
         // Sitting at full: keep the regen anchor fresh so the clock starts from
@@ -118,7 +130,7 @@ function applyStaminaRegen(user) {
 
 function msUntilNextStamina(user) {
     const e = user.exploration;
-    if (e.stamina >= LIMITS.MAX_STAMINA) return 0;
+    if (e.stamina >= getMaxStamina(user)) return 0;
     if (!e.staminaLastRegen) return LIMITS.STAMINA_REGEN_MS;
     const elapsed = Date.now() - e.staminaLastRegen.getTime();
     return Math.max(0, LIMITS.STAMINA_REGEN_MS - (elapsed % LIMITS.STAMINA_REGEN_MS));
@@ -502,7 +514,7 @@ function executeExplore(user, region, guildSettings, opts = {}) {
             result.type = 'quiet';
             result.quietLine = randomFrom(QUIET_LINES);
             result.xp = grantXp(user, EVENT_XP.quiet, result);
-            e.stamina = Math.min(LIMITS.MAX_STAMINA, e.stamina + 1);
+            e.stamina = Math.min(getMaxStamina(user), e.stamina + 1);
             result.staminaSpared = true;
             break;
         }
@@ -877,6 +889,7 @@ function formatMs(ms) {
 module.exports = {
     ensureExploreData,
     getRegionProgress,
+    getMaxStamina,
     applyStaminaRegen,
     msUntilNextStamina,
     applyDailyReset,

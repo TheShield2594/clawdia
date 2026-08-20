@@ -11,16 +11,18 @@ const fs = require('fs');
 const path = require('path');
 
 const { SYNERGIES, SYNERGY_LIST, MAX_STAMINA_UPGRADES } = require('../src/data/crossSystemData');
-const huntService = require('../src/services/huntService');
-const fishService = require('../src/services/fishService');
-const mineService = require('../src/services/mineService');
+const huntService    = require('../src/services/huntService');
+const fishService    = require('../src/services/fishService');
+const mineService    = require('../src/services/mineService');
+const exploreService = require('../src/services/exploreService');
 
 // A user whose grind levels are high enough to hold every synergy at once.
 function makeUser(overrides = {}) {
     return {
-        hunt:    { level: 60, prestige: 0 },
-        fishing: { level: 60, prestige: 0 },
-        mining:  { level: 60, prestige: 0 },
+        hunt:        { level: 60, prestige: 0 },
+        fishing:     { level: 60, prestige: 0 },
+        mining:      { level: 60, prestige: 0 },
+        exploration: { level: 30 },
         inventory: [],
         pets: [],
         ...overrides,
@@ -30,9 +32,10 @@ function makeUser(overrides = {}) {
 // A user below every synergy requirement.
 function makeNovice(overrides = {}) {
     return {
-        hunt:    { level: 1, prestige: 0 },
-        fishing: { level: 1, prestige: 0 },
-        mining:  { level: 1, prestige: 0 },
+        hunt:        { level: 1, prestige: 0 },
+        fishing:     { level: 1, prestige: 0 },
+        mining:      { level: 1, prestige: 0 },
+        exploration: { level: 1 },
         inventory: [],
         pets: [],
         ...overrides,
@@ -98,6 +101,29 @@ describe('stamina synergies actually raise max stamina', () => {
         const user = makeNovice({ mining: { level: 50, prestige: 0 } });
         expect(mineService.getMaxStamina(user))
             .toBe(mineService.getMaxStamina(novice) + SYNERGIES.artificer.bonuses.miningStamina);
+    });
+
+    test('Wayfinder lifts exploration and hunting', () => {
+        const novice = makeNovice();
+        const user = makeNovice({ hunt: { level: 30, prestige: 0 }, exploration: { level: 20 } });
+        expect(exploreService.getMaxStamina(user))
+            .toBe(exploreService.getMaxStamina(novice) + SYNERGIES.wayfinder.bonuses.explorationStamina);
+        expect(huntService.getMaxStamina(user))
+            .toBe(huntService.getMaxStamina(novice) + SYNERGIES.wayfinder.bonuses.huntStamina);
+    });
+
+    test('Outdoorsman and Wayfinder stack on hunting', () => {
+        const novice = makeNovice();
+        const user = makeUser();
+        const expected = SYNERGIES.outdoorsman.bonuses.huntStamina
+                       + SYNERGIES.wayfinder.bonuses.huntStamina;
+        expect(huntService.getMaxStamina(user)).toBe(huntService.getMaxStamina(novice) + expected);
+    });
+
+    test('exploration ignores the hunt/fish/mine-only shop stamina item', () => {
+        const base = makeNovice();
+        const bought = makeNovice({ staminaUpgrades: MAX_STAMINA_UPGRADES });
+        expect(exploreService.getMaxStamina(bought)).toBe(exploreService.getMaxStamina(base));
     });
 
     test('Deep Prospector and Artificer stack on mining', () => {

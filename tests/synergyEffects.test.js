@@ -6,8 +6,11 @@
 // listed as active and get neither. These tests pin each advertised bonus to the
 // code path that pays it out.
 
-const { getMaxStamina: mineMaxStamina } = require('../src/services/mineService');
-const { getMaxStamina: fishMaxStamina } = require('../src/services/fishService');
+const { getMaxStamina: mineMaxStamina }    = require('../src/services/mineService');
+const { getMaxStamina: fishMaxStamina }    = require('../src/services/fishService');
+const { getMaxStamina: huntMaxStamina }    = require('../src/services/huntService');
+const { getMaxStamina: exploreMaxStamina } = require('../src/services/exploreService');
+const { LIMITS: EXPLORE_LIMITS } = require('../src/data/exploreData');
 const {
     getActiveSynergies,
     getArtificerMineYieldBonus,
@@ -17,11 +20,12 @@ const { SYNERGIES, SYNERGY_LIST } = require('../src/data/crossSystemData');
 const { LIMITS } = require('../src/data/mineData');
 
 /** A player at the given grind levels, with nothing else going on. */
-function player({ hunt = 0, fishing = 0, mining = 0, inventory = [] } = {}) {
+function player({ hunt = 0, fishing = 0, mining = 0, exploration = 0, inventory = [] } = {}) {
     return {
-        hunt:    { level: hunt,    prestige: 0 },
-        fishing: { level: fishing, prestige: 0 },
-        mining:  { level: mining,  prestige: 0 },
+        hunt:        { level: hunt,    prestige: 0 },
+        fishing:     { level: fishing, prestige: 0 },
+        mining:      { level: mining,  prestige: 0 },
+        exploration: { level: exploration },
         inventory,
     };
 }
@@ -66,6 +70,26 @@ describe('fishing stamina synergies', () => {
     });
 });
 
+describe('Wayfinder stamina', () => {
+    test('pays both sides at the thresholds and neither below them', () => {
+        const under = player({ hunt: 30, exploration: 19 });
+        const at    = player({ hunt: 30, exploration: 20 });
+
+        expect(getActiveSynergies(under).map(s => s.id)).not.toContain('wayfinder');
+        expect(exploreMaxStamina(under)).toBe(EXPLORE_LIMITS.MAX_STAMINA);
+
+        expect(getActiveSynergies(at).map(s => s.id)).toContain('wayfinder');
+        expect(exploreMaxStamina(at))
+            .toBe(EXPLORE_LIMITS.MAX_STAMINA + SYNERGIES.wayfinder.bonuses.explorationStamina);
+        expect(huntMaxStamina(at)).toBe(
+            huntMaxStamina(player({ hunt: 29 }))
+            + SYNERGIES.wayfinder.bonuses.huntStamina
+            // hunt 30 alone doesn't reach Outdoorsman (needs fishing 30 too),
+            // so the whole lift here is Wayfinder's.
+        );
+    });
+});
+
 describe('Artificer ore yield', () => {
     test('pays nothing below Mining 50 and the advertised rate at 50', () => {
         expect(getArtificerMineYieldBonus(player({ mining: 49 }))).toBe(0);
@@ -98,6 +122,7 @@ describe('no advertised synergy is left unwired', () => {
         deep_prospector: ['fishingStamina', 'miningStamina'],
         artificer:       ['mineYieldPct', 'miningStamina'],
         merchant:        ['workCrimeCoinPct'],
+        wayfinder:       ['explorationStamina', 'huntStamina'],
     };
 
     test.each(SYNERGY_LIST.map(s => [s.id]))('%s has every bonus key accounted for', id => {
