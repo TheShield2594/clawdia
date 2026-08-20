@@ -15,6 +15,7 @@ const { applyXpGain, announceLevelUp } = require('../utils/applyXpGain');
 const BASE_BAD_WORDS = require('../data/profanityList');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
+const { BoundedRateLimiter } = require('../utils/boundedRateLimiter');
 
 // Pre-compile base word regexes once at module load — avoids per-message regex construction
 const BASE_BAD_WORD_REGEXES = BASE_BAD_WORDS.map(word => {
@@ -690,7 +691,12 @@ function resolveAbsoluteTime(hour, min, ampm, tomorrow) {
 const NL_REMINDER_MAX_TEXT = 200;
 const NL_REMINDER_MAX_PENDING = 10;
 const NL_REMINDER_COOLDOWN_MS = 30_000; // 30 seconds between NL-created reminders per user
-const nlReminderLastUsed = new Map(); // userId → timestamp
+// One key per user who recently tripped the cooldown. A plain Map here grew an
+// entry per user forever; the bounded limiter FIFO-evicts at the cap, and the
+// sweep drops keys whose window has fully aged out (same shape as aiService's).
+const NL_REMINDER_MAX_KEYS = 10_000;
+const nlReminderLimiter = new BoundedRateLimiter(NL_REMINDER_MAX_KEYS);
+setInterval(() => nlReminderLimiter.cleanup(NL_REMINDER_COOLDOWN_MS), 15 * 60 * 1000).unref();
 
 function sanitizeReminderText(text) {
     // Normalize first to prevent Unicode normalization attacks / length bypass tricks.
@@ -731,9 +737,10 @@ async function handleNLReminder(message, contentOverride) {
         const reminderText = sanitizeReminderText(parsed.text);
         if (!reminderText) continue;
 
-        // Per-user cooldown
-        const lastUsed = nlReminderLastUsed.get(message.author.id) || 0;
-        if (Date.now() - lastUsed < NL_REMINDER_COOLDOWN_MS) return false;
+        // Per-user cooldown. The limiter records the attempt as it checks it, so
+        // a create that fails downstream still counts — the cooldown paces how
+        // often a user can *trigger* the path, not how often they succeed.
+        if (!nlReminderLimiter.check(message.author.id, NL_REMINDER_COOLDOWN_MS, 1)) return false;
 
         // Cap pending reminders per user
         const pending = await Reminder.countDocuments({ userId: message.author.id, completed: false }).catch(() => NL_REMINDER_MAX_PENDING);
@@ -747,8 +754,6 @@ async function handleNLReminder(message, contentOverride) {
                 message:   reminderText,
                 remindAt
             });
-
-            nlReminderLastUsed.set(message.author.id, Date.now());
 
             const unixTs = Math.floor(remindAt.getTime() / 1000);
             await message.reply({ content: `✅ Got it! I'll remind you <t:${unixTs}:R> about: **${reminderText}**`, allowedMentions: { parse: [] } }).catch(() => {});
