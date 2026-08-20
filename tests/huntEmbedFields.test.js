@@ -299,3 +299,49 @@ describe('weapon inventory pages', () => {
         expect(buildWeaponPages(hoarder(9))).toHaveLength(2);
     });
 });
+
+describe('aim phase grading', () => {
+    const { gradeShot, AIM_WINDOW_MS, AIM_LATE_MS } = __test__;
+    const OPEN_AT = 1500; // the randomised moment the window opens
+
+    it('pays the top bonus for a shot inside the window', () => {
+        expect(gradeShot(OPEN_AT, OPEN_AT).bonus).toBe(0.18);
+        expect(gradeShot(OPEN_AT + AIM_WINDOW_MS, OPEN_AT).bonus).toBe(0.18);
+    });
+
+    it('pays less for a shot after the window has closed', () => {
+        expect(gradeShot(OPEN_AT + AIM_WINDOW_MS + 1, OPEN_AT).grade).toBe('late');
+        expect(gradeShot(OPEN_AT + AIM_LATE_MS, OPEN_AT).bonus).toBe(0.08);
+    });
+
+    it('charges for a shot fired before the window opened', () => {
+        // The mechanic the footer has always described. It used to be
+        // unreachable — the button did not exist yet — so mashing the trigger
+        // the instant it appeared was the *optimal* play and paid at least +8%.
+        expect(gradeShot(OPEN_AT - 1, OPEN_AT).grade).toBe('early');
+        expect(gradeShot(0, OPEN_AT).bonus).toBeLessThan(0);
+    });
+
+    it('pays nothing at all for never firing', () => {
+        expect(gradeShot(null, OPEN_AT).bonus).toBe(0);
+    });
+
+    it('grades on when the shot came, not how fast the wire is', () => {
+        // The old rule: under 800ms of round trip → +18%, otherwise +8%. The
+        // same play from a player 400ms further from Discord scored worse for
+        // no reason a hunter could act on. These two fire at the same moment
+        // relative to the call, 300ms apart in absolute terms, and grade the
+        // same.
+        const quick = gradeShot(OPEN_AT + 120, OPEN_AT);
+        const laggy = gradeShot(OPEN_AT + 420, OPEN_AT);
+
+        expect(quick.grade).toBe('perfect');
+        expect(laggy.grade).toBe('perfect');
+    });
+
+    it('leaves the window wide enough that a slow connection can still clear it', () => {
+        // Half a second of usable window at 400ms of round trip is twice a
+        // human reaction time; anything tighter grades the connection again.
+        expect(AIM_WINDOW_MS).toBeGreaterThanOrEqual(2 * 400);
+    });
+});

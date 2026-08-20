@@ -71,6 +71,67 @@ const { paginate } = require('../../utils/paginator');
 
 const WEAPON_SEPARATOR = '\n\n';
 
+// ── Aim phase timing ─────────────────────────────────────────────────────────
+// How long the shot stays perfect once the window opens, and how long after
+// that the trigger stays live at all.
+//
+// The window is wide on purpose, and timed from when the call reaches the
+// screen rather than from when the wait elapsed. It has to be comfortably
+// longer than the spread in players' round-trip times, or the grade goes back
+// to measuring connection quality: a hunter on a 400ms connection spends about
+// 650ms of the 900 on the wire and their own reaction, leaving a quarter of a
+// second in hand. What separates a perfect shot from a late one is whether the
+// player waited for the call, which is the same for everybody.
+const AIM_WINDOW_MS = 900;
+const AIM_LATE_MS   = 2500;
+
+/**
+ * Grades a shot by *when* it was fired relative to the window, and returns both
+ * the crit bonus and the embed that reports it.
+ *
+ * @param {number|null} shotMs  ms from the sights appearing to the trigger,
+ *                              or null if the trigger was never pulled
+ * @param {number} openAtMs     ms from the sights appearing to the call landing
+ *                              on screen — the moment the window opened
+ */
+function gradeShot(shotMs, openAtMs) {
+    const grade =
+        shotMs === null                    ? 'timeout' :
+        shotMs < openAtMs                  ? 'early'   :
+        shotMs <= openAtMs + AIM_WINDOW_MS ? 'perfect' :
+                                             'late';
+
+    const GRADES = {
+        perfect: {
+            bonus: 0.18, color: '#FFD700', title: '🎯 Perfect Shot!',
+            body: 'You held it until the moment came. **+18% crit chance** this hunt.',
+        },
+        late: {
+            bonus: 0.08, color: '#00CC66', title: '✅ Clean Shot!',
+            body: 'A beat behind the call, but the shot landed. **+8% crit chance** this hunt.',
+        },
+        // A rushed shot costs rather than merely failing to pay: an early
+        // trigger used to be impossible, so "don't fire too early" warned about
+        // nothing. It is a real decision now, so it has a real price.
+        early: {
+            bonus: -0.05, color: '#FF6B6B', title: '💨 You rushed it!',
+            body: 'You pulled before the shot lined up and the animal bolted at the noise. **−5% crit chance** this hunt.',
+        },
+        timeout: {
+            bonus: 0, color: '#888888', title: '⏰ Never took the shot',
+            body: 'The window closed with your finger still off the trigger. No aim bonus this hunt.',
+        },
+    };
+
+    const { bonus, color, title, body } = GRADES[grade];
+    return {
+        grade,
+        bonus,
+        embed: () => new EmbedBuilder().setColor(color).setTitle(title).setDescription(body),
+    };
+}
+
+
 const WILDERNESS_YIELD_BONUS = 0.10;
 
 const walletOf = interaction => ({ userId: interaction.user.id, guildId: interaction.guild.id });
@@ -583,10 +644,11 @@ async function executeStart(interaction) {
         //   Partial  → stealthBonus = +0.05 (safe but suboptimal)
         //   Wrong    → stealthBonus = −0.10 (spooked the animal)
         //   Timeout  → stealthBonus = 0
-        // Phase 2 — Aim: a single quick timing window for the shot.
-        //   Perfect (<0.8s) → aimBonus = +0.18 crit chance
-        //   Good    (<2.5s) → aimBonus = +0.08 crit chance
-        //   Timeout         → aimBonus = 0
+        // Phase 2 — Aim: hold the shot until the target lines up, then fire.
+        //   In the window  → aimBonus = +0.18 crit chance
+        //   Late           → aimBonus = +0.08 crit chance
+        //   Early          → aimBonus = −0.05 crit chance (rushed the shot)
+        //   Timeout        → aimBonus = 0
 
         let stealthBonus = 0;
         let aimBonus     = 0;
@@ -679,52 +741,71 @@ async function executeStart(interaction) {
             await delay(800);
 
             // ── Aim Phase ──────────────────────────────────────────────────────────
-            // Show "target in sights" then after a short wait show the FIRE! button.
+            // The Fire button is attached with the "sights" embed, not after it,
+            // so the shot can genuinely be taken early — which is what the
+            // footer has always warned about. The button used to arrive only
+            // once the wait had elapsed, so firing early was impossible and the
+            // grade was decided purely by how fast the click came back: under
+            // 800ms of round trip paid +18% crit, anything slower +8%. That
+            // scored the player's connection, not their play, and paid at least
+            // +8% for any click at all.
+            //
+            // Now the wait is the mechanic. The window opens at a random moment
+            // the player cannot anticipate and stays open long enough that a
+            // slow connection still comfortably clears it — so what separates
+            // the outcomes is *when* you fire, not how fast the wire is.
             const aimWaitMs = 1000 + Math.floor(Math.random() * 1001);
-            const aimSightsEmbed = new EmbedBuilder()
-                .setColor('#8B0000')
-                .setTitle('🎯 Target in Sights…')
-                .setDescription('*Hold your breath… wait for the right moment…*')
-                .setFooter({ text: 'Ready your shot — don\'t fire too early.' });
-            await interaction.editReply({ embeds: [aimSightsEmbed], components: [] });
-            await delay(aimWaitMs);
 
             const fireId  = `hunt_fire_${interaction.id}`;
-            const aimEmbed = new EmbedBuilder()
-                .setColor('#FF0000')
-                .setTitle('💥 FIRE!')
-                .setDescription('**Take the shot — NOW!**');
             const aimRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(fireId).setLabel('🔫 Fire!').setStyle(ButtonStyle.Danger)
             );
-            await interaction.editReply({ embeds: [aimEmbed], components: [aimRow] });
+            const aimSightsEmbed = new EmbedBuilder()
+                .setColor('#8B0000')
+                .setTitle('🎯 Target in Sights…')
+                .setDescription('*Hold your breath… wait for the shot to line up.*')
+                .setFooter({ text: 'Fire when the shot is called — rush it and you spoil the shot.' });
+
+            await interaction.editReply({ embeds: [aimSightsEmbed], components: [aimRow] });
             const aimTime = Date.now();
 
-            const shotMs = await new Promise(resolve => {
+            let shotTaken = false;
+            const shot = new Promise(resolve => {
                 const col = huntMsg.createMessageComponentCollector({
                     filter: i => i.user.id === interaction.user.id && i.customId === fireId,
-                    time: 2500,
+                    time: aimWaitMs + AIM_LATE_MS,
                     max: 1,
                 });
                 col.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - aimTime); });
                 col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
-            });
+            }).then(ms => { shotTaken = ms !== null; return ms; });
 
-            if (shotMs !== null && shotMs < 800) {
-                aimBonus = 0.18;
-            } else if (shotMs !== null) {
-                aimBonus = 0.08;
+            // Call the shot when the window opens — unless it has already been
+            // taken, in which case editing to "FIRE!" would tell a player who
+            // jumped the gun that they were right on time.
+            //
+            // The window is timed from when the call is actually on screen, not
+            // from when the wait elapsed: the edit is a round trip of its own,
+            // and charging it to the player would put the latency straight back
+            // into the grade this phase exists to take it out of.
+            let windowOpensAt = aimWaitMs;
+            await Promise.race([shot, delay(aimWaitMs)]);
+            if (!shotTaken) {
+                await interaction.editReply({
+                    embeds: [new EmbedBuilder()
+                        .setColor('#FF0000')
+                        .setTitle('💥 FIRE!')
+                        .setDescription('**Take the shot — NOW!**')],
+                    components: [aimRow],
+                });
+                windowOpensAt = Date.now() - aimTime;
             }
 
-            const aimResultEmbed = new EmbedBuilder()
-                .setColor(aimBonus >= 0.18 ? '#FFD700' : aimBonus > 0 ? '#00CC66' : '#888888')
-                .setTitle(aimBonus >= 0.18 ? '🎯 Perfect Shot!' : aimBonus > 0 ? '✅ Clean Shot!' : '⏰ Shot rushed…')
-                .setDescription(
-                    aimBonus >= 0.18 ? `Textbook precision. **+18% crit chance** this hunt.` :
-                    aimBonus > 0     ? `Solid hit. **+8% crit chance** this hunt.` :
-                                       `You hesitated on the trigger. No aim bonus this hunt.`
-                );
-            await interaction.editReply({ embeds: [aimResultEmbed], components: [] });
+            const shotMs = await shot;
+            const aim    = gradeShot(shotMs, windowOpensAt);
+            aimBonus     = aim.bonus;
+
+            await interaction.editReply({ embeds: [aim.embed()], components: [] });
             await delay(600);
 
         } else {
@@ -886,6 +967,7 @@ async function executeStart(interaction) {
             else if (stealthBonus < 0) lines.push(`> 🔊 *Spooked the animal — −10% success*`);
             if (aimBonus >= 0.18) lines.push(`> 🎯 *Perfect shot — +18% crit chance*`);
             else if (aimBonus > 0) lines.push(`> ✅ *Clean shot — +8% crit chance*`);
+            else if (aimBonus < 0) lines.push(`> 💨 *Rushed shot — −5% crit chance*`);
             if (lines.length) embed.setDescription(desc + '\n' + lines.join('\n'));
         }
         // One consolidated field rather than one per bonus: Discord caps an embed at
@@ -3152,7 +3234,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, AIM_WINDOW_MS, AIM_LATE_MS };
 
 // ── Per-user economy lock ─────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent

@@ -242,6 +242,21 @@ function calculateCritChance(user, traits = []) {
     return Math.min(LIMITS.MAX_CRIT_CHANCE, crit);
 }
 
+/**
+ * Folds the aim phase's grade into a crit chance.
+ *
+ * The aim bonus moves in both directions now: a shot taken inside the window
+ * adds to crit chance, one rushed before the window opened takes a little off.
+ * The old guard was `aimBonus > 0`, which silently discarded any penalty — fine
+ * while an early shot was impossible, wrong now that it is a decision the player
+ * makes. Clamped at both ends, so a hunter with almost no crit chance to lose
+ * cannot be pushed below zero and the cap still holds.
+ */
+function applyAimBonus(critChance, aimBonus = 0) {
+    if (!aimBonus) return critChance;
+    return Math.min(LIMITS.MAX_CRIT_CHANCE, Math.max(0, critChance + aimBonus));
+}
+
 // ─── TROPHY QUALITY ──────────────────────────────────────────────────────────
 
 /**
@@ -884,9 +899,8 @@ function executeHunt(user, zoneId, options = {}) {
     if (success) {
         const rawPayout = randInt(animal.payoutMin, animal.payoutMax);
 
-        // Crit — armored trait negates crits; aim bonus from precision shot boosts crit chance
-        let critChance = calculateCritChance(user, traits);
-        if (options.aimBonus > 0) critChance = Math.min(LIMITS.MAX_CRIT_CHANCE, critChance + options.aimBonus);
+        // Crit — armored trait negates crits; the aim phase moves crit chance.
+        const critChance = applyAimBonus(calculateCritChance(user, traits), options.aimBonus);
         const isCrit         = traits.includes('armored') ? false : Math.random() < critChance;
         const critMultiplier = isCrit ? (1.5 + Math.random() * 1.0) : 1.0;
 
@@ -1297,6 +1311,7 @@ module.exports = {
     msUntilDailyReset,
     calculateSuccessChance,
     calculateCritChance,
+    applyAimBonus,
     rollTier,
     rollAnimal,
     getRarePityThreshold,
