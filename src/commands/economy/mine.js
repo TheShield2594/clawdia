@@ -2344,7 +2344,10 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
 
     if (result.success) {
         const { ore, tier, finalPayout, isCrit, critMultiplier, specialDrop, xpEarned, levelUp, cappedByHard } = result;
-        const color = isCrit ? '#FFD700' : TIER_COLORS[tier];
+        // An event catch keeps its own colour even on a critical: the tier is the
+        // rarer fact of the two, and the title already announces it as one. Without
+        // this a critical event drop rendered crit-gold under a MYTHICAL headline.
+        const color = tier === 'event' ? TIER_COLORS.event : isCrit ? '#FFD700' : TIER_COLORS[tier];
 
         const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
         // At the hard cap finalPayout is already 0, so the old strikethrough rendered

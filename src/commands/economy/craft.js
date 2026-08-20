@@ -3,7 +3,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User  = require('../../models/User');
 const { attachGrind } = require('../../utils/grindProfile');
-const { tryAcquire: lockAcquire, release: lockRelease } = require('../../utils/activeGameLock');
 const Guild = require('../../models/Guild');
 const { CRAFT_RECIPES: HUNT_RECIPES, CONSUMABLES: HUNT_CONSUMABLES, MATERIAL_NAMES: HUNT_MAT_NAMES } = require('../../data/huntData');
 const { CRAFT_RECIPES: MINE_RECIPES, CONSUMABLES: MINE_CONSUMABLES, MATERIAL_NAMES: MINE_MAT_NAMES } = require('../../data/mineData');
@@ -310,20 +309,7 @@ module.exports = {
             user.markModified('hunt');
             user.markModified('mining');
             user.markModified('fishing');
-
-            // A grind profile is persisted by replacing its whole `data` document, so
-            // this save would overwrite a /mine raid's material transfer if one landed
-            // between the read above and here. The raid holds the defender's mining
-            // action lock for exactly that reason; take it here too so the spend and
-            // the transfer cannot interleave. The critical section is one save, so a
-            // short TTL is enough and a raider is never blocked for long.
-            const craftLockKey = `grind:mine:${interaction.guild.id}:${interaction.user.id}`;
-            const craftLock    = await lockAcquire(craftLockKey, 15_000);
-            try {
-                await user.save();
-            } finally {
-                if (craftLock) await lockRelease(craftLockKey, craftLock);
-            }
+            await user.save();
 
             const usedLines = recipe.ingredients.map(ing => {
                 const remaining = getMat(ing.material, ing.source);
@@ -349,5 +335,36 @@ module.exports = {
 
             return interaction.reply({ embeds: [embed] });
         }
+    }
+};
+
+
+// ── Per-user mining lock for the craft flow ───────────────────────────────────
+// Crafting spends mining materials, and a grind profile is persisted by replacing
+// its whole `data` document — so the lock has to cover the *read* as well as the
+// write. Taking it only around user.save() left the window that matters open: a
+// /mine raid landing between attachGrind and the save was simply overwritten by
+// the snapshot this flow had already loaded, and the raider kept their credit.
+//
+// So the whole `make` flow runs under the same key /mine holds, from before the
+// profiles are attached until after they are saved. `list` is read-only and is
+// left alone, so browsing recipes never blocks a raid.
+const { tryAcquire: _craftLockAcquire, release: _craftLockRelease } = require('../../utils/activeGameLock');
+const _craftExecute = module.exports.execute;
+module.exports.execute = async function (interaction) {
+    if (interaction.options.getSubcommand() !== 'make') return _craftExecute(interaction);
+
+    const lockKey   = `grind:mine:${interaction.guild?.id}:${interaction.user.id}`;
+    const lockToken = await _craftLockAcquire(lockKey, 60_000);
+    if (!lockToken) {
+        return interaction.reply({
+            content: '⛏️ You have a mining action in progress — finish it before crafting.',
+            flags: MessageFlags.Ephemeral,
+        }).catch(() => {});
+    }
+    try {
+        return await _craftExecute(interaction);
+    } finally {
+        await _craftLockRelease(lockKey, lockToken);
     }
 };
