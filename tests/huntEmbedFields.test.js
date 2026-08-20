@@ -29,6 +29,9 @@ function maximalUser() {
             trophies: [], activeBait: 'premium_bait', activeBaitHuntsLeft: 1,
             activeCharm: 'luck_charm', activeCharmHuntsLeft: 1,
             activeFocus: true, activeXpScroll: true,
+            // Low enough that the "Low Ammo" warning fires alongside the Ammo
+            // count — both new fields must fit inside the budget at once.
+            ammo: { steel_shot: 3 },
         },
     };
 }
@@ -107,7 +110,7 @@ describe('hunt success embed field budget', () => {
 
     test('the maximal case really did populate the optional fields', () => {
         const names = fieldsOf(embed).map(f => f.name).join(' | ');
-        for (const expected of ['Multipliers', 'Traits', 'Trait Effects', 'Special Drop', 'Level Up', 'Buffs Expired', 'Weapon Broke', 'Rare Pity']) {
+        for (const expected of ['Multipliers', 'Traits', 'Trait Effects', 'Special Drop', 'Level Up', 'Buffs Expired', 'Weapon Broke', 'Rare Pity', 'Ammo', 'Low Ammo']) {
             expect(names).toContain(expected);
         }
     });
@@ -151,6 +154,65 @@ describe('buildBonusLines', () => {
         const many = { gatheringYield: { label: 'X', emoji: '🪙', chargesLeft: 2 } };
         expect(buildBonusLines(one, 0, 0)[0]).toContain('1 charge left');
         expect(buildBonusLines(many, 0, 0)[0]).toContain('2 charges left');
+    });
+});
+
+describe('ammo visibility', () => {
+    const { buildAmmoField, buildLowAmmoField, AMMO_LOW_THRESHOLD } = __test__;
+    const t1Weapon = { name: 'Wooden Slingshot', tier: 1, currentDurability: 50, maxDurability: 50, status: 'good' };
+
+    function userWithAmmo(count) {
+        const user = maximalUser();
+        user.hunt.ammo = { steel_shot: count };
+        return user;
+    }
+
+    test('shows the remaining round count for an ammo-fed weapon', () => {
+        const field = buildAmmoField(userWithAmmo(47), brokenWeapon);
+        expect(field).toEqual({ name: 'Ammo', value: '⚫ Steel Shot ×47', inline: true });
+    });
+
+    test('omits the field entirely for a T1 weapon', () => {
+        expect(buildAmmoField(userWithAmmo(47), t1Weapon)).toBeNull();
+        expect(buildLowAmmoField(userWithAmmo(0), t1Weapon)).toBeNull();
+    });
+
+    test('treats missing ammo state as zero rounds', () => {
+        const user = maximalUser();
+        delete user.hunt.ammo;
+        expect(buildAmmoField(user, brokenWeapon).value).toContain('×0');
+    });
+
+    test('warns at the threshold and stays quiet above it', () => {
+        expect(buildLowAmmoField(userWithAmmo(AMMO_LOW_THRESHOLD), brokenWeapon)).not.toBeNull();
+        expect(buildLowAmmoField(userWithAmmo(AMMO_LOW_THRESHOLD + 1), brokenWeapon)).toBeNull();
+    });
+
+    test('the warning names the pack the shop actually sells', () => {
+        const field = buildLowAmmoField(userWithAmmo(3), brokenWeapon);
+        expect(field.value).toContain('Steel Shot (20)');
+        expect(field.value).toContain('/hunt shop buy');
+    });
+
+    test('says so plainly when the hunt spent the last round', () => {
+        const field = buildLowAmmoField(userWithAmmo(0), brokenWeapon);
+        expect(field.value).toContain('last');
+        expect(field.value).toContain('Steel Shot (20)');
+    });
+
+    test('both embeds carry the count on an ammo-fed weapon', () => {
+        const success = buildHuntEmbed(maximalSuccessResult(), userWithAmmo(3), ZONES.legendary_peaks, brokenWeapon, '💰', discordUser);
+        const failure = buildHuntEmbed({
+            success: false,
+            failure: { severity: { id: 'clean_miss', injuryMs: 0 }, message: 'Nothing stirred.' },
+            xpEarned: 0,
+        }, userWithAmmo(3), ZONES.murky_swamp, brokenWeapon, '💰', discordUser);
+
+        for (const embed of [success, failure]) {
+            const names = fieldsOf(embed).map(f => f.name);
+            expect(names).toContain('Ammo');
+            expect(names).toContain('⚠️ Low Ammo');
+        }
     });
 });
 
