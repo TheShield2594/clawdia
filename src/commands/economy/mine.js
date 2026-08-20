@@ -2775,12 +2775,17 @@ async function handleRaid(interaction) {
     // defender's lock for the transfer rather than racing it.
     //
     // tryAcquire never blocks, so two miners raiding each other simultaneously cannot
-    // deadlock — one or both are simply turned away.
-    const defenderLockKey = `grind:mine:${interaction.guild.id}:${defender.userId}`;
-    const defenderLock    = await _lockAcquire(defenderLockKey, 30_000);
+    // deadlock — one or both are simply turned away. The raider's own lease is a
+    // different key (theirs, taken by the wrapper below), so this cannot self-block.
+    const defenderLockKey = economyLockKey(interaction.guild.id, defender.userId);
+    const defenderLock    = await _lockAcquire(defenderLockKey, 30_000, 'raid');
     if (!defenderLock) {
+        // Deliberately vague about *what* they are doing: the lease is the
+        // shared economy one, so it is just as likely to be a hand of blackjack
+        // as a dig, and naming the wrong activity would be worse than naming
+        // none. It is also somebody else's business.
         return interaction.reply({
-            content: `**${targetUser.username}** is down in the mine right now — you can't get in behind them. Try again in a moment.`,
+            content: `**${targetUser.username}** is busy right now — you can't get in behind them. Try again in a moment.`,
             flags: MessageFlags.Ephemeral
         });
     }
@@ -2905,24 +2910,21 @@ async function handleRaid(interaction) {
 }
 
 
-// ── Per-user action lock ──────────────────────────────────────────────────────
+// ── Per-user economy lock ─────────────────────────────────────────────────────
 // Mining mutates the user document with read-modify-write saves, so concurrent
 // /mine invocations from the same user can race stamina, daily caps, and drops.
-// Serialize them: one mining action at a time per user.
+// The lock key is the player rather than this command, so a hand of blackjack
+// races the same document and contends for it too — see utils/economyLock.js.
 const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
-const _mineExecute = module.exports.execute;
-module.exports.execute = async function (interaction) {
-    const lockKey   = `grind:mine:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = await _lockAcquire(lockKey, 120_000);
-    if (!lockToken) {
-        return interaction.reply({
-            content: '⛏️ You already have a mining action in progress — finish it first.',
-            flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-    }
-    try {
-        return await _mineExecute(interaction);
-    } finally {
-        await _lockRelease(lockKey, lockToken);
-    }
-};
+const { withEconomyLock, exceptReadOnly, economyLockKey } = require('../../utils/economyLock');
+// Reads that persist nothing, so they never wait on a lease — see
+// exceptReadOnly. Everything else, including /mine raid, still locks.
+const MINE_READ_ONLY = [
+    'profile', 'map',
+    'inv view',
+    'shop list',
+];
+module.exports.execute = withEconomyLock(module.exports.execute, {
+    activity: 'mine',
+    only:     exceptReadOnly(MINE_READ_ONLY),
+});

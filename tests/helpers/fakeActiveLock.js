@@ -34,6 +34,12 @@ module.exports = {
         return options?.new ? doc : (existing ?? null);
     },
 
+    findOne(filter) {
+        const existing = locks.get(filter.key) ?? null;
+        // `.lean()` on a real query; here the stored object is already plain.
+        return { lean: async () => existing };
+    },
+
     async deleteOne(filter) {
         const existing = locks.get(filter.key);
         if (!existing || existing.token !== filter.token) return { deletedCount: 0 };

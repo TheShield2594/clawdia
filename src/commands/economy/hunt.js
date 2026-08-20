@@ -66,6 +66,159 @@ const { ensureQuests, onHunt, onEconomyEarn, notifyQuestComplete, notifyQuestNea
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
+const { chunkByLength } = require('../../utils/embedFields');
+const { paginate } = require('../../utils/paginator');
+
+// ── Aim phase timing ─────────────────────────────────────────────────────────
+// How long the shot stays perfect once the window opens, and how long after
+// that the trigger stays live at all.
+//
+// The window is wide on purpose, and timed from when the call reaches the
+// screen rather than from when the wait elapsed. It has to be comfortably
+// longer than the spread in players' round-trip times, or the grade goes back
+// to measuring connection quality: a hunter on a 400ms connection spends about
+// 650ms of the 900 on the wire and their own reaction, leaving a quarter of a
+// second in hand. What separates a perfect shot from a late one is whether the
+// player waited for the call, which is the same for everybody.
+const AIM_WINDOW_MS = 900;
+const AIM_LATE_MS   = 2500;
+
+/**
+ * Grades a shot by *when* it was fired relative to the window, and returns both
+ * the crit bonus and the embed that reports it.
+ *
+ * @param {number|null} shotMs  ms from the sights appearing to the trigger,
+ *                              or null if the trigger was never pulled
+ * @param {number} openAtMs     ms from the sights appearing to the call landing
+ *                              on screen — the moment the window opened
+ */
+function gradeShot(shotMs, openAtMs) {
+    const grade =
+        shotMs === null                    ? 'timeout' :
+        shotMs < openAtMs                  ? 'early'   :
+        shotMs <= openAtMs + AIM_WINDOW_MS ? 'perfect' :
+                                             'late';
+
+    const GRADES = {
+        perfect: {
+            bonus: 0.18, color: '#FFD700', title: '🎯 Perfect Shot!',
+            body: 'You held it until the moment came. **+18% crit chance** this hunt.',
+        },
+        late: {
+            bonus: 0.08, color: '#00CC66', title: '✅ Clean Shot!',
+            body: 'A beat behind the call, but the shot landed. **+8% crit chance** this hunt.',
+        },
+        // A rushed shot costs rather than merely failing to pay: an early
+        // trigger used to be impossible, so "don't fire too early" warned about
+        // nothing. It is a real decision now, so it has a real price.
+        early: {
+            bonus: -0.05, color: '#FF6B6B', title: '💨 You rushed it!',
+            body: 'You pulled before the shot lined up and the animal bolted at the noise. **−5% crit chance** this hunt.',
+        },
+        timeout: {
+            bonus: 0, color: '#888888', title: '⏰ Never took the shot',
+            body: 'The window closed with your finger still off the trigger. No aim bonus this hunt.',
+        },
+    };
+
+    const { bonus, color, title, body } = GRADES[grade];
+    return {
+        grade,
+        bonus,
+        embed: () => new EmbedBuilder().setColor(color).setTitle(title).setDescription(body),
+    };
+}
+
+
+/**
+ * The aim phase: hold the shot, take it when the target lines up.
+ *
+ * The Fire button is attached with the "sights" embed, not after it, so the
+ * shot can genuinely be taken early — which is what the footer has always
+ * warned about. The button used to arrive only once the wait had elapsed, so
+ * firing early was impossible and the grade was decided purely by how fast the
+ * click came back: under 800ms of round trip paid +18% crit, anything slower
+ * +8%. That scored the player's connection, not their play, and paid at least
+ * +8% for any click at all.
+ *
+ * Now the wait is the mechanic. The window opens at a random moment the player
+ * cannot anticipate and stays open long enough that a slow connection still
+ * comfortably clears it — so what separates the outcomes is *when* you fire,
+ * not how fast the wire is.
+ *
+ * Lives out here rather than inline in executeStart so the timing can be driven
+ * by a test: it is the one part of a hunt whose result depends on when things
+ * happen rather than on what they are.
+ *
+ * @returns the grade from `gradeShot`.
+ */
+async function runAimPhase(interaction, huntMsg) {
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+
+    const aimWaitMs = 1000 + Math.floor(Math.random() * 1001);
+
+    const fireId = `hunt_fire_${interaction.id}`;
+    const aimRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(fireId).setLabel('🔫 Fire!').setStyle(ButtonStyle.Danger)
+    );
+    const aimSightsEmbed = new EmbedBuilder()
+        .setColor('#8B0000')
+        .setTitle('🎯 Target in Sights…')
+        .setDescription('*Hold your breath… wait for the shot to line up.*')
+        .setFooter({ text: 'Fire when the shot is called — rush it and you spoil the shot.' });
+
+    await interaction.editReply({ embeds: [aimSightsEmbed], components: [aimRow] });
+    const aimTime = Date.now();
+
+    const collector = huntMsg.createMessageComponentCollector({
+        filter: i => i.user.id === interaction.user.id && i.customId === fireId,
+        time: aimWaitMs + AIM_LATE_MS,
+        max: 1,
+    });
+
+    let shotTaken = false;
+    const shot = new Promise(resolve => {
+        collector.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - aimTime); });
+        collector.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
+    }).then(ms => { shotTaken = ms !== null; return ms; });
+
+    // Call the shot when the window opens — unless it has already been taken,
+    // in which case editing to "FIRE!" would tell a player who jumped the gun
+    // that they were right on time.
+    //
+    // The window is timed from when the call is actually on screen, not from
+    // when the wait elapsed: the edit is a round trip of its own, and charging
+    // it to the player would put the latency straight back into the grade this
+    // phase exists to take it out of.
+    let windowOpensAt = aimWaitMs;
+    await Promise.race([shot, delay(aimWaitMs)]);
+    if (!shotTaken) {
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('💥 FIRE!')
+                .setDescription('**Take the shot — NOW!**')],
+            components: [aimRow],
+        });
+        windowOpensAt = Date.now() - aimTime;
+
+        // Re-arm for the same reason the window is timed from here. The
+        // collector was armed before the edit went out, so its deadline counts
+        // the edit's round trip against the player's grace period — a slow
+        // connection got less time to take a late shot than a fast one, which
+        // is the latency-decides-the-grade problem again at the other end of
+        // the window. AIM_LATE_MS is a promise about time after the call.
+        if (!shotTaken) collector.resetTimer({ time: AIM_LATE_MS });
+    }
+
+    const shotMs = await shot;
+    const aim    = gradeShot(shotMs, windowOpensAt);
+
+    await interaction.editReply({ embeds: [aim.embed()], components: [] });
+    await delay(600);
+
+    return aim;
+}
 
 const WILDERNESS_YIELD_BONUS = 0.10;
 
@@ -579,10 +732,11 @@ async function executeStart(interaction) {
         //   Partial  → stealthBonus = +0.05 (safe but suboptimal)
         //   Wrong    → stealthBonus = −0.10 (spooked the animal)
         //   Timeout  → stealthBonus = 0
-        // Phase 2 — Aim: a single quick timing window for the shot.
-        //   Perfect (<0.8s) → aimBonus = +0.18 crit chance
-        //   Good    (<2.5s) → aimBonus = +0.08 crit chance
-        //   Timeout         → aimBonus = 0
+        // Phase 2 — Aim: hold the shot until the target lines up, then fire.
+        //   In the window  → aimBonus = +0.18 crit chance
+        //   Late           → aimBonus = +0.08 crit chance
+        //   Early          → aimBonus = −0.05 crit chance (rushed the shot)
+        //   Timeout        → aimBonus = 0
 
         let stealthBonus = 0;
         let aimBonus     = 0;
@@ -674,54 +828,7 @@ async function executeStart(interaction) {
             await interaction.editReply({ embeds: [stealthResultEmbed], components: [] });
             await delay(800);
 
-            // ── Aim Phase ──────────────────────────────────────────────────────────
-            // Show "target in sights" then after a short wait show the FIRE! button.
-            const aimWaitMs = 1000 + Math.floor(Math.random() * 1001);
-            const aimSightsEmbed = new EmbedBuilder()
-                .setColor('#8B0000')
-                .setTitle('🎯 Target in Sights…')
-                .setDescription('*Hold your breath… wait for the right moment…*')
-                .setFooter({ text: 'Ready your shot — don\'t fire too early.' });
-            await interaction.editReply({ embeds: [aimSightsEmbed], components: [] });
-            await delay(aimWaitMs);
-
-            const fireId  = `hunt_fire_${interaction.id}`;
-            const aimEmbed = new EmbedBuilder()
-                .setColor('#FF0000')
-                .setTitle('💥 FIRE!')
-                .setDescription('**Take the shot — NOW!**');
-            const aimRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(fireId).setLabel('🔫 Fire!').setStyle(ButtonStyle.Danger)
-            );
-            await interaction.editReply({ embeds: [aimEmbed], components: [aimRow] });
-            const aimTime = Date.now();
-
-            const shotMs = await new Promise(resolve => {
-                const col = huntMsg.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && i.customId === fireId,
-                    time: 2500,
-                    max: 1,
-                });
-                col.on('collect', async i => { await i.deferUpdate(); resolve(Date.now() - aimTime); });
-                col.on('end',     (_, reason) => { if (reason !== 'limit') resolve(null); });
-            });
-
-            if (shotMs !== null && shotMs < 800) {
-                aimBonus = 0.18;
-            } else if (shotMs !== null) {
-                aimBonus = 0.08;
-            }
-
-            const aimResultEmbed = new EmbedBuilder()
-                .setColor(aimBonus >= 0.18 ? '#FFD700' : aimBonus > 0 ? '#00CC66' : '#888888')
-                .setTitle(aimBonus >= 0.18 ? '🎯 Perfect Shot!' : aimBonus > 0 ? '✅ Clean Shot!' : '⏰ Shot rushed…')
-                .setDescription(
-                    aimBonus >= 0.18 ? `Textbook precision. **+18% crit chance** this hunt.` :
-                    aimBonus > 0     ? `Solid hit. **+8% crit chance** this hunt.` :
-                                       `You hesitated on the trigger. No aim bonus this hunt.`
-                );
-            await interaction.editReply({ embeds: [aimResultEmbed], components: [] });
-            await delay(600);
+            aimBonus = (await runAimPhase(interaction, huntMsg)).bonus;
 
         } else {
             await interaction.deferReply();
@@ -882,6 +989,7 @@ async function executeStart(interaction) {
             else if (stealthBonus < 0) lines.push(`> 🔊 *Spooked the animal — −10% success*`);
             if (aimBonus >= 0.18) lines.push(`> 🎯 *Perfect shot — +18% crit chance*`);
             else if (aimBonus > 0) lines.push(`> ✅ *Clean shot — +8% crit chance*`);
+            else if (aimBonus < 0) lines.push(`> 💨 *Rushed shot — −5% crit chance*`);
             if (lines.length) embed.setDescription(desc + '\n' + lines.join('\n'));
         }
         // One consolidated field rather than one per bonus: Discord caps an embed at
@@ -1870,6 +1978,54 @@ async function executePrestige(interaction) {
 // INV (was /huntinv)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+const WEAPON_SEPARATOR = '\n\n';
+
+/**
+ * The weapon list, split into pages that each fit an embed description.
+ *
+ * This used to be one `lines.join('\n\n')` straight into `setDescription`. At
+ * roughly 180 characters an entry that overflows Discord's 4096-character cap
+ * at about 22 weapons, and the API rejects the whole embed — so the command
+ * stopped working entirely for the player who owned the most. The same defect
+ * broke `/hunt profile` at 56 trophies.
+ *
+ * Paged rather than trimmed, because the number in each heading is what
+ * `/hunt inv equip <#>` and `/hunt inv discard <#>` take: a weapon cut off the
+ * end of a `+N more` tail could never be equipped or thrown away again, and
+ * `/hunt inv discard` only accepts broken or condemned weapons — so the pile a
+ * trimmed list would hide is exactly the pile you cannot clear.
+ *
+ * Ordered equipped-first, then by tier descending, so page one is the one
+ * worth reading. The displayed number stays the weapon's index in `h.weapons`,
+ * which is what the other subcommands address it by.
+ */
+function buildWeaponPages(h) {
+    const ordered = h.weapons
+        .map((w, index) => ({ w, index }))
+        .sort((a, b) => {
+            if (a.index === h.equippedWeaponIndex) return -1;
+            if (b.index === h.equippedWeaponIndex) return 1;
+            return (b.w.tier ?? 0) - (a.w.tier ?? 0);
+        });
+
+    const lines = ordered.map(({ w, index }) => {
+        const wd         = WEAPON_BY_TIER[w.tier];
+        const statusIcon = weaponStatusEmoji(w.status);
+        const bar        = durabilityBar(w.currentDurability, w.maxDurability, 12);
+        const upgrade    = w.upgrade ? `[${w.upgrade.replace(/_/g, ' ')}]` : '';
+        const equipped   = index === h.equippedWeaponIndex ? ' **[EQUIPPED]**' : '';
+        return [
+            `**#${index + 1} — ${wd?.emoji ?? '🔫'} ${w.name}**${equipped}`,
+            `> ${statusIcon} ${w.status.toUpperCase()} · ${bar} ${w.currentDurability}/${w.maxDurability} dur`,
+            `> Repairs: ${w.repairCount} · Max: ${w.maxDurability}/${w.baseDurability} · ${upgrade || 'No upgrade'}`
+        ].join('\n');
+    });
+
+    // A page cap as well as a character budget: eight entries is a screenful,
+    // and a list that fills 4096 characters before it pages is one nobody reads.
+    return chunkByLength(lines, { separator: WEAPON_SEPARATOR, maxPerChunk: 8 });
+}
+
 async function executeInv(interaction, sub) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
     if (guildSettings?.economy?.enabled === false) {
@@ -1893,27 +2049,13 @@ async function executeInv(interaction, sub) {
             });
         }
 
-        const lines = h.weapons.map((w, i) => {
-            const isEquipped = i === h.equippedWeaponIndex;
-            const wd         = WEAPON_BY_TIER[w.tier];
-            const statusIcon = weaponStatusEmoji(w.status);
-            const bar        = durabilityBar(w.currentDurability, w.maxDurability, 12);
-            const upgrade    = w.upgrade ? `[${w.upgrade.replace(/_/g, ' ')}]` : '';
-            const equipped   = isEquipped ? ' **[EQUIPPED]**' : '';
-            return [
-                `**#${i + 1} — ${wd?.emoji ?? '🔫'} ${w.name}**${equipped}`,
-                `> ${statusIcon} ${w.status.toUpperCase()} · ${bar} ${w.currentDurability}/${w.maxDurability} dur`,
-                `> Repairs: ${w.repairCount} · Max: ${w.maxDurability}/${w.baseDurability} · ${upgrade || 'No upgrade'}`
-            ].join('\n');
-        });
-
-        const embed = new EmbedBuilder()
+        const pages = buildWeaponPages(h).map((lines, page, all) => new EmbedBuilder()
             .setColor('#3498db')
-            .setTitle('🔫 Your Weapons')
-            .setDescription(lines.join('\n\n'))
-            .setFooter({ text: 'Use /hunt inv equip <#> to change weapon • /hunt shop repair to restore durability • /hunt shop upgrade for modules' });
+            .setTitle(all.length > 1 ? `🔫 Your Weapons (${h.weapons.length})` : '🔫 Your Weapons')
+            .setDescription(lines.join(WEAPON_SEPARATOR))
+            .setFooter({ text: 'Use /hunt inv equip <#> to change weapon • /hunt shop repair to restore durability • /hunt shop upgrade for modules' }));
 
-        return interaction.reply({ embeds: [embed] });
+        return paginate(interaction, pages);
     }
 
     if (sub === 'equip') {
@@ -2010,18 +2152,26 @@ async function executeInv(interaction, sub) {
             .filter(([, qty]) => qty > 0)
             .map(([id, qty]) => `• **${MATERIAL_NAMES[id] ?? id}** ×${qty}`);
 
-        const embed = new EmbedBuilder()
-            .setColor('#1abc9c')
-            .setTitle('🪨 Crafting Materials')
-            .setDescription(entries.length ? entries.join('\n') : 'No materials yet. Hunt rare+ animals to find special drops!');
+        const footer = entries.length
+            ? 'Every material feeds a recipe — see /craft list. Each zone ends in a permanent Field Trophy.'
+            : 'Tip: Use bait from /hunt shop to boost rare animal chances';
 
-        embed.setFooter({
-            text: entries.length
-                ? 'Every material feeds a recipe — see /craft list. Each zone ends in a permanent Field Trophy.'
-                : 'Tip: Use bait from /hunt shop to boost rare animal chances',
-        });
+        // Bounded by the 58 material ids to about 1,700 characters, so this
+        // fits today — but it is the same join-and-hope shape the weapon list
+        // broke on, and the material table only ever grows.
+        const pages = entries.length
+            ? chunkByLength(entries).map(lines => new EmbedBuilder()
+                .setColor('#1abc9c')
+                .setTitle('🪨 Crafting Materials')
+                .setDescription(lines.join('\n'))
+                .setFooter({ text: footer }))
+            : [new EmbedBuilder()
+                .setColor('#1abc9c')
+                .setTitle('🪨 Crafting Materials')
+                .setDescription('No materials yet. Hunt rare+ animals to find special drops!')
+                .setFooter({ text: footer })];
 
-        return interaction.reply({ embeds: [embed] });
+        return paginate(interaction, pages);
     }
 
     if (sub === 'discard') {
@@ -2285,6 +2435,48 @@ async function executeShop(interaction, sub) {
     }
 }
 
+/**
+ * How the top of the weapon ladder is priced, and why it says so out loud.
+ *
+ * Hunt income has a ceiling: payouts halve above `DAILY_SOFT_CAP` (80,000) and
+ * stop entirely at `DAILY_HARD_CAP`. Measured against that ceiling, the last
+ * few tiers cost more than hunting can plausibly produce — a T12 Altair Rifle
+ * is 250 days of hunting at the soft cap, and a full repair on one is another
+ * 80, of which it has about eight before the shop wears it out for good.
+ *
+ * The numbers are not wrong. Hunting is not the only thing that feeds a wallet
+ * — casino, work, crime, heist and the rest all pay into the same balance, and
+ * the daily caps are hunt-specific — so the top tiers are whole-economy
+ * purchases by design. What was wrong is that nothing said so: a hunter looking
+ * at the shop had no way to tell the ladder stops being hunt-funded partway up,
+ * and could grind toward a number hunting cannot reach.
+ *
+ * Derived from the caps rather than hardcoded to a tier, so it stays true if
+ * either the prices or the caps move.
+ */
+const CROSS_ECONOMY_DAYS = 30;
+
+/** Days of hunting at the soft cap that `cost` represents. */
+function huntingDaysFor(cost) {
+    return cost / LIMITS.DAILY_SOFT_CAP;
+}
+
+/** Cost of taking a fresh weapon of this tier from empty back to full. */
+function fullRepairCost(weapon) {
+    return Math.ceil(weapon.baseDurability / 20) * weapon.repairCostPer20;
+}
+
+/** True for a weapon hunting alone cannot realistically pay for. */
+function isCrossEconomyWeapon(weapon) {
+    return huntingDaysFor(weapon.cost) > CROSS_ECONOMY_DAYS;
+}
+
+/** Rounded day count for display — "~250 days", never "249.9". */
+function huntingDaysLabel(cost) {
+    const days = huntingDaysFor(cost);
+    return days >= 10 ? Math.round(days) : Math.round(days * 10) / 10;
+}
+
 async function showShopList(interaction, user, currency) {
     const h = user.hunt;
 
@@ -2295,10 +2487,19 @@ async function showShopList(interaction, user, currency) {
         emoji:   w.emoji,
         badge:   `T${w.tier}`,
         subline: `${Math.round(w.successRate * 100)}% • +${Math.round(w.rarityBoost * 100)}% rare`
+            + (isCrossEconomyWeapon(w) ? ` • 🌐 ~${huntingDaysLabel(w.cost)}d of hunting` : '')
     }));
-    const weaponList = WEAPON_TIERS.map(w =>
-        `${w.emoji} **${w.name}** — ${currency}${w.cost.toLocaleString()} · \`/hunt shop weapon type:${w.slug}\``
-    ).join('\n');
+    const weaponLines = WEAPON_TIERS.map(w =>
+        `${w.emoji} **${w.name}** — ${currency}${w.cost.toLocaleString()}`
+        + (isCrossEconomyWeapon(w) ? ` 🌐` : '')
+        + ` · \`/hunt shop weapon type:${w.slug}\``
+    );
+    // The legend goes in the embed description rather than the banner subtitle:
+    // the banner is drawn with fillText on a canvas, which has no line breaks.
+    if (WEAPON_TIERS.some(isCrossEconomyWeapon)) {
+        weaponLines.push('', '🌐 *Costs more than hunting alone can fund — casino, work, crime and the rest all pay into the same wallet.*');
+    }
+    const weaponList = weaponLines.join('\n');
 
     const upgradeItems = Object.values(WEAPON_UPGRADES).map(u => ({
         imageId: `hunt:${u.id}`,
@@ -2397,6 +2598,24 @@ async function handleBuyWeapon(interaction, user, currency) {
             { name: 'Your Balance', value: `${currency}${user.balance.toLocaleString()}`,                             inline: true }
         )
         .setFooter({ text: 'Confirmation expires in 30 seconds' });
+
+    // The one place a hunter commits to the number, so it is the place to say
+    // what the number means. A weapon is a consumable — every shop repair drops
+    // maxDurability by 10% of base, so the top tiers cost their purchase price
+    // again several times over before they are condemned — and at the top of
+    // the ladder none of it is fundable from hunting alone.
+    if (isCrossEconomyWeapon(weaponData)) {
+        const repair = fullRepairCost(weaponData);
+        confirmEmbed.addFields({
+            name: '🌐 A whole-economy purchase',
+            value: [
+                `Hunting is capped at ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} a day before payouts halve, so this is about **${huntingDaysLabel(weaponData.cost)} days** of hunting on its own.`,
+                `A full repair runs ${currency}${repair.toLocaleString()} — another **${huntingDaysLabel(repair)} days** — and it has roughly eight before the wear condemns it.`,
+                `It is priced for a wallet fed by everything you do: casino, work, crime, heists and the rest all pay into the same balance.`,
+            ].join('\n'),
+            inline: false,
+        });
+    }
 
     const weaponImg = await getItemImageAttachment(`hunt:${weaponData.slug || weaponData.id}`).catch(() => null);
     if (weaponImg) confirmEmbed.setThumbnail(weaponImg.url);
@@ -3108,26 +3327,24 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, runAimPhase, AIM_WINDOW_MS, AIM_LATE_MS, isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS };
 
-// ── Per-user action lock ──────────────────────────────────────────────────────
+// ── Per-user economy lock ─────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent
 // /hunt invocations from the same user can race stamina, daily caps, and drops.
-// Serialize them: one hunting action at a time per user.
-const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
-const _huntExecute = module.exports.execute;
-module.exports.execute = async function (interaction) {
-    const lockKey   = `grind:hunt:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = await _lockAcquire(lockKey, 120_000);
-    if (!lockToken) {
-        return interaction.reply({
-            content: '🏹 You already have a hunting action in progress — finish it first.',
-            flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-    }
-    try {
-        return await _huntExecute(interaction);
-    } finally {
-        await _lockRelease(lockKey, lockToken);
-    }
-};
+// The lock key is the player rather than this command, so a hand of blackjack
+// races the same document and contends for it too — see utils/economyLock.js.
+const { withEconomyLock, exceptReadOnly } = require('../../utils/economyLock');
+// Reads that persist nothing, so they never wait on a lease — see
+// exceptReadOnly. Everything else, including /hunt inv equip and discard,
+// still locks.
+const HUNT_READ_ONLY = [
+    'profile',
+    'inv weapons', 'inv ammo', 'inv consumables', 'inv materials',
+    'shop list',
+    'zone list',
+];
+module.exports.execute = withEconomyLock(module.exports.execute, {
+    activity: 'hunt',
+    only:     exceptReadOnly(HUNT_READ_ONLY),
+});

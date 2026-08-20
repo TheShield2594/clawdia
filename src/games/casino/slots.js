@@ -6,6 +6,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User = require('../../models/User');
+const { placeWager } = require('../../utils/placeWager');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const Guild = require('../../models/Guild');
@@ -205,7 +206,7 @@ module.exports = {
                 .setMinValue(10)
                 .setMaxValue(1_000_000_000)
                 .setRequired(true)),
-    async execute(interaction, { releaseLock } = {}) {
+    async execute(interaction, { releaseLock, onWager } = {}) {
         const bet           = interaction.options.getInteger('bet');
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         const casinoMaxBet  = guildSettings?.economy?.casinoMaxBet ?? 0;
@@ -218,14 +219,14 @@ module.exports = {
         const { shouldProceed: slProceed, alreadyReplied: slReplied } = await confirmBet(interaction, bet, wallet, 'Slots', guildSettings);
         if (!slProceed) { releaseLock?.(); return; }
         if (!slReplied) await interaction.deferReply();
-        await playSlots(interaction, bet, releaseLock);
+        await playSlots(interaction, bet, releaseLock, onWager);
     },
 };
 
 // releaseLock is called once the spin settles into a result — "Spin Again"
 // starts a brand-new hand with its own atomic debit, so it doesn't need the
 // lock re-held.
-async function playSlots(interaction, bet, releaseLock) {
+async function playSlots(interaction, bet, releaseLock, onWager) {
     const userFilter  = { userId: interaction.user.id, guildId: interaction.guild.id };
     const guildFilter = { guildId: interaction.guild.id };
     try {
@@ -250,11 +251,7 @@ async function playSlots(interaction, bet, releaseLock) {
         const totalCoinMult    = coinMult * serverMult;
 
         // ── Debit the bet FIRST, before any pool mutations ─────────────────
-        const debited = await User.findOneAndUpdate(
-            { ...userFilter, balance: { $gte: bet } },
-            { $inc: { balance: -bet } },
-            { new: true }
-        );
+        const debited = await placeWager(userFilter, bet, { onWager });
         if (!debited) {
             releaseLock?.();
             const fresh = await User.findOne(userFilter);
@@ -467,7 +464,7 @@ async function playSlots(interaction, bet, releaseLock) {
             }
             collector.stop('replay');
             await i.deferUpdate();
-            await playSlots(interaction, bet, null);
+            await playSlots(interaction, bet, null, onWager);
         });
 
         collector.on('end', (_, reason) => {

@@ -6,6 +6,7 @@ const {
     activateConsumable,
     resolveApexEncounter,
     calculateSuccessChance,
+    applyAimBonus,
 } = require('../src/services/huntService');
 const { ZONES, LIMITS } = require('../src/data/huntData');
 
@@ -109,5 +110,30 @@ describe('resolveApexEncounter', () => {
 
         expect(user.hunt.weapons[0].currentDurability).toBeLessThan(80);
         expect(user.hunt.weapons[1].currentDurability).toBe(80);
+    });
+});
+
+describe('applyAimBonus', () => {
+    test('leaves crit chance alone when the aim phase did not run', () => {
+        expect(applyAimBonus(0.08)).toBe(0.08);
+        expect(applyAimBonus(0.08, 0)).toBe(0.08);
+    });
+
+    test('adds a shot taken inside the window', () => {
+        expect(applyAimBonus(0.05, 0.18)).toBeCloseTo(0.23);
+    });
+
+    test('takes the penalty off a rushed shot', () => {
+        // The old guard was `aimBonus > 0`, which threw the penalty away — so a
+        // player who fired early paid nothing for it.
+        expect(applyAimBonus(0.20, -0.05)).toBeCloseTo(0.15);
+    });
+
+    test('never pushes crit chance below zero', () => {
+        expect(applyAimBonus(0.03, -0.05)).toBe(0);
+    });
+
+    test('still respects the hard cap', () => {
+        expect(applyAimBonus(0.20, 0.18)).toBe(LIMITS.MAX_CRIT_CHANCE);
     });
 });

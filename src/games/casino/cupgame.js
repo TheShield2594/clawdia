@@ -6,6 +6,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
+const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
@@ -49,7 +50,7 @@ function buildReveal(queenPos) {
 // hand) and called once the hand truly settles — final loss/win or a cash-out
 // — but not held through "Play Again", since a replay re-debits atomically
 // just like any fresh bet.
-async function playMonte(interaction, bet, round = 1, releaseLock) {
+async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -58,11 +59,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock) {
     if (round === 1) {
         try {
             const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-            debited = await User.findOneAndUpdate(
-                { ...userFilter, balance: { $gte: bet } },
-                { $inc: { balance: -bet } },
-                { new: true }
-            );
+            debited = await placeWager(userFilter, bet, { onWager });
 
             if (!debited) {
                 releaseLock?.();
@@ -298,7 +295,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock) {
                 time: 60_000,
             }).on('collect', async i => {
                 await i.deferUpdate();
-                await playMonte(interaction, bet);
+                await playMonte(interaction, bet, 1, null, onWager);
             }).on('end', (_, reason) => {
                 if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
             });
@@ -381,7 +378,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock) {
                         max: 1, time: 60_000,
                     }).on('collect', async i => {
                         await i.deferUpdate();
-                        await playMonte(interaction, bet);
+                        await playMonte(interaction, bet, 1, null, onWager);
                     }).on('end', (_, reason) => {
                         if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
                     });
@@ -389,7 +386,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock) {
 
                 } else {
                     // Double or Nothing — recurse with next round (no payout yet)
-                    await playMonte(interaction, bet, round + 1, releaseLock);
+                    await playMonte(interaction, bet, round + 1, releaseLock, onWager);
                 }
 
             } catch {
@@ -433,7 +430,7 @@ module.exports = {
                 .setMinValue(MIN_BET)
                 .setMaxValue(1_000_000_000)),
 
-    async execute(interaction, { releaseLock } = {}) {
+    async execute(interaction, { releaseLock, onWager } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
             releaseLock?.();
@@ -461,6 +458,6 @@ module.exports = {
         const { shouldProceed, alreadyReplied } = await confirmBet(interaction, bet, user.balance, 'Three Card Monte', guildSettings);
         if (!shouldProceed) { releaseLock?.(); return; }
         if (!alreadyReplied) await interaction.deferReply();
-        await playMonte(interaction, bet, 1, releaseLock);
+        await playMonte(interaction, bet, 1, releaseLock, onWager);
     },
 };

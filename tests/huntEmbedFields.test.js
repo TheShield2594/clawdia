@@ -6,12 +6,13 @@ jest.mock('../src/models/GrindProfile', () => ({ find: jest.fn(), findOneAndUpda
 
 const { __test__ } = require('../src/commands/economy/hunt');
 const { buildHuntEmbed, buildBonusLines } = __test__;
-const { ZONES, ANIMALS, TROPHY_QUALITIES, LIMITS } = require('../src/data/huntData');
+const { ZONES, ANIMALS, TROPHY_QUALITIES, LIMITS, WEAPON_TIERS, WEAPON_UPGRADES } = require('../src/data/huntData');
 
 // Discord's hard limits.
 const MAX_FIELDS      = 25;
 const MAX_FIELD_VALUE = 1024;
 const MAX_FIELD_NAME  = 256;
+const MAX_DESCRIPTION = 4096;
 
 // executeStart appends at most two further fields after buildHuntEmbed returns:
 // the consolidated "Bonuses" field and the rare-companion drop.
@@ -214,5 +215,170 @@ describe('trophy case', () => {
         const field = buildTrophyField(few);
         expect(field.value).toBe('🔷 Pristine Wolf, 🟢 Good Rabbit');
         expect(field.name).toBe('🏆 Trophies (2)');
+    });
+});
+
+describe('weapon inventory pages', () => {
+    const { buildWeaponPages, WEAPON_SEPARATOR } = __test__;
+
+    /**
+     * The longest entry the renderer can ever produce for a tier: the longest
+     * weapon name, the longest upgrade label, and the widest durability and
+     * repair-count numbers a real weapon reaches.
+     */
+    function weapon(tier, overrides = {}) {
+        const def = WEAPON_TIERS.find(w => w.tier === tier);
+        const longestUpgrade = Object.keys(WEAPON_UPGRADES)
+            .sort((a, b) => b.length - a.length)[0];
+        return {
+            tier,
+            name: def.name,
+            status: 'condemned',
+            currentDurability: def.baseDurability,
+            maxDurability: def.baseDurability,
+            baseDurability: def.baseDurability,
+            repairCount: 99,
+            upgrade: longestUpgrade,
+            ...overrides,
+        };
+    }
+
+    /**
+     * The worst inventory the game can produce. `/hunt inv discard` only accepts
+     * broken or condemned weapons and `/hunt shop weapon` caps nothing, so a
+     * player who replaces working weapons accumulates them permanently — there
+     * is no upper bound to test against, only "far past where it used to break".
+     */
+    function hoarder(count) {
+        return {
+            equippedWeaponIndex: count - 1,
+            weapons: Array.from({ length: count }, (_, i) =>
+                weapon(WEAPON_TIERS[i % WEAPON_TIERS.length].tier)),
+        };
+    }
+
+    it('keeps every page inside the description limit for a hoarded inventory', () => {
+        // 200 is an order of magnitude past the ~22 that used to fail the API
+        // call outright and take the whole command down with it.
+        for (const page of buildWeaponPages(hoarder(200))) {
+            expect(page.join(WEAPON_SEPARATOR).length).toBeLessThanOrEqual(MAX_DESCRIPTION);
+        }
+    });
+
+    it('loses no weapon to paging — every number is still reachable', () => {
+        const h = hoarder(200);
+        const shown = buildWeaponPages(h).flat()
+            .map(line => Number(line.match(/^\*\*#(\d+) /)[1]));
+
+        expect(shown.slice().sort((a, b) => a - b))
+            .toEqual(Array.from({ length: 200 }, (_, i) => i + 1));
+    });
+
+    it('numbers each weapon by its index in the inventory, not its position on the page', () => {
+        // /hunt inv equip and /hunt inv discard address weapons by that index,
+        // so a display order that renumbered them would equip the wrong rifle.
+        const h = hoarder(30);
+        const equipped = buildWeaponPages(h)[0][0];
+        expect(equipped).toContain(`#${h.equippedWeaponIndex + 1} `);
+        expect(equipped).toContain('[EQUIPPED]');
+    });
+
+    it('puts the equipped weapon first and the rest by tier descending', () => {
+        const h = {
+            equippedWeaponIndex: 2,
+            weapons: [weapon(12), weapon(1), weapon(5)],
+        };
+        const tiers = buildWeaponPages(h).flat()
+            .map(line => Number(line.match(/^\*\*#(\d+) /)[1]));
+
+        expect(tiers).toEqual([3, 1, 2]); // equipped (#3), then T12 (#1), then T1 (#2)
+    });
+
+    it('fits a normal inventory on one page', () => {
+        expect(buildWeaponPages(hoarder(8))).toHaveLength(1);
+        expect(buildWeaponPages(hoarder(9))).toHaveLength(2);
+    });
+});
+
+describe('aim phase grading', () => {
+    const { gradeShot, AIM_WINDOW_MS, AIM_LATE_MS } = __test__;
+    const OPEN_AT = 1500; // the randomised moment the window opens
+
+    it('pays the top bonus for a shot inside the window', () => {
+        expect(gradeShot(OPEN_AT, OPEN_AT).bonus).toBe(0.18);
+        expect(gradeShot(OPEN_AT + AIM_WINDOW_MS, OPEN_AT).bonus).toBe(0.18);
+    });
+
+    it('pays less for a shot after the window has closed', () => {
+        expect(gradeShot(OPEN_AT + AIM_WINDOW_MS + 1, OPEN_AT).grade).toBe('late');
+        expect(gradeShot(OPEN_AT + AIM_LATE_MS, OPEN_AT).bonus).toBe(0.08);
+    });
+
+    it('charges for a shot fired before the window opened', () => {
+        // The mechanic the footer has always described. It used to be
+        // unreachable — the button did not exist yet — so mashing the trigger
+        // the instant it appeared was the *optimal* play and paid at least +8%.
+        expect(gradeShot(OPEN_AT - 1, OPEN_AT).grade).toBe('early');
+        expect(gradeShot(0, OPEN_AT).bonus).toBeLessThan(0);
+    });
+
+    it('pays nothing at all for never firing', () => {
+        expect(gradeShot(null, OPEN_AT).bonus).toBe(0);
+    });
+
+    it('grades on when the shot came, not how fast the wire is', () => {
+        // The old rule: under 800ms of round trip → +18%, otherwise +8%. The
+        // same play from a player 400ms further from Discord scored worse for
+        // no reason a hunter could act on. These two fire at the same moment
+        // relative to the call, 300ms apart in absolute terms, and grade the
+        // same.
+        const quick = gradeShot(OPEN_AT + 120, OPEN_AT);
+        const laggy = gradeShot(OPEN_AT + 420, OPEN_AT);
+
+        expect(quick.grade).toBe('perfect');
+        expect(laggy.grade).toBe('perfect');
+    });
+
+    it('leaves the window wide enough that a slow connection can still clear it', () => {
+        // Half a second of usable window at 400ms of round trip is twice a
+        // human reaction time; anything tighter grades the connection again.
+        expect(AIM_WINDOW_MS).toBeGreaterThanOrEqual(2 * 400);
+    });
+});
+
+describe('weapon pricing legibility', () => {
+    const { isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS } = __test__;
+    const byTier = tier => WEAPON_TIERS.find(w => w.tier === tier);
+
+    it('measures a price in days of hunting at the soft cap', () => {
+        // The cap is what makes the top of the ladder unreachable by hunting:
+        // payouts halve above it, so it is the honest ceiling to divide by.
+        expect(huntingDaysFor(LIMITS.DAILY_SOFT_CAP)).toBe(1);
+        expect(huntingDaysLabel(byTier(12).cost)).toBe(250);
+    });
+
+    it('prices a full repair the way the shop actually charges for one', () => {
+        // Repairs are sold in 20-durability units, rounded up — a rifle whose
+        // base durability is not a multiple of 20 pays for the part-unit.
+        const t12 = byTier(12);
+        expect(fullRepairCost(t12)).toBe(Math.ceil(t12.baseDurability / 20) * t12.repairCostPer20);
+        expect(fullRepairCost(t12)).toBe(6_440_000);
+    });
+
+    it('marks exactly the tiers hunting cannot fund', () => {
+        const marked = WEAPON_TIERS.filter(isCrossEconomyWeapon).map(w => w.tier);
+        expect(marked).toEqual([10, 11, 12]);
+    });
+
+    it('leaves T9 unmarked — fifteen days is a grind, not an impossibility', () => {
+        expect(huntingDaysFor(byTier(9).cost)).toBeLessThanOrEqual(CROSS_ECONOMY_DAYS);
+        expect(isCrossEconomyWeapon(byTier(9))).toBe(false);
+    });
+
+    it('derives the mark from the caps, not from a hardcoded tier', () => {
+        // Halve every price and nothing is out of reach any more. A rule pinned
+        // to "T10 and up" would still be marking the same three.
+        const cheap = WEAPON_TIERS.map(w => ({ ...w, cost: CROSS_ECONOMY_DAYS * LIMITS.DAILY_SOFT_CAP }));
+        expect(cheap.filter(isCrossEconomyWeapon)).toEqual([]);
     });
 });

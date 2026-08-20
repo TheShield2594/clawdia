@@ -1305,24 +1305,16 @@ async function handleProfile(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
-// ── Per-user action lock ──────────────────────────────────────────────────────
+// ── Per-user economy lock ─────────────────────────────────────────────────────
 // Exploration mutates the user document with read-modify-write saves, and an
-// expedition can sit for 20s waiting on the encounter prompt. Serialize them:
-// one exploration action at a time per user, matching /fish, /hunt and /mine.
-const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
-const _exploreExecute = module.exports.execute;
-module.exports.execute = async function (interaction) {
-    const lockKey   = `grind:explore:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = await _lockAcquire(lockKey, 120_000);
-    if (!lockToken) {
-        return interaction.reply({
-            content: '🥾 You already have an exploration action in progress — finish it first.',
-            flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-    }
-    try {
-        return await _exploreExecute(interaction);
-    } finally {
-        await _lockRelease(lockKey, lockToken);
-    }
-};
+// expedition can sit for 20s waiting on the encounter prompt. The lock key is
+// the player rather than this command, so every other money-moving command
+// contends for it too — see utils/economyLock.js.
+const { withEconomyLock, exceptReadOnly } = require('../../utils/economyLock');
+// Reads that persist nothing, so they never wait on a lease — see
+// exceptReadOnly. `go` and `travel` still lock.
+const EXPLORE_READ_ONLY = ['map', 'regions', 'journal', 'relics', 'profile'];
+module.exports.execute = withEconomyLock(module.exports.execute, {
+    activity: 'explore',
+    only:     exceptReadOnly(EXPLORE_READ_ONLY),
+});

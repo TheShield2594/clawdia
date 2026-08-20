@@ -6,6 +6,7 @@ const {
     MessageFlags,
 } = require('discord.js');
 const User  = require('../../models/User');
+const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
@@ -154,7 +155,7 @@ function embedAuthor(interaction) {
 // releaseLock is called at every terminal point of a hand (dealer/player
 // fold at any street, showdown, or a timeout refund) — "Play Again" starts
 // a brand-new hand with its own atomic debit, so it isn't passed releaseLock.
-async function playPoker(interaction, bet, releaseLock) {
+async function playPoker(interaction, bet, releaseLock, onWager) {
     const userFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
     let debited = null;
     let settled = false;
@@ -162,11 +163,7 @@ async function playPoker(interaction, bet, releaseLock) {
     try {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
 
-        debited = await User.findOneAndUpdate(
-            { ...userFilter, balance: { $gte: bet } },
-            { $inc: { balance: -bet } },
-            { new: true }
-        );
+        debited = await placeWager(userFilter, bet, { onWager });
 
         if (!debited) {
             releaseLock?.();
@@ -290,11 +287,9 @@ async function playPoker(interaction, bet, releaseLock) {
         } else if (preFlopAction === 'call' || preFlopAction === 'raise') {
             // Player calls dealer raise or makes their own raise
             const extraBet = bet;
-            const raised = await User.findOneAndUpdate(
-                { ...userFilter, balance: { $gte: extraBet } },
-                { $inc: { balance: -extraBet } },
-                { new: true }
-            );
+            // More money on a hand already counted — no onWager, or calling a
+            // dealer raise would score as another game played.
+            const raised = await placeWager(userFilter, extraBet);
             if (raised) {
                 debited = raised;
                 playerStake += extraBet;
@@ -419,11 +414,7 @@ async function playPoker(interaction, bet, releaseLock) {
         } else if (flopAction === 'call' || flopAction === 'raise') {
             const raiseAmt = Math.min(bet, debited.balance);
             if (raiseAmt > 0) {
-                const raised = await User.findOneAndUpdate(
-                    { ...userFilter, balance: { $gte: raiseAmt } },
-                    { $inc: { balance: -raiseAmt } },
-                    { new: true }
-                );
+                const raised = await placeWager(userFilter, raiseAmt);
                 if (raised) {
                     debited = raised;
                     playerStake += raiseAmt;
@@ -546,11 +537,7 @@ async function playPoker(interaction, bet, releaseLock) {
         } else if (turnAction === 'call' || turnAction === 'raise') {
             const raiseAmt = Math.min(bet, debited.balance);
             if (raiseAmt > 0) {
-                const raised = await User.findOneAndUpdate(
-                    { ...userFilter, balance: { $gte: raiseAmt } },
-                    { $inc: { balance: -raiseAmt } },
-                    { new: true }
-                );
+                const raised = await placeWager(userFilter, raiseAmt);
                 if (raised) {
                     debited = raised;
                     playerStake += raiseAmt;
@@ -671,11 +658,7 @@ async function playPoker(interaction, bet, releaseLock) {
         } else if (riverAction === 'call' || riverAction === 'raise') {
             const raiseAmt = Math.min(bet, debited.balance);
             if (raiseAmt > 0) {
-                const raised = await User.findOneAndUpdate(
-                    { ...userFilter, balance: { $gte: raiseAmt } },
-                    { $inc: { balance: -raiseAmt } },
-                    { new: true }
-                );
+                const raised = await placeWager(userFilter, raiseAmt);
                 if (raised) {
                     debited = raised;
                     playerStake += raiseAmt;
@@ -780,7 +763,7 @@ async function playPoker(interaction, bet, releaseLock) {
             time: 60_000,
         }).on('collect', async i => {
             await i.deferUpdate();
-            await playPoker(interaction, bet, null);
+            await playPoker(interaction, bet, null, onWager);
         }).on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});
         });
@@ -808,7 +791,7 @@ module.exports = {
                 .setMinValue(MIN_BET)
                 .setMaxValue(1_000_000_000)),
 
-    async execute(interaction, { releaseLock } = {}) {
+    async execute(interaction, { releaseLock, onWager } = {}) {
         const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
         if (guildSettings?.economy?.enabled === false || guildSettings?.economy?.gamesEnabled === false) {
             releaseLock?.();
@@ -835,6 +818,6 @@ module.exports = {
         const { shouldProceed: pkProceed, alreadyReplied: pkReplied } = await confirmBet(interaction, bet, user.balance, 'Poker', guildSettings);
         if (!pkProceed) { releaseLock?.(); return; }
         if (!pkReplied) await interaction.deferReply();
-        await playPoker(interaction, bet, releaseLock);
+        await playPoker(interaction, bet, releaseLock, onWager);
     },
 };

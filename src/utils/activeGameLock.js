@@ -27,6 +27,11 @@
  * Acquisition returns a lease token; release requires the matching token, so a
  * holder whose lease expired — and whose key was then taken by a newer flow —
  * cannot release the new holder's lock.
+ *
+ * An acquire also records what the lease is being held *for*. One key now
+ * covers every money-moving command a user can run (see utils/economyLock.js),
+ * so "you already have something in progress" is only useful if it can say
+ * which something — `holderActivity` is how the turned-away call finds out.
  */
 
 const ActiveLock = require('../models/ActiveLock');
@@ -55,14 +60,14 @@ function isDuplicateKey(err) {
  * for something that gates money, and if Mongo is unreachable the action it
  * guards has nothing to write to anyway.
  */
-async function tryAcquire(key, ttlMs = DEFAULT_TTL_MS) {
+async function tryAcquire(key, ttlMs = DEFAULT_TTL_MS, activity = null) {
     const now   = Date.now();
     const token = mintToken(now);
 
     try {
         const lock = await ActiveLock.findOneAndUpdate(
             { key, expiresAt: { $lte: new Date(now) } },
-            { $set: { key, token, expiresAt: new Date(now + ttlMs) } },
+            { $set: { key, token, expiresAt: new Date(now + ttlMs), activity } },
             { new: true, upsert: true },
         );
         // Someone else's token coming back would mean a concurrent takeover won.
@@ -70,6 +75,25 @@ async function tryAcquire(key, ttlMs = DEFAULT_TTL_MS) {
     } catch (err) {
         if (isDuplicateKey(err)) return null;
         console.error('[activeGameLock] acquire failed:', err);
+        return null;
+    }
+}
+
+/**
+ * What the live lease on `key` is being held for, or null if nothing holds it,
+ * the holder recorded no activity, or the read failed.
+ *
+ * Only ever used to word a message, so every failure answers null and lets the
+ * caller fall back to generic phrasing — never to decide whether a lock is held,
+ * which is `tryAcquire`'s job and has to stay a single atomic operation.
+ */
+async function holderActivity(key) {
+    try {
+        const lock = await ActiveLock.findOne({ key }).lean();
+        if (!lock || lock.expiresAt <= new Date()) return null;
+        return lock.activity ?? null;
+    } catch (err) {
+        console.error('[activeGameLock] holder lookup failed:', err);
         return null;
     }
 }
@@ -92,4 +116,4 @@ async function release(key, token) {
     }
 }
 
-module.exports = { tryAcquire, release, DEFAULT_TTL_MS };
+module.exports = { tryAcquire, holderActivity, release, DEFAULT_TTL_MS };

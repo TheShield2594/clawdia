@@ -137,14 +137,27 @@ beforeEach(() => {
 // per-command regression, not a shared-helper one, and only a per-command test
 // catches it.
 
+// One key for all four — that is the property under test now, not an incidental
+// duplication in the table.
+const KEY = 'economy:g1:u1';
+
 const GRIND = [
-    { name: 'hunt',    sub: 'start', busy: /hunting action in progress/,     key: 'grind:hunt:g1:u1' },
-    { name: 'mine',    sub: 'dig',   busy: /mining action in progress/,      key: 'grind:mine:g1:u1' },
-    { name: 'fish',    sub: 'cast',  busy: /fishing action in progress/,     key: 'grind:fish:g1:u1' },
-    { name: 'explore', sub: 'go',    busy: /exploration action in progress/, key: 'grind:explore:g1:u1' },
+    // `read` is a subcommand from that command's read-only allowlist. hunt and
+    // fish use a grouped one, which also exercises the "group sub" key form.
+    { name: 'hunt',    sub: 'start', busy: /hunting action in progress/, read: { group: 'shop', sub: 'list' } },
+    { name: 'mine',    sub: 'dig',   busy: /mining action in progress/,  read: { sub: 'map' } },
+    { name: 'fish',    sub: 'cast',  busy: /fishing action in progress/, read: { group: 'shop', sub: 'list' } },
+    { name: 'explore', sub: 'go',    busy: /exploration in progress/,    read: { sub: 'journal' } },
 ];
 
-describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub, busy, key }) => {
+describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub, busy, read }) => {
+    const key = KEY;
+    /** An interaction for a read-only subcommand, grouped or not. */
+    const readInteraction = ({ group = null, sub: readSub }) => {
+        const interaction = makeInteraction({ sub: readSub });
+        interaction.options.getSubcommandGroup = () => group;
+        return interaction;
+    };
     const command = require(`../src/commands/economy/${name}`);
     const interactionFor = overrides => makeInteraction({ sub, ...overrides });
 
@@ -230,6 +243,42 @@ describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub,
         expect(replyContent(theirs)).not.toMatch(busy);
     });
 
+    test('a read-only subcommand takes no lease at all', async () => {
+        // These write nothing, so they have no read-modify-write to protect —
+        // and one shared key means a lock here would refuse to show a player
+        // their own profile because they have a casino hand open.
+        await command.execute(readInteraction(read));
+
+        // Free, and takeable exactly once — so it was never taken, rather than
+        // taken and released.
+        const token = await tryAcquire(key);
+        expect(token).toBeTruthy();
+        await release(key, token);
+    });
+
+    test('a read-only subcommand runs while a lease is held', async () => {
+        // The property as the player meets it: mid-hand, they can still look.
+        const held = await tryAcquire(key, 60_000, 'casino');
+        expect(held).toBeTruthy();
+
+        const looking = readInteraction(read);
+        await command.execute(looking);
+
+        expect(replyContent(looking)).not.toMatch(/in progress/);
+        await release(key, held);
+    });
+
+    test('a mutating subcommand still waits on that same lease', async () => {
+        // The other half: exempting reads must not have exempted the action.
+        const held = await tryAcquire(key, 60_000, 'casino');
+
+        const acting = makeInteraction({ sub });
+        await command.execute(acting);
+
+        expect(replyContent(acting)).toMatch(/casino game in progress/);
+        await release(key, held);
+    });
+
     test('the lock is per guild, not global', async () => {
         const parked = gate();
         Guild.findOne.mockReturnValueOnce(parked.promise);
@@ -259,7 +308,6 @@ describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub,
 
 describe('/casino — the lock around a game that outlives execute()', () => {
     const casino = require('../src/commands/economy/casino');
-    const KEY = 'casino:g1:u1';
     const BUSY = /casino game in progress/;
 
     const interactionFor = overrides => makeInteraction({ sub: 'slots', ...overrides });
@@ -351,5 +399,115 @@ describe('/casino — the lock around a game that outlives execute()', () => {
         // Turned away by the still-held lease rather than allowed to start a
         // second hand: the game ran once in total, for the first call.
         expect(slots.execute).toHaveBeenCalledTimes(1);
+    });
+});
+
+// ── One lock, every command ──────────────────────────────────────────────────
+//
+// The keys used to be namespaced per subsystem, so `/fish` and `/casino
+// blackjack` from one user took different leases and ran side by side over the
+// same user document — the interleaving the surviving read-modify-write sites
+// lose coins to. The whole point of the shared `economy:{guild}:{user}` key is
+// that these two contend, so a per-command test cannot see it: only a test that
+// runs *two different commands* can.
+//
+// The second property is the message. One key means the command that turns you
+// away is not the one holding the lease, so "you already have a fishing action
+// in progress" has to come from what is actually running, not from whichever
+// command you happened to type.
+
+describe('one economy lock across every money-moving command', () => {
+    const fish   = require('../src/commands/economy/fish');
+    const casino = require('../src/commands/economy/casino');
+    const KEY    = 'economy:g1:u1';
+
+    test('a cast in progress turns away a casino game, and says so', async () => {
+        const parked = gate();
+        Guild.findOne.mockReturnValueOnce(parked.promise);  // parks /fish inside its body
+        Guild.findOne.mockResolvedValue({});                // /casino reads its settings and falls through
+
+        const casting = fish.execute(makeInteraction({ sub: 'cast' }));
+        await until(() => Guild.findOne.mock.calls.length === 1, '/fish to reach its first read');
+
+        const blocked = makeInteraction({ sub: 'slots' });
+        await casino.execute(blocked);
+
+        expect(replyContent(blocked)).toMatch(/fishing action in progress/);
+        expect(slots.execute).not.toHaveBeenCalled();
+
+        parked.resolve(ECONOMY_OFF);
+        await casting;
+    });
+
+    test('a hand in progress turns away a cast, and says so', async () => {
+        Guild.findOne.mockResolvedValue({});
+        // A game that returns without releasing is a hand still being played in
+        // collectors — the lease is held for real, not leaked.
+        slots.execute.mockResolvedValueOnce(undefined);
+        await casino.execute(makeInteraction({ sub: 'slots' }));
+
+        const blocked = makeInteraction({ sub: 'cast' });
+        await fish.execute(blocked);
+
+        expect(replyContent(blocked)).toMatch(/casino game in progress/);
+        // Turned away before the body: /fish never got as far as its first read.
+        expect(Guild.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    test('the lease is still per user — one player mid-hand does not stop another fishing', async () => {
+        Guild.findOne.mockResolvedValue({});
+        slots.execute.mockResolvedValueOnce(undefined);
+        await casino.execute(makeInteraction({ sub: 'slots', userId: 'u1' }));
+
+        Guild.findOne.mockResolvedValue(ECONOMY_OFF);
+        const other = makeInteraction({ sub: 'cast', userId: 'u2' });
+        await fish.execute(other);
+
+        expect(replyContent(other)).not.toMatch(/in progress/);
+    });
+
+    test('a lease with no recorded activity still blocks, with generic wording', async () => {
+        // Locks taken before this field existed, and any future caller that
+        // forgets to pass one: the message degrades, the lock does not.
+        const token = await tryAcquire(KEY, 60_000);
+        expect(token).toBeTruthy();
+
+        Guild.findOne.mockResolvedValue(ECONOMY_OFF);
+        const blocked = makeInteraction({ sub: 'cast' });
+        await fish.execute(blocked);
+
+        expect(replyContent(blocked)).toMatch(/economy action in progress/);
+        await release(KEY, token);
+    });
+});
+
+describe('exceptReadOnly', () => {
+    const { exceptReadOnly } = require('../src/utils/economyLock');
+
+    /** The two shapes discord.js reports: a bare subcommand, and one in a group. */
+    const at = (group, sub) => ({
+        options: { getSubcommandGroup: () => group, getSubcommand: () => sub },
+    });
+
+    const only = exceptReadOnly(['profile', 'shop list']);
+
+    test('exempts a bare subcommand on the list', () => {
+        expect(only(at(null, 'profile'))).toBe(false);
+    });
+
+    test('exempts a grouped subcommand on the list', () => {
+        expect(only(at('shop', 'list'))).toBe(false);
+    });
+
+    test('locks anything not on it — an allowlist, so the miss is a needless lock', () => {
+        expect(only(at(null, 'start'))).toBe(true);
+        expect(only(at('shop', 'weapon'))).toBe(true);
+        expect(only(at('inv', 'discard'))).toBe(true);
+    });
+
+    test('does not confuse a grouped subcommand with a bare one of the same name', () => {
+        // `list` is read-only under `shop` and says nothing about `zone list`.
+        expect(only(at(null, 'list'))).toBe(true);
+        expect(only(at('zone', 'list'))).toBe(true);
     });
 });

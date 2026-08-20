@@ -63,6 +63,8 @@ const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
+const { chunkByLength } = require('../../utils/embedFields');
+const { paginate } = require('../../utils/paginator');
 const { isDistrictActive } = require('../../services/districtService');
 const { ensureQuests, onFish, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
@@ -1801,22 +1803,36 @@ async function showRods(interaction, user) {
         return interaction.reply({ content: `You don't own any rods yet. Buy one with \`/fish shop rod\`.`, flags: MessageFlags.Ephemeral });
     }
 
-    const lines = f.rods.map((rod, i) => {
-        const equipped   = i === f.equippedRodIndex ? ' **[EQUIPPED]**' : '';
+    // Paged for the same reason /hunt inv weapons is: rods accumulate without
+    // limit — nothing forces a working spare out of the inventory — and one
+    // joined description overflows the 4096-character embed cap somewhere past
+    // thirty rods, which fails the whole command rather than truncating it.
+    // The number in each heading is what /fish inv equip takes, so trimming the
+    // tail would put those rods permanently out of reach.
+    const ordered = f.rods
+        .map((rod, index) => ({ rod, index }))
+        .sort((a, b) => {
+            if (a.index === f.equippedRodIndex) return -1;
+            if (b.index === f.equippedRodIndex) return 1;
+            return (b.rod.tier ?? 0) - (a.rod.tier ?? 0);
+        });
+
+    const lines = ordered.map(({ rod, index }) => {
+        const equipped    = index === f.equippedRodIndex ? ' **[EQUIPPED]**' : '';
         const statusEmoji = rodStatusEmoji(rod.status);
         const bar         = durabilityBar(rod.currentDurability, rod.maxDurability, 8);
         const upgradeStr  = rod.upgrade ? ` | ${ROD_UPGRADES[rod.upgrade]?.emoji ?? ''} ${rod.upgrade.replace(/_/g, ' ')}` : '';
-        return `**${i + 1}.** ${rod.name}${equipped}\n   ${statusEmoji} ${bar} ${rod.currentDurability}/${rod.maxDurability}${upgradeStr}`;
+        return `**${index + 1}.** ${rod.name}${equipped}\n   ${statusEmoji} ${bar} ${rod.currentDurability}/${rod.maxDurability}${upgradeStr}`;
     });
 
-    const embed = new EmbedBuilder()
+    const pages = chunkByLength(lines, { separator: '\n\n', maxPerChunk: 8 }).map((chunk, _i, all) => new EmbedBuilder()
         .setColor('#3498db')
-        .setTitle(`🎣 ${interaction.user.username}'s Rods`)
-        .setDescription(lines.join('\n\n'))
+        .setTitle(all.length > 1 ? `🎣 ${interaction.user.username}'s Rods (${f.rods.length})` : `🎣 ${interaction.user.username}'s Rods`)
+        .setDescription(chunk.join('\n\n'))
         .setFooter({ text: 'Use /fish inv equip <number> to equip a rod • /fish shop repair to repair' })
-        .setTimestamp();
+        .setTimestamp());
 
-    return interaction.reply({ embeds: [embed] });
+    return paginate(interaction, pages);
 }
 
 async function equipRod(interaction, user) {
@@ -3302,24 +3318,22 @@ async function checkGrandPrestige(client, user, guild, guildId) {
     }
 }
 
-// ── Per-user action lock ──────────────────────────────────────────────────────
+// ── Per-user economy lock ─────────────────────────────────────────────────────
 // Fishing mutates the user document with read-modify-write saves, so concurrent
 // /fish invocations from the same user can race stamina, daily caps, and drops.
-// Serialize them: one fishing action at a time per user.
-const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
-const _fishExecute = module.exports.execute;
-module.exports.execute = async function (interaction) {
-    const lockKey   = `grind:fish:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = await _lockAcquire(lockKey, 120_000);
-    if (!lockToken) {
-        return interaction.reply({
-            content: '🎣 You already have a fishing action in progress — finish it first.',
-            flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-    }
-    try {
-        return await _fishExecute(interaction);
-    } finally {
-        await _lockRelease(lockKey, lockToken);
-    }
-};
+// The lock key is the player rather than this command, so a hand of blackjack
+// races the same document and contends for it too — see utils/economyLock.js.
+const { withEconomyLock, exceptReadOnly } = require('../../utils/economyLock');
+// Reads that persist nothing, so they never wait on a lease — see
+// exceptReadOnly. Everything else, including /fish inv equip, still locks.
+const FISH_READ_ONLY = [
+    'profile', 'records',
+    'inv rods', 'inv bait', 'inv materials',
+    'shop list',
+    'craft list',
+    'location list',
+];
+module.exports.execute = withEconomyLock(module.exports.execute, {
+    activity: 'fish',
+    only:     exceptReadOnly(FISH_READ_ONLY),
+});

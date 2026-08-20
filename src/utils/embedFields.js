@@ -80,10 +80,53 @@ function fitDescription(lines, { limit = EMBED_LIMITS.DESCRIPTION, separator = '
     return { text: kept.join(separator), omitted: lines.length - kept.length };
 }
 
+/**
+ * Split lines into groups, each of which joins to no more than `limit`
+ * characters — one group per embed the caller then pages through.
+ *
+ * `fitDescription` is the right answer when the tail genuinely doesn't matter
+ * (the lowest-ranked trophies of a hundred). It is the wrong one for a list the
+ * player *acts on* by position: a weapon dropped off the end can never be
+ * equipped or discarded, because its number is only ever shown by the embed
+ * that just hid it. Those lists get paged instead, so nothing becomes
+ * unreachable by owning too much.
+ *
+ * A single line longer than the limit is truncated into a group of its own
+ * rather than dropped.
+ *
+ * @returns {string[][]} groups of lines, in order; empty input gives [].
+ */
+function chunkByLength(lines, {
+    limit = EMBED_LIMITS.DESCRIPTION,
+    separator = '\n',
+    maxPerChunk = Infinity,
+} = {}) {
+    const chunks = [];
+    let current = [];
+    let length  = 0;
+
+    for (const line of lines) {
+        const piece = truncate(line, limit);
+        const cost  = current.length ? separator.length + piece.length : piece.length;
+
+        if (current.length && (length + cost > limit || current.length >= maxPerChunk)) {
+            chunks.push(current);
+            current = [];
+            length  = 0;
+        }
+
+        length += current.length ? separator.length + piece.length : piece.length;
+        current.push(piece);
+    }
+
+    if (current.length) chunks.push(current);
+    return chunks;
+}
+
 /** Hard-truncate a single string to `limit`, marking the cut with an ellipsis. */
 function truncate(text, limit) {
     if (text.length <= limit) return text;
     return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-module.exports = { EMBED_LIMITS, packFields, fitDescription, truncate };
+module.exports = { EMBED_LIMITS, packFields, fitDescription, chunkByLength, truncate };
