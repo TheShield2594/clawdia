@@ -440,6 +440,22 @@ function rollTier(user, zone) {
 // ─── ANIMAL ROLL ─────────────────────────────────────────────────────────────
 
 /**
+ * Rolls the prey for a hunt — tier first, then a specific animal — *before*
+ * the approach prompt, so the prompt can describe the animal that is actually
+ * there and key its correct answer on that animal's traits. The roll used to
+ * live inside executeHunt, which runs after the prompt was answered: the hint
+ * described a deer while the player shot a squirrel, a crow, or a Golden Fox.
+ *
+ * Pass the result to executeHunt as options.encounter.
+ */
+function rollHuntEncounter(user, zoneId) {
+    const resolvedZoneId = zoneId ?? user.hunt.activeZone;
+    const zone = ZONES[resolvedZoneId];
+    const tier = rollTier(user, zone);
+    return { tier, animal: rollAnimal(tier, resolvedZoneId) };
+}
+
+/**
  * Picks a specific animal from the resolved tier that can spawn in this zone.
  */
 function rollAnimal(tier, zoneId) {
@@ -886,11 +902,20 @@ function executeHunt(user, zoneId, options = {}) {
         };
     }
 
-    // Roll the animal upfront so traits can influence the success check
-    let tier = rollTier(user, zone);
-    // Stealth bonus: patient approach upgrades common prey to uncommon ~30% of the time
-    if (options.stealthBonus > 0 && tier === 'common' && Math.random() < 0.30) tier = 'uncommon';
-    const animal = rollAnimal(tier, zoneId ?? h.activeZone);
+    // The encounter is normally pre-rolled by the caller (rollHuntEncounter)
+    // before the approach prompt, so the prompt describes the real animal. The
+    // internal roll remains for callers that skip the prompt entirely.
+    let tier, animal;
+    if (options.encounter?.animal) {
+        ({ tier, animal } = options.encounter);
+    } else {
+        tier = rollTier(user, zone);
+        // Stealth bonus: patient approach upgrades common prey to uncommon ~30% of
+        // the time. Pre-rolled encounters apply this upgrade caller-side, after the
+        // stealth outcome is known.
+        if (options.stealthBonus > 0 && tier === 'common' && Math.random() < 0.30) tier = 'uncommon';
+        animal = rollAnimal(tier, zoneId ?? h.activeZone);
+    }
     const traits = animal.traits ?? [];
 
     // Base success chance + trait adjustments
@@ -1338,6 +1363,7 @@ module.exports = {
     applyAimBonus,
     rollTier,
     rollAnimal,
+    rollHuntEncounter,
     getRarePityThreshold,
     rollFailureSeverity,
     applyPayoutModifiers,

@@ -54,7 +54,9 @@ const {
     getRarePityThreshold,
     getDiminishingReturns,
     recordBestPayout,
-    applyPayoutModifiers
+    applyPayoutModifiers,
+    rollHuntEncounter,
+    rollAnimal
 } = require('../../services/huntService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -232,57 +234,114 @@ const walletOf = interaction => ({ userId: interaction.user.id, guildId: interac
 const chargeBalance = (interaction, cost) => chargeExact(User, walletOf(interaction), cost);
 const refundBalance = (interaction, cost) => refundCharge(User, walletOf(interaction), cost, 'huntshop');
 
-// ─── STEALTH APPROACH OPTIONS (per zone) ─────────────────────────────────────
-// Each zone has a hint about the animal's behaviour + 3 approach strategies.
-// One approach is correct; correct = stealthBonus, wrong = noise penalty.
+// ─── STEALTH APPROACH PROFILES (per animal) ──────────────────────────────────
+// The prey is rolled before the prompt (rollHuntEncounter), so the hint
+// describes the animal that is actually there and the correct answer follows
+// from how *that* animal behaves. Trait prey keys on its traits — elusive
+// rewards patience, aggressive rewards cover, giant/armored/venomous reward
+// distance, spectral rewards stillness — and trait-less prey rolls one of
+// three behaviours per hunt. Either way the right answer changes hunt to
+// hunt, so the prompt is a read, not a memorised zone fact (issue #739).
+//
+// Each profile: one correct option (+0.25), one safe-but-suboptimal (+0.05),
+// one wrong (−0.10). The probabilistic outcome layer on top is unchanged.
 
-const ZONE_APPROACHES = {
-    beginner_forest: {
-        hint: 'A deer is grazing peacefully in a sun-dappled clearing, ears flicking at every sound.',
+const APPROACH_PROFILES = {
+    stillness: {
+        id: 'stillness',
+        hint: a => `${a.emoji} A **${a.name}** drifts at the edge of sight, half there and half not. It doesn't listen for you — it *feels* movement.`,
         options: [
-            { id: 'undergrowth', label: '🌿 Creep through the undergrowth', stealthBonus: 0.25 },
-            { id: 'sprint',      label: '🏃 Sprint straight in to close the gap', stealthBonus: -0.10 },
-            { id: 'call',        label: '📢 Mimic a bird call to distract it', stealthBonus: 0.05 },
+            { id: 'freeze',    label: '🗿 Freeze and let it drift closer',    stealthBonus: 0.25 },
+            { id: 'ease_back', label: '🌿 Ease back and wait it out',         stealthBonus: 0.05 },
+            { id: 'circle',    label: '🏃 Circle around for a better angle',  stealthBonus: -0.10 },
+        ],
+        correctId: 'freeze',
+    },
+    patience: {
+        id: 'patience',
+        hint: a => `${a.emoji} A **${a.name}** flickers between cover, never still for more than a breath — one hasty move and it's gone.`,
+        options: [
+            { id: 'read_pattern', label: '⏳ Study its pattern and wait for the pause', stealthBonus: 0.25 },
+            { id: 'shadow',       label: '🌿 Shadow it from a distance',                stealthBonus: 0.05 },
+            { id: 'rush',         label: '🏃 Rush it before it slips away',             stealthBonus: -0.10 },
+        ],
+        correctId: 'read_pattern',
+    },
+    cover: {
+        id: 'cover',
+        hint: a => `${a.emoji} A **${a.name}** prowls the clearing, head snapping up at every sound — whatever it sees, it charges.`,
+        options: [
+            { id: 'hard_cover', label: '🌳 Keep hard cover between you and it', stealthBonus: 0.25 },
+            { id: 'downwind',   label: '💨 Circle downwind in the open',        stealthBonus: 0.05 },
+            { id: 'direct',     label: '⚔️ Advance on it directly',             stealthBonus: -0.10 },
+        ],
+        correctId: 'hard_cover',
+    },
+    distance: {
+        id: 'distance',
+        hint: a => `${a.emoji} A **${a.name}** dominates the ground ahead — up close it's the one holding every advantage. Take it from range.`,
+        options: [
+            { id: 'high_ground', label: '🎯 Line up a long shot from high ground', stealthBonus: 0.25 },
+            { id: 'treeline',    label: '🌿 Skirt the treeline at range',          stealthBonus: 0.05 },
+            { id: 'close_in',    label: '🏃 Slip in close for a sure shot',        stealthBonus: -0.10 },
+        ],
+        correctId: 'high_ground',
+    },
+    // Behaviours for trait-less prey, rolled per hunt.
+    grazing: {
+        id: 'grazing',
+        hint: a => `${a.emoji} A **${a.name}** feeds in the open, ears flicking at every sound — it hasn't noticed you yet.`,
+        options: [
+            { id: 'undergrowth', label: '🌿 Creep through the undergrowth',   stealthBonus: 0.25 },
+            { id: 'call',        label: '📢 Mimic a call to distract it',     stealthBonus: 0.05 },
+            { id: 'sprint',      label: '🏃 Sprint in to close the gap',      stealthBonus: -0.10 },
         ],
         correctId: 'undergrowth',
     },
-    desert_wastes: {
-        hint: 'A desert serpent basks motionless on a sun-warmed rock — utterly still, eyes open.',
+    alert: {
+        id: 'alert',
+        hint: a => `${a.emoji} A **${a.name}** stands rigid, nose working the air — it's caught wind of something.`,
         options: [
-            { id: 'rock_crawl', label: '🪨 Crawl low between boulders', stealthBonus: 0.25 },
-            { id: 'open_run',   label: '💨 Sprint across the open sand', stealthBonus: -0.10 },
-            { id: 'shade_wait', label: '☁️ Wait for a cloud to pass over', stealthBonus: 0.05 },
+            { id: 'go_downwind', label: '💨 Circle downwind before closing in',  stealthBonus: 0.25 },
+            { id: 'hold',        label: '⏳ Hold position until it settles',     stealthBonus: 0.05 },
+            { id: 'upwind',      label: '🌬️ Push straight in from upwind',      stealthBonus: -0.10 },
         ],
-        correctId: 'rock_crawl',
+        correctId: 'go_downwind',
     },
-    arctic_tundra: {
-        hint: 'A white wolf moves in tight circles — it\'s caught a scent. One wrong step and it bolts.',
+    moving: {
+        id: 'moving',
+        hint: a => `${a.emoji} A **${a.name}** is on the move, weaving through cover with somewhere to be.`,
         options: [
-            { id: 'downwind',   label: '💨 Circle downwind before closing in', stealthBonus: 0.25 },
-            { id: 'upwind',     label: '🌬️ Walk directly into the wind toward it', stealthBonus: -0.10 },
-            { id: 'white_out',  label: '🌨️ Use a snow squall as cover', stealthBonus: 0.05 },
+            { id: 'ambush', label: '🪤 Cut ahead and set an ambush',        stealthBonus: 0.25 },
+            { id: 'trail',  label: '🐾 Trail it and wait for it to stop',   stealthBonus: 0.05 },
+            { id: 'chase',  label: '🏃 Run it down',                        stealthBonus: -0.10 },
         ],
-        correctId: 'downwind',
-    },
-    murky_swamp: {
-        hint: 'A large reptile floats just below the surface — only its eyes are visible.',
-        options: [
-            { id: 'wade_slow',  label: '🌊 Wade in slowly without splashing', stealthBonus: 0.25 },
-            { id: 'throw_rock', label: '🪨 Throw a rock to distract it first', stealthBonus: -0.10 },
-            { id: 'reed_hide',  label: '🌾 Hide in the reeds and wait for it to surface', stealthBonus: 0.05 },
-        ],
-        correctId: 'wade_slow',
-    },
-    legendary_peaks: {
-        hint: 'An ancient creature roosts on a cliff ledge — its senses are preternatural.',
-        options: [
-            { id: 'cliff_path', label: '🧗 Climb the cliff path at dusk, shadow-side', stealthBonus: 0.25 },
-            { id: 'direct',     label: '⚔️ Charge straight up the ridge', stealthBonus: -0.10 },
-            { id: 'below',      label: '🎯 Position below and let it come to you', stealthBonus: 0.05 },
-        ],
-        correctId: 'cliff_path',
+        correctId: 'ambush',
     },
 };
+
+// First matching trait wins; the order puts the most read-defining trait
+// first. Traits with no behavioural read of their own (enraged) fall through
+// to the rolled behaviours.
+const TRAIT_PROFILE_ORDER = [
+    ['spectral',    'stillness'],
+    ['elusive',     'patience'],
+    ['aggressive',  'cover'],
+    ['pack_hunter', 'cover'],
+    ['giant',       'distance'],
+    ['armored',     'distance'],
+    ['venomous',    'distance'],
+];
+
+const GENERIC_PROFILE_IDS = ['grazing', 'alert', 'moving'];
+
+function pickApproachProfile(animal) {
+    const traits = animal?.traits ?? [];
+    for (const [trait, profileId] of TRAIT_PROFILE_ORDER) {
+        if (traits.includes(trait)) return APPROACH_PROFILES[profileId];
+    }
+    return APPROACH_PROFILES[GENERIC_PROFILE_IDS[Math.floor(Math.random() * GENERIC_PROFILE_IDS.length)]];
+}
 
 // ─── SHARED CHOICE LISTS ──────────────────────────────────────────────────────
 
@@ -747,7 +806,8 @@ async function executeStart(interaction) {
         }
 
         // ── Stealth Approach + Precision Aim ─────────────────────────────────────
-        // Phase 1 — Stealth: player reads a behaviour hint and picks the right approach.
+        // Phase 1 — Stealth: the prey is rolled first, and the player reads a
+        // behaviour hint about *that animal* and picks the matching approach.
         //   Correct  → stealthBonus = +0.25 success chance, common→uncommon upgrade ~30%
         //   Partial  → stealthBonus = +0.05 (safe but suboptimal)
         //   Wrong    → stealthBonus = −0.10 (spooked the animal)
@@ -761,13 +821,17 @@ async function executeStart(interaction) {
         let stealthBonus = 0;
         let aimBonus     = 0;
 
-        const approachData = ZONE_APPROACHES[zoneId];
+        // Rolled before the prompt so the hint can be truthful and the correct
+        // answer can follow the animal rather than the zone.
+        let encounter = rollHuntEncounter(user, zoneId);
+
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
         // A quick hunt trades both phase bonuses for the ~6-10 seconds of
         // prompts and forced waits the interactive path costs — a real trade
         // the player opts into, so it needs no rebalancing.
-        if (!quick && approachData) {
+        if (!quick) {
+            const approachData = pickApproachProfile(encounter.animal);
             // Shuffle the 3 options
             const shuffled = [...approachData.options].sort(() => Math.random() - 0.5);
 
@@ -775,7 +839,7 @@ async function executeStart(interaction) {
                 .setColor('#556B2F')
                 .setTitle(`🌿 Approaching ${zone.emoji} ${zone.name}…`)
                 .setDescription(
-                    `*${approachData.hint}*\n\n` +
+                    `*${approachData.hint(encounter.animal)}*\n\n` +
                     `**How do you close in on your prey?**\n` +
                     `Choose wisely — the animal will react to your approach.`
                 )
@@ -851,6 +915,14 @@ async function executeStart(interaction) {
             await interaction.editReply({ embeds: [stealthResultEmbed], components: [] });
             await delay(800);
 
+            // A patient, correct approach can turn common prey into something
+            // better — the "chance of better prey" the result copy promises.
+            // Applied here, once the stealth outcome is known, because the
+            // encounter itself is rolled before the prompt now.
+            if (stealthBonus > 0 && encounter.tier === 'common' && Math.random() < 0.30) {
+                encounter = { tier: 'uncommon', animal: rollAnimal('uncommon', zoneId) };
+            }
+
             aimBonus = (await runAimPhase(interaction, huntMsg)).bonus;
 
         } else {
@@ -866,7 +938,7 @@ async function executeStart(interaction) {
         const isFeaturedZone = zoneId === featured.huntZone.id;
 
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
-        const result = executeHunt(user, zoneId, { stealthBonus, aimBonus, marketplaceActive });
+        const result = executeHunt(user, zoneId, { stealthBonus, aimBonus, marketplaceActive, encounter });
 
         // Pity counter: reset on rare+ success, increment otherwise
         if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
@@ -3435,7 +3507,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, runAimPhase, AIM_WINDOW_MS, AIM_LATE_MS, isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, runAimPhase, AIM_WINDOW_MS, AIM_LATE_MS, isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS, APPROACH_PROFILES, TRAIT_PROFILE_ORDER, GENERIC_PROFILE_IDS, pickApproachProfile };
 
 // ── Per-user economy lock ─────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent
