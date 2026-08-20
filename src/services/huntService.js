@@ -1264,9 +1264,27 @@ function durabilityBar(current, max, length = 10) {
 
 // ─── APEX ENCOUNTER RESOLUTION ───────────────────────────────────────────────
 
+const APEX_PHASES_PER_DUEL = 3;
+
+/**
+ * One duel's worth of phases: a random draw of APEX_PHASES_PER_DUEL from the
+ * apex's phase pool, in a random order. Every phase carries its own correct
+ * answer with the tell in its hint, so recognising the apex no longer hands
+ * over the whole duel — the sequence isn't memorisable either, because it
+ * differs encounter to encounter.
+ */
+function buildApexEncounter(base) {
+    const pool = [...base.phasePool];
+    for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return { ...base, phases: pool.slice(0, APEX_PHASES_PER_DUEL) };
+}
+
 function rollApexType() {
     const keys = Object.keys(APEX_TYPES);
-    return APEX_TYPES[keys[Math.floor(Math.random() * keys.length)]];
+    return buildApexEncounter(APEX_TYPES[keys[Math.floor(Math.random() * keys.length)]]);
 }
 
 // Nerve: the duel's second axis. A wrong aggressive read costs two, so two bad
@@ -1383,6 +1401,8 @@ module.exports = {
     rollTrophyQuality,
     executeHunt,
     rollApexType,
+    buildApexEncounter,
+    APEX_PHASES_PER_DUEL,
     resolveApexEncounter,
     apexNerveAfter,
     apexNerveMax,
