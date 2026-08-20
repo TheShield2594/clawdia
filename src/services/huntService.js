@@ -66,6 +66,7 @@ function ensureHuntData(user) {
     if (h.activeCharmHuntsLeft == null) h.activeCharmHuntsLeft = 0;
     if (h.activeFocus          == null) h.activeFocus          = false;
     if (h.activeXpScroll       == null) h.activeXpScroll       = false;
+    if (h.quickHunt            == null) h.quickHunt            = false;
     if (h.luckyPaw             == null) h.luckyPaw             = false;
     if (h.precisionScope       == null) h.precisionScope       = false;
     // Field Trophies — one permanent per zone, crafted from that zone's materials.

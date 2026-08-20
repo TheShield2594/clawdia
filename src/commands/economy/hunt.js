@@ -321,7 +321,11 @@ module.exports = {
                     o.setName('zone')
                         .setDescription('Zone to hunt in (defaults to your active zone)')
                         .setRequired(false)
-                        .addChoices(...ZONE_CHOICES)))
+                        .addChoices(...ZONE_CHOICES))
+                .addBooleanOption(o =>
+                    o.setName('quick')
+                        .setDescription('Skip the stealth & aim phases (no phase bonuses). Remembered for future hunts.')
+                        .setRequired(false)))
         .addSubcommand(sub =>
             sub.setName('profile')
                 .setDescription("View your or another player's hunter profile")
@@ -561,6 +565,17 @@ async function executeStart(interaction) {
     applyDailyReset(user);
     assignDailyHuntQuests(user);
 
+    // Quick-hunt preference: passing the option flips the stored setting, so it
+    // never has to be retyped; omitting it uses whatever was chosen last. Set
+    // before the pre-check save so the choice sticks even when this hunt then
+    // bounces off a cooldown or stamina gate.
+    const quickOpt = interaction.options.getBoolean('quick');
+    if (quickOpt !== null && quickOpt !== (user.hunt.quickHunt ?? false)) {
+        user.hunt.quickHunt = quickOpt;
+        user.markModified('hunt');
+    }
+    const quick = quickOpt ?? user.hunt.quickHunt ?? false;
+
     if (user.isModified()) {
         await user.save().catch(e => console.error('[hunt] pre-check save error:', e));
     }
@@ -749,7 +764,10 @@ async function executeStart(interaction) {
         const approachData = ZONE_APPROACHES[zoneId];
         const delay = ms => new Promise(r => setTimeout(r, ms));
 
-        if (approachData) {
+        // A quick hunt trades both phase bonuses for the ~6-10 seconds of
+        // prompts and forced waits the interactive path costs — a real trade
+        // the player opts into, so it needs no rebalancing.
+        if (!quick && approachData) {
             // Shuffle the 3 options
             const shuffled = [...approachData.options].sort(() => Math.random() - 0.5);
 
@@ -997,6 +1015,7 @@ async function executeStart(interaction) {
             if (aimBonus >= 0.18) lines.push(`> 🎯 *Perfect shot — +18% crit chance*`);
             else if (aimBonus > 0) lines.push(`> ✅ *Clean shot — +8% crit chance*`);
             else if (aimBonus < 0) lines.push(`> 💨 *Rushed shot — −5% crit chance*`);
+            if (quick) lines.push(`> ⚡ *Quick hunt — stealth & aim skipped · turn off with \`/hunt start quick:false\`*`);
             if (lines.length) embed.setDescription(desc + '\n' + lines.join('\n'));
         }
         // One consolidated field rather than one per bonus: Discord caps an embed at
@@ -1054,8 +1073,10 @@ async function executeStart(interaction) {
             embed.data.fields.length = 25;
         }
 
-        // Staged loot reveal for rare+ drops
-        await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+        // Staged loot reveal for rare+ drops. A quick hunt skips the ceremony
+        // here too — the fog-and-fanfare build-up is the same forced wait the
+        // player opted out of, and the tier is still announced on the embed.
+        await stagedLootReveal(interaction, !quick && result.success ? result.tier : null, embed);
 
         if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
