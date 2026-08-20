@@ -23,7 +23,11 @@ const LIMITS = {
     DAILY_SOFT_CAP:       100_000,
     DAILY_SOFT_CAP_RATE:  0.5,
     DAILY_HARD_CAP:       150_000,
-    JOURNAL_CAP:          20,
+    // The journal lives in the exploration GrindProfile blob and is rewritten
+    // whole on every save, so the cap is a storage judgement, not a maximum to
+    // chase: 100 entries is roughly 15KB and covers a long session of finds,
+    // where 20 covered barely an hour and a half of steady exploring.
+    JOURNAL_CAP:          100,
     // Secret pity: each expedition without a secret adds bonus weight to the
     // secret slot, so long droughts self-correct. Only expeditions into a
     // region that still HAS an unfound secret count toward it.
