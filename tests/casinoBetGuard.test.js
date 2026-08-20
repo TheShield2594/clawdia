@@ -290,3 +290,46 @@ describe('a stake that is available is taken exactly once', () => {
         expect(debits).toEqual([{ $inc: { balance: -BET } }]);
     });
 });
+
+// ── The confirmation has to be able to say no ────────────────────────────────
+//
+// confirmBet answers `{ shouldProceed, alreadyReplied }`. An object is always
+// truthy, so testing the call itself — `if (!await confirmBet(...)) return;` —
+// reads like a cancellation check and is one that can never fire. Roulette's
+// replay path did exactly that: a player who pressed Cancel on the large-bet
+// prompt had the wheel spun and their coins taken anyway.
+//
+// One site is a bug; the shape is a trap, because the wrong version looks right.
+// So this checks every caller rather than the one that got it wrong.
+
+describe('every confirmBet caller reads shouldProceed', () => {
+    const fs   = require('fs');
+    const path = require('path');
+
+    const ROOTS = ['src/games/casino', 'src/commands/economy'];
+    const CALL  = /\bconfirmBet\s*\(/;
+
+    function jsFilesUnder(dir) {
+        return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) return jsFilesUnder(full);
+            return entry.name.endsWith('.js') ? [full] : [];
+        });
+    }
+
+    test('no call site relies on the return value being truthy', () => {
+        const offenders = [];
+
+        for (const root of ROOTS) {
+            for (const file of jsFilesUnder(path.join(__dirname, '..', root))) {
+                fs.readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+                    if (CALL.test(line) && !line.includes('shouldProceed')) {
+                        offenders.push(`${root}/${path.basename(file)}:${i + 1} — ${line.trim()}`);
+                    }
+                });
+            }
+        }
+
+        expect(offenders).toEqual([]);
+    });
+});

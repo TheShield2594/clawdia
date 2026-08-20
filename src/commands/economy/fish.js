@@ -3323,5 +3323,17 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 // /fish invocations from the same user can race stamina, daily caps, and drops.
 // The lock key is the player rather than this command, so a hand of blackjack
 // races the same document and contends for it too — see utils/economyLock.js.
-const { withEconomyLock } = require('../../utils/economyLock');
-module.exports.execute = withEconomyLock(module.exports.execute, { activity: 'fish' });
+const { withEconomyLock, exceptReadOnly } = require('../../utils/economyLock');
+// Reads that persist nothing, so they never wait on a lease — see
+// exceptReadOnly. Everything else, including /fish inv equip, still locks.
+const FISH_READ_ONLY = [
+    'profile', 'records',
+    'inv rods', 'inv bait', 'inv materials',
+    'shop list',
+    'craft list',
+    'location list',
+];
+module.exports.execute = withEconomyLock(module.exports.execute, {
+    activity: 'fish',
+    only:     exceptReadOnly(FISH_READ_ONLY),
+});

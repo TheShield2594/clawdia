@@ -355,12 +355,19 @@ async function openLobby(interaction, bet, hostAutoCashout, releaseLock, onWager
 
         // A joiner stakes their own coins on somebody else's command, so the
         // wager is reported against them — the jackpot is credited to whoever
-        // wins it and the mission ticks for the player who actually bet. Their
-        // button interaction carries the channel a jackpot would announce in.
+        // wins it and the mission ticks for the player who actually bet.
+        //
+        // The debit is not the last thing that can go wrong here, though: the
+        // seat is claimed after it, and a lobby that filled in between refunds
+        // the stake. Reporting from inside placeWager would contribute to the
+        // jackpot and tick the mission for a bet that was then handed straight
+        // back — the same "counted a hand that never happened" this signal
+        // exists to stop. So the debit stays silent and the wager is reported
+        // once the seat is actually theirs.
         const deducted = await placeWager(
             { userId: i.user.id, guildId: interaction.guild.id },
             bet,
-            { extraInc: { pendingCrashRefund: bet }, onWager, user: i.user, source: i },
+            { extraInc: { pendingCrashRefund: bet } },
         );
         if (!deducted) {
             return i.reply({ content: `You need **${bet.toLocaleString()}** coins to join.`, flags: MessageFlags.Ephemeral });
@@ -374,6 +381,9 @@ async function openLobby(interaction, bet, hostAutoCashout, releaseLock, onWager
             ).catch(err => console.error('[crash] join refund failed:', err));
             return i.reply({ content: 'Could not join the lobby (it may have just filled up). Your coins have been refunded.', flags: MessageFlags.Ephemeral });
         }
+
+        // Their button interaction carries the channel a jackpot would announce in.
+        onWager?.({ amount: bet, user: i.user, source: i });
         await i.deferUpdate().catch(() => {});
         await updateLobbyEmbed();
     });

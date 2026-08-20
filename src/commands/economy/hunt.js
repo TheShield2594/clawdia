@@ -3310,5 +3310,17 @@ module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, b
 // /hunt invocations from the same user can race stamina, daily caps, and drops.
 // The lock key is the player rather than this command, so a hand of blackjack
 // races the same document and contends for it too — see utils/economyLock.js.
-const { withEconomyLock } = require('../../utils/economyLock');
-module.exports.execute = withEconomyLock(module.exports.execute, { activity: 'hunt' });
+const { withEconomyLock, exceptReadOnly } = require('../../utils/economyLock');
+// Reads that persist nothing, so they never wait on a lease — see
+// exceptReadOnly. Everything else, including /hunt inv equip and discard,
+// still locks.
+const HUNT_READ_ONLY = [
+    'profile',
+    'inv weapons', 'inv ammo', 'inv consumables', 'inv materials',
+    'shop list',
+    'zone list',
+];
+module.exports.execute = withEconomyLock(module.exports.execute, {
+    activity: 'hunt',
+    only:     exceptReadOnly(HUNT_READ_ONLY),
+});

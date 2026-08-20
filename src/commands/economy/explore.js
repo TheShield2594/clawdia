@@ -1310,5 +1310,11 @@ async function handleProfile(interaction) {
 // expedition can sit for 20s waiting on the encounter prompt. The lock key is
 // the player rather than this command, so every other money-moving command
 // contends for it too — see utils/economyLock.js.
-const { withEconomyLock } = require('../../utils/economyLock');
-module.exports.execute = withEconomyLock(module.exports.execute, { activity: 'explore' });
+const { withEconomyLock, exceptReadOnly } = require('../../utils/economyLock');
+// Reads that persist nothing, so they never wait on a lease — see
+// exceptReadOnly. `go` and `travel` still lock.
+const EXPLORE_READ_ONLY = ['map', 'regions', 'journal', 'relics', 'profile'];
+module.exports.execute = withEconomyLock(module.exports.execute, {
+    activity: 'explore',
+    only:     exceptReadOnly(EXPLORE_READ_ONLY),
+});

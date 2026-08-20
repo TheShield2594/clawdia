@@ -49,6 +49,12 @@ jest.mock('../src/services/casinoJackpotService', () => ({
 jest.mock('../src/services/seasonMissionService', () => ({
     advanceMissions: jest.fn().mockResolvedValue([]),
 }));
+// The real lobby store, with the seat claim observable so a lobby that fills
+// between the debit and the claim can be forced.
+jest.mock('../src/utils/crashLobby', () => {
+    const actual = jest.requireActual('../src/utils/crashLobby');
+    return { ...actual, addPlayer: jest.fn(actual.addPlayer) };
+});
 
 const User  = require('../src/models/User');
 const Guild = require('../src/models/Guild');
@@ -252,5 +258,127 @@ describe.each(GAMES)('/$name reports the wager that opens a hand', (game) => {
         errorSpy.mockRestore();
         jest.dontMock('../src/utils/placeWager');
         jest.resetModules();
+    });
+});
+
+describe('/crash — a joiner is counted only once the seat is theirs', () => {
+    // The debit is not the last thing that can fail on a join: the seat is
+    // claimed after it, and a lobby that filled in between refunds the stake.
+    // Reporting the wager from inside the debit contributed to the jackpot and
+    // ticked the mission for a bet that was handed straight back — the same
+    // "counted a hand that never happened" the signal exists to stop.
+    const { deleteLobby, addPlayer } = require('../src/utils/crashLobby');
+    const { CHANNEL_ID } = require('./helpers/casinoInteraction');
+    const crash = require('../src/games/casino/crash');
+
+    let errorSpy;
+
+    /** An interaction whose editReply hands back a message that keeps its collectors. */
+    function hostInteraction() {
+        const interaction = makeInteraction({ bet: BET, auto_cashout: null });
+        const handlers = {};
+        const message = {
+            createMessageComponentCollector: () => ({
+                on(event, fn) { handlers[event] = fn; return this; },
+                stop() {},
+            }),
+        };
+        const record = interaction.editReply;
+        interaction.editReply = jest.fn(payload => { record(payload); return Promise.resolve(message); });
+        interaction.client = { users: { fetch: async () => ({ username: 'joiner' }) } };
+        interaction.handlers = handlers;
+        return interaction;
+    }
+
+    /** The button press of a second player hitting Join. */
+    const joinPress = () => ({
+        user:  { id: 'user-2', username: 'joiner' },
+        customId: 'crash_join_channel-1_0',
+        reply: jest.fn().mockResolvedValue(undefined),
+        deferUpdate: jest.fn().mockResolvedValue(undefined),
+    });
+
+    /** Opens a lobby and returns the join collector's collect handler. */
+    async function openLobby(onWager) {
+        Guild.findOne.mockReturnValue(Object.assign(
+            Promise.resolve({ guildId: GUILD_ID, economy: { enabled: true, gamesEnabled: true } }),
+            { lean: () => ({ catch: () => Promise.resolve(null) }) },
+        ));
+        User.findOne.mockResolvedValue(walletDoc());
+        User.findOneAndUpdate.mockResolvedValue(walletDoc());
+        User.updateOne.mockResolvedValue({});
+
+        const interaction = hostInteraction();
+        await crash.execute(interaction, { releaseLock: jest.fn(), onWager });
+        // The host's own stake is reported and their own seat claimed on the
+        // way in; this suite is about the joiner's, so start counting here.
+        onWager.mockClear();
+        addPlayer.mockClear();
+        return { collect: interaction.handlers.collect, interaction };
+    }
+
+    beforeEach(() => {
+        // openLobby arms a 30s join-window timeout that nothing in this test
+        // path ever fires; faked, it is never a real handle to leak.
+        jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
+        jest.clearAllMocks();
+        errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        deleteLobby(CHANNEL_ID);
+    });
+
+    afterEach(() => {
+        deleteLobby(CHANNEL_ID);
+        errorSpy.mockRestore();
+        jest.useRealTimers();
+    });
+
+    test('a joiner who gets a seat is reported, and reported as themselves', async () => {
+        const onWager = jest.fn();
+        const { collect } = await openLobby(onWager);
+
+        await collect(joinPress());
+
+        expect(onWager).toHaveBeenCalledTimes(1);
+        expect(onWager).toHaveBeenCalledWith(expect.objectContaining({
+            amount: BET,
+            user: expect.objectContaining({ id: 'user-2' }),
+        }));
+    });
+
+    test('a joiner whose seat is gone is refunded and never counted', async () => {
+        const onWager = jest.fn();
+        const { collect } = await openLobby(onWager);
+
+        // The lobby filled between the debit landing and the seat being claimed.
+        // Once, so the real implementation survives for the next test.
+        addPlayer.mockImplementationOnce(() => false);
+        const press = joinPress();
+        await collect(press);
+
+        expect(onWager).not.toHaveBeenCalled();
+        // The stake really did come back, so counting it would have been
+        // counting a bet nobody ended up making.
+        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
+            { userId: 'user-2', guildId: GUILD_ID },
+            { $inc: { balance: BET, pendingCrashRefund: -BET } },
+        );
+        expect(press.reply).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.stringMatching(/refunded/i),
+        }));
+    });
+
+    test('a joiner who cannot cover the bet is neither seated nor counted', async () => {
+        const onWager = jest.fn();
+        const { collect } = await openLobby(onWager);
+
+        User.findOneAndUpdate.mockResolvedValue(null); // guarded debit misses
+        const press = joinPress();
+        await collect(press);
+
+        expect(onWager).not.toHaveBeenCalled();
+        expect(addPlayer).not.toHaveBeenCalled();
+        expect(press.reply).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.stringMatching(/coins to join/i),
+        }));
     });
 });

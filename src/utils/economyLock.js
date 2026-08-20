@@ -68,6 +68,34 @@ async function busyMessage(key) {
 }
 
 /**
+ * Builds an `only` predicate from an allowlist of subcommands that write nothing.
+ *
+ * A shared key makes exempting reads matter in a way a per-command key did not.
+ * `/hunt profile` has always taken its command's lock, which cost the player
+ * nothing when the only thing it could collide with was another `/hunt`. Now
+ * that one key covers every money-moving command, the same lock would refuse to
+ * show a player their own profile because they have a blackjack hand open — a
+ * lease that runs for as long as they take to play it. Reads have no
+ * read-modify-write to protect, so they should not be waiting on one.
+ *
+ * An allowlist rather than a denylist, so the failure mode is a read that locks
+ * needlessly rather than a write that races. Every entry here has been checked
+ * to persist nothing beyond the idempotent `$setOnInsert` upsert that makes sure
+ * the user document exists.
+ *
+ * Keys are `"sub"` for a bare subcommand and `"group sub"` for one inside a
+ * group.
+ */
+function exceptReadOnly(readOnly) {
+    const exempt = new Set(readOnly);
+    return (interaction) => {
+        const group = interaction.options.getSubcommandGroup?.(false) ?? null;
+        const sub   = interaction.options.getSubcommand?.(false) ?? null;
+        return !exempt.has(group ? `${group} ${sub}` : sub);
+    };
+}
+
+/**
  * Wraps a command's `execute` so it holds the shared economy lock for its whole
  * run and releases it on the way out — including when the body throws, where a
  * leaked lease would lock the player out of every economy command for the TTL
@@ -96,4 +124,4 @@ function withEconomyLock(execute, { activity, ttlMs = GRIND_TTL_MS, only = null 
     };
 }
 
-module.exports = { economyLockKey, busyMessage, withEconomyLock, GRIND_TTL_MS, ACTIVITIES, GENERIC };
+module.exports = { economyLockKey, busyMessage, withEconomyLock, exceptReadOnly, GRIND_TTL_MS, ACTIVITIES, GENERIC };

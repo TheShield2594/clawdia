@@ -2780,8 +2780,12 @@ async function handleRaid(interaction) {
     const defenderLockKey = economyLockKey(interaction.guild.id, defender.userId);
     const defenderLock    = await _lockAcquire(defenderLockKey, 30_000, 'raid');
     if (!defenderLock) {
+        // Deliberately vague about *what* they are doing: the lease is the
+        // shared economy one, so it is just as likely to be a hand of blackjack
+        // as a dig, and naming the wrong activity would be worse than naming
+        // none. It is also somebody else's business.
         return interaction.reply({
-            content: `**${targetUser.username}** is down in the mine right now — you can't get in behind them. Try again in a moment.`,
+            content: `**${targetUser.username}** is busy right now — you can't get in behind them. Try again in a moment.`,
             flags: MessageFlags.Ephemeral
         });
     }
@@ -2912,5 +2916,15 @@ async function handleRaid(interaction) {
 // The lock key is the player rather than this command, so a hand of blackjack
 // races the same document and contends for it too — see utils/economyLock.js.
 const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
-const { withEconomyLock, economyLockKey } = require('../../utils/economyLock');
-module.exports.execute = withEconomyLock(module.exports.execute, { activity: 'mine' });
+const { withEconomyLock, exceptReadOnly, economyLockKey } = require('../../utils/economyLock');
+// Reads that persist nothing, so they never wait on a lease — see
+// exceptReadOnly. Everything else, including /mine raid, still locks.
+const MINE_READ_ONLY = [
+    'profile', 'map',
+    'inv view',
+    'shop list',
+];
+module.exports.execute = withEconomyLock(module.exports.execute, {
+    activity: 'mine',
+    only:     exceptReadOnly(MINE_READ_ONLY),
+});

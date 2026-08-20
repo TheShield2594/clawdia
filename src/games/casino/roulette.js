@@ -318,11 +318,17 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
         });
         collector.on('collect', async i => {
             await i.deferUpdate();
-            const user = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        const wallet = user?.balance ?? 0;
-        if (!await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings)) return;
+            const user   = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+            const wallet = user?.balance ?? 0;
 
-        await playRoulette(interaction, betKey, bet, target, null, onWager);
+            // confirmBet answers `{ shouldProceed, alreadyReplied }`, which is
+            // always truthy — so testing the object itself never caught a
+            // cancellation, and a player who pressed Cancel on the large-bet
+            // prompt had the replay spun and their coins taken anyway.
+            const { shouldProceed } = await confirmBet(interaction, bet, wallet, 'Roulette', guildSettings);
+            if (!shouldProceed) return;
+
+            await playRoulette(interaction, betKey, bet, target, null, onWager);
         });
         collector.on('end', (_, reason) => {
             if (reason !== 'limit') interaction.editReply({ components: [] }).catch(() => {});

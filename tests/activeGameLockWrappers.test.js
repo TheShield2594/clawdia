@@ -142,14 +142,22 @@ beforeEach(() => {
 const KEY = 'economy:g1:u1';
 
 const GRIND = [
-    { name: 'hunt',    sub: 'start', busy: /hunting action in progress/ },
-    { name: 'mine',    sub: 'dig',   busy: /mining action in progress/ },
-    { name: 'fish',    sub: 'cast',  busy: /fishing action in progress/ },
-    { name: 'explore', sub: 'go',    busy: /exploration in progress/ },
+    // `read` is a subcommand from that command's read-only allowlist. hunt and
+    // fish use a grouped one, which also exercises the "group sub" key form.
+    { name: 'hunt',    sub: 'start', busy: /hunting action in progress/, read: { group: 'shop', sub: 'list' } },
+    { name: 'mine',    sub: 'dig',   busy: /mining action in progress/,  read: { sub: 'map' } },
+    { name: 'fish',    sub: 'cast',  busy: /fishing action in progress/, read: { group: 'shop', sub: 'list' } },
+    { name: 'explore', sub: 'go',    busy: /exploration in progress/,    read: { sub: 'journal' } },
 ];
 
-describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub, busy }) => {
+describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub, busy, read }) => {
     const key = KEY;
+    /** An interaction for a read-only subcommand, grouped or not. */
+    const readInteraction = ({ group = null, sub: readSub }) => {
+        const interaction = makeInteraction({ sub: readSub });
+        interaction.options.getSubcommandGroup = () => group;
+        return interaction;
+    };
     const command = require(`../src/commands/economy/${name}`);
     const interactionFor = overrides => makeInteraction({ sub, ...overrides });
 
@@ -233,6 +241,42 @@ describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub,
         await both;
 
         expect(replyContent(theirs)).not.toMatch(busy);
+    });
+
+    test('a read-only subcommand takes no lease at all', async () => {
+        // These write nothing, so they have no read-modify-write to protect —
+        // and one shared key means a lock here would refuse to show a player
+        // their own profile because they have a casino hand open.
+        await command.execute(readInteraction(read));
+
+        // Free, and takeable exactly once — so it was never taken, rather than
+        // taken and released.
+        const token = await tryAcquire(key);
+        expect(token).toBeTruthy();
+        await release(key, token);
+    });
+
+    test('a read-only subcommand runs while a lease is held', async () => {
+        // The property as the player meets it: mid-hand, they can still look.
+        const held = await tryAcquire(key, 60_000, 'casino');
+        expect(held).toBeTruthy();
+
+        const looking = readInteraction(read);
+        await command.execute(looking);
+
+        expect(replyContent(looking)).not.toMatch(/in progress/);
+        await release(key, held);
+    });
+
+    test('a mutating subcommand still waits on that same lease', async () => {
+        // The other half: exempting reads must not have exempted the action.
+        const held = await tryAcquire(key, 60_000, 'casino');
+
+        const acting = makeInteraction({ sub });
+        await command.execute(acting);
+
+        expect(replyContent(acting)).toMatch(/casino game in progress/);
+        await release(key, held);
     });
 
     test('the lock is per guild, not global', async () => {
@@ -434,5 +478,36 @@ describe('one economy lock across every money-moving command', () => {
 
         expect(replyContent(blocked)).toMatch(/economy action in progress/);
         await release(KEY, token);
+    });
+});
+
+describe('exceptReadOnly', () => {
+    const { exceptReadOnly } = require('../src/utils/economyLock');
+
+    /** The two shapes discord.js reports: a bare subcommand, and one in a group. */
+    const at = (group, sub) => ({
+        options: { getSubcommandGroup: () => group, getSubcommand: () => sub },
+    });
+
+    const only = exceptReadOnly(['profile', 'shop list']);
+
+    test('exempts a bare subcommand on the list', () => {
+        expect(only(at(null, 'profile'))).toBe(false);
+    });
+
+    test('exempts a grouped subcommand on the list', () => {
+        expect(only(at('shop', 'list'))).toBe(false);
+    });
+
+    test('locks anything not on it — an allowlist, so the miss is a needless lock', () => {
+        expect(only(at(null, 'start'))).toBe(true);
+        expect(only(at('shop', 'weapon'))).toBe(true);
+        expect(only(at('inv', 'discard'))).toBe(true);
+    });
+
+    test('does not confuse a grouped subcommand with a bare one of the same name', () => {
+        // `list` is read-only under `shop` and says nothing about `zone list`.
+        expect(only(at(null, 'list'))).toBe(true);
+        expect(only(at('zone', 'list'))).toBe(true);
     });
 });
