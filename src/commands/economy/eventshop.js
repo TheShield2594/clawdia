@@ -8,6 +8,7 @@ const {
     getEventCurrencyBalance,
 } = require('../../services/seasonalEventService');
 const { addEffect, resolveEffectType } = require('../../services/effectsService');
+const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { paginate, chunkArray } = require('../../utils/paginator');
 
 // Items that grant effects when purchased (grant via effectsService)
@@ -182,36 +183,44 @@ async function handleBuy(interaction, ev, def, currency, currencyId) {
 
     // Step 3: Grant item or effect (currency already secured above)
     const user = charged;
-    if (EFFECT_ITEMS.has(shopItem.itemId)) {
-        const effectType = resolveEffectType(shopItem.name) ?? shopItem.itemId;
-        for (let i = 0; i < qty; i++) addEffect(user, effectType);
-    } else {
-        if (!user.inventory) user.inventory = [];
-        const slot = user.inventory.find(i => i.itemId === shopItem.itemId);
-        if (slot) {
-            slot.quantity += qty;
-        } else {
-            user.inventory.push({ itemId: shopItem.itemId, quantity: qty });
-        }
-    }
 
-    try {
-        await user.save();
-    } catch (err) {
-        console.error('[eventshop] item grant save failed:', err.message);
-        // Revert currency deduction
+    // Hand the currency and any stock back when the grant cannot land.
+    const revertPurchase = async () => {
         await User.findOneAndUpdate(
             { userId: interaction.user.id, guildId: interaction.guild.id, 'eventCurrency.currencyId': currencyId },
             { $inc: { 'eventCurrency.$.amount': totalCost } }
         ).catch(() => {});
-        // Revert stock decrement
         if (stockLimited) {
             await Guild.findOneAndUpdate(
                 { guildId: interaction.guild.id, 'activeEvent.eventShop': { $elemMatch: { itemId: shopItem.itemId } } },
                 { $inc: { 'activeEvent.eventShop.$.stock': qty } }
             ).catch(() => {});
         }
-        return interaction.editReply({ content: '❌ Purchase failed due to a server error. Please try again.' });
+    };
+
+    if (EFFECT_ITEMS.has(shopItem.itemId)) {
+        const effectType = resolveEffectType(shopItem.name) ?? shopItem.itemId;
+        for (let i = 0; i < qty; i++) addEffect(user, effectType);
+        try {
+            await user.save();
+        } catch (err) {
+            console.error('[eventshop] effect grant save failed:', err.message);
+            await revertPurchase();
+            return interaction.editReply({ content: '❌ Purchase failed due to a server error. Please try again.' });
+        }
+    } else {
+        // One atomic upsert rather than mutate-then-save: the save would write
+        // the whole inventory array as read a moment ago, flattening any credit
+        // that landed in between, and two concurrent credits of the same item
+        // could each push their own slot (src/utils/inventoryGrant.js).
+        try {
+            const granted = await grantInventoryItem(interaction.user.id, interaction.guild.id, shopItem.itemId, qty);
+            if (!granted) throw new Error('user document not found');
+        } catch (err) {
+            console.error('[eventshop] item grant failed:', err.message);
+            await revertPurchase();
+            return interaction.editReply({ content: '❌ Purchase failed due to a server error. Please try again.' });
+        }
     }
 
     const newBalance = getEventCurrencyBalance(user, currencyId);

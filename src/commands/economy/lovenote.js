@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { logTransaction } = require('../../utils/logTransaction');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const {
     hasActiveEvent,
     getEventCurrencyId,
@@ -139,15 +140,6 @@ module.exports = {
 
             user.balance = (user.balance ?? 0) + reply.coins;
 
-            // Add a chocolate box to inventory
-            const invSlot = user.inventory?.find(i => i.itemId === 'chocolate_box');
-            if (invSlot) {
-                invSlot.quantity += 1;
-            } else {
-                if (!user.inventory) user.inventory = [];
-                user.inventory.push({ itemId: 'chocolate_box', quantity: 1 });
-            }
-
             logPayload = {
                 userId:   interaction.user.id,
                 guildId:  interaction.guild.id,
@@ -175,6 +167,14 @@ module.exports = {
             jobName: 'notePayout',
             guildId: interaction.guild.id,
         });
+        if (!isRejected) {
+            // The chocolate box lands as its own atomic upsert rather than riding
+            // the save: a slot pushed in memory can duplicate one a concurrent
+            // credit is creating (src/utils/inventoryGrant.js). The save above
+            // inserted the document for a first-time player, so the grant always
+            // has a doc to hit.
+            await grantInventoryItem(interaction.user.id, interaction.guild.id, 'chocolate_box', 1);
+        }
         logTransaction(logPayload);
         return interaction.editReply({ embeds: [embed] });
     }

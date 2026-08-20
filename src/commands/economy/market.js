@@ -10,6 +10,7 @@ const Transaction    = require('../../models/Transaction');
 const { DEFAULT_SHOP_ITEMS, getItemLore, getItemRarity, RARITY_ORDER } = require('../../data/defaultShopItems');
 const { EFFECT_CONFIGS } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
+const { grantInventoryItem } = require('../../utils/inventoryGrant');
 
 const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
 
@@ -100,10 +101,29 @@ async function handleList(interaction, currency) {
         return interaction.reply({ content: `You can only have ${MAX_LISTINGS_PER_USER} active listings at a time.`, flags: MessageFlags.Ephemeral });
     }
 
-    slot.quantity -= qty;
-    if (slot.quantity <= 0) seller.inventory = seller.inventory.filter(i => i.itemId !== itemId);
-    seller.markModified('inventory');
-    await seller.save();
+    // The stock leaves as a compare-and-set, not `slot.quantity -= qty` followed
+    // by a save: the quantity read above is history by now, and two concurrent
+    // `/market list` calls for the same stack would each see the full count and
+    // both take it — one stack backing two listings. The `$elemMatch` filter
+    // makes the check and the debit the same write (same shape as use.js).
+    const debited = await User.findOneAndUpdate(
+        {
+            userId:    interaction.user.id,
+            guildId:   interaction.guild.id,
+            inventory: { $elemMatch: { itemId, quantity: { $gte: qty } } },
+        },
+        { $inc: { 'inventory.$.quantity': -qty } },
+        { new: true },
+    );
+    if (!debited) {
+        return interaction.reply({ content: `You don't have ${qty}x \`${itemId}\` in your inventory.`, flags: MessageFlags.Ephemeral });
+    }
+    // Drop slots the decrement above emptied. Advisory: a failure leaves an
+    // empty slot, not wrong quantities.
+    await User.updateOne(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        { $pull: { inventory: { quantity: { $lte: 0 } } } },
+    ).catch(err => console.error('[market list] inventory cleanup failed:', err));
 
     let listing;
     try {
@@ -116,14 +136,13 @@ async function handleList(interaction, currency) {
             expiresAt:    new Date(Date.now() + LISTING_TTL_MS),
         });
     } catch (err) {
-        const restored = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-        if (restored) {
-            const s = restored.inventory.find(i => i.itemId === itemId);
-            if (s) { s.quantity += qty; }
-            else   { restored.inventory.push({ itemId, quantity: qty }); }
-            restored.markModified('inventory');
-            await restored.save().catch(console.error);
-        }
+        // Hand the stock back the same way every other credit lands — one atomic
+        // upsert, so the return can't duplicate a slot a concurrent credit is
+        // creating (src/utils/inventoryGrant.js).
+        await grantInventoryItem(interaction.user.id, interaction.guild.id, itemId, qty)
+            .catch(restoreErr => console.error(
+                `[market list] returning ${qty}x ${itemId} to ${interaction.user.id} failed — items owed:`, restoreErr,
+            ));
         console.error('[market list] MarketListing.create failed:', err);
         return interaction.reply({ content: 'Failed to create listing. Your item has been returned.', flags: MessageFlags.Ephemeral });
     }
@@ -322,14 +341,13 @@ async function handleBuy(interaction, currency) {
             return editReply({ content: 'This listing was just sold. Your coins have been refunded.', embeds: [], components: [] });
         }
 
-        // Update buyer inventory first; roll back the buyer deduction if it fails
+        // Update buyer inventory first; roll back the buyer deduction if it fails.
+        // One atomic upsert rather than read-modify-save: a save computed from a
+        // read here would flatten any credit that landed in between, and two
+        // concurrent credits of the same item could each push their own slot.
         try {
-            const buyerDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-            const slot = buyerDoc.inventory.find(i => i.itemId === listing.itemId);
-            if (slot) { slot.quantity += listing.quantity; }
-            else       { buyerDoc.inventory.push({ itemId: listing.itemId, quantity: listing.quantity }); }
-            buyerDoc.markModified('inventory');
-            await buyerDoc.save();
+            const credited = await grantInventoryItem(interaction.user.id, interaction.guild.id, listing.itemId, listing.quantity);
+            if (!credited) throw new Error('buyer document not found');
         } catch (inventoryErr) {
             console.error('[market buy] inventory update failed, refunding buyer:', inventoryErr);
             await User.updateOne({ userId: interaction.user.id, guildId: interaction.guild.id }, { $inc: { balance: totalCost } }).catch(console.error);
@@ -428,12 +446,21 @@ async function handleCancel(interaction, currency) {
         return interaction.reply({ content: 'Listing not found, already sold, or not yours.', flags: MessageFlags.Ephemeral });
     }
 
-    const seller = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
-    const slot = seller.inventory.find(i => i.itemId === listing.itemId);
-    if (slot) { slot.quantity += listing.quantity; }
-    else       { seller.inventory.push({ itemId: listing.itemId, quantity: listing.quantity }); }
-    seller.markModified('inventory');
-    await seller.save();
+    // The listing is already deleted, so this credit is the only copy of the
+    // stock — return it atomically and say so if the return fails, rather than
+    // saving a stale in-memory inventory over concurrent credits.
+    try {
+        await grantInventoryItem(interaction.user.id, interaction.guild.id, listing.itemId, listing.quantity, { upsert: true });
+    } catch (creditErr) {
+        console.error(
+            `[market cancel] listing ${listing._id} was removed but returning ` +
+            `${listing.quantity}x ${listing.itemId} to ${interaction.user.id} failed — items owed:`, creditErr,
+        );
+        return interaction.reply({
+            content: 'The listing was cancelled, but returning your items hit an error. Tell an admin — it is recoverable.',
+            flags: MessageFlags.Ephemeral,
+        });
+    }
 
     const embed = new EmbedBuilder()
         .setColor('#e67e22')

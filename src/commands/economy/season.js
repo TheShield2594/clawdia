@@ -11,6 +11,7 @@ const { rewardReveal } = require('../../utils/rewardReveal');
 const { logTransaction } = require('../../utils/logTransaction');
 const { awardSeasonXp } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { grantInventoryItem, inventoryAddStages } = require('../../utils/inventoryGrant');
 
 // Reset a user's season sub-document to the fresh shape when their stored
 // seasonId is stale (a new season started). Prevents carrying old xp / claimed
@@ -192,10 +193,8 @@ async function executeClaim(interaction) {
     const balanceAtLoad = user.balance ?? 0;
 
     if (reward.coins > 0) user.balance += reward.coins;
-    if (reward.itemId) user.inventory.push({ itemId: reward.itemId, quantity: 1 });
     (wantsPremium ? user.season.claimedPremiumTiers : user.season.claimedTiers).push(tier);
     user.markModified('season');
-    if (reward.itemId) user.markModified('inventory');
 
     let coinsOwed = 0;
     try {
@@ -210,6 +209,22 @@ async function executeClaim(interaction) {
     } catch (err) {
         if (isVersionError(err)) return interaction.reply({ content: 'Edit conflict — try again.', flags: MessageFlags.Ephemeral });
         throw err;
+    }
+
+    // The claim is recorded; the item now lands as its own atomic upsert rather
+    // than riding the save — an inventory array written through `save()` would
+    // flatten any credit that landed since the read, and a slot pushed in memory
+    // can duplicate one a concurrent credit is creating
+    // (src/utils/inventoryGrant.js). A grant that fails is owed and logged, not
+    // lost silently — same posture as the coins above.
+    let itemOwed = false;
+    if (reward.itemId) {
+        try {
+            await grantInventoryItem(interaction.user.id, interaction.guild.id, reward.itemId, 1);
+        } catch (err) {
+            console.error(`[season] tier ${tier} item ${reward.itemId} owed to ${interaction.user.id} — grant failed:`, err);
+            itemOwed = true;
+        }
     }
 
     // Social proof: how many users in this guild have claimed this tier (this track)
@@ -236,6 +251,9 @@ async function executeClaim(interaction) {
                 ? (coinsOwed > 0
                     ? `\n⚠️ **${reward.coins.toLocaleString()} ${currency}** could not be credited just now and has been recorded as owed — your wallet does not include it yet.`
                     : `\n+**${reward.coins.toLocaleString()} ${currency}** added to your wallet`)
+                : '') +
+            (itemOwed
+                ? `\n⚠️ **${reward.label}** could not be added to your inventory just now — it has been logged and an admin can restore it.`
                 : '')
         );
 
@@ -481,6 +499,7 @@ async function executeClaimAll(interaction) {
     const balanceAtLoad = user.balance ?? 0;
     let totalCoins = 0;
     const itemsClaimed = [];
+    const itemsToGrant = [];
 
     for (const tierDef of claimable) {
         const reward = rewardFor(tierDef.tier, wantsPremium);
@@ -491,14 +510,8 @@ async function executeClaimAll(interaction) {
             totalCoins += reward.coins;
         }
         if (reward.itemId) {
-            const existing = user.inventory.find(e => e.itemId === reward.itemId);
-            if (existing) {
-                existing.quantity += 1;
-            } else {
-                user.inventory.push({ itemId: reward.itemId, quantity: 1 });
-            }
             itemsClaimed.push(reward.label);
-            user.markModified('inventory');
+            itemsToGrant.push(reward.itemId);
         }
 
         if (wantsPremium) {
@@ -526,6 +539,26 @@ async function executeClaimAll(interaction) {
         throw err;
     }
 
+    // The claims are recorded; the reward items now land in one atomic pipeline
+    // update rather than riding the save — an inventory array written through
+    // `save()` would flatten any credit that landed since the read, and slots
+    // pushed in memory can duplicate ones a concurrent credit is creating
+    // (src/utils/inventoryGrant.js). A grant that fails is owed and logged, not
+    // lost silently — same posture as the coins above.
+    let itemsOwed = false;
+    if (itemsToGrant.length > 0) {
+        try {
+            const granted = await User.findOneAndUpdate(
+                { userId: interaction.user.id, guildId: interaction.guild.id },
+                inventoryAddStages(itemsToGrant.map(itemId => ({ itemId }))),
+            );
+            if (!granted) throw new Error('user document not found');
+        } catch (err) {
+            console.error(`[season] claim-all items [${itemsToGrant.join(', ')}] owed to ${interaction.user.id} — grant failed:`, err);
+            itemsOwed = true;
+        }
+    }
+
     const track = wantsPremium ? '✨ Premium' : '🆓 Free';
     const tierNums = claimable.map(t => t.tier);
     const tierRange = tierNums.length === 1
@@ -538,7 +571,11 @@ async function executeClaimAll(interaction) {
             ? `⚠️ **${totalCoins.toLocaleString()} ${currency}** could not be credited just now and has been recorded as owed — your wallet does not include it yet.`
             : `💰 +**${totalCoins.toLocaleString()} ${currency}**`);
     }
-    if (itemsClaimed.length > 0) lines.push(`🎁 Items: ${itemsClaimed.join(', ')}`);
+    if (itemsClaimed.length > 0) {
+        lines.push(itemsOwed
+            ? `⚠️ Items (${itemsClaimed.join(', ')}) could not be added to your inventory just now — they have been logged and an admin can restore them.`
+            : `🎁 Items: ${itemsClaimed.join(', ')}`);
+    }
 
     const embed = new EmbedBuilder()
         .setColor(wantsPremium ? '#ffd700' : '#5865f2')
