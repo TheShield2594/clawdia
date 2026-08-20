@@ -451,6 +451,10 @@ function rollTier(user, zone) {
 function rollHuntEncounter(user, zoneId) {
     const resolvedZoneId = zoneId ?? user.hunt.activeZone;
     const zone = ZONES[resolvedZoneId];
+    // Same contract as quoteRepair's unknown tier: callers validate the zone
+    // first, so an unknown one here is a programming error — fail loudly
+    // rather than dereferencing undefined inside rollTier.
+    if (!zone) throw new Error(`Unknown hunt zone: ${resolvedZoneId}`);
     const tier = rollTier(user, zone);
     return { tier, animal: rollAnimal(tier, resolvedZoneId) };
 }

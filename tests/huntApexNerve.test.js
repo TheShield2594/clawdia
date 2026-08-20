@@ -21,6 +21,9 @@ const APEX = buildApexEncounter(APEX_TYPES.dire_alpha);
 const ANIMAL = { payoutMin: 100, payoutMax: 100 };
 
 function choicesFor(pattern) {
+    // A pattern shorter than the duel would silently default the extra
+    // phases to 'safe'; fail loudly if the phase count ever changes.
+    expect(pattern).toHaveLength(APEX_PHASES_PER_DUEL);
     return APEX.phases.map((phase, i) => {
         const c = pattern[i];
         if (c === 'C') return phase.correct;

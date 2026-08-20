@@ -2084,17 +2084,23 @@ async function executePrestige(interaction) {
 
 const RECORD_MEDALS = ['🥇', '🥈', '🥉'];
 
+// A board query that cannot use its index or hits a degenerate plan should
+// fail fast rather than hold the deferred reply open.
+const RECORDS_QUERY_TIMEOUT_MS = 5_000;
+
 /**
  * Top hunters for one stat, rendered as medal lines. `line` maps a lean
  * GrindProfile to the text after the mention; sorting happens in the query so
- * the whole guild is never loaded.
+ * the whole guild is never loaded, and `fields` projects only the data
+ * subpaths the line actually reads — `data` holds the full hunt blob
+ * (weapons, materials, trophies), which no board needs.
  */
-async function topHuntersBy(guildId, sort, filter, line, limit = 3) {
-    const profs = await GrindProfile.find(
-        { guildId, system: 'hunt', ...filter },
-        { userId: 1, data: 1 },
-    ).sort(sort).limit(limit).lean();
-    return profs.map((p, i) => `${RECORD_MEDALS[i] ?? `**${i + 1}.**`} <@${p.userId}> — ${line(p.data)}`).join('\n');
+async function topHuntersBy(guildId, sort, filter, fields, line, limit = 3) {
+    const projection = { userId: 1 };
+    for (const f of fields) projection[f] = 1;
+    const profs = await GrindProfile.find({ guildId, system: 'hunt', ...filter }, projection)
+        .sort(sort).limit(limit).maxTimeMS(RECORDS_QUERY_TIMEOUT_MS).lean();
+    return profs.map((p, i) => `${RECORD_MEDALS[i] ?? `**${i + 1}.**`} <@${p.userId}> — ${line(p.data ?? {})}`).join('\n');
 }
 
 async function executeRecords(interaction) {
@@ -2118,13 +2124,19 @@ async function executeRecords(interaction) {
     };
 
     const [bestPayout, legendary, mythical, veterans, volume, earned] = await Promise.all([
-        topHuntersBy(guildId, { 'data.bestPayout': -1 },     { 'data.bestPayout':     { $gt: 0 } }, describeBest),
-        topHuntersBy(guildId, { 'data.legendaryKills': -1 }, { 'data.legendaryKills': { $gt: 0 } }, d => `**${d.legendaryKills.toLocaleString()}** legendary kills`),
-        topHuntersBy(guildId, { 'data.eventKills': -1 },     { 'data.eventKills':     { $gt: 0 } }, d => `**${d.eventKills.toLocaleString()}** mythical kills`),
+        topHuntersBy(guildId, { 'data.bestPayout': -1 },     { 'data.bestPayout':     { $gt: 0 } },
+            ['data.bestPayout', 'data.bestPayoutMeta'], describeBest),
+        topHuntersBy(guildId, { 'data.legendaryKills': -1 }, { 'data.legendaryKills': { $gt: 0 } },
+            ['data.legendaryKills'], d => `**${d.legendaryKills.toLocaleString()}** legendary kills`),
+        topHuntersBy(guildId, { 'data.eventKills': -1 },     { 'data.eventKills':     { $gt: 0 } },
+            ['data.eventKills'], d => `**${d.eventKills.toLocaleString()}** mythical kills`),
         topHuntersBy(guildId, { 'data.prestige': -1, 'data.level': -1 }, { 'data.totalHunts': { $gt: 0 } },
+            ['data.prestige', 'data.level'],
             d => `${(d.prestige ?? 0) > 0 ? `${PRESTIGE_BADGES[Math.min(d.prestige, PRESTIGE_BADGES.length - 1)]} P${d.prestige} · ` : ''}Level **${d.level ?? 1}**`),
-        topHuntersBy(guildId, { 'data.totalHunts': -1 },  { 'data.totalHunts':  { $gt: 0 } }, d => `**${d.totalHunts.toLocaleString()}** hunts`),
-        topHuntersBy(guildId, { 'data.totalEarned': -1 }, { 'data.totalEarned': { $gt: 0 } }, d => `**${currency}${d.totalEarned.toLocaleString()}** earned`),
+        topHuntersBy(guildId, { 'data.totalHunts': -1 },  { 'data.totalHunts':  { $gt: 0 } },
+            ['data.totalHunts'], d => `**${d.totalHunts.toLocaleString()}** hunts`),
+        topHuntersBy(guildId, { 'data.totalEarned': -1 }, { 'data.totalEarned': { $gt: 0 } },
+            ['data.totalEarned'], d => `**${currency}${d.totalEarned.toLocaleString()}** earned`),
     ]);
 
     if (!bestPayout && !volume) {
