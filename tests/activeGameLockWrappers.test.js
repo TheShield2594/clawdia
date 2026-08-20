@@ -137,14 +137,19 @@ beforeEach(() => {
 // per-command regression, not a shared-helper one, and only a per-command test
 // catches it.
 
+// One key for all four — that is the property under test now, not an incidental
+// duplication in the table.
+const KEY = 'economy:g1:u1';
+
 const GRIND = [
-    { name: 'hunt',    sub: 'start', busy: /hunting action in progress/,     key: 'grind:hunt:g1:u1' },
-    { name: 'mine',    sub: 'dig',   busy: /mining action in progress/,      key: 'grind:mine:g1:u1' },
-    { name: 'fish',    sub: 'cast',  busy: /fishing action in progress/,     key: 'grind:fish:g1:u1' },
-    { name: 'explore', sub: 'go',    busy: /exploration action in progress/, key: 'grind:explore:g1:u1' },
+    { name: 'hunt',    sub: 'start', busy: /hunting action in progress/ },
+    { name: 'mine',    sub: 'dig',   busy: /mining action in progress/ },
+    { name: 'fish',    sub: 'cast',  busy: /fishing action in progress/ },
+    { name: 'explore', sub: 'go',    busy: /exploration in progress/ },
 ];
 
-describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub, busy, key }) => {
+describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub, busy }) => {
+    const key = KEY;
     const command = require(`../src/commands/economy/${name}`);
     const interactionFor = overrides => makeInteraction({ sub, ...overrides });
 
@@ -259,7 +264,6 @@ describe.each(GRIND)('/$name — the lock wrapper around execute', ({ name, sub,
 
 describe('/casino — the lock around a game that outlives execute()', () => {
     const casino = require('../src/commands/economy/casino');
-    const KEY = 'casino:g1:u1';
     const BUSY = /casino game in progress/;
 
     const interactionFor = overrides => makeInteraction({ sub: 'slots', ...overrides });
@@ -351,5 +355,84 @@ describe('/casino — the lock around a game that outlives execute()', () => {
         // Turned away by the still-held lease rather than allowed to start a
         // second hand: the game ran once in total, for the first call.
         expect(slots.execute).toHaveBeenCalledTimes(1);
+    });
+});
+
+// ── One lock, every command ──────────────────────────────────────────────────
+//
+// The keys used to be namespaced per subsystem, so `/fish` and `/casino
+// blackjack` from one user took different leases and ran side by side over the
+// same user document — the interleaving the surviving read-modify-write sites
+// lose coins to. The whole point of the shared `economy:{guild}:{user}` key is
+// that these two contend, so a per-command test cannot see it: only a test that
+// runs *two different commands* can.
+//
+// The second property is the message. One key means the command that turns you
+// away is not the one holding the lease, so "you already have a fishing action
+// in progress" has to come from what is actually running, not from whichever
+// command you happened to type.
+
+describe('one economy lock across every money-moving command', () => {
+    const fish   = require('../src/commands/economy/fish');
+    const casino = require('../src/commands/economy/casino');
+    const KEY    = 'economy:g1:u1';
+
+    test('a cast in progress turns away a casino game, and says so', async () => {
+        const parked = gate();
+        Guild.findOne.mockReturnValueOnce(parked.promise);  // parks /fish inside its body
+        Guild.findOne.mockResolvedValue({});                // /casino reads its settings and falls through
+
+        const casting = fish.execute(makeInteraction({ sub: 'cast' }));
+        await until(() => Guild.findOne.mock.calls.length === 1, '/fish to reach its first read');
+
+        const blocked = makeInteraction({ sub: 'slots' });
+        await casino.execute(blocked);
+
+        expect(replyContent(blocked)).toMatch(/fishing action in progress/);
+        expect(slots.execute).not.toHaveBeenCalled();
+
+        parked.resolve(ECONOMY_OFF);
+        await casting;
+    });
+
+    test('a hand in progress turns away a cast, and says so', async () => {
+        Guild.findOne.mockResolvedValue({});
+        // A game that returns without releasing is a hand still being played in
+        // collectors — the lease is held for real, not leaked.
+        slots.execute.mockResolvedValueOnce(undefined);
+        await casino.execute(makeInteraction({ sub: 'slots' }));
+
+        const blocked = makeInteraction({ sub: 'cast' });
+        await fish.execute(blocked);
+
+        expect(replyContent(blocked)).toMatch(/casino game in progress/);
+        // Turned away before the body: /fish never got as far as its first read.
+        expect(Guild.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    test('the lease is still per user — one player mid-hand does not stop another fishing', async () => {
+        Guild.findOne.mockResolvedValue({});
+        slots.execute.mockResolvedValueOnce(undefined);
+        await casino.execute(makeInteraction({ sub: 'slots', userId: 'u1' }));
+
+        Guild.findOne.mockResolvedValue(ECONOMY_OFF);
+        const other = makeInteraction({ sub: 'cast', userId: 'u2' });
+        await fish.execute(other);
+
+        expect(replyContent(other)).not.toMatch(/in progress/);
+    });
+
+    test('a lease with no recorded activity still blocks, with generic wording', async () => {
+        // Locks taken before this field existed, and any future caller that
+        // forgets to pass one: the message degrades, the lock does not.
+        const token = await tryAcquire(KEY, 60_000);
+        expect(token).toBeTruthy();
+
+        Guild.findOne.mockResolvedValue(ECONOMY_OFF);
+        const blocked = makeInteraction({ sub: 'cast' });
+        await fish.execute(blocked);
+
+        expect(replyContent(blocked)).toMatch(/economy action in progress/);
+        await release(KEY, token);
     });
 });

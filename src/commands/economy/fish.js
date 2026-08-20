@@ -3302,24 +3302,10 @@ async function checkGrandPrestige(client, user, guild, guildId) {
     }
 }
 
-// ── Per-user action lock ──────────────────────────────────────────────────────
+// ── Per-user economy lock ─────────────────────────────────────────────────────
 // Fishing mutates the user document with read-modify-write saves, so concurrent
 // /fish invocations from the same user can race stamina, daily caps, and drops.
-// Serialize them: one fishing action at a time per user.
-const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
-const _fishExecute = module.exports.execute;
-module.exports.execute = async function (interaction) {
-    const lockKey   = `grind:fish:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = await _lockAcquire(lockKey, 120_000);
-    if (!lockToken) {
-        return interaction.reply({
-            content: '🎣 You already have a fishing action in progress — finish it first.',
-            flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-    }
-    try {
-        return await _fishExecute(interaction);
-    } finally {
-        await _lockRelease(lockKey, lockToken);
-    }
-};
+// The lock key is the player rather than this command, so a hand of blackjack
+// races the same document and contends for it too — see utils/economyLock.js.
+const { withEconomyLock } = require('../../utils/economyLock');
+module.exports.execute = withEconomyLock(module.exports.execute, { activity: 'fish' });

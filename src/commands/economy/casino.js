@@ -4,6 +4,7 @@ const User  = require('../../models/User');
 const { processJackpotBet, getJackpotDisplay } = require('../../services/casinoJackpotService');
 const { advanceMissions } = require('../../services/seasonMissionService');
 const { tryAcquire, release } = require('../../utils/activeGameLock');
+const { economyLockKey, busyMessage } = require('../../utils/economyLock');
 
 const games = [
     require('../../games/casino/blackjack'),
@@ -98,13 +99,18 @@ module.exports = {
             return interaction.reply({ content: 'Unknown casino game.', flags: MessageFlags.Ephemeral });
         }
 
-        // One active casino game per user — prevents concurrent sessions from racing
-        // each other's debits, effects, and jackpot snapshots.
-        const lockKey   = `casino:${interaction.guild.id}:${interaction.user.id}`;
-        const lockToken = await tryAcquire(lockKey);
+        // One economy action per user — prevents concurrent sessions from racing
+        // each other's debits, effects, and jackpot snapshots. The key is shared
+        // with /fish, /hunt, /mine, /explore and /craft (utils/economyLock.js),
+        // so a hand cannot interleave with a cast over the same user document
+        // either. The TTL is the primitive's ten-minute default rather than the
+        // grind commands' two minutes, because a hand outlives `execute` by as
+        // long as the player takes to play it.
+        const lockKey   = economyLockKey(interaction.guild.id, interaction.user.id);
+        const lockToken = await tryAcquire(lockKey, undefined, 'casino');
         if (!lockToken) {
             return interaction.reply({
-                content: '🎰 You already have a casino game in progress — finish it first.',
+                content: await busyMessage(lockKey),
                 flags: MessageFlags.Ephemeral,
             });
         }
@@ -120,7 +126,7 @@ module.exports = {
         //
         // If a game throws, or forgets to call releaseLock on some exotic
         // early-return path, the lock's own TTL (10 min) frees the slot —
-        // worst case the player is blocked from a second casino game for
+        // worst case the player is blocked from every economy command for
         // that long, never permanently.
         // Fire-and-forget: the games call this from collector callbacks that
         // cannot await, and a release that loses its round trip is covered by

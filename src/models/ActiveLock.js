@@ -14,6 +14,11 @@ const activeLockSchema = new Schema({
     key:       { type: String, required: true, unique: true },
     token:     { type: String, required: true },
     expiresAt: { type: Date,   required: true },
+    // What the lease is being held for ('hunt', 'casino', …), so a user turned
+    // away from one economy command can be told which other one is holding
+    // them up. Optional: a lock with no activity still locks, it just gets
+    // generic wording.
+    activity:  { type: String, default: null },
 });
 
 // A garbage collector, not the expiry mechanism: Mongo's TTL monitor only runs

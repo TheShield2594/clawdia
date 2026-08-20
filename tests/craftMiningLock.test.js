@@ -1,15 +1,16 @@
 'use strict';
 
 // Crafting spends mining materials, and a grind profile is persisted by replacing
-// its whole `data` document. So the mining action lock has to cover the *read* as
+// its whole `data` document. So the economy lock has to cover the *read* as
 // well as the write: holding it only around user.save() left the window that
 // matters open — a /mine raid landing between attachGrind and the save was simply
 // overwritten by the snapshot the craft had already loaded, and the raider kept
 // their credit while the defender kept their materials.
 
 jest.mock('../src/utils/activeGameLock', () => ({
-    tryAcquire: jest.fn(),
-    release:    jest.fn().mockResolvedValue(true),
+    tryAcquire:     jest.fn(),
+    holderActivity: jest.fn().mockResolvedValue('mine'),
+    release:        jest.fn().mockResolvedValue(true),
     DEFAULT_TTL_MS: 120_000,
 }));
 
@@ -41,19 +42,22 @@ beforeEach(() => {
     Guild.findOne.mockReset().mockResolvedValue({ economy: { enabled: false } });
 });
 
-describe('/craft make runs under the mining lock', () => {
+describe('/craft make runs under the economy lock', () => {
     test('takes the lock before the handler runs and releases it after', async () => {
         await craft.execute(interaction('make'));
         expect(trace).toEqual(['acquire', 'reply', 'release']);
     });
 
-    test('uses the same key /mine holds, so the two serialise against each other', async () => {
+    test('uses the shared per-user key, so every economy command serialises against it', async () => {
         await craft.execute(interaction('make'));
-        expect(lock.tryAcquire).toHaveBeenCalledWith('grind:mine:g1:u1', expect.any(Number));
+        expect(lock.tryAcquire).toHaveBeenCalledWith('economy:g1:u1', expect.any(Number), 'craft');
     });
 
-    test('a busy miner is turned away without touching their data', async () => {
+    test('a busy player is turned away without touching their data, and told what is holding them up', async () => {
         lock.tryAcquire.mockImplementation(async () => { trace.push('acquire'); return null; });
+        // The lease is held by a /mine dig, so the message names mining rather
+        // than the command the player just ran.
+        lock.holderActivity.mockResolvedValue('mine');
         const i = interaction('make');
 
         await craft.execute(i);

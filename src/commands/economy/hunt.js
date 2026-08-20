@@ -3110,24 +3110,10 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 // (src/index.js), so extra exports are inert at runtime.
 module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField };
 
-// ── Per-user action lock ──────────────────────────────────────────────────────
+// ── Per-user economy lock ─────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent
 // /hunt invocations from the same user can race stamina, daily caps, and drops.
-// Serialize them: one hunting action at a time per user.
-const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../utils/activeGameLock');
-const _huntExecute = module.exports.execute;
-module.exports.execute = async function (interaction) {
-    const lockKey   = `grind:hunt:${interaction.guild?.id}:${interaction.user.id}`;
-    const lockToken = await _lockAcquire(lockKey, 120_000);
-    if (!lockToken) {
-        return interaction.reply({
-            content: '🏹 You already have a hunting action in progress — finish it first.',
-            flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-    }
-    try {
-        return await _huntExecute(interaction);
-    } finally {
-        await _lockRelease(lockKey, lockToken);
-    }
-};
+// The lock key is the player rather than this command, so a hand of blackjack
+// races the same document and contends for it too — see utils/economyLock.js.
+const { withEconomyLock } = require('../../utils/economyLock');
+module.exports.execute = withEconomyLock(module.exports.execute, { activity: 'hunt' });
