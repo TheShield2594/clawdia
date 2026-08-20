@@ -118,6 +118,17 @@ const SYNERGIES = {
         flavor: 'A full bag and a sharp eye — the mark of someone who knows value.',
         requirements: { hunt: 20, fishing: 20, mining: 20 },
         bonuses: { workCrimeCoinPct: 0.05 }
+    },
+    wayfinder: {
+        id: 'wayfinder',
+        name: 'Wayfinder',
+        emoji: '🧭',
+        description: '+1 max stamina in both Exploration and Hunting',
+        flavor: 'Reading the land and reading the prey are the same craft.',
+        // Exploration's track tops out at 30, so 20 here is the same mid-track
+        // commitment the 50-level systems ask for at 30.
+        requirements: { hunt: 30, exploration: 20 },
+        bonuses: { explorationStamina: 1, huntStamina: 1 }
     }
 };
 

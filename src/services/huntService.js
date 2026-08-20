@@ -18,7 +18,7 @@ const {
 const { hasEffect, consumeEffect, getEffect, getGatheringYieldEffect, EFFECT_CONFIGS } = require('./effectsService');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 const { getPityBonus } = require('../utils/pityBonus');
-const { getHuntSynergyStaminaBonus } = require('./synergyService');
+const { getHuntSynergyStaminaBonus, getHuntWayfinderStaminaBonus } = require('./synergyService');
 const { MAX_STAMINA_UPGRADES } = require('../data/crossSystemData');
 const { getBonusMultipliers } = require('../utils/prestige');
 
@@ -96,7 +96,9 @@ function ensureHuntData(user) {
 function getMaxStamina(user) {
     const prestige = user.hunt?.prestige ?? 0;
     const bonus = PRESTIGE_BONUSES[Math.min(prestige, PRESTIGE_BONUSES.length - 1)]?.staminaBonus ?? 0;
-    const synergyBonus = getHuntSynergyStaminaBonus(user);
+    // Outdoorsman and Wayfinder both advertise +1 max hunt stamina; they stack,
+    // exactly as Deep Prospector and Artificer do on mining.
+    const synergyBonus = getHuntSynergyStaminaBonus(user) + getHuntWayfinderStaminaBonus(user);
     const trophyBonus  = user.hunt?.woodlandInstinct ? 1 : 0;
     // Permanent Stamina +1 from the shop, applied through /use.
     const purchased = Math.min(Math.max(0, user?.staminaUpgrades ?? 0), MAX_STAMINA_UPGRADES);

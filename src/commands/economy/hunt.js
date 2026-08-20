@@ -1719,7 +1719,7 @@ async function executeProfile(interaction) {
     } else if (h.level >= 25) {
         embed.addFields({
             name: '🔗 Synergies',
-            value: 'Reach combined level milestones across Hunt, Fish & Mine to unlock cross-system bonuses!',
+            value: 'Reach combined level milestones across Hunt, Fish, Mine & Explore to unlock cross-system bonuses!',
             inline: false
         });
     }
