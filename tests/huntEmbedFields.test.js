@@ -345,3 +345,40 @@ describe('aim phase grading', () => {
         expect(AIM_WINDOW_MS).toBeGreaterThanOrEqual(2 * 400);
     });
 });
+
+describe('weapon pricing legibility', () => {
+    const { isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS } = __test__;
+    const byTier = tier => WEAPON_TIERS.find(w => w.tier === tier);
+
+    it('measures a price in days of hunting at the soft cap', () => {
+        // The cap is what makes the top of the ladder unreachable by hunting:
+        // payouts halve above it, so it is the honest ceiling to divide by.
+        expect(huntingDaysFor(LIMITS.DAILY_SOFT_CAP)).toBe(1);
+        expect(huntingDaysLabel(byTier(12).cost)).toBe(250);
+    });
+
+    it('prices a full repair the way the shop actually charges for one', () => {
+        // Repairs are sold in 20-durability units, rounded up — a rifle whose
+        // base durability is not a multiple of 20 pays for the part-unit.
+        const t12 = byTier(12);
+        expect(fullRepairCost(t12)).toBe(Math.ceil(t12.baseDurability / 20) * t12.repairCostPer20);
+        expect(fullRepairCost(t12)).toBe(6_440_000);
+    });
+
+    it('marks exactly the tiers hunting cannot fund', () => {
+        const marked = WEAPON_TIERS.filter(isCrossEconomyWeapon).map(w => w.tier);
+        expect(marked).toEqual([10, 11, 12]);
+    });
+
+    it('leaves T9 unmarked — fifteen days is a grind, not an impossibility', () => {
+        expect(huntingDaysFor(byTier(9).cost)).toBeLessThanOrEqual(CROSS_ECONOMY_DAYS);
+        expect(isCrossEconomyWeapon(byTier(9))).toBe(false);
+    });
+
+    it('derives the mark from the caps, not from a hardcoded tier', () => {
+        // Halve every price and nothing is out of reach any more. A rule pinned
+        // to "T10 and up" would still be marking the same three.
+        const cheap = WEAPON_TIERS.map(w => ({ ...w, cost: CROSS_ECONOMY_DAYS * LIMITS.DAILY_SOFT_CAP }));
+        expect(cheap.filter(isCrossEconomyWeapon)).toEqual([]);
+    });
+});

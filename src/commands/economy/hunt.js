@@ -2411,6 +2411,48 @@ async function executeShop(interaction, sub) {
     }
 }
 
+/**
+ * How the top of the weapon ladder is priced, and why it says so out loud.
+ *
+ * Hunt income has a ceiling: payouts halve above `DAILY_SOFT_CAP` (80,000) and
+ * stop entirely at `DAILY_HARD_CAP`. Measured against that ceiling, the last
+ * few tiers cost more than hunting can plausibly produce — a T12 Altair Rifle
+ * is 250 days of hunting at the soft cap, and a full repair on one is another
+ * 80, of which it has about eight before the shop wears it out for good.
+ *
+ * The numbers are not wrong. Hunting is not the only thing that feeds a wallet
+ * — casino, work, crime, heist and the rest all pay into the same balance, and
+ * the daily caps are hunt-specific — so the top tiers are whole-economy
+ * purchases by design. What was wrong is that nothing said so: a hunter looking
+ * at the shop had no way to tell the ladder stops being hunt-funded partway up,
+ * and could grind toward a number hunting cannot reach.
+ *
+ * Derived from the caps rather than hardcoded to a tier, so it stays true if
+ * either the prices or the caps move.
+ */
+const CROSS_ECONOMY_DAYS = 30;
+
+/** Days of hunting at the soft cap that `cost` represents. */
+function huntingDaysFor(cost) {
+    return cost / LIMITS.DAILY_SOFT_CAP;
+}
+
+/** Cost of taking a fresh weapon of this tier from empty back to full. */
+function fullRepairCost(weapon) {
+    return Math.ceil(weapon.baseDurability / 20) * weapon.repairCostPer20;
+}
+
+/** True for a weapon hunting alone cannot realistically pay for. */
+function isCrossEconomyWeapon(weapon) {
+    return huntingDaysFor(weapon.cost) > CROSS_ECONOMY_DAYS;
+}
+
+/** Rounded day count for display — "~250 days", never "249.9". */
+function huntingDaysLabel(cost) {
+    const days = huntingDaysFor(cost);
+    return days >= 10 ? Math.round(days) : Math.round(days * 10) / 10;
+}
+
 async function showShopList(interaction, user, currency) {
     const h = user.hunt;
 
@@ -2421,10 +2463,19 @@ async function showShopList(interaction, user, currency) {
         emoji:   w.emoji,
         badge:   `T${w.tier}`,
         subline: `${Math.round(w.successRate * 100)}% • +${Math.round(w.rarityBoost * 100)}% rare`
+            + (isCrossEconomyWeapon(w) ? ` • 🌐 ~${huntingDaysLabel(w.cost)}d of hunting` : '')
     }));
-    const weaponList = WEAPON_TIERS.map(w =>
-        `${w.emoji} **${w.name}** — ${currency}${w.cost.toLocaleString()} · \`/hunt shop weapon type:${w.slug}\``
-    ).join('\n');
+    const weaponLines = WEAPON_TIERS.map(w =>
+        `${w.emoji} **${w.name}** — ${currency}${w.cost.toLocaleString()}`
+        + (isCrossEconomyWeapon(w) ? ` 🌐` : '')
+        + ` · \`/hunt shop weapon type:${w.slug}\``
+    );
+    // The legend goes in the embed description rather than the banner subtitle:
+    // the banner is drawn with fillText on a canvas, which has no line breaks.
+    if (WEAPON_TIERS.some(isCrossEconomyWeapon)) {
+        weaponLines.push('', '🌐 *Costs more than hunting alone can fund — casino, work, crime and the rest all pay into the same wallet.*');
+    }
+    const weaponList = weaponLines.join('\n');
 
     const upgradeItems = Object.values(WEAPON_UPGRADES).map(u => ({
         imageId: `hunt:${u.id}`,
@@ -2523,6 +2574,24 @@ async function handleBuyWeapon(interaction, user, currency) {
             { name: 'Your Balance', value: `${currency}${user.balance.toLocaleString()}`,                             inline: true }
         )
         .setFooter({ text: 'Confirmation expires in 30 seconds' });
+
+    // The one place a hunter commits to the number, so it is the place to say
+    // what the number means. A weapon is a consumable — every shop repair drops
+    // maxDurability by 10% of base, so the top tiers cost their purchase price
+    // again several times over before they are condemned — and at the top of
+    // the ladder none of it is fundable from hunting alone.
+    if (isCrossEconomyWeapon(weaponData)) {
+        const repair = fullRepairCost(weaponData);
+        confirmEmbed.addFields({
+            name: '🌐 A whole-economy purchase',
+            value: [
+                `Hunting is capped at ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} a day before payouts halve, so this is about **${huntingDaysLabel(weaponData.cost)} days** of hunting on its own.`,
+                `A full repair runs ${currency}${repair.toLocaleString()} — another **${huntingDaysLabel(repair)} days** — and it has roughly eight before the wear condemns it.`,
+                `It is priced for a wallet fed by everything you do: casino, work, crime, heists and the rest all pay into the same balance.`,
+            ].join('\n'),
+            inline: false,
+        });
+    }
 
     const weaponImg = await getItemImageAttachment(`hunt:${weaponData.slug || weaponData.id}`).catch(() => null);
     if (weaponImg) confirmEmbed.setThumbnail(weaponImg.url);
@@ -3234,7 +3303,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
 // Test hooks. The command loader only looks for `data` and `execute`
 // (src/index.js), so extra exports are inert at runtime.
-module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, AIM_WINDOW_MS, AIM_LATE_MS };
+module.exports.__test__ = { buildHuntEmbed, buildBonusLines, buildTrophyField, buildFieldTrophyField, buildDailyTollField, buildTodayField, buildWeaponPages, WEAPON_SEPARATOR, gradeShot, AIM_WINDOW_MS, AIM_LATE_MS, isCrossEconomyWeapon, huntingDaysFor, huntingDaysLabel, fullRepairCost, CROSS_ECONOMY_DAYS };
 
 // ── Per-user economy lock ─────────────────────────────────────────────────────
 // Hunting mutates the user document with read-modify-write saves, so concurrent
