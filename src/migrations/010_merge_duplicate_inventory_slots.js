@@ -19,8 +19,19 @@ const mongoose = require('mongoose');
 module.exports = {
     name: '010_merge_duplicate_inventory_slots',
 
-    async up() {
+    // A `$expr` scan of the whole users collection, then a batched rewrite of
+    // every document it matches. Like 005, that is more than the runner's 30 s
+    // default is meant to cover on a grown install, and running out of budget
+    // there aborts the boot.
+    timeoutMs: 120_000,
+
+    async up({ timeoutMs } = {}) {
         const users = mongoose.connection.db.collection('users');
+
+        // The runner can only stop waiting for this migration; maxTimeMS is
+        // what stops the scan itself, so an abandoned run does not leave a
+        // full-collection cursor open behind a bot that gave up on it.
+        const bounded = timeoutMs > 0 ? { maxTimeMS: timeoutMs } : {};
 
         // Only documents that actually have a repeated itemId are rewritten —
         // comparing the slot count against the distinct-itemId count finds them
@@ -34,7 +45,7 @@ module.exports = {
                     ],
                 },
             },
-            { projection: { inventory: 1 } },
+            { projection: { inventory: 1 }, ...bounded },
         );
 
         let merged = 0;

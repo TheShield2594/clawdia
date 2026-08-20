@@ -40,6 +40,13 @@ async function ensureIndex(collection, keys, options) {
 module.exports = {
     name: '001_add_indexes',
 
+    // Every index here makes an existing query faster; none of them is load
+    // bearing for correctness, and nothing later in the sequence depends on
+    // them or undoes them. Building one can take a while on a collection that
+    // has grown, and refusing to boot the bot over a slow index build trades a
+    // slow bot for no bot. Left unrecorded on failure, so the next boot retries.
+    optional: true,
+
     async up() {
         const db = mongoose.connection.db;
 
