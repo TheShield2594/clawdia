@@ -14,7 +14,25 @@ const mongoose = require('mongoose');
 module.exports = {
     name: '005_grind_profiles',
 
-    async up() {
+    // Eight full passes over the users collection — four $merge aggregations
+    // and four updateMany $unsets. The runner's 30 s default is a development
+    // figure; on a real install this is the migration that outgrows it, and
+    // outgrowing it used to mean startup aborted and the supervisor restarted
+    // into the same wall. Raise MIGRATION_TIMEOUT_MS above this if even four
+    // minutes is not enough.
+    timeoutMs: 240_000,
+
+    // `timeoutMs` is the budget the runner is actually enforcing (its own
+    // default, this declaration, or the operator's MIGRATION_TIMEOUT_MS,
+    // whichever is largest). The runner can only stop waiting; passing it to
+    // the server as maxTimeMS is what stops the query itself, so an abandoned
+    // migration does not leave a full-collection rewrite grinding away behind
+    // a bot that has already given up on it.
+    async up({ timeoutMs } = {}) {
+        // Undefined when a caller runs this migration outside the runner; the
+        // queries then behave exactly as they did before, unbounded.
+        const bounded  = timeoutMs > 0 ? { maxTimeMS: timeoutMs } : {};
+
         const db       = mongoose.connection.db;
         const users    = db.collection('users');
         const profiles = db.collection('grindprofiles');
@@ -49,11 +67,12 @@ module.exports = {
                     whenMatched:    'keepExisting',
                     whenNotMatched: 'insert',
                 } },
-            ]).toArray();
+            ], bounded).toArray();
 
             await users.updateMany(
                 { [system]: { $exists: true } },
-                { $unset: { [system]: '' } }
+                { $unset: { [system]: '' } },
+                bounded
             );
         }
 

@@ -3,6 +3,11 @@ const mongoose = require('mongoose');
 module.exports = {
     name: '007_reminder_indexes',
 
+    // A lookup index for /reminders list and the open-reminder cap check.
+    // Missing, both still work, just with a collection scan — not a reason to
+    // hold the whole bot down. See the note in runner.js on `optional`.
+    optional: true,
+
     async up() {
         const db = mongoose.connection.db;
         const reminders = db.collection('reminders');

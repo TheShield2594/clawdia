@@ -36,6 +36,11 @@ const STALE_INDEXES = [
 module.exports = {
     name: '009_drop_stale_grind_indexes',
 
+    // Housekeeping: these indexes cover paths no document has any more, so
+    // failing to drop them wastes write throughput and disk and breaks
+    // nothing. Retried on the next boot. See the note in runner.js.
+    optional: true,
+
     async up() {
         const users = mongoose.connection.db.collection('users');
 

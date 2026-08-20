@@ -3,7 +3,12 @@
 # source and needs a full toolchain plus cairo/pango headers. None of that
 # belongs in the runtime image, so the compile happens here and only the
 # resulting node_modules is carried forward.
-FROM node:26-alpine AS build
+# The tag major must stay in step with .nvmrc and package.json `engines`: CI
+# installs and tests on the .nvmrc version, so a Dockerfile on a different major
+# ships a runtime nothing ever tested. tests/nodeVersionAlignment.test.js fails
+# the build if the three drift apart. 24 is the active LTS line; move all three
+# together when 26 reaches LTS.
+FROM node:24-alpine AS build
 
 RUN apk add --no-cache \
     cairo-dev \
@@ -25,7 +30,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 # ---- runtime stage -----------------------------------------------------------
-FROM node:26-alpine
+# Same major as the build stage and as .nvmrc — see the note above.
+FROM node:24-alpine
 
 # Shared libraries canvas links against at runtime (the -dev headers and the
 # compiler are deliberately left behind in the build stage), plus the DejaVu
