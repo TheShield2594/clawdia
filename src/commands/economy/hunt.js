@@ -69,8 +69,6 @@ const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const { chunkByLength } = require('../../utils/embedFields');
 const { paginate } = require('../../utils/paginator');
 
-const WEAPON_SEPARATOR = '\n\n';
-
 // ── Aim phase timing ─────────────────────────────────────────────────────────
 // How long the shot stays perfect once the window opens, and how long after
 // that the trigger stays live at all.
@@ -1955,6 +1953,8 @@ async function executePrestige(interaction) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // INV (was /huntinv)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+const WEAPON_SEPARATOR = '\n\n';
 
 /**
  * The weapon list, split into pages that each fit an embed description.
