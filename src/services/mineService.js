@@ -1058,6 +1058,229 @@ function planRaidHaul(user, stealFraction) {
     }));
 }
 
+// ─── DIG TRANSACTION LAYER (#613) ────────────────────────────────────────────
+//
+// The pieces of a /mine dig that are business logic rather than Discord
+// transport: session preparation, preflight validation, the atomic cooldown
+// claim, the post-roll bonus stack, and the commit. Same seams as the cast
+// and hunt transaction layers in fishService / huntService.
+
+/**
+ * Bring a freshly loaded User document up to date for a dig: attach the grind
+ * profile, ensure subdocuments, regenerate stamina, roll the daily reset and
+ * daily quests, and persist if anything changed.
+ */
+async function prepareDigUser(user) {
+    const { attachGrind } = require('../utils/grindProfile');
+    await attachGrind(user);
+    ensureMineData(user);
+    applyStaminaRegen(user);
+    applyDailyReset(user);
+    assignDailyMineQuests(user);
+    if (user.isModified()) {
+        await user.save().catch(e => console.error('[mine] pre-check save error:', e));
+    }
+}
+
+/**
+ * Read-only preflight for a dig. Returns { ok: true, depthId, depth, pickaxe,
+ * pickaxeData } or { ok: false, reason, ... } where `reason` is one of:
+ * unknown_depth, depth_locked, injured, cooldown, no_stamina, no_pickaxe,
+ * pickaxe_broken, no_charge.
+ */
+function validateDigPreflight(user, requestedDepthId) {
+    const m = user.mining;
+    const depthId = requestedDepthId ?? m.activeDepth;
+    const depth = DEPTHS[depthId];
+
+    if (!depth) return { ok: false, reason: 'unknown_depth', depthId };
+    // Access is decided by `unlockedDepths` alone. The level requirement is
+    // enforced once, at `/mine shop unlock`; re-checking it here would lock a
+    // prestiged miner out of depths they already paid for, since prestige
+    // resets the level and the purchase is permanent.
+    if (!m.unlockedDepths.includes(depthId)) return { ok: false, reason: 'depth_locked', depth };
+
+    if (m.injuryUntil && Date.now() < m.injuryUntil.getTime()) {
+        return { ok: false, reason: 'injured', nextAt: new Date(m.injuryUntil.getTime()) };
+    }
+
+    // Read-only cooldown check; the slot is claimed atomically afterwards.
+    if (m.lastMine && Date.now() - m.lastMine.getTime() < LIMITS.MINE_COOLDOWN_MS) {
+        return { ok: false, reason: 'cooldown', nextAt: new Date(m.lastMine.getTime() + LIMITS.MINE_COOLDOWN_MS) };
+    }
+
+    if (m.stamina <= 0) {
+        return {
+            ok: false,
+            reason: 'no_stamina',
+            nextAt: new Date(Date.now() + msUntilNextStamina(user)),
+            sinceRare: m.sinceRare ?? 0,
+            consecutiveFails: m.consecutiveFails ?? 0,
+            pityBonus: getPityBonus(m.consecutiveFails ?? 0, LIMITS),
+        };
+    }
+
+    if (m.equippedPickaxeIndex < 0 || !m.pickaxes[m.equippedPickaxeIndex]) return { ok: false, reason: 'no_pickaxe' };
+    const pickaxe = m.pickaxes[m.equippedPickaxeIndex];
+    if (pickaxe.status === 'broken' || pickaxe.currentDurability <= 0) {
+        return { ok: false, reason: 'pickaxe_broken', pickaxe };
+    }
+
+    // Read-only charge check; the stock is spent only after the claim wins.
+    const pickaxeData = PICKAXE_BY_TIER[pickaxe.tier];
+    if (pickaxeData.requiresCharge && (m.charges[pickaxeData.chargeType] ?? 0) <= 0) {
+        return { ok: false, reason: 'no_charge', pickaxe, pickaxeData };
+    }
+
+    return { ok: true, depthId, depth, pickaxe, pickaxeData };
+}
+
+/**
+ * Atomically claim the dig cooldown slot now that preflight has passed —
+ * lastMine is set the moment the dig is actually accepted, not earlier, so a
+ * failed precheck (stamina/pickaxe/charge) never burns the cooldown. The same
+ * guard stops two concurrent /mine dig calls from both slipping through.
+ *
+ * The claim targets GrindProfile, not User: mining state lives in its own
+ * collection (see src/models/User.js), so a User-level guard would match
+ * every document on the missing `mining` field and never reject anything.
+ *
+ * Returns { claimed: true, claimNow, release } or { claimed: false, nextAt }.
+ */
+async function claimDigCooldown(user) {
+    const GrindProfile = require('../models/GrindProfile');
+    const { persistGrindIfNew } = require('../utils/grindProfile');
+
+    const m = user.mining;
+    const claimNow = new Date();
+    const cooldownFloor = new Date(claimNow.getTime() - LIMITS.MINE_COOLDOWN_MS);
+    const priorLastMine = m.lastMine ?? null;
+
+    await persistGrindIfNew(user, 'mining');
+    const claimQuery = { userId: user.userId, guildId: user.guildId, system: 'mining' };
+    const claimed = await GrindProfile.findOneAndUpdate(
+        {
+            ...claimQuery,
+            $or: [{ 'data.lastMine': null }, { 'data.lastMine': { $lte: cooldownFloor } }],
+        },
+        { $set: { 'data.lastMine': claimNow } },
+        { new: true },
+    );
+
+    if (!claimed) {
+        // Losing the claim means another dig already took the slot, so the
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the dig that actually happened.
+        const current = await GrindProfile.findOne(claimQuery).catch(() => null);
+        const lastAt = current?.data?.lastMine ?? claimNow;
+        return { claimed: false, nextAt: new Date(new Date(lastAt).getTime() + LIMITS.MINE_COOLDOWN_MS) };
+    }
+
+    m.lastMine = claimNow;
+    const release = () => GrindProfile.updateOne(
+        { ...claimQuery, 'data.lastMine': claimNow },
+        { $set: { 'data.lastMine': priorLastMine } },
+    ).catch(() => null);
+
+    return { claimed: true, claimNow, release };
+}
+
+const WILDERNESS_YIELD_BONUS = 0.10;
+
+/**
+ * The post-roll bonus stack: pity counter (a rare find abandoned in a cave-in
+ * does not reset it), featured-depth bonus, pet yield, Wilderness district
+ * bonus (clamped to the daily hard cap), the forfeited-payout scaling for a
+ * hard-capped dig, and the best-payout stat. Mutates the user and annotates
+ * the result for the renderer.
+ */
+function applyDigBonuses(user, result, { isFeaturedDepth = false, featuredPayoutBonus = 0, petMineYieldPct = 0, wildernessActive = false, intensityMultiplier = 1 } = {}) {
+    const m = user.mining;
+
+    // Pity counter: reset only when a rare+ find was actually kept (not abandoned in a cave-in)
+    const keptRareFind = result.success && !result.caveInAbandoned && ['rare', 'epic', 'legendary', 'event'].includes(result.tier);
+    if (keptRareFind) {
+        m.sinceRare = 0;
+    } else {
+        m.sinceRare = (m.sinceRare ?? 0) + 1;
+    }
+
+    // Yield bonuses below are gated on result.finalPayout > 0, which an
+    // abandoned cave-in resets to 0 — so abandoning correctly forfeits these too.
+    if (result.success && result.finalPayout > 0 && isFeaturedDepth) {
+        const featBonus = Math.round(result.finalPayout * featuredPayoutBonus);
+        if (featBonus > 0) {
+            user.balance             += featBonus;
+            m.totalEarned            += featBonus;
+            m.dailyCoins             += featBonus;
+            result.finalPayout       += featBonus;
+            result.featuredDepthBonus = featBonus;
+        }
+    }
+
+    if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
+        const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
+        if (bonus > 0) {
+            user.balance        += bonus;
+            m.totalEarned       += bonus;
+            m.dailyCoins        += bonus;
+            result.finalPayout  += bonus;
+            result.petYieldBonus = bonus;
+            result.petYieldPct   = petMineYieldPct;
+        }
+    }
+
+    if (result.success && result.finalPayout > 0 && wildernessActive) {
+        const remaining = LIMITS.DAILY_HARD_CAP - m.dailyCoins;
+        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+        if (bonus > 0) {
+            user.balance          += bonus;
+            m.totalEarned         += bonus;
+            m.dailyCoins          += bonus;
+            result.finalPayout    += bonus;
+            result.wildernessBonus = bonus;
+        }
+    }
+
+    // At the hard cap every yield bonus above is skipped (they all gate on a
+    // payout above zero), so `forfeited` holds only the ore's value before the
+    // intensity multiplier and the bonuses that would have followed it. Scale
+    // it by what would have applied, or the embed understates the loss
+    // several-fold.
+    if (result.cappedByHard && result.forfeited > 0) {
+        const wouldHaveApplied = intensityMultiplier
+            * (isFeaturedDepth ? 1 + featuredPayoutBonus : 1)
+            * (petMineYieldPct > 0 ? 1 + petMineYieldPct / 100 : 1)
+            * (wildernessActive ? 1 + WILDERNESS_YIELD_BONUS : 1);
+        result.forfeited = Math.round(result.forfeited * wouldHaveApplied);
+    }
+
+    // bestPayout must reflect what the player actually walked away with, so
+    // this runs after the cave-in resolution and all yield bonuses above.
+    if (result.success && result.finalPayout > m.bestPayout) m.bestPayout = result.finalPayout;
+}
+
+/**
+ * Persist the dig and credit its coin movement as an atomic `$inc` after the
+ * save has landed — same contract as fishService.commitCast. A credit that
+ * will not land is returned as `payoutOwed`.
+ */
+async function commitDig(user, balanceAtLoad) {
+    const User = require('../models/User');
+    const { detachBalanceDelta, commitBalanceDelta } = require('../utils/balanceDelta');
+    const balanceFilter = { userId: user.userId, guildId: user.guildId };
+
+    const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
+    await user.save();
+    const payout = await commitBalanceDelta(User, balanceFilter, user, balanceDelta, {
+        service: 'mine',
+        jobName: 'minePayout',
+        guildId: user.guildId,
+    });
+    return { payoutOwed: payout.credited ? 0 : balanceDelta };
+}
+
 module.exports = {
     ensureMineData,
     getMaxStamina,
@@ -1087,6 +1310,12 @@ module.exports = {
     executeMine,
     assignDailyMineQuests,
     updateMineQuestProgress,
+    prepareDigUser,
+    validateDigPreflight,
+    claimDigCooldown,
+    applyDigBonuses,
+    commitDig,
+    WILDERNESS_YIELD_BONUS,
     formatMs,
     pickaxeStatusEmoji,
     durabilityBar,

@@ -1373,6 +1373,237 @@ function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponI
     return { outcome, bonusPayout, durabilityLost, correctCount, phaseResults, apexType: at, message: messages[outcome] };
 }
 
+// ─── HUNT TRANSACTION LAYER (#613) ───────────────────────────────────────────
+//
+// The pieces of a /hunt start that are business logic rather than Discord
+// transport: session preparation, preflight validation, the atomic cooldown
+// claim, the post-roll bonus stack, and the commit. Same seams as the cast
+// transaction layer in fishService.
+
+/**
+ * Bring a freshly loaded User document up to date for a hunt. `quickHunt`
+ * (a parsed option, or null when omitted) flips the stored quick-hunt
+ * preference before the pre-check save so the choice sticks even when this
+ * hunt then bounces off a cooldown or stamina gate. Returns the effective
+ * quick-hunt flag for this run.
+ */
+async function prepareHuntUser(user, { quickHunt = null } = {}) {
+    const { attachGrind } = require('../utils/grindProfile');
+    await attachGrind(user);
+    ensureHuntData(user);
+    applyStaminaRegen(user);
+    applyDailyReset(user);
+    assignDailyHuntQuests(user);
+    if (quickHunt !== null && quickHunt !== (user.hunt.quickHunt ?? false)) {
+        user.hunt.quickHunt = quickHunt;
+        user.markModified('hunt');
+    }
+    if (user.isModified()) {
+        await user.save().catch(e => console.error('[hunt] pre-check save error:', e));
+    }
+    return quickHunt ?? user.hunt.quickHunt ?? false;
+}
+
+/**
+ * Read-only preflight for a hunt. Returns { ok: true, zoneId, zone, weapon,
+ * weaponData } or { ok: false, reason, ... } where `reason` is one of:
+ * unknown_zone, zone_locked, level_too_low, injured, cooldown, no_stamina,
+ * no_weapon, weapon_broken, no_ammo.
+ */
+function validateHuntPreflight(user, requestedZoneId) {
+    const h = user.hunt;
+    const zoneId = requestedZoneId ?? h.activeZone;
+    const zone = ZONES[zoneId];
+
+    if (!zone) return { ok: false, reason: 'unknown_zone', zoneId };
+    if (!h.unlockedZones.includes(zoneId)) return { ok: false, reason: 'zone_locked', zone };
+    if (h.level < zone.unlockLevel) return { ok: false, reason: 'level_too_low', zone };
+
+    if (h.injuryUntil && Date.now() < h.injuryUntil.getTime()) {
+        return { ok: false, reason: 'injured', remainingMs: h.injuryUntil.getTime() - Date.now() };
+    }
+
+    // Read-only cooldown check; the slot is claimed atomically afterwards.
+    if (h.lastHunt && Date.now() - h.lastHunt.getTime() < LIMITS.HUNT_COOLDOWN_MS) {
+        return { ok: false, reason: 'cooldown', nextAt: new Date(h.lastHunt.getTime() + LIMITS.HUNT_COOLDOWN_MS) };
+    }
+
+    if (h.stamina <= 0) {
+        return {
+            ok: false,
+            reason: 'no_stamina',
+            nextAt: new Date(Date.now() + msUntilNextStamina(user)),
+            sinceRare: h.sinceRare ?? 0,
+            pityCap: getRarePityThreshold(zone),
+            maxStamina: getMaxStamina(user),
+            zone,
+        };
+    }
+
+    if (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex]) return { ok: false, reason: 'no_weapon' };
+    const weapon = h.weapons[h.equippedWeaponIndex];
+    if (weapon.status === 'broken' || weapon.currentDurability <= 0) {
+        return { ok: false, reason: 'weapon_broken', weapon, condemned: isCondemned(weapon) };
+    }
+
+    // Read-only ammo check; the round is spent only after the claim wins.
+    const weaponData = WEAPON_BY_TIER[weapon.tier];
+    if (weaponData.requiresAmmo && (h.ammo[weaponData.ammoType] ?? 0) <= 0) {
+        return { ok: false, reason: 'no_ammo', weapon, weaponData };
+    }
+
+    return { ok: true, zoneId, zone, weapon, weaponData };
+}
+
+/**
+ * Atomically claim the hunt cooldown slot now that preflight has passed —
+ * lastHunt is set the moment the hunt is actually accepted, not earlier, so a
+ * failed precheck (stamina/weapon/ammo) never burns the cooldown. The same
+ * guard prevents two concurrent /hunt start calls from both slipping through.
+ *
+ * The claim targets GrindProfile, not User: hunt state lives in its own
+ * collection (see src/models/User.js), so a User-level guard would match
+ * every document on the missing `hunt` field and never reject anything.
+ *
+ * Returns { claimed: true, claimNow, release } or { claimed: false, nextAt }.
+ */
+async function claimHuntCooldown(user) {
+    const GrindProfile = require('../models/GrindProfile');
+    const { persistGrindIfNew } = require('../utils/grindProfile');
+
+    const h = user.hunt;
+    const claimNow = new Date();
+    const cooldownFloor = new Date(claimNow.getTime() - LIMITS.HUNT_COOLDOWN_MS);
+    const priorLastHunt = h.lastHunt ?? null;
+
+    await persistGrindIfNew(user, 'hunt');
+    const claimQuery = { userId: user.userId, guildId: user.guildId, system: 'hunt' };
+    const claimed = await GrindProfile.findOneAndUpdate(
+        {
+            ...claimQuery,
+            $or: [{ 'data.lastHunt': null }, { 'data.lastHunt': { $lte: cooldownFloor } }],
+        },
+        { $set: { 'data.lastHunt': claimNow } },
+        { new: true },
+    );
+
+    if (!claimed) {
+        // Losing the claim means another hunt already took the slot, so the
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the hunt that actually happened.
+        const current = await GrindProfile.findOne(claimQuery).catch(() => null);
+        const lastAt = current?.data?.lastHunt ?? claimNow;
+        return { claimed: false, nextAt: new Date(new Date(lastAt).getTime() + LIMITS.HUNT_COOLDOWN_MS) };
+    }
+
+    h.lastHunt = claimNow;
+    const release = () => GrindProfile.updateOne(
+        { ...claimQuery, 'data.lastHunt': claimNow },
+        { $set: { 'data.lastHunt': priorLastHunt } },
+    ).catch(() => null);
+
+    return { claimed: true, claimNow, release };
+}
+
+const WILDERNESS_YIELD_BONUS = 0.10;
+
+/**
+ * The post-roll bonus stack: pity counter, pet coin yield, pet XP (folded
+ * into any level-up the base XP already produced), featured-zone and
+ * Wilderness district bonuses (all coin bonuses clamped to the daily hard
+ * cap), and the best-payout record. Mutates the user and annotates the
+ * result with petYieldBonus / petXpBonus / featuredZoneBonus /
+ * wildernessBonus for the renderer.
+ */
+function applyHuntBonuses(user, result, zoneId, { petYieldPct = 0, petXpPct = 0, isFeaturedZone = false, featuredPayoutBonus = 0, wildernessActive = false } = {}) {
+    const h = user.hunt;
+
+    // Pity counter: reset on rare+ success, increment otherwise
+    if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
+        h.sinceRare = 0;
+    } else {
+        h.sinceRare = (h.sinceRare ?? 0) + 1;
+    }
+
+    if (result.success && result.finalPayout > 0 && petYieldPct > 0) {
+        const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - h.dailyCoins);
+        const bonus = Math.min(Math.round(result.finalPayout * petYieldPct / 100), remaining);
+        if (bonus > 0) {
+            user.balance        += bonus;
+            h.totalEarned       += bonus;
+            h.dailyCoins        += bonus;
+            result.finalPayout  += bonus;
+            result.petYieldBonus = bonus;
+        }
+    }
+    if (result.success && result.xpEarned > 0 && petXpPct > 0) {
+        const xpBonus = Math.round(result.xpEarned * petXpPct / 100);
+        if (xpBonus > 0) {
+            const petLevelUp = applyXp(user, xpBonus);
+            result.xpEarned  += xpBonus;
+            result.petXpBonus = xpBonus;
+            if (petLevelUp.leveledUp) {
+                // Fold into any level-up the base XP already produced so the
+                // embed reports one old → new span rather than two.
+                result.levelUp = {
+                    oldLevel:  result.levelUp?.oldLevel ?? petLevelUp.oldLevel,
+                    newLevel:  petLevelUp.newLevel,
+                    leveledUp: true,
+                };
+            }
+        }
+    }
+
+    if (result.success && result.finalPayout > 0 && isFeaturedZone) {
+        const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - h.dailyCoins);
+        const featBonus = Math.min(Math.round(result.finalPayout * featuredPayoutBonus), remaining);
+        if (featBonus > 0) {
+            user.balance            += featBonus;
+            h.totalEarned           += featBonus;
+            h.dailyCoins            += featBonus;
+            result.finalPayout      += featBonus;
+            result.featuredZoneBonus = featBonus;
+        }
+    }
+
+    if (result.success && result.finalPayout > 0 && wildernessActive) {
+        const remaining = LIMITS.DAILY_HARD_CAP - h.dailyCoins;
+        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+        if (bonus > 0) {
+            user.balance          += bonus;
+            h.totalEarned         += bonus;
+            h.dailyCoins          += bonus;
+            result.finalPayout    += bonus;
+            result.wildernessBonus = bonus;
+        }
+    }
+
+    if (result.success) {
+        recordBestPayout(h, result.finalPayout, { animal: result.animal, tier: result.tier, zoneId });
+    }
+}
+
+/**
+ * Persist the hunt and credit its coin movement as an atomic `$inc` after the
+ * save has landed — same contract as fishService.commitCast. A credit that
+ * will not land is returned as `payoutOwed`.
+ */
+async function commitHunt(user, balanceAtLoad) {
+    const User = require('../models/User');
+    const { detachBalanceDelta, commitBalanceDelta } = require('../utils/balanceDelta');
+    const balanceFilter = { userId: user.userId, guildId: user.guildId };
+
+    const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
+    await user.save();
+    const payout = await commitBalanceDelta(User, balanceFilter, user, balanceDelta, {
+        service: 'hunt',
+        jobName: 'huntPayout',
+        guildId: user.guildId,
+    });
+    return { payoutOwed: payout.credited ? 0 : balanceDelta };
+}
+
 module.exports = {
     ensureHuntData,
     getMaxStamina,
@@ -1414,6 +1645,12 @@ module.exports = {
     FIELD_TROPHY_FLAGS,
     assignDailyHuntQuests,
     updateHuntQuestProgress,
+    prepareHuntUser,
+    validateHuntPreflight,
+    claimHuntCooldown,
+    applyHuntBonuses,
+    commitHunt,
+    WILDERNESS_YIELD_BONUS,
     formatMs,
     weaponStatusEmoji,
     durabilityBar

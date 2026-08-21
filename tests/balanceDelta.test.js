@@ -351,8 +351,8 @@ describe('saveWithBalanceDelta', () => {
 // transaction inline in the command.
 const TRANSACTION_SOURCES = {
     fish:    path.join('services', 'fishService.js'),
-    hunt:    path.join('commands', 'economy', 'hunt.js'),
-    mine:    path.join('commands', 'economy', 'mine.js'),
+    hunt:    path.join('services', 'huntService.js'),
+    mine:    path.join('services', 'mineService.js'),
     explore: path.join('commands', 'economy', 'explore.js'),
 };
 

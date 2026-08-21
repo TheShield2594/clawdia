@@ -10,7 +10,7 @@ const {
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
-const { detachBalanceDelta, commitBalanceDelta, saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { chargeExact, refundCharge } = require('../../utils/balanceDebit');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
@@ -29,7 +29,6 @@ const { randomFrom, HUNT_EMPTY_LINES } = require('../../utils/copyLines');
 const {
     ensureHuntData,
     applyStaminaRegen,
-    applyDailyReset,
     msUntilDailyReset,
     msUntilNextStamina,
     getMaxStamina,
@@ -56,7 +55,12 @@ const {
     recordBestPayout,
     applyPayoutModifiers,
     rollHuntEncounter,
-    rollAnimal
+    rollAnimal,
+    prepareHuntUser,
+    validateHuntPreflight,
+    claimHuntCooldown,
+    applyHuntBonuses,
+    commitHunt
 } = require('../../services/huntService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -618,169 +622,33 @@ async function executeStart(interaction) {
         { upsert: true, new: true }
     );
 
-    await attachGrind(user);
-    ensureHuntData(user);
-    applyStaminaRegen(user);
-    applyDailyReset(user);
-    assignDailyHuntQuests(user);
-
     // Quick-hunt preference: passing the option flips the stored setting, so it
-    // never has to be retyped; omitting it uses whatever was chosen last. Set
-    // before the pre-check save so the choice sticks even when this hunt then
-    // bounces off a cooldown or stamina gate.
-    const quickOpt = interaction.options.getBoolean('quick');
-    if (quickOpt !== null && quickOpt !== (user.hunt.quickHunt ?? false)) {
-        user.hunt.quickHunt = quickOpt;
-        user.markModified('hunt');
-    }
-    const quick = quickOpt ?? user.hunt.quickHunt ?? false;
-
-    if (user.isModified()) {
-        await user.save().catch(e => console.error('[hunt] pre-check save error:', e));
-    }
-
+    // never has to be retyped; omitting it uses whatever was chosen last.
+    const quick = await prepareHuntUser(user, { quickHunt: interaction.options.getBoolean('quick') });
     const h = user.hunt;
 
-    const requestedZone = interaction.options.getString('zone');
-    const zoneId = requestedZone ?? h.activeZone;
-    const zone   = ZONES[zoneId];
+    // ── Preflight (read-only; the cooldown slot is claimed atomically below) ──
+    const preflight = validateHuntPreflight(user, interaction.options.getString('zone'));
+    if (!preflight.ok) {
+        return replyHuntPreflightFailure(interaction, preflight);
+    }
+    const { zoneId, zone, weapon, weaponData } = preflight;
 
-    if (!zone) {
-        return interaction.reply({ content: `Unknown zone \`${zoneId}\`. Use \`/hunt zone list\` to see available zones.`, flags: MessageFlags.Ephemeral });
-    }
-    if (!h.unlockedZones.includes(zoneId)) {
-        return interaction.reply({
-            content: `You haven't unlocked **${zone.name}** yet. Use \`/hunt shop unlock\` to unlock it.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-    if (h.level < zone.unlockLevel) {
-        return interaction.reply({
-            content: `You need to be Hunter Level **${zone.unlockLevel}** to hunt in **${zone.name}**.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    if (h.injuryUntil && Date.now() < h.injuryUntil.getTime()) {
-        const remaining = h.injuryUntil.getTime() - Date.now();
-        return interaction.reply({
-            content: `You're injured and need to rest. Back in action in **${formatMs(remaining)}**.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    // ── Hunt cooldown check (read-only; claimed atomically after preflight) ──
-    if (h.lastHunt && Date.now() - h.lastHunt.getTime() < LIMITS.HUNT_COOLDOWN_MS) {
-        const nextAt = new Date(h.lastHunt.getTime() + LIMITS.HUNT_COOLDOWN_MS);
+    // Atomically claim the cooldown slot now that all preflight checks have
+    // passed — see huntService.claimHuntCooldown for the guarantees.
+    const claim = await claimHuntCooldown(user);
+    if (!claim.claimed) {
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '🫁 Catching Your Breath',
                 description: 'You just came back from a hunt.\nGive it a moment before heading back out.',
                 color: '#5a8a3c',
-                nextAt,
+                nextAt: claim.nextAt,
             })],
             flags: MessageFlags.Ephemeral,
         });
     }
-
-    if (h.stamina <= 0) {
-        const regenMs = msUntilNextStamina(user);
-        const nextAt  = new Date(Date.now() + regenMs);
-        const sinceRare = h.sinceRare ?? 0;
-        const pityCap   = getRarePityThreshold(zone);
-        const pityStat  = sinceRare >= 5
-            ? `🎯 ${sinceRare} hunts since last Rare+ • guaranteed at ${pityCap} in ${zone.name}`
-            : null;
-        return interaction.reply({
-            embeds: [buildCooldownEmbed({
-                title: '😮‍💨 Out of Stamina',
-                description: "You've pushed yourself to the limit.\nRest up — the wilderness will wait.\nBuy a **Stamina Tonic** from `/hunt shop` to recover faster.",
-                color: '#5a8a3c',
-                nextAt,
-                pityStat,
-                nextRewardPreview: `Full stamina = ${getMaxStamina(user)} hunts · Rare+ guaranteed after ${pityCap} dry hunts here`,
-            })],
-            flags: MessageFlags.Ephemeral,
-        });
-    }
-
-    if (h.equippedWeaponIndex < 0 || !h.weapons[h.equippedWeaponIndex]) {
-        return interaction.reply({
-            content: `You don't have a weapon equipped! Buy one with \`/hunt shop weapon\` and equip it with \`/hunt inv equip 1\`.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    const weapon = h.weapons[h.equippedWeaponIndex];
-
-    if (weapon.status === 'broken' || weapon.currentDurability <= 0) {
-        return interaction.reply({
-            content: isCondemned(weapon)
-                ? `Your **${weapon.name}** is broken beyond repair — too many shop repairs have worn it out. Buy a replacement with \`/hunt shop weapon\` and discard this one with \`/hunt inv discard\`.`
-                : `Your **${weapon.name}** is broken! Repair it with \`/hunt shop repair\` or buy a new one with \`/hunt shop weapon\`.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    const weaponData = WEAPON_BY_TIER[weapon.tier];
-    if (weaponData.requiresAmmo && (h.ammo[weaponData.ammoType] ?? 0) <= 0) {
-        return interaction.reply({
-            content: `You're out of **${weaponData.ammoType.replace(/_/g, ' ')}**! Buy more with \`/hunt shop buy\`.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    // Atomically claim the cooldown slot now that all preflight checks have passed —
-    // lastHunt is set the moment the hunt is actually accepted, not earlier, so a
-    // failed precheck (stamina/weapon/ammo) never burns the cooldown. The same guard
-    // still prevents two concurrent /hunt start calls from both slipping through.
-    //
-    // The claim targets GrindProfile, not User: hunt state lives in its own
-    // collection (see src/models/User.js), so a User-level guard would match every
-    // document on the missing `hunt` field and never reject anything.
-    const huntClaimNow = new Date();
-    const huntCooldownFloor = new Date(huntClaimNow.getTime() - LIMITS.HUNT_COOLDOWN_MS);
-    const priorLastHunt = h.lastHunt ?? null;
-    await persistGrindIfNew(user, 'hunt');
-    const huntClaimQuery = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'hunt' };
-    const claimedHunt = await GrindProfile.findOneAndUpdate(
-        {
-            ...huntClaimQuery,
-            $or: [{ 'data.lastHunt': null }, { 'data.lastHunt': { $lte: huntCooldownFloor } }],
-        },
-        { $set: { 'data.lastHunt': huntClaimNow } },
-        { new: true },
-    );
-
-    if (!claimedHunt) {
-        // Losing the claim means another hunt already took the slot, so the
-        // in-memory snapshot is stale — read the winning timestamp back so the
-        // countdown reflects the hunt that actually happened. If that read fails,
-        // fall back to now rather than the snapshot: reaching the claim at all
-        // means the snapshot was already past the cooldown floor, so it would
-        // render a countdown in the past and tell the player they can hunt again.
-        const current = await GrindProfile.findOne(huntClaimQuery).catch(() => null);
-        const lastAt  = current?.data?.lastHunt ?? huntClaimNow;
-        const nextAt  = new Date(new Date(lastAt).getTime() + LIMITS.HUNT_COOLDOWN_MS);
-        return interaction.reply({
-            embeds: [buildCooldownEmbed({
-                title: '🫁 Catching Your Breath',
-                description: 'You just came back from a hunt.\nGive it a moment before heading back out.',
-                color: '#5a8a3c',
-                nextAt,
-            })],
-            flags: MessageFlags.Ephemeral,
-        });
-    }
-    h.lastHunt = huntClaimNow;
-
-    // The claim is a real write now, so a hunt that dies before its result is
-    // saved would otherwise cost the player a full cooldown for nothing. Hand the
-    // slot back — but only while it is still ours, so a newer claim isn't undone.
-    const releaseHuntClaim = () => GrindProfile.updateOne(
-        { ...huntClaimQuery, 'data.lastHunt': huntClaimNow },
-        { $set: { 'data.lastHunt': priorLastHunt } },
-    ).catch(() => null);
+    const releaseHuntClaim = claim.release;
 
     // Everything between here and the save can still fail — a Discord API error
     // while collecting the approach prompts, a service throwing — and until the
@@ -794,7 +662,6 @@ async function executeStart(interaction) {
     // `$inc` at the save, so `save()` never writes an absolute balance read
     // before that window. See src/utils/balanceDelta.js.
     const balanceAtLoad = user.balance ?? 0;
-    const balanceFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
     try {
 
@@ -940,71 +807,15 @@ async function executeStart(interaction) {
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
         const result = executeHunt(user, zoneId, { stealthBonus, aimBonus, marketplaceActive, encounter });
 
-        // Pity counter: reset on rare+ success, increment otherwise
-        if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
-            user.hunt.sinceRare = 0;
-        } else {
-            user.hunt.sinceRare = (user.hunt.sinceRare ?? 0) + 1;
-        }
-
-        if (result.success && result.finalPayout > 0 && petYieldPct > 0) {
-            const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins);
-            const bonus = Math.min(Math.round(result.finalPayout * petYieldPct / 100), remaining);
-            if (bonus > 0) {
-                user.balance           += bonus;
-                user.hunt.totalEarned  += bonus;
-                user.hunt.dailyCoins   += bonus;
-                result.finalPayout     += bonus;
-                result.petYieldBonus    = bonus;
-            }
-        }
-        if (result.success && result.xpEarned > 0 && petXpPct > 0) {
-            const xpBonus = Math.round(result.xpEarned * petXpPct / 100);
-            if (xpBonus > 0) {
-                const petLevelUp = applyXp(user, xpBonus);
-                result.xpEarned      += xpBonus;
-                result.petXpBonus     = xpBonus;
-                if (petLevelUp.leveledUp) {
-                    // Fold into any level-up the base XP already produced so the embed
-                    // reports one old → new span rather than two.
-                    result.levelUp = {
-                        oldLevel:  result.levelUp?.oldLevel ?? petLevelUp.oldLevel,
-                        newLevel:  petLevelUp.newLevel,
-                        leveledUp: true,
-                    };
-                }
-            }
-        }
-
-        // Featured zone bonus: +25% payout
-        if (result.success && result.finalPayout > 0 && isFeaturedZone) {
-            const remaining = Math.max(0, LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins);
-            const featBonus = Math.min(Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS), remaining);
-            if (featBonus > 0) {
-                user.balance              += featBonus;
-                user.hunt.totalEarned     += featBonus;
-                user.hunt.dailyCoins      += featBonus;
-                result.finalPayout        += featBonus;
-                result.featuredZoneBonus   = featBonus;
-            }
-        }
-        // Wilderness district: +10% hunt yield (clamped to daily hard cap)
-        const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
-        if (result.success && result.finalPayout > 0 && wildernessActive) {
-            const remaining = LIMITS.DAILY_HARD_CAP - user.hunt.dailyCoins;
-            const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-            const bonus     = Math.max(0, Math.min(rawBonus, remaining));
-            if (bonus > 0) {
-                user.balance           += bonus;
-                user.hunt.totalEarned  += bonus;
-                user.hunt.dailyCoins   += bonus;
-                result.finalPayout     += bonus;
-                result.wildernessBonus  = bonus;
-            }
-        }
-        if (result.success) {
-            recordBestPayout(user.hunt, result.finalPayout, { animal: result.animal, tier: result.tier, zoneId });
-        }
+        // Pity counter, pet coin/XP yield, featured-zone and Wilderness
+        // bonuses, best-payout record — the full post-roll bonus stack.
+        applyHuntBonuses(user, result, zoneId, {
+            petYieldPct,
+            petXpPct,
+            isFeaturedZone,
+            featuredPayoutBonus: FEATURED_PAYOUT_BONUS,
+            wildernessActive: isDistrictActive(guildSettings, 'wilderness'),
+        });
 
         updateHuntQuestProgress(user, result, zoneId);
         await ensureQuests(user, guildSettings);
@@ -1024,26 +835,12 @@ async function executeStart(interaction) {
 
         const huntAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
-        // Hand the run's coin movement to an atomic `$inc` and take `balance` out
-        // of the save. A path that reverses its own reward nets to zero and
-        // issues no write.
-        const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
-
+        // Persist and credit through the service. A path that reverses its own
+        // reward nets to zero and issues no coin write.
         let payoutOwed = 0;
         try {
-            await user.save();
+            ({ payoutOwed } = await commitHunt(user, balanceAtLoad));
             huntCommitted = true;
-            // Only after the save has landed: a credit applied before a save that
-            // then failed would pay for a run the player could take again. The two
-            // cannot be one write on a standalone mongod, so a credit that will
-            // not land is recorded as owed and said out loud rather than logged
-            // and forgotten.
-            const payout = await commitBalanceDelta(User, balanceFilter, user, balanceDelta, {
-                service: 'hunt',
-                jobName: 'huntPayout',
-                guildId: interaction.guild.id,
-            });
-            if (!payout.credited) payoutOwed = balanceDelta;
             if (huntAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, user, interaction.member, huntAchievements).catch(() => null);
             }
@@ -1371,6 +1168,74 @@ async function executeStart(interaction) {
     } catch (err) {
         if (!huntCommitted) await releaseHuntClaim();
         throw err;
+    }
+}
+
+// Renders a failed hunt preflight (huntService.validateHuntPreflight) as the
+// reply the player sees. Pure presentation — every check lives in the service.
+function replyHuntPreflightFailure(interaction, preflight) {
+    const ephemeral = { flags: MessageFlags.Ephemeral };
+    switch (preflight.reason) {
+        case 'unknown_zone':
+            return interaction.reply({ content: `Unknown zone \`${preflight.zoneId}\`. Use \`/hunt zone list\` to see available zones.`, ...ephemeral });
+        case 'zone_locked':
+            return interaction.reply({
+                content: `You haven't unlocked **${preflight.zone.name}** yet. Use \`/hunt shop unlock\` to unlock it.`,
+                ...ephemeral
+            });
+        case 'level_too_low':
+            return interaction.reply({
+                content: `You need to be Hunter Level **${preflight.zone.unlockLevel}** to hunt in **${preflight.zone.name}**.`,
+                ...ephemeral
+            });
+        case 'injured':
+            return interaction.reply({
+                content: `You're injured and need to rest. Back in action in **${formatMs(preflight.remainingMs)}**.`,
+                ...ephemeral
+            });
+        case 'cooldown':
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '🫁 Catching Your Breath',
+                    description: 'You just came back from a hunt.\nGive it a moment before heading back out.',
+                    color: '#5a8a3c',
+                    nextAt: preflight.nextAt,
+                })],
+                ...ephemeral,
+            });
+        case 'no_stamina':
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '😮‍💨 Out of Stamina',
+                    description: "You've pushed yourself to the limit.\nRest up — the wilderness will wait.\nBuy a **Stamina Tonic** from `/hunt shop` to recover faster.",
+                    color: '#5a8a3c',
+                    nextAt: preflight.nextAt,
+                    pityStat: preflight.sinceRare >= 5
+                        ? `🎯 ${preflight.sinceRare} hunts since last Rare+ • guaranteed at ${preflight.pityCap} in ${preflight.zone.name}`
+                        : null,
+                    nextRewardPreview: `Full stamina = ${preflight.maxStamina} hunts · Rare+ guaranteed after ${preflight.pityCap} dry hunts here`,
+                })],
+                ...ephemeral,
+            });
+        case 'no_weapon':
+            return interaction.reply({
+                content: `You don't have a weapon equipped! Buy one with \`/hunt shop weapon\` and equip it with \`/hunt inv equip 1\`.`,
+                ...ephemeral
+            });
+        case 'weapon_broken':
+            return interaction.reply({
+                content: preflight.condemned
+                    ? `Your **${preflight.weapon.name}** is broken beyond repair — too many shop repairs have worn it out. Buy a replacement with \`/hunt shop weapon\` and discard this one with \`/hunt inv discard\`.`
+                    : `Your **${preflight.weapon.name}** is broken! Repair it with \`/hunt shop repair\` or buy a new one with \`/hunt shop weapon\`.`,
+                ...ephemeral
+            });
+        case 'no_ammo':
+            return interaction.reply({
+                content: `You're out of **${preflight.weaponData.ammoType.replace(/_/g, ' ')}**! Buy more with \`/hunt shop buy\`.`,
+                ...ephemeral
+            });
+        default:
+            return interaction.reply({ content: 'You cannot hunt right now.', ...ephemeral });
     }
 }
 
