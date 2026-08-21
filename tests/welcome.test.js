@@ -33,6 +33,7 @@ jest.mock('canvas', () => {
 
 // Mock heavy service/model dependencies so the event module loads cleanly
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
+jest.mock('../src/models/GuildAnalytics', () => ({ updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }) }));
 jest.mock('../src/services/raidService', () => ({ handleMemberJoin: jest.fn() }));
 jest.mock('../src/services/antiNukeService', () => ({ enforceJoinGate: jest.fn().mockResolvedValue(false) }));
 

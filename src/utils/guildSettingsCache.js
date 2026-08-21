@@ -5,10 +5,11 @@
  *
  * Every message and every slash command used to issue its own
  * `Guild.findOne({ guildId })`, which loads and hydrates the entire guild
- * document — including up to 3000 `analytics.commandUsage` entries and every
- * shop item's inline `imageData` Buffer. On a busy server that is one full
- * document read per message, and it is the single biggest scaling limit in the
- * bot.
+ * document. On a busy server that is one full document read per message, and
+ * it is the single biggest scaling limit in the bot. The read here excludes
+ * the shop's inline `imageData` Buffers (see HEAVY_FIELDS_PROJECTION), and
+ * telemetry lives in its own GuildAnalytics collection, so the heavyweight
+ * parts of the old document never enter the heap on this path.
  *
  * Two properties make this safe to share between callers:
  *
@@ -51,6 +52,13 @@ let ttlMs = DEFAULT_TTL_MS;
 let hits = 0;
 let misses = 0;
 
+// Heavy payloads nothing on the cached read paths (messageCreate,
+// interactionCreate) ever looks at. Excluded so a guild with a fully
+// illustrated shop does not pin megabytes of image Buffers in this cache.
+// Exclusion projection on a hydrated read still applies schema defaults to
+// every other field.
+const HEAVY_FIELDS_PROJECTION = '-shop.imageData';
+
 // Required lazily: models/Guild.js registers invalidation hooks that reach back
 // into this module, and a top-level require in both directions would leave one
 // of them holding a half-initialised exports object.
@@ -78,7 +86,7 @@ async function getGuildSettings(guildId) {
 
     misses++;
     const promise = (async () => {
-        const doc = await getGuildModel().findOne({ guildId });
+        const doc = await getGuildModel().findOne({ guildId }, HEAVY_FIELDS_PROJECTION);
         // Misses are not cached: a missing document is a first-message event,
         // and caching the absence would delay the freshly created settings.
         if (!doc) return null;
@@ -140,11 +148,10 @@ function onGuildDocumentSaved(doc) {
 // Nothing on the cached read paths looks at them, so a write touching only these
 // need not evict the entry.
 //
-// This matters more than it looks: `logCommandMetric` pushes to
-// `analytics.commandUsage` after *every* slash command, and the member-event
-// counters fire on every join and leave. Treating those as configuration changes
-// would evict each active guild continuously and leave the cache doing nothing
-// but bookkeeping.
+// The per-command and per-join telemetry writers now target the separate
+// GuildAnalytics collection and never pass through here at all; 'analytics'
+// stays listed so a straggling write to a not-yet-migrated document (or a
+// rollback) still does not evict each active guild continuously.
 const NON_SETTINGS_ROOTS = new Set(['analytics']);
 
 /**

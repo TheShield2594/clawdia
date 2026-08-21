@@ -1,22 +1,24 @@
 const Guild = require('../models/Guild');
+const GuildAnalytics = require('../models/GuildAnalytics');
 const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const { trackAction } = require('../services/antiNukeService');
-async function trackMemberEvent(guildSettings, dateKey, field) {
-    const result = await guildSettings.constructor.updateOne(
-        { guildId: guildSettings.guildId, 'analytics.memberEvents.date': dateKey },
-        { $inc: { [`analytics.memberEvents.$.${field}`]: 1 } }
+async function trackMemberEvent(guildId, dateKey, field) {
+    const result = await GuildAnalytics.updateOne(
+        { guildId, 'memberEvents.date': dateKey },
+        { $inc: { [`memberEvents.$.${field}`]: 1 } }
     );
     if (!result.matchedCount) {
-        await guildSettings.constructor.updateOne(
-            { guildId: guildSettings.guildId, 'analytics.memberEvents.date': { $ne: dateKey } },
+        await GuildAnalytics.updateOne(
+            { guildId, 'memberEvents.date': { $ne: dateKey } },
             {
                 $push: {
-                    'analytics.memberEvents': {
+                    memberEvents: {
                         $each: [{ date: dateKey, joins: field === 'joins' ? 1 : 0, leaves: field === 'leaves' ? 1 : 0 }],
                         $slice: -120
                     }
                 }
-            }
+            },
+            { upsert: true }
         );
     }
 }
@@ -42,7 +44,7 @@ module.exports = {
 
             const dateKey = new Date().toISOString().slice(0, 10);
             try {
-                await trackMemberEvent(guildSettings, dateKey, 'leaves');
+                await trackMemberEvent(member.guild.id, dateKey, 'leaves');
             } catch (analyticsError) {
                 console.error('Member leave analytics error:', analyticsError);
             }

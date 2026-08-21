@@ -1,17 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const Guild = require('../../../models/Guild');
+const GuildAnalytics = require('../../../models/GuildAnalytics');
 const User = require('../../../models/User');
 const Case = require('../../../models/Case');
 const { checkAuth, checkGuildAccess } = require('../../lib/middleware');
 const { computeRetention, median, parseChannelIdFromJumpUrl } = require('../../lib/apiHelpers');
 const { cachedAggregate } = require('../../lib/aggregateCache');
 
-// A full Guild document carries the 3000-entry analytics.commandUsage array, the
-// analytics this route is actually after — and every shop item's image Buffer,
-// which it is not. Naming the fields keeps the second group out of the response
-// path entirely.
-const STATS_GUILD_FIELDS = 'analytics welcome moderation leveling economy rssFeeds';
+// Telemetry lives in its own GuildAnalytics collection; the Guild document is
+// read only for the handful of settings the recommendations look at, named so
+// the shop's image Buffers never enter the response path.
+const STATS_GUILD_FIELDS = 'welcome moderation leveling economy rssFeeds';
 
 // Moderation cases are read for four aggregates over five fields. Hydrating a
 // thousand full case documents to compute them is the expensive half of this
@@ -25,7 +25,7 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
         // Every one of these touches the guild's whole user collection, and the page
         // that calls this route also calls /economy/stats, which asks two of the same
         // questions. Memoised so that costs one scan, not five.
-        const [totalUsers, totalMessages, topLevels, guildSettings] = await Promise.all([
+        const [totalUsers, totalMessages, topLevels, guildSettings, analytics] = await Promise.all([
             cachedAggregate(`${guildId}:stats:users`, () => User.countDocuments({ guildId })),
             cachedAggregate(`${guildId}:stats:messages`, () => User.aggregate([
                 { $match: { guildId } },
@@ -36,10 +36,11 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
                 .sort({ level: -1, xp: -1 })
                 .limit(10)
                 .lean()),
-            Guild.findOne({ guildId }).select(STATS_GUILD_FIELDS).lean()
+            Guild.findOne({ guildId }).select(STATS_GUILD_FIELDS).lean(),
+            GuildAnalytics.findOne({ guildId }).lean()
         ]);
-        const memberEvents = guildSettings?.analytics?.memberEvents || [];
-        const commandUsage = guildSettings?.analytics?.commandUsage || [];
+        const memberEvents = analytics?.memberEvents || [];
+        const commandUsage = analytics?.commandUsage || [];
 
         const { joins7, leaves7, joins30, leaves30, retained7, retained30 } = computeRetention(memberEvents);
 
@@ -146,11 +147,14 @@ router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, 
     const { guildId } = req.params;
 
     try {
-        const guildSettings = await Guild.findOne({ guildId }).select('guildId analytics').lean();
-        if (!guildSettings) return res.status(404).json({ error: 'Guild not found' });
+        const [guildExists, analytics] = await Promise.all([
+            Guild.exists({ guildId }),
+            GuildAnalytics.findOne({ guildId }).lean()
+        ]);
+        if (!guildExists) return res.status(404).json({ error: 'Guild not found' });
 
-        const memberEvents = guildSettings?.analytics?.memberEvents || [];
-        const commandUsage = guildSettings?.analytics?.commandUsage || [];
+        const memberEvents = analytics?.memberEvents || [];
+        const commandUsage = analytics?.commandUsage || [];
 
         // Retention: 7/30 day net-retention proxy from join/leave tracking.
         const { joins7, leaves7, joins30, leaves30, retained7, retained30 } = computeRetention(memberEvents);

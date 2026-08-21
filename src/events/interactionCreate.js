@@ -1,5 +1,6 @@
 const { MessageFlags } = require('discord.js');
 const Guild = require('../models/Guild');
+const GuildAnalytics = require('../models/GuildAnalytics');
 const User = require('../models/User');
 const { handlePollVote } = require('../commands/utility/poll');
 const { handleHeistButton } = require('../commands/economy/heist');
@@ -67,19 +68,16 @@ async function logCommandMetric(interaction, success, reason = null) {
             success,
             reason
         };
-        await Guild.updateOne(
+        await GuildAnalytics.updateOne(
             { guildId: interaction.guild.id },
             {
                 $push: {
-                    'analytics.commandUsage': {
+                    commandUsage: {
                         $each: [entry],
                         $slice: -3000
                     }
                 },
-                $setOnInsert: {
-                    guildId: interaction.guild.id,
-                    name: interaction.guild.name || 'Unknown Guild'
-                }
+                $setOnInsert: { guildId: interaction.guild.id }
             },
             { upsert: true }
         );
