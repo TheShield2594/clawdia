@@ -25,6 +25,9 @@ module.exports = {
                 .addIntegerOption(o => o.setName('case_id').setDescription('The case ID of the warning to remove').setRequired(true).setMinValue(1)))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ModerateMembers],
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
 

@@ -20,6 +20,9 @@ module.exports = {
             o.setName('id').setDescription('Case ID number').setRequired(true).setMinValue(1))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ModerateMembers],
     async execute(interaction) {
         const caseId = interaction.options.getInteger('id');
         const modCase = await getCase(interaction.guild.id, caseId);

@@ -16,6 +16,9 @@ module.exports = {
                 .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.BanMembers],
     async execute(interaction) {
         const userId = interaction.options.getString('user_id').trim();
         const reason = interaction.options.getString('reason') || 'No reason provided';

@@ -16,6 +16,9 @@ module.exports = {
                 .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ManageChannels],
     async execute(interaction) {
         const seconds = interaction.options.getInteger('seconds');
         const channel = interaction.options.getChannel('channel') ?? interaction.channel;

@@ -16,6 +16,9 @@ module.exports = {
             o.setName('assign').setDescription('Assign this case to a moderator').setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ModerateMembers],
     async execute(interaction) {
         const caseId = interaction.options.getInteger('case_id');
         const text = interaction.options.getString('text');

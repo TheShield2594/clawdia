@@ -17,6 +17,9 @@ module.exports = {
                 .setMinValue(1).setMaxValue(25).setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ModerateMembers],
     async execute(interaction) {
         const user = interaction.options.getUser('user');
         const limit = interaction.options.getInteger('limit') ?? 10;

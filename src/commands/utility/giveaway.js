@@ -23,6 +23,9 @@ module.exports = {
                 .addStringOption(o => o.setName('message_id').setDescription('Message ID of the giveaway').setRequired(true)))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ManageGuild],
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
 
