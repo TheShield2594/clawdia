@@ -1,13 +1,5 @@
-const cron = require('node-cron');
 const { deployCommands } = require('../utils/commandDeployer');
-const { checkRssFeeds, scheduleDailyNews } = require('../services/rssService');
-const { checkReminders } = require('../services/reminderService');
-const { checkGiveaways } = require('../services/giveawayService');
-const { checkTempVoice } = require('../services/tempVoiceService');
-const { checkBirthdays } = require('../services/birthdayService');
-const { checkSeasonalEvents } = require('../services/seasonalEventService');
-const { resolveExpiredWars, resolveExpiredSeasons, awardWeeklyLeaderboardBadges, selectPetOfTheWeek, announceHourlyWinners, recalcShopPrices, resolveRankedSeasons, applyBankInterest, returnExpiredMarketListings, postScheduledNewspapers } = require('../services/schedulerService');
-const { runJob } = require('../utils/jobRunner');
+const { startScheduler } = require('../services/scheduler');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
 
@@ -25,89 +17,9 @@ module.exports = {
             console.error('[READY] Failed to deploy slash commands:', error);
         }
 
-        client.user.setPresence({
-            activities: [{ name: '/help | Clawdia', type: 0 }],
-            status: 'online'
-        });
-
-        cron.schedule('*/5 * * * *', () =>
-            runJob('rssService', 'checkRssFeeds', () => checkRssFeeds(client))
-        );
-
-        cron.schedule('* * * * *', () =>
-            runJob('reminderService', 'checkReminders', () => checkReminders(client))
-        );
-
-        scheduleDailyNews(client);
-
-        cron.schedule('* * * * *', () =>
-            runJob('giveawayService', 'checkGiveaways', () => checkGiveaways(client))
-        );
-
-        cron.schedule('*/2 * * * *', () =>
-            runJob('tempVoiceService', 'checkTempVoice', () => checkTempVoice(client))
-        );
-
-        cron.schedule('0 * * * *', () =>
-            runJob('birthdayService', 'checkBirthdays', () => checkBirthdays(client))
-        );
-
-        // Check seasonal event auto-start/auto-end once per hour
-        cron.schedule('0 * * * *', () =>
-            runJob('seasonalEventService', 'checkSeasonalEvents', () => checkSeasonalEvents(client))
-        );
-
-        // Auto-resolve expired server wars and economy seasons every 5 minutes
-        cron.schedule('*/5 * * * *', () =>
-            runJob('schedulerService', 'resolveExpiredWars', () => resolveExpiredWars(client))
-        );
-        cron.schedule('*/5 * * * *', () =>
-            runJob('schedulerService', 'resolveExpiredSeasons', () => resolveExpiredSeasons(client))
-        );
-
-        // Award weekly leaderboard badges every Sunday at 23:59 UTC
-        cron.schedule('59 23 * * 0', () =>
-            runJob('schedulerService', 'awardWeeklyLeaderboardBadges', () => awardWeeklyLeaderboardBadges(client)),
-            { timezone: 'Etc/UTC' }
-        );
-
-        // Select Pet of the Week every Monday at midnight UTC
-        cron.schedule('0 0 * * 1', () =>
-            runJob('schedulerService', 'selectPetOfTheWeek', () => selectPetOfTheWeek(client)),
-            { timezone: 'Etc/UTC' }
-        );
-
-        // Apply Bank district weekly interest every Monday at 00:01 UTC
-        cron.schedule('1 0 * * 1', () =>
-            runJob('schedulerService', 'applyBankInterest', () => applyBankInterest(client)),
-            { timezone: 'Etc/UTC' }
-        );
-
-        // Announce last hour's micro-competition winners and reset at the top of every hour
-        cron.schedule('0 * * * *', () =>
-            runJob('schedulerService', 'announceHourlyWinners', () => announceHourlyWinners(client))
-        );
-
-        // Dynamic shop pricing recalculation — per-guild gated by lastRecalcAt + recalcMinutes
-        cron.schedule('*/15 * * * *', () =>
-            runJob('schedulerService', 'recalcShopPrices', () => recalcShopPrices(client))
-        );
-
-        // Ranked duel season rollover — check every 10 minutes for expired seasons
-        cron.schedule('*/10 * * * *', () =>
-            runJob('schedulerService', 'resolveRankedSeasons', () => resolveRankedSeasons(client))
-        );
-
-        // Return items from expired market listings before the TTL index deletes them
-        cron.schedule('*/10 * * * *', () =>
-            runJob('schedulerService', 'returnExpiredMarketListings', () => returnExpiredMarketListings())
-        );
-
-        // Server Newspaper delivery — check every hour for guilds scheduled to receive their edition
-        cron.schedule('0 * * * *', () =>
-            runJob('schedulerService', 'postScheduledNewspapers', () => postScheduledNewspapers(client)),
-            { timezone: 'Etc/UTC' }
-        );
+        // All recurring jobs, start-once services, and presence rotation live
+        // in the scheduler — this is the only bootstrap site.
+        startScheduler(client);
 
         // Reconcile any jackpot wins where pool was reset but winner was never credited
         try {
