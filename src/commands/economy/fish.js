@@ -10,7 +10,7 @@ const {
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
-const { detachBalanceDelta, commitBalanceDelta, saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { chargeExact, refundCharge } = require('../../utils/balanceDebit');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
@@ -25,7 +25,7 @@ const {
     BOSS_TYPES
 } = require('../../data/fishData');
 const { MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../data/huntData');
-const { getPityBonus, buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
+const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const {
     ensureFishingData,
@@ -49,7 +49,16 @@ const {
     applyRepair,
     applyPayoutModifiers,
     updateRodStatus,
-    applyXp
+    applyXp,
+    prepareCastUser,
+    validateCastPreflight,
+    claimCastCooldown,
+    snapshotCastRewards,
+    revertEscapedCast,
+    downgradeOptionalMiss,
+    applyCastBonuses,
+    rollWinterHuntMaterial,
+    commitCast
 } = require('../../services/fishService');
 const { getCurrentWeather } = require('../../services/weatherService');
 const { FISH_TRAITS, TIME_OF_DAY_BONUSES, getTimeOfDay } = require('../../data/fishData');
@@ -70,7 +79,6 @@ const { ensureQuests, onFish, onEconomyEarn, notifyQuestComplete, notifyQuestNea
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { hasActiveEvent, getEventCrossSystemType } = require('../../services/seasonalEventService');
-const { refundEffectCharge } = require('../../services/effectsService');
 
 // Rarity score for hourly fish competition (rarest catch wins)
 const WILDERNESS_YIELD_BONUS = 0.10;
@@ -387,174 +395,31 @@ async function handleCast(interaction) {
         { upsert: true, new: true }
     );
 
-    await attachGrind(user);
-    ensureFishingData(user);
-    ensureHuntData(user);
-    applyStaminaRegen(user);
-    applyDailyReset(user);
-    assignDailyFishQuests(user);
-
-    if (user.isModified()) {
-        await user.save().catch(e => console.error('[fish] pre-check save error:', e));
-    }
-
+    await prepareCastUser(user);
     const f = user.fishing;
 
-    // ── Location resolution ────────────────────────────────────────────
-    const requestedLoc = interaction.options.getString('location');
-    const locationId   = requestedLoc ?? f.activeLocation;
-    const location     = LOCATIONS[locationId];
+    // ── Preflight (read-only; the cooldown slot is claimed atomically below) ──
+    const preflight = validateCastPreflight(user, interaction.options.getString('location'));
+    if (!preflight.ok) {
+        return replyCastPreflightFailure(interaction, preflight);
+    }
+    const { locationId, location, rod, rodData } = preflight;
 
-    if (!location) {
-        return interaction.reply({ content: `Unknown location. Use \`/fish location list\` to see available spots.`, flags: MessageFlags.Ephemeral });
-    }
-    if (!f.unlockedLocations.includes(locationId)) {
-        return interaction.reply({
-            content: `You haven't unlocked **${location.name}** yet. Use \`/fish shop unlock\` to unlock it.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-    if (f.level < location.unlockLevel) {
-        return interaction.reply({
-            content: `You need to be Fisher Level **${location.unlockLevel}** to fish at **${location.name}**.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    // ── Injury cooldown ────────────────────────────────────────────────
-    if (f.injuryUntil && Date.now() < f.injuryUntil.getTime()) {
-        const nextAt = new Date(f.injuryUntil.getTime());
-        return interaction.reply({
-            embeds: [buildCooldownEmbed({
-                title: '🤕 Drying Off',
-                description: "You're still recovering from your last mishap.\nThe fish will be there when you're back.",
-                color: '#1e6fa5',
-                nextAt,
-            })],
-            flags: MessageFlags.Ephemeral,
-        });
-    }
-
-    // ── Cast cooldown check (read-only; claimed atomically after preflight) ──
-    if (f.lastCast && Date.now() - f.lastCast.getTime() < LIMITS.CAST_COOLDOWN_MS) {
-        const nextAt = new Date(f.lastCast.getTime() + LIMITS.CAST_COOLDOWN_MS);
+    // Atomically claim the cooldown slot now that all preflight checks have
+    // passed — see fishService.claimCastCooldown for the guarantees.
+    const claim = await claimCastCooldown(user);
+    if (!claim.claimed) {
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '🎣 Line Still Settling',
                 description: 'Give your line a moment before the next cast.\nPatience is half of fishing.',
                 color: '#1e6fa5',
-                nextAt,
+                nextAt: claim.nextAt,
             })],
             flags: MessageFlags.Ephemeral,
         });
     }
-
-    // ── Stamina check ──────────────────────────────────────────────────
-    if (f.stamina <= 0) {
-        const regenMs   = msUntilNextStamina(user);
-        const nextAt    = new Date(Date.now() + regenMs);
-        // Surfaces the fail-streak pity that actually exists, using the shared
-        // curve so this never drifts from what calculateSuccessChance applies.
-        // There is no rare-catch pity — sinceRare is a stat, not a guarantee,
-        // so it is reported as one.
-        const sinceRare  = f.sinceRare ?? 0;
-        const pityBonus  = getPityBonus(f.consecutiveFails ?? 0, LIMITS);
-        const pityBits   = [];
-        if (pityBonus > 0) {
-            pityBits.push(`🎯 ${f.consecutiveFails} ${PITY_COPY.fishing.streakNoun} • +${Math.round(pityBonus * 100)}% success on your next cast`);
-        }
-        if (sinceRare >= 5) pityBits.push(`🐟 ${sinceRare} casts since your last Rare+ catch`);
-        const pityStat = pityBits.length ? pityBits.join('\n') : null;
-        return interaction.reply({
-            embeds: [buildCooldownEmbed({
-                title: '😮‍💨 Too Tired to Cast',
-                description: "You've worn yourself out on the water.\nBuy an **Energy Drink** from `/fish shop` to speed up recovery.",
-                color: '#1e6fa5',
-                nextAt,
-                pityStat,
-                nextRewardPreview: `Full stamina = ${getMaxStamina(user)} casts · Boss fights can start on any Rare or better catch`,
-            })],
-            flags: MessageFlags.Ephemeral,
-        });
-    }
-
-    // ── Rod check ─────────────────────────────────────────────────────
-    if (f.equippedRodIndex < 0 || !f.rods[f.equippedRodIndex]) {
-        return interaction.reply({
-            content: `You don't have a rod equipped! Buy one with \`/fish shop rod\` and equip it with \`/fish inv equip 1\`.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    const rod = f.rods[f.equippedRodIndex];
-
-    if (rod.status === 'broken' || rod.currentDurability <= 0) {
-        return interaction.reply({
-            content: `Your **${rod.name}** is broken! Repair it with \`/fish shop repair\` or buy a new one with \`/fish shop rod\`.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    // ── Bait check (read-only; the stock is spent after the claim below) ──
-    const rodData = ROD_BY_TIER[rod.tier];
-    if (rodData.requiresBait && (f.bait[rodData.baitType] ?? 0) <= 0) {
-        return interaction.reply({
-            content: `You're out of **${rodData.baitType.replace(/_/g, ' ')}**! Buy more with \`/fish shop\`.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    // Atomically claim the cooldown slot now that all preflight checks have passed —
-    // lastCast is set the moment the cast is actually accepted, not earlier, so a
-    // failed precheck (stamina/rod/bait) never burns the cooldown. The same guard
-    // still prevents two concurrent /fish casts from both slipping through.
-    //
-    // The claim targets GrindProfile, not User: fishing state lives in its own
-    // collection (see src/models/User.js), so a User-level guard would match every
-    // document on the missing `fishing` field and never reject anything.
-    const fishClaimNow = new Date();
-    const fishCooldownFloor = new Date(fishClaimNow.getTime() - LIMITS.CAST_COOLDOWN_MS);
-    const priorLastCast = f.lastCast ?? null;
-    await persistGrindIfNew(user, 'fishing');
-    const fishClaimQuery = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'fishing' };
-    const claimedFish = await GrindProfile.findOneAndUpdate(
-        {
-            ...fishClaimQuery,
-            $or: [{ 'data.lastCast': null }, { 'data.lastCast': { $lte: fishCooldownFloor } }],
-        },
-        { $set: { 'data.lastCast': fishClaimNow } },
-        { new: true },
-    );
-
-    if (!claimedFish) {
-        // Losing the claim means another cast already took the slot, so the
-        // in-memory snapshot is stale — read the winning timestamp back so the
-        // countdown reflects the cast that actually happened. If that read fails,
-        // fall back to now rather than the snapshot: reaching the claim at all
-        // means the snapshot was already past the cooldown floor, so it would
-        // render a countdown in the past and tell the player they can cast again.
-        const current = await GrindProfile.findOne(fishClaimQuery).catch(() => null);
-        const lastAt  = current?.data?.lastCast ?? fishClaimNow;
-        const nextAt  = new Date(new Date(lastAt).getTime() + LIMITS.CAST_COOLDOWN_MS);
-        return interaction.reply({
-            embeds: [buildCooldownEmbed({
-                title: '🎣 Line Still Settling',
-                description: 'Give your line a moment before the next cast.\nPatience is half of fishing.',
-                color: '#1e6fa5',
-                nextAt,
-            })],
-            flags: MessageFlags.Ephemeral,
-        });
-    }
-    f.lastCast = fishClaimNow;
-
-    // The claim is a real write now, so a cast that dies before its result is
-    // saved would otherwise cost the player a full cooldown for nothing. Hand the
-    // slot back — but only while it is still ours, so a newer claim isn't undone.
-    const releaseFishClaim = () => GrindProfile.updateOne(
-        { ...fishClaimQuery, 'data.lastCast': fishClaimNow },
-        { $set: { 'data.lastCast': priorLastCast } },
-    ).catch(() => null);
+    const releaseFishClaim = claim.release;
 
     // Everything between here and the save can still fail — a Discord API error
     // while collecting the reel-in prompts, a service throwing — and until the
@@ -568,7 +433,6 @@ async function handleCast(interaction) {
     // applied as an atomic `$inc` at the save, so `save()` never writes an
     // absolute balance read before that window. See src/utils/balanceDelta.js.
     const balanceAtLoad = user.balance ?? 0;
-    const balanceFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
     try {
 
@@ -608,23 +472,7 @@ async function handleCast(interaction) {
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');
 
         // Snapshot pre-cast reward state so we can reverse it if the fish escapes
-        const preCastBalance          = user.balance;
-        const preCastTotalEarned      = user.fishing.totalEarned;
-        const preCastDailyCoins       = user.fishing.dailyCoins;
-        const preCastSuccessful       = user.fishing.successfulCasts;
-        const preCastXp               = user.fishing.xp;
-        const preCastLevel            = user.fishing.level;
-        const preCastLegendaryCatches = user.fishing.legendaryCatches;
-        const preCastEventCatches     = user.fishing.eventCatches;
-        const preCastBestPayout       = user.fishing.bestPayout;
-        const preCastConsecutiveFails = user.fishing.consecutiveFails ?? 0;
-        const preCastMaterials        = JSON.parse(JSON.stringify(user.fishing.materials ?? {}));
-        const preCastPersonalBest = user.fishing.personalBest
-            ? JSON.parse(JSON.stringify(user.fishing.personalBest))
-            : null;
-        const preCastWeeklyRecord = user.fishing.weeklyRecord
-            ? JSON.parse(JSON.stringify(user.fishing.weeklyRecord))
-            : null;
+        const preCastSnapshot = snapshotCastRewards(user);
 
         let reelResult = null; // { caught: bool, label: string, icon: string }
 
@@ -671,33 +519,8 @@ async function handleCast(interaction) {
 
             if (!reelPressed) {
                 if (cfg.required) {
-                    // Reverse all reward mutations — fish escapes, only stamina and rod durability are spent
-                    user.balance                   = preCastBalance;
-                    user.fishing.totalEarned       = preCastTotalEarned;
-                    user.fishing.dailyCoins        = preCastDailyCoins;
-                    user.fishing.successfulCasts   = preCastSuccessful;
-                    user.fishing.xp                = preCastXp;
-                    user.fishing.level             = preCastLevel;
-                    user.fishing.legendaryCatches  = preCastLegendaryCatches;
-                    user.fishing.eventCatches      = preCastEventCatches;
-                    user.fishing.bestPayout        = preCastBestPayout;
-                    user.fishing.materials         = preCastMaterials;
-                    if (preCastPersonalBest !== null) user.fishing.personalBest = preCastPersonalBest;
-                    if (preCastWeeklyRecord !== null) user.fishing.weeklyRecord = preCastWeeklyRecord;
-                    // executeCast zeroed the fail streak on the successful roll; the
-                    // fish was never landed, so restore it and count this as the miss
-                    // it was — otherwise a required reel-in miss hands back pity progress.
-                    user.fishing.consecutiveFails = preCastConsecutiveFails + 1;
-                    // The doubled-yield charge paid for a payout that is being reversed.
-                    if (result.gatherEffectConsumed) refundEffectCharge(user, result.gatherEffectConsumed);
-                    user.markModified('fishing');
-                    result.success      = false;
-                    result.finalPayout  = 0;
-                    result.rawPayout    = 0;
-                    result.xpEarned     = 0;
-                    result.levelUp      = null;
-                    result.specialDrop  = null;
-                    result.escaped      = true;
+                    // Fish escapes — only stamina and rod durability stay spent.
+                    revertEscapedCast(user, preCastSnapshot, result);
                     reelResult = { caught: false, icon: '💨', label: `${result.tier} fish escaped!` };
 
                     const durLine = result.durabilityLost > 0 ? ` Rod took ${result.durabilityLost} durability damage.` : '';
@@ -711,14 +534,8 @@ async function handleCast(interaction) {
                     });
                     await delay(1200);
                 } else {
-                    // Rare optional miss — downgrade payout by ~65% to simulate Uncommon yield
-                    const reduction = Math.round(result.finalPayout * 0.65);
-                    result.finalPayout              -= reduction;
-                    result.rawPayout                -= reduction;
-                    user.balance                    -= reduction;
-                    user.fishing.totalEarned        -= reduction;
-                    user.fishing.dailyCoins         -= reduction;
-                    result.tier = 'uncommon';
+                    // Rare optional miss — downgrade payout to simulate Uncommon yield
+                    downgradeOptionalMiss(user, result);
                     reelResult = { caught: true, icon: '😬', label: 'Rare slipped — Uncommon catch instead' };
 
                     await interaction.editReply({
@@ -747,63 +564,19 @@ async function handleCast(interaction) {
         }
         // ─────────────────────────────────────────────────────────────────────────
 
-        // Pity counter: reset on rare+ success, increment otherwise
-        if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
-            user.fishing.sinceRare = 0;
-        } else {
-            user.fishing.sinceRare = (user.fishing.sinceRare ?? 0) + 1;
-        }
-
-        if (result.success && result.finalPayout > 0 && petFishYieldPct > 0) {
-            const bonus = Math.round(result.finalPayout * petFishYieldPct / 100);
-            if (bonus > 0) {
-                user.balance              += bonus;
-                user.fishing.totalEarned  += bonus;
-                user.fishing.dailyCoins   += bonus;
-                result.finalPayout        += bonus;
-                result.petYieldBonus       = bonus;
-            }
-        }
-
-        // Featured spot bonus: +25% payout
-        if (result.success && result.finalPayout > 0 && isFeaturedSpot) {
-            const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
-            if (featBonus > 0) {
-                user.balance                += featBonus;
-                user.fishing.totalEarned    += featBonus;
-                user.fishing.dailyCoins     += featBonus;
-                result.finalPayout          += featBonus;
-                result.featuredSpotBonus     = featBonus;
-            }
-        }
-        // Wilderness district: +10% fish yield (clamped to daily hard cap)
-        const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
-        if (result.success && result.finalPayout > 0 && wildernessActive) {
-            const remaining = LIMITS.DAILY_HARD_CAP - user.fishing.dailyCoins;
-            const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-            const bonus     = Math.max(0, Math.min(rawBonus, remaining));
-            if (bonus > 0) {
-                user.balance               += bonus;
-                user.fishing.totalEarned   += bonus;
-                user.fishing.dailyCoins    += bonus;
-                result.finalPayout         += bonus;
-                result.wildernessBonus      = bonus;
-            }
-        }
-        if (result.success && result.finalPayout > user.fishing.bestPayout) user.fishing.bestPayout = result.finalPayout;
+        // Pity counter, pet yield, featured-spot and Wilderness bonuses,
+        // best-payout stat — the full post-roll bonus stack.
+        applyCastBonuses(user, result, {
+            petFishYieldPct,
+            isFeaturedSpot,
+            featuredPayoutBonus: FEATURED_PAYOUT_BONUS,
+            wildernessActive: isDistrictActive(guildSettings, 'wilderness'),
+        });
 
         // Winter Hunt cross-system bonus: fishing at Misty Lake drops arctic hunt materials
-        let winterHuntMaterial = null;
-        if (result.success && getEventCrossSystemType(guildSettings) === 'winter_hunt' && locationId === 'lake') {
-            const ARCTIC_MATERIALS = ['arctic_fox_pelt', 'snowy_feather', 'thick_hide', 'polar_claw', 'mammoth_tusk'];
-            const roll = Math.random();
-            if (roll < 0.40) {
-                const matId = ARCTIC_MATERIALS[Math.floor(Math.random() * ARCTIC_MATERIALS.length)];
-                user.hunt.materials[matId] = (user.hunt.materials[matId] ?? 0) + 1;
-                user.markModified('hunt');
-                winterHuntMaterial = matId;
-            }
-        }
+        const winterHuntMaterial = rollWinterHuntMaterial(
+            user, result, getEventCrossSystemType(guildSettings), locationId
+        );
 
         updateFishQuestProgress(user, result, locationId);
         await ensureQuests(user, guildSettings);
@@ -823,26 +596,13 @@ async function handleCast(interaction) {
 
         const fishAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
-        // Hand the cast's coin movement to an atomic `$inc` and take `balance`
-        // out of the save. An escape reverses its own mutations, so that path
-        // simply produces a delta of zero and issues no write.
-        const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
-
+        // Persist and credit through the service. An escape reverses its own
+        // mutations, so that path simply produces a delta of zero and issues
+        // no coin write.
         let payoutOwed = 0;
         try {
-            await user.save();
+            ({ payoutOwed } = await commitCast(user, balanceAtLoad));
             castCommitted = true;
-            // Only after the save has landed: a credit applied before a save that
-            // then failed would pay for a cast the player could take again. The
-            // save and the credit cannot be one write on a standalone mongod, so
-            // a credit that will not land is recorded as owed and said out loud
-            // rather than logged and forgotten.
-            const payout = await commitBalanceDelta(User, balanceFilter, user, balanceDelta, {
-                service: 'fish',
-                jobName: 'castPayout',
-                guildId: interaction.guild.id,
-            });
-            if (!payout.credited) payoutOwed = balanceDelta;
             if (fishAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, user, interaction.member, fishAchievements).catch(() => null);
             }
@@ -1189,6 +949,85 @@ async function handleCast(interaction) {
     } catch (err) {
         if (!castCommitted) await releaseFishClaim();
         throw err;
+    }
+}
+
+// Renders a failed cast preflight (fishService.validateCastPreflight) as the
+// reply the player sees. Pure presentation — every check lives in the service.
+function replyCastPreflightFailure(interaction, preflight) {
+    const ephemeral = { flags: MessageFlags.Ephemeral };
+    switch (preflight.reason) {
+        case 'unknown_location':
+            return interaction.reply({ content: `Unknown location. Use \`/fish location list\` to see available spots.`, ...ephemeral });
+        case 'location_locked':
+            return interaction.reply({
+                content: `You haven't unlocked **${preflight.location.name}** yet. Use \`/fish shop unlock\` to unlock it.`,
+                ...ephemeral
+            });
+        case 'level_too_low':
+            return interaction.reply({
+                content: `You need to be Fisher Level **${preflight.location.unlockLevel}** to fish at **${preflight.location.name}**.`,
+                ...ephemeral
+            });
+        case 'injured':
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '🤕 Drying Off',
+                    description: "You're still recovering from your last mishap.\nThe fish will be there when you're back.",
+                    color: '#1e6fa5',
+                    nextAt: preflight.nextAt,
+                })],
+                ...ephemeral,
+            });
+        case 'cooldown':
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '🎣 Line Still Settling',
+                    description: 'Give your line a moment before the next cast.\nPatience is half of fishing.',
+                    color: '#1e6fa5',
+                    nextAt: preflight.nextAt,
+                })],
+                ...ephemeral,
+            });
+        case 'no_stamina': {
+            // Surfaces the fail-streak pity that actually exists, using the shared
+            // curve so this never drifts from what calculateSuccessChance applies.
+            // There is no rare-catch pity — sinceRare is a stat, not a guarantee,
+            // so it is reported as one.
+            const pityBits = [];
+            if (preflight.pityBonus > 0) {
+                pityBits.push(`🎯 ${preflight.consecutiveFails} ${PITY_COPY.fishing.streakNoun} • +${Math.round(preflight.pityBonus * 100)}% success on your next cast`);
+            }
+            if (preflight.sinceRare >= 5) pityBits.push(`🐟 ${preflight.sinceRare} casts since your last Rare+ catch`);
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '😮‍💨 Too Tired to Cast',
+                    description: "You've worn yourself out on the water.\nBuy an **Energy Drink** from `/fish shop` to speed up recovery.",
+                    color: '#1e6fa5',
+                    nextAt: preflight.nextAt,
+                    pityStat: pityBits.length ? pityBits.join('\n') : null,
+                    nextRewardPreview: `Full stamina = ${preflight.maxStamina} casts · Boss fights can start on any Rare or better catch`,
+                })],
+                ...ephemeral,
+            });
+        }
+        case 'no_rod':
+            return interaction.reply({
+                content: `You don't have a rod equipped! Buy one with \`/fish shop rod\` and equip it with \`/fish inv equip 1\`.`,
+                ...ephemeral
+            });
+        case 'rod_broken':
+            return interaction.reply({
+                content: `Your **${preflight.rod.name}** is broken! Repair it with \`/fish shop repair\` or buy a new one with \`/fish shop rod\`.`,
+                ...ephemeral
+            });
+        case 'no_bait':
+            return interaction.reply({
+                content: `You're out of **${preflight.rodData.baitType.replace(/_/g, ' ')}**! Buy more with \`/fish shop\`.`,
+                ...ephemeral
+            });
+        default:
+            return interaction.reply({ content: 'You cannot cast right now.', ...ephemeral });
     }
 }
 
