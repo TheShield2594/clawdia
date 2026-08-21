@@ -497,6 +497,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 /explore relics        - Open your relic case and see what it earns you
 /explore profile       - Explorer level, stamina, and field record
 /explore map - Unroll your persistent Explorer's Map
+/explore prestige      - Reset Explorer Level for a permanent bonus (Lv 30, to P5)
 ```
 
 **Regions:**
@@ -507,7 +508,7 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 **Progression:**
 - **Secret pity** — every expedition into a region that still hides a secret lifts the odds of finding one, shown as a live chance on the result embed. Regions you have fully uncovered stop building pity instead of promising a secret they can't deliver
 - **Fully surveyed** — chart every landmark, lore fragment and secret in a region and everything it pays you afterwards carries a standing +15%
-- **Relic case** — each distinct relic is worth +1% on exploration coins, up to +10%. Treasure prefers relics you don't own yet, so the case fills instead of stacking duplicates
+- **Relic case** — each distinct relic is worth +1% on exploration coins, up to the width of your case. Treasure prefers relics you don't own yet, so the case fills instead of stacking duplicates. The case starts at 10 of the 25 known relics and is widened by explorer prestige
 - **Encounters are a real bet** — the prompt quotes the win chance and both coin bands in the money *you* would see, and losing is priced off what was on the table rather than a flat fee, so the long-odds encounters with the biggest prizes are worth taking instead of worth dodging
 - **Quiet expeditions** cost the cooldown but refund the stamina point — a blank walk isn't charged for
 - **Level-ups are announced** on the result embed, and name any region the new Explorer Level just brought within reach
@@ -523,6 +524,27 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 - Expeditions grant Explorer XP and mirror guild leveling XP, and Explorer Level shows on `/profile`
 - Rare finds unlock exploration achievements (including secret ones)
 - The Explorer's Map persists per player: landmarks, lore, and secrets charted per region
+
+**Explorer prestige** (`/explore prestige`) opens at Explorer Level 30 and runs to
+P5. Each rank resets Explorer Level and XP and keeps everything else — charted
+regions, completed surveys, the relic case, the journal and every lifetime stat.
+An ascended explorer carries a prestige title rather than dropping back to
+"Doorstep Wanderer", but region unlocks are level-gated, so the deeper regions sit
+behind the ladder again until it is re-climbed:
+
+| Rank | Grants (cumulative) |
+|---|---|
+| 🧭 P1 | Relic case holds 13 of 25 |
+| 🧭🧭 P2 | +5% all payouts |
+| 🗺️ P3 | +1 max stamina · relic case holds 16 |
+| 🗺️✨ P4 | +25% weight on the secret slot |
+| 🌌 P5 | +10% all payouts · relic case holds all 25 |
+
+The relic cap is the point of the ladder as much as the payout is: at P0 the case
+pays for 10 of the 25 known relics, so the back half of a completed collection was
+worth only its trade value. Region surveys stay a one-off — a charted map is
+knowledge, and taking it back on every ascension would be a punishment rather than
+a reset.
 
 **Dashboard Settings:**
 - Enable/disable exploration, per-region toggles
