@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Collection, Partials, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Partials } = require('discord.js');
 const { connect, connection } = require('mongoose');
 const fs = require('fs');
 const path = require('path');
@@ -123,12 +123,11 @@ async function startDashboard() {
     dashboard.start(client);
 }
 
-let presenceInterval = null;
-
 // Graceful shutdown: close DB and destroy Discord client before exiting
 async function shutdown(signal) {
     console.log(`[SHUTDOWN] Received ${signal}. Shutting down gracefully...`);
-    if (presenceInterval) clearInterval(presenceInterval);
+    const { stopScheduler } = require('./services/scheduler');
+    stopScheduler();
     try {
         await client.destroy();
         await connection.close();
@@ -150,55 +149,8 @@ async function startBot() {
     await loadEvents();
     await startDashboard();
 
-    client.once('clientReady', () => {
-        const { startSummaryService } = require('./services/summaryService');
-        startSummaryService(client);
-
-        const { startSlaMonitor } = require('./services/caseService');
-        startSlaMonitor(client);
-
-        const { startQuestService } = require('./services/questService');
-        startQuestService();
-
-        const { scheduleActivePollExpirations } = require('./commands/utility/poll');
-        scheduleActivePollExpirations(client);
-
-        const { startDailyBibleService } = require('./services/dailyBibleService');
-        startDailyBibleService(client);
-
-        const { startTempBanService } = require('./services/tempBanService');
-        startTempBanService(client);
-
-        const { checkTempVoice } = require('./services/tempVoiceService');
-        checkTempVoice(client);
-        setInterval(() => checkTempVoice(client), 5 * 60_000);
-
-        const { startRaidMonitor } = require('./services/raidService');
-        startRaidMonitor(client);
-
-        // Rotating rich presence — Clawdia's ancient, mysterious personality
-        const presenceActivities = [
-            { type: ActivityType.Watching, name: 'over the server' },
-            { type: ActivityType.Playing,  name: 'with ancient secrets' },
-            { type: ActivityType.Listening, name: 'to the void' },
-            { type: ActivityType.Watching, name: 'mortals struggle' },
-            { type: ActivityType.Watching, name: 'for worthy souls' },
-            { type: ActivityType.Playing,  name: 'a very long game' },
-        ];
-
-        const setPresence = () => {
-            const activity = presenceActivities[Math.floor(Math.random() * presenceActivities.length)];
-            Promise.resolve(client.user.setPresence({
-                status: 'online',
-                activities: [{ type: activity.type, name: activity.name }],
-            })).catch(err => {
-                console.error(`[PRESENCE] Failed to set presence (${activity.type} ${activity.name}):`, err);
-            });
-        };
-
-        setPresence();
-        presenceInterval = setInterval(setPresence, 5 * 60_000);
-    });
+    // All background services, scheduled jobs, and presence rotation start
+    // from the clientReady handler in events/ready.js via services/scheduler.
 
     // Await the login so a bad/revoked token is a hard startup failure. Left
     // unawaited it rejects into the unhandledRejection handler, which just logs

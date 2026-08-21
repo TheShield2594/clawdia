@@ -21,7 +21,7 @@ const ALLOWED_SETTING_PARENTS = new Set([
     'season', 'progressionTracks', 'commandPolicies',
     'suggestions', 'ai', 'tempVoice', 'bibleVerse',
     'dailyNews', 'dailyNewsProfiles', 'rssFeeds',
-    'autoRoles', 'reactionRoles', 'analytics',
+    'autoRoles', 'reactionRoles',
     'giveaways', 'notifications',
     'newspaper', 'heist', 'exploration',
     'dynamicPricing'

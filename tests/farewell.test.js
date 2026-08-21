@@ -22,6 +22,7 @@ jest.mock('discord.js', () => {
 });
 
 jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
+jest.mock('../src/models/GuildAnalytics', () => ({ updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }) }));
 jest.mock('../src/services/antiNukeService', () => ({ trackAction: jest.fn().mockResolvedValue(undefined) }));
 
 const farewellEvent = require('../src/events/guildMemberRemove');

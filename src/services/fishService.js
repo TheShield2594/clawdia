@@ -1040,6 +1040,307 @@ function resolveBossEncounter(user, fish, tier, choicesMade, bossType) {
     return { outcome, bonusPayout, durabilityLost, correctCount, phaseResults, bossType: bt, tournamentMultiplier, message: messages[outcome] };
 }
 
+// ─── CAST TRANSACTION LAYER (#613) ───────────────────────────────────────────
+//
+// The pieces of a /fish cast that are business logic rather than Discord
+// transport: session preparation, preflight validation, the atomic cooldown
+// claim, reward-state snapshot/rollback for the interactive reel-in, the
+// post-roll bonus stack, and the commit. The command owns option parsing,
+// button collectors, and embed construction; everything that touches the
+// database or mutates reward state lives here, so it is reachable from the
+// dashboard API and testable without a mock interaction.
+
+/**
+ * Bring a freshly loaded User document up to date for a cast: attach the
+ * grind profile, ensure subdocuments, regenerate stamina, roll the daily
+ * reset and daily quests, and persist if anything changed.
+ */
+async function prepareCastUser(user) {
+    const { attachGrind } = require('../utils/grindProfile');
+    await attachGrind(user);
+    ensureFishingData(user);
+    ensureHuntData(user);
+    applyStaminaRegen(user);
+    applyDailyReset(user);
+    assignDailyFishQuests(user);
+    if (user.isModified()) {
+        await user.save().catch(e => console.error('[fish] pre-check save error:', e));
+    }
+}
+
+/**
+ * Read-only preflight for a cast. Returns { ok: true, locationId, location,
+ * rod, rodData } when the cast may proceed, or { ok: false, reason, ... }
+ * where `reason` is one of: unknown_location, location_locked, level_too_low,
+ * injured, cooldown, no_stamina, no_rod, rod_broken, no_bait. Cooldown-shaped
+ * failures carry `nextAt`; no_stamina also carries the pity counters so the
+ * renderer can surface them.
+ */
+function validateCastPreflight(user, requestedLocationId) {
+    const f = user.fishing;
+    const locationId = requestedLocationId ?? f.activeLocation;
+    const location = LOCATIONS[locationId];
+
+    if (!location) return { ok: false, reason: 'unknown_location' };
+    if (!f.unlockedLocations.includes(locationId)) return { ok: false, reason: 'location_locked', location };
+    if (f.level < location.unlockLevel) return { ok: false, reason: 'level_too_low', location };
+
+    if (f.injuryUntil && Date.now() < f.injuryUntil.getTime()) {
+        return { ok: false, reason: 'injured', nextAt: new Date(f.injuryUntil.getTime()) };
+    }
+
+    // Read-only cooldown check; the slot is claimed atomically afterwards.
+    if (f.lastCast && Date.now() - f.lastCast.getTime() < LIMITS.CAST_COOLDOWN_MS) {
+        return { ok: false, reason: 'cooldown', nextAt: new Date(f.lastCast.getTime() + LIMITS.CAST_COOLDOWN_MS) };
+    }
+
+    if (f.stamina <= 0) {
+        return {
+            ok: false,
+            reason: 'no_stamina',
+            nextAt: new Date(Date.now() + msUntilNextStamina(user)),
+            sinceRare: f.sinceRare ?? 0,
+            consecutiveFails: f.consecutiveFails ?? 0,
+            pityBonus: getPityBonus(f.consecutiveFails ?? 0, LIMITS),
+            maxStamina: getMaxStamina(user),
+        };
+    }
+
+    if (f.equippedRodIndex < 0 || !f.rods[f.equippedRodIndex]) return { ok: false, reason: 'no_rod' };
+    const rod = f.rods[f.equippedRodIndex];
+    if (rod.status === 'broken' || rod.currentDurability <= 0) return { ok: false, reason: 'rod_broken', rod };
+
+    // Read-only bait check; the stock is spent only after the claim wins.
+    const rodData = ROD_BY_TIER[rod.tier];
+    if (rodData.requiresBait && (user.fishing.bait[rodData.baitType] ?? 0) <= 0) {
+        return { ok: false, reason: 'no_bait', rod, rodData };
+    }
+
+    return { ok: true, locationId, location, rod, rodData };
+}
+
+/**
+ * Atomically claim the cast cooldown slot now that preflight has passed —
+ * lastCast is set the moment the cast is actually accepted, not earlier, so a
+ * failed precheck (stamina/rod/bait) never burns the cooldown. The same guard
+ * prevents two concurrent /fish casts from both slipping through.
+ *
+ * The claim targets GrindProfile, not User: fishing state lives in its own
+ * collection (see src/models/User.js), so a User-level guard would match every
+ * document on the missing `fishing` field and never reject anything.
+ *
+ * Returns { claimed: true, claimNow, release } — `release` hands the slot back
+ * (only while it is still ours, so a newer claim isn't undone) for casts that
+ * die before their result is saved — or { claimed: false, nextAt }.
+ */
+async function claimCastCooldown(user) {
+    const GrindProfile = require('../models/GrindProfile');
+    const { persistGrindIfNew } = require('../utils/grindProfile');
+
+    const f = user.fishing;
+    const claimNow = new Date();
+    const cooldownFloor = new Date(claimNow.getTime() - LIMITS.CAST_COOLDOWN_MS);
+    const priorLastCast = f.lastCast ?? null;
+
+    await persistGrindIfNew(user, 'fishing');
+    const claimQuery = { userId: user.userId, guildId: user.guildId, system: 'fishing' };
+    const claimed = await GrindProfile.findOneAndUpdate(
+        {
+            ...claimQuery,
+            $or: [{ 'data.lastCast': null }, { 'data.lastCast': { $lte: cooldownFloor } }],
+        },
+        { $set: { 'data.lastCast': claimNow } },
+        { new: true },
+    );
+
+    if (!claimed) {
+        // Losing the claim means another cast already took the slot, so the
+        // in-memory snapshot is stale — read the winning timestamp back so the
+        // countdown reflects the cast that actually happened. If that read
+        // fails, fall back to now rather than the snapshot: reaching the claim
+        // at all means the snapshot was already past the cooldown floor, so it
+        // would render a countdown in the past.
+        const current = await GrindProfile.findOne(claimQuery).catch(() => null);
+        const lastAt = current?.data?.lastCast ?? claimNow;
+        return { claimed: false, nextAt: new Date(new Date(lastAt).getTime() + LIMITS.CAST_COOLDOWN_MS) };
+    }
+
+    f.lastCast = claimNow;
+    const release = () => GrindProfile.updateOne(
+        { ...claimQuery, 'data.lastCast': claimNow },
+        { $set: { 'data.lastCast': priorLastCast } },
+    ).catch(() => null);
+
+    return { claimed: true, claimNow, release };
+}
+
+/**
+ * Snapshot every reward field a cast can mutate, taken before executeCast so
+ * an escaped required reel-in can be reversed cleanly.
+ */
+function snapshotCastRewards(user) {
+    const f = user.fishing;
+    return {
+        balance: user.balance,
+        totalEarned: f.totalEarned,
+        dailyCoins: f.dailyCoins,
+        successfulCasts: f.successfulCasts,
+        xp: f.xp,
+        level: f.level,
+        legendaryCatches: f.legendaryCatches,
+        eventCatches: f.eventCatches,
+        bestPayout: f.bestPayout,
+        consecutiveFails: f.consecutiveFails ?? 0,
+        materials: JSON.parse(JSON.stringify(f.materials ?? {})),
+        personalBest: f.personalBest ? JSON.parse(JSON.stringify(f.personalBest)) : null,
+        weeklyRecord: f.weeklyRecord ? JSON.parse(JSON.stringify(f.weeklyRecord)) : null,
+    };
+}
+
+/**
+ * A required reel-in was missed: reverse all reward mutations — the fish
+ * escapes, and only stamina and rod durability stay spent. Mutates both the
+ * user and the result in place.
+ */
+function revertEscapedCast(user, snapshot, result) {
+    const { refundEffectCharge } = require('./effectsService');
+    user.balance                  = snapshot.balance;
+    user.fishing.totalEarned      = snapshot.totalEarned;
+    user.fishing.dailyCoins       = snapshot.dailyCoins;
+    user.fishing.successfulCasts  = snapshot.successfulCasts;
+    user.fishing.xp               = snapshot.xp;
+    user.fishing.level            = snapshot.level;
+    user.fishing.legendaryCatches = snapshot.legendaryCatches;
+    user.fishing.eventCatches     = snapshot.eventCatches;
+    user.fishing.bestPayout       = snapshot.bestPayout;
+    user.fishing.materials        = snapshot.materials;
+    if (snapshot.personalBest !== null) user.fishing.personalBest = snapshot.personalBest;
+    if (snapshot.weeklyRecord !== null) user.fishing.weeklyRecord = snapshot.weeklyRecord;
+    // executeCast zeroed the fail streak on the successful roll; the fish was
+    // never landed, so restore it and count this as the miss it was —
+    // otherwise a required reel-in miss hands back pity progress.
+    user.fishing.consecutiveFails = snapshot.consecutiveFails + 1;
+    // The doubled-yield charge paid for a payout that is being reversed.
+    if (result.gatherEffectConsumed) refundEffectCharge(user, result.gatherEffectConsumed);
+    user.markModified('fishing');
+    result.success     = false;
+    result.finalPayout = 0;
+    result.rawPayout   = 0;
+    result.xpEarned    = 0;
+    result.levelUp     = null;
+    result.specialDrop = null;
+    result.escaped     = true;
+}
+
+/**
+ * A rare (optional) reel-in was missed: downgrade the payout by ~65% to
+ * simulate Uncommon yield. Mutates the user and the result in place.
+ */
+function downgradeOptionalMiss(user, result) {
+    const reduction = Math.round(result.finalPayout * 0.65);
+    result.finalPayout        -= reduction;
+    result.rawPayout          -= reduction;
+    user.balance              -= reduction;
+    user.fishing.totalEarned  -= reduction;
+    user.fishing.dailyCoins   -= reduction;
+    result.tier = 'uncommon';
+}
+
+const WILDERNESS_YIELD_BONUS = 0.10;
+
+/**
+ * The post-roll bonus stack: pity counter, pet yield, featured-spot bonus,
+ * Wilderness district bonus (clamped to the daily hard cap), and the
+ * best-payout stat. Mutates the user and annotates the result with
+ * petYieldBonus / featuredSpotBonus / wildernessBonus for the renderer.
+ */
+function applyCastBonuses(user, result, { petFishYieldPct = 0, isFeaturedSpot = false, featuredPayoutBonus = 0, wildernessActive = false } = {}) {
+    // Pity counter: reset on rare+ success, increment otherwise
+    if (result.success && ['rare', 'epic', 'legendary', 'event'].includes(result.tier)) {
+        user.fishing.sinceRare = 0;
+    } else {
+        user.fishing.sinceRare = (user.fishing.sinceRare ?? 0) + 1;
+    }
+
+    if (result.success && result.finalPayout > 0 && petFishYieldPct > 0) {
+        const bonus = Math.round(result.finalPayout * petFishYieldPct / 100);
+        if (bonus > 0) {
+            user.balance             += bonus;
+            user.fishing.totalEarned += bonus;
+            user.fishing.dailyCoins  += bonus;
+            result.finalPayout       += bonus;
+            result.petYieldBonus      = bonus;
+        }
+    }
+
+    if (result.success && result.finalPayout > 0 && isFeaturedSpot) {
+        const featBonus = Math.round(result.finalPayout * featuredPayoutBonus);
+        if (featBonus > 0) {
+            user.balance             += featBonus;
+            user.fishing.totalEarned += featBonus;
+            user.fishing.dailyCoins  += featBonus;
+            result.finalPayout       += featBonus;
+            result.featuredSpotBonus  = featBonus;
+        }
+    }
+
+    if (result.success && result.finalPayout > 0 && wildernessActive) {
+        const remaining = LIMITS.DAILY_HARD_CAP - user.fishing.dailyCoins;
+        const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
+        const bonus     = Math.max(0, Math.min(rawBonus, remaining));
+        if (bonus > 0) {
+            user.balance             += bonus;
+            user.fishing.totalEarned += bonus;
+            user.fishing.dailyCoins  += bonus;
+            result.finalPayout       += bonus;
+            result.wildernessBonus    = bonus;
+        }
+    }
+
+    if (result.success && result.finalPayout > user.fishing.bestPayout) {
+        user.fishing.bestPayout = result.finalPayout;
+    }
+}
+
+/**
+ * Winter Hunt cross-system bonus: fishing at Misty Lake drops arctic hunt
+ * materials. Returns the granted material id or null.
+ */
+function rollWinterHuntMaterial(user, result, crossSystemType, locationId) {
+    if (!result.success || crossSystemType !== 'winter_hunt' || locationId !== 'lake') return null;
+    const ARCTIC_MATERIALS = ['arctic_fox_pelt', 'snowy_feather', 'thick_hide', 'polar_claw', 'mammoth_tusk'];
+    if (Math.random() >= 0.40) return null;
+    const matId = ARCTIC_MATERIALS[Math.floor(Math.random() * ARCTIC_MATERIALS.length)];
+    user.hunt.materials[matId] = (user.hunt.materials[matId] ?? 0) + 1;
+    user.markModified('hunt');
+    return matId;
+}
+
+/**
+ * Persist the cast and credit its coin movement as an atomic `$inc`. The
+ * balance delta is measured against the balance read at load, so `save()`
+ * never writes an absolute balance read before the interactive window (see
+ * src/utils/balanceDelta.js). The credit happens only after the save has
+ * landed: a credit applied before a save that then failed would pay for a
+ * cast the player could take again. A credit that will not land is returned
+ * as `payoutOwed` so the caller says it out loud rather than logging it and
+ * forgetting.
+ */
+async function commitCast(user, balanceAtLoad) {
+    const User = require('../models/User');
+    const { detachBalanceDelta, commitBalanceDelta } = require('../utils/balanceDelta');
+    const balanceFilter = { userId: user.userId, guildId: user.guildId };
+
+    const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
+    await user.save();
+    const payout = await commitBalanceDelta(User, balanceFilter, user, balanceDelta, {
+        service: 'fish',
+        jobName: 'castPayout',
+        guildId: user.guildId,
+    });
+    return { payoutOwed: payout.credited ? 0 : balanceDelta };
+}
+
 // ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
 
 function formatMs(ms) {
@@ -1089,6 +1390,15 @@ module.exports = {
     rollBossType,
     assignDailyFishQuests,
     updateFishQuestProgress,
+    prepareCastUser,
+    validateCastPreflight,
+    claimCastCooldown,
+    snapshotCastRewards,
+    revertEscapedCast,
+    downgradeOptionalMiss,
+    applyCastBonuses,
+    rollWinterHuntMaterial,
+    commitCast,
     formatMs,
     rodStatusEmoji,
     durabilityBar

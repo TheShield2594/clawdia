@@ -44,10 +44,13 @@ const CLAIMS = [
 ];
 
 // The four grind systems keep their cooldown on GrindProfile rather than User.
+// Fishing's claim lives in its service layer (#613 — the command parses and
+// renders, fishService.claimCastCooldown owns the transaction); the rest still
+// claim inline in the command and should follow the same path when extracted.
 const GRIND_CLAIMS = [
-    { file: 'fish.js',    field: 'data.lastCast',    shape: 'floor' },
-    { file: 'hunt.js',    field: 'data.lastHunt',    shape: 'floor' },
-    { file: 'mine.js',    field: 'data.lastMine',    shape: 'floor' },
+    { file: '../../services/fishService.js', field: 'data.lastCast', shape: 'floor' },
+    { file: '../../services/huntService.js', field: 'data.lastHunt', shape: 'floor' },
+    { file: '../../services/mineService.js', field: 'data.lastMine', shape: 'floor' },
     { file: 'explore.js', field: 'data.lastExplore', shape: 'floor' },
 ];
 

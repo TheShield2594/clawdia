@@ -1,16 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const Guild = require('../../../models/Guild');
+const GuildAnalytics = require('../../../models/GuildAnalytics');
 const User = require('../../../models/User');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
 const { topByNetWorth } = require('../../../utils/netWorth');
 const { cachedAggregate, invalidatePrefix } = require('../../lib/aggregateCache');
 
-// A full Guild document carries every shop item's image Buffer and the
-// 3000-entry analytics.commandUsage array. This route reads command names out of
-// the second and nothing at all out of the first.
-const ECONOMY_GUILD_FIELDS = 'analytics.commandUsage';
+// Command telemetry lives in its own GuildAnalytics collection; this route
+// reads command names out of it and nothing from the Guild document at all.
+const ECONOMY_ANALYTICS_FIELDS = 'commandUsage';
 
 router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
@@ -20,7 +19,7 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
         // are the two `$group`s beside it. Memoised on a short TTL so a dashboard
         // that opens two panels, or a tab left refreshing, does not re-run all three
         // against data that has not moved. See lib/aggregateCache.
-        const [topEarners, totalCoinsAgg, activeUsersCount, guildSettings] = await Promise.all([
+        const [topEarners, totalCoinsAgg, activeUsersCount, analytics] = await Promise.all([
             cachedAggregate(`${guildId}:economy:top`, () => topByNetWorth(User, guildId, 10)),
             cachedAggregate(`${guildId}:economy:total`, () => User.aggregate([
                 { $match: { guildId } },
@@ -35,10 +34,10 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
                 { lastHeist: { $gte: new Date(Date.now() - 7 * 864e5) } },
                 { lastRob:   { $gte: new Date(Date.now() - 7 * 864e5) } }
             ] })),
-            Guild.findOne({ guildId }).select(ECONOMY_GUILD_FIELDS).lean()
+            GuildAnalytics.findOne({ guildId }).select(ECONOMY_ANALYTICS_FIELDS).lean()
         ]);
 
-        const commandUsage = guildSettings?.analytics?.commandUsage || [];
+        const commandUsage = analytics?.commandUsage || [];
         const econCommands = ['balance', 'daily', 'work', 'shop', 'rob', 'crime', 'duel', 'mine', 'fish', 'hunt', 'bank', 'pay', 'coinflip', 'roll', 'blackjack', 'casino'];
         const commandFrequency = {};
         for (const ev of commandUsage) {

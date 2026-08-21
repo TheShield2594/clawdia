@@ -1,29 +1,31 @@
 const Guild = require('../models/Guild');
+const GuildAnalytics = require('../models/GuildAnalytics');
 const { EmbedBuilder, AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const { createWelcomeCard } = require('../utils/cardGenerator');
 const { handleMemberJoin: raidCheck } = require('../services/raidService');
 const { enforceJoinGate } = require('../services/antiNukeService');
 
-async function trackMemberEvent(guildSettings, dateKey, field) {
+async function trackMemberEvent(guildId, dateKey, field) {
     // Try to atomically increment today's existing entry (fix #8 — simpler, no spurious $push).
-    const result = await guildSettings.constructor.updateOne(
-        { guildId: guildSettings.guildId, 'analytics.memberEvents.date': dateKey },
-        { $inc: { [`analytics.memberEvents.$.${field}`]: 1 } }
+    const result = await GuildAnalytics.updateOne(
+        { guildId, 'memberEvents.date': dateKey },
+        { $inc: { [`memberEvents.$.${field}`]: 1 } }
     );
     if (!result.matchedCount) {
         // No entry for today yet; add one and trim array to 120 days.
         // The $ne guard prevents a duplicate insert when concurrent joins both
         // miss the first update and race to this branch.
-        await guildSettings.constructor.updateOne(
-            { guildId: guildSettings.guildId, 'analytics.memberEvents.date': { $ne: dateKey } },
+        await GuildAnalytics.updateOne(
+            { guildId, 'memberEvents.date': { $ne: dateKey } },
             {
                 $push: {
-                    'analytics.memberEvents': {
+                    memberEvents: {
                         $each: [{ date: dateKey, joins: field === 'joins' ? 1 : 0, leaves: field === 'leaves' ? 1 : 0 }],
                         $slice: -120
                     }
                 }
-            }
+            },
+            { upsert: true }
         );
     }
 }
@@ -55,7 +57,7 @@ module.exports = {
             if (!guildSettings) return;
             const dateKey = new Date().toISOString().slice(0, 10);
             try {
-                await trackMemberEvent(guildSettings, dateKey, 'joins');
+                await trackMemberEvent(member.guild.id, dateKey, 'joins');
             } catch (analyticsError) {
                 console.error('Member join analytics error:', analyticsError);
             }

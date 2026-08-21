@@ -713,21 +713,9 @@ const guildSchema = new Schema({
         }]
     },
 
-    analytics: {
-        memberEvents: [{
-            date: { type: String, required: true },
-            joins: { type: Number, default: 0 },
-            leaves: { type: Number, default: 0 }
-        }],
-        commandUsage: [{
-            command: { type: String, required: true },
-            channelId: { type: String, default: null },
-            hour: { type: Number, required: true },
-            success: { type: Boolean, default: true },
-            reason: { type: String, default: null },
-            createdAt: { type: Date, default: Date.now }
-        }]
-    },
+    // Recorded telemetry (memberEvents, commandUsage) lives in its own
+    // GuildAnalytics collection — see models/GuildAnalytics.js and
+    // migrations/013_split_guild_analytics.js.
 
     // Server vs server war
     activeWar: {

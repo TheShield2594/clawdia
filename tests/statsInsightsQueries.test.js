@@ -14,7 +14,8 @@
 const express = require('express');
 const { evaluate } = require('./helpers/pipelineUpdate');
 
-jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
+jest.mock('../src/models/Guild', () => ({ findOne: jest.fn(), exists: jest.fn() }));
+jest.mock('../src/models/GuildAnalytics', () => ({ findOne: jest.fn() }));
 jest.mock('../src/models/User',  () => ({ aggregate: jest.fn(), find: jest.fn(), countDocuments: jest.fn() }));
 jest.mock('../src/models/Case',  () => ({ find: jest.fn() }));
 jest.mock('../src/dashboard/lib/middleware', () => ({
@@ -23,6 +24,7 @@ jest.mock('../src/dashboard/lib/middleware', () => ({
 }));
 
 const Guild = require('../src/models/Guild');
+const GuildAnalytics = require('../src/models/GuildAnalytics');
 const User  = require('../src/models/User');
 const Case  = require('../src/models/Case');
 const { __reset } = require('../src/dashboard/lib/aggregateCache');
@@ -114,6 +116,15 @@ function stubGuildFindOne(doc) {
     return seen;
 }
 
+function stubAnalyticsFindOne(doc) {
+    const seen = {};
+    GuildAnalytics.findOne.mockImplementation(() => ({
+        select(fields) { seen.select = fields; return this; },
+        lean: () => Promise.resolve(doc),
+    }));
+    return seen;
+}
+
 function stubUserFind(docs = []) {
     User.find.mockImplementation(() => {
         const chain = {
@@ -148,7 +159,9 @@ beforeEach(() => {
     stubUserFind([]);
     User.countDocuments.mockResolvedValue(0);
     User.aggregate.mockResolvedValue([]);
-    stubGuildFindOne({ guildId: 'g1', analytics: { memberEvents: [], commandUsage: [] } });
+    stubGuildFindOne({ guildId: 'g1' });
+    Guild.exists.mockResolvedValue({ _id: 'g1' });
+    stubAnalyticsFindOne({ guildId: 'g1', memberEvents: [], commandUsage: [] });
     stubCaseFind([]);
 });
 
@@ -229,16 +242,19 @@ describe('/insights reads', () => {
         expect(seen.limit).toBe(1000);
     });
 
-    test('asks the guild for analytics and not for the shop', async () => {
-        const seen = stubGuildFindOne({ guildId: 'g1', analytics: { memberEvents: [], commandUsage: [] } });
-
+    test('reads telemetry from GuildAnalytics and only existence from Guild', async () => {
         await get('/guild/g1/insights');
 
-        expect(seen.select).toBe('guildId analytics');
+        // Telemetry moved to its own collection — the route never pulls the
+        // Guild document (with its shop image Buffers) at all.
+        expect(GuildAnalytics.findOne).toHaveBeenCalledWith({ guildId: 'g1' });
+        expect(Guild.exists).toHaveBeenCalledWith({ guildId: 'g1' });
+        expect(Guild.findOne).not.toHaveBeenCalled();
     });
 
     test('still 404s a guild that is not there', async () => {
-        stubGuildFindOne(null);
+        Guild.exists.mockResolvedValue(null);
+        stubAnalyticsFindOne(null);
 
         const { status } = await get('/guild/nope/insights');
 
@@ -269,11 +285,13 @@ describe('/stats', () => {
     });
 
     test('asks the guild for the fields it reads and not the shop images', async () => {
-        const seen = stubGuildFindOne({ guildId: 'g1', analytics: { memberEvents: [], commandUsage: [] } });
+        const seen = stubGuildFindOne({ guildId: 'g1' });
 
         await get('/guild/g1/stats');
 
         expect(seen.select.split(/\s+/)).not.toContain('shop');
-        expect(seen.select).toContain('analytics');
+        // Telemetry no longer lives on the Guild document at all.
+        expect(seen.select.split(/\s+/)).not.toContain('analytics');
+        expect(GuildAnalytics.findOne).toHaveBeenCalledWith({ guildId: 'g1' });
     });
 });

@@ -4,7 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const User  = require('../../models/User');
 const { attachGrind, persistGrindIfNew, saveGrind } = require('../../utils/grindProfile');
 const { isVersionError } = require('../../utils/versionRetry');
-const { detachBalanceDelta, commitBalanceDelta, saveWithBalanceDelta } = require('../../utils/balanceDelta');
+const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { chargeExact, refundCharge } = require('../../utils/balanceDebit');
 const GrindProfile = require('../../models/GrindProfile');
 const Guild = require('../../models/Guild');
@@ -22,11 +22,10 @@ const {
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { TIER_NUM, TIER_RIBBON, TIER_STARS } = require('../../data/materialRarity');
 const { randomFrom, MINE_CAVE_LINES } = require('../../utils/copyLines');
-const { getPityBonus, buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
+const { buildPityStreakField, PITY_COPY } = require('../../utils/pityBonus');
 const {
     ensureMineData,
     applyStaminaRegen,
-    applyDailyReset,
     msUntilNextStamina,
     getMaxStamina,
     executeMine,
@@ -50,7 +49,12 @@ const {
     getRaidableMaterials,
     hasRaidableMaterials,
     planRaidHaul,
-    RAID_MAX_PER_MATERIAL
+    RAID_MAX_PER_MATERIAL,
+    prepareDigUser,
+    validateDigPreflight,
+    claimDigCooldown,
+    applyDigBonuses,
+    commitDig
 } = require('../../services/mineService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { stackBar } = require('../../utils/rewardReveal');
@@ -324,174 +328,32 @@ async function handleDig(interaction) {
         { upsert: true, new: true }
     );
 
-    await attachGrind(user);
-    ensureMineData(user);
-    applyStaminaRegen(user);
-    applyDailyReset(user);
-    assignDailyMineQuests(user);
-
-    if (user.isModified()) {
-        await user.save().catch(e => console.error('[mine] pre-check save error:', e));
-    }
-
+    await prepareDigUser(user);
     const m = user.mining;
 
+    // ── Preflight (read-only; the cooldown slot is claimed atomically below) ──
     const requestedDepth = interaction.options.getString('depth');
-    const depthId = requestedDepth ?? m.activeDepth;
-    const depth   = DEPTHS[depthId];
-
-    if (!depth) {
-        return interaction.reply({ content: `Unknown depth \`${depthId}\`. Use \`/mine shop list\` to see available depths.`, flags: MessageFlags.Ephemeral });
+    const preflight = validateDigPreflight(user, requestedDepth);
+    if (!preflight.ok) {
+        return replyDigPreflightFailure(interaction, preflight);
     }
-    // Access is decided by `unlockedDepths` alone. The level requirement is enforced
-    // once, at `/mine shop unlock`; re-checking it here would lock a prestiged miner
-    // out of depths they already paid for, since prestige resets the level and the
-    // purchase is permanent.
-    if (!m.unlockedDepths.includes(depthId)) {
-        const gate = depth.defaultUnlocked
-            ? ''
-            : ` (Miner Level ${depth.unlockLevel}, ${depth.unlockCost.toLocaleString()} coins)`;
-        return interaction.reply({
-            content: `You haven't unlocked **${depth.name}** yet. Use \`/mine shop unlock\` to unlock it${gate}.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
+    const { depthId, depth, pickaxe, pickaxeData } = preflight;
 
-    if (m.injuryUntil && Date.now() < m.injuryUntil.getTime()) {
-        const nextAt = new Date(m.injuryUntil.getTime());
-        return interaction.reply({
-            embeds: [buildCooldownEmbed({
-                title: '🤕 Recovering from Cave-in',
-                description: "You took a hit down there. Rest up before heading back underground.",
-                color: '#b5651d',
-                nextAt,
-            })],
-            flags: MessageFlags.Ephemeral,
-        });
-    }
-
-    if (m.lastMine && Date.now() - m.lastMine.getTime() < LIMITS.MINE_COOLDOWN_MS) {
-        const nextAt = new Date(m.lastMine.getTime() + LIMITS.MINE_COOLDOWN_MS);
-        // Intensity is earned in the vein-reading rounds, not picked from a menu —
-        // so the preview promises what a good read pays, not a setting to choose.
+    // Atomically claim the cooldown slot now that all preflight checks have
+    // passed — see mineService.claimDigCooldown for the guarantees.
+    const claim = await claimDigCooldown(user);
+    if (!claim.claimed) {
         return interaction.reply({
             embeds: [buildCooldownEmbed({
                 title: '⛏️ Catching Your Breath',
                 description: 'You just came up from a dig.\nTake a short break before heading back down.',
                 color: '#b5651d',
-                nextAt,
-                nextRewardPreview: 'Pick how hard to push next dig — up to 2×, and 3× if you read the vein right',
+                nextAt: claim.nextAt,
             })],
             flags: MessageFlags.Ephemeral,
         });
     }
-
-    if (m.stamina <= 0) {
-        const regenMs   = msUntilNextStamina(user);
-        const nextAt    = new Date(Date.now() + regenMs);
-        // Report the fail-streak pity that actually exists, through the shared curve
-        // so this cannot drift from what calculateSuccessChance applies. Mining has
-        // no rare-material guarantee — only hunting implements one
-        // (LIMITS.RARE_PITY_GUARANTEE) — so sinceRare is reported as the stat it is.
-        const sinceRare = m.sinceRare ?? 0;
-        const pityBonus = getPityBonus(m.consecutiveFails ?? 0, LIMITS);
-        const pityBits  = [];
-        if (pityBonus > 0) {
-            pityBits.push(`🎯 ${m.consecutiveFails} ${PITY_COPY.mining.streakNoun} • +${Math.round(pityBonus * 100)}% success on your next dig`);
-        }
-        if (sinceRare >= 5) pityBits.push(`⛏️ ${sinceRare} digs since your last Rare+ material`);
-        const pityStat = pityBits.length ? pityBits.join('\n') : null;
-        return interaction.reply({
-            embeds: [buildCooldownEmbed({
-                title: '😮‍💨 Out of Stamina',
-                description: "You've dug yourself to exhaustion.\nBuy an **Energy Tonic** from `/mine shop` to recover faster.",
-                color: '#b5651d',
-                nextAt,
-                pityStat,
-                // Stamina buys swings, not luck: tier odds come from the depth you
-                // dig, your pickaxe and an active magnet. Don't imply otherwise.
-                nextRewardPreview: 'Deeper depths, a better pickaxe and an Ore Magnet are what move your rare odds',
-            })],
-            flags: MessageFlags.Ephemeral,
-        });
-    }
-
-    if (m.equippedPickaxeIndex < 0 || !m.pickaxes[m.equippedPickaxeIndex]) {
-        return interaction.reply({
-            content: `You don't have a pickaxe equipped! Buy one with \`/mine shop pickaxe\` and equip it with \`/mine inv equip 1\`.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    const pickaxe = m.pickaxes[m.equippedPickaxeIndex];
-
-    if (pickaxe.status === 'broken' || pickaxe.currentDurability <= 0) {
-        return interaction.reply({
-            content: `Your **${pickaxe.name}** is broken! Repair it with \`/mine shop repair\` or buy a new one with \`/mine shop pickaxe\`.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    // ── Charge check (read-only; the stock is spent after the claim below) ──
-    const pickaxeData = PICKAXE_BY_TIER[pickaxe.tier];
-    if (pickaxeData.requiresCharge && (m.charges[pickaxeData.chargeType] ?? 0) <= 0) {
-        return interaction.reply({
-            content: `You're out of **${pickaxeData.chargeType.replace(/_/g, ' ')}**! Buy more with \`/mine shop buy\`.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    // Atomically claim the cooldown slot now that all preflight checks have passed —
-    // lastMine is set the moment the dig is actually accepted, not earlier, so a
-    // failed precheck (stamina/pickaxe/charge) never burns the cooldown. The same
-    // guard stops two concurrent /mine dig calls from both slipping through.
-    //
-    // The claim targets GrindProfile, not User: mining state lives in its own
-    // collection (see src/models/User.js), so a User-level guard would match every
-    // document on the missing `mining` field and never reject anything.
-    const mineClaimNow = new Date();
-    const mineCooldownFloor = new Date(mineClaimNow.getTime() - LIMITS.MINE_COOLDOWN_MS);
-    const priorLastMine = m.lastMine ?? null;
-    await persistGrindIfNew(user, 'mining');
-    const mineClaimQuery = { userId: interaction.user.id, guildId: interaction.guild.id, system: 'mining' };
-    const claimedMine = await GrindProfile.findOneAndUpdate(
-        {
-            ...mineClaimQuery,
-            $or: [{ 'data.lastMine': null }, { 'data.lastMine': { $lte: mineCooldownFloor } }],
-        },
-        { $set: { 'data.lastMine': mineClaimNow } },
-        { new: true },
-    );
-
-    if (!claimedMine) {
-        // Losing the claim means another dig already took the slot, so the
-        // in-memory snapshot is stale — read the winning timestamp back so the
-        // countdown reflects the dig that actually happened. If that read fails,
-        // fall back to now rather than the snapshot: reaching the claim at all
-        // means the snapshot was already past the cooldown floor, so it would
-        // render a countdown in the past and tell the player they can dig again.
-        const current = await GrindProfile.findOne(mineClaimQuery).catch(() => null);
-        const lastAt  = current?.data?.lastMine ?? mineClaimNow;
-        const nextAt  = new Date(new Date(lastAt).getTime() + LIMITS.MINE_COOLDOWN_MS);
-        return interaction.reply({
-            embeds: [buildCooldownEmbed({
-                title: '⛏️ Catching Your Breath',
-                description: 'You just came up from a dig.\nTake a short break before heading back down.',
-                color: '#b5651d',
-                nextAt,
-            })],
-            flags: MessageFlags.Ephemeral,
-        });
-    }
-    m.lastMine = mineClaimNow;
-
-    // The claim is a real write now, so a dig that dies before its result is
-    // saved would otherwise cost the player a full cooldown for nothing. Hand the
-    // slot back — but only while it is still ours, so a newer claim isn't undone.
-    const releaseMineClaim = () => GrindProfile.updateOne(
-        { ...mineClaimQuery, 'data.lastMine': mineClaimNow },
-        { $set: { 'data.lastMine': priorLastMine } },
-    ).catch(() => null);
+    const releaseMineClaim = claim.release;
 
     // Everything between here and the save can still fail — a Discord API error
     // while collecting the vein prompts, a service throwing — and until the result
@@ -505,7 +367,6 @@ async function handleDig(interaction) {
     // `$inc` at the save, so `save()` never writes an absolute balance read
     // before that window. See src/utils/balanceDelta.js.
     const balanceAtLoad = user.balance ?? 0;
-    const balanceFilter = { userId: interaction.user.id, guildId: interaction.guild.id };
 
     try {
 
@@ -790,69 +651,15 @@ async function handleDig(interaction) {
             }
         }
 
-        // Pity counter: reset only when a rare+ find was actually kept (not abandoned in a cave-in)
-        const keptRareFind = result.success && !result.caveInAbandoned && ['rare', 'epic', 'legendary', 'event'].includes(result.tier);
-        if (keptRareFind) {
-            user.mining.sinceRare = 0;
-        } else {
-            user.mining.sinceRare = (user.mining.sinceRare ?? 0) + 1;
-        }
-
-        // Yield bonuses below are gated on result.finalPayout > 0, which an abandoned
-        // cave-in resets to 0 above — so abandoning correctly forfeits these too.
-        if (result.success && result.finalPayout > 0 && isFeaturedDepth) {
-            const featBonus = Math.round(result.finalPayout * FEATURED_PAYOUT_BONUS);
-            if (featBonus > 0) {
-                user.balance               += featBonus;
-                user.mining.totalEarned    += featBonus;
-                user.mining.dailyCoins     += featBonus;
-                result.finalPayout         += featBonus;
-                result.featuredDepthBonus   = featBonus;
-            }
-        }
-
-        if (result.success && result.finalPayout > 0 && petMineYieldPct > 0) {
-            const bonus = Math.round(result.finalPayout * petMineYieldPct / 100);
-            if (bonus > 0) {
-                user.balance              += bonus;
-                user.mining.totalEarned   += bonus;
-                user.mining.dailyCoins    += bonus;
-                result.finalPayout        += bonus;
-                result.petYieldBonus       = bonus;
-                result.petYieldPct         = petMineYieldPct;
-            }
-        }
-
-        // Wilderness district: +10% mine yield (clamped to daily hard cap)
-        const wildernessActive = isDistrictActive(guildSettings, 'wilderness');
-        if (result.success && result.finalPayout > 0 && wildernessActive) {
-            const remaining = LIMITS.DAILY_HARD_CAP - user.mining.dailyCoins;
-            const rawBonus  = Math.round(result.finalPayout * WILDERNESS_YIELD_BONUS);
-            const bonus     = Math.max(0, Math.min(rawBonus, remaining));
-            if (bonus > 0) {
-                user.balance               += bonus;
-                user.mining.totalEarned    += bonus;
-                user.mining.dailyCoins     += bonus;
-                result.finalPayout         += bonus;
-                result.wildernessBonus      = bonus;
-            }
-        }
-
-        // At the hard cap every yield bonus above is skipped (they all gate on a
-        // payout above zero), so `forfeited` holds only the ore's value before the
-        // intensity multiplier and the bonuses that would have followed it. Scale it
-        // by what would have applied, or the embed understates the loss several-fold.
-        if (result.cappedByHard && result.forfeited > 0) {
-            const wouldHaveApplied = (chosenIntensity?.multiplier ?? 1)
-                * (isFeaturedDepth ? 1 + FEATURED_PAYOUT_BONUS : 1)
-                * (petMineYieldPct > 0 ? 1 + petMineYieldPct / 100 : 1)
-                * (wildernessActive ? 1 + WILDERNESS_YIELD_BONUS : 1);
-            result.forfeited = Math.round(result.forfeited * wouldHaveApplied);
-        }
-
-        // bestPayout must reflect what the player actually walked away with, so this
-        // runs after the cave-in resolution and all yield bonuses above.
-        if (result.success && result.finalPayout > user.mining.bestPayout) user.mining.bestPayout = result.finalPayout;
+        // Pity counter, featured-depth / pet / Wilderness bonuses, forfeited
+        // scaling and best payout — the full post-roll bonus stack.
+        applyDigBonuses(user, result, {
+            isFeaturedDepth,
+            featuredPayoutBonus: FEATURED_PAYOUT_BONUS,
+            petMineYieldPct,
+            wildernessActive: isDistrictActive(guildSettings, 'wilderness'),
+            intensityMultiplier: chosenIntensity?.multiplier ?? 1,
+        });
 
         updateMineQuestProgress(user, result, depthId);
 
@@ -881,26 +688,12 @@ async function handleDig(interaction) {
 
         const mineAchievements = await checkAndAward(user, guildSettings).catch(() => []);
 
-        // Hand the run's coin movement to an atomic `$inc` and take `balance` out
-        // of the save. A path that reverses its own reward nets to zero and
-        // issues no write.
-        const balanceDelta = detachBalanceDelta(user, balanceAtLoad);
-
+        // Persist and credit through the service. A path that reverses its own
+        // reward nets to zero and issues no coin write.
         let payoutOwed = 0;
         try {
-            await user.save();
+            ({ payoutOwed } = await commitDig(user, balanceAtLoad));
             mineCommitted = true;
-            // Only after the save has landed: a credit applied before a save that
-            // then failed would pay for a run the player could take again. The two
-            // cannot be one write on a standalone mongod, so a credit that will
-            // not land is recorded as owed and said out loud rather than logged
-            // and forgotten.
-            const payout = await commitBalanceDelta(User, balanceFilter, user, balanceDelta, {
-                service: 'mine',
-                jobName: 'minePayout',
-                guildId: interaction.guild.id,
-            });
-            if (!payout.credited) payoutOwed = balanceDelta;
             if (mineAchievements.length) {
                 announceAchievements(interaction.client, guildSettings, user, interaction.member, mineAchievements).catch(() => null);
             }
@@ -1035,6 +828,89 @@ async function handleDig(interaction) {
     } catch (err) {
         if (!mineCommitted) await releaseMineClaim();
         throw err;
+    }
+}
+
+// Renders a failed dig preflight (mineService.validateDigPreflight) as the
+// reply the player sees. Pure presentation — every check lives in the service.
+function replyDigPreflightFailure(interaction, preflight) {
+    const ephemeral = { flags: MessageFlags.Ephemeral };
+    switch (preflight.reason) {
+        case 'unknown_depth':
+            return interaction.reply({ content: `Unknown depth \`${preflight.depthId}\`. Use \`/mine shop list\` to see available depths.`, ...ephemeral });
+        case 'depth_locked': {
+            const gate = preflight.depth.defaultUnlocked
+                ? ''
+                : ` (Miner Level ${preflight.depth.unlockLevel}, ${preflight.depth.unlockCost.toLocaleString()} coins)`;
+            return interaction.reply({
+                content: `You haven't unlocked **${preflight.depth.name}** yet. Use \`/mine shop unlock\` to unlock it${gate}.`,
+                ...ephemeral
+            });
+        }
+        case 'injured':
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '🤕 Recovering from Cave-in',
+                    description: "You took a hit down there. Rest up before heading back underground.",
+                    color: '#b5651d',
+                    nextAt: preflight.nextAt,
+                })],
+                ...ephemeral,
+            });
+        case 'cooldown':
+            // Intensity is earned in the vein-reading rounds, not picked from a menu —
+            // so the preview promises what a good read pays, not a setting to choose.
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '⛏️ Catching Your Breath',
+                    description: 'You just came up from a dig.\nTake a short break before heading back down.',
+                    color: '#b5651d',
+                    nextAt: preflight.nextAt,
+                    nextRewardPreview: 'Pick how hard to push next dig — up to 2×, and 3× if you read the vein right',
+                })],
+                ...ephemeral,
+            });
+        case 'no_stamina': {
+            // Report the fail-streak pity that actually exists, through the shared
+            // curve so this cannot drift from what calculateSuccessChance applies.
+            // Mining has no rare-material guarantee — only hunting implements one —
+            // so sinceRare is reported as the stat it is.
+            const pityBits = [];
+            if (preflight.pityBonus > 0) {
+                pityBits.push(`🎯 ${preflight.consecutiveFails} ${PITY_COPY.mining.streakNoun} • +${Math.round(preflight.pityBonus * 100)}% success on your next dig`);
+            }
+            if (preflight.sinceRare >= 5) pityBits.push(`⛏️ ${preflight.sinceRare} digs since your last Rare+ material`);
+            return interaction.reply({
+                embeds: [buildCooldownEmbed({
+                    title: '😮‍💨 Out of Stamina',
+                    description: "You've dug yourself to exhaustion.\nBuy an **Energy Tonic** from `/mine shop` to recover faster.",
+                    color: '#b5651d',
+                    nextAt: preflight.nextAt,
+                    pityStat: pityBits.length ? pityBits.join('\n') : null,
+                    // Stamina buys swings, not luck: tier odds come from the depth you
+                    // dig, your pickaxe and an active magnet. Don't imply otherwise.
+                    nextRewardPreview: 'Deeper depths, a better pickaxe and an Ore Magnet are what move your rare odds',
+                })],
+                ...ephemeral,
+            });
+        }
+        case 'no_pickaxe':
+            return interaction.reply({
+                content: `You don't have a pickaxe equipped! Buy one with \`/mine shop pickaxe\` and equip it with \`/mine inv equip 1\`.`,
+                ...ephemeral
+            });
+        case 'pickaxe_broken':
+            return interaction.reply({
+                content: `Your **${preflight.pickaxe.name}** is broken! Repair it with \`/mine shop repair\` or buy a new one with \`/mine shop pickaxe\`.`,
+                ...ephemeral
+            });
+        case 'no_charge':
+            return interaction.reply({
+                content: `You're out of **${preflight.pickaxeData.chargeType.replace(/_/g, ' ')}**! Buy more with \`/mine shop buy\`.`,
+                ...ephemeral
+            });
+        default:
+            return interaction.reply({ content: 'You cannot dig right now.', ...ephemeral });
     }
 }
 

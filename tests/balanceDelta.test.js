@@ -346,8 +346,21 @@ describe('saveWithBalanceDelta', () => {
 // /hunt and /mine wait on approach prompts, and /explore holds an encounter
 // prompt for up to 20 seconds and writes coins twice around it. All four are
 // converted; these assertions are what keeps them that way.
+// /fish's cast transaction was pushed into fishService (#613), so its delta
+// mechanics are asserted against the service; the other three still hold the
+// transaction inline in the command.
+const TRANSACTION_SOURCES = {
+    fish:    path.join('services', 'fishService.js'),
+    hunt:    path.join('services', 'huntService.js'),
+    mine:    path.join('services', 'mineService.js'),
+    explore: path.join('commands', 'economy', 'explore.js'),
+};
+
 describe.each(['fish', 'hunt', 'mine', 'explore'])('/%s keeps balance out of its save', (command) => {
     const source = fs.readFileSync(
+        path.join(__dirname, '..', 'src', TRANSACTION_SOURCES[command]), 'utf8',
+    );
+    const commandSource = fs.readFileSync(
         path.join(__dirname, '..', 'src', 'commands', 'economy', `${command}.js`), 'utf8',
     );
 
@@ -369,19 +382,19 @@ describe.each(['fish', 'hunt', 'mine', 'explore'])('/%s keeps balance out of its
 
     test('an uncredited payout is shown to the player, not swallowed', () => {
         expect(source).toMatch(/payoutOwed/);
-        expect(source).toMatch(/Payout Not Yet Credited/);
+        expect(commandSource).toMatch(/payoutOwed/);
+        expect(commandSource).toMatch(/Payout Not Yet Credited/);
     });
 });
 
 describe('/fish uses the helper', () => {
     const source = fs.readFileSync(
-        path.join(__dirname, '..', 'src', 'commands', 'economy', 'fish.js'), 'utf8',
+        path.join(__dirname, '..', 'src', 'services', 'fishService.js'), 'utf8',
     );
 
     test('a credit that will not land is surfaced, not swallowed', () => {
         // The failure mode this guards: save lands, $inc does not, and the player
         // is shown a catch they were never paid for.
-        expect(source).toMatch(/if \(!payout\.credited\) payoutOwed = balanceDelta;/);
-        expect(source).toMatch(/Payout Not Yet Credited/);
+        expect(source).toMatch(/payoutOwed: payout\.credited \? 0 : balanceDelta/);
     });
 });

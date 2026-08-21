@@ -36,6 +36,8 @@ jest.mock('discord.js', () => {
 // factory executes (jest.mock is hoisted above const declarations).
 const mockGuild = { findOne: jest.fn(), updateOne: jest.fn() };
 jest.mock('../src/models/Guild', () => mockGuild);
+const mockGuildAnalytics = { findOne: jest.fn(), updateOne: jest.fn() };
+jest.mock('../src/models/GuildAnalytics', () => mockGuildAnalytics);
 jest.mock('../src/services/raidService', () => ({ handleMemberJoin: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../src/services/antiNukeService', () => ({
     enforceJoinGate: jest.fn().mockResolvedValue(false),
@@ -82,7 +84,6 @@ const interactionCreate = require('../src/events/interactionCreate');
 function makeGuildSettings(overrides = {}) {
     return {
         guildId: '111111111111111111',
-        constructor: { updateOne: mockGuild.updateOne },
         welcome: { enabled: false, cardEnabled: false, dmEnabled: false, message: '', dmMessage: '' },
         farewell: { enabled: false },
         autoRoles: [],
@@ -131,32 +132,32 @@ describe('trackMemberEvent (guildMemberAdd)', () => {
     });
 
     it('increments joins on existing today entry', async () => {
-        mockGuild.updateOne.mockResolvedValueOnce({ matchedCount: 1 });
+        mockGuildAnalytics.updateOne.mockResolvedValueOnce({ matchedCount: 1 });
 
         const member = makeMember();
         await guildMemberAdd.execute(member, {});
 
-        expect(mockGuild.updateOne).toHaveBeenCalledWith(
-            expect.objectContaining({ 'analytics.memberEvents.date': TODAY }),
-            expect.objectContaining({ $inc: { 'analytics.memberEvents.$.joins': 1 } })
+        expect(mockGuildAnalytics.updateOne).toHaveBeenCalledWith(
+            expect.objectContaining({ 'memberEvents.date': TODAY }),
+            expect.objectContaining({ $inc: { 'memberEvents.$.joins': 1 } })
         );
     });
 
     it('inserts new entry when no existing today entry', async () => {
-        mockGuild.updateOne
+        mockGuildAnalytics.updateOne
             .mockResolvedValueOnce({ matchedCount: 0 }) // increment miss
             .mockResolvedValueOnce({ matchedCount: 1 }); // insert succeeds
 
         const member = makeMember();
         await guildMemberAdd.execute(member, {});
 
-        const secondCall = mockGuild.updateOne.mock.calls[1];
-        expect(secondCall[1].$push['analytics.memberEvents'].$each[0]).toMatchObject({
+        const secondCall = mockGuildAnalytics.updateOne.mock.calls[1];
+        expect(secondCall[1].$push.memberEvents.$each[0]).toMatchObject({
             date: TODAY,
             joins: 1,
             leaves: 0,
         });
-        expect(secondCall[1].$push['analytics.memberEvents'].$slice).toBe(-120);
+        expect(secondCall[1].$push.memberEvents.$slice).toBe(-120);
     });
 
     it('does not throw if guild not found', async () => {
@@ -166,7 +167,7 @@ describe('trackMemberEvent (guildMemberAdd)', () => {
     });
 
     it('swallows analytics errors without crashing the join flow', async () => {
-        mockGuild.updateOne.mockRejectedValue(new Error('DB error'));
+        mockGuildAnalytics.updateOne.mockRejectedValue(new Error('DB error'));
         const member = makeMember();
         // Should not reject — analytics errors are caught
         await expect(guildMemberAdd.execute(member, {})).resolves.not.toThrow();
@@ -186,27 +187,27 @@ describe('trackMemberEvent (guildMemberRemove)', () => {
     });
 
     it('increments leaves on existing today entry', async () => {
-        mockGuild.updateOne.mockResolvedValueOnce({ matchedCount: 1 });
+        mockGuildAnalytics.updateOne.mockResolvedValueOnce({ matchedCount: 1 });
 
         const member = makeMember();
         await guildMemberRemove.execute(member, {});
 
-        expect(mockGuild.updateOne).toHaveBeenCalledWith(
-            expect.objectContaining({ 'analytics.memberEvents.date': TODAY }),
-            expect.objectContaining({ $inc: { 'analytics.memberEvents.$.leaves': 1 } })
+        expect(mockGuildAnalytics.updateOne).toHaveBeenCalledWith(
+            expect.objectContaining({ 'memberEvents.date': TODAY }),
+            expect.objectContaining({ $inc: { 'memberEvents.$.leaves': 1 } })
         );
     });
 
     it('inserts new entry with leaves=1 joins=0 when no today entry', async () => {
-        mockGuild.updateOne
+        mockGuildAnalytics.updateOne
             .mockResolvedValueOnce({ matchedCount: 0 })
             .mockResolvedValueOnce({ matchedCount: 1 });
 
         const member = makeMember();
         await guildMemberRemove.execute(member, {});
 
-        const secondCall = mockGuild.updateOne.mock.calls[1];
-        expect(secondCall[1].$push['analytics.memberEvents'].$each[0]).toMatchObject({
+        const secondCall = mockGuildAnalytics.updateOne.mock.calls[1];
+        expect(secondCall[1].$push.memberEvents.$each[0]).toMatchObject({
             date: TODAY,
             joins: 0,
             leaves: 1,
@@ -214,7 +215,7 @@ describe('trackMemberEvent (guildMemberRemove)', () => {
     });
 
     it('swallows analytics errors without crashing the leave flow', async () => {
-        mockGuild.updateOne.mockRejectedValue(new Error('DB error'));
+        mockGuildAnalytics.updateOne.mockRejectedValue(new Error('DB error'));
         const member = makeMember();
         await expect(guildMemberRemove.execute(member, {})).resolves.not.toThrow();
     });
@@ -263,6 +264,7 @@ describe('logCommandMetric (interactionCreate)', () => {
         // own findOne mock.
         require('../src/utils/guildSettingsCache').clearGuildSettingsCache();
         mockGuild.updateOne.mockResolvedValue({});
+        mockGuildAnalytics.updateOne.mockResolvedValue({});
         mockGuild.findOne.mockResolvedValue(makeGuildSettings());
         mockCommand.execute.mockResolvedValue(undefined);
         // Reset cooldown state so tests don't block each other via the 3s cooldown.
@@ -282,18 +284,18 @@ describe('logCommandMetric (interactionCreate)', () => {
             expect.objectContaining({ content: expect.stringContaining('only works inside a server') })
         );
         expect(mockCommand.execute).not.toHaveBeenCalled();
-        expect(mockGuild.updateOne).not.toHaveBeenCalled();
+        expect(mockGuildAnalytics.updateOne).not.toHaveBeenCalled();
     });
 
     it('logs a success metric after successful command execution', async () => {
         const interaction = makeInteraction();
         await interactionCreate.execute(interaction, mockClient);
 
-        const call = mockGuild.updateOne.mock.calls.find(c =>
-            c[1]?.$push?.['analytics.commandUsage'] !== undefined
+        const call = mockGuildAnalytics.updateOne.mock.calls.find(c =>
+            c[1]?.$push?.commandUsage !== undefined
         );
         expect(call).toBeDefined();
-        const entry = call[1].$push['analytics.commandUsage'].$each[0];
+        const entry = call[1].$push.commandUsage.$each[0];
         expect(entry.command).toBe('ping');
         expect(entry.success).toBe(true);
         expect(entry.reason).toBeNull();
@@ -304,10 +306,10 @@ describe('logCommandMetric (interactionCreate)', () => {
         const interaction = makeInteraction({ replied: false, deferred: false });
         await interactionCreate.execute(interaction, mockClient);
 
-        const calls = mockGuild.updateOne.mock.calls.filter(c =>
-            c[1]?.$push?.['analytics.commandUsage'] !== undefined
+        const calls = mockGuildAnalytics.updateOne.mock.calls.filter(c =>
+            c[1]?.$push?.commandUsage !== undefined
         );
-        const failCall = calls.find(c => c[1].$push['analytics.commandUsage'].$each[0].success === false);
+        const failCall = calls.find(c => c[1].$push.commandUsage.$each[0].success === false);
         expect(failCall).toBeDefined();
     });
 
@@ -315,20 +317,20 @@ describe('logCommandMetric (interactionCreate)', () => {
         const interaction = makeInteraction();
         await interactionCreate.execute(interaction, mockClient);
 
-        const call = mockGuild.updateOne.mock.calls.find(c =>
-            c[1]?.$push?.['analytics.commandUsage'] !== undefined
+        const call = mockGuildAnalytics.updateOne.mock.calls.find(c =>
+            c[1]?.$push?.commandUsage !== undefined
         );
-        expect(call[1].$push['analytics.commandUsage'].$slice).toBe(-3000);
+        expect(call[1].$push.commandUsage.$slice).toBe(-3000);
     });
 
     it('records the hour of the command (0–23)', async () => {
         const interaction = makeInteraction();
         await interactionCreate.execute(interaction, mockClient);
 
-        const call = mockGuild.updateOne.mock.calls.find(c =>
-            c[1]?.$push?.['analytics.commandUsage'] !== undefined
+        const call = mockGuildAnalytics.updateOne.mock.calls.find(c =>
+            c[1]?.$push?.commandUsage !== undefined
         );
-        const hour = call[1].$push['analytics.commandUsage'].$each[0].hour;
+        const hour = call[1].$push.commandUsage.$each[0].hour;
         expect(hour).toBeGreaterThanOrEqual(0);
         expect(hour).toBeLessThanOrEqual(23);
     });
@@ -337,11 +339,11 @@ describe('logCommandMetric (interactionCreate)', () => {
         const unknownInteraction = makeInteraction({ commandName: 'nonexistent' });
         await interactionCreate.execute(unknownInteraction, mockClient);
 
-        const call = mockGuild.updateOne.mock.calls.find(c =>
-            c[1]?.$push?.['analytics.commandUsage'] !== undefined
+        const call = mockGuildAnalytics.updateOne.mock.calls.find(c =>
+            c[1]?.$push?.commandUsage !== undefined
         );
-        expect(call[1].$push['analytics.commandUsage'].$each[0].reason).toBe('unknown_command');
-        expect(call[1].$push['analytics.commandUsage'].$each[0].success).toBe(false);
+        expect(call[1].$push.commandUsage.$each[0].reason).toBe('unknown_command');
+        expect(call[1].$push.commandUsage.$each[0].success).toBe(false);
     });
 });
 
