@@ -318,6 +318,29 @@ async function rollbackMigration(name, { dir = __dirname } = {}) {
 }
 
 /**
+ * True for a migration `runMigrations` will actually apply *and record*.
+ *
+ * This has to agree with runMigrations' own filtering exactly, because
+ * waitForMigrations blocks on the answer. Two shapes run and leave no record,
+ * and counting either as pending strands every non-primary shard on a
+ * successful boot until it times out and refuses to start:
+ *
+ *   - A file that does not export both a name and an `up` function is skipped
+ *     with a warning and never recorded.
+ *   - An `optional` migration that fails is deliberately not recorded, so the
+ *     next boot retries it. The bot is merely faster with one applied, which is
+ *     the whole reason it is allowed to fail — so it is not something another
+ *     shard should refuse to start over.
+ */
+function isRecordableMigration(migration) {
+    const name = migration?.name;
+    if (typeof name !== 'string' || name.length === 0) return false;
+    if (typeof migration.up !== 'function') return false;
+    if (migration.optional) return false;
+    return true;
+}
+
+/**
  * Migration names that are discovered on disk but not yet recorded as applied.
  *
  * Split out of runMigrations so a process that must NOT run migrations can
@@ -326,8 +349,8 @@ async function rollbackMigration(name, { dir = __dirname } = {}) {
  */
 async function pendingMigrationNames({ dir = __dirname } = {}) {
     const declared = loadMigrations(dir)
-        .map(({ migration }) => migration?.name)
-        .filter(name => typeof name === 'string' && name.length > 0);
+        .filter(({ migration }) => isRecordableMigration(migration))
+        .map(({ migration }) => migration.name);
     if (declared.length === 0) return [];
 
     const applied = new Set(
@@ -376,4 +399,10 @@ async function waitForMigrations({ dir = __dirname, timeoutMs = 300_000, pollMs 
     }
 }
 
-module.exports = { runMigrations, rollbackMigration, pendingMigrationNames, waitForMigrations };
+module.exports = {
+    runMigrations,
+    rollbackMigration,
+    pendingMigrationNames,
+    waitForMigrations,
+    isRecordableMigration,
+};

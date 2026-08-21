@@ -102,6 +102,74 @@ function collectCalls() {
     return calls;
 }
 
+/**
+ * How each file that uses the credit helpers brings them in.
+ *
+ * The sweep matches calls by name, which is only sound while a name in a source
+ * file means the imported helper and nothing else. Two shapes would break that
+ * silently — an aliased import (`const { grantInventoryItem: grant } = ...`,
+ * whose calls the sweep never sees) and a namespace import
+ * (`const inv = require(...); inv.grantInventoryItem(...)`, likewise) — and a
+ * third would make it lie the other way, a local function that happens to share
+ * a helper's name.
+ *
+ * Resolving bindings properly means a scope analyser in a test file. Refusing
+ * the shapes that would need one is the same guarantee for a fraction of the
+ * machinery: if someone writes an alias, this fails and says the sweep cannot
+ * see it, rather than the sweep quietly covering less than it claims.
+ */
+function importShapeProblems() {
+    const problems = [];
+    const IMPORT_PATH = /inventoryGrant/;
+
+    for (const file of sourceFiles(SRC)) {
+        if (file === PRIMITIVE) continue;
+        const code = fs.readFileSync(file, 'utf8');
+        if (!HELPERS.some(h => code.includes(h))) continue;
+        const rel = path.relative(SRC, file);
+        const ast = parse(code, { sourceType: 'unambiguous', plugins: ['classProperties'] });
+
+        walk(ast, node => {
+            // A local declaration shadowing a helper name would make the sweep
+            // report a call site that is not one.
+            if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration')
+                && HELPERS.includes(node.id?.name)) {
+                problems.push(`${rel}:${node.loc?.start.line} declares its own ${node.id.name}`);
+            }
+
+            if (node.type !== 'VariableDeclarator') return;
+            const init = node.init;
+            const isHelperRequire = init?.type === 'CallExpression'
+                && init.callee.type === 'Identifier' && init.callee.name === 'require'
+                && init.arguments[0]?.type === 'StringLiteral'
+                && IMPORT_PATH.test(init.arguments[0].value);
+            if (!isHelperRequire) return;
+
+            if (node.id.type === 'Identifier') {
+                problems.push(`${rel}:${node.loc?.start.line} imports the module as a namespace (${node.id.name}); the sweep matches bare calls only`);
+                return;
+            }
+            if (node.id.type !== 'ObjectPattern') {
+                problems.push(`${rel}:${node.loc?.start.line} uses an import shape the sweep cannot follow`);
+                return;
+            }
+            for (const property of node.id.properties) {
+                if (property.type !== 'ObjectProperty') {
+                    problems.push(`${rel}:${node.loc?.start.line} uses a rest element in the import; the sweep matches bare calls only`);
+                    continue;
+                }
+                const imported = property.key.name;
+                const local    = property.value.type === 'Identifier' ? property.value.name : null;
+                if (!HELPERS.includes(imported)) continue;
+                if (local !== imported) {
+                    problems.push(`${rel}:${node.loc?.start.line} imports ${imported} as ${local ?? '<pattern>'}; the sweep would not see its calls`);
+                }
+            }
+        });
+    }
+    return problems;
+}
+
 const CALLS  = collectCalls();
 const GRANTS = CALLS.filter(c => c.name === 'grantInventoryItem');
 const where  = c => `${c.file}:${c.line}`;
@@ -174,13 +242,22 @@ function unguardedAccumulator(grants) {
     }).map(where);
 }
 
+// Parents that genuinely observe the promise. `VariableDeclarator` is NOT one:
+// `const p = grantInventoryItem(...)` with nothing downstream is as floating as
+// a bare call, and reads more like it was handled. A binding that IS handled is
+// written `const x = await grant(...)` or `const x = grant(...).catch(...)`,
+// both of which put an Await or a MemberExpression between the call and the
+// declarator — so dropping it costs nothing and keeps the check honest.
+const OBSERVING_PARENTS = [
+    'AwaitExpression',        // await grant(...)
+    'ReturnStatement',        // return grant(...)
+    'ArrowFunctionExpression', // const f = () => grant(...)
+    'MemberExpression',       // grant(...).catch(...) / .then(...)
+];
+
 /** A grant whose promise nobody awaits, returns or handles. */
 function floatingGrants(grants) {
-    return grants.filter(call => {
-        const parentType = call.parent?.type;
-        return !['AwaitExpression', 'ReturnStatement', 'ArrowFunctionExpression',
-                 'VariableDeclarator', 'MemberExpression'].includes(parentType);
-    }).map(where);
+    return grants.filter(call => !OBSERVING_PARENTS.includes(call.parent?.type)).map(where);
 }
 
 /** inventoryAddStages spread into an update *object* rather than a pipeline array. */
@@ -216,6 +293,14 @@ describe('the sweep is actually sweeping', () => {
         const areas = new Set(GRANTS.map(c => c.file.split(path.sep)[0]));
         expect(areas).toContain('commands');
         expect(areas).toContain('services');
+    });
+
+    it('sees every use, because nothing imports the helpers under another name', () => {
+        // The sweep matches calls by name. An alias or a namespace import would
+        // hide a call site from it entirely, and a local function of the same
+        // name would invent one. Refusing those shapes is what makes matching by
+        // name sound.
+        expect(importShapeProblems()).toEqual([]);
     });
 });
 
@@ -355,15 +440,21 @@ describe('each check can still fail', () => {
     });
 
     it('catches a grant nobody waits for', () => {
-        expect(floatingGrants(bad(
-            `async function f() { grantInventoryItem(u, g, 'x', 1); }`
-        ))).toHaveLength(1);
+        for (const floating of [
+            `async function f() { grantInventoryItem(u, g, 'x', 1); }`,
+            // Bound to a name and then dropped. This reads as handled and is not:
+            // the rejection is still unobserved.
+            `const p = grantInventoryItem(u, g, 'x', 1);`,
+        ]) {
+            expect(floatingGrants(bad(floating))).toHaveLength(1);
+        }
         for (const handled of [
             `async function f() { await grantInventoryItem(u, g, 'x', 1); }`,
             `async function f() { return grantInventoryItem(u, g, 'x', 1); }`,
             `const f = () => grantInventoryItem(u, g, 'x', 1);`,
-            `const p = grantInventoryItem(u, g, 'x', 1);`,
+            `async function f() { const x = await grantInventoryItem(u, g, 'x', 1); }`,
             `grantInventoryItem(u, g, 'x', 1).catch(() => null);`,
+            `const p = grantInventoryItem(u, g, 'x', 1).catch(() => null);`,
         ]) {
             expect(floatingGrants(bad(handled))).toEqual([]);
         }

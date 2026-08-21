@@ -186,6 +186,18 @@ describe('the affinity assertion', () => {
         warn.mockRestore();
     });
 
+    it('warns without throwing for an id it cannot route at all', () => {
+        // `ownsGuild` returns false for an unroutable id as well as for one that
+        // belongs elsewhere, and resolving the destination for the warning is
+        // exactly what throws on an unroutable one. The "warns, never throws"
+        // contract has to hold for both.
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        expect(() => assertGuildAffinity('not-a-snowflake', 'crash lobby', fakeClient(1, 4))).not.toThrow();
+        expect(assertGuildAffinity('not-a-snowflake', 'crash lobby', fakeClient(1, 4))).toBe(false);
+        expect(warn).toHaveBeenCalled();
+        warn.mockRestore();
+    });
+
     it('never fires unsharded', () => {
         const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
         for (const guildId of SNOWFLAKES) expect(assertGuildAffinity(guildId, 'test')).toBe(true);

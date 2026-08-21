@@ -131,10 +131,23 @@ function ownsGuild(guildId, client = null) {
  */
 function assertGuildAffinity(guildId, label, client = null) {
     if (ownsGuild(guildId, client)) return true;
+
+    // `ownsGuild` returns false for an id it cannot route as well as for one
+    // that belongs elsewhere, so the destination has to be resolved separately —
+    // and resolving it is exactly what throws on an unroutable id. Working it
+    // out before the warning is built keeps the "warns, never throws" contract
+    // true for both cases.
+    let routesTo;
+    try {
+        routesTo = `shard ${shardIdForGuild(guildId, shardCount(client))}`;
+    } catch {
+        routesTo = 'no shard — it is not a snowflake';
+    }
+
     console.warn(
         `[sharding] ${label}: guild ${guildId} is handled in shard ${shardId(client)} but routes to ` +
-        `shard ${shardIdForGuild(guildId, shardCount(client))}. Guild-scoped session state assumes ` +
-        `one shard per guild — see src/utils/sharding.js.`
+        `${routesTo}. Guild-scoped session state assumes one shard per guild — ` +
+        `see src/utils/sharding.js.`
     );
     return false;
 }

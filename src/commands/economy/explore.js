@@ -1329,13 +1329,19 @@ async function handlePrestige(interaction) {
 
     let actionPromise = null;
     collector.on('collect', btn => {
+        // An emitter discards whatever a listener returns, so these replies are
+        // floating promises: a failed one (an expired interaction token, a
+        // deleted message) becomes an unhandled rejection rather than a logged
+        // miss, and enough of those trip the process-level rejection guard.
         if (btn.user.id !== interaction.user.id) {
-            return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral });
+            return btn.reply({ content: 'This is not your confirmation.', flags: MessageFlags.Ephemeral })
+                .catch(err => console.error('[explore prestige] foreign-user reply failed:', err));
         }
 
         if (btn.customId === 'exploreprestige_cancel') {
             collector.stop();
-            return btn.update({ content: 'You stay on the map. For now.', embeds: [], components: [] });
+            return btn.update({ content: 'You stay on the map. For now.', embeds: [], components: [] })
+                .catch(err => console.error('[explore prestige] cancel update failed:', err));
         }
 
         // Assigned before collector.stop(): stop() emits 'end' synchronously, so an

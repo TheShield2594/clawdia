@@ -127,6 +127,13 @@ function nonReplayableMutations(retries) {
         for (const name of callNames(retry.mutate)) {
             if (NON_REPLAYABLE[name]) offenders.push(`${where(retry)} → ${name} (${NON_REPLAYABLE[name]})`);
             if (REPLIES.test(name))   offenders.push(`${where(retry)} → ${name} (messages the player again on every retry)`);
+            // The primitive saves the document itself once mutate returns. A
+            // mutate that also saves writes twice per attempt, and the second
+            // write is the one whose VersionError the retry loop then catches —
+            // so the block retries against a document it has already committed.
+            if (name === 'save' || name.endsWith('.save')) {
+                offenders.push(`${where(retry)} → ${name} (the primitive saves after mutate returns; this saves again)`);
+            }
         }
     }
     return offenders;
@@ -150,6 +157,24 @@ function coinMutations(retries) {
     return offenders;
 }
 
+// Calls that hand back whatever they were given. A loader whose returned
+// expression is one of these is doing no re-reading, however call-shaped it
+// looks: `() => Promise.resolve(user)` re-wraps the stale document every time.
+const PASS_THROUGH = ['Promise.resolve', 'Promise.reject', 'Promise.all', 'Promise.race'];
+
+/** The expression a loader hands back, or null if it never returns one. */
+function returnedExpression(fn) {
+    if (fn.body.type !== 'BlockStatement') return fn.body; // () => expr
+    let returned = null;
+    walk(fn.body, node => {
+        // The first return wins; a loader with several is unusual enough that
+        // treating the first as representative is fine, and a loader with none
+        // returns undefined, which the caller reads as "found nothing".
+        if (!returned && node.type === 'ReturnStatement' && node.argument) returned = node.argument;
+    });
+    return returned;
+}
+
 /**
  * A load callback that does not actually re-read.
  *
@@ -157,6 +182,10 @@ function coinMutations(retries) {
  * lost the race and hands it back on every attempt, so the retry loop burns all
  * three attempts against the same stale version and then throws — the exact
  * failure the retry existed to avoid, dressed up as an unavoidable conflict.
+ *
+ * Judged on what the loader *returns*, not on whether its body contains a call
+ * anywhere: a body can log, count attempts or build a filter and still hand
+ * back the same document it was closed over.
  */
 function staleLoaders(retries) {
     return retries.filter(retry => {
@@ -167,21 +196,91 @@ function staleLoaders(retries) {
             // reference; it is re-invoked per attempt, which is the point.
             return false;
         }
-        return callNames(load).length === 0;
+
+        const returned = returnedExpression(load);
+        if (!returned) return true;
+        return !isReload(returned, load);
     }).map(where);
 }
 
-/** A call that does not give the primitive both halves it needs. */
-function malformedCalls(retries) {
-    return retries.filter(r => r.args.length < 2 || !r.load || !r.mutate).map(where);
+/**
+ * Whether `node` is the expression that re-reads the document.
+ *
+ * Handles the shapes a loader is actually written in: the call itself, an await
+ * of it, a member access off it, and — the common one — a local binding that
+ * the body awaited into and then returns. A returned identifier with no such
+ * binding in the body is something the loader closed over, which is the stale
+ * case this exists to catch.
+ */
+function isReload(node, fn) {
+    let current = node;
+    if (current?.type === 'AwaitExpression') current = current.argument;
+    // `(await load()).doc` and `load().then(...)` both re-read; walk down to the
+    // call that does it.
+    while (current?.type === 'MemberExpression') current = current.object;
+
+    if (current?.type === 'Identifier') {
+        // `const u = await User.findOne(f); return u;` — resolve the binding
+        // inside this loader. Anything not bound here was closed over.
+        let bound = null;
+        walk(fn.body, n => {
+            if (!bound && n.type === 'VariableDeclarator'
+                && n.id.type === 'Identifier' && n.id.name === current.name && n.init) {
+                bound = n.init;
+            }
+        });
+        return bound ? isReload(bound, fn) : false;
+    }
+
+    if (current?.type !== 'CallExpression') return false;
+
+    const callee = current.callee;
+    const name = callee.type === 'Identifier'
+        ? callee.name
+        : (callee.type === 'MemberExpression' && callee.property.type === 'Identifier'
+            ? `${callee.object.type === 'Identifier' ? `${callee.object.name}.` : ''}${callee.property.name}`
+            : '');
+    return !PASS_THROUGH.includes(name);
 }
 
-/** A retry with no label — the give-up warning would name nothing. */
+// Node types that are definitely not a function. A call the primitive will
+// invoke has to be one, and `!node` only catches the argument being absent.
+const NOT_CALLABLE = ['NullLiteral', 'StringLiteral', 'NumericLiteral', 'BooleanLiteral',
+                      'ObjectExpression', 'ArrayExpression', 'TemplateLiteral'];
+
+const isUndefinedLiteral = node =>
+    node?.type === 'Identifier' && node.name === 'undefined';
+
+/** A call that does not give the primitive both halves it needs, as callables. */
+function malformedCalls(retries) {
+    return retries.filter(r => {
+        if (r.args.length < 2) return true;
+        for (const arg of [r.load, r.mutate]) {
+            if (!arg) return true;
+            if (isUndefinedLiteral(arg)) return true;
+            if (NOT_CALLABLE.includes(arg.type)) return true;
+        }
+        return false;
+    }).map(where);
+}
+
+/** A retry with no usable label — the give-up warning would name nothing. */
 function unlabelled(retries) {
     return retries.filter(retry => {
         if (!retry.opts || retry.opts.type !== 'ObjectExpression') return true;
-        return !retry.opts.properties.some(p =>
+        const label = retry.opts.properties.find(p =>
             p.type === 'ObjectProperty' && p.key.type === 'Identifier' && p.key.name === 'label');
+        if (!label) return true;
+        // Present but empty is the same as absent once it reaches the log line,
+        // and worse to read in review — it looks answered.
+        const value = label.value;
+        if (isUndefinedLiteral(value)) return true;
+        if (value.type === 'NullLiteral') return true;
+        if (value.type === 'StringLiteral' && value.value.trim() === '') return true;
+        if (value.type === 'TemplateLiteral'
+            && value.expressions.length === 0
+            && value.quasis.every(q => q.value.cooked.trim() === '')) return true;
+        return false;
     }).map(where);
 }
 
@@ -244,6 +343,19 @@ describe('each check can still fail', () => {
         ))).toHaveLength(1);
     });
 
+    it('catches a mutate that saves the document itself', () => {
+        // The primitive saves once mutate returns. Saving inside it writes twice
+        // per attempt, and it is the second write whose VersionError the loop
+        // catches — so the retry replays a block that already committed.
+        expect(nonReplayableMutations(bad(
+            `withVersionRetry(() => load(), async doc => { doc.a = 1; await doc.save(); }, { label: 'x' });`
+        ))).toHaveLength(1);
+        // markModified is the correct way to tell mongoose about the change.
+        expect(nonReplayableMutations(bad(
+            `withVersionRetry(() => load(), doc => { doc.a = 1; doc.markModified('a'); }, { label: 'x' });`
+        ))).toEqual([]);
+    });
+
     it('catches a mutate that credits coins', () => {
         expect(coinMutations(bad(
             `withVersionRetry(() => load(), doc => { doc.balance += reward; }, { label: 'x' });`
@@ -254,21 +366,58 @@ describe('each check can still fail', () => {
     });
 
     it('catches a loader that hands back the same stale document', () => {
-        expect(staleLoaders(bad(
-            `withVersionRetry(() => user, doc => { doc.name = n; }, { label: 'x' });`
-        ))).toHaveLength(1);
-        expect(staleLoaders(bad(
-            `withVersionRetry(() => resolveUser(interaction), doc => { doc.name = n; }, { label: 'x' });`
-        ))).toEqual([]);
+        for (const stale of [
+            // Closed over outright.
+            `withVersionRetry(() => user, doc => { doc.name = n; }, { label: 'x' });`,
+            // Call-shaped, but the call only re-wraps the same stale document —
+            // the case a body-wide "does it contain a call" check waves through.
+            `withVersionRetry(() => Promise.resolve(user), doc => { doc.name = n; }, { label: 'x' });`,
+            // A body that does work and still hands back what it closed over.
+            `withVersionRetry(() => { attempts++; return user; }, doc => { doc.a = 1; }, { label: 'x' });`,
+            // Never returns anything at all.
+            `withVersionRetry(() => { load(); }, doc => { doc.a = 1; }, { label: 'x' });`,
+        ]) {
+            expect(staleLoaders(bad(stale))).toHaveLength(1);
+        }
+        for (const fresh of [
+            `withVersionRetry(() => resolveUser(interaction), doc => { doc.name = n; }, { label: 'x' });`,
+            `withVersionRetry(async () => { const u = await User.findOne(f); return u; }, d => { d.a = 1; }, { label: 'x' });`,
+            `withVersionRetry(() => User.findOne(f).exec(), d => { d.a = 1; }, { label: 'x' });`,
+            // A function reference is re-invoked per attempt, which is the point.
+            `withVersionRetry(loadUser, d => { d.a = 1; }, { label: 'x' });`,
+            `withVersionRetry(deps.loadUser, d => { d.a = 1; }, { label: 'x' });`,
+        ]) {
+            expect(staleLoaders(bad(fresh))).toEqual([]);
+        }
     });
 
-    it('catches a call missing a half, and an unlabelled one', () => {
+    it('catches a call whose halves are not callable', () => {
+        // Presence is not enough: the primitive invokes both, so a null or a
+        // literal in either slot is a TypeError on the first attempt.
         expect(malformedCalls(bad(`withVersionRetry(() => load());`))).toHaveLength(1);
+        expect(malformedCalls(bad(`withVersionRetry(null, d => { d.a = 1; }, { label: 'x' });`))).toHaveLength(1);
+        expect(malformedCalls(bad(`withVersionRetry(() => load(), null, { label: 'x' });`))).toHaveLength(1);
+        expect(malformedCalls(bad(`withVersionRetry(() => load(), undefined, { label: 'x' });`))).toHaveLength(1);
+        expect(malformedCalls(bad(`withVersionRetry(() => load(), {}, { label: 'x' });`))).toHaveLength(1);
+        expect(malformedCalls(bad(`withVersionRetry(loadUser, mutateUser, { label: 'x' });`))).toEqual([]);
+    });
+
+    it('catches a label that is present but says nothing', () => {
+        // A label that reaches the give-up warning as an empty string names the
+        // flow no better than a missing one, and reads in review as answered.
         expect(unlabelled(bad(`withVersionRetry(() => load(), d => { d.a = 1; });`))).toHaveLength(1);
-        expect(unlabelled(bad(`withVersionRetry(() => load(), d => { d.a = 1; }, { label: 'x' });`))).toEqual([]);
+        expect(unlabelled(bad(`withVersionRetry(() => load(), d => { d.a = 1; }, { label: undefined });`))).toHaveLength(1);
+        expect(unlabelled(bad(`withVersionRetry(() => load(), d => { d.a = 1; }, { label: null });`))).toHaveLength(1);
+        expect(unlabelled(bad(`withVersionRetry(() => load(), d => { d.a = 1; }, { label: '' });`))).toHaveLength(1);
+        expect(unlabelled(bad(`withVersionRetry(() => load(), d => { d.a = 1; }, { label: '   ' });`))).toHaveLength(1);
+        expect(unlabelled(bad(`withVersionRetry(() => load(), d => { d.a = 1; }, { label: 'pet release' });`))).toEqual([]);
+        expect(unlabelled(bad("withVersionRetry(() => load(), d => { d.a = 1; }, { label: `pet ${verb}` });"))).toEqual([]);
     });
 
     it('accepts the shape the primitive documents', () => {
+        // Lifted from src/commands/economy/pet.js: a re-read, a mutation that is
+        // a pure function of what came back, an abort when the precondition no
+        // longer holds, and a label. No check here may reject this.
         const good = bad(
             `withVersionRetry(
                  () => resolveUser(interaction),

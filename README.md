@@ -88,9 +88,10 @@ npm start
 
 ### Sharding
 
-`npm start` runs one process with one gateway connection — right for every
-deployment below roughly 2,000 guilds, and the default. Past that, Discord
-requires sharding:
+`npm start` runs one process with one gateway connection, and is the default.
+Discord suggests preparing for sharding as you approach 2,000 guilds, and
+**requires** it at 2,500 or more — past that the gateway refuses an unsharded
+IDENTIFY outright:
 
 ```bash
 npm run start:sharded          # Discord's recommended shard count
