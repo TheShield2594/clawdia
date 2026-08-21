@@ -30,6 +30,9 @@ const record = expr => `require('fs').appendFileSync(${JSON.stringify(logPath())
 beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrations-'));
     records.length = 0;
+    // The inline fixtures declare no down(), which would otherwise trigger the
+    // pre-migration backup attempt; that path has its own tests.
+    process.env.MIGRATION_BACKUP = 'skip';
     jest.spyOn(console, 'log').mockImplementation(() => {});
     jest.spyOn(console, 'warn').mockImplementation(() => {});
     jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -38,6 +41,7 @@ beforeEach(() => {
 afterEach(() => {
     jest.restoreAllMocks();
     delete process.env.MIGRATION_TIMEOUT_MS;
+    delete process.env.MIGRATION_BACKUP;
     fs.rmSync(dir, { recursive: true, force: true });
 });
 

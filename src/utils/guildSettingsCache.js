@@ -54,10 +54,12 @@ let misses = 0;
 
 // Heavy payloads nothing on the cached read paths (messageCreate,
 // interactionCreate) ever looks at. Excluded so a guild with a fully
-// illustrated shop does not pin megabytes of image Buffers in this cache.
-// Exclusion projection on a hydrated read still applies schema defaults to
-// every other field.
-const HEAVY_FIELDS_PROJECTION = '-shop.imageData';
+// illustrated shop (up to 35 items × 512 KB image Buffers) or a giveaway with
+// thousands of entrants does not pin megabytes in this cache. Every giveaway
+// reader/writer (the entry button, /giveaway, giveawayService) goes through
+// the model directly, never through here. Exclusion projection on a hydrated
+// read still applies schema defaults to every other field.
+const HEAVY_FIELDS_PROJECTION = '-shop.imageData -giveaways.entrantIds';
 
 // Required lazily: models/Guild.js registers invalidation hooks that reach back
 // into this module, and a top-level require in both directions would leave one

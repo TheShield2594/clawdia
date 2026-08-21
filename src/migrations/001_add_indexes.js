@@ -92,4 +92,24 @@ module.exports = {
             { name: 'idx_failedjobs_status_service' }
         );
     },
+
+    async down() {
+        const db = mongoose.connection.db;
+
+        const built = [
+            ['reminders',   'idx_remind_due'],
+            ['guilds',      'idx_giveaways_active'],
+            ['cases',       'idx_cases_sla'],
+            ['summaryjobs', 'idx_summaryjobs_schedule'],
+            ['guilds',      'idx_guilds_rssfeeds'],
+            ['failedjobs',  'idx_failedjobs_status_service'],
+        ];
+
+        for (const [collection, name] of built) {
+            await db.collection(collection).dropIndex(name).catch(err => {
+                // Already gone, or the collection was never created.
+                if (err?.codeName !== 'IndexNotFound' && err?.code !== 26) throw err;
+            });
+        }
+    },
 };

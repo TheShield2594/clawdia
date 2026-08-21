@@ -17,6 +17,10 @@ const mongoose = require('mongoose');
 module.exports = {
     name: '011_clamp_negative_balances',
 
+    // The negative values are overwritten with zero, not recorded; the
+    // pre-migration backup is the only place they survive.
+    irreversible: true,
+
     async up() {
         const users = mongoose.connection.db.collection('users');
 

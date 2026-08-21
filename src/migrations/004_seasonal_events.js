@@ -32,4 +32,17 @@ module.exports = {
             );
         }
     },
+
+    async down() {
+        const db = mongoose.connection.db;
+
+        for (const [collection, name] of [
+            ['guilds', 'idx_guilds_active_event'],
+            ['users',  'idx_users_event_currency'],
+        ]) {
+            await db.collection(collection).dropIndex(name).catch(err => {
+                if (err?.codeName !== 'IndexNotFound' && err?.code !== 26) throw err;
+            });
+        }
+    },
 };

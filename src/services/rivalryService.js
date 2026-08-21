@@ -1,10 +1,18 @@
 const User = require('../models/User');
 
-// guildId -> { entries: [{userId, level, xp}], index: Map(userId -> position), updatedAt }
+// guildId -> { entries: [{userId, level, xp}], index: Map(userId -> position), updatedAt, truncated }
 const rankCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const MAX_RANK = 100;             // only notify users within top 100
 const MAX_RANK_DIFF = 10;         // only notify when rival is within 10 ranks
+
+// Both bounds exist so the cache has a memory ceiling instead of growing with
+// every guild and member the bot ever sees. Rivalry only cares about the top
+// MAX_RANK, so a window of double that loses nothing the feature reads; a
+// guild beyond MAX_GUILDS evicts the oldest cached guild FIFO (same pattern as
+// utils/boundedRateLimiter), which merely costs that guild one re-read.
+const MAX_GUILDS = 500;
+const MAX_ENTRIES_PER_GUILD = 200;
 const NOTIFY_COOLDOWN = 60 * 60 * 1000; // 1 notification per user per hour
 
 // Significant rank thresholds that trigger the optional "climbed" DM
@@ -28,9 +36,20 @@ async function getLeaderboard(guildId) {
     }
     const users = await User.find({ guildId })
         .sort({ level: -1, xp: -1 })
+        .limit(MAX_ENTRIES_PER_GUILD)
         .select('userId level xp')
         .lean();
-    const entry = { entries: users, index: buildIndex(users), updatedAt: Date.now() };
+    const entry = {
+        entries: users,
+        index: buildIndex(users),
+        updatedAt: Date.now(),
+        // A full window means the guild (probably) has more members than the
+        // cache holds, so anyone not in the index has an unknown rank below it.
+        truncated: users.length === MAX_ENTRIES_PER_GUILD,
+    };
+    if (!rankCache.has(guildId) && rankCache.size >= MAX_GUILDS) {
+        rankCache.delete(rankCache.keys().next().value);
+    }
     rankCache.set(guildId, entry);
     return entry;
 }
@@ -79,11 +98,29 @@ function reposition(entries, index, from) {
  * from before its own await.
  *
  * Returns `{ oldRank, newRank, overtaken }`, where `overtaken` lists the players
- * this user passed together with the rank each of them now holds.
+ * this user passed together with the rank each of them now holds — or null when
+ * the board is a truncated window and this user falls outside it, in which case
+ * nothing changed and the caller has nothing to notify about.
+ *
+ * Deliberately does NOT touch board.updatedAt: bumping it on every write-through
+ * turned the TTL into "5 minutes since the last message", which on any active
+ * guild is never — the entry could not expire, so a board that drifted (or a
+ * guild that shrank) was never re-read. The write-through keeps the board
+ * current between refreshes; the TTL now actually fires and replaces it.
  */
 function applyStanding(board, savedUser) {
     const { entries, index } = board;
     const oldIdx = index.get(savedUser.userId) ?? -1;
+
+    // On a truncated board an unknown user's real rank is somewhere below the
+    // window. If they still sort at-or-below the current last entry, placing
+    // them would invent a rank; they are also nowhere near MAX_RANK, so skip.
+    // A user who now sorts above the last entry has climbed into the window
+    // and is inserted (the entry that falls off the end is trimmed below).
+    if (oldIdx === -1 && board.truncated) {
+        const last = entries[entries.length - 1];
+        if (last && compare(savedUser, last) >= 0) return null;
+    }
 
     let from;
     if (oldIdx === -1) {
@@ -97,13 +134,18 @@ function applyStanding(board, savedUser) {
     }
 
     const newIdx = reposition(entries, index, from);
-    board.updatedAt = Date.now();
 
     // Everyone between the new and old positions was shifted down by exactly
     // one, so their ranks are known without searching for them again.
     const overtaken = [];
     for (let i = newIdx + 1; i <= from; i++) {
         overtaken.push({ userId: entries[i].userId, rank: i + 1 });
+    }
+
+    // An insertion into a truncated window pushed one entry past the cap.
+    if (board.truncated && entries.length > MAX_ENTRIES_PER_GUILD) {
+        const dropped = entries.pop();
+        index.delete(dropped.userId);
     }
 
     return {
@@ -124,7 +166,9 @@ function applyStanding(board, savedUser) {
 async function checkRivalry(client, guild, savedUser) {
     try {
         const board = await getLeaderboard(guild.id);
-        const { oldRank, newRank, overtaken } = applyStanding(board, savedUser);
+        const standing = applyStanding(board, savedUser);
+        if (!standing) return; // outside a truncated board's window — nothing to report
+        const { oldRank, newRank, overtaken } = standing;
 
         if (newRank > MAX_RANK) return;
         if (!oldRank || newRank >= oldRank) return;
@@ -192,4 +236,10 @@ async function checkRivalry(client, guild, savedUser) {
     }
 }
 
-module.exports = { checkRivalry, __test__: { applyStanding, reposition, compare, buildIndex, rankCache } };
+module.exports = {
+    checkRivalry,
+    __test__: {
+        applyStanding, reposition, compare, buildIndex, rankCache, getLeaderboard,
+        CACHE_TTL, MAX_GUILDS, MAX_ENTRIES_PER_GUILD,
+    },
+};

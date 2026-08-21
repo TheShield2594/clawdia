@@ -71,4 +71,42 @@ module.exports = {
             `removed the field from ${unsetResult.modifiedCount} document(s)`
         );
     },
+
+    /**
+     * Moves every GuildAnalytics document's arrays back onto its Guild
+     * document and deletes the moved document — the shape the pre-013 code
+     * reads. Only meaningful alongside deploying that older code: current
+     * writers upsert GuildAnalytics again on the next command, so rolling
+     * back under current code just splits the data anew.
+     */
+    async down({ timeoutMs } = {}) {
+        const guilds = mongoose.connection.db.collection('guilds');
+        const analyticsCollection = require('../models/GuildAnalytics').collection;
+
+        const bounded = timeoutMs > 0 ? { maxTimeMS: timeoutMs } : {};
+
+        const cursor = analyticsCollection.find({}, bounded);
+        let restored = 0;
+        for await (const doc of cursor) {
+            if (doc.guildId) {
+                await guilds.updateOne(
+                    { guildId: doc.guildId },
+                    {
+                        $set: {
+                            analytics: {
+                                memberEvents: doc.memberEvents || [],
+                                commandUsage: doc.commandUsage || [],
+                            },
+                        },
+                    },
+                );
+            }
+            // Deleted either way: a document whose guild is gone has nowhere
+            // to go back to.
+            await analyticsCollection.deleteOne({ _id: doc._id });
+            restored++;
+        }
+
+        console.log(`[MIGRATIONS] 013 down: moved analytics back for ${restored} guild(s)`);
+    },
 };

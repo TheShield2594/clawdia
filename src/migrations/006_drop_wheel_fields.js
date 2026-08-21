@@ -3,6 +3,11 @@ const mongoose = require('mongoose');
 module.exports = {
     name: '006_drop_wheel_fields',
 
+    // $unset discards the values; nothing keeps a copy to put back. The way
+    // back is the pre-migration backup the runner takes before anything
+    // irreversible runs (scripts/restore.sh).
+    irreversible: true,
+
     async up() {
         const db = mongoose.connection.db;
 

@@ -39,4 +39,14 @@ module.exports = {
             );
         }
     },
+
+    // Rolling this back re-opens the concurrent-acquire hole described above;
+    // it exists for unwinding to a build that predates the conditional-upsert
+    // lock, not for running current code without the index.
+    async down() {
+        const locks = mongoose.connection.db.collection('activelocks');
+        await locks.dropIndex('idx_activelock_key').catch(err => {
+            if (err?.codeName !== 'IndexNotFound' && err?.code !== 26) throw err;
+        });
+    },
 };

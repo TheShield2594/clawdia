@@ -14,6 +14,12 @@ const mongoose = require('mongoose');
 module.exports = {
     name: '005_grind_profiles',
 
+    // The $unset half discards the User-document copy of the grind state, and
+    // writing a faithful inverse (merging profiles back into user documents
+    // that may have changed since) would be a migration as risky as this one.
+    // Rolling back means restoring the pre-migration backup.
+    irreversible: true,
+
     // Eight full passes over the users collection — four $merge aggregations
     // and four updateMany $unsets. The runner's 30 s default is a development
     // figure; on a real install this is the migration that outgrows it, and
