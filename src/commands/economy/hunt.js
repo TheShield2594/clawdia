@@ -44,6 +44,8 @@ const {
     applyRepair,
     updateWeaponStatus,
     isCondemned,
+    repairsRemaining,
+    projectWeaponLifetime,
     quoteRepair,
     applyXp,
     rollApexType,
@@ -2125,10 +2127,15 @@ function buildWeaponPages(h) {
         const bar        = durabilityBar(w.currentDurability, w.maxDurability, 12);
         const upgrade    = w.upgrade ? `[${w.upgrade.replace(/_/g, ' ')}]` : '';
         const equipped   = index === h.equippedWeaponIndex ? ' **[EQUIPPED]**' : '';
+        // Repairs spent is the number the profile stores; repairs LEFT is the
+        // number that decides whether this weapon is worth putting money into,
+        // and it is the one a player cannot work out from the durability bar.
+        const left = repairsRemaining(w);
+        const repairNote = left > 0 ? `${w.repairCount} used, ${left} left` : `${w.repairCount} used, condemned`;
         return [
             `**#${index + 1} — ${wd?.emoji ?? '🔫'} ${w.name}**${equipped}`,
             `> ${statusIcon} ${w.status.toUpperCase()} · ${bar} ${w.currentDurability}/${w.maxDurability} dur`,
-            `> Repairs: ${w.repairCount} · Max: ${w.maxDurability}/${w.baseDurability} · ${upgrade || 'No upgrade'}`
+            `> Repairs: ${repairNote} · Max: ${w.maxDurability}/${w.baseDurability} · ${upgrade || 'No upgrade'}`
         ].join('\n');
     });
 
@@ -2716,12 +2723,13 @@ async function handleBuyWeapon(interaction, user, currency) {
     // again several times over before they are condemned — and at the top of
     // the ladder none of it is fundable from hunting alone.
     if (isCrossEconomyWeapon(weaponData)) {
-        const repair = fullRepairCost(weaponData);
+        const { repairs, maintenance, lifetimeCost, firstRepairCost } = projectWeaponLifetime(weaponData);
         confirmEmbed.addFields({
             name: '🌐 A whole-economy purchase',
             value: [
-                `Hunting is capped at ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} a day before payouts halve, so this is about **${huntingDaysLabel(weaponData.cost)} days** of hunting on its own.`,
-                `A full repair runs ${currency}${repair.toLocaleString()} — another **${huntingDaysLabel(repair)} days** — and it has roughly eight before the wear condemns it.`,
+                `Hunting is capped at ${currency}${LIMITS.DAILY_SOFT_CAP.toLocaleString()} a day before payouts halve, so the sticker price alone is about **${huntingDaysLabel(weaponData.cost)} days** of hunting.`,
+                `The sticker price is the down payment. A full repair runs ${currency}${firstRepairCost.toLocaleString()}, it has **${repairs}** of them before the wear condemns it, and keeping it in the field costs ${currency}${maintenance.toLocaleString()} over that life.`,
+                `**Total cost of ownership: ${currency}${lifetimeCost.toLocaleString()}** — about **${huntingDaysLabel(lifetimeCost)} days** of hunting.`,
                 `It is priced for a wallet fed by everything you do: casino, work, crime, heists and the rest all pay into the same balance.`,
             ].join('\n'),
             inline: false,
@@ -3202,6 +3210,13 @@ async function handleRepair(interaction, user, currency) {
     }
 
     const statusIcon = weaponStatusEmoji(result.newStatus);
+    // How many repairs are left is the number that decides whether to keep
+    // paying into this weapon or replace it, and it was never shown — the embed
+    // only counted the ones already spent (#747).
+    const repairsLeft = repairsRemaining(weapon);
+    const repairCountValue = result.condemned
+        ? `${weapon.repairCount} — no repairs left`
+        : `${weapon.repairCount} used · **${repairsLeft}** left (max dur -10% each)`;
     const embed = new EmbedBuilder()
         .setColor(result.condemned ? '#e74c3c' : '#2ecc71')
         .setTitle('🔧 Weapon Repaired')
@@ -3212,7 +3227,7 @@ async function handleRepair(interaction, user, currency) {
             { name: 'Weapon Status',        value: `${statusIcon} ${result.newStatus}`,                     inline: true },
             { name: 'Repair Cost',          value: `${currency}${result.cost.toLocaleString()}`,            inline: true },
             { name: 'New Balance',          value: `${currency}${user.balance.toLocaleString()}`,           inline: true },
-            { name: 'Repair Count',         value: `${weapon.repairCount} (max dur -10% per repair)`,      inline: true },
+            { name: 'Repair Count',         value: repairCountValue,                                       inline: true },
             { name: 'Durability Bar',       value: `${durabilityBar(weapon.currentDurability, weapon.maxDurability)} ${weapon.currentDurability}/${weapon.maxDurability}` }
         );
 

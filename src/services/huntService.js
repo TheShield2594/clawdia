@@ -714,6 +714,81 @@ function applyRepair(weapon, requestedAmount) {
     return { cost, restoredAmount: amount, newStatus: weapon.status, condemned: isCondemned(weapon) };
 }
 
+/**
+ * How many more shop repairs a weapon has in it before the wear condemns it.
+ *
+ * Simulated against the real `applyRepair` rather than derived algebraically, so
+ * it cannot drift from the mechanic: the degradation step, its floor and the
+ * condemnation threshold are all read from the same code the shop runs.
+ * `weapon` is not touched — the walk happens on a copy.
+ */
+function repairsRemaining(weapon) {
+    if (!weapon?.baseDurability || !WEAPON_BY_TIER[weapon.tier]) return 0;
+    if (isCondemned(weapon)) return 0;
+
+    const sim = {
+        tier:             weapon.tier,
+        baseDurability:   weapon.baseDurability,
+        maxDurability:    weapon.maxDurability,
+        currentDurability: 0,
+        repairCount:      weapon.repairCount ?? 0,
+        status:           'broken',
+    };
+
+    let count = 0;
+    // The loop is bounded by the degradation step, but a weapon whose base
+    // durability is small enough to floor that step to zero would never
+    // condemn; cap it rather than spin.
+    while (count < 100) {
+        const result = applyRepair(sim, sim.maxDurability);
+        if (result.error) break;
+        count += 1;
+        if (result.condemned) break;
+        sim.currentDurability = 0;
+    }
+    return count;
+}
+
+/**
+ * The whole service life of a fresh weapon of this tier, in coins (#747).
+ *
+ * A weapon is a consumable: every shop repair permanently drops maxDurability
+ * by 10% of base, so the sticker price is only the down payment. Running the
+ * full cycle out gives the number that actually decides whether a tier is worth
+ * buying — a T12 Altair Rifle costs 20M and then another 35M to keep in the
+ * field, which is the part the shop used to leave unsaid.
+ *
+ * Returns { repairs, maintenance, lifetimeCost, firstRepairCost }.
+ */
+function projectWeaponLifetime(weaponData) {
+    const sim = {
+        tier:             weaponData.tier,
+        baseDurability:   weaponData.baseDurability,
+        maxDurability:    weaponData.baseDurability,
+        currentDurability: 0,
+        repairCount:      0,
+        status:           'broken',
+    };
+
+    let repairs = 0, maintenance = 0, firstRepairCost = 0;
+    while (repairs < 100) {
+        const result = applyRepair(sim, sim.maxDurability);
+        if (result.error) break;
+        repairs     += 1;
+        maintenance += result.cost;
+        if (repairs === 1) firstRepairCost = result.cost;
+        if (result.condemned) break;
+        sim.currentDurability = 0;
+    }
+
+    return {
+        repairs,
+        maintenance,
+        lifetimeCost: weaponData.cost + maintenance,
+        firstRepairCost,
+    };
+}
+
 // ─── LEVEL / XP ──────────────────────────────────────────────────────────────
 
 /**
@@ -1660,6 +1735,8 @@ module.exports = {
     applyDurabilityLoss,
     updateWeaponStatus,
     isCondemned,
+    repairsRemaining,
+    projectWeaponLifetime,
     quoteRepair,
     applyRepair,
     levelFromXp,
