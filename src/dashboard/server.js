@@ -39,18 +39,40 @@ function resolveDashboardUrl() {
     return `${parsed.protocol}//${parsed.host}`;
 }
 
+// Options for the Discord OAuth2 strategy, split out from the passport.use()
+// call so the login CSRF defence below is assertable without booting the app.
+//
+// `state: true` is the load-bearing line. Without it passport-oauth2 falls back
+// to its NullStore (lib/strategy.js), which issues no state parameter and
+// verifies none on the way back — so /auth/callback accepts any `code` from
+// anyone, with nothing tying it to the session that started the login. An
+// attacker who begins a login, captures their own code and gets an operator to
+// open /auth/callback?code=... silently signs that operator into the attacker's
+// Discord identity, where anything they then configure or paste lands in the
+// attacker's guild. With `state: true` the strategy uses the session-backed
+// NonceStore: the callback only completes for a state value this session
+// generated moments earlier.
+//
+// PKCE (`pkce: true`) would layer on protection for the code itself; it is left
+// off deliberately, since the client secret already covers the confidential-client
+// case this dashboard is and enabling it changes the token request.
+function discordStrategyOptions(callbackURL) {
+    return {
+        clientID: process.env.CLIENT_ID,
+        clientSecret: process.env.CLIENT_SECRET,
+        callbackURL,
+        scope: [DiscordScope.Identify, DiscordScope.Guilds],
+        state: true
+    };
+}
+
 function setupPassport() {
     const baseUrl = resolveDashboardUrl();
     const callbackURL = `${baseUrl}/auth/callback`;
     console.log(`[DASHBOARD] OAuth callback URL: ${callbackURL}`);
     console.log('[DASHBOARD] This EXACT URL must be added under "OAuth2 → Redirects" in the Discord Developer Portal.');
 
-    passport.use(new DiscordStrategy({
-        clientID: process.env.CLIENT_ID,
-        clientSecret: process.env.CLIENT_SECRET,
-        callbackURL,
-        scope: [DiscordScope.Identify, DiscordScope.Guilds]
-    }, async (accessToken, refreshToken, profile, done, consumable) => {
+    passport.use(new DiscordStrategy(discordStrategyOptions(callbackURL), async (accessToken, refreshToken, profile, done, consumable) => {
         try {
             if (!profile || !profile.id || !profile.username) {
                 return done(new Error('Invalid Discord profile returned from OAuth'));
@@ -203,4 +225,4 @@ function start(client) {
     });
 }
 
-module.exports = { start };
+module.exports = { start, discordStrategyOptions };
