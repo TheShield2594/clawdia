@@ -877,6 +877,7 @@ function recordBestPayout(h, amount, { animal, tier, zoneId } = {}) {
  *   animal?: Animal,
  *   tier?: string,
  *   rawPayout?: number,
+ *   payoutBeforeMods?: number,
  *   finalPayout?: number,
  *   isCrit?: boolean,
  *   critMultiplier?: number,
@@ -1046,7 +1047,7 @@ function executeHunt(user, zoneId, options = {}) {
         const lvResult = applyXp(user, xpGain);
 
         Object.assign(result, {
-            rawPayout, finalPayout: adjustedPayout,
+            rawPayout, payoutBeforeMods, finalPayout: adjustedPayout,
             isCrit, critMultiplier: parseFloat(critMultiplier.toFixed(2)),
             trophyQuality,
             specialDrop, xpEarned: xpGain,
@@ -1064,7 +1065,9 @@ function executeHunt(user, zoneId, options = {}) {
         // 12% chance for legendary, 8% for epic, 3% for rare, skipped for others
         const apexTierChance = tier === 'legendary' ? 0.12 : tier === 'epic' ? 0.08 : tier === 'rare' ? 0.03 : 0;
         if (apexTierChance > 0 && Math.random() < apexTierChance) {
-            result.apexEncounter = { animal, tier };
+            // The kill's own earned payout rides along so the duel can price
+            // itself off the kill rather than re-rolling the base range (#744).
+            result.apexEncounter = { animal, tier, killPayout: payoutBeforeMods };
             // Bonus payout handled when the player responds to the encounter
         }
 
@@ -1330,11 +1333,39 @@ function resolveApexPhases(apexType, choicesMade, user) {
     return { phaseResults, nerve: apexNerveAfter(phaseResults, user) };
 }
 
+/** What each apex outcome is worth, as a share of the kill it grew out of. */
+const APEX_OUTCOME_RATE = { escaped: 0, survived: 0.4, win: 1.0, perfect: 1.5 };
+
+/**
+ * The number an apex bonus is a share of (#744).
+ *
+ * The duel is the climax of a specific kill, so it prices off that kill's own
+ * earned payout — crit, trophy quality, streak and the enraged trait included —
+ * rather than re-rolling the animal's base range and throwing every multiplier
+ * away. Re-rolling also made two identical duels on identical kills pay
+ * differently for no reason a player could see.
+ *
+ * `killPayout` is `payoutBeforeMods` from the hunt that spawned the encounter:
+ * post-multiplier but pre-cap, because the apex path runs the payout through
+ * `applyPayoutModifiers` itself. Callers that have no kill to point at (the
+ * duel primitive under test, a future standalone encounter) fall back to the
+ * base range so the function stays callable on its own.
+ */
+function apexBasePayout(animal, killPayout) {
+    const fromKill = Number(killPayout);
+    if (Number.isFinite(fromKill) && fromKill > 0) return fromKill;
+    return randInt(animal.payoutMin, animal.payoutMax);
+}
+
 /**
  * Resolve the final apex outcome after all phases.
+ *
+ * `options.killPayout` scales the bonus off the kill that spawned the duel; see
+ * apexBasePayout.
+ *
  * Returns { outcome, bonusPayout, durabilityLost, correctCount, phaseResults, apexType, message }
  */
-function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponIndex) {
+function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponIndex, options = {}) {
     const idx    = weaponIndex ?? user.hunt.equippedWeaponIndex;
     const weapon = user.hunt?.weapons[idx];
     const at     = apexType ?? rollApexType();
@@ -1343,6 +1374,10 @@ function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponI
     const correctCount = phaseResults.filter(p => p.correct).length;
     const broken       = nerve <= 0;
 
+    // One roll for the whole duel: the outcome tier picks a share of it, so the
+    // four outcomes stay ordered against each other on any single encounter.
+    const basePayout = apexBasePayout(animal, options.killPayout);
+
     let bonusPayout = 0, durabilityLost = 0, outcome = '';
 
     if (broken || correctCount === 0) {
@@ -1350,15 +1385,15 @@ function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponI
         if (weapon) { applyDurabilityLoss(weapon, 4); durabilityLost = 4; }
     } else if (correctCount === 1) {
         outcome = 'survived';
-        bonusPayout = Math.round(randInt(animal.payoutMin, animal.payoutMax) * 0.4);
+        bonusPayout = Math.round(basePayout * APEX_OUTCOME_RATE.survived);
         if (weapon) { applyDurabilityLoss(weapon, 3); durabilityLost = 3; }
     } else if (correctCount === 2) {
         outcome = 'win';
-        bonusPayout = Math.round(randInt(animal.payoutMin, animal.payoutMax) * 1.0);
+        bonusPayout = Math.round(basePayout * APEX_OUTCOME_RATE.win);
         if (weapon) { applyDurabilityLoss(weapon, 2); durabilityLost = 2; }
     } else {
         outcome = 'perfect';
-        bonusPayout = Math.round(randInt(animal.payoutMin, animal.payoutMax) * 1.5);
+        bonusPayout = Math.round(basePayout * APEX_OUTCOME_RATE.perfect);
         if (weapon) { applyDurabilityLoss(weapon, 1); durabilityLost = 1; }
     }
 
@@ -1639,6 +1674,8 @@ module.exports = {
     buildApexEncounter,
     APEX_PHASES_PER_DUEL,
     resolveApexEncounter,
+    apexBasePayout,
+    APEX_OUTCOME_RATE,
     apexNerveAfter,
     apexNerveMax,
     APEX_NERVE_MAX,

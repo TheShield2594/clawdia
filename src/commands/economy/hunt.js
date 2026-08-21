@@ -1069,7 +1069,14 @@ async function executeStart(interaction) {
             }
             await attachGrind(freshUser);
             ensureHuntData(freshUser);
-            const apexResult = resolveApexEncounter(freshUser, result.apexEncounter.animal, result.apexEncounter.tier, choicesMade, apexType, apexWeaponIndex);
+            // The duel is priced off the kill that spawned it — crit, trophy
+            // quality, streak and traits included — rather than a fresh roll of
+            // the animal's base range (#744). Caps are still applied below.
+            const apexResult = resolveApexEncounter(
+                freshUser, result.apexEncounter.animal, result.apexEncounter.tier,
+                choicesMade, apexType, apexWeaponIndex,
+                { killPayout: result.apexEncounter.killPayout },
+            );
 
             // The reload above is already seconds old by the time the fight
             // resolves, and `save()` writes `balance` as an absolute `$set` — so
