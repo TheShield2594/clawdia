@@ -22,10 +22,48 @@ const runtimeTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // Consecutive failure counts per feed URL. Feeds are skipped after DEAD_FEED_THRESHOLD failures,
 // but a retry is allowed once DEAD_FEED_COOLDOWN_MS has elapsed since the last failure.
+// Shared between the 5-minute sweep and the daily digests: a feed that is down
+// is down for both.
 const feedFailCounts = new Map();
 const feedLastFailTime = new Map();
 const DEAD_FEED_THRESHOLD = 3;
 const DEAD_FEED_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
+// How many feed URLs checkRssFeeds fetches at once. Each fetch can take up to
+// ~40s worst case (8s/hop × 5 redirects through safeFetchFeed), so strictly
+// serial fetching could not finish a few dozen slow feeds inside the 5-minute
+// schedule; unbounded parallelism would burst-open one socket per configured
+// feed. Five keeps the sweep short without being a thundering herd.
+const RSS_FETCH_CONCURRENCY = 5;
+
+function shouldSkipDeadFeed(feedUrl) {
+    const failCount = feedFailCounts.get(feedUrl) || 0;
+    if (failCount < DEAD_FEED_THRESHOLD) return false;
+
+    const lastFail = feedLastFailTime.get(feedUrl) || 0;
+    if (Date.now() - lastFail < DEAD_FEED_COOLDOWN_MS) {
+        console.warn(`Skipping dead feed (${failCount} consecutive failures): ${feedUrl}`);
+        return true;
+    }
+    console.log(`Retrying previously dead feed after cooldown: ${feedUrl}`);
+    return false;
+}
+
+function recordFeedSuccess(feedUrl) {
+    feedFailCounts.delete(feedUrl);
+    feedLastFailTime.delete(feedUrl);
+}
+
+function recordFeedFailure(feedUrl, error) {
+    const newCount = (feedFailCounts.get(feedUrl) || 0) + 1;
+    feedFailCounts.set(feedUrl, newCount);
+    feedLastFailTime.set(feedUrl, Date.now());
+    if (newCount >= DEAD_FEED_THRESHOLD) {
+        console.error(`Feed marked as dead after ${newCount} consecutive failures: ${feedUrl}`);
+    } else {
+        console.error(`Error parsing feed (failure ${newCount}/${DEAD_FEED_THRESHOLD}) ${feedUrl}:`, error.message);
+    }
+}
 
 const SENT_LINKS_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -115,54 +153,102 @@ async function fetchSendableChannel(client, channelId) {
 
     return channel;
 }
+/**
+ * Delivers a freshly-parsed feed to one guild's subscription: sends the embed
+ * if the latest item is new for that guild, and advances its lastPublished
+ * cursor. Per-subscription failures are contained here so one guild's deleted
+ * channel does not stop the fan-out to the others.
+ */
+async function deliverFeedUpdate(client, guild, feed, parsedFeed, latestItem, itemDate) {
+    try {
+        // Not `itemDate <= lastPublished`: an unparseable pubDate gives an
+        // invalid Date, which compares false both ways, and it must skip (as
+        // it always has) rather than post with a timestamp that cannot render.
+        if (feed.lastPublished && !(itemDate > feed.lastPublished)) return;
+
+        const channel = await fetchSendableChannel(client, feed.channelId);
+
+        if (channel) {
+            const embed = new EmbedBuilder()
+                .setColor('#00ff00')
+                .setTitle(latestItem.title || 'New Post')
+                .setURL(latestItem.link)
+                .setDescription(latestItem.contentSnippet?.substring(0, 200) || 'No description available')
+                .setTimestamp(itemDate);
+
+            if (parsedFeed.image?.url) {
+                embed.setThumbnail(parsedFeed.image.url);
+            }
+
+            await channel.send({ embeds: [embed] });
+        }
+
+        // Targets the one subdocument rather than rewriting the whole
+        // rssFeeds array, which is also what `guild.save()` on a
+        // projected document could not do.
+        await Guild.updateOne(
+            { guildId: guild.guildId, 'rssFeeds._id': feed._id },
+            { $set: { 'rssFeeds.$.lastPublished': itemDate } }
+        );
+    } catch (error) {
+        console.error(`Error delivering RSS update for ${feed.url} to guild ${guild.guildId}:`, error);
+    }
+}
+
+// Overlap protection lives in the scheduler: this runs through runJob, which
+// drops a tick while the previous sweep is still in flight.
 async function checkRssFeeds(client) {
     try {
-        // Projected and lean: a full Guild document carries the 3000-entry
-        // analytics.commandUsage array and every shop item's image Buffer, none of
-        // which this job reads.
+        // Projected and lean: a full Guild document carries every shop item's
+        // image Buffer and each giveaway's entrant list, none of which this
+        // job reads.
         const guilds = await Guild.find({ 'rssFeeds.0': { $exists: true } }, 'guildId rssFeeds').lean();
 
+        // Popular feeds are configured by many guilds; fetch each URL once per
+        // sweep and fan the parsed result out to every subscription.
+        const subscriptionsByUrl = new Map(); // url -> [{ guild, feed }]
         for (const guild of guilds) {
             for (const feed of guild.rssFeeds) {
-                try {
-                    const parsedFeed = await parseFeedUrl(feed.url);
-                    
-                    if (parsedFeed.items.length === 0) continue;
-
-                    const latestItem = parsedFeed.items[0];
-                    const itemDate = new Date(latestItem.pubDate || latestItem.isoDate);
-
-                    if (!feed.lastPublished || itemDate > feed.lastPublished) {
-                        const channel = await fetchSendableChannel(client, feed.channelId);
-                        
-                        if (channel) {
-                            const embed = new EmbedBuilder()
-                                .setColor('#00ff00')
-                                .setTitle(latestItem.title || 'New Post')
-                                .setURL(latestItem.link)
-                                .setDescription(latestItem.contentSnippet?.substring(0, 200) || 'No description available')
-                                .setTimestamp(itemDate);
-
-                            if (parsedFeed.image?.url) {
-                                embed.setThumbnail(parsedFeed.image.url);
-                            }
-
-                            await channel.send({ embeds: [embed] });
-                        }
-
-                        // Targets the one subdocument rather than rewriting the whole
-                        // rssFeeds array, which is also what `guild.save()` on a
-                        // projected document could not do.
-                        await Guild.updateOne(
-                            { guildId: guild.guildId, 'rssFeeds._id': feed._id },
-                            { $set: { 'rssFeeds.$.lastPublished': itemDate } }
-                        );
-                    }
-                } catch (error) {
-                    console.error(`Error parsing RSS feed ${feed.url}:`, error);
-                }
+                if (!feed?.url) continue;
+                let subs = subscriptionsByUrl.get(feed.url);
+                if (!subs) subscriptionsByUrl.set(feed.url, subs = []);
+                subs.push({ guild, feed });
             }
         }
+
+        // A shared cursor over the URL list, drained by a small pool of
+        // workers — bounded parallelism without chunking (no worker idles
+        // while a slow feed holds up its chunk).
+        const urls = [...subscriptionsByUrl.keys()];
+        let next = 0;
+        const worker = async () => {
+            while (next < urls.length) {
+                const url = urls[next++];
+                if (shouldSkipDeadFeed(url)) continue;
+
+                let parsedFeed;
+                try {
+                    parsedFeed = await parseFeedUrl(url);
+                    recordFeedSuccess(url);
+                } catch (error) {
+                    recordFeedFailure(url, error);
+                    continue;
+                }
+
+                if (parsedFeed.items.length === 0) continue;
+
+                const latestItem = parsedFeed.items[0];
+                const itemDate = new Date(latestItem.pubDate || latestItem.isoDate);
+
+                for (const { guild, feed } of subscriptionsByUrl.get(url)) {
+                    await deliverFeedUpdate(client, guild, feed, parsedFeed, latestItem, itemDate);
+                }
+            }
+        };
+
+        await Promise.all(
+            Array.from({ length: Math.min(RSS_FETCH_CONCURRENCY, urls.length) }, worker)
+        );
     } catch (error) {
         console.error('Error checking RSS feeds:', error);
     }
@@ -179,20 +265,11 @@ async function sendDailyNewsForProfile(client, guild, profile) {
     const cutoffMs = Date.now() - (24 * 60 * 60 * 1000);
 
     for (const feedUrl of profile.feeds) {
-        const failCount = feedFailCounts.get(feedUrl) || 0;
-        if (failCount >= DEAD_FEED_THRESHOLD) {
-            const lastFail = feedLastFailTime.get(feedUrl) || 0;
-            if (Date.now() - lastFail < DEAD_FEED_COOLDOWN_MS) {
-                console.warn(`Skipping dead feed (${failCount} consecutive failures): ${feedUrl}`);
-                continue;
-            }
-            console.log(`Retrying previously dead feed after cooldown: ${feedUrl}`);
-        }
+        if (shouldSkipDeadFeed(feedUrl)) continue;
 
         try {
             const parsedFeed = await parseFeedUrl(feedUrl);
-            feedFailCounts.delete(feedUrl);
-            feedLastFailTime.delete(feedUrl);
+            recordFeedSuccess(feedUrl);
             const feedItems = parsedFeed.items
                 .map(item => ({
                     title: item.title,
@@ -208,14 +285,7 @@ async function sendDailyNewsForProfile(client, guild, profile) {
 
             allItems.push(...feedItems);
         } catch (error) {
-            const newCount = (feedFailCounts.get(feedUrl) || 0) + 1;
-            feedFailCounts.set(feedUrl, newCount);
-            feedLastFailTime.set(feedUrl, Date.now());
-            if (newCount >= DEAD_FEED_THRESHOLD) {
-                console.error(`Feed marked as dead after ${newCount} consecutive failures: ${feedUrl}`);
-            } else {
-                console.error(`Error parsing daily news feed (failure ${newCount}/${DEAD_FEED_THRESHOLD}) ${feedUrl}:`, error.message);
-            }
+            recordFeedFailure(feedUrl, error);
         }
     }
 
@@ -346,4 +416,10 @@ function rescheduleDailyNews(client, guildId) {
     });
 }
 
-module.exports = { checkRssFeeds, scheduleDailyNews, rescheduleDailyNews, sendDailyNews };
+module.exports = {
+    checkRssFeeds, scheduleDailyNews, rescheduleDailyNews, sendDailyNews,
+    __test__: {
+        feedFailCounts, feedLastFailTime, shouldSkipDeadFeed,
+        DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, RSS_FETCH_CONCURRENCY,
+    },
+};
