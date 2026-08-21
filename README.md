@@ -86,6 +86,24 @@ npm run deploy  # Deploy slash commands globally
 npm start
 ```
 
+### Sharding
+
+`npm start` runs one process with one gateway connection — right for every
+deployment below roughly 2,000 guilds, and the default. Past that, Discord
+requires sharding:
+
+```bash
+npm run start:sharded          # Discord's recommended shard count
+SHARD_COUNT=2 npm run start:sharded
+```
+
+Each shard is its own process. Discord routes a guild's events to exactly one of
+them, which is what keeps the live multiplayer rounds — crash lobbies, heists,
+the raid join window — correct without persisting them. Work that must happen
+once per deployment rather than once per shard runs on shard 0 only: the
+dashboard, schema migrations, and the cron scheduler. `src/utils/sharding.js`
+has the full reasoning.
+
 ## Configuration
 
 1. Invite the bot to your server

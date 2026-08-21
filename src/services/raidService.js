@@ -1,5 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
+const { assertGuildAffinity } = require('../utils/sharding');
 
 // guildId -> [{timestamp, userId, accountAgeDays}]
 //
@@ -61,6 +62,11 @@ async function handleMemberJoin(member, client) {
 
     const accountAgeDays = (Date.now() - member.user.createdTimestamp) / 86400000;
 
+    // The window is a per-guild sliding count, so it is only a true count while
+    // one shard sees all of that guild's joins — which Discord's routing
+    // guarantees. See src/utils/sharding.js (#732); two shards each seeing half
+    // the joins is precisely a detector that needs double the real rate to trip.
+    assertGuildAffinity(guildId, 'raid join window');
     const entries = pruneLog(guildId, windowMs);
     entries.push({ timestamp: Date.now(), userId: member.id, accountAgeDays });
     joinLog.set(guildId, entries);

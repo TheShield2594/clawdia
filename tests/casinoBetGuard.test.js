@@ -163,7 +163,8 @@ describe('/crash leaves nothing behind when the host cannot pay', () => {
         await load('crash').execute(interaction, { releaseLock: jest.fn() });
 
         // Opened for this channel, then gone again — not merely never opened.
-        expect(createLobby).toHaveBeenCalledWith(CHANNEL_ID, USER_ID, BET);
+        // The guild id rides along so the lobby can check shard affinity (#732).
+        expect(createLobby).toHaveBeenCalledWith(CHANNEL_ID, USER_ID, BET, GUILD_ID);
         expect(getLobby(CHANNEL_ID)).toBeFalsy();
         errorSpy.mockRestore();
     });

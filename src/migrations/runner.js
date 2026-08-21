@@ -317,4 +317,63 @@ async function rollbackMigration(name, { dir = __dirname } = {}) {
     );
 }
 
-module.exports = { runMigrations, rollbackMigration };
+/**
+ * Migration names that are discovered on disk but not yet recorded as applied.
+ *
+ * Split out of runMigrations so a process that must NOT run migrations can
+ * still tell whether they have finished — which is what every shard but the
+ * primary one needs (#732).
+ */
+async function pendingMigrationNames({ dir = __dirname } = {}) {
+    const declared = loadMigrations(dir)
+        .map(({ migration }) => migration?.name)
+        .filter(name => typeof name === 'string' && name.length > 0);
+    if (declared.length === 0) return [];
+
+    const applied = new Set(
+        (await MigrationRecord.find({ name: { $in: declared } }, 'name').lean()).map(r => r.name)
+    );
+    return declared.filter(name => !applied.has(name));
+}
+
+/**
+ * Blocks until every discovered migration is recorded as applied.
+ *
+ * Only shard 0 runs migrations; the others must not start serving traffic
+ * against a half-migrated database, and they cannot simply run their own —
+ * concurrent runs of the same migration is a different failure every time. So
+ * they wait for the records shard 0 writes.
+ *
+ * Gives up after `timeoutMs` and says so rather than blocking a boot forever: a
+ * migration that never completes is an operator problem, and a shard stuck
+ * silently in a poll loop is a worse way to find out about it.
+ *
+ * @returns {Promise<boolean>} true if everything applied, false on timeout.
+ */
+async function waitForMigrations({ dir = __dirname, timeoutMs = 300_000, pollMs = 2_000 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    let announced = false;
+
+    for (;;) {
+        let pending;
+        try {
+            pending = await pendingMigrationNames({ dir });
+        } catch (err) {
+            console.error('[MIGRATIONS] Could not check migration state while waiting:', err.message);
+            return false;
+        }
+        if (pending.length === 0) return true;
+
+        if (!announced) {
+            console.log(`[MIGRATIONS] Waiting for ${pending.length} migration(s) to be applied elsewhere: ${pending.join(', ')}`);
+            announced = true;
+        }
+        if (Date.now() >= deadline) {
+            console.error(`[MIGRATIONS] Gave up after ${Math.round(timeoutMs / 1000)}s waiting for: ${pending.join(', ')}`);
+            return false;
+        }
+        await new Promise(resolve => setTimeout(resolve, pollMs).unref());
+    }
+}
+
+module.exports = { runMigrations, rollbackMigration, pendingMigrationNames, waitForMigrations };
