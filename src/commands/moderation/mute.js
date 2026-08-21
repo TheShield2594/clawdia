@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../utils/logger');
+const { hierarchyDenial } = require('../../utils/moderationHierarchy');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -20,6 +21,9 @@ module.exports = {
                 .setDescription('Reason for the timeout')
                 .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ModerateMembers],
     async execute(interaction) {
         const user = interaction.options.getUser('user');
         const duration = interaction.options.getInteger('duration');
@@ -32,6 +36,13 @@ module.exports = {
 
         if (!member.moderatable) {
             return interaction.reply({ content: 'I cannot mute this user!', flags: MessageFlags.Ephemeral });
+        }
+
+        // `moderatable` above answered whether the bot outranks the target. This
+        // answers whether the moderator does.
+        const denial = hierarchyDenial(interaction.member, member, 'mute');
+        if (denial) {
+            return interaction.reply({ content: denial, flags: MessageFlags.Ephemeral });
         }
 
         try {

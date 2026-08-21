@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../utils/logger');
+const { hierarchyDenial } = require('../../utils/moderationHierarchy');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -14,6 +15,9 @@ module.exports = {
                 .setDescription('Reason for the kick')
                 .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.KickMembers],
     async execute(interaction) {
         const user = interaction.options.getUser('user');
         const reason = interaction.options.getString('reason') || 'No reason provided';
@@ -29,6 +33,13 @@ module.exports = {
 
         if (!member.kickable) {
             return interaction.reply({ content: 'I cannot kick this user! They may have higher permissions.', flags: MessageFlags.Ephemeral });
+        }
+
+        // `kickable` above answered whether the bot outranks the target. This
+        // answers whether the moderator does.
+        const denial = hierarchyDenial(interaction.member, member, 'kick');
+        if (denial) {
+            return interaction.reply({ content: denial, flags: MessageFlags.Ephemeral });
         }
 
         try {
