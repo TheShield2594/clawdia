@@ -8,7 +8,10 @@ const { isValidDiscordId } = require('../../lib/apiHelpers');
 const { rescheduleDailyNews, sendDailyNews } = require('../../../services/rssService');
 
 
-router.post('/guild/:guildId/validate-feed', checkAuth, checkGuildAccess, async (req, res) => {
+// The one write on the router that had no rate limit, and the one that reaches
+// out to a caller-supplied URL — an admin looping it turns the bot into an
+// outbound fetcher on someone else's behalf.
+router.post('/guild/:guildId/validate-feed', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { url } = req.body;
     if (!url || typeof url !== 'string') {
         return res.status(400).json({ valid: false, error: 'No URL provided.' });
