@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const MigrationRecord = require('../models/MigrationRecord');
 
 // Wall-clock budget for a single migration. A migration that hangs holds the
@@ -59,12 +60,97 @@ function withTimeout(promise, ms, label) {
     ]);
 }
 
+// Discovers migration files and requires them, in apply order.
+function loadMigrations(dir) {
+    return fs.readdirSync(dir)
+        .filter(f => f.endsWith('.js') && f !== 'runner.js')
+        .sort()
+        .map(file => ({ file, migration: require(path.join(dir, file)) }));
+}
+
+/**
+ * A mongodump taken immediately before irreversible migrations run, because
+ * afterwards it is the only way back: the runner rolls migrations back through
+ * their `down()`, and an irreversible migration by definition has none.
+ *
+ * Controlled by MIGRATION_BACKUP:
+ *   'skip'     don't attempt one
+ *   'require'  a failed or impossible backup aborts startup rather than
+ *              letting the destructive step run unprotected
+ *   unset      attempt it; if mongodump is missing or fails, warn loudly and
+ *              carry on, because a bot that cannot boot without a tool its
+ *              container may not ship is a worse default than no backup —
+ *              operators who want the guarantee set 'require'.
+ *
+ * The archive lands in MIGRATION_BACKUP_DIR (default ./backups, same place as
+ * scripts/backup.sh) and is restored with scripts/restore.sh.
+ */
+function preMigrationBackup(irreversibleNames) {
+    const mode = String(process.env.MIGRATION_BACKUP || '').toLowerCase();
+    if (mode === 'skip') {
+        console.warn('[MIGRATIONS] MIGRATION_BACKUP=skip — applying irreversible migrations without a backup.');
+        return;
+    }
+
+    const fail = message => {
+        if (mode === 'require') {
+            throw new Error(`[MIGRATIONS] ${message} (MIGRATION_BACKUP=require, so refusing to run: ${irreversibleNames.join(', ')})`);
+        }
+        console.warn(
+            `[MIGRATIONS] ${message} — continuing WITHOUT a backup before irreversible ` +
+            `migration(s): ${irreversibleNames.join(', ')}. Run scripts/backup.sh first, ` +
+            'or set MIGRATION_BACKUP=require to make this abort instead.'
+        );
+    };
+
+    const uri = process.env.MONGODB_URI;
+    if (!uri) return fail('MONGODB_URI is not set, cannot take a pre-migration backup');
+
+    const backupDir = process.env.MIGRATION_BACKUP_DIR || path.join(process.cwd(), 'backups');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '').replace(/-/g, '');
+    const archive = path.join(backupDir, `pre-migration-${stamp}.gz`);
+
+    try {
+        fs.mkdirSync(backupDir, { recursive: true });
+    } catch (err) {
+        return fail(`could not create backup directory ${backupDir}: ${err.message}`);
+    }
+
+    console.log(`[MIGRATIONS] Taking pre-migration backup → ${archive}`);
+    // Synchronous on purpose: this runs at boot before anything is served, and
+    // the destructive migration must not start until the dump has finished.
+    const result = spawnSync('mongodump', [`--uri=${uri}`, '--gzip', `--archive=${archive}`], {
+        stdio: ['ignore', 'inherit', 'inherit'],
+    });
+
+    if (result.error) {
+        return fail(`mongodump could not be run (${result.error.code === 'ENOENT' ? 'not on PATH' : result.error.message})`);
+    }
+    if (result.status !== 0) {
+        return fail(`mongodump exited with status ${result.status}`);
+    }
+    console.log('[MIGRATIONS] Pre-migration backup complete.');
+}
+
 /**
  * Discovers and applies any pending migrations in this directory.
  * Migrations are .js files (excluding runner.js itself) sorted by filename.
  *
- * Each migration file must export `{ name: string, up: async function }`, and
- * may export:
+ * Each migration file must export `{ name: string, up: async function }`, plus
+ * a rollback story — one of:
+ *
+ *   down          async function that undoes `up`. Invoked only by
+ *                 rollbackMigration (a boot never rolls back on its own),
+ *                 under the same timeout machinery as `up`.
+ *   irreversible  `true` for a migration whose effect cannot be computed back
+ *                 (dropped fields, merged data). Declaring it is what triggers
+ *                 the pre-migration backup, which is then the only way back.
+ *
+ * tests/migrationRollback.test.js enforces that every shipped migration
+ * declares one of the two; the runner itself only warns, so a boot is never
+ * blocked over a missing annotation.
+ *
+ * A migration may also export:
  *
  *   timeoutMs  Wall-clock budget for this migration, when the default is too
  *              tight for the work it does. `up({ timeoutMs })` receives the
@@ -78,11 +164,9 @@ function withTimeout(promise, ms, label) {
  * Already-applied migrations are skipped (tracked in the MigrationRecord collection).
  */
 async function runMigrations({ dir = __dirname } = {}) {
-    const files = fs.readdirSync(dir)
-        .filter(f => f.endsWith('.js') && f !== 'runner.js')
-        .sort();
+    const loaded = loadMigrations(dir);
 
-    if (files.length === 0) {
+    if (loaded.length === 0) {
         console.log('[MIGRATIONS] No migration files found.');
         return;
     }
@@ -93,10 +177,8 @@ async function runMigrations({ dir = __dirname } = {}) {
 
     const baseTimeoutMs = envTimeoutMs() ?? DEFAULT_TIMEOUT_MS;
 
-    let count = 0;
-    const deferred = [];
-    for (const file of files) {
-        const migration = require(path.join(dir, file));
+    const pending = [];
+    for (const { file, migration } of loaded) {
         const { name, up } = migration;
 
         if (!name || typeof up !== 'function') {
@@ -109,6 +191,27 @@ async function runMigrations({ dir = __dirname } = {}) {
             continue;
         }
 
+        if (typeof migration.down !== 'function' && migration.irreversible !== true) {
+            console.warn(
+                `[MIGRATIONS] ${name} declares no rollback story: export down() or ` +
+                'irreversible: true. Treating it as irreversible.'
+            );
+        }
+
+        pending.push(migration);
+    }
+
+    // Anything without a down() cannot be unwound once it runs, so this is the
+    // last moment a copy of the data can be taken.
+    const irreversible = pending.filter(m => typeof m.down !== 'function').map(m => m.name);
+    if (irreversible.length > 0) {
+        preMigrationBackup(irreversible);
+    }
+
+    let count = 0;
+    const deferred = [];
+    for (const migration of pending) {
+        const { name, up } = migration;
         const timeoutMs = resolveTimeoutMs(migration.timeoutMs, baseTimeoutMs);
 
         console.log(`[MIGRATIONS] Applying: ${name} (budget ${timeoutMs}ms)`);
@@ -147,4 +250,71 @@ async function runMigrations({ dir = __dirname } = {}) {
     }
 }
 
-module.exports = { runMigrations };
+/**
+ * Rolls back one applied migration by running its `down()` and deleting its
+ * MigrationRecord — after which the next boot re-applies it, so pair a
+ * rollback with deploying the code you are rolling back to (or removing the
+ * migration file).
+ *
+ * Never called at boot; the entry point is `npm run migrate:rollback -- <name>`
+ * (scripts/rollback-migration.js). Only the most recently applied migration
+ * can be rolled back: later migrations may build on what an earlier one wrote,
+ * so the chain unwinds in reverse order, one step per invocation.
+ *
+ * A migration marked `irreversible` (or missing `down()`) refuses here by
+ * design — the way back from those is the pre-migration backup, via
+ * scripts/restore.sh.
+ */
+async function rollbackMigration(name, { dir = __dirname } = {}) {
+    if (!name) {
+        throw new Error('[MIGRATIONS] rollbackMigration needs a migration name.');
+    }
+
+    const loaded = loadMigrations(dir).filter(({ migration }) =>
+        migration.name && typeof migration.up === 'function');
+
+    const target = loaded.find(({ migration }) => migration.name === name);
+    if (!target) {
+        throw new Error(`[MIGRATIONS] No migration named "${name}" found in ${dir}.`);
+    }
+
+    const applied = new Set(
+        (await MigrationRecord.find({}, 'name').lean()).map(r => r.name)
+    );
+    if (!applied.has(name)) {
+        throw new Error(`[MIGRATIONS] ${name} is not recorded as applied — nothing to roll back.`);
+    }
+
+    const appliedInOrder = loaded
+        .map(({ migration }) => migration.name)
+        .filter(n => applied.has(n));
+    const latest = appliedInOrder[appliedInOrder.length - 1];
+    if (name !== latest) {
+        throw new Error(
+            `[MIGRATIONS] ${name} is not the most recently applied migration — ` +
+            `roll back ${latest} first. Migrations unwind in reverse order.`
+        );
+    }
+
+    const { migration } = target;
+    if (typeof migration.down !== 'function') {
+        throw new Error(
+            `[MIGRATIONS] ${name} is irreversible: it defines no down(). ` +
+            'Restore the pre-migration backup instead — see scripts/restore.sh.'
+        );
+    }
+
+    const timeoutMs = resolveTimeoutMs(migration.timeoutMs, envTimeoutMs() ?? DEFAULT_TIMEOUT_MS);
+
+    console.log(`[MIGRATIONS] Rolling back: ${name} (budget ${timeoutMs}ms)`);
+    const start = Date.now();
+    await withTimeout(migration.down({ timeoutMs }), timeoutMs, `${name} (down)`);
+    await MigrationRecord.deleteOne({ name });
+    console.log(
+        `[MIGRATIONS] Rolled back ${name} in ${Date.now() - start}ms. ` +
+        'It is no longer recorded as applied, so the next boot will re-apply it ' +
+        'unless the file is removed with the code being rolled back to.'
+    );
+}
+
+module.exports = { runMigrations, rollbackMigration };

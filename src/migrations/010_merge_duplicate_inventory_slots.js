@@ -19,6 +19,10 @@ const mongoose = require('mongoose');
 module.exports = {
     name: '010_merge_duplicate_inventory_slots',
 
+    // The merge folds duplicate slots together without remembering how the
+    // quantities were split; only the pre-migration backup can restore that.
+    irreversible: true,
+
     // A `$expr` scan of the whole users collection, then a batched rewrite of
     // every document it matches. Like 005, that is more than the runner's 30 s
     // default is meant to cover on a grown install, and running out of budget

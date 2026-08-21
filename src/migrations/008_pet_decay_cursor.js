@@ -13,6 +13,10 @@ const mongoose = require('mongoose');
 module.exports = {
     name: '008_pet_decay_cursor',
 
+    // Overwrites every pet's starvation clock without keeping the old values;
+    // rolling back means restoring the pre-migration backup.
+    irreversible: true,
+
     async up() {
         const db = mongoose.connection.db;
 

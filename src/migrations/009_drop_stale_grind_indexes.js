@@ -51,4 +51,11 @@ module.exports = {
             });
         }
     },
+
+    // The exact inverse is re-running the migrations whose indexes this one
+    // dropped — their specs live in one place instead of being copied here.
+    async down() {
+        await require('./002_hunt_indexes').up();
+        await require('./003_fishing_indexes').up();
+    },
 };
