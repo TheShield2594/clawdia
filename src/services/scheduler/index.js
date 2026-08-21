@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const { ActivityType } = require('discord.js');
 const { runJob } = require('../../utils/jobRunner');
+const { isPrimaryShard, shardTag } = require('../../utils/sharding');
 
 // Single owner of all recurring background work. Every scheduled job goes
 // through runJob (overlap protection, DLQ, health tracking), and every
@@ -163,7 +164,43 @@ function startScheduler(client) {
         console.warn('[SCHEDULER] startScheduler called twice — ignoring second call.');
         return;
     }
+
     started = true;
+
+    // Presence is a property of a gateway connection, so it is set per shard
+    // rather than per deployment — a shard that skipped this would show no
+    // activity to every guild it serves. It runs before the primary-shard gate
+    // for exactly that reason.
+    setPresence(client);
+    presenceInterval = setInterval(() => setPresence(client), PRESENCE_ROTATE_MS);
+
+    // ── The scheduler is singleton work, and runs on shard 0 only (#732) ─────
+    //
+    // Under sharding each shard is its own process, so an ungated scheduler
+    // fires every job once per shard. jobRunner's overlap guard would not
+    // notice: `inFlight` is a process-local Set, so N processes each see an
+    // empty one. applyBankInterest paying every account N times is the shape of
+    // that mistake, and it is the expensive shape.
+    //
+    // The trade-off this makes, stated plainly rather than discovered later:
+    // most of these jobs reach a guild through the client, and shard 0's client
+    // only has the guilds Discord routed to shard 0. So gating here means a job
+    // that announces into a guild on another shard cannot reach it. That is a
+    // missed announcement; the alternative is duplicated money. Money wins.
+    //
+    // Step 2 is to classify each job as deployment-wide (bank interest, market
+    // listing returns — pure database work that must happen once) or per-guild
+    // (the announcements, which should run on every shard filtered to the
+    // guilds that shard owns, since `ownsGuild` makes that partition exact).
+    // That classification needs each job read against a live multi-shard
+    // deployment, which is why it is not guessed at here.
+    //
+    // Unsharded — every deployment today — `isPrimaryShard` is true and none of
+    // this changes anything.
+    if (!isPrimaryShard(client)) {
+        console.log(`${shardTag(client)}[SCHEDULER] Presence only — scheduled jobs and services run on shard 0.`);
+        return;
+    }
 
     for (const job of JOBS) {
         const run = () => runJob(job.service, job.name, () => job.fn(client));
@@ -183,10 +220,7 @@ function startScheduler(client) {
         }
     }
 
-    setPresence(client);
-    presenceInterval = setInterval(() => setPresence(client), PRESENCE_ROTATE_MS);
-
-    console.log(`[SCHEDULER] Started ${JOBS.length} scheduled jobs and ${STARTERS.length} services`);
+    console.log(`${shardTag(client)}[SCHEDULER] Started ${JOBS.length} scheduled jobs and ${STARTERS.length} services`);
 }
 
 /** Stop presence rotation and all cron tasks (used on graceful shutdown). */

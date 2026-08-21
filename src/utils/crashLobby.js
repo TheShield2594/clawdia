@@ -16,6 +16,8 @@
 // from the `pendingCrashRefund` field the debit writes, which is in Mongo
 // precisely so a lost lobby cannot strand a stake.
 
+const { assertGuildAffinity } = require('./sharding');
+
 const lobbies = new Map();
 
 const LOBBY_JOIN_WINDOW_MS = 30_000;
@@ -23,11 +25,18 @@ const MAX_PLAYERS          = 10;
 
 /**
  * Creates a new lobby. Returns the lobby object or null if one already exists.
+ *
+ * `guildId` is only used to check shard affinity — a channel belongs to exactly
+ * one guild, and Discord routes that guild's events to exactly one shard, which
+ * is what makes one lobby per channel a safe thing to hold in a Map. The check
+ * makes that assumption loud if it ever stops holding (#732).
  */
-function createLobby(channelId, hostId, bet) {
+function createLobby(channelId, hostId, bet, guildId = null) {
     if (lobbies.has(channelId)) return null;
+    if (guildId) assertGuildAffinity(guildId, 'crash lobby');
     const lobby = {
         channelId,
+        guildId,
         hostId,
         bet,
         players: new Map(), // userId -> { cashedOutAt: number|null }

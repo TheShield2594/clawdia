@@ -7,6 +7,8 @@
 // an `$inc` per participant at the end, so neither pays anyone twice. Money is
 // gated by the Mongo-backed per-user lock in src/utils/activeGameLock.js.
 
+const { assertGuildAffinity } = require('../utils/sharding');
+
 const activeSyndicateHeists = new Map();
 
 const SYNDICATE_TARGETS = {
@@ -90,6 +92,8 @@ function createSyndicateLobby({ guildId, channelId, syndicateId, leaderId, targe
         resolving: false,
         _skillChecks: {},
     };
+    // Same affinity assumption as the plain heist; see src/utils/sharding.js.
+    assertGuildAffinity(guildId, 'syndicate heist lobby');
     activeSyndicateHeists.set(guildId, state);
     return state;
 }

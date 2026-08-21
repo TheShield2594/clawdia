@@ -3,6 +3,10 @@
 const {
     LIMITS,
     EXPLORER_LEVELS,
+    EXPLORER_PRESTIGE,
+    MAX_EXPLORER_LEVEL,
+    MAX_EXPLORER_PRESTIGE,
+    PRESTIGE_TITLES,
     EVENT_XP,
     TREASURE_TIERS,
     REGIONS,
@@ -45,6 +49,7 @@ function ensureExploreData(user) {
 
     seed('stamina', LIMITS.MAX_STAMINA);
     seed('level', 1);
+    seed('prestige', 0);
     seed('activeRegion', 'whispering_forest');
     for (const key of EXPLORE_COUNTERS) seed(key, 0);
     for (const key of EXPLORE_TIMESTAMPS) {
@@ -92,7 +97,9 @@ function getRegionProgress(user, regionId, { create = false } = {}) {
  * as hunt/fish/mine only.
  */
 function getMaxStamina(user) {
-    return LIMITS.MAX_STAMINA + getExploreWayfinderStaminaBonus(user);
+    return LIMITS.MAX_STAMINA
+        + getExploreWayfinderStaminaBonus(user)
+        + getExplorerPrestige(user).staminaBonus;
 }
 
 /** @returns {boolean} true if anything was written */
@@ -154,6 +161,46 @@ function applyDailyReset(user) {
 
 function getLevelData(level) {
     return EXPLORER_LEVELS[Math.min(level, EXPLORER_LEVELS.length) - 1] ?? EXPLORER_LEVELS[0];
+}
+
+// ─── EXPLORER PRESTIGE ───────────────────────────────────────────────────────
+
+/**
+ * The bonus row for a user's prestige rank, clamped to the table (#750).
+ * Reads a missing rank as 0, so profiles written before the field existed
+ * behave exactly as they did.
+ */
+function getExplorerPrestige(user) {
+    const rank = Math.max(0, Number(user?.exploration?.prestige) || 0);
+    return EXPLORER_PRESTIGE[Math.min(rank, MAX_EXPLORER_PRESTIGE)];
+}
+
+/** Whether this explorer has anything left to ascend into, and what blocks it. */
+function canPrestige(user) {
+    const e    = user?.exploration ?? {};
+    const rank = Math.max(0, Number(e.prestige) || 0);
+    if (rank >= MAX_EXPLORER_PRESTIGE) return { ok: false, reason: 'max_rank', rank };
+    if ((e.level ?? 1) < MAX_EXPLORER_LEVEL) {
+        return { ok: false, reason: 'level_too_low', rank, level: e.level ?? 1 };
+    }
+    return { ok: true, rank, nextRank: rank + 1 };
+}
+
+/**
+ * The title an explorer carries. A prestiged wanderer keeps their rank title
+ * rather than dropping back to 'Doorstep Wanderer' — resetting the level is the
+ * cost of ascending, reading as a beginner afterwards is not.
+ */
+function getExplorerTitle(user) {
+    const rank = Math.max(0, Number(user?.exploration?.prestige) || 0);
+    const level = user?.exploration?.level ?? 1;
+    // Once the level ladder has been climbed back past its own titles, the
+    // level title is the more specific one and wins.
+    if (rank > 0 && level < MAX_EXPLORER_LEVEL) {
+        return PRESTIGE_TITLES[Math.min(rank, PRESTIGE_TITLES.length - 1)]
+            ?? getLevelData(level).title;
+    }
+    return getLevelData(level).title;
 }
 
 function xpToNextLevel(level, xp) {
@@ -303,7 +350,27 @@ function getRelicCollection(user) {
  */
 function getRelicBonus(user) {
     const distinct = getRelicCollection(user).length;
-    return Math.min(LIMITS.RELIC_BONUS_MAX, distinct * LIMITS.RELIC_BONUS_PER);
+    return Math.min(getRelicBonusCap(user), distinct * LIMITS.RELIC_BONUS_PER);
+}
+
+/**
+ * How wide this explorer's display case is. The base cap pays for ten distinct
+ * relics out of twenty-five, which is what made the back half of the collection
+ * worth nothing but trade value; each prestige rank widens it, and the top rank
+ * opens it far enough that a complete set pays in full (#750).
+ */
+function getRelicBonusCap(user) {
+    return LIMITS.RELIC_BONUS_MAX + getExplorerPrestige(user).relicCapBonus;
+}
+
+/** How many distinct relics a case of the given width actually pays for. */
+function relicCapacityForBonus(relicCapBonus = 0) {
+    return Math.round((LIMITS.RELIC_BONUS_MAX + relicCapBonus) / LIMITS.RELIC_BONUS_PER);
+}
+
+/** How many distinct relics this explorer's case has room to pay for. */
+function getRelicCapacity(user) {
+    return relicCapacityForBonus(getExplorerPrestige(user).relicCapBonus);
 }
 
 // ─── EVENT ROLL ──────────────────────────────────────────────────────────────
@@ -335,11 +402,24 @@ function buildEventWeights(region, guildSettings) {
     return w;
 }
 
+/**
+ * The prestige rank's share of the secret slot, applied as a multiplier on the
+ * slot's own weight rather than a flat addition — a flat one would swamp the
+ * starter region's table and barely register in a deep one.
+ *
+ * Applied in both the roll and the odds display, so a prestiged explorer is
+ * quoted the chance they actually play against.
+ */
+function applySecretPrestige(weight, user) {
+    return weight * (1 + getExplorerPrestige(user).secretBonus);
+}
+
 function rollEventType(user, region, guildSettings, progress) {
     const w = buildEventWeights(region, guildSettings);
     const secretsLeft = hasUnfoundSecrets(region, progress);
 
     if (secretsLeft) {
+        w.secret = applySecretPrestige(w.secret, user);
         // Secret pity: long droughts self-correct
         w.secret += getSecretPity(user);
     } else {
@@ -375,6 +455,9 @@ function getSecretOdds(user, region, progress, guildSettings = null) {
     // Same table the roll uses, so a server running rareEventBonus is quoted
     // the odds it actually plays against.
     const w = buildEventWeights(region, guildSettings);
+    // Same widening the roll applies, before the total is taken — quoting the
+    // unprestiged slot against a prestiged roll is the one thing this must not do.
+    w.secret = applySecretPrestige(w.secret, user);
     const total = Object.values(w).reduce((s, n) => s + n, 0);
     const pity = getSecretPity(user);
     return {
@@ -680,7 +763,8 @@ function getPayoutMultiplier(user, region, guildSettings, eventCoinMultiplier = 
     const dropRate = clamp(guildSettings?.exploration?.dropRateMultiplier ?? 1, 0.1, 5);
     const survey   = isRegionFullyCharted(region, progress) ? 1 + LIMITS.SURVEY_BONUS : 1;
     const relics   = 1 + getRelicBonus(user);
-    return eventCoinMultiplier * dropRate * region.payoutMultiplier * survey * relics;
+    const prestige = 1 + getExplorerPrestige(user).payoutBonus;
+    return eventCoinMultiplier * dropRate * region.payoutMultiplier * survey * relics * prestige;
 }
 
 /**
@@ -895,6 +979,12 @@ module.exports = {
     applyDailyReset,
     getLevelData,
     xpToNextLevel,
+    getExplorerPrestige,
+    getExplorerTitle,
+    canPrestige,
+    getRelicBonusCap,
+    getRelicCapacity,
+    relicCapacityForBonus,
     applyExplorerXp,
     weightedRoll,
     randomFrom,

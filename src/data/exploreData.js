@@ -51,6 +51,9 @@ const LIMITS = {
     SURVEY_BONUS:         0.15,
     // Each DISTINCT relic in your collection is worth a small standing payout
     // bonus, capped so a full set is a nice edge and not a second economy.
+    // The cap is the FLOOR of the case's capacity, not its ceiling: explorer
+    // prestige widens it (see EXPLORER_PRESTIGE), which is what gives relics
+    // 11-25 a reason to exist beyond the trade window.
     RELIC_BONUS_PER:      0.01,
     RELIC_BONUS_MAX:      0.10,
 };
@@ -89,6 +92,48 @@ const EXPLORER_LEVELS = [
     { level: 28, xpRequired: 75_300, title: 'Legend of the Blank Spaces' },
     { level: 29, xpRequired: 84_700, title: 'Legend of the Blank Spaces' },
     { level: 30, xpRequired: 95_000, title: 'Legend of the Blank Spaces' },
+];
+
+// ─── EXPLORER PRESTIGE ───────────────────────────────────────────────────────
+//
+// Exploration used to be the only grind system with nothing behind its ceiling
+// (#750). Hunting, fishing and mining each reset a maxed level for a permanent
+// bonus stack; an explorer who reached Level 30 was simply finished, and kept
+// earning Explorer XP into a counter nothing read.
+//
+// The ladder mirrors those three in shape — six ranks, bonuses that accumulate
+// — but pulls exploration's own levers rather than copying hunting's. The one
+// that matters most is `relicCapBonus`: the relic case caps at
+// LIMITS.RELIC_BONUS_MAX (0.10, so ten distinct relics) while RELIC_LIST holds
+// twenty-five, which made relics 11-25 mechanically worthless. Each rank widens
+// the case, and P5 opens it far enough that all twenty-five pay. That deals
+// with two of the three dead ends at once, and ties them to each other: the
+// reason to prestige is the reason to finish the collection.
+//
+// Region surveys stay a one-off — a charted map is knowledge, and taking it
+// back on every ascension would be a punishment rather than a reset.
+
+const EXPLORER_PRESTIGE = [
+    { prestige: 0, payoutBonus: 0,    staminaBonus: 0, secretBonus: 0,    relicCapBonus: 0    },
+    { prestige: 1, payoutBonus: 0,    staminaBonus: 0, secretBonus: 0,    relicCapBonus: 0.03 },
+    { prestige: 2, payoutBonus: 0.05, staminaBonus: 0, secretBonus: 0,    relicCapBonus: 0.03 },
+    { prestige: 3, payoutBonus: 0.05, staminaBonus: 1, secretBonus: 0,    relicCapBonus: 0.06 },
+    { prestige: 4, payoutBonus: 0.05, staminaBonus: 1, secretBonus: 0.25, relicCapBonus: 0.06 },
+    { prestige: 5, payoutBonus: 0.10, staminaBonus: 1, secretBonus: 0.25, relicCapBonus: 0.15 },
+];
+
+// Rank badges, indexed by prestige.
+const PRESTIGE_BADGES = ['', '🧭', '🧭🧭', '🗺️', '🗺️✨', '🌌'];
+
+// The titles a returning explorer carries instead of the level-1 one, so an
+// ascended wanderer never reads as a beginner on someone else's profile.
+const PRESTIGE_TITLES = [
+    null,
+    'Wanderer Returned',
+    'Twice-Lost',
+    'Keeper of Old Roads',
+    'The Map Cannot Hold You',
+    'Walked Off Every Edge',
 ];
 
 // Explorer XP awarded per event type
@@ -1030,6 +1075,11 @@ const INJURY_LINES = [
 module.exports = {
     LIMITS,
     EXPLORER_LEVELS,
+    EXPLORER_PRESTIGE,
+    PRESTIGE_BADGES,
+    PRESTIGE_TITLES,
+    MAX_EXPLORER_LEVEL:    EXPLORER_LEVELS.length,
+    MAX_EXPLORER_PRESTIGE: EXPLORER_PRESTIGE.length - 1,
     EVENT_XP,
     TREASURE_TIERS,
     TIER_COLORS,

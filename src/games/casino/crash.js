@@ -288,7 +288,7 @@ async function openLobby(interaction, bet, hostAutoCashout, releaseLock, onWager
         return interaction.editReply({ content: 'A crash lobby is already open in this channel.', components: [] });
     }
 
-    const lobby = createLobby(channelId, interaction.user.id, bet);
+    const lobby = createLobby(channelId, interaction.user.id, bet, interaction.guild.id);
     if (!lobby) {
         releaseLock?.();
         return interaction.editReply({ content: 'A crash lobby is already open in this channel.', components: [] });

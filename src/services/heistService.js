@@ -9,6 +9,8 @@
 // duplicates anyone's coins. The per-user action lock, which is the thing that
 // actually gates money, is in Mongo; see src/utils/activeGameLock.js.
 
+const { assertGuildAffinity } = require('../utils/sharding');
+
 const activeHeists = new Map();
 
 const ROLES = {
@@ -52,6 +54,9 @@ function createLobby({ guildId, channelId, initiatorId, target, lobbyDurationSec
         skillResults: {},
         skillTimers: {},
     };
+    // One heist per guild only holds while one shard handles that guild; see
+    // src/utils/sharding.js (#732).
+    assertGuildAffinity(guildId, 'heist lobby');
     activeHeists.set(guildId, state);
     return state;
 }

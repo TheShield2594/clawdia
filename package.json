@@ -1,10 +1,11 @@
 {
   "name": "clawdia",
   "version": "1.0.0",
-  "description": "Clawdia — a chill, self-hosted Discord bot with a full-featured admin dashboard",
+  "description": "Clawdia \u2014 a chill, self-hosted Discord bot with a full-featured admin dashboard",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "start:sharded": "node src/shard.js",
     "dev": "nodemon src/index.js",
     "deploy": "node src/deploy-commands.js",
     "migrate:rollback": "node scripts/rollback-migration.js",

@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const health = require('./health');
 const { makeCache, sweepers } = require('./utils/cacheOptions');
+const { isPrimaryShard, shardTag, shardCount } = require('./utils/sharding');
 
 // Validate required environment variables before doing anything else.
 // Fail loudly at startup rather than silently misbehaving at runtime.
@@ -119,6 +120,14 @@ async function connectDatabase() {
 }
 
 async function startDashboard() {
+    // The dashboard binds a TCP port, so it is singleton work: under sharding
+    // every shard is its own process and N of them would fight over one port.
+    // Shard 0 runs it; the rest skip it. Unsharded, `isPrimaryShard` is true and
+    // nothing changes. See src/utils/sharding.js (#732).
+    if (!isPrimaryShard(client)) {
+        console.log(`${shardTag(client)}[DASHBOARD] Not the primary shard — dashboard not started.`);
+        return;
+    }
     const dashboard = require('./dashboard/server');
     dashboard.start(client);
 }
@@ -141,9 +150,22 @@ async function shutdown(signal) {
 async function startBot() {
     await connectDatabase();
 
-    // Run pending schema migrations before the bot starts accepting traffic
-    const { runMigrations } = require('./migrations/runner');
-    await runMigrations();
+    // Migrations are singleton work too: N shards racing the same schema change
+    // is a different failure every time. Shard 0 runs them before it logs in;
+    // the others wait for the flag it sets rather than running their own.
+    const { runMigrations, waitForMigrations } = require('./migrations/runner');
+    if (isPrimaryShard(client)) {
+        await runMigrations();
+    } else {
+        // Not "skip and carry on": serving traffic against a half-migrated
+        // database is the failure this ordering exists to prevent.
+        console.log(`${shardTag(client)}[MIGRATIONS] Shard 0 owns migrations — waiting for them.`);
+        const ready = await waitForMigrations();
+        if (!ready) {
+            console.error(`${shardTag(client)}[STARTUP] Migrations did not complete — refusing to start.`);
+            process.exit(1);
+        }
+    }
 
     await loadCommands();
     await loadEvents();
