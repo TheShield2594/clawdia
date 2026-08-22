@@ -5,6 +5,7 @@ const {
     GLOBAL_COMMAND_LIMIT,
     COMMAND_BUDGET,
 } = require('../src/utils/commandDeployer');
+const { loadCommandModules } = require('../src/utils/commandLoader');
 
 // Discord caps global application commands at 100 and rejects the whole `PUT`
 // when a payload exceeds it — it does not register the first 100 and drop the
@@ -57,10 +58,19 @@ describe('global slash-command cap', () => {
         }
     });
 
-    // Two files cannot both claim one command name, and the deploy would fail
-    // the whole payload if they tried.
+    // Two commands cannot both claim one name, and Discord would reject the
+    // whole payload if they tried. The names come from the loaded modules
+    // rather than from their paths: it is `data.name` that gets registered, and
+    // a file whose name has drifted from the command inside it is exactly the
+    // case a path-derived check would miss.
     test('no two commands share a name', () => {
-        const names = files.map(f => f.file.replace(/\/index\.js$/, '').replace(/\.js$/, ''));
+        const { commands, failures } = loadCommandModules();
+
+        expect(failures).toEqual([]);
+        expect(commands).toHaveLength(files.length);
+
+        const names = commands.map(({ command }) => command.data.name);
+        expect(names.every(n => typeof n === 'string' && n.length > 0)).toBe(true);
         expect(new Set(names).size).toBe(names.length);
     });
 });

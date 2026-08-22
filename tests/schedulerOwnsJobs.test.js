@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { parse } = require('@babel/parser');
 
 const { JOBS, STARTERS } = require('../src/services/scheduler');
 
@@ -52,14 +53,69 @@ const NON_JOB_TIMERS = new Set([
     'commands/economy/quiz.js',         // per-question countdown
 ]);
 
+// A setTimeout that re-arms itself is an interval wearing a different hat, and
+// it would walk straight past a scan that only looks for setInterval. This
+// finds the shape that matters — `setTimeout(f, ...)` where `f` is a function
+// in the same file that schedules a setTimeout of its own — while leaving the
+// ordinary one-shot setTimeout (a `wait(ms)` promise, a deferred reply) alone.
+function selfReschedulingTimers(text) {
+    let ast;
+    try {
+        ast = parse(text, { sourceType: 'script', allowReturnOutsideFunction: true });
+    } catch {
+        return [];
+    }
+
+    const schedulers = new Map();   // function name -> does its body arm a setTimeout
+    const rearmed = new Set();      // names passed directly to setTimeout
+
+    const bodyOf = node => text.slice(node.start, node.end);
+
+    const walk = node => {
+        if (!node || typeof node.type !== 'string') return;
+
+        if (node.type === 'FunctionDeclaration' && node.id) {
+            schedulers.set(node.id.name, /setTimeout\(/.test(bodyOf(node)));
+        }
+        if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && node.init
+            && (node.init.type === 'FunctionExpression' || node.init.type === 'ArrowFunctionExpression')) {
+            schedulers.set(node.id.name, /setTimeout\(/.test(bodyOf(node.init)));
+        }
+        if (node.type === 'CallExpression' && node.callee?.name === 'setTimeout'
+            && node.arguments[0]?.type === 'Identifier') {
+            rearmed.add(node.arguments[0].name);
+        }
+
+        for (const key of Object.keys(node)) {
+            if (key === 'loc') continue;
+            const child = node[key];
+            if (Array.isArray(child)) child.forEach(walk);
+            else if (child && typeof child.type === 'string') walk(child);
+        }
+    };
+
+    walk(ast.program);
+    return [...rearmed].filter(name => schedulers.get(name) === true);
+}
+
 describe('the scheduler owns recurring work', () => {
     test('nothing schedules a background timer outside the job table', () => {
         const offenders = sourceFiles
-            .filter(f => /setInterval\(/.test(f.text))
+            .filter(f => /setInterval\(/.test(f.text) || selfReschedulingTimers(f.text).length)
             .map(f => f.rel)
             .filter(rel => !NON_JOB_TIMERS.has(rel));
 
         expect(offenders).toEqual([]);
+    });
+
+    // If the self-rescheduling detector stops matching its own shape, the scan
+    // above quietly narrows to setInterval again.
+    test('the self-rescheduling detector recognises a re-arming timer', () => {
+        const reArming = `function tick() { doWork(); setTimeout(tick, 60_000); }\ntick();`;
+        const oneShot = `function wait(ms) { return new Promise(r => setTimeout(r, ms)); }`;
+
+        expect(selfReschedulingTimers(reArming)).toEqual(['tick']);
+        expect(selfReschedulingTimers(oneShot)).toEqual([]);
     });
 
     // cron.schedule outside the table is legitimate only where the schedule is
@@ -123,6 +179,10 @@ describe('the scheduler owns recurring work', () => {
             expect(typeof job.service).toBe('string');
             expect(typeof job.fn).toBe('function');
             expect(job.schedule).toMatch(/^[\d*,/ -]+$/);
+            // Five fields, not six: node-cron accepts a seconds field, and a
+            // five-field expression read as six shifts every field one place —
+            // a nightly job silently becomes an every-minute one.
+            expect(job.schedule.trim().split(/\s+/)).toHaveLength(5);
         }
         expect(new Set(JOBS.map(j => j.name)).size).toBe(JOBS.length);
     });

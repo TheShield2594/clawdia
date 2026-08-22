@@ -59,9 +59,17 @@ function listCommandFiles(foldersPath = COMMANDS_ROOT) {
     return files;
 }
 
-/** A module is a usable command only if it can be both registered and run. */
+/**
+ * A module is a usable command only if it can be both registered and run —
+ * so the properties have to be callable, not merely present. Startup makes a
+ * failure here fatal and the deploy publishes exactly the collection startup
+ * builds, so a module that has an `execute` key holding a string is caught
+ * here rather than at the moment someone runs the command.
+ */
 function isCommandModule(command) {
-    return !!command && 'data' in command && 'execute' in command;
+    return !!command
+        && typeof command.execute === 'function'
+        && typeof command.data?.toJSON === 'function';
 }
 
 /**
@@ -86,7 +94,7 @@ function loadCommandModules(foldersPath = COMMANDS_ROOT) {
         }
 
         if (!isCommandModule(command)) {
-            failures.push(`${entry.rel} (missing data/execute)`);
+            failures.push(`${entry.rel} (needs a callable execute and a data with toJSON)`);
             continue;
         }
 

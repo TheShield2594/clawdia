@@ -324,7 +324,7 @@ async function handleDig(interaction) {
         await interaction.editReply({ embeds: [confirmEmbed], components: [] });
 
         // Crystal Fox pet: +15% mine yield (only if hunger >= 30)
-        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
+        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../../services/petService');
         const petMineYieldPct = getTotalBonus(user.pets || [], 'mine_yield');
 
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');

@@ -174,7 +174,7 @@ async function handleCast(interaction) {
         await delay(2000 + Math.floor(Math.random() * 3001));
 
         // Fish/Shark pet: +5%/+15% yield (only if hunger >= 30)
-        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
+        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../../services/petService');
         const petFishYieldPct = getTotalBonus(user.pets || [], 'fish_yield');
 
         const marketplaceActive = isDistrictActive(guildSettings, 'marketplace');

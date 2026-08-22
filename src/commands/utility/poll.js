@@ -107,6 +107,10 @@ function buildPollRows(options) {
     return rows;
 }
 
+// Discord API error codes meaning the poll message can never be edited again:
+// Unknown Message, Unknown Channel, Missing Access.
+const MESSAGE_UNREACHABLE = new Set([10008, 10003, 50001]);
+
 function scheduleExpiry(msg, question, options, endsAt, createdBy) {
     const delay = endsAt.getTime() - Date.now();
     if (delay <= 0) return;
@@ -122,7 +126,18 @@ function scheduleExpiry(msg, question, options, endsAt, createdBy) {
 
         const counts = tallyVotes(poll.votes, options.length);
         const closedEmbed = buildPollEmbed(question, options, counts, endsAt, createdBy, true);
-        await msg.edit({ embeds: [closedEmbed], components: [] }).catch(() => {});
+        try {
+            await msg.edit({ embeds: [closedEmbed], components: [] });
+        } catch (err) {
+            // A message that is not there any more is the one failure that
+            // still ends the poll: there is nothing left to edit and nothing a
+            // retry would reach, so mark it closed and stop taking votes.
+            // Anything else — a rate limit, an outage — leaves the poll open
+            // with live buttons, which is the truth, and propagates so runJob
+            // records it instead of the poll being marked closed against a
+            // message still showing it as running.
+            if (!MESSAGE_UNREACHABLE.has(err?.code)) throw err;
+        }
 
         poll.closed = true;
         await poll.save();

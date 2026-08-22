@@ -280,7 +280,7 @@ async function executeStart(interaction) {
         }
 
         // Wolf pet: +10% coin yield; Eagle pet: +15% XP (only if hunger >= 30)
-        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../services/petService');
+        const { getTotalBonus, PET_DEFINITIONS: PET_DEFS, isPetActive, TRAIT_FLAVOR, tryGrantRarePet } = require('../../../services/petService');
         const petYieldPct = getTotalBonus(user.pets || [], 'hunt_yield');
         const petXpPct    = getTotalBonus(user.pets || [], 'hunt_xp');
 

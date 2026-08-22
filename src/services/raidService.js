@@ -230,16 +230,21 @@ async function sweepRaidModes(client) {
         const entries = pruneLog(guildId, calmWindowMs);
         if (entries.length >= 2) continue;
 
-        raidModeActive.delete(guildId);
-        raidModeActivatedBy.delete(guildId);
-
+        // Persist before forgetting. The other order leaves memory saying raid
+        // mode is off while the database still says it is on, and a restart
+        // then reloads a raid mode nothing will lift. A throw here propagates
+        // to runJob rather than being logged and swallowed: that is the whole
+        // point of running this as a job, and the next tick is a minute away.
         await Guild.updateOne({ guildId }, {
             $set: {
                 'raidDetection.raidModeActive': false,
                 'raidDetection.raidModeActivatedBy': null,
                 'raidDetection.raidModeActivatedAt': null
             }
-        }).catch(console.error);
+        });
+
+        raidModeActive.delete(guildId);
+        raidModeActivatedBy.delete(guildId);
 
         const guild = client.guilds.cache.get(guildId);
         if (!guild) continue;
