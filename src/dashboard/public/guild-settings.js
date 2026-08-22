@@ -1163,10 +1163,22 @@ async function addAutoRole() {
         });
         if (response.ok) {
             const roleName = select.options[select.selectedIndex].text.replace(/^@/, '');
+            // Built with DOM nodes, not innerHTML: a role name is attacker-chosen
+            // text from Discord, so `@${roleName}` in a template literal turns any
+            // role called `<img onerror=...>` into markup that runs for the next
+            // admin to open this panel. textContent renders it as the name it is.
+            // The remove button goes through data-action for the same reason the
+            // rest of this page does — see the delegated handler below.
             const chip = document.createElement('span');
             chip.className = 'role-tag';
             chip.dataset.roleId = roleId;
-            chip.innerHTML = `@${roleName} <button onclick="removeAutoRole('${roleId}')" title="Remove">&times;</button>`;
+            chip.appendChild(document.createTextNode('@' + roleName + ' '));
+            const removeBtn = document.createElement('button');
+            removeBtn.title = 'Remove';
+            removeBtn.dataset.action = 'autorole-remove';
+            removeBtn.dataset.roleId = roleId;
+            removeBtn.textContent = '\u00d7';
+            chip.appendChild(removeBtn);
             document.getElementById('autorole-list').appendChild(chip);
             select.value = '';
             toast('Role added ✓', 'success');
@@ -1737,6 +1749,7 @@ document.addEventListener('click', function(e) {
     else if (d.action === 'mcp-test')       testMcpServer(d.serverName, el.closest('.list-item') && el.closest('.list-item').querySelector('.mcp-test-result'));
     else if (d.action === 'mcp-edit')       editMcpServer(d.serverName);
     else if (d.action === 'mcp-remove')     removeMcpServer(d.serverName);
+    else if (d.action === 'autorole-remove') removeAutoRole(d.roleId);
 });
 
 // mousedown, not click: the dropdown is hidden by the input's blur, which

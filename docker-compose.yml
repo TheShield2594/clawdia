@@ -30,6 +30,38 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Everything in .env arrives as a plain container environment variable, and
+    # those are readable by anyone who can reach the Docker API: `docker inspect
+    # clawdia` prints the bot token and every provider key in full, no shell in
+    # the container required. To keep them out of it, deliver each secret as a
+    # file instead — every secret variable also accepts a <NAME>_FILE form
+    # naming a file to read the value from (src/config/fileSecrets.js).
+    #
+    # To switch over: create ./secrets/discord_token (etc.), remove the plain
+    # variable from .env, and uncomment the matching lines here and the
+    # top-level `secrets:` block at the bottom of this file. If both forms are
+    # set the plain variable wins and the file is ignored, so the migration can
+    # be done one secret at a time.
+    # environment:
+    #   DISCORD_TOKEN_FILE: /run/secrets/discord_token
+    #   CLIENT_SECRET_FILE: /run/secrets/client_secret
+    #   SESSION_SECRET_FILE: /run/secrets/session_secret
+    #   # The optional `backup` service reads MONGODB_URI too; uncomment the
+    #   # matching lines on it so both sides come from the same secret.
+    #   MONGODB_URI_FILE: /run/secrets/mongodb_uri
+    #   ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+    #   OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+    #   GEMINI_API_KEY_FILE: /run/secrets/gemini_api_key
+    #   OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_api_key
+    # secrets:
+    #   - discord_token
+    #   - client_secret
+    #   - session_secret
+    #   - mongodb_uri
+    #   - anthropic_api_key
+    #   - openai_api_key
+    #   - gemini_api_key
+    #   - openrouter_api_key
     # Bound to loopback only. DASHBOARD_URL is required to be HTTPS in
     # production, which means a TLS-terminating reverse proxy sits in front of
     # this; publishing on 0.0.0.0 would also expose the dashboard directly over
@@ -88,6 +120,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Mirrors the bot's MONGODB_URI_FILE. This is a stock mongo image with no
+    # loader of its own, so the entrypoint below reads the file itself.
+    # environment:
+    #   MONGODB_URI_FILE: /run/secrets/mongodb_uri
+    # secrets:
+    #   - mongodb_uri
     volumes:
       - ./backups:/backups
     networks:
@@ -97,6 +135,20 @@ services:
         condition: service_healthy
     entrypoint: >
       sh -c '
+        if [ -n "$$MONGODB_URI_FILE" ]; then
+          if [ ! -r "$$MONGODB_URI_FILE" ]; then
+            echo "[backup] MONGODB_URI_FILE=$$MONGODB_URI_FILE is not readable"; exit 1;
+          fi;
+          MONGODB_URI=$$(tr -d "\r\n" < "$$MONGODB_URI_FILE");
+          if [ -z "$$MONGODB_URI" ]; then
+            echo "[backup] MONGODB_URI_FILE=$$MONGODB_URI_FILE is empty"; exit 1;
+          fi;
+          export MONGODB_URI;
+          echo "[backup] Read MONGODB_URI from $$MONGODB_URI_FILE";
+        fi;
+        if [ -z "$$MONGODB_URI" ]; then
+          echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
+        fi;
         NOW=$$(date -u +%s);
         MIDNIGHT=$$(( ($$NOW / 86400) * 86400 ));
         TARGET=$$(( $$MIDNIGHT + 10800 ));
@@ -115,6 +167,30 @@ services:
           find /backups \( -name "clawdia-*.gz" -o -name "ultrabot-*.gz" \) -mtime +30 -delete;
           sleep 86400;
         done'
+
+# Host files mounted read-only at /run/secrets/<name> inside the container.
+# Keep ./secrets/ out of git (it already is, via .gitignore) and chmod 0400 the
+# files. Uncomment alongside the service block above.
+# Declare only the ones you actually create — compose fails the deploy for a
+# declared secret whose file is missing, and a service must not list one that
+# was never declared. Drop the lines for secrets you are not using.
+# secrets:
+#   discord_token:
+#     file: ./secrets/discord_token
+#   client_secret:
+#     file: ./secrets/client_secret
+#   session_secret:
+#     file: ./secrets/session_secret
+#   mongodb_uri:
+#     file: ./secrets/mongodb_uri
+#   anthropic_api_key:
+#     file: ./secrets/anthropic_api_key
+#   openai_api_key:
+#     file: ./secrets/openai_api_key
+#   gemini_api_key:
+#     file: ./secrets/gemini_api_key
+#   openrouter_api_key:
+#     file: ./secrets/openrouter_api_key
 
 volumes:
   mongodb_data:

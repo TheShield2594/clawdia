@@ -132,7 +132,12 @@ function buildDataSummary(stats, usernameMap, currency, sections) {
     return lines.join('\n');
 }
 
-async function generateNewspaper(client, guildDoc, preloadedGuild) {
+// `requester` attributes an on-demand run (the /newspaper preview) to the user
+// who asked for it, so it counts against the guild's AI limits like any other
+// user-initiated call. The scheduled path passes nothing: it runs on a cadence
+// the guild itself configures, and is bounded by that rather than by a
+// per-user window it has no user for.
+async function generateNewspaper(client, guildDoc, preloadedGuild, requester) {
     const { guildId } = guildDoc;
     const sections = guildDoc.newspaper?.sections ?? {};
     const currency = guildDoc.economy?.currency ?? '💰';
@@ -164,13 +169,15 @@ async function generateNewspaper(client, guildDoc, preloadedGuild) {
     // Use AI if configured
     if (guildDoc.ai?.enabled) {
         try {
-            const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers } = resolveProviderConfig(guildDoc.ai);
+            const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(guildDoc.ai);
             if (apiKey || provider === 'ollama') {
                 const quoteInstruction = includeQuote
                     ? 'End with a witty "Quote of the Week" that you invent yourself based on the server activity.'
                     : '';
                 narrativeText = await getCompletion({
-                    provider, model, apiKey, baseUrl, mcpServers,
+                    provider, model, apiKey, baseUrl, mcpServers, rateLimit,
+                    userId: requester?.userId,
+                    channelId: requester?.channelId,
                     temperature: 0.85,
                     maxTokens: 900,
                     systemPrompt:
@@ -186,6 +193,10 @@ async function generateNewspaper(client, guildDoc, preloadedGuild) {
                 });
             }
         } catch (err) {
+            // A limit refusal is the guild's own setting talking, not a provider
+            // fault: the /newspaper preview should say so rather than silently
+            // hand back the AI-less fallback as if nothing was configured.
+            if (err?.rateLimited && requester) throw err;
             console.error('[newspaper] AI generation failed:', err.message);
         }
     }

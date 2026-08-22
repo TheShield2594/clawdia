@@ -4,7 +4,7 @@ const compression = require('compression');
 const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const passport = require('passport');
-const { Strategy: DiscordStrategy, DiscordScope } = require('discord-strategy');
+const { Strategy: DiscordStrategy, DiscordScope } = require('./lib/discordStrategy');
 const path = require('path');
 const { getStatus } = require('../health');
 const { hasManagePermission } = require('./lib/permissions');
@@ -72,14 +72,11 @@ function setupPassport() {
     console.log(`[DASHBOARD] OAuth callback URL: ${callbackURL}`);
     console.log('[DASHBOARD] This EXACT URL must be added under "OAuth2 → Redirects" in the Discord Developer Portal.');
 
-    passport.use(new DiscordStrategy(discordStrategyOptions(callbackURL), async (accessToken, refreshToken, profile, done, consumable) => {
+    passport.use(new DiscordStrategy(discordStrategyOptions(callbackURL), (accessToken, refreshToken, profile, done) => {
         try {
             if (!profile || !profile.id || !profile.username) {
                 return done(new Error('Invalid Discord profile returned from OAuth'));
             }
-            // discord-strategy only fetches basic identity by default; guilds must
-            // be pulled in explicitly, which populates profile.guilds in place.
-            await consumable.guilds();
 
             // Store only what the dashboard needs — never persist raw OAuth tokens or full profile
             const safeProfile = {

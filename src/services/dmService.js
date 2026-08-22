@@ -150,13 +150,20 @@ async function beginSession(interaction) {
     try {
         const gs = await Guild.findOne({ guildId: guild.id });
         const aiSettings = gs?.ai || {};
-        const { provider, model, apiKey, baseUrl, mcpServers } = resolveProviderConfig(aiSettings);
+        const { provider, model, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(aiSettings);
 
         if (provider !== 'ollama' && !apiKey) {
             return interaction.editReply('AI is not configured for this server. An admin must add an API key.');
         }
 
-        const story = await getCompletion({ provider, model, apiKey, baseUrl, mcpServers, systemPrompt, history: [], prompt: openingPrompt, temperature: 0.9, maxTokens: 600 });
+        // guildId/userId/channelId are what tie this call to the guild's usage
+        // ledger and to its configured AI limits; a DM campaign is otherwise an
+        // unbounded provider bill behind a slash command.
+        const story = await getCompletion({
+            provider, model, apiKey, baseUrl, mcpServers, rateLimit,
+            guildId: guild.id, userId: interaction.user.id, channelId: interaction.channelId,
+            systemPrompt, history: [], prompt: openingPrompt, temperature: 0.9, maxTokens: 600
+        });
 
         await DmSession.findOneAndUpdate(
             { sessionId: session.sessionId },
@@ -179,6 +186,7 @@ async function beginSession(interaction) {
         }
         return;
     } catch (err) {
+        if (err?.rateLimited) return interaction.editReply(aiLimitMessage(err));
         console.error('[DM] begin error:', err.message);
         return interaction.editReply('Failed to generate the opening scene. Please try again.');
     }
@@ -222,13 +230,17 @@ async function takeAction(interaction) {
     try {
         const gs = await Guild.findOne({ guildId: guild.id });
         const aiSettings = gs?.ai || {};
-        const { provider, model, apiKey, baseUrl, mcpServers } = resolveProviderConfig(aiSettings);
+        const { provider, model, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(aiSettings);
 
         if (provider !== 'ollama' && !apiKey) {
             return interaction.editReply('AI is not configured for this server.');
         }
 
-        const narrative = await getCompletion({ provider, model, apiKey, baseUrl, mcpServers, systemPrompt, history, prompt, temperature: 0.9, maxTokens: 500 });
+        const narrative = await getCompletion({
+            provider, model, apiKey, baseUrl, mcpServers, rateLimit,
+            guildId: guild.id, userId: user.id, channelId: interaction.channelId,
+            systemPrompt, history, prompt, temperature: 0.9, maxTokens: 500
+        });
 
         // Scope damage/heal detection to this player by name or "you/your"
         const namePattern = escapeRegex(player.name);
@@ -290,6 +302,7 @@ async function takeAction(interaction) {
         }
         return;
     } catch (err) {
+        if (err?.rateLimited) return interaction.editReply(aiLimitMessage(err));
         console.error('[DM] action error:', err.message);
         return interaction.editReply('Failed to generate a response. Please try again.');
     }
@@ -422,7 +435,7 @@ async function handleDmButton(interaction, client) {
     try {
         const gs = await Guild.findOne({ guildId: session.guildId });
         const aiSettings = gs?.ai || {};
-        const { provider, model, apiKey, baseUrl, mcpServers } = resolveProviderConfig(aiSettings);
+        const { provider, model, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(aiSettings);
 
         if (provider !== 'ollama' && !apiKey) {
             return interaction.editReply('AI is not configured for this server.');
@@ -430,7 +443,8 @@ async function handleDmButton(interaction, client) {
 
         const logSnippet = session.storyLog.slice(-16).join('\n\n');
         const recap = await getCompletion({
-            provider, model, apiKey, baseUrl, mcpServers,
+            provider, model, apiKey, baseUrl, mcpServers, rateLimit,
+            guildId: session.guildId, userId: interaction.user.id, channelId: interaction.channelId,
             systemPrompt: 'You are a dramatic fantasy narrator. Summarize the story concisely.',
             history: [],
             prompt: `Summarize the following campaign story so far as a dramatic narrator in 3-5 sentences:\n\n${logSnippet}`,
@@ -446,10 +460,19 @@ async function handleDmButton(interaction, client) {
 
         await interaction.editReply({ embeds: [embed] });
     } catch (err) {
+        if (err?.rateLimited) { await interaction.editReply(aiLimitMessage(err)); return true; }
         console.error('[DM] story recap error:', err.message);
         await interaction.editReply('Failed to generate recap. Please try again.');
     }
     return true;
+}
+
+// A limit refusal is not a failure to narrate — telling the party to "try
+// again" when the server's own AI budget is spent just walks them into it.
+function aiLimitMessage(err) {
+    return err.scope === 'channel'
+        ? 'This channel has reached the server\'s AI request limit. Please wait a few minutes.'
+        : `You have reached the server's AI request limit (${err.limit} per ${err.windowMin}m). Please wait a few minutes.`;
 }
 
 function buildDMSystemPrompt() {

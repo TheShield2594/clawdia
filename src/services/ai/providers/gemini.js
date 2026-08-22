@@ -1,4 +1,16 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenAI } = require('@google/genai');
+
+// Google's current SDK. It replaces `@google/generative-ai`, which Google
+// retired in favour of this one — that package still installs but no longer
+// gets model or API updates, so a new Gemini model would arrive here unusable.
+//
+// The shapes that changed, since they are the whole of the diff:
+//   new GoogleGenerativeAI(key)          → new GoogleGenAI({ apiKey })
+//   client.getGenerativeModel().startChat → client.chats.create()
+//   generationConfig / systemInstruction  → one `config` block
+//   response.text()                       → response.text (a getter)
+//   result.stream                         → the awaited return value itself
+//   usage after the stream, via .response → usageMetadata on the chunks
 
 const PRICING = [
     { match: /flash-lite/i, in: 0.075, out: 0.30 },
@@ -10,13 +22,14 @@ const PRICING = [
 ];
 
 function startChat({ apiKey, model, systemPrompt, history, temperature, maxTokens }) {
-    const client = new GoogleGenerativeAI(apiKey);
-    const generative = client.getGenerativeModel({
+    const client = new GoogleGenAI({ apiKey });
+    return client.chats.create({
         model,
-        systemInstruction: systemPrompt,
-        generationConfig: { temperature, maxOutputTokens: maxTokens }
-    });
-    return generative.startChat({
+        config: {
+            systemInstruction: systemPrompt,
+            temperature,
+            maxOutputTokens: maxTokens
+        },
         history: history.map(h => ({
             role: h.role === 'assistant' ? 'model' : 'user',
             parts: [{ text: h.content }]
@@ -24,37 +37,39 @@ function startChat({ apiKey, model, systemPrompt, history, temperature, maxToken
     });
 }
 
+function usageOf(meta) {
+    if (!meta) return null;
+    return {
+        inputTokens: meta.promptTokenCount || 0,
+        outputTokens: meta.candidatesTokenCount || 0
+    };
+}
+
 async function* stream(req) {
     const chat = startChat(req);
-    const result = await chat.sendMessageStream(req.prompt);
-    for await (const chunk of result.stream) {
-        const text = chunk.text();
+    const result = await chat.sendMessageStream({ message: req.prompt });
+
+    // Usage now rides on the chunks rather than on a separate response object
+    // awaited after the stream. Each chunk that carries it carries the running
+    // total, so the last one seen is the total for the turn.
+    let lastUsage = null;
+    for await (const chunk of result) {
+        if (chunk.usageMetadata) lastUsage = chunk.usageMetadata;
+        const text = chunk.text;
         if (text) yield text;
     }
-    if (req.usageOut) {
-        try {
-            const final = await result.response;
-            const meta = final?.usageMetadata;
-            if (meta) {
-                req.usageOut.usage = {
-                    inputTokens: meta.promptTokenCount || 0,
-                    outputTokens: meta.candidatesTokenCount || 0
-                };
-            }
-        } catch { /* usage metadata unavailable — leave unset */ }
+
+    if (req.usageOut && lastUsage) {
+        req.usageOut.usage = usageOf(lastUsage);
     }
 }
 
 async function complete(req) {
     const chat = startChat(req);
-    const result = await chat.sendMessage(req.prompt);
-    const text = result.response.text();
-    const meta = result.response.usageMetadata;
-    const usage = meta ? {
-        inputTokens: meta.promptTokenCount || 0,
-        outputTokens: meta.candidatesTokenCount || 0
-    } : null;
-    return { text, usage };
+    const response = await chat.sendMessage({ message: req.prompt });
+    // `.text` is undefined when the model returned no text part at all — a
+    // safety block, or a response that was only tool calls.
+    return { text: response.text ?? '', usage: usageOf(response.usageMetadata) };
 }
 
 module.exports = {
