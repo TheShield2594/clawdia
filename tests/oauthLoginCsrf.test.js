@@ -12,7 +12,7 @@
 // builds from it, because "we passed state: true" and "a state store is installed"
 // are different claims and only the second one defends anything.
 
-const { Strategy: DiscordStrategy } = require('discord-strategy');
+const { Strategy: DiscordStrategy } = require('../src/dashboard/lib/discordStrategy');
 const { discordStrategyOptions } = require('../src/dashboard/server');
 
 const CALLBACK = 'https://dash.example.com/auth/callback';
