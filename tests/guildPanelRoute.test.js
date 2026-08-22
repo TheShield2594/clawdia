@@ -3,6 +3,10 @@
 // Drives the guild settings routes through a real express app with the models
 // and the Discord client stubbed, so the page/fragment split is exercised
 // rather than described.
+//
+// The route sees the real botGateway facade over a stub client rather than a
+// hand-written stub of the facade — the point of #608 is that routes talk to
+// that seam, so the seam is what the test exercises.
 
 const express = require('express');
 const path = require('path');
@@ -16,6 +20,7 @@ const ItemImage = require('../src/models/ItemImage');
 const { jsonForScript } = require('../src/dashboard/lib/jsonForScript');
 const { asset } = require('../src/dashboard/lib/assets');
 const { PANELS, DEFAULT_PANEL } = require('../src/dashboard/lib/panels');
+const { createBotGateway } = require('../src/bot/gateway');
 
 let server;
 let baseUrl;
@@ -37,8 +42,9 @@ function discordGuild() {
         name: 'Test Guild',
         icon: null,
         ownerId: 'admin-1',
-        channels: { cache: new Collection([['c1', { id: 'c1', name: 'general', type: 0 }]]) },
-        roles: { cache: new Collection([['r1', { id: 'r1', name: 'Member' }]]) },
+        memberCount: 3,
+        channels: { cache: new Collection([['c1', { id: 'c1', name: 'general', type: 0, parentId: null }]]) },
+        roles: { cache: new Collection([['r1', { id: 'r1', name: 'Member', position: 1, managed: false }]]) },
     };
 }
 
@@ -49,7 +55,7 @@ beforeAll(done => {
     app.use((req, res, next) => {
         req.isAuthenticated = () => true;
         req.user = { id: 'admin-1', username: 'admin', guilds: [{ id: allowedGuildId, name: 'Test Guild', permissions: '8' }] };
-        req.client = { guilds: { cache: new Collection([['g1', discordGuild()]]) } };
+        req.bot = createBotGateway({ guilds: { cache: new Collection([['g1', discordGuild()]]) } });
         res.locals.jsonForScript = jsonForScript;
         res.locals.asset = asset;
         next();

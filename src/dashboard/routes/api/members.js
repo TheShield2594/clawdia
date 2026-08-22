@@ -7,14 +7,13 @@ router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, checkW
     const q = (req.query.q || '').trim();
     if (q.length < 2) return res.json([]);
     try {
-        const guild = req.client.guilds.cache.get(guildId);
-        if (!guild) return res.status(404).json({ error: 'Guild not found' });
-        const results = await guild.members.search({ query: q, limit: 10 });
+        const results = await req.bot.searchMembers(guildId, q, 10);
+        if (!results) return res.status(404).json({ error: 'Guild not found' });
         res.json(results.map(m => ({
-            id: m.user.id,
-            username: m.user.username,
+            id: m.id,
+            username: m.username,
             displayName: m.displayName,
-            avatarURL: m.user.displayAvatarURL({ size: 32, extension: 'webp' })
+            avatarURL: m.avatarUrl
         })));
     } catch (err) {
         console.error('Member search error:', err);
@@ -26,13 +25,14 @@ router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, check
     const ids = (req.query.ids || '').split(',').map(s => s.trim()).filter(s => /^\d{17,20}$/.test(s)).slice(0, 50);
     if (!ids.length) return res.json({});
     try {
+        const users = await req.bot.resolveUsers(ids);
         const result = {};
-        await Promise.all(ids.map(async id => {
-            try {
-                const user = await req.client.users.fetch(id, { force: false });
-                result[id] = { id, username: user.username, displayName: user.globalName || user.username, avatarURL: user.displayAvatarURL({ size: 32, extension: 'webp' }) };
-            } catch { result[id] = null; }
-        }));
+        for (const id of ids) {
+            const user = users[id];
+            result[id] = user
+                ? { id, username: user.username, displayName: user.displayName, avatarURL: user.avatarUrl }
+                : null;
+        }
         res.json(result);
     } catch (err) {
         console.error('Member resolve error:', err);

@@ -22,13 +22,7 @@ router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res
         ]);
 
         const uniqueIds = [...new Set(cases.flatMap(c => [c.targetUserId, c.moderatorId].filter(Boolean)))];
-        const userMap = {};
-        await Promise.all(uniqueIds.map(async id => {
-            try {
-                const u = await req.client.users.fetch(id, { force: false });
-                userMap[id] = { tag: u.tag, avatarUrl: u.displayAvatarURL({ size: 32, extension: 'webp' }) };
-            } catch { /* user not resolvable */ }
-        }));
+        const userMap = await req.bot.resolveUsers(uniqueIds);
 
         res.json({
             cases: cases.map(c => ({
@@ -86,39 +80,21 @@ router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, check
 router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
-        const guild = req.client.guilds.cache.get(guildId);
-        if (!guild) return res.status(404).json({ error: 'Guild not found or bot not in guild' });
+        if (!req.bot.hasGuild(guildId)) return res.status(404).json({ error: 'Guild not found or bot not in guild' });
 
         let bans;
         try {
-            bans = await guild.bans.fetch({ limit: 200 });
+            bans = await req.bot.listBans(guildId, 200);
         } catch (banErr) {
+            // The guild is there — this is Discord refusing the fetch, which is
+            // almost always a missing Ban Members permission.
             console.error('Active sanctions: bans fetch failed:', banErr);
             return res.status(503).json({ error: 'Could not fetch bans from Discord. Check bot permissions.' });
         }
 
-        const now = new Date();
-        const timeoutMembers = [...guild.members.cache.values()]
-            .filter(m => m.communicationDisabledUntil && m.communicationDisabledUntil > now)
-            .slice(0, 200);
-
-        const banList = [...bans.values()].map(b => ({
-            type: 'ban',
-            userId: b.user.id,
-            userTag: b.user.tag,
-            avatarUrl: b.user.displayAvatarURL({ size: 32 }),
-            reason: b.reason || null,
-            expires: null
-        }));
-
-        const timeoutList = timeoutMembers.map(m => ({
-            type: 'timeout',
-            userId: m.user.id,
-            userTag: m.user.tag,
-            avatarUrl: m.user.displayAvatarURL({ size: 32 }),
-            reason: null,
-            expires: m.communicationDisabledUntil?.toISOString() || null
-        }));
+        const banList = bans.map(b => ({ type: 'ban', ...b, expires: null }));
+        const timeoutList = (req.bot.listActiveTimeouts(guildId, 200) || [])
+            .map(t => ({ type: 'timeout', ...t, reason: null }));
 
         res.json({ bans: banList, timeouts: timeoutList });
     } catch (error) {
@@ -131,9 +107,8 @@ router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAcce
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
     try {
-        const guild = req.client.guilds.cache.get(guildId);
-        if (!guild) return res.status(404).json({ error: 'Guild not found' });
-        await guild.members.unban(userId, `Unbanned via dashboard by ${req.user.username}`);
+        const unbanned = await req.bot.unban(guildId, userId, `Unbanned via dashboard by ${req.user.username}`);
+        if (unbanned === null) return res.status(404).json({ error: 'Guild not found' });
         await logAuditEvent(req, guildId, 'unban', { targetUserId: userId });
         res.json({ success: true });
     } catch (error) {
@@ -146,11 +121,9 @@ router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuild
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
     try {
-        const guild = req.client.guilds.cache.get(guildId);
-        if (!guild) return res.status(404).json({ error: 'Guild not found' });
-        const member = await guild.members.fetch(userId).catch(() => null);
-        if (!member) return res.status(404).json({ error: 'Member not found' });
-        await member.timeout(null, `Timeout removed via dashboard by ${req.user.username}`);
+        const cleared = await req.bot.clearTimeout(guildId, userId, `Timeout removed via dashboard by ${req.user.username}`);
+        if (cleared === null) return res.status(404).json({ error: 'Guild not found' });
+        if (cleared === 'no-member') return res.status(404).json({ error: 'Member not found' });
         await logAuditEvent(req, guildId, 'untimeout', { targetUserId: userId });
         res.json({ success: true });
     } catch (error) {

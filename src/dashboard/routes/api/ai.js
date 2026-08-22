@@ -18,11 +18,10 @@ router.post('/guild/:guildId/persona', checkAuth, checkGuildAccess, checkWriteRa
     }
 
     try {
-        const guild = req.client.guilds.cache.get(guildId);
-        if (!guild) return res.status(404).json({ error: 'Guild not found' });
-
-        const channel = guild.channels.cache.get(channelId.trim());
-        if (!channel) return res.status(400).json({ error: 'Channel not found in this guild' });
+        if (!req.bot.hasGuild(guildId)) return res.status(404).json({ error: 'Guild not found' });
+        if (!req.bot.hasChannel(guildId, channelId.trim())) {
+            return res.status(400).json({ error: 'Channel not found in this guild' });
+        }
 
         const cid = channelId.trim();
         const pName = personaName.trim().slice(0, 100);

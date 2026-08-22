@@ -5,7 +5,6 @@ const Parser = require('rss-parser');
 const { safeFetchFeed } = require('../../../utils/safeFeedFetch');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
-const { rescheduleDailyNews, sendDailyNews } = require('../../../services/rssService');
 
 
 // The one write on the router that had no rate limit, and the one that reaches
@@ -77,7 +76,7 @@ router.post('/guild/:guildId/dailynews/trigger', checkAuth, checkGuildAccess, ch
     }
     dailyNewsInFlight.add(guildId);
     try {
-        await sendDailyNews(req.client, guildId);
+        await req.bot.sendDailyNews(guildId);
         res.json({ success: true });
     } catch (error) {
         console.error('Daily news manual trigger error:', error);
