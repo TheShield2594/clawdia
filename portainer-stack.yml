@@ -14,6 +14,19 @@
 #   3. Set all required variables in the Portainer Stack "Environment variables"
 #      section before clicking Deploy.
 #
+#      SECRETS: anything set here is a plain container environment variable, and
+#      those are readable by anyone who can reach the Docker API — `docker
+#      inspect clawdia` prints them in full, and Portainer shows the same values
+#      in the container detail view. To keep the bot token, the OAuth client
+#      secret, the session secret and the provider keys out of both, deliver
+#      them as files instead: every one of those variables also accepts a
+#      <NAME>_FILE form naming a file to read the value from (see
+#      src/config/fileSecrets.js). The `secrets:` block at the bottom of this
+#      file wires that up; uncomment it and the matching lines in the service to
+#      switch over. Create the secrets first, in Portainer > Secrets (Swarm) or
+#      by mounting host files, and leave the plain variable unset — if both are
+#      set the plain one wins and the file is ignored.
+#
 #      DASHBOARD_URL has no default on purpose. With NODE_ENV=production the bot
 #      refuses to start unless it is an https:// URL (see resolveDashboardUrl in
 #      src/dashboard/server.js), so a placeholder default would only produce a
@@ -53,6 +66,8 @@ services:
     restart: unless-stopped
     environment:
       # --- Required ---
+      # Every secret below is also readable as <NAME>_FILE; see the note at the
+      # top of this file and the commented block after this service.
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - CLIENT_ID=${CLIENT_ID}
       - CLIENT_SECRET=${CLIENT_SECRET}
@@ -78,6 +93,26 @@ services:
       - DASHBOARD_PORT=7001
       - AUDIT_LOG_RETENTION_DAYS=${AUDIT_LOG_RETENTION_DAYS:-90}
       - NODE_ENV=${NODE_ENV:-production}
+      #
+      # --- Secrets as files (recommended) ---------------------------------
+      # Uncomment these *and* the matching `secrets:` entries below, then leave
+      # the plain DISCORD_TOKEN / CLIENT_SECRET / SESSION_SECRET / *_API_KEY
+      # variables above unset. The container environment then holds only the
+      # paths, which `docker inspect` and the Portainer UI are welcome to show.
+      # - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      # - CLIENT_SECRET_FILE=/run/secrets/client_secret
+      # - SESSION_SECRET_FILE=/run/secrets/session_secret
+      # - MONGODB_URI_FILE=/run/secrets/mongodb_uri
+      # - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
+      # - GEMINI_API_KEY_FILE=/run/secrets/gemini_api_key
+      # - ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key
+      # - OPENROUTER_API_KEY_FILE=/run/secrets/openrouter_api_key
+    # The secrets this service should have mounted under /run/secrets. Only the
+    # ones you actually use — a declared-but-missing secret fails the deploy.
+    # secrets:
+    #   - discord_token
+    #   - client_secret
+    #   - session_secret
     # A Portainer stack has no repo checkout to mount, so put mcp-servers.json
     # somewhere on the Docker host and point MCP_SERVERS_CONFIG at it inside the
     # container. Mounted read-only: the file can hold OAuth tokens.
@@ -124,6 +159,19 @@ services:
         reservations:
           memory: 256m
     stop_grace_period: 30s
+
+# Declare each secret once here, then list it under the service that needs it.
+# `external: true` means Portainer > Secrets (Swarm) already holds the value;
+# on a plain non-Swarm Docker host use the `file:` form instead, pointing at a
+# root-owned, 0400 file on the host.
+# secrets:
+#   discord_token:
+#     external: true
+#     # file: /opt/clawdia/secrets/discord_token
+#   client_secret:
+#     external: true
+#   session_secret:
+#     external: true
 
 volumes:
   mongodb_data:

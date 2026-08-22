@@ -6,4 +6,6 @@ logs/
 dist/
 .DS_Store
 config/mcp-servers.json
+# Secret files mounted via the compose `secrets:` block (see docker-compose.yml).
+secrets/
 coverage/

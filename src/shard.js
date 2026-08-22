@@ -22,6 +22,11 @@
 // Set SHARD_COUNT to pin a number; leave it unset for Discord's recommendation.
 
 require('dotenv').config();
+// Resolves any <NAME>_FILE variable into <NAME>, so secrets can be mounted as
+// files (docker secrets) instead of being readable via `docker inspect`. Runs
+// straight after dotenv so .env can set the *_FILE paths too, and before
+// anything reads process.env.
+require('./config/fileSecrets').loadFileSecrets();
 
 const path = require('path');
 const { ShardingManager } = require('discord.js');
