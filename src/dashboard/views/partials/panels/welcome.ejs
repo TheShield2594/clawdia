@@ -48,7 +48,7 @@
                             <% (settings.autoRoles || []).forEach(r => { %>
                                 <% const role = roles.find(ro => ro.id === r.roleId); %>
                                 <% if (role) { %>
-                                    <span class="role-tag" data-role-id="<%= r.roleId %>">@<%= role.name %> <button onclick="removeAutoRole('<%= r.roleId %>')" title="Remove">&times;</button></span>
+                                    <span class="role-tag" data-role-id="<%= r.roleId %>">@<%= role.name %> <button data-action="autorole-remove" data-role-id="<%= r.roleId %>" title="Remove">&times;</button></span>
                                 <% } %>
                             <% }); %>
                         </div>
