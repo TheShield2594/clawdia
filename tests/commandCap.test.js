@@ -43,10 +43,24 @@ describe('global slash-command cap', () => {
         expect(COMMAND_BUDGET).toBe(files.length);
     });
 
-    test('every command file sits in a category directory', () => {
-        for (const { dir, rel } of files) {
+    // A command is either `<category>/<name>.js` or `<category>/<name>/index.js`
+    // — the folder form is how a command too big for one file (fish, hunt,
+    // mine) splits up without its helper files each registering as a command
+    // of their own. Either way it lives under a category, never loose at the
+    // root, and `rel` is `dir` plus `file` with nothing invented in between.
+    test('every command sits in a category directory', () => {
+        for (const { dir, file, rel } of files) {
             expect(dir).not.toBe('');
-            expect(rel).toBe(`${dir}/${rel.split('/')[1]}`);
+            expect(rel).toBe(`${dir}/${file}`);
+            expect(file === 'index.js').toBe(false);
+            expect(file.endsWith('.js')).toBe(true);
         }
+    });
+
+    // Two files cannot both claim one command name, and the deploy would fail
+    // the whole payload if they tried.
+    test('no two commands share a name', () => {
+        const names = files.map(f => f.file.replace(/\/index\.js$/, '').replace(/\.js$/, ''));
+        expect(new Set(names).size).toBe(names.length);
     });
 });

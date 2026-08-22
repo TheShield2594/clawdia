@@ -12,6 +12,7 @@ require('./config/fileSecrets').loadFileSecrets();
 const health = require('./health');
 const { makeCache, sweepers } = require('./utils/cacheOptions');
 const { isPrimaryShard, shardTag, shardCount } = require('./utils/sharding');
+const { loadCommandModules } = require('./utils/commandLoader');
 
 // Validate required environment variables before doing anything else.
 // Fail loudly at startup rather than silently misbehaving at runtime.
@@ -53,24 +54,25 @@ client.commands = new Collection();
 client.cooldowns = new Collection();
 
 async function loadCommands() {
-    const foldersPath = path.join(__dirname, 'commands');
-    const commandFolders = fs.readdirSync(foldersPath);
+    // One walk, shared with the deploy and the cap guard — see
+    // utils/commandLoader.js. The deploy at ready reuses this collection
+    // rather than re-requiring the tree (#607).
+    const { commands, failures } = loadCommandModules();
 
-    for (const folder of commandFolders) {
-        const commandsPath = path.join(foldersPath, folder);
-        const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+    for (const { command } of commands) {
+        client.commands.set(command.data.name, command);
+        console.log(`[COMMAND] Loaded ${command.data.name}`);
+    }
 
-        for (const file of commandFiles) {
-            const filePath = path.join(commandsPath, file);
-            const command = require(filePath);
-
-            if ('data' in command && 'execute' in command) {
-                client.commands.set(command.data.name, command);
-                console.log(`[COMMAND] Loaded ${command.data.name}`);
-            } else {
-                console.log(`[WARNING] Command at ${filePath} is missing required "data" or "execute" property.`);
-            }
-        }
+    // Fatal rather than a warning, because the deploy now publishes exactly
+    // what is in this collection. A file that quietly fails to load here would
+    // otherwise unregister a working command in production, with the only
+    // signal a line in the startup log nobody reads.
+    if (failures.length) {
+        console.error(`[STARTUP] ${failures.length} command file(s) failed to load:`);
+        for (const f of failures) console.error(`  - ${f}`);
+        console.error('[STARTUP] Refusing to start with an incomplete command set.');
+        process.exit(1);
     }
 }
 
