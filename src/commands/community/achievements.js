@@ -3,7 +3,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
-const { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS } = require('../../data/achievements');
+const { ACHIEVEMENTS } = require('../../data/achievements');
 
 const CATEGORY_ORDER = ['economy', 'leveling', 'hunt', 'fishing', 'exploration', 'community', 'moderation', 'custom'];
 
@@ -279,7 +279,7 @@ async function handleTop(interaction, guildSettings) {
     return interaction.reply({ embeds: [embed] });
 }
 
-async function handleLeaderboard(interaction, guildSettings) {
+async function handleLeaderboard(interaction, _guildSettings) {
     const topUsers = await User.find(
         { guildId: interaction.guild.id, achievementsCount: { $gt: 0 } },
         'userId achievementsCount'

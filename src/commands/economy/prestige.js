@@ -6,7 +6,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const {
-    PRESTIGE_TIERS, UNLOCK_LABELS, tierFor, titleForExactRank, nextTierAfter, badgeFor, roman,
+    PRESTIGE_TIERS, UNLOCK_LABELS, tierFor, titleForExactRank, nextTierAfter, badgeFor,
 } = require('../../utils/prestige');
 
 const CONFIRM_TIMEOUT_MS = 30_000;

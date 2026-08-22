@@ -42,7 +42,7 @@ async function applyRaidAction(member, rd, minAccountAgeDays) {
     }
 }
 
-async function handleMemberJoin(member, client) {
+async function handleMemberJoin(member, _client) {
     const guildId = member.guild.id;
 
     let guildSettings;

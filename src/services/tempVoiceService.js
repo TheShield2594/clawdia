@@ -1,7 +1,7 @@
 const { ChannelType, PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 
-async function handleVoiceStateUpdate(oldState, newState, client) {
+async function handleVoiceStateUpdate(oldState, newState, _client) {
     const guild = newState.guild ?? oldState.guild;
     if (!guild) return;
 

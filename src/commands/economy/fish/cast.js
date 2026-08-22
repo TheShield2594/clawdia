@@ -449,7 +449,6 @@ async function handleCast(interaction) {
             await interaction.editReply({ embeds: [embed, buildBossPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
 
             const runPhase = async (phaseIndex, prevResults, prevBtn) => {
-                const responder  = prevBtn ?? interaction;
                 const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
 
                 return new Promise(resolve => {

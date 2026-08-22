@@ -1,11 +1,9 @@
 'use strict';
 
 const {
-    PICKAXE_TIERS,
     PICKAXE_BY_TIER,
     PICKAXE_UPGRADES,
     DEPTHS,
-    ORES,
     ORES_BY_TIER,
     MINER_LEVELS,
     LIMITS,

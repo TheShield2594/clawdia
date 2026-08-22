@@ -428,7 +428,7 @@ async function handleBuy(interaction, currency) {
     await executePurchase(opts => interaction.editReply(opts));
 }
 
-async function handleCancel(interaction, currency) {
+async function handleCancel(interaction, _currency) {
     const rawId = interaction.options.getString('listing_id');
 
     let listing;

@@ -3,7 +3,7 @@ const { ensureDefaultShopItems } = require('../data/defaultShopItems');
 
 module.exports = {
     name: 'guildCreate',
-    async execute(guild, client) {
+    async execute(guild, _client) {
         console.log(`[GUILD] Joined new guild: ${guild.name} (${guild.id})`);
 
         try {

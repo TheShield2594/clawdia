@@ -58,7 +58,6 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
     // Only debit on round 1 — subsequent rounds reuse the same session bet
     if (round === 1) {
         try {
-            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             debited = await placeWager(userFilter, bet, { onWager });
 
             if (!debited) {

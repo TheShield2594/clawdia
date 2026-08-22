@@ -3,7 +3,7 @@ const Guild = require('../models/Guild');
 
 module.exports = {
     name: 'messageDelete',
-    async execute(message, client) {
+    async execute(message, _client) {
         if (message.author?.bot || !message.guild) return;
 
         const guildSettings = await Guild.findOne({ guildId: message.guild.id });

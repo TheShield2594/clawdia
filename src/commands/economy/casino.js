@@ -87,7 +87,7 @@ module.exports = {
         }
 
         if (sub === 'jackpot') {
-            const { pool, hot, display } = await getJackpotDisplay(interaction.guild.id);
+            const { hot, display } = await getJackpotDisplay(interaction.guild.id);
             const lastWinner = guildSettings?.casinoJackpot?.lastWinnerName;
             const lastWon    = guildSettings?.casinoJackpot?.lastWonAmount;
             const embed = new EmbedBuilder()

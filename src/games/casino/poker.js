@@ -189,7 +189,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
 
         // Dealer acts pre-flop before player sees their choice
         const dealerPreAction = dealerPreFlopAction(dealerCategory);
-        let dealerRaised = dealerPreAction === 'raise';
+        const dealerRaised = dealerPreAction === 'raise';
 
         // If dealer folds pre-flop (very weak hand), player wins immediately
         if (dealerPreAction === 'fold') {

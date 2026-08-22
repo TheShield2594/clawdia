@@ -73,7 +73,7 @@ function nearMissCount(picked, drawn) {
     return picked.filter(p => drawn.some(d => Math.abs(d - p) <= 2 && !drawn.includes(p))).length;
 }
 
-function phaseTitle(hits, total) {
+function phaseTitle(hits, _total) {
     if (hits === 0) return '🎱 Drawing… no hits yet';
     if (hits === 1) return '🎱 One match!';
     if (hits === 2) return '🎱 Two matches!';

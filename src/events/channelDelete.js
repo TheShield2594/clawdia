@@ -4,7 +4,7 @@ const { trackAction } = require('../services/antiNukeService');
 
 module.exports = {
     name: 'channelDelete',
-    async execute(channel, client) {
+    async execute(channel, _client) {
         if (!channel.guild) return;
 
         await trackAction(channel.guild, 'channelDelete', AuditLogEvent.ChannelDelete, channel.id).catch(console.error);

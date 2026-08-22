@@ -14,9 +14,7 @@ const { formatMs, rodStatusEmoji, durabilityBar, getMaxStamina, xpToNextLevel, g
 
 // ─── EMBED BUILDER ────────────────────────────────────────────────────────────
 
-function buildCastEmbed(result, user, location, rod, currency, discordUser) {
-    const f = user.fishing;
-
+function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
     if (result.success) {
         const { catchType, finalPayout, xpEarned, levelUp, cappedByHard } = result;
 

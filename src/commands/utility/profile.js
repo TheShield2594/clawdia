@@ -6,7 +6,7 @@ const { attachGrind } = require('../../utils/grindProfile');
 const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/effectsService');
 const { getStreakMultiplier, MILESTONES } = require('../../utils/streakMultiplier');
-const { badgeFor, titleForExactRank, getBonusMultipliers } = require('../../utils/prestige');
+const { badgeFor, titleForExactRank } = require('../../utils/prestige');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { isPetActive } = require('../../services/petService');
 

@@ -130,7 +130,7 @@ function buildButtons(gameId, disabled = false, opts = {}) {
     return [row1];
 }
 
-function buildDealerRevealEmbed(interaction, dealerHand, playerHand, splitHands, currency, bet) {
+function buildDealerRevealEmbed(interaction, dealerHand, playerHand, splitHands, _currency, _bet) {
     const dealerStr = displayHand(dealerHand);
     const dealerVal = handTotal(dealerHand);
 

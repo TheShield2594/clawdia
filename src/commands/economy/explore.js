@@ -519,7 +519,7 @@ async function handleGo(interaction) {
         // Expedition quests count the trip; the coin quests count the haul. A
         // quiet walk still advances the first and rightly not the second.
         const trip = await onExplore(user, guildSettings);
-        let questsDone = [...trip.completed], questsNear = [...trip.nearComplete];
+        const questsDone = [...trip.completed], questsNear = [...trip.nearComplete];
         if (result.payout > 0) {
             const earn = await onEconomyEarn(user, guildSettings, result.payout);
             questsDone.push(...earn.completed);

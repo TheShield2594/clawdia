@@ -99,10 +99,7 @@ module.exports = {
 
         const hit = Math.random() < HIT_CHANCE;
 
-        let coinsGained = 0;
-        let stolen = 0;
-        let defender = null;
-        let description = '';
+        let coinsGained, stolen, defender, description;
 
         if (hit) {
             // Debit the defender first, atomically guarded against their balance

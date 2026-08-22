@@ -143,7 +143,7 @@ async function resolveHeist(client, heist) {
     heist.resolving = true;
 
     const target = SYNDICATE_TARGETS[heist.target];
-    const { outcome, payout, perPlayer, passedCount } = computeSyndicateOutcome(heist);
+    const { outcome, payout, perPlayer } = computeSyndicateOutcome(heist);
 
     const guildDoc = await Guild.findOne({ guildId: heist.guildId }, 'economy').lean();
     const currency = guildDoc?.economy?.currency ?? '💰';
@@ -856,7 +856,7 @@ async function executeHeist(interaction, guildDoc, client) {
     }, LOBBY_DURATION_S * 1000);
 }
 
-async function executeSabotage(interaction, guildDoc) {
+async function executeSabotage(interaction, _guildDoc) {
     const userDoc = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id }, 'syndicateId').lean();
     if (!userDoc?.syndicateId) return interaction.reply({ content: 'You are not in a syndicate.', flags: MessageFlags.Ephemeral });
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const { WEATHER_LIST, WEATHER_TYPES } = require('../data/fishData');
+const { WEATHER_TYPES } = require('../data/fishData');
 
 // ─── GLOBAL WEATHER STATE ─────────────────────────────────────────────────────
 // Shared across all guilds; rotates on a timer.

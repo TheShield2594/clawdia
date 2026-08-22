@@ -3,7 +3,7 @@
 // discord.js and the Guild model both load fine without a gateway or DB
 // connection, so this suite exercises the real command module.
 
-const { parseDuration, pickWinners, getEntrants } = require('../src/commands/utility/giveaway');
+const { parseDuration, pickWinners } = require('../src/commands/utility/giveaway');
 
 describe('parseDuration', () => {
     it('parses each supported unit', () => {

@@ -736,7 +736,7 @@ async function executeAdminEnd(interaction) {
         .limit(10)
         .select('userId seasonCoins');
 
-    let resolvedNames = {};
+    const resolvedNames = {};
     try {
         for (const u of topUsers.slice(0, 3)) {
             const member = await interaction.guild.members.fetch(u.userId).catch(() => null);

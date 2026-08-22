@@ -23,7 +23,7 @@ const { buildPityStreakField, PITY_COPY } = require('../../../utils/pityBonus');
 const { FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
 const { WILDERNESS_YIELD_BONUS } = require('./shared');
 
-function buildHuntEmbed(result, user, zone, weapon, currency, discordUser) {
+function buildHuntEmbed(result, user, zone, weapon, currency, _discordUser) {
     const h = user.hunt;
 
     if (result.success) {
