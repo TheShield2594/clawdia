@@ -127,7 +127,7 @@ async function punish(member, settings, action, count) {
     }
 }
 
-async function trackAction(guild, action, auditType, targetId, client) {
+async function trackAction(guild, action, auditType, targetId, _client) {
     let settings;
     try {
         settings = await Guild.findOne({ guildId: guild.id });

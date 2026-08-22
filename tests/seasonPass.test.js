@@ -1,6 +1,6 @@
 'use strict';
 
-const { TIER_COUNT, XP_PER_TIER, TIER_TABLE, loreForTier } = require('../src/data/seasonPass');
+const { TIER_COUNT, TIER_TABLE, loreForTier } = require('../src/data/seasonPass');
 const { awardSeasonXp } = require('../src/services/questService');
 
 describe('season pass tier table', () => {

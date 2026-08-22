@@ -81,7 +81,7 @@ function loadFileSecrets(env = process.env, { log = console, names = FILE_BACKED
         try {
             value = readSecretFile(filePath);
         } catch (err) {
-            throw new Error(`[SECRETS] Cannot read ${key} (${filePath}): ${err.message}`);
+            throw new Error(`[SECRETS] Cannot read ${key} (${filePath}): ${err.message}`, { cause: err });
         }
 
         if (!value) {

@@ -63,7 +63,7 @@ async function showLocationList(interaction, user, currency) {
     return interaction.reply({ embeds: [embed] });
 }
 
-async function setLocation(interaction, user, currency) {
+async function setLocation(interaction, user, _currency) {
     const f          = user.fishing;
     const locationId = interaction.options.getString('location');
     const location   = LOCATIONS[locationId];

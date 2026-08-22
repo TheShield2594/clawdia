@@ -31,9 +31,7 @@ function prestigeBonusLines(bonus) {
 
 // ─── EMBED BUILDERS / HELPERS ─────────────────────────────────────────────────
 
-function buildMineEmbed(result, user, depth, pickaxe, currency, discordUser) {
-    const m = user.mining;
-
+function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
     if (result.success) {
         const { ore, tier, finalPayout, isCrit, critMultiplier, specialDrop, xpEarned, levelUp, cappedByHard } = result;
         // An event catch keeps its own colour even on a critical: the tier is the

@@ -17,9 +17,22 @@ const games = [
     require('../../games/casino/slots'),
 ];
 
+// Discord rejects a command description longer than this.
+const DESCRIPTION_LIMIT = 100;
+
+// Named off the `games` array rather than beside it. The old description was a
+// hand-written copy, and it had gone stale: it still advertised baccarat,
+// wheel, plinko and doubleornothing long after they were removed, and never
+// mentioned cupgame, keno or poker (#665). A roster that outgrows the
+// description limit elides here rather than failing the deploy.
+const gameRoster = `Play casino games: ${games.map(game => game.name).join(', ')}.`;
+const description = gameRoster.length <= DESCRIPTION_LIMIT
+    ? gameRoster
+    : `${gameRoster.slice(0, DESCRIPTION_LIMIT - 1).trimEnd()}…`;
+
 const builder = new SlashCommandBuilder()
     .setName('casino')
-    .setDescription('Play casino games: blackjack, crash, cupgame, higher/lower, keno, poker, roulette, and slots.')
+    .setDescription(description)
     .addSubcommand(sub => sub.setName('jackpot').setDescription('View the current progressive jackpot pool.'))
     .addSubcommand(sub => sub
         .setName('setlimit')
@@ -74,7 +87,7 @@ module.exports = {
         }
 
         if (sub === 'jackpot') {
-            const { pool, hot, display } = await getJackpotDisplay(interaction.guild.id);
+            const { hot, display } = await getJackpotDisplay(interaction.guild.id);
             const lastWinner = guildSettings?.casinoJackpot?.lastWinnerName;
             const lastWon    = guildSettings?.casinoJackpot?.lastWonAmount;
             const embed = new EmbedBuilder()

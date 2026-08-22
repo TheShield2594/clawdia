@@ -118,7 +118,6 @@ function ensureDefaultShopItems(guildSettings) {
             guildSettings.shop.push({ ...item, roleId: null, stock: -1, imageUrl: '' });
             existingIds.add(id);
             existingNames.add(item.name.toLowerCase());
-            changed = true;
         }
         guildSettings.shopDefaultsSeeded = true;
         return true;

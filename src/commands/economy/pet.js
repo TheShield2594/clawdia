@@ -13,7 +13,6 @@ const {
     PET_DEFINITIONS,
     PERSONALITY_TRAITS,
     STARVING_THRESHOLD,
-    RUNAWAY_DAYS,
     applyHungerDecay,
     effectiveHunger,
     isPetActive,
@@ -235,7 +234,6 @@ async function syncHungerAndRunaway(user, interaction) {
 
 function buildPetEmbed(pet, index, total, ownerAvatarURL) {
     const def         = PET_DEFINITIONS[pet.petId];
-    const displayName = pet.name || def?.name || pet.petId;
     const bondDays    = Math.floor((Date.now() - new Date(pet.adoptedAt).getTime()) / 86400000);
     const hunger      = effectiveHunger(pet);
     const moodLine    = getMoodLine(pet);
@@ -936,7 +934,7 @@ function petSnapshot(pet) {
 // petA/petB must be PRE-battle snapshots: result.finalHpA/B and the HP-bar
 // denominators (max HP) are computed from pre-battle stats, so rendering from
 // post-XP pets would mismatch the bars and show the wrong level.
-function battleResultEmbed({ color, title, petA, petB, result, currency, payoutLine, xpLineA, xpLineB }) {
+function battleResultEmbed({ color, title, petA, petB, result, _currency, payoutLine, xpLineA, xpLineB }) {
     const da = getPetDisplay(petA), db = getPetDisplay(petB);
     const sa = getPetStats(petA),   sb = getPetStats(petB);
     return new EmbedBuilder()

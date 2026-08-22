@@ -3,7 +3,7 @@ const Guild = require('../models/Guild');
 
 module.exports = {
     name: 'messageUpdate',
-    async execute(oldMessage, newMessage, client) {
+    async execute(oldMessage, newMessage, _client) {
         if (newMessage.author?.bot || !newMessage.guild) return;
         if (oldMessage.content === newMessage.content) return;
 

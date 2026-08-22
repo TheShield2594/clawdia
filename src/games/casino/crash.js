@@ -120,7 +120,7 @@ async function updateCrashStats(userId, guildId, multiplier, username) {
     }
 }
 
-async function buildWeeklyLeaderboard(guildId, client) {
+async function buildWeeklyLeaderboard(guildId, _client) {
     const weekStart = getCurrentWeekStart();
 
     const topUsers = await User.find({
@@ -218,7 +218,7 @@ function liveMultiEmbed(multiplier, bet, playerLines) {
 
 // ── Final result embed ───────────────────────────────────────────────────────
 
-async function buildFinalEmbed(crashPoint, bet, players, client, guildId) {
+async function buildFinalEmbed(crashPoint, bet, players, client, _guildId) {
     const crashLabel = multLabel(crashPoint);
     const lines = [];
     for (const [uid, state] of players.entries()) {
@@ -388,7 +388,7 @@ async function openLobby(interaction, bet, hostAutoCashout, releaseLock, onWager
         await updateLobbyEmbed();
     });
 
-    joinCollector.on('end', async (_, reason) => {
+    joinCollector.on('end', async (_, _reason) => {
         if (lobby.locked) return;
         lobby.locked = true;
 

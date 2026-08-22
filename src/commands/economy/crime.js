@@ -10,7 +10,7 @@ const { clampMultiplier } = require('../../config/economy');
 const { logTransaction } = require('../../utils/logTransaction');
 const { debitUpTo, incExpr } = require('../../utils/balanceDebit');
 const { getTotalBonus } = require('../../services/petService');
-const { randomFrom, CRIME_WIN_LINES, CRIME_BUST_LINES, getCrimeFlavorText } = require('../../utils/copyLines');
+const { getCrimeFlavorText } = require('../../utils/copyLines');
 const { stackBar } = require('../../utils/rewardReveal');
 const { delay } = require('../../utils/delay');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
@@ -183,7 +183,7 @@ module.exports = {
         const timeBand = getTimeBand();
 
         const shuffled = [...CRIMES].sort(() => Math.random() - 0.5);
-        let choices = shuffled.slice(0, 3);
+        const choices = shuffled.slice(0, 3);
         if (!choices.some(c => c.name === featured.crime.name)) {
             choices[Math.floor(Math.random() * 3)] = CRIMES.find(c => c.name === featured.crime.name) ?? choices[0];
         }
@@ -341,7 +341,7 @@ module.exports = {
                     logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: earned, source: 'crime', details: crime.displayName });
                 }
 
-                let flavorWin = getCrimeFlavorText(crime.name, 'win')
+                const flavorWin = getCrimeFlavorText(crime.name, 'win')
                     .replace('{amount}', earned.toLocaleString());
                 let desc = flavorWin;
                 if (luckyActive) desc += `\n> 🍀 *Lucky Charm boosted your success chance!*`;

@@ -5,7 +5,6 @@ const {
     WEAPON_BY_TIER,
     WEAPON_UPGRADES,
     ZONES,
-    ANIMALS,
     ANIMALS_BY_TIER,
     HUNTER_LEVELS,
     LIMITS,
@@ -1453,7 +1452,7 @@ function resolveApexEncounter(user, animal, tier, choicesMade, apexType, weaponI
     // four outcomes stay ordered against each other on any single encounter.
     const basePayout = apexBasePayout(animal, options.killPayout);
 
-    let bonusPayout = 0, durabilityLost = 0, outcome = '';
+    let bonusPayout = 0, durabilityLost = 0, outcome;
 
     if (broken || correctCount === 0) {
         outcome = 'escaped';

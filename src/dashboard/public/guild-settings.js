@@ -99,15 +99,18 @@ let ESCALATION_LADDER = boot('escalationLadder');
 const navItems = document.querySelectorAll('.nav-item');
 const topbarSection = document.getElementById('topbar-section');
 
-// Keyboard + ARIA accessibility for nav items
-navItems.forEach(item => {
-    item.setAttribute('role', 'button');
-    item.setAttribute('tabindex', '0');
-    item.setAttribute('aria-pressed', item.classList.contains('active') ? 'true' : 'false');
-    item.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); item.click(); }
-    });
-});
+// The nav items used to be plain <li> elements that this file dressed up at
+// runtime: role="button" and tabindex injected onto each one, plus a keydown
+// handler standing in for Enter and Space. That stripped `listitem` off the
+// <ul>'s children — role="button" replaces the implicit role rather than
+// adding to it — and left the whole nav inert to the keyboard if the script
+// failed to load. They are <button> elements in the markup now, so the roles,
+// the focusability and the key handling are all the browser's (#660).
+//
+// The state they carry is aria-current="page", not aria-pressed: these select
+// which section is being viewed, which is not the same claim as a toggle
+// button being held down.
+const mainContent = document.getElementById('dash-main-content');
 
 // The tab the reader last asked for. A panel that is still being fetched when
 // the reader moves on must not steal the view when it finally arrives.
@@ -119,11 +122,11 @@ async function activateTab(tab) {
     if (!item) return null;
     requestedTab = tab;
 
-    navItems.forEach(n => { n.classList.remove('active'); n.setAttribute('aria-pressed', 'false'); });
+    navItems.forEach(n => { n.classList.remove('active'); n.removeAttribute('aria-current'); });
     document.querySelectorAll('.panel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
     document.querySelectorAll('.panel-stub').forEach(p => { p.style.display = 'none'; });
     item.classList.add('active');
-    item.setAttribute('aria-pressed', 'true');
+    item.setAttribute('aria-current', 'page');
     if (topbarSection) topbarSection.textContent = item.querySelector('span:last-child')?.textContent || tab;
     if (history.replaceState) {
         const innerToParent = { knowledgebase: 'ai', aisummaries: 'ai', aipersonas: 'ai', dailynews: 'rss' };
@@ -155,7 +158,17 @@ async function activateTab(tab) {
 }
 
 navItems.forEach(item => {
-    item.addEventListener('click', () => { activateTab(item.dataset.tab); });
+    item.addEventListener('click', async () => {
+        await activateTab(item.dataset.tab);
+        // Land the reader in the section they just opened. Without this, a
+        // keyboard user picking the last item in the sidebar has to tab back
+        // through every item below it to reach the settings — 25 stops on
+        // every visit. `preventScroll` keeps the mouse path unchanged, and the
+        // target is tabindex="-1", so this adds no tab stop of its own.
+        if (mainContent && document.activeElement === item) {
+            mainContent.focus({ preventScroll: true });
+        }
+    });
 });
 
 // Module card click-to-navigate. Delegated, because the cards sit inside a panel.
@@ -296,11 +309,14 @@ function filterSidebarNav(query) {
         const navList = label.nextElementSibling;
         if (!navList) return;
         let groupVisible = false;
-        navList.querySelectorAll('li').forEach(li => {
-            const text = li.textContent.toLowerCase();
-            const keywords = (li.dataset.keywords || '').toLowerCase();
+        navList.querySelectorAll('.nav-item').forEach(item => {
+            const text = item.textContent.toLowerCase();
+            const keywords = (item.dataset.keywords || '').toLowerCase();
             const matches = text.includes(q) || keywords.includes(q);
-            li.style.display = matches ? '' : 'none';
+            // Hide the <li>, not the button: `display: none` on the list item
+            // takes the button out of the tab order and the accessibility tree
+            // with it, and leaves the list itself intact.
+            item.closest('li').style.display = matches ? '' : 'none';
             if (matches) { groupVisible = true; anyVisible = true; }
         });
         label.style.display = groupVisible ? '' : 'none';
@@ -326,7 +342,7 @@ async function sendWelcomeCardPreview() {
             body: JSON.stringify({ channelId })
         });
         if (resp.ok) {
-            toast('Preview sent to channel ✓', 'success');
+            toast('Preview sent to channel', 'success');
         } else {
             const d = await resp.json().catch(() => ({}));
             toast(d.error || 'Failed to send preview', 'error');
@@ -381,15 +397,55 @@ onPanel('welcome',   () => updateMsgPreview('welcome-message', 'welcome-preview'
 onPanel('farewell',  () => updateMsgPreview('farewell-message', 'farewell-preview'));
 onPanel('birthdays', () => updateMsgPreview('birthday-message', 'birthday-preview'));
 
-// Toast helper
+// ── Toast ─────────────────────────────────────────────────────────────
+// The only feedback channel the dashboard has: every save, delete and failure
+// reports through this one element. That makes three things load-bearing (#659):
+//
+//   * The element is a live region (role="status" in the markup), so a screen
+//     reader announces the result instead of the reader being left guessing.
+//   * Success and failure are told apart by an icon and a word, not by a
+//     0.4-alpha border colour — WCAG 1.4.1 rules colour-only out, and the
+//     border was invisible to most people anyway.
+//   * There is a dismiss button, and an error stays up long enough to read.
+//     The old fixed 2.8 s auto-dismiss could take a message away mid-sentence
+//     with no way to bring it back.
 const toastEl = document.getElementById('toast');
+const toastIcon = document.getElementById('toast-icon');
+const toastMessage = document.getElementById('toast-message');
+const toastClose = document.getElementById('toast-close');
 let toastTimer;
-function toast(message, kind) {
-    toastEl.textContent = message;
-    toastEl.className = 'toast show' + (kind ? ' ' + kind : '');
+
+const TOAST_KINDS = {
+    success: { icon: '✓', prefix: 'Success' },
+    error:   { icon: '⚠', prefix: 'Error' },
+    info:    { icon: 'ℹ', prefix: 'Note' },
+};
+const TOAST_DISMISS_MS = { success: 2800, error: 8000, info: 4500 };
+
+function hideToast() {
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2800);
+    toastEl.classList.remove('show');
+    // The toast is only faded out, not display:none, so without this the
+    // dismiss button stays in the tab order — an unlabelled stop in the corner
+    // of every page, dismissing nothing. It ships `hidden` for the same reason.
+    if (toastClose) toastClose.hidden = true;
 }
+
+function toast(message, kind) {
+    const style = TOAST_KINDS[kind];
+    toastIcon.textContent = style ? style.icon : '';
+    // The prefix is what a screen reader hears first, so it carries the
+    // outcome even when the message itself reads the same either way
+    // ("Network error" is only an error because we say so).
+    toastMessage.textContent = style ? `${style.prefix}: ${message}` : message;
+    toastEl.className = 'toast show' + (kind ? ' ' + kind : '');
+    if (toastClose) toastClose.hidden = false;
+
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, TOAST_DISMISS_MS[kind] || 2800);
+}
+
+if (toastClose) toastClose.addEventListener('click', hideToast);
 
 const AI_MODEL_DEFAULTS = {
     openai: 'gpt-4o-mini',
@@ -902,7 +958,7 @@ async function saveSettings(section) {
         // EJS renders the saved systemPrompt verbatim, so pre-existing values
         // can exceed the textarea's maxlength (e.g. set via the API).
         // Validate here so we never POST an oversized prompt.
-        var aiPromptVal = document.getElementById('ai-prompt').value;
+        const aiPromptVal = document.getElementById('ai-prompt').value;
         if (aiPromptVal.length > 4000) {
             updatePromptCount('ai-prompt');
             toast('System prompt is ' + aiPromptVal.length + ' chars — maximum is 4000.', 'error');
@@ -1057,10 +1113,10 @@ async function saveSettings(section) {
             else {
                 Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]);
                 _shopItemClearedImages.clear();
-                toast('Settings saved ✓', 'success');
+                toast('Settings saved', 'success');
             }
         } else {
-            toast('Settings saved ✓', 'success');
+            toast('Settings saved', 'success');
         }
     } catch (error) {
         console.error(error);
@@ -1069,17 +1125,17 @@ async function saveSettings(section) {
 }
 
 async function uploadActivityImage(itemId, input) {
-    var file = input.files[0];
+    const file = input.files[0];
     if (!file) return;
-    var emojiEl = document.getElementById('gic-emoji-' + itemId);
-    var imgEl = document.getElementById('gic-img-' + itemId);
-    var fd = new FormData();
+    const emojiEl = document.getElementById('gic-emoji-' + itemId);
+    let imgEl = document.getElementById('gic-img-' + itemId);
+    const fd = new FormData();
     fd.append('image', file);
     try {
-        var r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'POST', body: fd });
+        const r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'POST', body: fd });
         if (r.ok) {
-            var dataUrl = await new Promise(function(res) {
-                var reader = new FileReader();
+            const dataUrl = await new Promise(function(res) {
+                const reader = new FileReader();
                 reader.onload = function(e) { res(e.target.result); };
                 reader.readAsDataURL(file);
             });
@@ -1096,12 +1152,12 @@ async function uploadActivityImage(itemId, input) {
                 imgEl.style.display = 'block';
             }
             if (emojiEl) emojiEl.style.display = 'none';
-            toast('Image uploaded ✓', 'success');
+            toast('Image uploaded', 'success');
         } else {
-            var err = await r.json().catch(function(){ return {}; });
+            const err = await r.json().catch(function(){ return {}; });
             toast(err.error || 'Upload failed', 'error');
         }
-    } catch(e) {
+    } catch {
         toast('Upload error', 'error');
     }
     input.value = '';
@@ -1111,10 +1167,10 @@ async function removeActivityImage(itemId) {
     const ok = await showConfirm({ title: 'Remove image', body: 'Remove the image for this activity item?', okText: 'Remove' });
     if (!ok) return;
     try {
-        var r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'DELETE' });
+        const r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'DELETE' });
         if (r.ok) {
-            var imgEl = document.getElementById('gic-img-' + itemId);
-            var emojiEl = document.getElementById('gic-emoji-' + itemId);
+            const imgEl = document.getElementById('gic-img-' + itemId);
+            const emojiEl = document.getElementById('gic-emoji-' + itemId);
             if (imgEl) {
                 imgEl.src = '';
                 imgEl.style.display = 'none';
@@ -1122,10 +1178,10 @@ async function removeActivityImage(itemId) {
             if (emojiEl) emojiEl.style.display = 'flex';
             toast('Image removed', 'success');
         } else {
-            var err = await r.json().catch(function(){ return {}; });
+            const err = await r.json().catch(function(){ return {}; });
             toast(err.error || 'Remove failed', 'error');
         }
-    } catch(e) {
+    } catch {
         toast('Error removing image', 'error');
     }
 }
@@ -1136,7 +1192,7 @@ async function triggerDailyNewsNow() {
     if (!ok) return;
     try {
         const response = await fetch(`/api/guild/${guildId}/dailynews/trigger`, { method: 'POST' });
-        if (response.ok) toast('Digest sent ✓', 'success');
+        if (response.ok) toast('Digest sent', 'success');
         else {
             const err = await response.json().catch(() => ({}));
             toast(err.error || 'Failed to send digest', 'error');
@@ -1181,7 +1237,7 @@ async function addAutoRole() {
             chip.appendChild(removeBtn);
             document.getElementById('autorole-list').appendChild(chip);
             select.value = '';
-            toast('Role added ✓', 'success');
+            toast('Role added', 'success');
         } else toast('Failed to add role', 'error');
     } catch (error) {
         console.error(error);
@@ -1196,7 +1252,7 @@ async function removeAutoRole(roleId) {
         if (response.ok) {
             const chip = document.querySelector(`#autorole-list [data-role-id="${roleId}"]`);
             if (chip) chip.remove();
-            toast('Role removed ✓', 'success');
+            toast('Role removed', 'success');
         } else toast('Failed to remove role', 'error');
     } catch (error) {
         console.error(error);
@@ -1215,7 +1271,7 @@ async function addRssFeed() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, channelId })
         });
-        if (response.ok) { toast('RSS feed added ✓', 'success'); setTimeout(() => location.reload(), 600); }
+        if (response.ok) { toast('RSS feed added', 'success'); setTimeout(() => location.reload(), 600); }
         else toast('Failed to add RSS feed', 'error');
     } catch (error) {
         console.error(error);
@@ -1229,7 +1285,7 @@ async function deleteRssFeed(index) {
     const guildId = BOOT.guildId;
     try {
         const response = await fetch(`/api/guild/${guildId}/rss/${index}`, { method: 'DELETE' });
-        if (response.ok) { toast('RSS feed removed ✓', 'success'); setTimeout(() => location.reload(), 600); }
+        if (response.ok) { toast('RSS feed removed', 'success'); setTimeout(() => location.reload(), 600); }
         else toast('Failed to delete RSS feed', 'error');
     } catch (error) {
         console.error(error);
@@ -1250,7 +1306,7 @@ var _confirmPrevFocus = null;
 var _confirmTrapHandler = null;
 
 function _confirmFocusables() {
-    var modal = document.getElementById('confirm-modal');
+    const modal = document.getElementById('confirm-modal');
     return Array.from(modal.querySelectorAll(
         'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
     )).filter(function(el) { return el.offsetParent !== null; });
@@ -1258,15 +1314,15 @@ function _confirmFocusables() {
 
 function showConfirm(opts) {
     return new Promise(function(resolve) {
-        var title  = opts.title  || 'Are you sure?';
-        var body   = opts.body   || 'This action cannot be undone.';
-        var okText = opts.okText || 'Confirm';
-        var typeRequired = opts.typeRequired || null;
+        const title  = opts.title  || 'Are you sure?';
+        const body   = opts.body   || 'This action cannot be undone.';
+        const okText = opts.okText || 'Confirm';
+        const typeRequired = opts.typeRequired || null;
         document.getElementById('confirm-modal-title').textContent = title;
         document.getElementById('confirm-modal-body').textContent  = body;
         document.getElementById('confirm-modal-ok').textContent    = okText;
-        var typeArea  = document.getElementById('confirm-modal-type-reset');
-        var typeInput = document.getElementById('confirm-type-input');
+        const typeArea  = document.getElementById('confirm-modal-type-reset');
+        const typeInput = document.getElementById('confirm-type-input');
         if (typeRequired) {
             document.getElementById('confirm-type-label').innerHTML = 'Type <strong>' + escHtml(typeRequired) + '</strong> to confirm';
             typeInput.value = '';
@@ -1275,7 +1331,7 @@ function showConfirm(opts) {
         } else {
             typeArea.style.display = 'none';
         }
-        var modal = document.getElementById('confirm-modal');
+        const modal = document.getElementById('confirm-modal');
         _confirmPrevFocus = document.activeElement;
         modal.setAttribute('aria-hidden', 'false');
         modal.style.display = 'flex';
@@ -1290,9 +1346,9 @@ function showConfirm(opts) {
         _confirmTrapHandler = function(e) {
             if (e.key === 'Escape') { e.preventDefault(); _confirmResolve(false); return; }
             if (e.key !== 'Tab') return;
-            var focusables = _confirmFocusables();
+            const focusables = _confirmFocusables();
             if (!focusables.length) { e.preventDefault(); return; }
-            var first = focusables[0], last = focusables[focusables.length - 1];
+            const first = focusables[0], last = focusables[focusables.length - 1];
             if (e.shiftKey) {
                 if (document.activeElement === first) { e.preventDefault(); last.focus(); }
             } else {
@@ -1322,10 +1378,10 @@ function showConfirm(opts) {
 }
 
 function renderCpRules() {
-    var list = document.getElementById('cp-rules-list');
+    const list = document.getElementById('cp-rules-list');
     if (!_cpRules.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;">No rules — click <strong>+ Add rule</strong> to add one.</p>'; return; }
     list.innerHTML = _cpRules.map(function(r, i) {
-        var color = r.effect === 'allow' ? '#2ecc71' : '#e74c3c';
+        const color = r.effect === 'allow' ? '#2ecc71' : '#e74c3c';
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="flex:1"><strong>' + escHtml(r.command) + '</strong> — <span style="color:' + color + '">' + escHtml(r.effect) + '</span></span>' +
             '<button class="btn btn-sm" onclick="openCpRuleModal(' + i + ')">Edit</button>' +
@@ -1334,10 +1390,10 @@ function renderCpRules() {
 }
 var _cpRoleMap = boot('roleNames');
 function renderCpCooldowns() {
-    var list = document.getElementById('cp-cooldowns-list');
+    const list = document.getElementById('cp-cooldowns-list');
     if (!_cpCooldowns.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;">No cooldown overrides — click <strong>+ Add override</strong>.</p>'; return; }
     list.innerHTML = _cpCooldowns.map(function(c, i) {
-        var roleName = _cpRoleMap[c.roleId] ? '@' + _cpRoleMap[c.roleId] : escHtml(c.roleId);
+        const roleName = _cpRoleMap[c.roleId] ? '@' + _cpRoleMap[c.roleId] : escHtml(c.roleId);
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="flex:1"><strong>' + escHtml(c.command) + '</strong> — ' + escHtml(roleName) + ' → ' + escHtml(c.cooldownSeconds) + 's</span>' +
             '<button class="btn btn-sm" onclick="openCpCooldownModal(' + i + ')">Edit</button>' +
@@ -1346,13 +1402,13 @@ function renderCpCooldowns() {
 }
 function openCpRuleModal(idx) {
     _cpRuleIdx = idx;
-    var r = idx === -1 ? {} : _cpRules[idx];
+    const r = idx === -1 ? {} : _cpRules[idx];
     document.getElementById('cp-rule-modal-title').textContent = idx === -1 ? 'Add Rule' : 'Edit Rule';
     document.getElementById('cp-r-command').value   = r.command || '';
     document.getElementById('cp-r-effect').value    = r.effect || 'allow';
-    var rRoles = r.roleIds || [];
+    const rRoles = r.roleIds || [];
     Array.from(document.getElementById('cp-r-roles').options).forEach(function(o) { o.selected = rRoles.includes(o.value); });
-    var rChans = r.channelIds || [];
+    const rChans = r.channelIds || [];
     Array.from(document.getElementById('cp-r-channels').options).forEach(function(o) { o.selected = rChans.includes(o.value); });
     document.getElementById('cp-r-start-hour').value = r.startHourUtc != null ? r.startHourUtc : '';
     document.getElementById('cp-r-end-hour').value   = r.endHourUtc   != null ? r.endHourUtc   : '';
@@ -1360,11 +1416,11 @@ function openCpRuleModal(idx) {
 }
 function closeCpRuleModal() { document.getElementById('cp-rule-modal').style.display = 'none'; }
 function saveCpRuleModal() {
-    var cmd = document.getElementById('cp-r-command').value.trim();
+    const cmd = document.getElementById('cp-r-command').value.trim();
     if (!cmd) { toast('Command name is required', 'error'); return; }
-    var sh = document.getElementById('cp-r-start-hour').value;
-    var eh = document.getElementById('cp-r-end-hour').value;
-    var rule = {
+    const sh = document.getElementById('cp-r-start-hour').value;
+    const eh = document.getElementById('cp-r-end-hour').value;
+    const rule = {
         command: cmd,
         effect: document.getElementById('cp-r-effect').value,
         roleIds: Array.from(document.getElementById('cp-r-roles').selectedOptions).map(function(o){return o.value;}),
@@ -1378,7 +1434,7 @@ function saveCpRuleModal() {
 }
 function openCpCooldownModal(idx) {
     _cpCdIdx = idx;
-    var c = idx === -1 ? {} : _cpCooldowns[idx];
+    const c = idx === -1 ? {} : _cpCooldowns[idx];
     document.getElementById('cp-cd-command').value = c.command || '';
     document.getElementById('cp-cd-role').value    = c.roleId  || '';
     document.getElementById('cp-cd-seconds').value = c.cooldownSeconds != null ? c.cooldownSeconds : '';
@@ -1386,26 +1442,26 @@ function openCpCooldownModal(idx) {
 }
 function closeCpCooldownModal() { document.getElementById('cp-cooldown-modal').style.display = 'none'; }
 function saveCpCooldownModal() {
-    var cmd = document.getElementById('cp-cd-command').value.trim();
-    var role = document.getElementById('cp-cd-role').value.trim();
+    const cmd = document.getElementById('cp-cd-command').value.trim();
+    const role = document.getElementById('cp-cd-role').value.trim();
     if (!cmd || !role) { toast('Command and role are required', 'error'); return; }
-    var entry = { command: cmd, roleId: role, cooldownSeconds: parseInt(document.getElementById('cp-cd-seconds').value, 10) || 0 };
+    const entry = { command: cmd, roleId: role, cooldownSeconds: parseInt(document.getElementById('cp-cd-seconds').value, 10) || 0 };
     if (_cpCdIdx === -1) _cpCooldowns.push(entry); else _cpCooldowns[_cpCdIdx] = entry;
     closeCpCooldownModal(); renderCpCooldowns();
 }
 
 function addCpExcRole() {
-    var sel = document.getElementById('cp-exc-roles-select');
-    var roleId = sel.value;
-    var roleName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : roleId;
+    const sel = document.getElementById('cp-exc-roles-select');
+    const roleId = sel.value;
+    const roleName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : roleId;
     if (!roleId) return;
     if (document.querySelector('#cp-exc-roles-list [data-role-id="' + CSS.escape(roleId) + '"]')) { toast('Role already added', 'error'); return; }
-    var list = document.getElementById('cp-exc-roles-list');
-    var tag = document.createElement('span');
+    const list = document.getElementById('cp-exc-roles-list');
+    const tag = document.createElement('span');
     tag.className = 'role-tag';
     tag.dataset.roleId = roleId;
     tag.textContent = roleName + ' ';
-    var btn = document.createElement('button');
+    const btn = document.createElement('button');
     btn.type = 'button';
     btn.title = 'Remove';
     btn.textContent = '×';
@@ -1436,18 +1492,18 @@ var _shopItemClearedImages = new Set(); // itemIds whose images were explicitly 
 var _guildId = BOOT.guildId;
 
 function renderStoreItems() {
-    var grid = document.getElementById('store-items-grid');
+    const grid = document.getElementById('store-items-grid');
     if (!storeItems.length) {
         grid.innerHTML = '<div class="empty-state"><h3>No store items yet</h3><p>Click <strong>+ Add item</strong> to create your first shop listing.</p></div>';
         return;
     }
     grid.innerHTML = storeItems.map(function(item, i) {
-        var roleName = item.roleId ? (_roleMap[item.roleId] || item.roleId) : null;
-        var stockText = (item.stock === -1 || item.stock == null) ? '∞ Unlimited' : item.stock + ' left';
-        var imgSrc = (item.itemId && _shopItemPendingImages[item.itemId])
+        const roleName = item.roleId ? (_roleMap[item.roleId] || item.roleId) : null;
+        const stockText = (item.stock === -1 || item.stock == null) ? '∞ Unlimited' : item.stock + ' left';
+        const imgSrc = (item.itemId && _shopItemPendingImages[item.itemId])
             ? _shopItemPendingImages[item.itemId].dataUrl
             : (item.itemId ? '/api/item-image/shop/' + _guildId + '/' + escHtml(item.itemId) : '');
-        var thumbHtml = imgSrc ? '<img class="store-card-thumb" src="' + imgSrc + '" alt="" onerror="this.style.display=\'none\'">' : '';
+        const thumbHtml = imgSrc ? '<img class="store-card-thumb" src="' + imgSrc + '" alt="" onerror="this.style.display=\'none\'">' : '';
         return '<div class="store-card">' +
             (thumbHtml ? '<div class="store-card-thumb-wrap">' + thumbHtml + '</div>' : '') +
             '<div class="store-card-body">' +
@@ -1472,11 +1528,11 @@ function _genItemId() {
 }
 
 function previewShopItemImage(input) {
-    var file = input.files[0];
+    const file = input.files[0];
     if (!file) return;
-    var reader = new FileReader();
+    const reader = new FileReader();
     reader.onload = function(e) {
-        var dataUrl = e.target.result;
+        const dataUrl = e.target.result;
         document.getElementById('shop-img-preview').src = dataUrl;
         document.getElementById('shop-img-preview').style.display = 'block';
         document.getElementById('shop-img-placeholder').style.display = 'none';
@@ -1492,7 +1548,7 @@ function clearShopItemImage() {
     document.getElementById('shop-img-preview').style.display = 'none';
     document.getElementById('shop-img-placeholder').style.display = 'block';
     document.getElementById('shop-img-clear-btn').style.display = 'none';
-    var fileInput = document.getElementById('modal-item-image-file');
+    const fileInput = document.getElementById('modal-item-image-file');
     fileInput._pendingFile = null;
     fileInput._pendingDataUrl = null;
     fileInput.value = '';
@@ -1502,33 +1558,33 @@ function clearShopItemImage() {
 function openItemModal(idx) {
     editingItemIdx = idx;
     document.getElementById('item-modal-title').textContent = idx === -1 ? 'Add Store Item' : 'Edit Store Item';
-    var item = idx === -1 ? {} : storeItems[idx];
+    const item = idx === -1 ? {} : storeItems[idx];
     document.getElementById('modal-item-name').value = item.name || '';
     document.getElementById('modal-item-desc').value = item.description || '';
     document.getElementById('modal-item-price').value = item.price != null ? item.price : '';
     document.getElementById('modal-item-role').value = item.roleId || '';
-    var isUnlimited = (item.stock == null || item.stock === -1);
+    const isUnlimited = (item.stock == null || item.stock === -1);
     document.getElementById('modal-item-unlimited').checked = isUnlimited;
     document.getElementById('modal-item-stock').style.display = isUnlimited ? 'none' : '';
     document.getElementById('modal-item-stock').value = isUnlimited ? '' : item.stock;
 
     // Reset image preview
-    var fileInput = document.getElementById('modal-item-image-file');
+    const fileInput = document.getElementById('modal-item-image-file');
     fileInput.value = '';
     fileInput._pendingFile = null;
     fileInput._pendingDataUrl = null;
     fileInput._clearExisting = false;
-    var preview = document.getElementById('shop-img-preview');
-    var placeholder = document.getElementById('shop-img-placeholder');
-    var clearBtn = document.getElementById('shop-img-clear-btn');
-    var pending = item.itemId && _shopItemPendingImages[item.itemId];
+    const preview = document.getElementById('shop-img-preview');
+    const placeholder = document.getElementById('shop-img-placeholder');
+    const clearBtn = document.getElementById('shop-img-clear-btn');
+    const pending = item.itemId && _shopItemPendingImages[item.itemId];
     if (pending) {
         preview.src = pending.dataUrl;
         preview.style.display = 'block';
         placeholder.style.display = 'none';
         clearBtn.style.display = 'inline-flex';
     } else if (item.itemId) {
-        var imgSrc = '/api/item-image/shop/' + _guildId + '/' + item.itemId;
+        const imgSrc = '/api/item-image/shop/' + _guildId + '/' + item.itemId;
         preview.src = imgSrc;
         preview.style.display = 'block';
         placeholder.style.display = 'none';
@@ -1552,19 +1608,19 @@ function toggleStockInput(cb) {
 }
 
 function saveItemModal() {
-    var name = document.getElementById('modal-item-name').value.trim();
-    var price = parseInt(document.getElementById('modal-item-price').value, 10);
+    const name = document.getElementById('modal-item-name').value.trim();
+    const price = parseInt(document.getElementById('modal-item-price').value, 10);
     if (!name) { toast('Item name is required', 'error'); return; }
     if (!Number.isFinite(price) || price < 0) { toast('Enter a valid price', 'error'); return; }
-    var isUnlimited = document.getElementById('modal-item-unlimited').checked;
-    var parsedStock = isUnlimited ? -1 : parseInt(document.getElementById('modal-item-stock').value, 10);
+    const isUnlimited = document.getElementById('modal-item-unlimited').checked;
+    const parsedStock = isUnlimited ? -1 : parseInt(document.getElementById('modal-item-stock').value, 10);
     if (!isUnlimited && (!Number.isFinite(parsedStock) || parsedStock < 1)) { toast('Enter a valid stock quantity', 'error'); return; }
-    var fileInput = document.getElementById('modal-item-image-file');
+    const fileInput = document.getElementById('modal-item-image-file');
 
-    var existingItem = editingItemIdx === -1 ? null : storeItems[editingItemIdx];
-    var itemId = (existingItem && existingItem.itemId) ? existingItem.itemId : _genItemId();
+    const existingItem = editingItemIdx === -1 ? null : storeItems[editingItemIdx];
+    const itemId = (existingItem && existingItem.itemId) ? existingItem.itemId : _genItemId();
 
-    var item = {
+    const item = {
         name: name,
         itemId: itemId,
         description: document.getElementById('modal-item-desc').value.trim(),
@@ -1598,11 +1654,11 @@ var JOB_TIER_COLORS = ['#2ecc71','#3498db','#9b59b6','#f39c12'];
 var JOB_TIER_BADGES = ['🟢','🔵','🟣','🟡'];
 
 function renderJobTiers() {
-    var grid = document.getElementById('job-tiers-grid');
+    const grid = document.getElementById('job-tiers-grid');
     grid.innerHTML = jobTiersList.map(function(t, i) {
-        var color = JOB_TIER_COLORS[i] || '#888';
-        var badge = JOB_TIER_BADGES[i] || '⚪';
-        var isFirst = t.minShifts === 0;
+        const color = JOB_TIER_COLORS[i] || '#888';
+        const badge = JOB_TIER_BADGES[i] || '⚪';
+        const isFirst = t.minShifts === 0;
         return '<div class="job-tier-row" style="border-left:3px solid ' + color + '">' +
             '<span class="job-tier-row-badge">' + badge + ' Tier ' + t.tier + '</span>' +
             '<input class="job-tier-name-input" data-tier-idx="' + i + '" data-field="name" value="' + escHtml(t.name) + '" placeholder="Tier name" oninput="updateTierField(this)">' +
@@ -1615,8 +1671,8 @@ function renderJobTiers() {
 }
 
 function updateTierField(el) {
-    var idx = parseInt(el.dataset.tierIdx, 10);
-    var field = el.dataset.field;
+    const idx = parseInt(el.dataset.tierIdx, 10);
+    const field = el.dataset.field;
     jobTiersList[idx][field] = field === 'minShifts' ? (parseInt(el.value, 10) || 0) : el.value;
 }
 
@@ -1628,32 +1684,32 @@ var JOB_TIER_META = [
 ];
 
 function renderJobs() {
-    var list = document.getElementById('jobs-list');
+    const list = document.getElementById('jobs-list');
     if (!jobsList.length) {
         list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;padding:.5rem 0">No jobs — click <strong>+ Add job</strong> to add one.</p>';
         return;
     }
 
     // Sort by tier then name
-    var sorted = jobsList.map(function(j, i) { return { job: j, idx: i }; });
+    const sorted = jobsList.map(function(j, i) { return { job: j, idx: i }; });
     sorted.sort(function(a, b) {
-        var ta = a.job.tier || 1, tb = b.job.tier || 1;
+        const ta = a.job.tier || 1, tb = b.job.tier || 1;
         return ta !== tb ? ta - tb : a.job.name.localeCompare(b.job.name);
     });
 
     // Build tier name lookup from live jobTiersList so names stay in sync
-    var tierNameMap = {};
+    const tierNameMap = {};
     jobTiersList.forEach(function(t) { tierNameMap[t.tier] = t.name; });
 
     // Group into tiers
-    var html = '';
-    var lastTier = null;
+    let html = '';
+    let lastTier = null;
     sorted.forEach(function(entry) {
-        var job = entry.job, i = entry.idx;
-        var tier = job.tier || 1;
-        var color = JOB_TIER_COLORS[tier - 1] || '#888';
-        var badge = JOB_TIER_BADGES[tier - 1] || '⚪';
-        var tierName = tierNameMap[tier] || ('Tier ' + tier);
+        const job = entry.job, i = entry.idx;
+        const tier = job.tier || 1;
+        const color = JOB_TIER_COLORS[tier - 1] || '#888';
+        const badge = JOB_TIER_BADGES[tier - 1] || '⚪';
+        const tierName = tierNameMap[tier] || ('Tier ' + tier);
         if (tier !== lastTier) {
             if (lastTier !== null) html += '</div>';
             html += '<div class="job-tier-group">' +
@@ -1662,8 +1718,8 @@ function renderJobs() {
                 '</div>';
             lastTier = tier;
         }
-        var minPay = job.minPay != null ? job.minPay : '?';
-        var maxPay = job.maxPay != null ? job.maxPay : '?';
+        const minPay = job.minPay != null ? job.minPay : '?';
+        const maxPay = job.maxPay != null ? job.maxPay : '?';
         html += '<div class="job-chip">' +
             (job.emoji ? '<span class="job-chip-emoji">' + escHtml(job.emoji) + '</span>' : '') +
             '<span class="job-name">' + escHtml(job.name) + '</span>' +
@@ -1679,7 +1735,7 @@ function renderJobs() {
 function openJobModal(idx) {
     editingJobIdx = idx;
     document.getElementById('job-modal-title').textContent = idx === -1 ? 'Add Job' : 'Edit Job';
-    var job = idx === -1 ? {} : jobsList[idx];
+    const job = idx === -1 ? {} : jobsList[idx];
     document.getElementById('modal-job-name').value = job.name || '';
     document.getElementById('modal-job-emoji').value = job.emoji || '';
     document.getElementById('modal-job-tier').value = String(job.tier || 1);
@@ -1691,13 +1747,13 @@ function openJobModal(idx) {
 function closeJobModal() { document.getElementById('job-modal').style.display = 'none'; }
 
 function saveJobModal() {
-    var name = document.getElementById('modal-job-name').value.trim();
+    const name = document.getElementById('modal-job-name').value.trim();
     if (!name) { toast('Job name is required', 'error'); return; }
-    var minPay = parseInt(document.getElementById('modal-job-min-pay').value, 10);
-    var maxPay = parseInt(document.getElementById('modal-job-max-pay').value, 10);
+    const minPay = parseInt(document.getElementById('modal-job-min-pay').value, 10);
+    const maxPay = parseInt(document.getElementById('modal-job-max-pay').value, 10);
     if (!Number.isFinite(minPay) || minPay < 0) { toast('Enter a valid min pay', 'error'); return; }
     if (!Number.isFinite(maxPay) || maxPay < minPay) { toast('Max pay must be ≥ min pay', 'error'); return; }
-    var job = {
+    const job = {
         name: name,
         emoji: document.getElementById('modal-job-emoji').value.trim(),
         tier: parseInt(document.getElementById('modal-job-tier').value, 10) || 1,
@@ -1740,9 +1796,9 @@ document.addEventListener('click', function(e) {
 // `&#39;` from escHtml turns back into a quote and closes the string it
 // was meant to sit inside.
 document.addEventListener('click', function(e) {
-    var el = e.target.closest && e.target.closest('[data-action]');
+    const el = e.target.closest && e.target.closest('[data-action]');
     if (!el) return;
-    var d = el.dataset;
+    const d = el.dataset;
     if (d.action === 'ach-grant')      openAchGrantModal(d.achId, d.achName);
     else if (d.action === 'summary-delete') deleteSummaryJob(d.jobId);
     else if (d.action === 'persona-remove') removePersona(d.channelId);
@@ -1755,12 +1811,12 @@ document.addEventListener('click', function(e) {
 // mousedown, not click: the dropdown is hidden by the input's blur, which
 // fires first on a click.
 document.addEventListener('mousedown', function(e) {
-    var el = e.target.closest && e.target.closest('[data-action="member-select"]');
+    const el = e.target.closest && e.target.closest('[data-action="member-select"]');
     if (el) selectGrantMember(el.dataset.memberId, el.dataset.memberName);
 });
 
 document.addEventListener('change', function(e) {
-    var el = e.target.closest && e.target.closest('[data-builtin-ach-id]');
+    const el = e.target.closest && e.target.closest('[data-builtin-ach-id]');
     if (el) toggleBuiltinAch(el.dataset.builtinAchId, el.checked);
 });
 
@@ -1774,11 +1830,11 @@ var ACH_CAT_LABELS = { economy:'Economy', leveling:'Leveling', hunt:'Hunt', fish
 var ACH_CAT_EMOJIS = { economy:'💰', leveling:'📈', hunt:'🏹', fishing:'🎣', community:'👥', moderation:'🛡️', custom:'⚙️' };
 
 function renderBuiltinAchievements() {
-    var list = document.getElementById('builtin-ach-list');
+    const list = document.getElementById('builtin-ach-list');
     if (!_BUILTIN_ACHS.length) { list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem">No built-in achievements loaded.</p>'; return; }
     list.innerHTML = _BUILTIN_ACHS.map(function(a) {
-        var disabled = _disabledAchievements.indexOf(a.id) !== -1;
-        var catLabel = (ACH_CAT_EMOJIS[a.category] || '🔹') + ' ' + (ACH_CAT_LABELS[a.category] || a.category);
+        const disabled = _disabledAchievements.indexOf(a.id) !== -1;
+        const catLabel = (ACH_CAT_EMOJIS[a.category] || '🔹') + ' ' + (ACH_CAT_LABELS[a.category] || a.category);
         return '<div class="store-item-card" style="padding:.6rem .9rem;display:flex;align-items:center;gap:.75rem;">' +
             '<span style="font-size:1.4rem">' + escHtml(a.emoji) + '</span>' +
             '<span style="flex:1"><strong>' + escHtml(a.name) + '</strong> <span style="font-size:.8rem;color:var(--text-dim)">' + catLabel + '</span><br>' +
@@ -1800,13 +1856,13 @@ function toggleBuiltinAch(id, enabled) {
 }
 
 function renderCustomAchievements() {
-    var list = document.getElementById('custom-ach-list');
+    const list = document.getElementById('custom-ach-list');
     if (!_customAchievements.length) {
         list.innerHTML = '<p style="color:var(--text-dim);font-size:.88rem;padding:.25rem 0">No custom achievements yet — click <strong>+ Add achievement</strong> to create one.</p>';
         return;
     }
     list.innerHTML = _customAchievements.map(function(a, i) {
-        var catLabel = (ACH_CAT_EMOJIS[a.category] || '🔹') + ' ' + (ACH_CAT_LABELS[a.category] || a.category);
+        const catLabel = (ACH_CAT_EMOJIS[a.category] || '🔹') + ' ' + (ACH_CAT_LABELS[a.category] || a.category);
         return '<div class="store-card">' +
             '<div class="store-card-body">' +
                 '<div class="store-card-name">' + escHtml(a.emoji || '🏆') + ' ' + escHtml(a.name) + '</div>' +
@@ -1829,7 +1885,7 @@ function renderCustomAchievements() {
 function openAchModal(idx) {
     _editingAchIdx = idx;
     document.getElementById('ach-modal-title').textContent = idx === -1 ? 'Add Achievement' : 'Edit Achievement';
-    var a = idx === -1 ? {} : _customAchievements[idx];
+    const a = idx === -1 ? {} : _customAchievements[idx];
     document.getElementById('modal-ach-name').value     = a.name        || '';
     document.getElementById('modal-ach-desc').value     = a.description || '';
     document.getElementById('modal-ach-emoji').value    = a.emoji       || '🏆';
@@ -1842,11 +1898,11 @@ function openAchModal(idx) {
 function closeAchModal() { document.getElementById('ach-modal').style.display = 'none'; }
 
 function saveAchModal() {
-    var name = document.getElementById('modal-ach-name').value.trim();
-    var desc = document.getElementById('modal-ach-desc').value.trim();
+    const name = document.getElementById('modal-ach-name').value.trim();
+    const desc = document.getElementById('modal-ach-desc').value.trim();
     if (!name) { toast('Achievement name is required', 'error'); return; }
     if (!desc) { toast('Description is required', 'error'); return; }
-    var entry = {
+    const entry = {
         id:          (_editingAchIdx === -1 ? 'custom_' + Date.now() : _customAchievements[_editingAchIdx].id),
         name:        name,
         description: desc,
@@ -1893,14 +1949,14 @@ function debouncedMemberSearch() {
 }
 
 async function runMemberSearch() {
-    var q = document.getElementById('grant-member-search').value.trim();
-    var resultsEl = document.getElementById('grant-member-results');
+    const q = document.getElementById('grant-member-search').value.trim();
+    const resultsEl = document.getElementById('grant-member-results');
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/members/search?q=' + encodeURIComponent(q));
+        const resp = await fetch('/api/guild/' + guildId + '/members/search?q=' + encodeURIComponent(q));
         if (!resp.ok) throw new Error('non-ok');
-        var members = await resp.json();
+        const members = await resp.json();
         if (!members.length) {
             resultsEl.innerHTML = '<div style="padding:.5rem .75rem;font-size:.88rem;color:var(--text-dim)">No members found</div>';
         } else {
@@ -1914,7 +1970,7 @@ async function runMemberSearch() {
             }).join('');
         }
         resultsEl.style.display = '';
-    } catch (e) {
+    } catch {
         resultsEl.innerHTML = '<div style="padding:.5rem .75rem;font-size:.88rem;color:var(--bad)">Search failed</div>';
         resultsEl.style.display = '';
     }
@@ -1924,27 +1980,27 @@ function selectGrantMember(userId, displayName) {
     document.getElementById('grant-member-id').value = userId;
     document.getElementById('grant-member-search').value = displayName;
     document.getElementById('grant-member-results').style.display = 'none';
-    var sel = document.getElementById('grant-selected-member');
+    const sel = document.getElementById('grant-selected-member');
     sel.textContent = 'Selected: ' + displayName + ' (' + userId + ')';
     sel.style.display = '';
 }
 
 async function submitAchGrant() {
-    var userId = document.getElementById('grant-member-id').value.trim();
-    var achId  = document.getElementById('grant-ach-id').value.trim();
+    const userId = document.getElementById('grant-member-id').value.trim();
+    const achId  = document.getElementById('grant-ach-id').value.trim();
     if (!userId) { toast('Select a member first', 'error'); return; }
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/achievements/grant', {
+        const resp = await fetch('/api/guild/' + guildId + '/achievements/grant', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId: userId, achievementId: achId })
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (!resp.ok) { toast(data.error || 'Grant failed', 'error'); return; }
         toast(data.granted ? 'Achievement granted!' : 'Member already has this achievement', data.granted ? 'success' : 'info');
         closeAchGrantModal();
-    } catch (e) {
+    } catch {
         toast('Grant failed', 'error');
     }
 }
@@ -1956,44 +2012,44 @@ var _levelLeaderboardLoaded = false;
 function loadLevelLeaderboard(page, force) {
     page = page || 1;
     if (_levelLeaderboardLoaded && !force && page === _levelLeaderboardPage) return;
-    var skel    = document.getElementById('level-leaderboard-skeleton');
-    var err     = document.getElementById('level-leaderboard-error');
-    var content = document.getElementById('level-leaderboard-content');
-    var empty   = document.getElementById('level-leaderboard-empty');
+    const skel    = document.getElementById('level-leaderboard-skeleton');
+    const err     = document.getElementById('level-leaderboard-error');
+    const content = document.getElementById('level-leaderboard-content');
+    const empty   = document.getElementById('level-leaderboard-empty');
     skel.style.display = ''; err.style.display = 'none';
     content.style.display = 'none'; empty.style.display = 'none';
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     fetch('/api/guild/' + guildId + '/leveling/leaderboard?page=' + page)
         .then(function(r) { if (!r.ok) throw new Error('non-ok'); return r.json(); })
         .then(function(data) {
             skel.style.display = 'none';
-            var entries = data.entries || [];
+            const entries = data.entries || [];
             if (!entries.length) { empty.style.display = ''; return; }
-            var medals = ['🥇','🥈','🥉'];
-            var tbody = document.getElementById('level-leaderboard-tbody');
+            const medals = ['🥇','🥈','🥉'];
+            const tbody = document.getElementById('level-leaderboard-tbody');
             tbody.innerHTML = entries.map(function(u) {
-                var rank = medals[u.rank - 1] || u.rank;
+                const rank = medals[u.rank - 1] || u.rank;
                 return '<tr><td>' + rank + '</td>' +
                     '<td style="font-family:monospace;font-size:.82rem">' + escHtml(u.userId) + '</td>' +
                     '<td>' + escHtml(String(u.level)) + '</td>' +
                     '<td>' + Number(u.xp).toLocaleString() + '</td>' +
                     '<td>' + Number(u.messages || 0).toLocaleString() + '</td></tr>';
             }).join('');
-            var pag = document.getElementById('level-leaderboard-pagination');
+            const pag = document.getElementById('level-leaderboard-pagination');
             pag.innerHTML = '';
             if (data.pages > 1) {
                 if (page > 1) {
-                    var prev = document.createElement('button');
+                    const prev = document.createElement('button');
                     prev.className = 'btn btn-sm'; prev.textContent = '← Prev';
                     prev.onclick = function() { loadLevelLeaderboard(page - 1, true); };
                     pag.appendChild(prev);
                 }
-                var info = document.createElement('span');
+                const info = document.createElement('span');
                 info.style.cssText = 'font-size:.85rem;opacity:.7';
                 info.textContent = 'Page ' + page + ' of ' + data.pages;
                 pag.appendChild(info);
                 if (page < data.pages) {
-                    var next = document.createElement('button');
+                    const next = document.createElement('button');
                     next.className = 'btn btn-sm'; next.textContent = 'Next →';
                     next.onclick = function() { loadLevelLeaderboard(page + 1, true); };
                     pag.appendChild(next);
@@ -2011,54 +2067,54 @@ function loadLevelLeaderboard(page, force) {
 
 // ── Leveling Admin Actions ──────────────────────────────────────────────────
 async function levelAdminAction(action) {
-    var guildId = BOOT.guildId;
-    var userId  = document.getElementById('level-admin-user-id').value.trim();
-    var amount  = parseInt(document.getElementById('level-admin-amount').value, 10);
-    var msgEl   = document.getElementById('level-admin-msg');
+    const guildId = BOOT.guildId;
+    const userId  = document.getElementById('level-admin-user-id').value.trim();
+    const amount  = parseInt(document.getElementById('level-admin-amount').value, 10);
+    const msgEl   = document.getElementById('level-admin-msg');
     if (!userId) { msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Enter a Discord user ID.'; return; }
     if (['give','take','set_level'].includes(action) && (!Number.isFinite(amount) || amount < 0)) {
         msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Enter a valid amount / level.'; return;
     }
     msgEl.style.color = ''; msgEl.textContent = 'Working…';
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/leveling/adjust', {
+        const resp = await fetch('/api/guild/' + guildId + '/leveling/adjust', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId, action, amount })
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (!resp.ok) { msgEl.style.color = 'var(--bad)'; msgEl.textContent = data.error || 'Failed.'; return; }
         msgEl.style.color = 'var(--good)';
         msgEl.textContent = 'Done — level: ' + data.level + ' · XP: ' + Number(data.xp).toLocaleString();
         loadLevelLeaderboard(1, true);
-    } catch (e) {
+    } catch {
         msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Request failed.';
     }
 }
 
 // ── Leveling Boost Events ──────────────────────────────────────────────────
 async function startBoostEvent() {
-    var guildId    = BOOT.guildId;
-    var multiplier = parseFloat(document.getElementById('boost-multiplier').value);
-    var hours      = parseInt(document.getElementById('boost-duration').value, 10);
-    var msgEl      = document.getElementById('level-boost-msg');
+    const guildId    = BOOT.guildId;
+    const multiplier = parseFloat(document.getElementById('boost-multiplier').value);
+    const hours      = parseInt(document.getElementById('boost-duration').value, 10);
+    const msgEl      = document.getElementById('level-boost-msg');
     if (!Number.isFinite(multiplier) || multiplier < 1.1) { msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Multiplier must be at least 1.1×.'; return; }
     if (!Number.isFinite(hours) || hours < 1) { msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Duration must be at least 1 hour.'; return; }
     msgEl.style.color = ''; msgEl.textContent = 'Activating…';
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/leveling/xp-event', {
+        const resp = await fetch('/api/guild/' + guildId + '/leveling/xp-event', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ multiplier, durationHours: hours })
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (!resp.ok) { msgEl.style.color = 'var(--bad)'; msgEl.textContent = data.error || 'Failed.'; return; }
         msgEl.style.color = 'var(--good)'; msgEl.textContent = '';
-        var active = document.getElementById('level-boost-active');
-        var end = new Date(data.endTime);
+        const active = document.getElementById('level-boost-active');
+        const end = new Date(data.endTime);
         active.style.display = '';
         active.innerHTML = '⚡ <strong>' + multiplier + '× XP boost active</strong> — expires ' + end.toLocaleString();
-    } catch (e) {
+    } catch {
         msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Request failed.';
     }
 }
@@ -2067,8 +2123,8 @@ async function startBoostEvent() {
 var rrRoles = boot('roles');
 
 function addRrMapping() {
-    var list = document.getElementById('rr-mappings-list');
-    var row = document.createElement('div');
+    const list = document.getElementById('rr-mappings-list');
+    const row = document.createElement('div');
     row.style.cssText = 'display:grid;grid-template-columns:1fr 2fr auto;gap:.5rem;align-items:center;';
     row.innerHTML =
         '<input type="text" placeholder="Emoji (e.g. 👍)" class="rr-emoji" style="font-size:1.1rem;">' +
@@ -2080,22 +2136,22 @@ function addRrMapping() {
 }
 
 async function publishRrPanel() {
-    var channelId = document.getElementById('rr-channel').value;
+    const channelId = document.getElementById('rr-channel').value;
     if (!channelId) { toast('Select a target channel', 'error'); return; }
 
-    var rows = document.querySelectorAll('#rr-mappings-list > div');
-    var mappings = [];
+    const rows = document.querySelectorAll('#rr-mappings-list > div');
+    const mappings = [];
     rows.forEach(function(row) {
-        var emoji = row.querySelector('.rr-emoji').value.trim();
-        var roleId = row.querySelector('.rr-role').value;
+        const emoji = row.querySelector('.rr-emoji').value.trim();
+        const roleId = row.querySelector('.rr-role').value;
         if (emoji && roleId) mappings.push({ emoji: emoji, roleId: roleId });
     });
 
     if (!mappings.length) { toast('Add at least one emoji → role mapping', 'error'); return; }
 
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     try {
-        var response = await fetch('/api/guild/' + guildId + '/reactionrole/panel', {
+        const response = await fetch('/api/guild/' + guildId + '/reactionrole/panel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2105,9 +2161,9 @@ async function publishRrPanel() {
                 mappings: mappings
             })
         });
-        var data = await response.json();
+        const data = await response.json();
         if (response.ok) {
-            toast('Panel published ✓', 'success');
+            toast('Panel published', 'success');
             setTimeout(function() { location.reload(); }, 800);
         } else {
             toast(data.error || 'Failed to publish panel', 'error');
@@ -2121,11 +2177,11 @@ async function publishRrPanel() {
 async function deleteRrPanel(messageId) {
     const ok = await showConfirm({ title: 'Delete reaction role panel', body: 'Delete this panel? The Discord message will also be permanently deleted and all reaction mappings will be removed.', okText: 'Delete panel' });
     if (!ok) return;
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     try {
-        var response = await fetch('/api/guild/' + guildId + '/reactionrole/panel/' + messageId, { method: 'DELETE' });
+        const response = await fetch('/api/guild/' + guildId + '/reactionrole/panel/' + messageId, { method: 'DELETE' });
         if (response.ok) {
-            toast('Panel deleted ✓', 'success');
+            toast('Panel deleted', 'success');
             setTimeout(function() { location.reload(); }, 600);
         } else {
             toast('Failed to delete panel', 'error');
@@ -2141,19 +2197,19 @@ var kbLoaded = false;
 
 async function loadKnowledgeBase() {
     if (kbLoaded) return;
-    var guildId = BOOT.guildId;
-    var skel = document.getElementById('kb-skeleton');
-    var err  = document.getElementById('kb-error');
+    const guildId = BOOT.guildId;
+    const skel = document.getElementById('kb-skeleton');
+    const err  = document.getElementById('kb-error');
     if (skel) skel.style.display = '';
     if (err)  err.style.display  = 'none';
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/knowledge-base');
+        const resp = await fetch('/api/guild/' + guildId + '/knowledge-base');
         if (!resp.ok) throw new Error('non-ok');
-        var entries = await resp.json();
+        const entries = await resp.json();
         kbLoaded = true;
         if (skel) skel.style.display = 'none';
         renderKbEntries(entries);
-    } catch (e) {
+    } catch {
         if (skel) skel.style.display = 'none';
         if (err)  err.style.display  = '';
     }
@@ -2162,7 +2218,7 @@ async function loadKnowledgeBase() {
 function retryLoadKnowledgeBase() { kbLoaded = false; loadKnowledgeBase(); }
 
 function renderKbEntries(entries) {
-    var container = document.getElementById('kb-list');
+    const container = document.getElementById('kb-list');
     if (!Array.isArray(entries) || !entries.length) {
         container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><h3>No entries yet</h3><p>Add your first knowledge base entry below.</p></div>';
         return;
@@ -2174,11 +2230,11 @@ function renderKbEntries(entries) {
 }
 
 function buildKbRow(entry) {
-    var div = document.createElement('div');
+    const div = document.createElement('div');
     div.className = 'list-item';
     div.id = 'kb-row-' + entry._id;
-    var preview = entry.content.length > 120 ? entry.content.slice(0, 120) + '…' : entry.content;
-    var tagsHtml = (entry.tags && entry.tags.length)
+    const preview = entry.content.length > 120 ? entry.content.slice(0, 120) + '…' : entry.content;
+    const tagsHtml = (entry.tags && entry.tags.length)
         ? '<div style="margin-top:.3rem;">' + entry.tags.map(function(t) { return '<span style="background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:.76rem;margin-right:4px;">' + escHtml(t) + '</span>'; }).join('') + '</div>'
         : '';
     div.innerHTML =
@@ -2195,11 +2251,11 @@ function buildKbRow(entry) {
 }
 
 function editKbEntry(id, encodedTitle, encodedContent, encodedTags) {
-    var row = document.getElementById('kb-row-' + id);
+    const row = document.getElementById('kb-row-' + id);
     if (!row) return;
-    var title = decodeURIComponent(encodedTitle);
-    var content = decodeURIComponent(encodedContent);
-    var tags = decodeURIComponent(encodedTags);
+    const title = decodeURIComponent(encodedTitle);
+    const content = decodeURIComponent(encodedContent);
+    const tags = decodeURIComponent(encodedTags);
     row.innerHTML =
         '<div style="flex:1;display:flex;flex-direction:column;gap:.5rem;">' +
             '<input id="kb-edit-title-' + id + '" class="field-input" value="' + escHtml(title) + '" placeholder="Title" style="width:100%;">' +
@@ -2218,21 +2274,21 @@ function cancelKbEdit() {
 }
 
 async function saveKbEntry(id) {
-    var guildId = BOOT.guildId;
-    var title = document.getElementById('kb-edit-title-' + id).value.trim();
-    var content = document.getElementById('kb-edit-content-' + id).value.trim();
-    var tagsRaw = document.getElementById('kb-edit-tags-' + id).value.trim();
-    var tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+    const guildId = BOOT.guildId;
+    const title = document.getElementById('kb-edit-title-' + id).value.trim();
+    const content = document.getElementById('kb-edit-content-' + id).value.trim();
+    const tagsRaw = document.getElementById('kb-edit-tags-' + id).value.trim();
+    const tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
     if (!title || !content) { toast('Title and content are required', 'error'); return; }
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, {
+        const resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: title, content: content, tags: tags })
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (resp.ok) {
-            toast('Entry updated ✓', 'success');
+            toast('Entry updated', 'success');
             kbLoaded = false;
             loadKnowledgeBase();
         } else {
@@ -2245,21 +2301,21 @@ async function saveKbEntry(id) {
 }
 
 async function addKbEntry() {
-    var guildId = BOOT.guildId;
-    var title = document.getElementById('kb-title').value.trim();
-    var content = document.getElementById('kb-content').value.trim();
-    var tagsRaw = document.getElementById('kb-tags').value.trim();
-    var tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
+    const guildId = BOOT.guildId;
+    const title = document.getElementById('kb-title').value.trim();
+    const content = document.getElementById('kb-content').value.trim();
+    const tagsRaw = document.getElementById('kb-tags').value.trim();
+    const tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
     if (!title || !content) { toast('Title and content are required', 'error'); return; }
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/knowledge-base', {
+        const resp = await fetch('/api/guild/' + guildId + '/knowledge-base', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: title, content: content, tags: tags })
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (resp.ok) {
-            toast('Entry added ✓', 'success');
+            toast('Entry added', 'success');
             document.getElementById('kb-title').value = '';
             document.getElementById('kb-content').value = '';
             document.getElementById('kb-tags').value = '';
@@ -2277,11 +2333,11 @@ async function addKbEntry() {
 async function deleteKbEntry(id) {
     const ok = await showConfirm({ title: 'Delete knowledge base entry', body: 'Remove this entry? The AI will no longer have access to this context.', okText: 'Delete' });
     if (!ok) return;
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, { method: 'DELETE' });
+        const resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, { method: 'DELETE' });
         if (resp.ok) {
-            toast('Entry removed ✓', 'success');
+            toast('Entry removed', 'success');
             kbLoaded = false;
             loadKnowledgeBase();
         } else {
@@ -2295,14 +2351,14 @@ async function deleteKbEntry(id) {
 
 // KB static button listeners (inline onclick blocked by CSP)
 onPanel('ai', function() {
-    var addBtn = document.getElementById('kb-add-btn');
+    const addBtn = document.getElementById('kb-add-btn');
     if (addBtn) addBtn.addEventListener('click', addKbEntry);
-    var retryBtn = document.getElementById('kb-retry-btn');
+    const retryBtn = document.getElementById('kb-retry-btn');
     if (retryBtn) retryBtn.addEventListener('click', retryLoadKnowledgeBase);
-    var kbList = document.getElementById('kb-list');
+    const kbList = document.getElementById('kb-list');
     if (kbList) {
         kbList.addEventListener('click', function(e) {
-            var t = e.target;
+            const t = e.target;
             if (t.classList.contains('kb-edit-btn')) {
                 editKbEntry(t.dataset.id, t.dataset.title, t.dataset.content, t.dataset.tags);
             } else if (t.classList.contains('kb-delete-btn')) {
@@ -2322,19 +2378,19 @@ var _channelNameMap = boot('channelNames');
 
 async function loadSummaryJobs() {
     if (summaryJobsLoaded) return;
-    var guildId = BOOT.guildId;
-    var skel = document.getElementById('summary-jobs-skeleton');
-    var err  = document.getElementById('summary-jobs-error');
+    const guildId = BOOT.guildId;
+    const skel = document.getElementById('summary-jobs-skeleton');
+    const err  = document.getElementById('summary-jobs-error');
     if (skel) skel.style.display = '';
     if (err)  err.style.display  = 'none';
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/summary-jobs');
+        const resp = await fetch('/api/guild/' + guildId + '/summary-jobs');
         if (!resp.ok) throw new Error('non-ok');
-        var jobs = await resp.json();
+        const jobs = await resp.json();
         summaryJobsLoaded = true;
         if (skel) skel.style.display = 'none';
         renderSummaryJobs(jobs);
-    } catch (e) {
+    } catch {
         if (skel) skel.style.display = 'none';
         if (err)  err.style.display  = '';
     }
@@ -2343,20 +2399,20 @@ async function loadSummaryJobs() {
 function retryLoadSummaryJobs() { summaryJobsLoaded = false; loadSummaryJobs(); }
 
 function renderSummaryJobs(jobs) {
-    var container = document.getElementById('summary-jobs-list');
+    const container = document.getElementById('summary-jobs-list');
     if (!Array.isArray(jobs) || !jobs.length) {
         container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><h3>No summary jobs yet</h3><p>Add your first scheduled summary below.</p></div>';
         return;
     }
     container.innerHTML = '';
     jobs.forEach(function(job) {
-        var div = document.createElement('div');
+        const div = document.createElement('div');
         div.className = 'list-item';
-        var hh = String(job.hour).padStart(2, '0');
-        var mm = String(job.minute).padStart(2, '0');
-        var srcName = _channelNameMap[job.sourceChannelId] ? '#' + escHtml(_channelNameMap[job.sourceChannelId]) : escHtml(job.sourceChannelId);
-        var tgtName = _channelNameMap[job.targetChannelId] ? '#' + escHtml(_channelNameMap[job.targetChannelId]) : escHtml(job.targetChannelId);
-        var lastRun = job.lastRun ? new Date(job.lastRun).toLocaleString() : 'Never';
+        const hh = String(job.hour).padStart(2, '0');
+        const mm = String(job.minute).padStart(2, '0');
+        const srcName = _channelNameMap[job.sourceChannelId] ? '#' + escHtml(_channelNameMap[job.sourceChannelId]) : escHtml(job.sourceChannelId);
+        const tgtName = _channelNameMap[job.targetChannelId] ? '#' + escHtml(_channelNameMap[job.targetChannelId]) : escHtml(job.targetChannelId);
+        const lastRun = job.lastRun ? new Date(job.lastRun).toLocaleString() : 'Never';
         div.innerHTML =
             '<div style="min-width:0;flex:1;">' +
                 '<strong>' + escHtml(job.label) + '</strong>' +
@@ -2370,31 +2426,31 @@ function renderSummaryJobs(jobs) {
 }
 
 async function saveDailyDigest() {
-    var guildId = BOOT.guildId;
-    var enabled = document.getElementById('digest-enabled').checked;
-    var channelId = document.getElementById('digest-channel').value;
-    var sourceOpts = Array.from(document.getElementById('digest-sources').selectedOptions).map(o => o.value);
-    var hourRaw = document.getElementById('digest-hour').value.trim();
-    var minuteRaw = document.getElementById('digest-minute').value.trim();
-    var tzInput = document.getElementById('digest-timezone');
-    var timezone = tzInput.value.trim() || 'UTC';
+    const guildId = BOOT.guildId;
+    const enabled = document.getElementById('digest-enabled').checked;
+    const channelId = document.getElementById('digest-channel').value;
+    const sourceOpts = Array.from(document.getElementById('digest-sources').selectedOptions).map(o => o.value);
+    const hourRaw = document.getElementById('digest-hour').value.trim();
+    const minuteRaw = document.getElementById('digest-minute').value.trim();
+    const tzInput = document.getElementById('digest-timezone');
+    const timezone = tzInput.value.trim() || 'UTC';
 
     if (enabled && !channelId) { toast('Please select a digest channel', 'error'); return; }
-    var hour = parseInt(hourRaw, 10);
-    var minute = parseInt(minuteRaw, 10);
+    const hour = parseInt(hourRaw, 10);
+    const minute = parseInt(minuteRaw, 10);
     if (!/^\d+$/.test(hourRaw) || hour < 0 || hour > 23) { toast('Hour must be a number between 0 and 23', 'error'); return; }
     if (!/^\d+$/.test(minuteRaw) || minute < 0 || minute > 59) { toast('Minute must be a number between 0 and 59', 'error'); return; }
     if (!validateTimezoneInput(tzInput)) { toast('Please enter a valid IANA timezone (e.g. UTC, America/New_York)', 'error'); return; }
 
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/daily-digest', {
+        const resp = await fetch('/api/guild/' + guildId + '/daily-digest', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled, channelId, sourceChannelIds: sourceOpts, hour, minute, timezone })
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (resp.ok) {
-            toast('Daily digest settings saved ✓', 'success');
+            toast('Daily digest settings saved', 'success');
         } else {
             toast(data.error || 'Failed to save digest settings', 'error');
         }
@@ -2405,22 +2461,22 @@ async function saveDailyDigest() {
 }
 
 async function addSummaryJob() {
-    var guildId = BOOT.guildId;
-    var sourceChannelId = document.getElementById('summary-source').value;
-    var targetChannelId = document.getElementById('summary-target').value;
-    var hour = parseInt(document.getElementById('summary-hour').value, 10);
-    var minute = parseInt(document.getElementById('summary-minute').value, 10);
-    var label = document.getElementById('summary-label').value.trim();
+    const guildId = BOOT.guildId;
+    const sourceChannelId = document.getElementById('summary-source').value;
+    const targetChannelId = document.getElementById('summary-target').value;
+    const hour = parseInt(document.getElementById('summary-hour').value, 10);
+    const minute = parseInt(document.getElementById('summary-minute').value, 10);
+    const label = document.getElementById('summary-label').value.trim();
     if (!sourceChannelId || !targetChannelId) { toast('Please select both source and target channels', 'error'); return; }
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/summary-jobs', {
+        const resp = await fetch('/api/guild/' + guildId + '/summary-jobs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sourceChannelId: sourceChannelId, targetChannelId: targetChannelId, hour: hour, minute: minute, label: label })
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (resp.ok) {
-            toast('Summary job added ✓', 'success');
+            toast('Summary job added', 'success');
             document.getElementById('summary-source').value = '';
             document.getElementById('summary-target').value = '';
             document.getElementById('summary-hour').value = '9';
@@ -2440,11 +2496,11 @@ async function addSummaryJob() {
 async function deleteSummaryJob(jobId) {
     const ok = await showConfirm({ title: 'Delete summary job', body: 'Remove this scheduled summary job? It will no longer run.', okText: 'Delete' });
     if (!ok) return;
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/summary-jobs/' + jobId, { method: 'DELETE' });
+        const resp = await fetch('/api/guild/' + guildId + '/summary-jobs/' + jobId, { method: 'DELETE' });
         if (resp.ok) {
-            toast('Summary job removed ✓', 'success');
+            toast('Summary job removed', 'success');
             summaryJobsLoaded = false;
             loadSummaryJobs();
         } else {
@@ -2460,20 +2516,20 @@ async function deleteSummaryJob(jobId) {
 var _personas = boot('personas');
 
 function updatePersonaChannelWarning() {
-    var aiChannel = document.getElementById('ai-channel');
-    var warning = document.getElementById('persona-channel-warning');
+    const aiChannel = document.getElementById('ai-channel');
+    const warning = document.getElementById('persona-channel-warning');
     if (!aiChannel || !warning) return;
     warning.style.display = aiChannel.value ? '' : 'none';
 }
 
 onPanel('ai', function() {
-    var aiChannel = document.getElementById('ai-channel');
+    const aiChannel = document.getElementById('ai-channel');
     if (aiChannel) aiChannel.addEventListener('change', updatePersonaChannelWarning);
 });
 
 function renderPersonas() {
     updatePersonaChannelWarning();
-    var container = document.getElementById('personas-list');
+    const container = document.getElementById('personas-list');
     if (!container) return;
     if (!_personas.length) {
         container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><h3>No personas configured</h3><p>Add a persona below to give the AI a distinct identity in specific channels.</p></div>';
@@ -2481,10 +2537,10 @@ function renderPersonas() {
     }
     container.innerHTML = '';
     _personas.forEach(function(p) {
-        var div = document.createElement('div');
+        const div = document.createElement('div');
         div.className = 'list-item';
-        var chanName = _channelNameMap[p.channelId] ? '#' + escHtml(_channelNameMap[p.channelId]) : escHtml(p.channelId);
-        var preview = p.systemPrompt.length > 120 ? p.systemPrompt.slice(0, 120) + '…' : p.systemPrompt;
+        const chanName = _channelNameMap[p.channelId] ? '#' + escHtml(_channelNameMap[p.channelId]) : escHtml(p.channelId);
+        const preview = p.systemPrompt.length > 120 ? p.systemPrompt.slice(0, 120) + '…' : p.systemPrompt;
         div.innerHTML =
             '<div style="min-width:0;flex:1;">' +
                 '<strong>' + escHtml(p.personaName) + '</strong> <span style="color:var(--text-mute);font-size:.85rem;">(' + chanName + ')</span>' +
@@ -2496,20 +2552,20 @@ function renderPersonas() {
 }
 
 async function addPersona() {
-    var guildId = BOOT.guildId;
-    var channelId = document.getElementById('persona-channel').value;
-    var personaName = document.getElementById('persona-name').value.trim();
-    var systemPrompt = document.getElementById('persona-prompt').value.trim();
+    const guildId = BOOT.guildId;
+    const channelId = document.getElementById('persona-channel').value;
+    const personaName = document.getElementById('persona-name').value.trim();
+    const systemPrompt = document.getElementById('persona-prompt').value.trim();
     if (!channelId || !personaName || !systemPrompt) { toast('All fields are required', 'error'); return; }
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/persona', {
+        const resp = await fetch('/api/guild/' + guildId + '/persona', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ channelId: channelId, personaName: personaName, systemPrompt: systemPrompt })
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (resp.ok) {
-            toast('Persona saved ✓', 'success');
+            toast('Persona saved', 'success');
             document.getElementById('persona-channel').value = '';
             document.getElementById('persona-name').value = '';
             document.getElementById('persona-prompt').value = '';
@@ -2527,11 +2583,11 @@ async function addPersona() {
 async function removePersona(channelId) {
     const ok = await showConfirm({ title: 'Remove persona', body: 'Remove this channel persona? The AI will revert to the default system prompt for this channel.', okText: 'Remove' });
     if (!ok) return;
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
+        const resp = await fetch('/api/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
         if (resp.ok) {
-            toast('Persona removed ✓', 'success');
+            toast('Persona removed', 'success');
             _personas = _personas.filter(function(p) { return p.channelId !== channelId; });
             renderPersonas();
         } else {
@@ -2561,10 +2617,10 @@ function mcpEl(id) { return document.getElementById(id); }
 
 async function loadMcpServers(force) {
     if (_mcpServers && !force) { renderMcpServers(); return; }
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/mcp-servers');
-        var data = await resp.json();
+        const resp = await fetch('/api/guild/' + guildId + '/mcp-servers');
+        const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'Failed to load');
         _mcpServers = data.servers || [];
         _mcpGlobal = data.globalServers || [];
@@ -2575,17 +2631,17 @@ async function loadMcpServers(force) {
         renderMcpServers(data.provider);
     } catch (e) {
         console.error(e);
-        var list = mcpEl('mcp-list');
+        const list = mcpEl('mcp-list');
         if (list) list.innerHTML = '<div class="empty-state" style="padding:1.5rem;"><p>Could not load MCP connections.</p></div>';
     }
 }
 
 function renderMcpPresets() {
-    var select = mcpEl('mcp-preset');
+    const select = mcpEl('mcp-preset');
     if (!select) return;
     select.innerHTML = '<option value="">Custom server…</option>';
     _mcpPresets.forEach(function(preset) {
-        var opt = document.createElement('option');
+        const opt = document.createElement('option');
         opt.value = preset.id;
         opt.textContent = preset.label;
         select.appendChild(opt);
@@ -2601,10 +2657,10 @@ function resetMcpHints() {
 }
 
 function applyMcpPreset() {
-    var select = mcpEl('mcp-preset');
-    var hint = mcpEl('mcp-preset-hint');
-    var tokenHint = mcpEl('mcp-token-hint');
-    var preset = _mcpPresets.find(function(p) { return p.id === select.value; });
+    const select = mcpEl('mcp-preset');
+    const hint = mcpEl('mcp-preset-hint');
+    const tokenHint = mcpEl('mcp-token-hint');
+    const preset = _mcpPresets.find(function(p) { return p.id === select.value; });
     if (!preset) {
         resetMcpHints();
         return;
@@ -2621,27 +2677,27 @@ function applyMcpPreset() {
 }
 
 function renderMcpServers(provider) {
-    var providerWarn = mcpEl('mcp-provider-warning');
+    const providerWarn = mcpEl('mcp-provider-warning');
     if (providerWarn) {
-        var selected = provider || (mcpEl('ai-provider') ? mcpEl('ai-provider').value : null);
+        const selected = provider || (mcpEl('ai-provider') ? mcpEl('ai-provider').value : null);
         providerWarn.style.display = selected && selected !== 'anthropic' ? '' : 'none';
     }
-    var disabledWarn = mcpEl('mcp-disabled-warning');
+    const disabledWarn = mcpEl('mcp-disabled-warning');
     if (disabledWarn) disabledWarn.style.display = _mcpEditable ? 'none' : '';
     updateMcpFormState();
 
-    var container = mcpEl('mcp-list');
+    const container = mcpEl('mcp-list');
     if (!container) return;
     if (!_mcpServers || !_mcpServers.length) {
         container.innerHTML = '<div class="empty-state" style="padding:2rem 1.5rem;"><h3>No connections yet</h3><p>Add one below to let Claude use another service\'s tools during a conversation.</p></div>';
     } else {
         container.innerHTML = '';
         _mcpServers.forEach(function(srv) {
-            var bits = [];
+            const bits = [];
             bits.push(srv.hasToken ? '🔑 token stored' : 'no token');
             if (srv.allowedTools.length) bits.push('only ' + srv.allowedTools.length + ' tool(s)');
             if (srv.blockedTools.length) bits.push(srv.blockedTools.length + ' blocked');
-            var div = document.createElement('div');
+            const div = document.createElement('div');
             div.className = 'list-item';
             div.innerHTML =
                 '<div style="min-width:0;flex:1;">' +
@@ -2660,7 +2716,7 @@ function renderMcpServers(provider) {
         });
     }
 
-    var globalBox = mcpEl('mcp-global-list');
+    const globalBox = mcpEl('mcp-global-list');
     if (globalBox) {
         if (!_mcpGlobal.length) {
             globalBox.innerHTML = '';
@@ -2677,8 +2733,8 @@ function renderMcpServers(provider) {
 // when the guild is already at its cap. Editing an existing connection
 // stays available in the cap case — it does not add another one.
 function updateMcpFormState() {
-    var atCap = !_mcpEditing && (_mcpServers || []).length >= _mcpMaxServers;
-    var locked = !_mcpEditable || atCap;
+    const atCap = !_mcpEditing && (_mcpServers || []).length >= _mcpMaxServers;
+    const locked = !_mcpEditable || atCap;
 
     ['mcp-preset', 'mcp-url', 'mcp-token', 'mcp-allowed', 'mcp-blocked', 'mcp-enabled', 'mcp-save-btn'].forEach(function(id) {
         if (mcpEl(id)) mcpEl(id).disabled = locked;
@@ -2686,7 +2742,7 @@ function updateMcpFormState() {
     // The name is fixed while editing — the API keys the record on it.
     if (mcpEl('mcp-name')) mcpEl('mcp-name').disabled = locked || Boolean(_mcpEditing);
 
-    var capWarn = mcpEl('mcp-cap-warning');
+    const capWarn = mcpEl('mcp-cap-warning');
     if (capWarn) {
         capWarn.style.display = _mcpEditable && atCap ? '' : 'none';
         capWarn.textContent = '⚠️ This server is at the limit of ' + _mcpMaxServers +
@@ -2714,7 +2770,7 @@ function resetMcpForm() {
 }
 
 function editMcpServer(name) {
-    var srv = (_mcpServers || []).find(function(s) { return s.name === name; });
+    const srv = (_mcpServers || []).find(function(s) { return s.name === name; });
     if (!srv) return;
     _mcpEditing = name;
     mcpEl('mcp-preset').value = '';
@@ -2734,12 +2790,12 @@ function editMcpServer(name) {
 }
 
 async function saveMcpServer() {
-    var guildId = BOOT.guildId;
-    var name = (_mcpEditing || mcpEl('mcp-name').value).trim();
-    var url = mcpEl('mcp-url').value.trim();
+    const guildId = BOOT.guildId;
+    const name = (_mcpEditing || mcpEl('mcp-name').value).trim();
+    const url = mcpEl('mcp-url').value.trim();
     if (!name || !url) { toast('Name and URL are required', 'error'); return; }
 
-    var body = {
+    const body = {
         url: url,
         enabled: mcpEl('mcp-enabled').checked,
         allowedTools: splitToolNames(mcpEl('mcp-allowed').value),
@@ -2748,18 +2804,18 @@ async function saveMcpServer() {
     // Only send the token when one was typed — an absent field means
     // "keep whatever is stored", which is how editing without
     // re-entering the secret works.
-    var token = mcpEl('mcp-token').value;
+    const token = mcpEl('mcp-token').value;
     if (token) body.authorizationToken = token;
 
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), {
+        const resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (!resp.ok) { toast(data.error || 'Failed to save connection', 'error'); return; }
-        toast('Connection saved ✓', 'success');
+        toast('Connection saved', 'success');
         _mcpServers = data.servers || [];
         resetMcpForm();
         renderMcpServers();
@@ -2776,12 +2832,12 @@ async function removeMcpServer(name) {
         okText: 'Remove'
     });
     if (!ok) return;
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), { method: 'DELETE' });
-        var data = await resp.json();
+        const resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), { method: 'DELETE' });
+        const data = await resp.json();
         if (!resp.ok) { toast(data.error || 'Failed to remove', 'error'); return; }
-        toast('Connection removed ✓', 'success');
+        toast('Connection removed', 'success');
         _mcpServers = data.servers || [];
         if (_mcpEditing === name) resetMcpForm();
         renderMcpServers();
@@ -2795,13 +2851,13 @@ async function removeMcpServer(name) {
 // built from the server name — a name is operator-supplied text and does
 // not survive round-tripping through an id selector.
 async function testMcpServer(name, out) {
-    var guildId = BOOT.guildId;
+    const guildId = BOOT.guildId;
     if (out) { out.className = 'mcp-test-result'; out.textContent = 'Testing…'; }
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/test', { method: 'POST' });
-        var data = await resp.json();
+        const resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/test', { method: 'POST' });
+        const data = await resp.json();
         if (!out) return;
-        var okay = resp.ok && data.success;
+        const okay = resp.ok && data.success;
         out.className = 'mcp-test-result ' + (okay ? 'ok' : 'bad');
         out.textContent = (okay ? '✓ ' : '✗ ') + (data.message || data.error || (okay ? 'Connected' : 'Failed'));
     } catch (e) {
@@ -2812,11 +2868,11 @@ async function testMcpServer(name, out) {
 
 // ── Prompt editor: char counter + full-screen modal ─────────────────
 function updatePromptCount(textareaId) {
-    var ta = document.getElementById(textareaId);
-    var counter = document.getElementById(textareaId + '-count');
+    const ta = document.getElementById(textareaId);
+    const counter = document.getElementById(textareaId + '-count');
     if (!ta || !counter) return;
-    var max = parseInt(ta.getAttribute('maxlength'), 10) || 4000;
-    var len = ta.value.length;
+    const max = parseInt(ta.getAttribute('maxlength'), 10) || 4000;
+    const len = ta.value.length;
     counter.textContent = len + ' / ' + max;
     counter.classList.toggle('over', len >= max);
 }
@@ -2832,11 +2888,11 @@ function _promptEditorKeydown(e) {
     }
 }
 function openPromptEditor(textareaId, title) {
-    var ta = document.getElementById(textareaId);
+    const ta = document.getElementById(textareaId);
     if (!ta) return;
     _promptEditorTarget = textareaId;
     document.getElementById('prompt-editor-title').textContent = title || 'Edit prompt';
-    var editor = document.getElementById('prompt-editor-textarea');
+    const editor = document.getElementById('prompt-editor-textarea');
     editor.value = ta.value;
     editor.setAttribute('maxlength', ta.getAttribute('maxlength') || 4000);
     document.getElementById('prompt-editor-modal').style.display = 'flex';
@@ -2845,17 +2901,17 @@ function openPromptEditor(textareaId, title) {
     setTimeout(function() { editor.focus(); }, 50);
 }
 function updatePromptEditorCount() {
-    var editor = document.getElementById('prompt-editor-textarea');
-    var counter = document.getElementById('prompt-editor-count');
-    var max = parseInt(editor.getAttribute('maxlength'), 10) || 4000;
-    var len = editor.value.length;
+    const editor = document.getElementById('prompt-editor-textarea');
+    const counter = document.getElementById('prompt-editor-count');
+    const max = parseInt(editor.getAttribute('maxlength'), 10) || 4000;
+    const len = editor.value.length;
     counter.textContent = len + ' / ' + max;
     counter.classList.toggle('over', len >= max);
 }
 function closePromptEditor(commit) {
-    var modal = document.getElementById('prompt-editor-modal');
+    const modal = document.getElementById('prompt-editor-modal');
     if (commit && _promptEditorTarget) {
-        var ta = document.getElementById(_promptEditorTarget);
+        const ta = document.getElementById(_promptEditorTarget);
         if (ta) {
             ta.value = document.getElementById('prompt-editor-textarea').value;
             updatePromptCount(_promptEditorTarget);
@@ -2881,27 +2937,26 @@ function formatTokens(n) {
 function formatCost(n, costKnown) {
     if (n == null) return '';
     if (!costKnown && n === 0) return 'cost unavailable';
-    var prefix = costKnown ? '' : '≥ ';
+    const prefix = costKnown ? '' : '≥ ';
     if (n < 0.01 && n > 0) return prefix + '< $0.01';
     return prefix + '$' + n.toFixed(2);
 }
 function renderSparkline(daily) {
-    var svg = document.getElementById('ai-usage-sparkline');
+    const svg = document.getElementById('ai-usage-sparkline');
     if (!svg) return;
-    var W = 280, H = 60, pad = 4;
-    var values = daily.map(function(d) { return d.inputTokens + d.outputTokens; });
-    var max = Math.max.apply(null, values.concat([1]));
+    const W = 280, H = 60, pad = 4;
+    const values = daily.map(function(d) { return d.inputTokens + d.outputTokens; });
+    let max = Math.max.apply(null, values.concat([1]));
     if (max <= 0) max = 1;
-    var n = values.length;
-    var stepX = (W - pad * 2) / Math.max(1, n - 1);
+    const n = values.length;
     // Build bars instead of a line — easier to read for small token counts
-    var barW = Math.max(2, (W - pad * 2) / n - 2);
-    var bars = '';
-    for (var i = 0; i < n; i++) {
-        var v = values[i];
-        var h = max > 0 ? (v / max) * (H - pad * 2) : 0;
-        var x = pad + i * ((W - pad * 2) / n);
-        var y = H - pad - h;
+    const barW = Math.max(2, (W - pad * 2) / n - 2);
+    let bars = '';
+    for (let i = 0; i < n; i++) {
+        const v = values[i];
+        const h = max > 0 ? (v / max) * (H - pad * 2) : 0;
+        const x = pad + i * ((W - pad * 2) / n);
+        const y = H - pad - h;
         bars += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) +
                 '" width="' + barW.toFixed(1) + '" height="' + h.toFixed(1) +
                 '" fill="currentColor" opacity="' + (v > 0 ? 0.7 : 0.2) + '">' +
@@ -2911,14 +2966,14 @@ function renderSparkline(daily) {
     svg.style.color = 'var(--accent, #7aa7ff)';
 }
 function renderUsageBreakdown(byModel) {
-    var el = document.getElementById('ai-usage-breakdown');
+    const el = document.getElementById('ai-usage-breakdown');
     if (!el) return;
     if (!byModel.length) { el.innerHTML = ''; return; }
-    var rows = byModel
+    const rows = byModel
         .sort(function(a, b) { return (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens); })
         .map(function(m) {
-            var total = m.inputTokens + m.outputTokens;
-            var costStr = m.costKnown ? '$' + (m.cost || 0).toFixed(4) : '—';
+            const total = m.inputTokens + m.outputTokens;
+            const costStr = m.costKnown ? '$' + (m.cost || 0).toFixed(4) : '—';
             return '<tr>' +
                 '<td>' + escHtml(m.provider) + '</td>' +
                 '<td>' + escHtml(m.model) + '</td>' +
@@ -2937,12 +2992,12 @@ function renderUsageBreakdown(byModel) {
         '</tr></thead><tbody>' + rows + '</tbody></table>';
 }
 async function loadAiUsage() {
-    var guildId = BOOT.guildId;
-    var statusEl = document.getElementById('ai-usage-status');
+    const guildId = BOOT.guildId;
+    const statusEl = document.getElementById('ai-usage-status');
     try {
-        var resp = await fetch('/api/guild/' + guildId + '/ai/usage?days=14');
+        const resp = await fetch('/api/guild/' + guildId + '/ai/usage?days=14');
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        var data = await resp.json();
+        const data = await resp.json();
         document.getElementById('ai-usage-today-tokens').textContent = formatTokens(data.today.tokens);
         document.getElementById('ai-usage-week-tokens').textContent  = formatTokens(data.week.tokens);
         document.getElementById('ai-usage-month-tokens').textContent = formatTokens(data.month.tokens);
@@ -2952,11 +3007,11 @@ async function loadAiUsage() {
         renderSparkline(data.daily || []);
         renderUsageBreakdown(data.byModel || []);
 
-        var rl = data.rateLimit || {};
-        var rlParts = [];
+        const rl = data.rateLimit || {};
+        const rlParts = [];
         if (rl.perUser)    rlParts.push(rl.perUser + '/user');
         if (rl.perChannel) rlParts.push(rl.perChannel + '/channel');
-        var rlStr = rlParts.length
+        const rlStr = rlParts.length
             ? 'Limit: ' + rlParts.join(', ') + ' per ' + (rl.windowMin || 10) + 'm'
             : 'No rate limit set';
         statusEl.textContent = rlStr;
@@ -2971,8 +3026,8 @@ async function loadAiUsage() {
 // routing, and initial page load without coupling to the nav implementation.
 onPanel('ai', function(aiPanel) {
     if (!aiPanel) return;
-    var loaded = false;
-    var inFlight = false;
+    let loaded = false;
+    let inFlight = false;
     function check() {
         if (loaded || inFlight) return;
         if (!aiPanel.classList.contains('active')) return;
@@ -2983,7 +3038,7 @@ onPanel('ai', function(aiPanel) {
             .finally(function() { inFlight = false; });
     }
     check();
-    var obs = new MutationObserver(check);
+    const obs = new MutationObserver(check);
     obs.observe(aiPanel, { attributes: true, attributeFilter: ['class'] });
 });
 
@@ -3241,7 +3296,7 @@ async function loadOverviewStats() {
                 </div>`
             ).join('');
         }
-    } catch (err) {
+    } catch {
         const msgEl = document.getElementById('clawdia-msg');
         if (msgEl) msgEl.innerHTML = `Open <a href="#" onclick="document.querySelector('.nav-item[data-tab=analytics]').click();return false">Analytics</a> to review server health.`;
         const actionsEl = document.getElementById('clawdia-actions');
@@ -3368,7 +3423,7 @@ function renderAnalyticsCharts(data, insights) {
 
     // Helper: remove any stale "no data" placeholder from a chart card container
     function clearChartPlaceholder(container) {
-        var p = container.querySelector('p.chart-no-data');
+        const p = container.querySelector('p.chart-no-data');
         if (p) p.remove();
     }
 
@@ -3530,7 +3585,7 @@ async function loadAnalytics() {
                 recCont.insertAdjacentHTML('beforeend', `<div class="analytics-rec-card"><span>💡 ${rec}</span>${linkHtml}</div>`);
             }
         }
-    } catch (error) {
+    } catch {
         document.getElementById('analytics-skeleton').style.display = 'none';
         document.getElementById('analytics-error').style.display = '';
     }

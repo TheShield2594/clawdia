@@ -216,7 +216,7 @@ function start(client) {
         res.render('index', { user: req.user });
     });
 
-    app.use((err, req, res, next) => {
+    app.use((err, req, res, _next) => {
         console.error('[DASHBOARD] Unhandled error:', err);
         res.status(500).json({ error: 'Internal server error' });
     });

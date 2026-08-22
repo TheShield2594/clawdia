@@ -17,7 +17,7 @@ const parser = new Parser();
 async function parseFeedUrl(url) {
     return parser.parseString(await safeFetchFeed(url));
 }
-let dailyNewsJobs = new Map();
+const dailyNewsJobs = new Map();
 const runtimeTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // Consecutive failure counts per feed URL. Feeds are skipped after DEAD_FEED_THRESHOLD failures,
@@ -140,7 +140,7 @@ function normalizeArticleLink(link = '') {
 
 
 async function fetchSendableChannel(client, channelId) {
-    let channel = null;
+    let channel;
 
     try {
         channel = await client.channels.fetch(channelId);

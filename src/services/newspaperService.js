@@ -7,8 +7,6 @@ const GrindProfile = require('../models/GrindProfile');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 const { topByNetWorth } = require('../utils/netWorth');
 
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
 async function collectStats(guildId, sections) {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const data = {};
@@ -169,7 +167,7 @@ async function generateNewspaper(client, guildDoc, preloadedGuild, requester) {
     // Use AI if configured
     if (guildDoc.ai?.enabled) {
         try {
-            const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(guildDoc.ai);
+            const { provider, model, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(guildDoc.ai);
             if (apiKey || provider === 'ollama') {
                 const quoteInstruction = includeQuote
                     ? 'End with a witty "Quote of the Week" that you invent yourself based on the server activity.'

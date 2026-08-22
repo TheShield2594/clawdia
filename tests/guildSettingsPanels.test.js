@@ -9,84 +9,14 @@ const { TextEncoder, TextDecoder } = require('util');
 global.TextEncoder = global.TextEncoder || TextEncoder;
 global.TextDecoder = global.TextDecoder || TextDecoder;
 
-const fs = require('fs');
-const path = require('path');
-const ejs = require('ejs');
-const { guildSettingsLocals } = require('./helpers/guildSettingsLocals');
 const { PANELS, DEFAULT_PANEL } = require('../src/dashboard/lib/panels');
-
-const VIEWS = path.join(__dirname, '..', 'src', 'dashboard', 'views');
-const PUBLIC = path.join(__dirname, '..', 'src', 'dashboard', 'public');
-
-function renderPage() {
-    const file = path.join(VIEWS, 'guild-settings.ejs');
-    return ejs.render(fs.readFileSync(file, 'utf8'), guildSettingsLocals(), { filename: file });
-}
-
-function renderPanel(name) {
-    const file = path.join(VIEWS, 'partials', 'panels', `${name}.ejs`);
-    return ejs.render(fs.readFileSync(file, 'utf8'), guildSettingsLocals(), { filename: file });
-}
-
-// The script wires delegated handlers onto `document`, which survives a body
-// swap. Record them at boot so each test can start from a clean document.
-const documentListeners = [];
-const addDocumentListener = document.addEventListener.bind(document);
-
-function forgetDocumentListeners() {
-    while (documentListeners.length) {
-        const [type, fn, opts] = documentListeners.pop();
-        document.removeEventListener(type, fn, opts);
-    }
-}
-
-/** Put the rendered page in the document and run its scripts, as a browser would. */
-function bootPage({ panelFetch } = {}) {
-    const html = renderPage();
-    const body = html.slice(html.indexOf('<body'), html.indexOf('</body>'));
-    document.body.innerHTML = body.replace(/^<body[^>]*>/, '');
-
-    // jsdom has no CSS.escape; every browser that can run this page does.
-    window.CSS = window.CSS || {};
-    window.CSS.escape = value => String(value).replace(/[^\w-]/g, c => '\\' + c);
-
-    window.fetch = jest.fn(async url => {
-        const panel = /\/panel\/([a-z]+)(?:$|\?)/.exec(String(url));
-        if (panel) {
-            if (panelFetch) return panelFetch(panel[1]);
-            return { ok: true, status: 200, text: async () => renderPanel(panel[1]) };
-        }
-        // Every other call is one of the panels' own data endpoints. Most cope
-        // with an empty object; the AI usage widget reads into nested keys.
-        const body = /\/ai\/usage/.test(String(url))
-            ? { today: {}, week: {}, month: {}, daily: [], byModel: [], rateLimit: {} }
-            : {};
-        return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
-    });
-
-    const bootstrap = html.match(/<script nonce="[^"]*">([\s\S]*?)<\/script>/)[1];
-    document.addEventListener = (type, fn, opts) => {
-        documentListeners.push([type, fn, opts]);
-        addDocumentListener(type, fn, opts);
-    };
-    try {
-        window.eval(fs.readFileSync(path.join(PUBLIC, 'esc-html.js'), 'utf8'));
-        window.eval(bootstrap);
-        window.eval(fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8'));
-    } finally {
-        document.addEventListener = addDocumentListener;
-    }
-}
-
-/** Let the fetch chain inside loadPanel() settle. */
-const settle = async () => {
-    await new Promise(resolve => setTimeout(resolve, 0));
-    await new Promise(resolve => setTimeout(resolve, 0));
-};
-
-function clickTab(id) {
-    document.querySelector(`.nav-item[data-tab="${id}"]`).dispatchEvent(new window.Event('click', { bubbles: true }));
-}
+const {
+    bootPage,
+    clickTab,
+    renderPanel,
+    settle,
+    forgetDocumentListeners,
+} = require('./helpers/guildSettingsPage');
 
 describe('lazily loaded settings panels', () => {
     let errors;

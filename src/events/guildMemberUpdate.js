@@ -1,9 +1,9 @@
-const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
 
 module.exports = {
     name: 'guildMemberUpdate',
-    async execute(oldMember, newMember, client) {
+    async execute(oldMember, newMember, _client) {
         const guildSettings = await Guild.findOne({ guildId: newMember.guild.id });
         if (!guildSettings?.eventLog?.enabled || !guildSettings.eventLog.logRoleChanges) return;
 

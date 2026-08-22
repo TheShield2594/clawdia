@@ -415,7 +415,7 @@ async function postOrUpdateStatCard(channel, session) {
     );
 }
 
-async function handleDmButton(interaction, client) {
+async function handleDmButton(interaction, _client) {
     if (!interaction.customId.startsWith('dm_storysofar_')) return false;
 
     const sessionId = interaction.customId.slice('dm_storysofar_'.length);

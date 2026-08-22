@@ -1,11 +1,9 @@
 'use strict';
 
 const {
-    ROD_TIERS,
     ROD_BY_TIER,
     ROD_UPGRADES,
     LOCATIONS,
-    FISH,
     FISH_BY_TIER,
     JUNK_ITEMS,
     TREASURE_ITEMS,
@@ -1007,7 +1005,7 @@ function resolveBossEncounter(user, fish, tier, choicesMade, bossType) {
     const correctCount = phaseResults.filter(p => p.correct).length;
     const lineSnapped  = lineIntegrity <= 0;
 
-    let bonusPayout = 0, durabilityLost = 0, outcome = '';
+    let bonusPayout = 0, durabilityLost = 0, outcome;
 
     if (lineSnapped || correctCount === 0) {
         outcome = 'escaped';

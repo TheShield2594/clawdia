@@ -233,7 +233,7 @@ async function resolveOneSeason(client, guildDoc) {
             ?? null;
     } catch {}
 
-    let resolvedNames = {};
+    const resolvedNames = {};
     if (seasonDiscordGuild) {
         for (const u of topUsers.slice(0, 3)) {
             const member = await seasonDiscordGuild.members.fetch(u.userId).catch(() => null);
@@ -356,8 +356,15 @@ async function awardWeeklyLeaderboardBadges(client) {
             const leased = await Guild.findOneAndUpdate(
                 {
                     guildId,
-                    $or: [{ badgesLastAwardedAt: null }, { badgesLastAwardedAt: { $lte: weekAgo } }],
-                    $or: [{ badgesAwardLeaseAt: null }, { badgesAwardLeaseAt: { $lte: new Date() } }],
+                    // Both conditions, under $and. They were two `$or` keys in
+                    // one object literal, so the second silently replaced the
+                    // first and only the lease was ever checked: the weekly
+                    // cadence was not enforced at all, and badges could be
+                    // re-awarded as soon as a five-minute lease lapsed.
+                    $and: [
+                        { $or: [{ badgesLastAwardedAt: null }, { badgesLastAwardedAt: { $lte: weekAgo } }] },
+                        { $or: [{ badgesAwardLeaseAt: null }, { badgesAwardLeaseAt: { $lte: new Date() } }] },
+                    ],
                 },
                 { $set: { badgesAwardLeaseAt: leaseUntil } },
                 { new: false }

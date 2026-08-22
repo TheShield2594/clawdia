@@ -15,7 +15,7 @@ const {
     FIELD_TROPHY_FLAGS,
 } = require('../src/services/huntService');
 const {
-    ANIMALS, CRAFT_RECIPES, FIELD_TROPHIES, ZONES, ZONE_LIST, LIMITS, WEAPON_BY_TIER,
+    ANIMALS, CRAFT_RECIPES, FIELD_TROPHIES, ZONES, ZONE_LIST,
 } = require('../src/data/huntData');
 const { CROSS_CRAFT_RECIPES } = require('../src/data/crossSystemData');
 const { __test__ } = require('../src/commands/economy/hunt');

@@ -8,140 +8,16 @@ const {
     ButtonStyle,
 } = require('discord.js');
 
+// The catalog is derived from the commands this process actually loaded, not
+// from a list kept alongside them — see utils/helpCatalog.js for why (#665).
+const { buildCategories } = require('../../utils/helpCatalog');
+
 const TIMEOUT_MS = 3 * 60 * 1000;
 const PAGE_SIZE = 10;
 const COLOR = '#5865F2';
 
-const CATEGORIES = [
-    {
-        id: 'economy',
-        emoji: '📦',
-        label: 'Economy',
-        preview: 'balance, work, hunt, fish, games',
-        commands: [
-            { name: 'balance',        description: 'Check your wallet and bank balance' },
-            { name: 'daily',          description: 'Claim your daily coin reward (24h cooldown)' },
-            { name: 'work',           description: 'Earn coins by working a shift (1h cooldown)' },
-            { name: 'bank',           description: 'Bank actions: deposit, withdraw, transfer' },
-            { name: 'inventory',      description: 'View your or another user\'s inventory' },
-            { name: 'shop',           description: 'Browse the item shop' },
-            { name: 'use',            description: 'Use an item from your inventory' },
-            { name: 'jobs',           description: 'Browse all available jobs and pay ranges' },
-            { name: 'crime',          description: 'Attempt a crime for coins (40% success, 2.5h cooldown)' },
-            { name: 'rob',            description: 'Try to rob another member\'s wallet' },
-            { name: 'mine',           description: 'Dig for ore in the mines (2h cooldown)' },
-            { name: 'explore',        description: 'Set out on narrated expeditions — chart regions, find treasure, lore, and secrets' },
-            { name: 'hunt',           description: 'Hunt animals, manage gear, quests, zones, and prestige — all in one place' },
-            { name: 'craft',          description: 'Craft items from hunting materials' },
-            { name: 'fish',           description: 'Fishing: cast lines, manage gear, shop, craft, quests, locations, and prestige' },
-            { name: 'casino',         description: 'Casino games: blackjack, crash, cupgame, higherlower, keno, poker, roulette, slots' },
-            { name: 'duel',           description: 'Challenge another user to a coin duel' },
-            { name: 'quiz',           description: 'Answer trivia questions to win coins' },
-        ],
-    },
-    {
-        id: 'moderation',
-        emoji: '🛡️',
-        label: 'Moderation',
-        preview: 'ban, kick, warn, cases, appeals',
-        commands: [
-            { name: 'ban',       description: 'Ban a member from the server' },
-            { name: 'kick',      description: 'Kick a member from the server' },
-            { name: 'warn',      description: 'Manage member warnings' },
-            { name: 'mute',      description: 'Timeout a member' },
-            { name: 'unmute',    description: 'Remove timeout from a member' },
-            { name: 'unban',     description: 'Unban a user from the server' },
-            { name: 'softban',   description: 'Ban then unban to purge recent messages' },
-            { name: 'massban',   description: 'Ban multiple users by ID (raid cleanup)' },
-            { name: 'clear',     description: 'Delete multiple messages' },
-            { name: 'slowmode',  description: 'Set or clear slowmode for a channel' },
-            { name: 'lockdown',  description: 'Lock or unlock all text channels server-wide' },
-            { name: 'case',      description: 'View a moderation case' },
-            { name: 'cases',     description: 'List moderation cases for a user' },
-            { name: 'closecase', description: 'Close a moderation case' },
-            { name: 'note',      description: 'Add a note to a case or assign/label it' },
-            { name: 'appeal',    description: 'Appeal a moderation case against you' },
-        ],
-    },
-    {
-        id: 'leveling',
-        emoji: '⭐',
-        label: 'Leveling',
-        preview: 'rank, leaderboard, level roles',
-        commands: [
-            { name: 'rank',        description: 'View your rank card showing level, XP, and position' },
-            { name: 'leaderboard', description: 'View the top 10 members on the server leaderboard' },
-            { name: 'setlevel',    description: 'Directly assign a level to a member (admin)' },
-        ],
-    },
-    {
-        id: 'fun',
-        emoji: '🎮',
-        label: 'Fun',
-        preview: '8ball, coinflip, roll',
-        commands: [
-            { name: '8ball',    description: 'Ask the magic 8-ball a yes/no question — shake again or ask another' },
-            { name: 'coinflip', description: 'Flip a coin: call heads or tails, bet coins, or challenge a member' },
-            { name: 'roll',     description: 'Roll a 2-100 sided die, optionally betting high, low, or an exact number' },
-        ],
-    },
-    {
-        id: 'utility',
-        emoji: '🔧',
-        label: 'Utility',
-        preview: 'avatar, polls, giveaway, bible',
-        commands: [
-            { name: 'avatar',     description: 'Fetch and display a user\'s full-size avatar' },
-            { name: 'userinfo',   description: 'Show info about a user (account age, roles, etc.)' },
-            { name: 'serverinfo', description: 'Display server stats: members, channels, boost level' },
-            { name: 'ping',       description: 'Check the bot\'s latency' },
-            { name: 'poll',       description: 'Create a button-based poll' },
-            { name: 'giveaway',   description: 'Manage giveaways' },
-            { name: 'birthday',   description: 'Manage birthdays' },
-            { name: 'bible',      description: 'Look up a Bible verse or get the daily verse' },
-            { name: 'suggest',    description: 'Submit a suggestion to the server' },
-            { name: 'role',       description: 'Self-assign or remove a role from reaction role panels' },
-            { name: 'vc',         description: 'Manage your temporary voice channel' },
-            { name: 'timezone',   description: 'Set your timezone so reminders and times are computed correctly for you' },
-        ],
-    },
-    {
-        id: 'ai',
-        emoji: '🤖',
-        label: 'AI',
-        preview: 'AI chat & reminders',
-        commands: [
-            { name: 'remind',   description: 'Set a reminder — posted in this channel (or DMed if that channel is no longer reachable), optionally recurring' },
-            { name: 'reminders', description: 'List or cancel your open reminders' },
-            { name: '@Clawdia', description: 'Mention or ping the bot to start an AI conversation', mention: true },
-        ],
-    },
-    {
-        id: 'community',
-        emoji: '👥',
-        label: 'Community',
-        preview: 'season, quests, streak, track',
-        commands: [
-            { name: 'quests', description: 'View your active daily and weekly quests' },
-            { name: 'season', description: 'View season pass progress or manage the current season' },
-            { name: 'streak', description: 'View your activity streak' },
-            { name: 'track',  description: 'View or set your progression track' },
-        ],
-    },
-    {
-        id: 'admin',
-        emoji: '⚙️',
-        label: 'Admin',
-        preview: 'raid mode, events',
-        commands: [
-            { name: 'raidmode',  description: 'Configure raid detection and case management settings' },
-            { name: 'event',     description: 'Manage seasonal events (admin)' },
-        ],
-    },
-];
-
-function buildLandingEmbed() {
-    const lines = CATEGORIES.map(cat =>
+function buildLandingEmbed(categories) {
+    const lines = categories.map(cat =>
         `${cat.emoji} **${cat.label}** — ${cat.commands.length} commands: ${cat.preview}`
     );
     return new EmbedBuilder()
@@ -175,16 +51,16 @@ function buildCategoryEmbed(cat, page) {
         .setFooter({ text: `Page ${page + 1} of ${totalPages} • ${cat.commands.length} commands total` });
 }
 
-function buildSelectRow(disabled = false) {
+function buildSelectRow(categories, disabled = false) {
     const menu = new StringSelectMenuBuilder()
         .setCustomId('help_category')
         .setPlaceholder('Select a category…')
         .setDisabled(disabled)
         .addOptions(
-            CATEGORIES.map(cat =>
+            categories.map(cat =>
                 new StringSelectMenuOptionBuilder()
                     .setLabel(`${cat.emoji} ${cat.label}`)
-                    .setDescription(`${cat.commands.length} commands: ${cat.preview}`)
+                    .setDescription(cat.summary)
                     .setValue(cat.id)
             )
         );
@@ -224,11 +100,27 @@ module.exports = {
         .setDescription('Browse all bot commands by category'),
     async execute(interaction) {
         const id = interaction.id;
+        const categories = buildCategories(interaction.client?.commands?.values?.() || []);
+
+        // Only reachable if the collection is empty, which startup refuses to
+        // run with — but a select menu with no options is a Discord API error
+        // rather than an empty menu, so it cannot just fall through.
+        if (!categories.length) {
+            await interaction.reply({
+                embeds: [new EmbedBuilder()
+                    .setColor(COLOR)
+                    .setTitle('🐾 Clawdia Help')
+                    .setDescription('No commands are loaded right now. Try again in a moment.')],
+            });
+            return;
+        }
+
+        const findCategory = catId => categories.find(c => c.id === catId);
         const state = { view: 'landing', catId: null, page: 0 };
 
         await interaction.reply({
-            embeds: [buildLandingEmbed()],
-            components: [buildSelectRow()],
+            embeds: [buildLandingEmbed(categories)],
+            components: [buildSelectRow(categories)],
         });
 
         const message = await interaction.fetchReply();
@@ -240,7 +132,8 @@ module.exports = {
 
         collector.on('collect', async i => {
             if (i.customId === 'help_category') {
-                const cat = CATEGORIES.find(c => c.id === i.values[0]);
+                const cat = findCategory(i.values[0]);
+                if (!cat) return;
                 state.view = 'category';
                 state.catId = cat.id;
                 state.page = 0;
@@ -253,21 +146,15 @@ module.exports = {
                 state.catId = null;
                 state.page = 0;
                 await i.update({
-                    embeds: [buildLandingEmbed()],
-                    components: [buildSelectRow()],
+                    embeds: [buildLandingEmbed(categories)],
+                    components: [buildSelectRow(categories)],
                 });
-            } else if (i.customId === `help_prev_${id}`) {
-                const cat = CATEGORIES.find(c => c.id === state.catId);
+            } else if (i.customId === `help_prev_${id}` || i.customId === `help_next_${id}`) {
+                const cat = findCategory(state.catId);
+                if (!cat) return;
+                const step = i.customId === `help_next_${id}` ? 1 : -1;
                 const totalPages = Math.ceil(cat.commands.length / PAGE_SIZE);
-                state.page = Math.max(0, Math.min(state.page - 1, totalPages - 1));
-                await i.update({
-                    embeds: [buildCategoryEmbed(cat, state.page)],
-                    components: [buildNavRow(id, cat, state.page)],
-                });
-            } else if (i.customId === `help_next_${id}`) {
-                const cat = CATEGORIES.find(c => c.id === state.catId);
-                const totalPages = Math.ceil(cat.commands.length / PAGE_SIZE);
-                state.page = Math.max(0, Math.min(state.page + 1, totalPages - 1));
+                state.page = Math.max(0, Math.min(state.page + step, totalPages - 1));
                 await i.update({
                     embeds: [buildCategoryEmbed(cat, state.page)],
                     components: [buildNavRow(id, cat, state.page)],
@@ -277,14 +164,11 @@ module.exports = {
 
         collector.on('end', async (_, reason) => {
             if (reason !== 'time') return;
-            if (state.view === 'landing') {
-                await interaction.editReply({ components: [buildSelectRow(true)] }).catch(() => {});
-            } else {
-                const cat = CATEGORIES.find(c => c.id === state.catId);
-                await interaction.editReply({
-                    components: [buildNavRow(id, cat, state.page, true)],
-                }).catch(() => {});
-            }
+            const cat = state.view === 'landing' ? null : findCategory(state.catId);
+            const components = cat
+                ? [buildNavRow(id, cat, state.page, true)]
+                : [buildSelectRow(categories, true)];
+            await interaction.editReply({ components }).catch(() => {});
         });
     },
 };

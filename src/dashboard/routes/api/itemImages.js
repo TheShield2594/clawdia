@@ -102,7 +102,7 @@ router.get('/item-image/activity/:itemId', async (req, res) => {
 router.post('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, checkWriteRateLimit, uploadImage, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
     const { itemId } = req.params;
-    if (!/^[a-z0-9_:\-]{1,64}$/.test(itemId)) return res.status(400).json({ error: 'Invalid itemId' });
+    if (!/^[a-z0-9_:-]{1,64}$/.test(itemId)) return res.status(400).json({ error: 'Invalid itemId' });
     // M4: Verify file contents match a known image signature.
     const detectedType = detectImageType(req.file.buffer);
     if (!detectedType) return res.status(400).json({ error: 'Invalid image file: unrecognized format' });

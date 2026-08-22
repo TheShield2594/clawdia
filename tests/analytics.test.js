@@ -72,7 +72,6 @@ jest.mock('express', () => {
 });
 
 const { computeRetention } = require('../src/dashboard/routes/api');
-const Guild = require('../src/models/Guild');
 const guildMemberAdd = require('../src/events/guildMemberAdd');
 const guildMemberRemove = require('../src/events/guildMemberRemove');
 const interactionCreate = require('../src/events/interactionCreate');

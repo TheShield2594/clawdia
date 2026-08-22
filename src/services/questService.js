@@ -1,5 +1,3 @@
-const User = require('../models/User');
-const Guild = require('../models/Guild');
 const { getStreakMultiplier } = require('../utils/streakMultiplier');
 
 // difficulty → reward multiplier

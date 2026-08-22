@@ -158,7 +158,7 @@ async function spawnAirdrop(message, guildSettings) {
 
 // ── Supply crate (item drop) ─────────────────────────────────────────────────
 
-async function spawnCrate(message, guildSettings) {
+async function spawnCrate(message, _guildSettings) {
     const item    = weightedPick(CRATE_ITEMS);
     const claimId = `chatev_crate_${message.id}`;
 

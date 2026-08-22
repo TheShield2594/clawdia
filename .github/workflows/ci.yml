@@ -70,6 +70,16 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # A step in this job rather than a job of its own: it needs the same
+      # `npm ci`, and a second job would pay for that install again to save a
+      # few seconds. After the tests, with `always()`, so the two signals are
+      # independent — an unused variable never hides which tests failed, and a
+      # failing test never hides the lint result either. Both still fail the
+      # job, which is what `publish: needs: test` is gating on.
+      - name: Lint
+        if: always()
+        run: npm run lint
+
   # Publishing lives here, behind `needs: test`, rather than in its own
   # workflow. It used to be a separate file triggered on `push: main`, which
   # ran alongside the tests instead of after them: a commit that broke the

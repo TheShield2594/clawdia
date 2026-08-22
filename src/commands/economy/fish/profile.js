@@ -428,7 +428,7 @@ async function equipRod(interaction, user) {
     });
 }
 
-async function showBait(interaction, user, currency) {
+async function showBait(interaction, user, _currency) {
     const f = user.fishing;
 
     const baitLines = Object.entries(f.bait ?? {})

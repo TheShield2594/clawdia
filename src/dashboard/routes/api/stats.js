@@ -42,7 +42,7 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
         const memberEvents = analytics?.memberEvents || [];
         const commandUsage = analytics?.commandUsage || [];
 
-        const { joins7, leaves7, joins30, leaves30, retained7, retained30 } = computeRetention(memberEvents);
+        const { joins30, leaves30, retained7, retained30 } = computeRetention(memberEvents);
 
         const commandSummary = {};
         const failedByReason = {};

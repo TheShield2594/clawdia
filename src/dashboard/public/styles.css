@@ -747,15 +747,25 @@ textarea { resize: vertical; min-height: 80px; }
     white-space: nowrap;
 }
 
+/* The dashboard's only feedback channel. Success and failure used to differ by
+   nothing but a 0.4-alpha border tint, which WCAG 1.4.1 rules out and which
+   almost nobody could see either way. The icon below is the signal now; the
+   colour on the icon and the accent bar reinforces it rather than carrying it
+   alone. See the toast helper in guild-settings.js (#659). */
 .toast {
     position: fixed;
     right: 1.5rem;
     bottom: 1.5rem;
     z-index: 100;
-    padding: 0.9rem 1.2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    max-width: min(30rem, calc(100vw - 3rem));
+    padding: 0.9rem 0.9rem 0.9rem 1.1rem;
     border-radius: 12px;
     background: rgba(20, 18, 16, 0.95);
     border: 1px solid var(--border-strong);
+    border-left: 4px solid var(--border-strong);
     color: var(--text);
     font-size: 0.92rem;
     backdrop-filter: blur(14px);
@@ -765,9 +775,68 @@ textarea { resize: vertical; min-height: 80px; }
     transition: opacity .25s ease, transform .25s ease;
     pointer-events: none;
 }
-.toast.show { opacity: 1; transform: translateY(0); }
-.toast.error { border-color: rgba(248,113,113,0.4); }
-.toast.success { border-color: rgba(52,211,153,0.4); }
+/* Only reachable once it is on screen — otherwise the dismiss button would sit
+   invisible in the corner swallowing clicks meant for the page behind it. */
+.toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.toast-icon { flex-shrink: 0; font-size: 1.05rem; line-height: 1; }
+.toast-icon:empty { display: none; }
+.toast-message { flex: 1; min-width: 0; }
+.toast-close {
+    flex-shrink: 0;
+    padding: 0.2rem 0.4rem;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+}
+.toast-close:hover { background: rgba(255,255,255,0.09); color: var(--text); }
+.toast-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toast.error { border-color: rgba(248,113,113,0.4); border-left-color: #f87171; }
+.toast.error .toast-icon { color: #f87171; }
+.toast.success { border-color: rgba(52,211,153,0.4); border-left-color: #34d399; }
+.toast.success .toast-icon { color: #34d399; }
+.toast.info { border-color: rgba(147,197,253,0.4); border-left-color: #93c5fd; }
+.toast.info .toast-icon { color: #93c5fd; }
+
+/* Skip link: off screen until it takes focus, then the first thing on the page.
+   The sidebar is 25 items long, so without it a keyboard user walks the whole
+   nav before reaching the settings they opened (#660). */
+.skip-link {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 200;
+    transform: translateY(-120%);
+    padding: 0.7rem 1.1rem;
+    border-radius: 0 0 10px 0;
+    background: var(--claw-500, #f97316);
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform .15s ease;
+}
+.skip-link:focus { transform: translateY(0); }
+
+/* The skip link and the nav both move focus here programmatically, so this is
+   where a keyboard user lands and it has to show that it did — an unmarked jump
+   is as disorienting as no jump. The ring is drawn inset so it frames the
+   content rather than the viewport edge.
+
+   Only for :focus-visible, which browsers match when the focus move followed
+   keyboard interaction. Clicking a nav item also focuses this element (the
+   button takes focus on mousedown), and outlining the whole main column on
+   every mouse click would be noise. */
+.dash-main:focus-visible {
+    outline: 2px solid var(--claw-500);
+    outline-offset: -3px;
+    border-radius: 8px;
+}
+.dash-main:focus:not(:focus-visible) { outline: none; }
 
 @media (max-width: 860px) {
     .settings-layout { grid-template-columns: 1fr; }
@@ -1270,11 +1339,15 @@ textarea.auto-resize {
 .dash-server-name span { font-size: 11.5px; color: var(--ink-400); }
 .dash-nav-label { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-500); margin: 18px 8px 8px; }
 .dash-nav { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 1px; }
-.dash-nav li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; font-size: 14px; color: var(--ink-200); cursor: pointer; border: none; background: transparent; width: 100%; text-align: left; font-family: inherit; transition: background .12s, color .12s; }
-.dash-nav li:hover { background: var(--ink-850); color: var(--cream-50); }
-.dash-nav li.active { background: var(--claw-500); color: #fff; }
-.dash-nav li.active .badge { background: rgba(255,255,255,.2); color: #fff; }
-.dash-nav li svg { flex-shrink: 0; color: inherit; }
+/* The <li> is a plain wrapper; the button inside it is what is styled, focused
+   and clicked. Keeping the list item intact is the point — the old markup put
+   role="button" on the <li> itself, which took `listitem` away from it (#660). */
+.dash-nav li { display: block; }
+.dash-nav .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; font-size: 14px; color: var(--ink-200); cursor: pointer; border: none; background: transparent; width: 100%; text-align: left; font-family: inherit; transition: background .12s, color .12s; }
+.dash-nav .nav-item:hover { background: var(--ink-850); color: var(--cream-50); }
+.dash-nav .nav-item.active { background: var(--claw-500); color: #fff; }
+.dash-nav .nav-item.active .badge { background: rgba(255,255,255,.2); color: #fff; }
+.dash-nav .nav-item svg { flex-shrink: 0; color: inherit; }
 .dash-nav .nav-emoji { font-size: 15px; width: 17px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .dash-nav .badge { margin-left: auto; background: var(--ink-800); color: var(--ink-300); font-size: 10.5px; padding: 2px 7px; border-radius: 999px; font-family: 'JetBrains Mono', monospace; }
 .dash-side-footer { margin-top: auto; padding-top: 18px; border-top: 1px solid var(--ink-800); }
@@ -1360,7 +1433,7 @@ textarea.auto-resize {
 .dash-bot-btn:hover { background: rgba(0,0,0,.4); }
 
 /* Nav item keyboard focus */
-.dash-nav li:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; border-radius: 10px; }
+.dash-nav .nav-item:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; border-radius: 10px; }
 
 /* Sidebar search */
 .dash-nav-search-wrap { position: relative; margin-bottom: 14px; }

@@ -197,7 +197,7 @@ module.exports = {
 
         // Atomically increment the district pool to prevent concurrent contributions
         // from overwriting each other. The $inc is safe against race conditions.
-        let freshGuild = await Guild.findOneAndUpdate(
+        const freshGuild = await Guild.findOneAndUpdate(
             {
                 guildId: interaction.guild.id,
                 districts: { $elemMatch: { districtId, activeUntil: { $not: { $gt: new Date() } } } },

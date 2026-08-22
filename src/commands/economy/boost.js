@@ -49,7 +49,7 @@ module.exports = {
         const sub = interaction.options.getSubcommand();
 
         try {
-            let guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+            const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
             if (!guildSettings) {
                 return interaction.reply({ content: 'Guild settings not found.', flags: MessageFlags.Ephemeral });
             }

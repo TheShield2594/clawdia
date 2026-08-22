@@ -103,8 +103,8 @@ module.exports = {
             .setColor('#f39c12')
             .setTitle('🪤 Trap Set!')
             .setDescription(
-                `You\'ve armed a **Tripwire** on your wallet.\n\n` +
-                `The trap is **invisible** — any robber has no way to know it\'s there.\n\n` +
+                `You've armed a **Tripwire** on your wallet.\n\n` +
+                `The trap is **invisible** — any robber has no way to know it's there.\n\n` +
                 `> **If a rob attempt succeeds:**\n` +
                 `> The robber pays **2× the normal fine** — straight to you.\n\n` +
                 `> **If a rob attempt fails:**\n` +

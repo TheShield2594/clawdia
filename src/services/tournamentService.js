@@ -133,7 +133,7 @@ async function endTournament(tournamentId) {
 /**
  * Build the live leaderboard embed.
  */
-function buildLeaderboardEmbed(tournament, client) {
+function buildLeaderboardEmbed(tournament, _client) {
     const sorted   = getSortedEntries(tournament);
     const now      = new Date();
     const msLeft   = Math.max(0, tournament.endsAt - now);

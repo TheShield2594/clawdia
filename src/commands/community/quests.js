@@ -4,7 +4,6 @@ const Guild = require('../../models/Guild');
 const AiQuest = require('../../models/AiQuest');
 const { ensureQuests, getDailyPool, getWeeklyPool, getCategoryEmojis, getDifficultyColors } = require('../../services/questService');
 
-const DIFFICULTY_EMBED_COLORS = { easy: 0x57F287, medium: 0xFEE75C, hard: 0xED4245 };
 const DIFFICULTY_LABELS = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
 const AI_MECHANIC_EMOJIS = {
     hunt:    '🏹',

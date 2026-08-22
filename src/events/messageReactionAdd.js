@@ -31,7 +31,7 @@ module.exports = {
 
 async function handleReactionQuests(reaction, discordUser, guild, guildSettings) {
     if (!guildSettings?.quests?.enabled) return;
-    let userDoc = await User.findOneAndUpdate(
+    const userDoc = await User.findOneAndUpdate(
         { userId: discordUser.id, guildId: guild.id },
         { $setOnInsert: { userId: discordUser.id, guildId: guild.id } },
         { upsert: true, new: true }

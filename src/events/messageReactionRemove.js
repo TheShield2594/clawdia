@@ -2,7 +2,7 @@ const Guild = require('../models/Guild');
 
 module.exports = {
     name: 'messageReactionRemove',
-    async execute(reaction, user, client) {
+    async execute(reaction, user, _client) {
         if (user.bot) return;
 
         if (reaction.partial) {

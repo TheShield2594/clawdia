@@ -11,6 +11,10 @@
     <script src="<%= asset('/esc-html.js') %>"></script>
 </head>
 <body style="background:var(--ink-950);margin:0;">
+<%# First tab stop on the page. The sidebar is 25 items long and is rebuilt on
+    every panel visit, so without this a keyboard user walks all of it to reach
+    the settings they just opened. Visible only while focused. %>
+<a class="skip-link" href="#dash-main-content">Skip to main content</a>
 <div class="dash">
 
     <!-- ── SIDEBAR ───────────────────────────────────────────── -->
@@ -45,6 +49,11 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg>
         </a>
 
+        <%# A landmark, so a screen reader can jump to the section list — and
+            can skip past it — instead of walking the sidebar from the top.
+            The search filters this list, so it lives inside the landmark. %>
+        <nav class="dash-side-nav" aria-label="Dashboard sections">
+
         <!-- Sidebar search -->
         <div class="dash-nav-search-wrap">
             <svg class="dash-nav-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -53,64 +62,66 @@
         <div id="sidebar-no-results" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true" style="display:none;font-size:.8rem;color:var(--ink-500);padding:6px 8px;">No sections match</div>
 
         <!-- Configure -->
-        <div class="dash-nav-label">// Configure</div>
-        <ul class="dash-nav">
-            <li class="nav-item active" data-tab="overview" data-keywords="stats kpis dashboard home"><span class="nav-emoji" aria-hidden="true">📊</span><span>Overview</span></li>
-            <li class="nav-item" data-tab="welcome" data-keywords="join greet card dm autorole message"><span class="nav-emoji" aria-hidden="true">👋</span><span>Welcome</span></li>
-            <li class="nav-item" data-tab="farewell" data-keywords="leave goodbye departure"><span class="nav-emoji" aria-hidden="true">🚪</span><span>Farewell</span></li>
-            <li class="nav-item" data-tab="leveling" data-keywords="xp level rank points progression"><span class="nav-emoji" aria-hidden="true">📈</span><span>Leveling</span></li>
-            <li class="nav-item" data-tab="economy" data-keywords="coins currency shop store jobs work daily"><span class="nav-emoji" aria-hidden="true">💰</span><span>Economy</span></li>
-            <li class="nav-item" data-tab="birthdays" data-keywords="birthday celebration age"><span class="nav-emoji">🎂</span><span>Birthdays</span></li>
+        <div class="dash-nav-label" id="nav-group-configure">// Configure</div>
+        <ul class="dash-nav" aria-labelledby="nav-group-configure">
+            <li><button type="button" class="nav-item active" data-tab="overview" data-keywords="stats kpis dashboard home" aria-current="page"><span class="nav-emoji" aria-hidden="true">📊</span><span>Overview</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="welcome" data-keywords="join greet card dm autorole message"><span class="nav-emoji" aria-hidden="true">👋</span><span>Welcome</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="farewell" data-keywords="leave goodbye departure"><span class="nav-emoji" aria-hidden="true">🚪</span><span>Farewell</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="leveling" data-keywords="xp level rank points progression"><span class="nav-emoji" aria-hidden="true">📈</span><span>Leveling</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="economy" data-keywords="coins currency shop store jobs work daily"><span class="nav-emoji" aria-hidden="true">💰</span><span>Economy</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="birthdays" data-keywords="birthday celebration age"><span class="nav-emoji" aria-hidden="true">🎂</span><span>Birthdays</span></button></li>
         </ul>
 
         <!-- Moderation -->
-        <div class="dash-nav-label">// Moderation</div>
-        <ul class="dash-nav">
-            <li class="nav-item" data-tab="moderation" data-keywords="ban kick mute warn automod spam filter profanity caps"><span class="nav-emoji" aria-hidden="true">🛡️</span><span>Moderation</span></li>
-            <li class="nav-item" data-tab="raiddetection" data-keywords="raid bot attack lockdown"><span class="nav-emoji">🚨</span><span>Raid Detection</span></li>
-            <li class="nav-item" data-tab="antinuke" data-keywords="nuke protect security whitelist threshold"><span class="nav-emoji" aria-hidden="true">🔒</span><span>Anti-Nuke</span></li>
+        <div class="dash-nav-label" id="nav-group-moderation">// Moderation</div>
+        <ul class="dash-nav" aria-labelledby="nav-group-moderation">
+            <li><button type="button" class="nav-item" data-tab="moderation" data-keywords="ban kick mute warn automod spam filter profanity caps"><span class="nav-emoji" aria-hidden="true">🛡️</span><span>Moderation</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="raiddetection" data-keywords="raid bot attack lockdown"><span class="nav-emoji" aria-hidden="true">🚨</span><span>Raid Detection</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="antinuke" data-keywords="nuke protect security whitelist threshold"><span class="nav-emoji" aria-hidden="true">🔒</span><span>Anti-Nuke</span></button></li>
         </ul>
 
         <!-- Progression -->
-        <div class="dash-nav-label">// Progression</div>
-        <ul class="dash-nav">
-            <li class="nav-item" data-tab="achievements" data-keywords="badge milestone unlock reward"><span class="nav-emoji">🏅</span><span>Achievements</span></li>
-            <li class="nav-item" data-tab="quests" data-keywords="task challenge daily weekly mission"><span class="nav-emoji">🗺️</span><span>Quests</span></li>
-            <li class="nav-item" data-tab="exploration" data-keywords="explore expedition region map secret treasure relic wilds"><span class="nav-emoji">🥾</span><span>Exploration</span></li>
-            <li class="nav-item" data-tab="season" data-keywords="seasonal pass battle tier"><span class="nav-emoji">🏆</span><span>Season Pass</span></li>
-            <li class="nav-item" data-tab="progressiontracks" data-keywords="track creator helper raider bonus xp multiplier"><span class="nav-emoji">🧭</span><span>Progression Tracks</span></li>
+        <div class="dash-nav-label" id="nav-group-progression">// Progression</div>
+        <ul class="dash-nav" aria-labelledby="nav-group-progression">
+            <li><button type="button" class="nav-item" data-tab="achievements" data-keywords="badge milestone unlock reward"><span class="nav-emoji" aria-hidden="true">🏅</span><span>Achievements</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="quests" data-keywords="task challenge daily weekly mission"><span class="nav-emoji" aria-hidden="true">🗺️</span><span>Quests</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="exploration" data-keywords="explore expedition region map secret treasure relic wilds"><span class="nav-emoji" aria-hidden="true">🥾</span><span>Exploration</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="season" data-keywords="seasonal pass battle tier"><span class="nav-emoji" aria-hidden="true">🏆</span><span>Season Pass</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="progressiontracks" data-keywords="track creator helper raider bonus xp multiplier"><span class="nav-emoji" aria-hidden="true">🧭</span><span>Progression Tracks</span></button></li>
         </ul>
 
         <!-- Community -->
-        <div class="dash-nav-label">// Community</div>
-        <ul class="dash-nav">
-            <li class="nav-item" data-tab="starboard" data-keywords="star highlight pin featured"><span class="nav-emoji">⭐</span><span>Starboard</span></li>
-            <li class="nav-item" data-tab="suggestions" data-keywords="ideas feedback vote upvote downvote approve staff anonymous"><span class="nav-emoji">💡</span><span>Suggestions</span></li>
-            <li class="nav-item" data-tab="reactionroles" data-keywords="self assign emoji role react"><span class="nav-emoji">🎭</span><span>Reaction Roles</span></li>
+        <div class="dash-nav-label" id="nav-group-community">// Community</div>
+        <ul class="dash-nav" aria-labelledby="nav-group-community">
+            <li><button type="button" class="nav-item" data-tab="starboard" data-keywords="star highlight pin featured"><span class="nav-emoji" aria-hidden="true">⭐</span><span>Starboard</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="suggestions" data-keywords="ideas feedback vote upvote downvote approve staff anonymous"><span class="nav-emoji" aria-hidden="true">💡</span><span>Suggestions</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="reactionroles" data-keywords="self assign emoji role react"><span class="nav-emoji" aria-hidden="true">🎭</span><span>Reaction Roles</span></button></li>
         </ul>
 
         <!-- Tools -->
-        <div class="dash-nav-label">// Tools</div>
-        <ul class="dash-nav">
-            <li class="nav-item" data-tab="commandpolicies" data-keywords="permissions restrict cooldown command disable"><span class="nav-emoji" aria-hidden="true">⚙️</span><span>Command Policies</span></li>
-            <li class="nav-item" data-tab="ai" data-keywords="chatbot gpt openai knowledge persona summary"><span class="nav-emoji" aria-hidden="true">🤖</span><span>AI Chat</span></li>
-            <li class="nav-item" data-tab="tempvoice" data-keywords="voice channel temporary dynamic create"><span class="nav-emoji">🔊</span><span>Temp Voice</span></li>
+        <div class="dash-nav-label" id="nav-group-tools">// Tools</div>
+        <ul class="dash-nav" aria-labelledby="nav-group-tools">
+            <li><button type="button" class="nav-item" data-tab="commandpolicies" data-keywords="permissions restrict cooldown command disable"><span class="nav-emoji" aria-hidden="true">⚙️</span><span>Command Policies</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="ai" data-keywords="chatbot gpt openai knowledge persona summary"><span class="nav-emoji" aria-hidden="true">🤖</span><span>AI Chat</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="tempvoice" data-keywords="voice channel temporary dynamic create"><span class="nav-emoji" aria-hidden="true">🔊</span><span>Temp Voice</span></button></li>
         </ul>
 
         <!-- Feeds & Automation -->
-        <div class="dash-nav-label">// Feeds &amp; Automation</div>
-        <ul class="dash-nav">
-            <li class="nav-item" data-tab="newspaper" data-keywords="news daily digest article ai"><span class="nav-emoji">📰</span><span>Newspaper</span></li>
-            <li class="nav-item" data-tab="bibleverses" data-keywords="bible verse scripture daily scripture"><span class="nav-emoji">📖</span><span>Bible Verses</span></li>
-            <li class="nav-item" data-tab="rss" data-keywords="feed rss atom url news blog"><span class="nav-emoji" aria-hidden="true">📡</span><span>RSS Feeds</span></li>
+        <div class="dash-nav-label" id="nav-group-feeds">// Feeds &amp; Automation</div>
+        <ul class="dash-nav" aria-labelledby="nav-group-feeds">
+            <li><button type="button" class="nav-item" data-tab="newspaper" data-keywords="news daily digest article ai"><span class="nav-emoji" aria-hidden="true">📰</span><span>Newspaper</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="bibleverses" data-keywords="bible verse scripture daily scripture"><span class="nav-emoji" aria-hidden="true">📖</span><span>Bible Verses</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="rss" data-keywords="feed rss atom url news blog"><span class="nav-emoji" aria-hidden="true">📡</span><span>RSS Feeds</span></button></li>
         </ul>
 
         <!-- Insights -->
-        <div class="dash-nav-label">// Insights</div>
-        <ul class="dash-nav">
-            <li class="nav-item" data-tab="analytics" data-keywords="stats graphs reports activity commands usage"><span class="nav-emoji" aria-hidden="true">📊</span><span>Analytics</span></li>
-            <li class="nav-item" data-tab="eventlog" data-keywords="log audit events voice messages members server"><span class="nav-emoji">📋</span><span>Event Log</span></li>
+        <div class="dash-nav-label" id="nav-group-insights">// Insights</div>
+        <ul class="dash-nav" aria-labelledby="nav-group-insights">
+            <li><button type="button" class="nav-item" data-tab="analytics" data-keywords="stats graphs reports activity commands usage"><span class="nav-emoji" aria-hidden="true">📊</span><span>Analytics</span></button></li>
+            <li><button type="button" class="nav-item" data-tab="eventlog" data-keywords="log audit events voice messages members server"><span class="nav-emoji" aria-hidden="true">📋</span><span>Event Log</span></button></li>
         </ul>
+
+        </nav><!-- /.dash-side-nav -->
 
         <!-- User footer -->
         <div class="dash-side-footer">
@@ -130,7 +141,7 @@
     </aside><!-- /.dash-side -->
 
     <!-- ── MAIN ──────────────────────────────────────────────── -->
-    <main class="dash-main">
+    <main class="dash-main" id="dash-main-content" tabindex="-1">
 
         <!-- Top bar -->
         <div class="dash-topbar">
@@ -154,7 +165,18 @@
 
 </div><!-- /.dash -->
 
-    <div class="toast" id="toast"></div>
+    <%# Every save, delete and failure in the dashboard reports through this
+        one element, so it has to be announced: without a live region a screen
+        reader user gets no confirmation that anything happened at all. The
+        icon and the "Error"/"Saved" prefix guild-settings.js writes are what
+        carry the outcome — the border colour alone did, which WCAG 1.4.1
+        rules out. `polite` rather than `assertive`: these follow an action
+        the reader just took, so they do not need to cut in. %>
+    <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true">
+        <span class="toast-icon" id="toast-icon" aria-hidden="true"></span>
+        <span class="toast-message" id="toast-message"></span>
+        <button type="button" class="toast-close" id="toast-close" aria-label="Dismiss message" hidden>✕</button>
+    </div>
 
     <!-- Generic confirm modal -->
     <div id="confirm-modal" class="modal-overlay" style="display:none;" aria-modal="true" aria-hidden="true" role="dialog" onclick="if(event.target===this)_confirmResolve(false)">

@@ -46,8 +46,8 @@ async function applyEscalation({ guild, targetUser, warningCount, triggeringCase
     const reason = formatReason(step.reason, warningCount);
     const botUser = client.user;
     const member = await guild.members.fetch(targetUser.id).catch(() => null);
-    let actionTaken = step.action;
-    let durationMs = step.durationMinutes ? step.durationMinutes * 60 * 1000 : null;
+    const actionTaken = step.action;
+    const durationMs = step.durationMinutes ? step.durationMinutes * 60 * 1000 : null;
 
     if (step.dmUser) {
         const actionPast = ACTION_PAST_TENSE[step.action] || step.action;

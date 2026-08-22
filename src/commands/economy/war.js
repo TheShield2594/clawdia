@@ -186,7 +186,6 @@ async function executeStatus(interaction) {
 
     const now = Date.now();
     const endsAt = new Date(war.endsAt).getTime();
-    const totalMs = WAR_DURATION_MS;
     const elapsed = now - new Date(war.startedAt).getTime();
     const day = Math.min(WAR_DURATION_DAYS, Math.ceil(elapsed / 86400000));
 

@@ -34,7 +34,7 @@ function applyVariables(template, member) {
 
 module.exports = {
     name: 'guildMemberRemove',
-    async execute(member, client) {
+    async execute(member, _client) {
         try {
             // Detect kick via audit log; bans fire guildBanAdd separately.
             await trackAction(member.guild, 'kick', AuditLogEvent.MemberKick, member.id).catch(console.error);

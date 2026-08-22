@@ -11,7 +11,7 @@ const User = require('../../models/User');
 const { advanceMissions } = require('../../services/seasonMissionService');
 const Guild = require('../../models/Guild');
 const { isDistrictActive } = require('../../services/districtService');
-const { RANK_TIERS, START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duelElo');
+const { START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duelElo');
 
 const DUEL_COOLDOWN_MS = 5 * 60_000;
 const ACCEPT_TIMEOUT_MS = 60_000;

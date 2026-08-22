@@ -103,7 +103,7 @@ async function runDailyDigest(guildSettings, client) {
         ? digest.sourceChannelIds
         : guild.channels.cache.filter(c => c.isTextBased()).map(c => c.id);
 
-    let lines = [];
+    const lines = [];
     for (const channelId of sourceIds) {
         const channel = guild.channels.cache.get(channelId)
             || await guild.channels.fetch(channelId).catch(() => null);

@@ -11,7 +11,7 @@ require('./config/fileSecrets').loadFileSecrets();
 
 const health = require('./health');
 const { makeCache, sweepers } = require('./utils/cacheOptions');
-const { isPrimaryShard, shardTag, shardCount } = require('./utils/sharding');
+const { isPrimaryShard, shardTag } = require('./utils/sharding');
 const { loadCommandModules } = require('./utils/commandLoader');
 
 // Validate required environment variables before doing anything else.
