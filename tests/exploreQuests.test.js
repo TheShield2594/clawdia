@@ -133,6 +133,7 @@ describe('exploration competes in the hourly micro-competition', () => {
     const fsx  = require('fs');
     const pathx = require('path');
     const read = (...p) => fsx.readFileSync(pathx.join(__dirname, '..', 'src', ...p), 'utf8');
+    const { grindCommandSource } = require('./helpers/grindSources');
 
     test('the scheduler can name an explore winner', () => {
         // A category with no label entry is skipped at announcement time — the
@@ -144,8 +145,8 @@ describe('exploration competes in the hourly micro-competition', () => {
             [...labels.slice(0, labels.indexOf('};')).matchAll(/^\s+(\w+):\s*\{/gm)].map(m => m[1])
         );
 
-        const commands = ['hunt.js', 'fish.js', 'mine.js', 'explore.js']
-            .map(f => read('commands', 'economy', f)).join('\n');
+        const commands = ['hunt', 'fish', 'mine', 'explore']
+            .map(grindCommandSource).join('\n');
         const recorded = new Set(
             [...commands.matchAll(/category:\s*'(\w+)'/g)].map(m => m[1])
         );

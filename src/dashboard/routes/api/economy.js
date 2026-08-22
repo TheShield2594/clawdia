@@ -46,13 +46,7 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
             }
         }
 
-        const ecoUserMap = {};
-        await Promise.all(topEarners.map(async u => {
-            try {
-                const user = await req.client.users.fetch(u.userId, { force: false });
-                ecoUserMap[u.userId] = { tag: user.tag, avatarUrl: user.displayAvatarURL({ size: 32, extension: 'webp' }) };
-            } catch { /* user not resolvable */ }
-        }));
+        const ecoUserMap = await req.bot.resolveUsers(topEarners.map(u => u.userId));
 
         res.json({
             totalCoins: totalCoinsAgg[0]?.total || 0,

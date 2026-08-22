@@ -64,7 +64,7 @@ jest.mock('../src/models/ItemImage', () => ({
     findOne: jest.fn().mockResolvedValue({ imageData: Buffer.from('fake-png'), imageType: 'image/png' }),
 }));
 
-const mineCommand = require('../src/commands/economy/mine.js');
+const mineCommand = require('../src/commands/economy/mine');
 
 // Polls `check` until it returns truthy or `timeoutMs` elapses, instead of
 // assuming a fixed number of microtask ticks. Keeps the test stable even if

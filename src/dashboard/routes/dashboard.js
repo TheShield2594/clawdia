@@ -18,10 +18,10 @@ function checkAuth(req, res, next) {
 }
 
 const { hasManagePermission } = require('../lib/permissions');
+const { CHANNEL_TYPES } = require('../../bot/gateway');
 const { PANELS, DEFAULT_PANEL, isPanel } = require('../lib/panels');
 
 function getManageableGuilds(req) {
-    const botGuilds = req.client.guilds.cache;
     return req.user.guilds
         .filter(hasManagePermission)
         .map(guild => ({
@@ -29,7 +29,7 @@ function getManageableGuilds(req) {
             name: guild.name,
             icon: guild.icon,
             owner: guild.owner === true,
-            botPresent: botGuilds.has(guild.id)
+            botPresent: req.bot.hasGuild(guild.id)
         }));
 }
 
@@ -72,7 +72,7 @@ async function buildGuildSettingsLocals(req) {
     }
 
     let guildSettings = await Guild.findOne({ guildId });
-    const guild = req.client.guilds.cache.get(guildId);
+    const guild = req.bot.getGuild(guildId);
 
     if (!guild) {
         return { status: 404, message: 'Guild not found' };
@@ -89,23 +89,15 @@ async function buildGuildSettingsLocals(req) {
         await guildSettings.save();
     }
 
-    const channels = guild.channels.cache
-        .filter(c => c.type === 0)
-        .map(c => ({ id: c.id, name: c.name }));
+    const allChannels = req.bot.listChannels(guildId) || [];
+    const ofType = type => allChannels.filter(c => c.type === type).map(c => ({ id: c.id, name: c.name }));
 
-    const voiceChannels = guild.channels.cache
-        .filter(c => c.type === 2)
-        .map(c => ({ id: c.id, name: c.name }));
+    const channels = ofType(CHANNEL_TYPES.TEXT);
+    const voiceChannels = ofType(CHANNEL_TYPES.VOICE);
+    const stageChannels = ofType(CHANNEL_TYPES.STAGE);
+    const categories = ofType(CHANNEL_TYPES.CATEGORY);
 
-    const stageChannels = guild.channels.cache
-        .filter(c => c.type === 13)
-        .map(c => ({ id: c.id, name: c.name }));
-
-    const categories = guild.channels.cache
-        .filter(c => c.type === 4)
-        .map(c => ({ id: c.id, name: c.name }));
-
-    const roles = guild.roles.cache
+    const roles = (req.bot.listRoles(guildId) || [])
         .filter(r => r.name !== '@everyone')
         .map(r => ({ id: r.id, name: r.name }));
 

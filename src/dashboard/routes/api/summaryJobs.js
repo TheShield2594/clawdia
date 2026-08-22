@@ -32,11 +32,11 @@ router.post('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, checkWr
     if (!Number.isFinite(m) || m < 0 || m > 59) return res.status(400).json({ error: 'minute must be 0–59' });
 
     try {
-        const guild = req.client.guilds.cache.get(guildId);
-        if (!guild) return res.status(404).json({ error: 'Guild not found' });
+        const channels = req.bot.listChannels(guildId);
+        if (!channels) return res.status(404).json({ error: 'Guild not found' });
 
-        const srcChannel = guild.channels.cache.get(sourceChannelId.trim());
-        const tgtChannel = guild.channels.cache.get(targetChannelId.trim());
+        const srcChannel = channels.find(c => c.id === sourceChannelId.trim());
+        const tgtChannel = channels.find(c => c.id === targetChannelId.trim());
         if (!srcChannel || !tgtChannel) return res.status(400).json({ error: 'One or both channels not found in this guild' });
 
         const jobCount = await SummaryJob.countDocuments({ guildId });

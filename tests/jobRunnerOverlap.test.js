@@ -75,6 +75,25 @@ describe('runJob overlap protection', () => {
         await Promise.all([a, b]);
     });
 
+    // One-shot work — a poll expiry, scheduled once for one message — is never
+    // retried by a later tick, so an overlap skip loses it permanently. `scope`
+    // is what keeps two of them in the same second from colliding (#611).
+    it('scopes the lock per entity so two one-shot runs do not block each other', async () => {
+        const g = gate();
+        let runs = 0;
+        const fn = async () => { runs++; await g.promise; };
+
+        const a = runJob('pollSvc', 'close', fn, { guildId: 'guild-a', scope: 'message-1' });
+        const b = runJob('pollSvc', 'close', fn, { guildId: 'guild-a', scope: 'message-2' });
+        const dupA = await runJob('pollSvc', 'close', fn, { guildId: 'guild-a', scope: 'message-1' });
+
+        expect(dupA).toBe(false);
+        expect(runs).toBe(2);
+
+        g.release();
+        await Promise.all([a, b]);
+    });
+
     it('counts skips on the health report without marking the service unhealthy', async () => {
         const g = gate();
         const fn = async () => { await g.promise; };

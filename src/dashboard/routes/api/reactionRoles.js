@@ -27,38 +27,36 @@ router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, c
     }
 
     try {
-        const guild = req.client.guilds.cache.get(guildId);
-        if (!guild) return res.status(404).json({ error: 'Guild not found' });
-
-        const channel = guild.channels.cache.get(channelId);
-        if (!channel) return res.status(404).json({ error: 'Channel not found' });
+        if (!req.bot.hasGuild(guildId)) return res.status(404).json({ error: 'Guild not found' });
+        if (!req.bot.hasChannel(guildId, channelId)) return res.status(404).json({ error: 'Channel not found' });
 
         const guildSettings = await Guild.findOne({ guildId });
         if (!guildSettings) return res.status(404).json({ error: 'Guild settings not found' });
 
-        const { EmbedBuilder } = require('discord.js');
-        const embed = new EmbedBuilder()
-            .setColor(0x5865F2)
-            .setTitle(title || 'React to get a role!')
-            .setDescription(
+        // Plain embed JSON rather than an EmbedBuilder: the gateway facade
+        // takes data, so this route needs nothing from discord.js (#608).
+        const embed = {
+            color: 0x5865F2,
+            title: title || 'React to get a role!',
+            description:
                 (description ? description + '\n\n' : '') +
-                mappings.map(m => `${m.emoji.trim()} — <@&${m.roleId.trim()}>`).join('\n')
-            )
-            .setFooter({ text: 'React below to assign yourself a role' });
+                mappings.map(m => `${m.emoji.trim()} — <@&${m.roleId.trim()}>`).join('\n'),
+            footer: { text: 'React below to assign yourself a role' },
+        };
 
-        const message = await channel.send({ embeds: [embed] });
+        const sent = await req.bot.sendEmbed(guildId, channelId, embed);
+        if (!sent) return res.status(404).json({ error: 'Channel not found' });
 
         try {
-            for (const mapping of mappings) {
+            await req.bot.addReactions(guildId, channelId, sent.messageId, mappings.map(mapping => {
                 const emojiStr = mapping.emoji.trim();
                 const match = emojiStr.match(/^<a?:(\w+):(\d+)>$/);
-                const reactArg = match ? `${match[1]}:${match[2]}` : emojiStr;
-                await message.react(reactArg);
-            }
+                return match ? `${match[1]}:${match[2]}` : emojiStr;
+            }));
 
             for (const mapping of mappings) {
                 guildSettings.reactionRoles.push({
-                    messageId: message.id,
+                    messageId: sent.messageId,
                     channelId,
                     emoji: mapping.emoji.trim(),
                     roleId: mapping.roleId.trim()
@@ -67,11 +65,13 @@ router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, c
 
             await guildSettings.save();
         } catch (innerError) {
-            await message.delete().catch(() => null);
+            // A panel whose reactions or settings write failed is a message
+            // nobody can use, so it does not get to stay up.
+            await req.bot.deleteMessage(guildId, channelId, sent.messageId);
             throw innerError;
         }
 
-        res.json({ success: true, messageId: message.id });
+        res.json({ success: true, messageId: sent.messageId });
     } catch (error) {
         console.error('Reaction role panel create error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -87,13 +87,7 @@ router.delete('/guild/:guildId/reactionrole/panel/:messageId', checkAuth, checkG
 
         const entry = guildSettings.reactionRoles.find(r => r.messageId === messageId);
         if (entry) {
-            const guild = req.client.guilds.cache.get(guildId);
-            if (guild) {
-                const channel = guild.channels.cache.get(entry.channelId);
-                if (channel) {
-                    await channel.messages.fetch(messageId).then(m => m.delete()).catch(() => null);
-                }
-            }
+            await req.bot.deleteMessage(guildId, entry.channelId, messageId);
         }
 
         guildSettings.reactionRoles = guildSettings.reactionRoles.filter(r => r.messageId !== messageId);

@@ -10,8 +10,9 @@ const { recordServiceRun, recordServiceSkip } = require('../health');
 // at most a minute away, and the work is idempotent catch-up work.
 const inFlight = new Set();
 
-function inFlightKey(service, jobName, guildId) {
-    return guildId ? `${service}/${jobName}#${guildId}` : `${service}/${jobName}`;
+function inFlightKey(service, jobName, guildId, scope) {
+    const suffix = [guildId, scope].filter(Boolean).join(':');
+    return suffix ? `${service}/${jobName}#${suffix}` : `${service}/${jobName}`;
 }
 
 /**
@@ -23,13 +24,17 @@ function inFlightKey(service, jobName, guildId) {
  * @param {Function} fn     - async job function to run
  * @param {object} [opts]
  * @param {string}  [opts.guildId]      - guild this job is scoped to
+ * @param {string}  [opts.scope]        - further narrows the overlap guard, for
+ *   work scheduled per entity rather than per tick. A poll expiry fires once
+ *   for one message and is never retried by a later tick, so two polls closing
+ *   in the same second must not have the second dropped as an overlap.
  * @param {object}  [opts.payload]      - extra context stored on failure
  * @param {number}  [opts.maxAttempts]  - max DLQ retry count (default 3)
  * @returns {Promise<boolean>} false when the run was skipped because the same
  *   job (and guild, if scoped) was already in flight; true otherwise.
  */
-async function runJob(service, jobName, fn, { guildId = null, payload = null, maxAttempts = 3 } = {}) {
-    const key = inFlightKey(service, jobName, guildId);
+async function runJob(service, jobName, fn, { guildId = null, scope = null, payload = null, maxAttempts = 3 } = {}) {
+    const key = inFlightKey(service, jobName, guildId, scope);
     if (inFlight.has(key)) {
         recordServiceSkip(service);
         console.warn(`[JobRunner] ${key} still running from a previous tick — skipping this one.`);

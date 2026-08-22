@@ -10,6 +10,7 @@ const { getStatus } = require('../health');
 const { hasManagePermission } = require('./lib/permissions');
 const { jsonForScript } = require('./lib/jsonForScript');
 const { asset } = require('./lib/assets');
+const { createBotGateway } = require('../bot/gateway');
 
 const app = express();
 
@@ -178,8 +179,13 @@ function start(client) {
     app.use(passport.initialize());
     app.use(passport.session());
 
+    // Routes get the facade, never the client (#608). Everything they need
+    // from Discord is a method on it, so nothing downstream holds a live
+    // gateway object — which is what lets this be backed by IPC or
+    // broadcastEval later without touching a single route.
+    const bot = createBotGateway(client);
     app.use((req, res, next) => {
-        req.client = client;
+        req.bot = bot;
         next();
     });
 
@@ -200,7 +206,7 @@ function start(client) {
     app.get('/health', (req, res) => {
         const detailed = req.isAuthenticated?.() === true
             && Array.isArray(req.user?.guilds)
-            && req.user.guilds.some(g => hasManagePermission(g) && client.guilds.cache.has(g.id));
+            && req.user.guilds.some(g => hasManagePermission(g) && bot.hasGuild(g.id));
 
         const status = getStatus({ detailed });
         res.status(status.status === 'unhealthy' ? 503 : 200).json(status);

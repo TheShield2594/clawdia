@@ -76,7 +76,7 @@ jest.mock('canvas', () => ({
     registerFont: jest.fn(),
 }));
 
-const huntCommand = require('../src/commands/economy/hunt.js');
+const huntCommand = require('../src/commands/economy/hunt');
 const User = require('../src/models/User');
 const GrindProfile = require('../src/models/GrindProfile');
 

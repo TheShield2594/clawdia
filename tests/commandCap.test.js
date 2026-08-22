@@ -5,6 +5,7 @@ const {
     GLOBAL_COMMAND_LIMIT,
     COMMAND_BUDGET,
 } = require('../src/utils/commandDeployer');
+const { loadCommandModules } = require('../src/utils/commandLoader');
 
 // Discord caps global application commands at 100 and rejects the whole `PUT`
 // when a payload exceeds it — it does not register the first 100 and drop the
@@ -43,10 +44,33 @@ describe('global slash-command cap', () => {
         expect(COMMAND_BUDGET).toBe(files.length);
     });
 
-    test('every command file sits in a category directory', () => {
-        for (const { dir, rel } of files) {
+    // A command is either `<category>/<name>.js` or `<category>/<name>/index.js`
+    // — the folder form is how a command too big for one file (fish, hunt,
+    // mine) splits up without its helper files each registering as a command
+    // of their own. Either way it lives under a category, never loose at the
+    // root, and `rel` is `dir` plus `file` with nothing invented in between.
+    test('every command sits in a category directory', () => {
+        for (const { dir, file, rel } of files) {
             expect(dir).not.toBe('');
-            expect(rel).toBe(`${dir}/${rel.split('/')[1]}`);
+            expect(rel).toBe(`${dir}/${file}`);
+            expect(file === 'index.js').toBe(false);
+            expect(file.endsWith('.js')).toBe(true);
         }
+    });
+
+    // Two commands cannot both claim one name, and Discord would reject the
+    // whole payload if they tried. The names come from the loaded modules
+    // rather than from their paths: it is `data.name` that gets registered, and
+    // a file whose name has drifted from the command inside it is exactly the
+    // case a path-derived check would miss.
+    test('no two commands share a name', () => {
+        const { commands, failures } = loadCommandModules();
+
+        expect(failures).toEqual([]);
+        expect(commands).toHaveLength(files.length);
+
+        const names = commands.map(({ command }) => command.data.name);
+        expect(names.every(n => typeof n === 'string' && n.length > 0)).toBe(true);
+        expect(new Set(names).size).toBe(names.length);
     });
 });

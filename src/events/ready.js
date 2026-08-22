@@ -11,7 +11,10 @@ module.exports = {
         console.log(`[READY] Serving ${client.guilds.cache.size} guilds`);
 
         try {
-            const count = await deployCommands(client.user.id, process.env.DISCORD_TOKEN);
+            // Deploy the commands startup already loaded rather than walking and
+            // requiring src/commands a second time (#607). It is also what keeps
+            // the registered set and the running set the same set.
+            const count = await deployCommands(client.user.id, process.env.DISCORD_TOKEN, client.commands.values());
             console.log(`[READY] Deployed ${count} slash commands`);
         } catch (error) {
             console.error('[READY] Failed to deploy slash commands:', error);

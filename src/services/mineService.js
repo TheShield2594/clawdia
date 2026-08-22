@@ -699,7 +699,7 @@ function executeMine(user, depthId, options = {}) {
         m.totalEarned    += adjustedPayout;
         m.dailyCoins     += adjustedPayout;
         // bestPayout is deliberately NOT booked here: the intensity multiplier,
-        // the yield bonuses and the cave-in resolution all still run in mine.js,
+        // the yield bonuses and the cave-in resolution all still run in mine/dig.js,
         // so only the caller knows what the player actually walked away with.
 
         m.successfulMines  += 1;
@@ -767,17 +767,17 @@ function executeMine(user, depthId, options = {}) {
         const caveInBlocked = trapActive || ironWillBlocks;
 
         if (caveInRisk > 0 && Math.random() < caveInRisk && !caveInBlocked) {
-            // Cave-in: flag it and store at-risk payout; mine.js resolves interactively.
+            // Cave-in: flag it and store at-risk payout; mine/dig.js resolves interactively.
             result.caveIn        = true;
             result.caveInDur     = intensityDurLoss;
-            // What executeMine has already credited, and what mine.js reverses if the
+            // What executeMine has already credited, and what mine/dig.js reverses if the
             // player flees.
             result.caveInPayout  = result.finalPayout ?? 0;
             // The multiplier the vein read earned is held in escrow, not destroyed.
             // Cave-in and the multiplier used to be exclusive branches, so reading the
             // vein perfectly, caving in, and spending a blast charge to dig clear paid
             // exactly the same as a one-in-three read — the charge bought back a haul
-            // stripped of the very bonus it was risked for. mine.js pays this out only
+            // stripped of the very bonus it was risked for. mine/dig.js pays this out only
             // on a successful escape.
             result.caveInEscrow  = multiplier !== 1.0 && result.finalPayout
                 ? Math.round(result.finalPayout * (multiplier - 1.0))

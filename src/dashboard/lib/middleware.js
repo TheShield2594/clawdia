@@ -28,7 +28,7 @@ function checkAuth(req, res, next) {
 function checkGuildAccess(req, res, next) {
     const { guildId } = req.params;
     const userGuilds = req.user.guilds.filter(guild =>
-        hasManagePermission(guild) && req.client.guilds.cache.has(guild.id)
+        hasManagePermission(guild) && req.bot.hasGuild(guild.id)
     );
 
     if (!userGuilds.find(g => g.id === guildId)) {
@@ -73,7 +73,7 @@ function checkCsrfOrigin(req, res, next) {
 
 function checkAnyGuildAdmin(req, res, next) {
     if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
-    const adminGuilds = req.user.guilds.filter(g => hasManagePermission(g) && req.client.guilds.cache.has(g.id));
+    const adminGuilds = req.user.guilds.filter(g => hasManagePermission(g) && req.bot.hasGuild(g.id));
     if (!adminGuilds.length) return res.status(403).json({ error: 'Forbidden' });
     next();
 }

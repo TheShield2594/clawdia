@@ -40,7 +40,7 @@ function makeReq({ authenticated = true, guilds = [], botGuilds = [], params = {
     return {
         isAuthenticated: () => authenticated,
         user: authenticated ? { id: 'user-1', guilds } : undefined,
-        client: { guilds: { cache: { has: id => botGuilds.includes(id) } } },
+        bot: { hasGuild: id => botGuilds.includes(id) },
         params,
         headers,
     };

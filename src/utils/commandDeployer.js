@@ -1,48 +1,54 @@
 const { REST, Routes } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const { listCommandFiles, loadCommandModules } = require('./commandLoader');
 
 // Discord registers at most this many global application commands. Going over
 // is not a soft limit or a truncation — the whole `PUT` is rejected, so one
 // command too many takes every other command down with it.
 const GLOBAL_COMMAND_LIMIT = 100;
 
-// How close to the limit we are willing to sit. Each file under src/commands
-// is one top-level command, so this is also the count that tests/commandCap
-// pins: new top-level commands have to displace an old one or become a
-// subcommand of an existing group (the shape /hunt, /fish and /explore use).
+// How close to the limit we are willing to sit. Each command under src/commands
+// — one file, or one folder with an index.js — is one top-level command, so
+// this is also the count that tests/commandCap pins: new top-level commands
+// have to displace an old one or become a subcommand of an existing group (the
+// shape /hunt, /fish and /explore use).
 // Lower it when a consolidation lands; raising it spends the last of the
 // headroom between here and a deploy that cannot be undone by a revert.
 const COMMAND_BUDGET = 97;
 
-// The walk the deploy actually performs, shared with the test so the guard
-// cannot drift from the thing it guards.
-function listCommandFiles(foldersPath = path.join(__dirname, '../commands')) {
-    const files = [];
-    for (const entry of fs.readdirSync(foldersPath, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        const commandsPath = path.join(foldersPath, entry.name);
-        for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) {
-            files.push({ dir: entry.name, file, rel: `${entry.name}/${file}`, full: path.join(commandsPath, file) });
-        }
-    }
-    return files;
-}
-
-async function deployCommands(clientId, token) {
+/**
+ * Publish the global command set.
+ *
+ * @param {string} clientId
+ * @param {string} token
+ * @param {Iterable<object>} [loadedCommands] commands already required at
+ *   startup (`client.commands`). Startup has just required all 98 of them; a
+ *   second walk-and-require here bought nothing but ~800 ms and a chance for
+ *   the deployed set to disagree with the running one. Omit it — as the
+ *   standalone `npm run deploy` does, where no client exists — and the deploy
+ *   loads them itself.
+ */
+async function deployCommands(clientId, token, loadedCommands = null) {
     const commands = [];
     const failures = [];
 
-    for (const { rel, full } of listCommandFiles()) {
-        try {
-            const command = require(full);
-            if ('data' in command && 'execute' in command && typeof command.data?.toJSON === 'function') {
+    if (loadedCommands) {
+        for (const command of loadedCommands) {
+            const name = command?.data?.name ?? '(unnamed command)';
+            if (typeof command?.data?.toJSON === 'function') {
                 commands.push(command.data.toJSON());
             } else {
-                failures.push(`${rel} (missing data/execute or data.toJSON)`);
+                failures.push(`${name} (data.toJSON is not a function)`);
             }
-        } catch (error) {
-            failures.push(`${rel} (${error.message})`);
+        }
+    } else {
+        const loaded = loadCommandModules();
+        failures.push(...loaded.failures);
+        for (const { entry, command } of loaded.commands) {
+            if (typeof command.data?.toJSON === 'function') {
+                commands.push(command.data.toJSON());
+            } else {
+                failures.push(`${entry.rel} (data.toJSON is not a function)`);
+            }
         }
     }
 
