@@ -262,7 +262,13 @@ Most news sites and blogs provide RSS feeds. Here are some examples:
 
 ### Testing Daily News
 
-Use the `/dailynews` command (requires administrator permissions) to manually trigger a digest and test your configuration.
+Open the dashboard's **Daily News** panel and press **Send digest now** (the
+dashboard already requires Manage Server on the guild). It posts a digest
+immediately to the configured channel, so you can check the feeds, the
+channel and the bot's permissions without waiting for the scheduled time.
+
+The button calls `POST /api/guild/:guildId/dailynews/trigger`; there is no
+slash command for it.
 
 ## Dashboard Setup
 
@@ -413,6 +419,26 @@ docker-compose up -d
 docker logs clawdia -f
 ```
 
+### Health Monitoring
+
+The bot serves `GET /health` on the dashboard port:
+
+```bash
+curl -s http://localhost:7001/health
+# {"status":"healthy","uptime":43200}
+```
+
+`status` is `healthy`, `degraded` (MongoDB is up, but a scheduled service —
+RSS, raid detection, temp-ban sweeps, the daily verse — is failing every run) or
+`unhealthy` (MongoDB is not connected). Only `healthy` answers HTTP 200.
+
+Nothing watches this for you. Point an uptime monitor at the endpoint and alert
+on a non-200 response *and* on a body whose `status` is not `"healthy"` — the
+`degraded` case is the one you would otherwise never hear about, because the bot
+keeps answering Discord perfectly well while it is in it. README's **Monitoring**
+section covers the setup, and the optional `autoheal` service that restarts an
+`unhealthy` container.
+
 ## Database Management
 
 ### MongoDB Connection
@@ -460,7 +486,7 @@ docker exec clawdia-mongodb mongorestore /data/backup
 1. Verify RSS feed URLs are valid
 2. Check delivery time is in correct format (HH:MM)
 3. Ensure channel ID is valid
-4. Test with `/dailynews` command
+4. Press **Send digest now** in the dashboard's Daily News panel to test a delivery
 5. Check bot has permission to post in channel
 
 ## Best Practices
