@@ -549,21 +549,72 @@ if (!hasPermission(interaction.member, 'ManageMessages')) {
 
 ## Testing
 
-### Manual Testing Commands
+`npm test` runs the whole suite — every `*.test.js` under `tests/`, about 20
+seconds on a laptop. CI runs the same command on every push and pull request,
+and the `publish` job that builds the Docker image sits behind `needs: test`, so
+a red suite means no image is built at all.
+
+```bash
+npm test                            # everything
+npx jest tests/birthday.test.js     # one file
+npx jest -t "leap day"              # every test whose name matches
+npx jest --watch                    # re-run the affected files on save
+```
+
+`--forceExit` is in the npm script rather than in a config: a few suites leave a
+mongoose connection or a timer handle open, and without it Jest waits on them
+after the last assertion has already passed.
+
+### How the suite is laid out
+
+- One file per subject, named after it: `tests/huntRepair.test.js`,
+  `tests/rollPayout.test.js`. There is no `jest.config.js` — the defaults apply,
+  so anything matching `*.test.js` is collected.
+- Shared fixtures live in `tests/helpers/`. They are not test files and are not
+  collected; require them from a test the way you would any module.
+- Some suites guard an invariant rather than a behaviour, and those are the ones
+  worth knowing about before you add a command or a script:
+  `commandCap.test.js` (Discord's 100-command global limit, plus a ratchet on
+  the current count), `commandDocs.test.js` (README's command list against the
+  loaded set), `lintGate.test.js` (the lint script and its CI step still exist)
+  and `requirePathsResolve.test.js`.
+
+### Writing one
+
+Node is the default environment, and models and services are mocked at the
+`require` boundary rather than being pointed at a live MongoDB:
 
 ```javascript
-// Add a test command during development
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('test')
-        .setDescription('Testing command'),
-    async execute(interaction) {
-        // Test your logic here
-        console.log('Test executed');
-        await interaction.reply('Test complete!');
-    }
-};
+'use strict';
+
+jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn() }));
+
+const { __test__ } = require('../src/commands/fun/roll');
+const { payoutMultiplier } = __test__;
+
+describe('payoutMultiplier', () => {
+    test('exact-number bets pay at the die odds', () => {
+        expect(payoutMultiplier({ type: 'exact', number: 3 }, 6)).toBe(6);
+    });
+});
 ```
+
+Commands export the internals they want covered under a `__test__` key, which
+keeps the test off the interaction plumbing and on the logic that can actually
+be wrong.
+
+Anything that touches dashboard front-end code — `src/dashboard/public/*.js`,
+the EJS views — needs a DOM, requested per file with a docblock at the top:
+
+```javascript
+/**
+ * @jest-environment jsdom
+ * @jest-environment-options {"customExportConditions": ["node"]}
+ */
+```
+
+jsdom omits a few Node globals that mongoose's driver reaches for on require;
+`tests/dashboardAccessibility.test.js` shows the shim those suites use.
 
 ### Logging
 
