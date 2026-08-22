@@ -81,9 +81,31 @@ function selfReschedulingTimers(text) {
             && (node.init.type === 'FunctionExpression' || node.init.type === 'ArrowFunctionExpression')) {
             schedulers.set(node.id.name, /setTimeout\(/.test(bodyOf(node.init)));
         }
-        if (node.type === 'CallExpression' && node.callee?.name === 'setTimeout'
-            && node.arguments[0]?.type === 'Identifier') {
-            rearmed.add(node.arguments[0].name);
+        if (node.type === 'CallExpression' && node.callee?.name === 'setTimeout') {
+            const callback = node.arguments[0];
+            if (callback?.type === 'Identifier') {
+                // setTimeout(tick, ms)
+                rearmed.add(callback.name);
+            } else if (callback?.type === 'FunctionExpression' || callback?.type === 'ArrowFunctionExpression') {
+                // setTimeout(() => tick(), ms) — the wrapper hides the name
+                // from a first-argument check, so look at what it calls. Names
+                // that are not file-level schedulers fall out at the filter
+                // below, which is what keeps `setTimeout(() => resolve(x), ms)`
+                // from reading as a re-arming timer.
+                const collectCalls = inner => {
+                    if (!inner || typeof inner.type !== 'string') return;
+                    if (inner.type === 'CallExpression' && inner.callee?.type === 'Identifier') {
+                        rearmed.add(inner.callee.name);
+                    }
+                    for (const key of Object.keys(inner)) {
+                        if (key === 'loc') continue;
+                        const child = inner[key];
+                        if (Array.isArray(child)) child.forEach(collectCalls);
+                        else if (child && typeof child.type === 'string') collectCalls(child);
+                    }
+                };
+                collectCalls(callback.body);
+            }
         }
 
         for (const key of Object.keys(node)) {
@@ -116,6 +138,19 @@ describe('the scheduler owns recurring work', () => {
 
         expect(selfReschedulingTimers(reArming)).toEqual(['tick']);
         expect(selfReschedulingTimers(oneShot)).toEqual([]);
+    });
+
+    // The wrapper form is the one a first-argument check walks straight past.
+    test('the detector sees a re-arming timer behind a callback wrapper', () => {
+        const wrapped = `function tick() { doWork(); setTimeout(() => tick(), 60_000); }`;
+        const wrappedAsync = `const loop = async () => { await work(); setTimeout(() => { loop(); }, 1000); };`;
+        // A callback that calls something which is not a scheduler is ordinary
+        // one-shot work and must stay off the list.
+        const innocuous = `function wait(ms) { return new Promise(resolve => setTimeout(() => resolve(), ms)); }`;
+
+        expect(selfReschedulingTimers(wrapped)).toEqual(['tick']);
+        expect(selfReschedulingTimers(wrappedAsync)).toEqual(['loop']);
+        expect(selfReschedulingTimers(innocuous)).toEqual([]);
     });
 
     // cron.schedule outside the table is legitimate only where the schedule is

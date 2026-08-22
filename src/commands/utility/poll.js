@@ -112,8 +112,11 @@ function buildPollRows(options) {
 const MESSAGE_UNREACHABLE = new Set([10008, 10003, 50001]);
 
 function scheduleExpiry(msg, question, options, endsAt, createdBy) {
-    const delay = endsAt.getTime() - Date.now();
-    if (delay <= 0) return;
+    // Overdue polls close now rather than being dropped. A poll only reaches
+    // this already past its end when it is being picked up at startup — the bot
+    // was down when it expired, or a transient edit failure left it open — and
+    // returning early there is what made "still open" permanent.
+    const delay = Math.max(0, endsAt.getTime() - Date.now());
     // Through runJob like every other scheduled callback (#611): a poll that
     // fails to close is a poll that stays open forever, and a swallowed
     // console.error was the only trace of it. `scope` is the message id
@@ -175,7 +178,10 @@ async function handlePollVote(interaction) {
 
 async function scheduleActivePollExpirations(client) {
     try {
-        const active = await Poll.find({ closed: false, endsAt: { $gt: new Date() } });
+        // No lower bound on endsAt: a poll that expired while the process was
+        // down has no timer left anywhere, so excluding it here is what left it
+        // open forever. scheduleExpiry closes an overdue one immediately.
+        const active = await Poll.find({ closed: false });
         for (const poll of active) {
             try {
                 const guild = client.guilds.cache.get(poll.guildId);
@@ -189,7 +195,7 @@ async function scheduleActivePollExpirations(client) {
                 console.error('[poll] failed to reschedule poll', poll.messageId, err);
             }
         }
-        if (active.length) console.log(`[POLL] Rescheduled ${active.length} active poll(s).`);
+        if (active.length) console.log(`[POLL] Picked up ${active.length} unclosed poll(s).`);
     } catch (err) {
         console.error('[poll] scheduleActivePollExpirations error:', err);
     }
