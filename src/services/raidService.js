@@ -190,69 +190,72 @@ async function setRaidMode(guildId, guild, active, guildSettings) {
 }
 
 // Periodic tick: auto-disable raid mode once the server calms down.
-function startRaidMonitor(client) {
-    setInterval(async () => {
-        if (raidModeActive.size === 0) return;
+//
+// Registered in services/scheduler as a job rather than owning a setInterval
+// here (#611). The interval ran outside runJob, so a throw inside it recorded
+// nothing: no dead-letter entry, no failed run on the health payload, and
+// /health went on reporting healthy while raid mode never auto-disabled again.
+async function sweepRaidModes(client) {
+    if (raidModeActive.size === 0) return;
 
-        for (const guildId of [...raidModeActive]) {
-            // Never auto-disable a manually activated raid mode
-            if (raidModeActivatedBy.get(guildId) === 'manual') continue;
+    for (const guildId of [...raidModeActive]) {
+        // Never auto-disable a manually activated raid mode
+        if (raidModeActivatedBy.get(guildId) === 'manual') continue;
 
-            let guildSettings;
-            try {
-                guildSettings = await Guild.findOne({ guildId });
-            } catch (err) {
-                console.error(`[RaidService] DB error fetching guild ${guildId}:`, err);
-                continue;
-            }
+        let guildSettings;
+        try {
+            guildSettings = await Guild.findOne({ guildId });
+        } catch (err) {
+            console.error(`[RaidService] DB error fetching guild ${guildId}:`, err);
+            continue;
+        }
 
-            if (!guildSettings?.raidDetection?.enabled) {
-                raidModeActive.delete(guildId);
-                raidModeActivatedBy.delete(guildId);
-                continue;
-            }
-
-            const rd = guildSettings.raidDetection;
-
-            if (!rd.autoDisable || rd.requireManualDisable) continue;
-
-            const calmWindowMs = (rd.calmWindowSeconds || 300) * 1000;
-            const last = lastJoinTime.get(guildId) || 0;
-
-            // Require silence for the full calm window before auto-disabling
-            if (Date.now() - last < calmWindowMs) continue;
-
-            // Also verify the window itself has fewer than 2 joins
-            const entries = pruneLog(guildId, calmWindowMs);
-            if (entries.length >= 2) continue;
-
+        if (!guildSettings?.raidDetection?.enabled) {
             raidModeActive.delete(guildId);
             raidModeActivatedBy.delete(guildId);
-
-            await Guild.updateOne({ guildId }, {
-                $set: {
-                    'raidDetection.raidModeActive': false,
-                    'raidDetection.raidModeActivatedBy': null,
-                    'raidDetection.raidModeActivatedAt': null
-                }
-            }).catch(console.error);
-
-            const guild = client.guilds.cache.get(guildId);
-            if (!guild) continue;
-
-            const alertChannelId = rd.alertChannelId || guildSettings.moderation?.logChannelId;
-            const alertChannel = alertChannelId ? guild.channels.cache.get(alertChannelId) : null;
-
-            if (alertChannel) {
-                const embed = new EmbedBuilder()
-                    .setColor('#00ff00')
-                    .setTitle('✅ Raid Stopped — Raid Mode Auto-Disabled')
-                    .setDescription('Raid appears to have stopped. Raid mode auto-disabled.')
-                    .setTimestamp();
-                await alertChannel.send({ embeds: [embed] }).catch(console.error);
-            }
+            continue;
         }
-    }, 60_000);
+
+        const rd = guildSettings.raidDetection;
+
+        if (!rd.autoDisable || rd.requireManualDisable) continue;
+
+        const calmWindowMs = (rd.calmWindowSeconds || 300) * 1000;
+        const last = lastJoinTime.get(guildId) || 0;
+
+        // Require silence for the full calm window before auto-disabling
+        if (Date.now() - last < calmWindowMs) continue;
+
+        // Also verify the window itself has fewer than 2 joins
+        const entries = pruneLog(guildId, calmWindowMs);
+        if (entries.length >= 2) continue;
+
+        raidModeActive.delete(guildId);
+        raidModeActivatedBy.delete(guildId);
+
+        await Guild.updateOne({ guildId }, {
+            $set: {
+                'raidDetection.raidModeActive': false,
+                'raidDetection.raidModeActivatedBy': null,
+                'raidDetection.raidModeActivatedAt': null
+            }
+        }).catch(console.error);
+
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) continue;
+
+        const alertChannelId = rd.alertChannelId || guildSettings.moderation?.logChannelId;
+        const alertChannel = alertChannelId ? guild.channels.cache.get(alertChannelId) : null;
+
+        if (alertChannel) {
+            const embed = new EmbedBuilder()
+                .setColor('#00ff00')
+                .setTitle('✅ Raid Stopped — Raid Mode Auto-Disabled')
+                .setDescription('Raid appears to have stopped. Raid mode auto-disabled.')
+                .setTimestamp();
+            await alertChannel.send({ embeds: [embed] }).catch(console.error);
+        }
+    }
 }
 
-module.exports = { handleMemberJoin, startRaidMonitor, setRaidMode, raidModeActive, raidModeActivatedBy };
+module.exports = { handleMemberJoin, sweepRaidModes, setRaidMode, raidModeActive, raidModeActivatedBy };

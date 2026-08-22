@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const Poll = require('../../models/Poll');
+const { runJob } = require('../../utils/jobRunner');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -109,21 +110,23 @@ function buildPollRows(options) {
 function scheduleExpiry(msg, question, options, endsAt, createdBy) {
     const delay = endsAt.getTime() - Date.now();
     if (delay <= 0) return;
-    setTimeout(async () => {
-        try {
-            const poll = await Poll.findOne({ messageId: msg.id });
-            if (!poll || poll.closed) return;
+    // Through runJob like every other scheduled callback (#611): a poll that
+    // fails to close is a poll that stays open forever, and a swallowed
+    // console.error was the only trace of it. `scope` is the message id
+    // because this fires once for one poll and no later tick retries it — two
+    // polls expiring in the same second must both run, not one be dropped as
+    // an overlap of the other.
+    setTimeout(() => runJob('poll', 'closeExpiredPoll', async () => {
+        const poll = await Poll.findOne({ messageId: msg.id });
+        if (!poll || poll.closed) return;
 
-            const counts = tallyVotes(poll.votes, options.length);
-            const closedEmbed = buildPollEmbed(question, options, counts, endsAt, createdBy, true);
-            await msg.edit({ embeds: [closedEmbed], components: [] }).catch(() => {});
+        const counts = tallyVotes(poll.votes, options.length);
+        const closedEmbed = buildPollEmbed(question, options, counts, endsAt, createdBy, true);
+        await msg.edit({ embeds: [closedEmbed], components: [] }).catch(() => {});
 
-            poll.closed = true;
-            await poll.save();
-        } catch (err) {
-            console.error('[poll] expiry error:', err);
-        }
-    }, delay);
+        poll.closed = true;
+        await poll.save();
+    }, { guildId: msg.guildId, scope: msg.id, payload: { messageId: msg.id } }), delay);
 }
 
 async function handlePollVote(interaction) {

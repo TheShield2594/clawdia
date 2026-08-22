@@ -108,6 +108,23 @@ const JOBS = [
         fn: () => require('../schedulerService').returnExpiredMarketListings(),
     },
     {
+        // Both of these used to be a bare setInterval inside their own service,
+        // outside runJob: a throw recorded nothing, /health kept reporting
+        // healthy, and the service was silently dead until someone noticed
+        // bans not lifting or raid mode stuck on (#611).
+        name: 'sweepRaidModes',
+        service: 'raidService',
+        schedule: '* * * * *',
+        fn: client => require('../raidService').sweepRaidModes(client),
+    },
+    {
+        name: 'processExpiredBans',
+        service: 'tempBanService',
+        schedule: '* * * * *',
+        runOnStart: true,
+        fn: client => require('../tempBanService').processExpiredBans(client),
+    },
+    {
         name: 'postScheduledNewspapers',
         service: 'schedulerService',
         schedule: '0 * * * *',
@@ -116,17 +133,22 @@ const JOBS = [
     },
 ];
 
-// Start-once services that own their own internal timers or per-guild
-// schedules. Each is called exactly once at bootstrap.
+// Start-once services. A service belongs here only when its schedule cannot be
+// written as a fixed cron line — a per-guild time the guild picks, a per-poll
+// expiry, a lazily-evaluated window. Everything on a fixed schedule belongs in
+// JOBS above, where runJob is applied for it and cannot be forgotten.
+//
+// A starter is responsible for wrapping its own callbacks in runJob, since the
+// schedule is its own. tests/schedulerOwnsJobs.test.js enforces that: a starter
+// module that registers a timer without runJob fails the suite rather than
+// failing invisibly in production.
 const STARTERS = [
     { name: 'summaryService', start: client => require('../summaryService').startSummaryService(client) },
     { name: 'caseService.slaMonitor', start: client => require('../caseService').startSlaMonitor(client) },
     { name: 'questService', start: () => require('../questService').startQuestService() },
     { name: 'poll.expirations', start: client => require('../../commands/utility/poll').scheduleActivePollExpirations(client) },
     { name: 'dailyBibleService', start: client => require('../dailyBibleService').startDailyBibleService(client) },
-    { name: 'tempBanService', start: client => require('../tempBanService').startTempBanService(client) },
     { name: 'rssService.dailyNews', start: client => require('../rssService').scheduleDailyNews(client) },
-    { name: 'raidService.monitor', start: client => require('../raidService').startRaidMonitor(client) },
 ];
 
 // Rotating rich presence — Clawdia's ancient, mysterious personality
