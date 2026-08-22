@@ -4,7 +4,7 @@ const { providers } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, buildKnowledgeContext } = require('./knowledge');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
-const { peekRateLimit, peekChannelRateLimit } = require('./rateLimit');
+const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
 const { buildActionsAddendum, extractAction, executeAction } = require('./actions');
 
 // Discord transport for the AI chat loop: rate limiting, prompt assembly,
@@ -78,7 +78,8 @@ async function handleAIChat(message, aiSettings) {
     // streamCompletion, which is what actually bounds provider spend. This is
     // only here to refuse before the history load, knowledge retrieval and
     // prompt assembly below, and to say so in the channel where the user asked.
-    if (!peekRateLimit(message.author.id, rateLimit.perUser, rateLimit.windowMin)) {
+    // The same key enforcement will consume, so the peek and the spend agree.
+    if (!peekRateLimit(userRateLimitKey(message.guild.id, message.author.id), rateLimit.perUser, rateLimit.windowMin)) {
         return message.reply(`Rate limit reached (${rateLimit.perUser} per ${rateLimit.windowMin}m). Please slow down.`);
     }
 
@@ -88,6 +89,11 @@ async function handleAIChat(message, aiSettings) {
 
     const maxHistory = aiSettings.maxHistory ?? 20;
     const useStreaming = aiSettings.streaming !== false;
+
+    // The streaming path posts this "…" before the first chunk arrives, so an
+    // error after that point has to land *in* it. Left alone it stays in the
+    // channel as a permanent ellipsis next to a separate error message.
+    let placeholder = null;
 
     // Build system prompt: base + pinned memories + knowledge context + action instructions
     let systemPrompt = aiSettings.systemPrompt || 'You are a helpful Discord bot assistant.';
@@ -135,7 +141,7 @@ async function handleAIChat(message, aiSettings) {
         let fullResponse = '';
 
         if (useStreaming) {
-            const placeholder = await message.reply('…');
+            placeholder = await message.reply('…');
             let lastEdit = 0;
             let currentMsg = placeholder;
             let currentBuf = '';
@@ -236,12 +242,21 @@ async function handleAIChat(message, aiSettings) {
             }
         }
     } catch (error) {
+        // Reuse the streaming placeholder if one is already on screen, so the
+        // failure replaces the "…" instead of leaving it dangling beside it.
+        const report = async text => {
+            if (placeholder) {
+                const edited = await placeholder.edit(text).then(() => true).catch(() => false);
+                if (edited) return;
+            }
+            await message.reply(text).catch(() => {});
+        };
+
         // The peek above passed but somebody else took the last slot in between.
         if (error?.rateLimited) {
-            const refusal = error.scope === 'channel'
+            await report(error.scope === 'channel'
                 ? 'This channel has reached the AI request limit. Please wait before sending more AI requests here.'
-                : `Rate limit reached (${error.limit} per ${error.windowMin}m). Please slow down.`;
-            await message.reply(refusal).catch(() => {});
+                : `Rate limit reached (${error.limit} per ${error.windowMin}m). Please slow down.`);
             return;
         }
         console.error(`[AI:${provider}] error:`, error?.message || error);
@@ -251,7 +266,7 @@ async function handleAIChat(message, aiSettings) {
         else if (status === 404) detail += ' — model not found; check your model name in the AI settings';
         else if (status === 429) detail += ' — rate limit exceeded';
         else if (status === 503) detail += ' — provider unavailable';
-        await message.reply(`Sorry, I hit an error talking to ${providerLabel}${detail}.`).catch(() => {});
+        await report(`Sorry, I hit an error talking to ${providerLabel}${detail}.`);
     }
 }
 

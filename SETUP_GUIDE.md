@@ -485,10 +485,19 @@ docker exec clawdia-mongodb mongorestore /data/backup
   ```
 
   The container environment then holds only the path. `docker-compose.yml` and
-  `portainer-stack.yml` both carry a commented block ready to uncomment. Setting
-  both forms uses the plain value and logs a warning, so secrets can be migrated
-  one at a time; an unreadable or empty file aborts startup rather than leaving
-  the variable quietly unset.
+  `portainer-stack.yml` both carry a commented block covering every supported
+  secret; uncomment the entries you want on the service, the matching top-level
+  declarations, and nothing else — a declared secret whose file is missing fails
+  the deploy. Setting both forms uses the plain value and logs a warning, so
+  secrets can be migrated one at a time; an unreadable or empty file aborts
+  startup rather than leaving the variable quietly unset.
+
+  Two cases need more than uncommenting. In `portainer-stack.yml` the
+  `MONGODB_URI` mapping carries a `:-` default, so it is never empty and always
+  wins over `MONGODB_URI_FILE` — delete that line rather than blanking it. And
+  the optional `backup` service is a stock mongo image with no loader of its
+  own; it reads `MONGODB_URI_FILE` in its entrypoint, so mount the same secret
+  there if you move the database URI to a file.
 
 ### Performance
 

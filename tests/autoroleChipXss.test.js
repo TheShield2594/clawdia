@@ -159,6 +159,28 @@ describe('autorole chip', () => {
         expect(panel).not.toMatch(/onclick="removeAutoRole/);
     });
 
+    it('escapes the role name in a server-side chip, so the payload stays text', () => {
+        // The template renders these on first page load, before any JS runs —
+        // a second, independent path to the same sink as addAutoRole.
+        const panel = renderPanel('welcome', {
+            settings: { ...guildSettingsLocals().settings, autoRoles: [{ roleId: PAYLOAD_ROLE.id }] },
+        });
+
+        // The raw payload must not survive into the markup as markup.
+        expect(panel).not.toContain(MALICIOUS_ROLE_NAME);
+        expect(panel).toContain('&lt;img src=x onerror=');
+
+        // And parsed as a browser would: the name is text, with no element and
+        // no event handler recovered from it.
+        document.body.innerHTML = panel;
+        const chip = document.querySelector(`[data-role-id="${PAYLOAD_ROLE.id}"]`);
+        expect(chip).not.toBeNull();
+        expect(chip.textContent).toContain(MALICIOUS_ROLE_NAME);
+        expect(chip.querySelector('img')).toBeNull();
+        expect(document.querySelector('img')).toBeNull();
+        expect(window.__xss).toBeUndefined();
+    });
+
     it('never builds an autorole chip with innerHTML', () => {
         const script = fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8');
         // The whole class of bug: a role name concatenated into markup.

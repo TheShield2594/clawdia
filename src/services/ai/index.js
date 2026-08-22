@@ -51,7 +51,9 @@ function resolveProviderConfig(aiSettings) {
 function streamCompletion({ userId, channelId, rateLimit, ...args }) {
     // Before the provider is touched: every route into a paid API goes through
     // here, so this is the only place a limit has to be applied to bound spend.
-    enforceRateLimit({ userId, channelId, rateLimit });
+    // guildId stays in `args` as well — it is what the usage ledger records
+    // under, and here it is what scopes the per-user window to one server.
+    enforceRateLimit({ guildId: args.guildId, userId, channelId, rateLimit });
     return streamProvider(args);
 }
 
@@ -64,7 +66,7 @@ async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req
 }
 
 async function getCompletion({ provider, guildId, mcp = true, userId, channelId, rateLimit, ...req }) {
-    enforceRateLimit({ userId, channelId, rateLimit });
+    enforceRateLimit({ guildId, userId, channelId, rateLimit });
     const result = await getProvider(provider).complete({ ...req, useMcp: mcp });
     if (guildId && result.usage) {
         recordUsage(guildId, provider, req.model, result.usage).catch(err =>

@@ -137,6 +137,30 @@ describe('DiscordStrategy', () => {
         });
         expect((await profileOf(strategy)).guilds).toEqual(GUILDS);
     });
+
+    it('handles a scope given as one pre-joined string, which passport also accepts', async () => {
+        // 'identify guilds' compared whole against 'guilds' is never equal, so
+        // this configuration used to skip the guild fetch and hand the
+        // dashboard a user who appears to administer nothing.
+        const strategy = build({ ...OPTIONS, scope: 'identify guilds' });
+        const seen = stubApi(strategy, {
+            [`${API_BASE}/users/@me`]: { body: JSON.stringify(PROFILE) },
+            [`${API_BASE}/users/@me/guilds`]: { body: JSON.stringify(GUILDS) },
+        });
+
+        expect((await profileOf(strategy)).guilds).toEqual(GUILDS);
+        expect(seen.map(s => s.url)).toContain(`${API_BASE}/users/@me/guilds`);
+    });
+
+    it('still skips the fetch when a joined scope string omits guilds', async () => {
+        const strategy = build({ ...OPTIONS, scope: 'identify email' });
+        const seen = stubApi(strategy, {
+            [`${API_BASE}/users/@me`]: { body: JSON.stringify(PROFILE) },
+        });
+
+        expect((await profileOf(strategy)).guilds).toEqual([]);
+        expect(seen.map(s => s.url)).toEqual([`${API_BASE}/users/@me`]);
+    });
 });
 
 describe('the dashboard wiring', () => {

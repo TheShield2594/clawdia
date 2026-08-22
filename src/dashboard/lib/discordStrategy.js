@@ -68,7 +68,13 @@ class Strategy extends OAuth2Strategy {
     _wants(scope) {
         const configured = this._scope;
         if (!configured) return false;
-        return Array.isArray(configured) ? configured.includes(scope) : configured === scope;
+        if (Array.isArray(configured)) return configured.includes(scope);
+        // passport-oauth2 accepts `scope` as a pre-joined string as readily as
+        // an array. Comparing the whole string against one scope would miss
+        // "identify guilds" and quietly skip the guild fetch — which the
+        // dashboard reads as "this user administers nothing" rather than as a
+        // misconfiguration.
+        return String(configured).split(this._scopeSeparator).includes(scope);
     }
 
     _fetch(endpoint, accessToken) {

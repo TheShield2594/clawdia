@@ -109,6 +109,35 @@ describe('getCompletion', () => {
         expect(providersMock.__complete).toHaveBeenCalledTimes(3);
     });
 
+    it('gives the same user an independent quota in each guild', async () => {
+        // The limit, the window and the API key being billed all belong to one
+        // guild; a bare user ID would let one server's chatter exhaust another
+        // server's allowance, and the two owners pay separate bills.
+        const config = resolveProviderConfig({ ...SETTINGS, rateLimitPerUser: 1 });
+        const userId = nextUser();
+        const guildA = `guild-${++seq}`;
+        const guildB = `guild-${++seq}`;
+
+        await getCompletion({ ...config, guildId: guildA, userId, prompt: 'hi' });
+        await expect(getCompletion({ ...config, guildId: guildA, userId, prompt: 'hi' }))
+            .rejects.toMatchObject({ scope: 'user' });
+
+        // Same person, different server, untouched allowance.
+        await getCompletion({ ...config, guildId: guildB, userId, prompt: 'hi' });
+        await expect(getCompletion({ ...config, guildId: guildB, userId, prompt: 'hi' }))
+            .rejects.toMatchObject({ scope: 'user' });
+
+        expect(providersMock.__complete).toHaveBeenCalledTimes(2);
+    });
+
+    it('still bounds a call that names no guild', async () => {
+        const config = resolveProviderConfig({ ...SETTINGS, rateLimitPerUser: 1 });
+        const userId = nextUser();
+        await getCompletion({ ...config, userId, prompt: 'hi' });
+        await expect(getCompletion({ ...config, userId, prompt: 'hi' }))
+            .rejects.toMatchObject({ scope: 'user' });
+    });
+
     it('leaves an unattributed call — the scheduled jobs — unbounded', async () => {
         const config = resolveProviderConfig({ ...SETTINGS, rateLimitPerUser: 1 });
         for (let i = 0; i < 5; i++) await getCompletion({ ...config, prompt: 'hi' });
@@ -194,12 +223,22 @@ describe('call sites', () => {
 
     it('keeps the enforcement in the dispatch layer, not the transports', () => {
         const dispatch = fs.readFileSync(path.join(SRC, 'services/ai/index.js'), 'utf8');
-        expect(dispatch).toMatch(/enforceRateLimit\(\{ userId, channelId, rateLimit \}\)/);
+        // Both paths, and each one naming the guild that scopes the user window.
+        const enforced = dispatch.match(/enforceRateLimit\(\{[^}]*\}\)/g) || [];
+        expect(enforced).toHaveLength(2);
+        for (const call of enforced) {
+            expect(call).toMatch(/guildId/);
+            expect(call).toMatch(/userId/);
+            expect(call).toMatch(/channelId/);
+            expect(call).toMatch(/rateLimit/);
+        }
 
         // The transport may peek to refuse early, but it must not be the thing
         // that spends the slot — that would double-count against the dispatch.
         const chat = fs.readFileSync(path.join(SRC, 'services/ai/discordChat.js'), 'utf8');
         expect(chat).not.toMatch(/\bcheckRateLimit\(|\bcheckChannelRateLimit\(/);
-        expect(chat).toMatch(/peekRateLimit\(/);
+        // And it peeks the key enforcement will consume, not a bare user ID —
+        // otherwise the early refusal and the real bound disagree.
+        expect(chat).toMatch(/peekRateLimit\(userRateLimitKey\(message\.guild\.id, message\.author\.id\)/);
     });
 });

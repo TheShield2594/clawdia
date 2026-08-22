@@ -68,24 +68,37 @@ function peekChannelRateLimit(channelId, limit, windowMin) {
  * unattributed — the scheduled digests and newspapers, which run on a fixed
  * cadence the guild configures rather than on demand — and is not bounded here.
  *
+ * The per-user window is keyed per guild. A Discord user ID is global, but the
+ * limit, the window and the API key being billed all belong to one guild, so a
+ * bare user ID would let activity in one server eat another server's allowance
+ * — and the two owners pay separate bills. Channel IDs are already unique
+ * across Discord, so that key is left alone.
+ *
  * Throws AiRateLimitError rather than returning false: the caller is about to
  * spend real provider tokens, so the failure has to be impossible to ignore.
  */
-function enforceRateLimit({ userId, channelId, rateLimit }) {
+function enforceRateLimit({ guildId, userId, channelId, rateLimit }) {
     if (!rateLimit) return;
     const { perUser, perChannel, windowMin } = rateLimit;
+    const userKey = userId && (guildId ? `${guildId}:${userId}` : userId);
 
     // Channel first: it is the wider bound, and refusing on it should not
     // silently spend one of the user's own slots.
     if (channelId && !peekChannelRateLimit(channelId, perChannel, windowMin)) {
         throw new AiRateLimitError('channel', perChannel, windowMin);
     }
-    if (userId && !checkRateLimit(userId, perUser, windowMin)) {
+    if (userKey && !checkRateLimit(userKey, perUser, windowMin)) {
         throw new AiRateLimitError('user', perUser, windowMin);
     }
     if (channelId && !checkChannelRateLimit(channelId, perChannel, windowMin)) {
         throw new AiRateLimitError('channel', perChannel, windowMin);
     }
+}
+
+/** The per-guild key the user window is tracked under. Exported so the
+ *  transports can peek with exactly the key enforcement will consume. */
+function userRateLimitKey(guildId, userId) {
+    return guildId ? `${guildId}:${userId}` : userId;
 }
 
 module.exports = {
@@ -94,5 +107,6 @@ module.exports = {
     peekRateLimit,
     peekChannelRateLimit,
     enforceRateLimit,
+    userRateLimitKey,
     AiRateLimitError
 };

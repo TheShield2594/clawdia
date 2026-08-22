@@ -46,10 +46,8 @@ services:
     #   DISCORD_TOKEN_FILE: /run/secrets/discord_token
     #   CLIENT_SECRET_FILE: /run/secrets/client_secret
     #   SESSION_SECRET_FILE: /run/secrets/session_secret
-    #   # Note: the optional `backup` service below reads MONGODB_URI straight
-    #   # from .env — it is a stock mongo image with no loader — so moving that
-    #   # one to a file needs the same secret mounted there and the entrypoint
-    #   # taught to read it. Leave MONGODB_URI plain unless you use `backup`.
+    #   # The optional `backup` service reads MONGODB_URI too; uncomment the
+    #   # matching lines on it so both sides come from the same secret.
     #   MONGODB_URI_FILE: /run/secrets/mongodb_uri
     #   ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
     #   OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
@@ -59,6 +57,11 @@ services:
     #   - discord_token
     #   - client_secret
     #   - session_secret
+    #   - mongodb_uri
+    #   - anthropic_api_key
+    #   - openai_api_key
+    #   - gemini_api_key
+    #   - openrouter_api_key
     # Bound to loopback only. DASHBOARD_URL is required to be HTTPS in
     # production, which means a TLS-terminating reverse proxy sits in front of
     # this; publishing on 0.0.0.0 would also expose the dashboard directly over
@@ -117,6 +120,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Mirrors the bot's MONGODB_URI_FILE. This is a stock mongo image with no
+    # loader of its own, so the entrypoint below reads the file itself.
+    # environment:
+    #   MONGODB_URI_FILE: /run/secrets/mongodb_uri
+    # secrets:
+    #   - mongodb_uri
     volumes:
       - ./backups:/backups
     networks:
@@ -126,6 +135,20 @@ services:
         condition: service_healthy
     entrypoint: >
       sh -c '
+        if [ -n "$$MONGODB_URI_FILE" ]; then
+          if [ ! -r "$$MONGODB_URI_FILE" ]; then
+            echo "[backup] MONGODB_URI_FILE=$$MONGODB_URI_FILE is not readable"; exit 1;
+          fi;
+          MONGODB_URI=$$(tr -d "\r\n" < "$$MONGODB_URI_FILE");
+          if [ -z "$$MONGODB_URI" ]; then
+            echo "[backup] MONGODB_URI_FILE=$$MONGODB_URI_FILE is empty"; exit 1;
+          fi;
+          export MONGODB_URI;
+          echo "[backup] Read MONGODB_URI from $$MONGODB_URI_FILE";
+        fi;
+        if [ -z "$$MONGODB_URI" ]; then
+          echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
+        fi;
         NOW=$$(date -u +%s);
         MIDNIGHT=$$(( ($$NOW / 86400) * 86400 ));
         TARGET=$$(( $$MIDNIGHT + 10800 ));
@@ -148,6 +171,9 @@ services:
 # Host files mounted read-only at /run/secrets/<name> inside the container.
 # Keep ./secrets/ out of git (it already is, via .gitignore) and chmod 0400 the
 # files. Uncomment alongside the service block above.
+# Declare only the ones you actually create — compose fails the deploy for a
+# declared secret whose file is missing, and a service must not list one that
+# was never declared. Drop the lines for secrets you are not using.
 # secrets:
 #   discord_token:
 #     file: ./secrets/discord_token
@@ -155,6 +181,16 @@ services:
 #     file: ./secrets/client_secret
 #   session_secret:
 #     file: ./secrets/session_secret
+#   mongodb_uri:
+#     file: ./secrets/mongodb_uri
+#   anthropic_api_key:
+#     file: ./secrets/anthropic_api_key
+#   openai_api_key:
+#     file: ./secrets/openai_api_key
+#   gemini_api_key:
+#     file: ./secrets/gemini_api_key
+#   openrouter_api_key:
+#     file: ./secrets/openrouter_api_key
 
 volumes:
   mongodb_data:

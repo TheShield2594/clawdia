@@ -25,7 +25,9 @@
 #      file wires that up; uncomment it and the matching lines in the service to
 #      switch over. Create the secrets first, in Portainer > Secrets (Swarm) or
 #      by mounting host files, and leave the plain variable unset — if both are
-#      set the plain one wins and the file is ignored.
+#      set the plain one wins and the file is ignored. MONGODB_URI is the one
+#      that needs its mapping deleted rather than merely left blank, because it
+#      has a default; see the note beside it below.
 #
 #      DASHBOARD_URL has no default on purpose. With NODE_ENV=production the bot
 #      refuses to start unless it is an https:// URL (see resolveDashboardUrl in
@@ -102,17 +104,27 @@ services:
       # - DISCORD_TOKEN_FILE=/run/secrets/discord_token
       # - CLIENT_SECRET_FILE=/run/secrets/client_secret
       # - SESSION_SECRET_FILE=/run/secrets/session_secret
+      # MONGODB_URI needs one extra step: unlike the others, its mapping above
+      # carries a `:-` default, so it is never empty and always wins over the
+      # file. DELETE the `- MONGODB_URI=...` line above before uncommenting
+      # this, or the secret is read and then ignored with a warning.
       # - MONGODB_URI_FILE=/run/secrets/mongodb_uri
       # - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
       # - GEMINI_API_KEY_FILE=/run/secrets/gemini_api_key
       # - ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key
       # - OPENROUTER_API_KEY_FILE=/run/secrets/openrouter_api_key
     # The secrets this service should have mounted under /run/secrets. Only the
-    # ones you actually use — a declared-but-missing secret fails the deploy.
+    # ones you actually use — a declared-but-missing secret fails the deploy, so
+    # delete the lines for anything you are not mounting.
     # secrets:
     #   - discord_token
     #   - client_secret
     #   - session_secret
+    #   - mongodb_uri
+    #   - openai_api_key
+    #   - gemini_api_key
+    #   - anthropic_api_key
+    #   - openrouter_api_key
     # A Portainer stack has no repo checkout to mount, so put mcp-servers.json
     # somewhere on the Docker host and point MCP_SERVERS_CONFIG at it inside the
     # container. Mounted read-only: the file can hold OAuth tokens.
@@ -171,6 +183,16 @@ services:
 #   client_secret:
 #     external: true
 #   session_secret:
+#     external: true
+#   mongodb_uri:
+#     external: true
+#   openai_api_key:
+#     external: true
+#   gemini_api_key:
+#     external: true
+#   anthropic_api_key:
+#     external: true
+#   openrouter_api_key:
 #     external: true
 
 volumes:
