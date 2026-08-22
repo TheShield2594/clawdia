@@ -374,9 +374,9 @@ wide, and it is widest exactly where the risk is.
 
 **Economy** — the largest uncovered area:
 
-- `hunt` (`huntService.js`, `hunt.js`, `trackhunt.js`, `craft.js`, `forge.js`)
-- `mine` (`mineService.js`, `mine.js`)
-- `fish` (`fishService.js`, `fish.js`)
+- `hunt` (`huntService.js`, `hunt/`, `trackhunt.js`, `craft.js`, `forge.js`)
+- `mine` (`mineService.js`, `mine/`)
+- `fish` (`fishService.js`, `fish/`)
 - `pet` (`petService.js`, `pet.js`)
 - `use` / items / effects (`use.js`, `effectsService.js`, `inventory.js`, `shop.js`)
 - exploration (`exploreService.js`, `explore.js`, `map.js`)

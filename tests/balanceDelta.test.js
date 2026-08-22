@@ -13,6 +13,7 @@
 
 const fs   = require('fs');
 const path = require('path');
+const { grindCommandSource } = require('./helpers/grindSources');
 const {
     detachBalanceDelta, applyBalanceDelta, commitBalanceDelta, saveWithBalanceDelta,
 } = require('../src/utils/balanceDelta');
@@ -360,9 +361,9 @@ describe.each(['fish', 'hunt', 'mine', 'explore'])('/%s keeps balance out of its
     const source = fs.readFileSync(
         path.join(__dirname, '..', 'src', TRANSACTION_SOURCES[command]), 'utf8',
     );
-    const commandSource = fs.readFileSync(
-        path.join(__dirname, '..', 'src', 'commands', 'economy', `${command}.js`), 'utf8',
-    );
+    // Every file of the command, since /fish, /hunt and /mine are folders (#721)
+    // — reading only index.js would scan the dispatch and none of the payout.
+    const commandSource = grindCommandSource(command);
 
     test('detaches the balance and commits it as a delta', () => {
         expect(source).toMatch(/detachBalanceDelta\(user, balance(AtLoad|Baseline)\)/);

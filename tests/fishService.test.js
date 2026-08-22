@@ -154,11 +154,13 @@ function collectBindingsAndCalls(ast) {
     return { bound, called };
 }
 
+// Every file of every grind command, plus the service. /fish, /hunt and /mine
+// are folders (#721), and each of their files is scanned on its own so a
+// failure names the file rather than the command.
+const { grindCommandRelPaths } = require('./helpers/grindSources');
+
 const GRIND_FILES = [
-    'src/commands/economy/fish.js',
-    'src/commands/economy/hunt.js',
-    'src/commands/economy/mine.js',
-    'src/commands/economy/explore.js',
+    ...['fish', 'hunt', 'mine', 'explore'].flatMap(grindCommandRelPaths),
     'src/services/fishService.js',
 ];
 

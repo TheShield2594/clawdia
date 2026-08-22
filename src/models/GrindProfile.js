@@ -26,7 +26,7 @@ grindProfileSchema.index({ guildId: 1, userId: 1, system: 1 }, { unique: true })
 grindProfileSchema.index({ guildId: 1, system: 1, 'data.xp': -1 });
 grindProfileSchema.index({ guildId: 1, system: 1, 'data.totalEarned': -1 });
 // /hunt records boards — one index per sort path, matching the reads in
-// executeRecords (hunt.js). prestige and level share one compound index
+// executeRecords (hunt/profile.js). prestige and level share one compound index
 // because they are always sorted together.
 grindProfileSchema.index({ guildId: 1, system: 1, 'data.bestPayout': -1 });
 grindProfileSchema.index({ guildId: 1, system: 1, 'data.legendaryKills': -1 });

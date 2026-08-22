@@ -252,7 +252,7 @@ async function executeCancel(interaction) {
 
 /**
  * Grant war points to the guild for a given action type.
- * Call this from daily.js, work.js, hunt.js, etc. with appropriate action type.
+ * Call this from daily.js, work.js, hunt/, etc. with appropriate action type.
  */
 async function grantWarPoints(guildId, action) {
     const pts = WAR_POINTS[action];

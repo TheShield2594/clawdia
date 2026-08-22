@@ -6,10 +6,11 @@ const { listCommandFiles, loadCommandModules } = require('./commandLoader');
 // command too many takes every other command down with it.
 const GLOBAL_COMMAND_LIMIT = 100;
 
-// How close to the limit we are willing to sit. Each file under src/commands
-// is one top-level command, so this is also the count that tests/commandCap
-// pins: new top-level commands have to displace an old one or become a
-// subcommand of an existing group (the shape /hunt, /fish and /explore use).
+// How close to the limit we are willing to sit. Each command under src/commands
+// — one file, or one folder with an index.js — is one top-level command, so
+// this is also the count that tests/commandCap pins: new top-level commands
+// have to displace an old one or become a subcommand of an existing group (the
+// shape /hunt, /fish and /explore use).
 // Lower it when a consolidation lands; raising it spends the last of the
 // headroom between here and a deploy that cannot be undone by a revert.
 const COMMAND_BUDGET = 97;
