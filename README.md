@@ -390,4 +390,4 @@ Use the **Send digest now** button in the dashboard's Daily News panel.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
