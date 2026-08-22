@@ -132,6 +132,31 @@ function isWithinRuleWindow(rule, now) {
     return hour >= rule.startHourUtc || hour <= rule.endHourUtc;
 }
 
+// `setDefaultMemberPermissions` on a command builder is a *default*, not a rule.
+// A guild admin can reassign any command to @everyone under Server Settings →
+// Integrations, and Discord will then deliver it as an ordinary interaction with
+// nothing to say the gate was moved. Fifteen moderation commands took Discord's
+// word for it and re-checked nothing, so the only thing standing between a
+// reassigned /ban and an ordinary member was a setting an attacker's own admin
+// could change.
+//
+// Commands opt in by declaring `requiredPermissions`, and the check lands here
+// once rather than in fifteen handlers where the sixteenth is the one that
+// forgets. Administrators and the guild owner satisfy any bit — Discord already
+// folds that into the permissions it sends, and PermissionsBitField#missing
+// honours it.
+function missingRequiredPermissions(interaction, command) {
+    const required = command.requiredPermissions;
+    if (!required || (Array.isArray(required) && required.length === 0)) return null;
+
+    // A guild chat-input interaction always carries this. Absent means we cannot
+    // establish what the caller holds, and "cannot establish" is not "allowed".
+    if (!interaction.memberPermissions) return ['Unknown'];
+
+    const missing = interaction.memberPermissions.missing(required);
+    return missing.length ? missing : null;
+}
+
 function getPolicyDecision(interaction, guildSettings) {
     const policies = guildSettings?.commandPolicies;
     if (!policies?.enabled) return { allowed: true };
@@ -289,6 +314,15 @@ module.exports = {
             return;
         }
 
+        const missingPerms = missingRequiredPermissions(interaction, command);
+        if (missingPerms) {
+            await logCommandMetric(interaction, false, 'missing_permissions');
+            return interaction.reply({
+                content: `You need the following permission(s) to use \`/${command.data.name}\`: **${missingPerms.join(', ')}**.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
         const policy = getPolicyDecision(interaction, guildSettings);
         if (!policy.allowed) {
             await logCommandMetric(interaction, false, 'policy_denied');
@@ -352,3 +386,7 @@ module.exports = {
         }
     }
 };
+
+// Exposed for the permission-gate tests, which drive the check directly rather
+// than booting the whole interaction handler and its model imports.
+module.exports.missingRequiredPermissions = missingRequiredPermissions;

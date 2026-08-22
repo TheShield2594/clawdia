@@ -11,6 +11,9 @@ module.exports = {
             o.setName('resolution').setDescription('Resolution / closing note').setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ModerateMembers],
     async execute(interaction) {
         const caseId = interaction.options.getInteger('case_id');
         const resolution = interaction.options.getString('resolution') ?? 'Closed by moderator.';

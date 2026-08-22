@@ -11,6 +11,9 @@ module.exports = {
                 .setMinValue(1)
                 .setMaxValue(100))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ManageMessages],
     async execute(interaction) {
         const amount = interaction.options.getInteger('amount');
 

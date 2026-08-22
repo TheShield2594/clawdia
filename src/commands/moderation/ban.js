@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../utils/logger');
+const { hierarchyDenial, resolveMember } = require('../../utils/moderationHierarchy');
 const TempBan = require('../../models/TempBan');
 
 const DURATION_RE = /^(\d+)(m|h|d)$/i;
@@ -51,6 +52,9 @@ module.exports = {
                 .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.BanMembers],
     async execute(interaction) {
         const user        = interaction.options.getUser('user');
         const reason      = interaction.options.getString('reason') || 'No reason provided';
@@ -64,9 +68,25 @@ module.exports = {
             return interaction.reply({ content: 'I cannot ban myself.', flags: MessageFlags.Ephemeral });
         }
 
-        const member = interaction.guild.members.cache.get(user.id);
+        const { member, indeterminate } = await resolveMember(interaction.guild, user.id);
+        // Not the same as "not in the guild": we could not find out. Proceeding
+        // would skip both checks below on a target who may well outrank you.
+        if (indeterminate) {
+            return interaction.reply({
+                content: 'I could not look this user up just now, so I have not banned them. Try again in a moment.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
         if (member && !member.bannable) {
             return interaction.reply({ content: 'I cannot ban this user — they may have higher permissions.', flags: MessageFlags.Ephemeral });
+        }
+
+        // `bannable` above answered whether the bot outranks the target. This
+        // answers whether the moderator does.
+        const denial = hierarchyDenial(interaction.member, member, 'ban');
+        if (denial) {
+            return interaction.reply({ content: denial, flags: MessageFlags.Ephemeral });
         }
 
         let durationMs = null;

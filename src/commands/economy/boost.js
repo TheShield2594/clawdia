@@ -42,6 +42,9 @@ module.exports = {
             sub.setName('status')
                 .setDescription('Check the current server boost status')),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.Administrator],
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
 

@@ -62,6 +62,9 @@ module.exports = {
                 .addIntegerOption(o => o.setName('weekly_coins').setDescription('Coin reward per weekly quest (default 150)').setMinValue(0).setRequired(false)))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ManageGuild],
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
 

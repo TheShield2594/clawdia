@@ -12,6 +12,9 @@ module.exports = {
             o.setName('level').setDescription('Level to assign').setRequired(true).setMinValue(0).setMaxValue(500))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ManageGuild],
     async execute(interaction) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 

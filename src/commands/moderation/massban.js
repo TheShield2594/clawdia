@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { logModeration } = require('../../utils/logger');
+const { hierarchyDenial, resolveMembers } = require('../../utils/moderationHierarchy');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -22,6 +23,9 @@ module.exports = {
                 .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers | PermissionFlagsBits.ManageGuild),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.BanMembers, PermissionFlagsBits.ManageGuild],
     async execute(interaction) {
         await interaction.deferReply();
 
@@ -38,14 +42,44 @@ module.exports = {
             return interaction.editReply('Maximum 50 users per mass ban. Split into multiple calls if needed.');
         }
 
-        const succeeded = [];
-        const failed    = [];
+        // One resolution pass for the whole batch: the member cache holds at most
+        // 200 per guild, so reading it alone would leave most of these ids
+        // looking like non-members and skip both checks below.
+        const { members, indeterminate } = await resolveMembers(interaction.guild, ids);
+
+        const succeeded  = [];
+        const failed     = [];
+        const refused    = [];
+        const unverified = [];
 
         for (const userId of ids) {
             if (userId === interaction.user.id || userId === interaction.client.user.id) {
                 failed.push(userId);
                 continue;
             }
+
+            // The single-target commands run these two checks; this one looped
+            // guild.members.ban() over raw IDs with neither, which made it the
+            // way around the hierarchy rule the others enforce. IDs belonging to
+            // nobody in the guild — the raid cleanup this command exists for —
+            // have no member to check and fall straight through.
+            // Unsettled, not confirmed absent — banning here would skip both
+            // checks below on someone who may outrank the moderator.
+            if (indeterminate.has(userId)) {
+                unverified.push(userId);
+                continue;
+            }
+
+            const member = members.get(userId);
+            if (member && !member.bannable) {
+                refused.push(userId);
+                continue;
+            }
+            if (hierarchyDenial(interaction.member, member, 'ban')) {
+                refused.push(userId);
+                continue;
+            }
+
             try {
                 await interaction.guild.members.ban(userId, {
                     deleteMessageSeconds: deleteDays * 86400,
@@ -61,7 +95,7 @@ module.exports = {
         }
 
         const embed = new EmbedBuilder()
-            .setColor(failed.length === 0 ? '#ff0000' : '#ff9900')
+            .setColor(failed.length === 0 && refused.length === 0 && unverified.length === 0 ? '#ff0000' : '#ff9900')
             .setTitle('Mass Ban Complete')
             .addFields(
                 { name: 'Banned', value: `${succeeded.length} user(s)`, inline: true },
@@ -72,6 +106,23 @@ module.exports = {
 
         if (failed.length > 0) {
             embed.addFields({ name: 'Failed IDs', value: failed.slice(0, 20).join(', ') });
+        }
+
+        // Reported apart from failures: these did not error, they were declined,
+        // and a moderator who cannot tell the two apart will just retry them.
+        if (refused.length > 0) {
+            embed.addFields({
+                name: 'Skipped — outranks you or the bot',
+                value: refused.slice(0, 20).join(', ')
+            });
+        }
+
+        // These are the ones worth retrying: nothing was decided about them.
+        if (unverified.length > 0) {
+            embed.addFields({
+                name: 'Skipped — could not be looked up, try again',
+                value: unverified.slice(0, 20).join(', ')
+            });
         }
 
         await interaction.editReply({ embeds: [embed] });

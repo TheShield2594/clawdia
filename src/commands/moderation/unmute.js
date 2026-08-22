@@ -9,6 +9,9 @@ module.exports = {
                 .setDescription('The user to unmute')
                 .setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ModerateMembers],
     async execute(interaction) {
         const user = interaction.options.getUser('user');
         const member = interaction.guild.members.cache.get(user.id);

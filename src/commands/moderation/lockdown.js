@@ -12,6 +12,9 @@ module.exports = {
             .setDescription('Lift the active lockdown'))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
+    // Re-checked inside the gate in events/interactionCreate — the builder line
+    // above is only Discord's default, which a guild admin can reassign.
+    requiredPermissions: [PermissionFlagsBits.ManageGuild],
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
