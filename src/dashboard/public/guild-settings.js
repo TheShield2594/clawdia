@@ -425,6 +425,10 @@ const TOAST_DISMISS_MS = { success: 2800, error: 8000, info: 4500 };
 function hideToast() {
     clearTimeout(toastTimer);
     toastEl.classList.remove('show');
+    // The toast is only faded out, not display:none, so without this the
+    // dismiss button stays in the tab order — an unlabelled stop in the corner
+    // of every page, dismissing nothing. It ships `hidden` for the same reason.
+    if (toastClose) toastClose.hidden = true;
 }
 
 function toast(message, kind) {
@@ -435,9 +439,10 @@ function toast(message, kind) {
     // ("Network error" is only an error because we say so).
     toastMessage.textContent = style ? `${style.prefix}: ${message}` : message;
     toastEl.className = 'toast show' + (kind ? ' ' + kind : '');
+    if (toastClose) toastClose.hidden = false;
 
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('show'), TOAST_DISMISS_MS[kind] || 2800);
+    toastTimer = setTimeout(hideToast, TOAST_DISMISS_MS[kind] || 2800);
 }
 
 if (toastClose) toastClose.addEventListener('click', hideToast);

@@ -163,9 +163,28 @@ describe('toast', () => {
 
         const close = document.getElementById('toast-close');
         expect(close.getAttribute('aria-label')).toBeTruthy();
+        expect(close.hidden).toBe(false);
         close.dispatchEvent(new window.Event('click', { bubbles: true }));
 
         expect(toastEl().classList.contains('show')).toBe(false);
+    });
+
+    // The toast is faded out rather than display:none, so its button would
+    // otherwise be a tab stop on every page that dismisses nothing.
+    it('keeps the dismiss button out of the tab order with nothing to dismiss', () => {
+        expect(document.getElementById('toast-close').hidden).toBe(true);
+
+        window.toast('Settings saved', 'success');
+        expect(document.getElementById('toast-close').hidden).toBe(false);
+
+        jest.useFakeTimers();
+        try {
+            window.toast('Settings saved', 'success');
+            jest.advanceTimersByTime(2800);
+            expect(document.getElementById('toast-close').hidden).toBe(true);
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     it('leaves an error up longer than a success', () => {

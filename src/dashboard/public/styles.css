@@ -822,10 +822,21 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .skip-link:focus { transform: translateY(0); }
 
-/* The skip link and the nav both move focus here programmatically. It is
-   tabindex="-1", so it is never a tab stop of its own and never needs a ring —
-   :focus-visible does not match a programmatic focus. */
-.dash-main:focus { outline: none; }
+/* The skip link and the nav both move focus here programmatically, so this is
+   where a keyboard user lands and it has to show that it did — an unmarked jump
+   is as disorienting as no jump. The ring is drawn inset so it frames the
+   content rather than the viewport edge.
+
+   Only for :focus-visible, which browsers match when the focus move followed
+   keyboard interaction. Clicking a nav item also focuses this element (the
+   button takes focus on mousedown), and outlining the whole main column on
+   every mouse click would be noise. */
+.dash-main:focus-visible {
+    outline: 2px solid var(--claw-500);
+    outline-offset: -3px;
+    border-radius: 8px;
+}
+.dash-main:focus:not(:focus-visible) { outline: none; }
 
 @media (max-width: 860px) {
     .settings-layout { grid-template-columns: 1fr; }

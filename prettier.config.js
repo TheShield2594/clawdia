@@ -23,4 +23,14 @@ module.exports = {
     bracketSpacing: true,
     arrowParens: 'avoid',
     endOfLine: 'lf',
+
+    // package.json, the compose files and the workflows are all two-space and
+    // always have been, and .editorconfig tells editors the same. Without this
+    // override `npm run format` would reindent any of them to four.
+    overrides: [
+        {
+            files: ['*.json', '*.yml', '*.yaml'],
+            options: { tabWidth: 2 },
+        },
+    ],
 };
