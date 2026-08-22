@@ -1,0 +1,21 @@
+# Matches prettier.config.js. This is the half an editor can apply without any
+# tooling installed, which is most of what kept the tree consistent before there
+# was a linter at all.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.sh]
+indent_size = 2

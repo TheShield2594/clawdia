@@ -105,6 +105,23 @@ once per deployment rather than once per shard runs on shard 0 only: the
 dashboard, schema migrations, and the cron scheduler. `src/utils/sharding.js`
 has the full reasoning.
 
+## Development
+
+```bash
+npm test                       # Jest, ~20s
+npm run lint                   # ESLint (flat config, eslint.config.js)
+npm run lint:fix               # …and apply what it can fix
+npm run format -- <paths>      # Prettier, on the files you name
+```
+
+CI runs the tests and the lint, and the Docker image is only published when
+both pass.
+
+`npm run format` takes explicit paths on purpose. Prettier's settings match the
+style the tree is already written in, but it has never been applied wholesale —
+doing that rewrites ~45,000 lines and every `git blame` with them — so run it on
+the files a change already touches.
+
 ## Configuration
 
 1. Invite the bot to your server

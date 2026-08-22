@@ -1,7 +1,7 @@
 {
   "name": "clawdia",
   "version": "1.0.0",
-  "description": "Clawdia \u2014 a chill, self-hosted Discord bot with a full-featured admin dashboard",
+  "description": "Clawdia — a chill, self-hosted Discord bot with a full-featured admin dashboard",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -9,6 +9,9 @@
     "dev": "nodemon src/index.js",
     "deploy": "node src/deploy-commands.js",
     "migrate:rollback": "node scripts/rollback-migration.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write",
     "test": "jest --forceExit"
   },
   "keywords": [
@@ -40,9 +43,14 @@
     "rss-parser": "^3.13.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.9.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.11.0",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "prettier": "^3.9.6"
   },
   "engines": {
     "node": ">=24.19.0"
