@@ -99,15 +99,18 @@ let ESCALATION_LADDER = boot('escalationLadder');
 const navItems = document.querySelectorAll('.nav-item');
 const topbarSection = document.getElementById('topbar-section');
 
-// Keyboard + ARIA accessibility for nav items
-navItems.forEach(item => {
-    item.setAttribute('role', 'button');
-    item.setAttribute('tabindex', '0');
-    item.setAttribute('aria-pressed', item.classList.contains('active') ? 'true' : 'false');
-    item.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); item.click(); }
-    });
-});
+// The nav items used to be plain <li> elements that this file dressed up at
+// runtime: role="button" and tabindex injected onto each one, plus a keydown
+// handler standing in for Enter and Space. That stripped `listitem` off the
+// <ul>'s children — role="button" replaces the implicit role rather than
+// adding to it — and left the whole nav inert to the keyboard if the script
+// failed to load. They are <button> elements in the markup now, so the roles,
+// the focusability and the key handling are all the browser's (#660).
+//
+// The state they carry is aria-current="page", not aria-pressed: these select
+// which section is being viewed, which is not the same claim as a toggle
+// button being held down.
+const mainContent = document.getElementById('dash-main-content');
 
 // The tab the reader last asked for. A panel that is still being fetched when
 // the reader moves on must not steal the view when it finally arrives.
@@ -119,11 +122,11 @@ async function activateTab(tab) {
     if (!item) return null;
     requestedTab = tab;
 
-    navItems.forEach(n => { n.classList.remove('active'); n.setAttribute('aria-pressed', 'false'); });
+    navItems.forEach(n => { n.classList.remove('active'); n.removeAttribute('aria-current'); });
     document.querySelectorAll('.panel').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
     document.querySelectorAll('.panel-stub').forEach(p => { p.style.display = 'none'; });
     item.classList.add('active');
-    item.setAttribute('aria-pressed', 'true');
+    item.setAttribute('aria-current', 'page');
     if (topbarSection) topbarSection.textContent = item.querySelector('span:last-child')?.textContent || tab;
     if (history.replaceState) {
         const innerToParent = { knowledgebase: 'ai', aisummaries: 'ai', aipersonas: 'ai', dailynews: 'rss' };
@@ -155,7 +158,17 @@ async function activateTab(tab) {
 }
 
 navItems.forEach(item => {
-    item.addEventListener('click', () => { activateTab(item.dataset.tab); });
+    item.addEventListener('click', async () => {
+        await activateTab(item.dataset.tab);
+        // Land the reader in the section they just opened. Without this, a
+        // keyboard user picking the last item in the sidebar has to tab back
+        // through every item below it to reach the settings — 25 stops on
+        // every visit. `preventScroll` keeps the mouse path unchanged, and the
+        // target is tabindex="-1", so this adds no tab stop of its own.
+        if (mainContent && document.activeElement === item) {
+            mainContent.focus({ preventScroll: true });
+        }
+    });
 });
 
 // Module card click-to-navigate. Delegated, because the cards sit inside a panel.
@@ -296,11 +309,14 @@ function filterSidebarNav(query) {
         const navList = label.nextElementSibling;
         if (!navList) return;
         let groupVisible = false;
-        navList.querySelectorAll('li').forEach(li => {
-            const text = li.textContent.toLowerCase();
-            const keywords = (li.dataset.keywords || '').toLowerCase();
+        navList.querySelectorAll('.nav-item').forEach(item => {
+            const text = item.textContent.toLowerCase();
+            const keywords = (item.dataset.keywords || '').toLowerCase();
             const matches = text.includes(q) || keywords.includes(q);
-            li.style.display = matches ? '' : 'none';
+            // Hide the <li>, not the button: `display: none` on the list item
+            // takes the button out of the tab order and the accessibility tree
+            // with it, and leaves the list itself intact.
+            item.closest('li').style.display = matches ? '' : 'none';
             if (matches) { groupVisible = true; anyVisible = true; }
         });
         label.style.display = groupVisible ? '' : 'none';
@@ -326,7 +342,7 @@ async function sendWelcomeCardPreview() {
             body: JSON.stringify({ channelId })
         });
         if (resp.ok) {
-            toast('Preview sent to channel ✓', 'success');
+            toast('Preview sent to channel', 'success');
         } else {
             const d = await resp.json().catch(() => ({}));
             toast(d.error || 'Failed to send preview', 'error');
@@ -381,15 +397,50 @@ onPanel('welcome',   () => updateMsgPreview('welcome-message', 'welcome-preview'
 onPanel('farewell',  () => updateMsgPreview('farewell-message', 'farewell-preview'));
 onPanel('birthdays', () => updateMsgPreview('birthday-message', 'birthday-preview'));
 
-// Toast helper
+// ── Toast ─────────────────────────────────────────────────────────────
+// The only feedback channel the dashboard has: every save, delete and failure
+// reports through this one element. That makes three things load-bearing (#659):
+//
+//   * The element is a live region (role="status" in the markup), so a screen
+//     reader announces the result instead of the reader being left guessing.
+//   * Success and failure are told apart by an icon and a word, not by a
+//     0.4-alpha border colour — WCAG 1.4.1 rules colour-only out, and the
+//     border was invisible to most people anyway.
+//   * There is a dismiss button, and an error stays up long enough to read.
+//     The old fixed 2.8 s auto-dismiss could take a message away mid-sentence
+//     with no way to bring it back.
 const toastEl = document.getElementById('toast');
+const toastIcon = document.getElementById('toast-icon');
+const toastMessage = document.getElementById('toast-message');
+const toastClose = document.getElementById('toast-close');
 let toastTimer;
-function toast(message, kind) {
-    toastEl.textContent = message;
-    toastEl.className = 'toast show' + (kind ? ' ' + kind : '');
+
+const TOAST_KINDS = {
+    success: { icon: '✓', prefix: 'Success' },
+    error:   { icon: '⚠', prefix: 'Error' },
+    info:    { icon: 'ℹ', prefix: 'Note' },
+};
+const TOAST_DISMISS_MS = { success: 2800, error: 8000, info: 4500 };
+
+function hideToast() {
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2800);
+    toastEl.classList.remove('show');
 }
+
+function toast(message, kind) {
+    const style = TOAST_KINDS[kind];
+    toastIcon.textContent = style ? style.icon : '';
+    // The prefix is what a screen reader hears first, so it carries the
+    // outcome even when the message itself reads the same either way
+    // ("Network error" is only an error because we say so).
+    toastMessage.textContent = style ? `${style.prefix}: ${message}` : message;
+    toastEl.className = 'toast show' + (kind ? ' ' + kind : '');
+
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), TOAST_DISMISS_MS[kind] || 2800);
+}
+
+if (toastClose) toastClose.addEventListener('click', hideToast);
 
 const AI_MODEL_DEFAULTS = {
     openai: 'gpt-4o-mini',
@@ -1057,10 +1108,10 @@ async function saveSettings(section) {
             else {
                 Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]);
                 _shopItemClearedImages.clear();
-                toast('Settings saved ✓', 'success');
+                toast('Settings saved', 'success');
             }
         } else {
-            toast('Settings saved ✓', 'success');
+            toast('Settings saved', 'success');
         }
     } catch (error) {
         console.error(error);
@@ -1096,7 +1147,7 @@ async function uploadActivityImage(itemId, input) {
                 imgEl.style.display = 'block';
             }
             if (emojiEl) emojiEl.style.display = 'none';
-            toast('Image uploaded ✓', 'success');
+            toast('Image uploaded', 'success');
         } else {
             var err = await r.json().catch(function(){ return {}; });
             toast(err.error || 'Upload failed', 'error');
@@ -1136,7 +1187,7 @@ async function triggerDailyNewsNow() {
     if (!ok) return;
     try {
         const response = await fetch(`/api/guild/${guildId}/dailynews/trigger`, { method: 'POST' });
-        if (response.ok) toast('Digest sent ✓', 'success');
+        if (response.ok) toast('Digest sent', 'success');
         else {
             const err = await response.json().catch(() => ({}));
             toast(err.error || 'Failed to send digest', 'error');
@@ -1181,7 +1232,7 @@ async function addAutoRole() {
             chip.appendChild(removeBtn);
             document.getElementById('autorole-list').appendChild(chip);
             select.value = '';
-            toast('Role added ✓', 'success');
+            toast('Role added', 'success');
         } else toast('Failed to add role', 'error');
     } catch (error) {
         console.error(error);
@@ -1196,7 +1247,7 @@ async function removeAutoRole(roleId) {
         if (response.ok) {
             const chip = document.querySelector(`#autorole-list [data-role-id="${roleId}"]`);
             if (chip) chip.remove();
-            toast('Role removed ✓', 'success');
+            toast('Role removed', 'success');
         } else toast('Failed to remove role', 'error');
     } catch (error) {
         console.error(error);
@@ -1215,7 +1266,7 @@ async function addRssFeed() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, channelId })
         });
-        if (response.ok) { toast('RSS feed added ✓', 'success'); setTimeout(() => location.reload(), 600); }
+        if (response.ok) { toast('RSS feed added', 'success'); setTimeout(() => location.reload(), 600); }
         else toast('Failed to add RSS feed', 'error');
     } catch (error) {
         console.error(error);
@@ -1229,7 +1280,7 @@ async function deleteRssFeed(index) {
     const guildId = BOOT.guildId;
     try {
         const response = await fetch(`/api/guild/${guildId}/rss/${index}`, { method: 'DELETE' });
-        if (response.ok) { toast('RSS feed removed ✓', 'success'); setTimeout(() => location.reload(), 600); }
+        if (response.ok) { toast('RSS feed removed', 'success'); setTimeout(() => location.reload(), 600); }
         else toast('Failed to delete RSS feed', 'error');
     } catch (error) {
         console.error(error);
@@ -2107,7 +2158,7 @@ async function publishRrPanel() {
         });
         var data = await response.json();
         if (response.ok) {
-            toast('Panel published ✓', 'success');
+            toast('Panel published', 'success');
             setTimeout(function() { location.reload(); }, 800);
         } else {
             toast(data.error || 'Failed to publish panel', 'error');
@@ -2125,7 +2176,7 @@ async function deleteRrPanel(messageId) {
     try {
         var response = await fetch('/api/guild/' + guildId + '/reactionrole/panel/' + messageId, { method: 'DELETE' });
         if (response.ok) {
-            toast('Panel deleted ✓', 'success');
+            toast('Panel deleted', 'success');
             setTimeout(function() { location.reload(); }, 600);
         } else {
             toast('Failed to delete panel', 'error');
@@ -2232,7 +2283,7 @@ async function saveKbEntry(id) {
         });
         var data = await resp.json();
         if (resp.ok) {
-            toast('Entry updated ✓', 'success');
+            toast('Entry updated', 'success');
             kbLoaded = false;
             loadKnowledgeBase();
         } else {
@@ -2259,7 +2310,7 @@ async function addKbEntry() {
         });
         var data = await resp.json();
         if (resp.ok) {
-            toast('Entry added ✓', 'success');
+            toast('Entry added', 'success');
             document.getElementById('kb-title').value = '';
             document.getElementById('kb-content').value = '';
             document.getElementById('kb-tags').value = '';
@@ -2281,7 +2332,7 @@ async function deleteKbEntry(id) {
     try {
         var resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, { method: 'DELETE' });
         if (resp.ok) {
-            toast('Entry removed ✓', 'success');
+            toast('Entry removed', 'success');
             kbLoaded = false;
             loadKnowledgeBase();
         } else {
@@ -2394,7 +2445,7 @@ async function saveDailyDigest() {
         });
         var data = await resp.json();
         if (resp.ok) {
-            toast('Daily digest settings saved ✓', 'success');
+            toast('Daily digest settings saved', 'success');
         } else {
             toast(data.error || 'Failed to save digest settings', 'error');
         }
@@ -2420,7 +2471,7 @@ async function addSummaryJob() {
         });
         var data = await resp.json();
         if (resp.ok) {
-            toast('Summary job added ✓', 'success');
+            toast('Summary job added', 'success');
             document.getElementById('summary-source').value = '';
             document.getElementById('summary-target').value = '';
             document.getElementById('summary-hour').value = '9';
@@ -2444,7 +2495,7 @@ async function deleteSummaryJob(jobId) {
     try {
         var resp = await fetch('/api/guild/' + guildId + '/summary-jobs/' + jobId, { method: 'DELETE' });
         if (resp.ok) {
-            toast('Summary job removed ✓', 'success');
+            toast('Summary job removed', 'success');
             summaryJobsLoaded = false;
             loadSummaryJobs();
         } else {
@@ -2509,7 +2560,7 @@ async function addPersona() {
         });
         var data = await resp.json();
         if (resp.ok) {
-            toast('Persona saved ✓', 'success');
+            toast('Persona saved', 'success');
             document.getElementById('persona-channel').value = '';
             document.getElementById('persona-name').value = '';
             document.getElementById('persona-prompt').value = '';
@@ -2531,7 +2582,7 @@ async function removePersona(channelId) {
     try {
         var resp = await fetch('/api/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
         if (resp.ok) {
-            toast('Persona removed ✓', 'success');
+            toast('Persona removed', 'success');
             _personas = _personas.filter(function(p) { return p.channelId !== channelId; });
             renderPersonas();
         } else {
@@ -2759,7 +2810,7 @@ async function saveMcpServer() {
         });
         var data = await resp.json();
         if (!resp.ok) { toast(data.error || 'Failed to save connection', 'error'); return; }
-        toast('Connection saved ✓', 'success');
+        toast('Connection saved', 'success');
         _mcpServers = data.servers || [];
         resetMcpForm();
         renderMcpServers();
@@ -2781,7 +2832,7 @@ async function removeMcpServer(name) {
         var resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), { method: 'DELETE' });
         var data = await resp.json();
         if (!resp.ok) { toast(data.error || 'Failed to remove', 'error'); return; }
-        toast('Connection removed ✓', 'success');
+        toast('Connection removed', 'success');
         _mcpServers = data.servers || [];
         if (_mcpEditing === name) resetMcpForm();
         renderMcpServers();
