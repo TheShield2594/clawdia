@@ -4,7 +4,7 @@ const { providers } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, buildKnowledgeContext } = require('./knowledge');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
-const { checkRateLimit, checkChannelRateLimit } = require('./rateLimit');
+const { peekRateLimit, peekChannelRateLimit } = require('./rateLimit');
 const { buildActionsAddendum, extractAction, executeAction } = require('./actions');
 
 // Discord transport for the AI chat loop: rate limiting, prompt assembly,
@@ -26,6 +26,11 @@ async function withRetry(fn, { retries = 2, baseDelayMs = 800 } = {}) {
         } catch (err) {
             lastErr = err;
             const status = err?.status || err?.response?.status;
+            // A rate-limited call is refused before the provider is touched, so
+            // retrying it only burns more of the same budget and cannot succeed
+            // inside the window. It has no HTTP status, which the check below
+            // would otherwise read as a transient network failure.
+            if (err?.rateLimited) throw err;
             const retryable = !status || status === 408 || status === 429 || status >= 500;
             if (!retryable || i === retries) throw err;
             await sleep(baseDelayMs * Math.pow(2, i));
@@ -50,7 +55,7 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
 }
 
 async function handleAIChat(message, aiSettings) {
-    const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers } = resolveProviderConfig(aiSettings);
+    const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(aiSettings);
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
 
@@ -69,11 +74,15 @@ async function handleAIChat(message, aiSettings) {
         return message.reply('Conversation history cleared.');
     }
 
-    if (!checkRateLimit(message.author.id, aiSettings.rateLimitPerUser, aiSettings.rateLimitWindowMin)) {
-        return message.reply(`Rate limit reached (${aiSettings.rateLimitPerUser} per ${aiSettings.rateLimitWindowMin}m). Please slow down.`);
+    // A peek, not a consuming check: the slot is spent inside getCompletion /
+    // streamCompletion, which is what actually bounds provider spend. This is
+    // only here to refuse before the history load, knowledge retrieval and
+    // prompt assembly below, and to say so in the channel where the user asked.
+    if (!peekRateLimit(message.author.id, rateLimit.perUser, rateLimit.windowMin)) {
+        return message.reply(`Rate limit reached (${rateLimit.perUser} per ${rateLimit.windowMin}m). Please slow down.`);
     }
 
-    if (!checkChannelRateLimit(message.channel.id, aiSettings.rateLimitPerChannel, aiSettings.rateLimitWindowMin)) {
+    if (!peekChannelRateLimit(message.channel.id, rateLimit.perChannel, rateLimit.windowMin)) {
         return message.reply(`This channel has reached the AI request limit. Please wait before sending more AI requests here.`);
     }
 
@@ -117,7 +126,10 @@ async function handleAIChat(message, aiSettings) {
         const callArgs = {
             provider, model, apiKey, baseUrl, systemPrompt, history,
             prompt: content, temperature, maxTokens, mcpServers,
-            guildId: message.guild.id, usageOut
+            guildId: message.guild.id, usageOut,
+            // Who the request is for, so the limit is enforced where the spend
+            // happens rather than only in the peek above.
+            rateLimit, userId: message.author.id, channelId: message.channel.id
         };
 
         let fullResponse = '';
@@ -224,6 +236,14 @@ async function handleAIChat(message, aiSettings) {
             }
         }
     } catch (error) {
+        // The peek above passed but somebody else took the last slot in between.
+        if (error?.rateLimited) {
+            const refusal = error.scope === 'channel'
+                ? 'This channel has reached the AI request limit. Please wait before sending more AI requests here.'
+                : `Rate limit reached (${error.limit} per ${error.windowMin}m). Please slow down.`;
+            await message.reply(refusal).catch(() => {});
+            return;
+        }
         console.error(`[AI:${provider}] error:`, error?.message || error);
         const status = error?.status || error?.response?.status;
         let detail = status ? ` (HTTP ${status})` : '';

@@ -32,9 +32,16 @@ module.exports = {
         await interaction.deferReply();
 
         try {
-            const embed = await generateNewspaper(client, guildDoc);
+            const embed = await generateNewspaper(client, guildDoc, undefined, {
+                userId: interaction.user.id,
+                channelId: interaction.channelId,
+            });
             await interaction.editReply({ content: '📰 *Preview — this is how the newspaper will look when delivered:*', embeds: [embed] });
         } catch (err) {
+            if (err?.rateLimited) {
+                await interaction.editReply({ content: `This server's AI request limit has been reached (${err.limit} per ${err.windowMin}m). Please wait a few minutes.` });
+                return;
+            }
             console.error('[newspaper] preview failed:', err);
             await interaction.editReply({ content: 'Failed to generate the newspaper. Check that your AI provider is configured.' });
         }

@@ -130,6 +130,11 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
                 const raw = await getCompletion({
                     ...config,
                     guildId: interaction.guild.id,
+                    // Attribution for the guild's AI limits, which `config`
+                    // carries: without it this command spends provider tokens
+                    // bounded only by its own command cooldown.
+                    userId: interaction.user.id,
+                    channelId: interaction.channelId,
                     systemPrompt,
                     history: [],
                     prompt,
@@ -161,7 +166,10 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
                 { userId: interaction.user.id, guildId: interaction.guild.id },
                 { $inc: { balance: cfg.cost } }
             ).catch(() => {});
-            return interaction.editReply({ content: 'The forge misfired! Your coins have been refunded. Try again in a moment.' });
+            const failure = err?.rateLimited
+                ? `This server's AI limit has been reached (${err.limit} per ${err.windowMin}m).`
+                : 'The forge misfired!';
+            return interaction.editReply({ content: `${failure} Your coins have been refunded. Try again in a moment.` });
         }
 
         // Sanitize

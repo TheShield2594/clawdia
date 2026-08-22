@@ -153,6 +153,11 @@ Create a legendary quest that feels fitting for their journey so far.`;
                 const raw = await getCompletion({
                     ...config,
                     guildId: interaction.guild.id,
+                    // Attribution for the guild's AI limits, which `config`
+                    // carries: without it this command spends provider tokens
+                    // bounded only by its own command cooldown.
+                    userId: interaction.user.id,
+                    channelId: interaction.channelId,
                     systemPrompt,
                     history: [],
                     prompt,
@@ -186,10 +191,15 @@ Create a legendary quest that feels fitting for their journey so far.`;
                 { userId: interaction.user.id, guildId: interaction.guild.id },
                 { $inc: { balance: COST } },
             ).catch(refundErr => { console.error('[QUESTGEN] Refund failed after AI failure:', refundErr); return null; });
+            // A refusal by the server's own AI limit is not a misfire — say so,
+            // or the user retries straight into the same wall.
+            const failure = err?.rateLimited
+                ? `This server's AI limit has been reached (${err.limit} per ${err.windowMin}m).`
+                : 'The quest forge misfired!';
             return interaction.editReply({
                 content: refunded
-                    ? 'The quest forge misfired! Your coins have been refunded. Try again in a moment.'
-                    : 'The quest forge misfired, and the refund failed to process. Please contact a server admin — your coins were not returned automatically.',
+                    ? `${failure} Your coins have been refunded. Try again in a moment.`
+                    : `${failure} The refund failed to process — please contact a server admin, your coins were not returned automatically.`,
             });
         }
 

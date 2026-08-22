@@ -51,6 +51,10 @@ async function runSummaryJob(job, client) {
     if (!guildSettings?.ai?.enabled) return false;
 
     const config = resolveProviderConfig(guildSettings.ai);
+    // No userId/channelId: this is a scheduled job, not a request. The guild's
+    // per-user AI limit has no user to bill it to, and bounding a digest by a
+    // per-channel window would silently drop the run the guild configured.
+    // Its cadence is the bound.
     const summary = await getCompletion({
         ...config,
         systemPrompt: 'You are a helpful assistant that creates concise summaries of Discord channel activity.',
@@ -145,6 +149,10 @@ async function runDailyDigest(guildSettings, client) {
     const persona = guildSettings.ai?.systemPrompt || 'You are a helpful Discord bot assistant.';
 
     const config = resolveProviderConfig(guildSettings.ai);
+    // No userId/channelId: this is a scheduled job, not a request. The guild's
+    // per-user AI limit has no user to bill it to, and bounding a digest by a
+    // per-channel window would silently drop the run the guild configured.
+    // Its cadence is the bound.
     const summary = await getCompletion({
         ...config,
         systemPrompt: persona,

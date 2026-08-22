@@ -41,6 +41,22 @@ class BoundedRateLimiter {
         return true;
     }
 
+    /**
+     * Reports whether `key` would be allowed right now, without recording it.
+     *
+     * This exists so a caller can refuse early — before doing the database and
+     * network work a request needs — while the one call that actually spends
+     * the budget stays the only thing that consumes a slot. A peek that passes
+     * is not a reservation: another request can take the last slot before the
+     * consuming `check` runs, which is exactly the outcome the limit is for.
+     */
+    peek(key, windowMs, limit) {
+        const now = Date.now();
+        const arr = this._map.get(key);
+        if (!arr) return true;
+        return arr.filter(t => now - t < windowMs).length < limit;
+    }
+
     /** Drops keys whose recorded requests have all aged out of `windowMs`. */
     cleanup(windowMs) {
         const cutoff = Date.now() - windowMs;
