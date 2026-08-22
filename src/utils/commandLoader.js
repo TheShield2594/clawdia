@@ -98,6 +98,14 @@ function loadCommandModules(foldersPath = COMMANDS_ROOT) {
             continue;
         }
 
+        // The folder a command lives in is its category, and it is the only
+        // record of that: `client.commands` is keyed by name, so by the time
+        // /help reads the collection the directory walk is long gone. Stamping
+        // it here keeps the category derived from disk rather than from a
+        // hand-maintained list that drifts (#665). Modules are singletons in
+        // the require cache, so this is idempotent across repeat loads.
+        command.category = entry.dir;
+
         commands.push({ entry, command });
     }
 
