@@ -9,6 +9,7 @@
     "dev": "nodemon src/index.js",
     "deploy": "node src/deploy-commands.js",
     "migrate:rollback": "node scripts/rollback-migration.js",
+    "docs:commands": "node scripts/docs-commands.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write",
