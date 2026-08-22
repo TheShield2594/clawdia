@@ -92,4 +92,33 @@ function getStatus({ detailed = true } = {}) {
 function incrementUnhandledRejections() { state.unhandledRejections++; }
 function incrementUncaughtExceptions() { state.uncaughtExceptions++; }
 
-module.exports = { recordServiceRun, recordServiceSkip, getStatus, incrementUnhandledRejections, incrementUncaughtExceptions };
+/**
+ * The HTTP status `/health` answers with for a given overall status.
+ *
+ * `degraded` used to answer 200 (#640). It is the state where mongo is up but a
+ * scheduled service — RSS, raid detection, temp-ban sweeps, the daily verse — is
+ * failing every run, which is exactly the half-broken bot an uptime monitor
+ * exists to catch, and a 200 told every one of them it was fine. The monitors
+ * that read the JSON body could have caught it; the ones that only look at the
+ * status code, which is most of them, could not.
+ *
+ * So anything short of `healthy` is a non-200 now. This does not make a degraded
+ * container restart: the compose healthchecks parse `status` out of the body and
+ * fail only on `unhealthy`, deliberately, because restarting the process does not
+ * fix a feed that is 404ing and a restart loop is worse than a degraded bot.
+ *
+ * @param {string} status `healthy`, `degraded` or `unhealthy`
+ * @returns {number}
+ */
+function httpStatusFor(status) {
+    return status === 'healthy' ? 200 : 503;
+}
+
+module.exports = {
+    recordServiceRun,
+    recordServiceSkip,
+    getStatus,
+    httpStatusFor,
+    incrementUnhandledRejections,
+    incrementUncaughtExceptions,
+};

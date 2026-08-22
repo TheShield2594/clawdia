@@ -6,7 +6,7 @@ const MongoStore = require('connect-mongo');
 const passport = require('passport');
 const { Strategy: DiscordStrategy, DiscordScope } = require('./lib/discordStrategy');
 const path = require('path');
-const { getStatus } = require('../health');
+const { getStatus, httpStatusFor } = require('../health');
 const { hasManagePermission } = require('./lib/permissions');
 const { jsonForScript } = require('./lib/jsonForScript');
 const { asset } = require('./lib/assets');
@@ -209,7 +209,11 @@ function start(client) {
             && req.user.guilds.some(g => hasManagePermission(g) && bot.hasGuild(g.id));
 
         const status = getStatus({ detailed });
-        res.status(status.status === 'unhealthy' ? 503 : 200).json(status);
+        // Non-200 for `degraded` as well as `unhealthy`, so a monitor that only
+        // reads status codes still sees a half-broken bot (#640). The container
+        // healthchecks read `status` out of the body instead, and restart only on
+        // `unhealthy` — see httpStatusFor in src/health.js.
+        res.status(httpStatusFor(status.status)).json(status);
     });
 
     app.get('/', (req, res) => {

@@ -85,7 +85,16 @@ services:
       options:
         max-size: "50m"
         max-file: "5"
-    # Dedicated JSON health endpoint; 503 when mongo is down
+    # Dedicated JSON health endpoint. The probe reads `status` out of the body
+    # rather than looking at the HTTP code, and fails only on `unhealthy` —
+    # MongoDB down, so the bot can neither read nor write anything, which is the
+    # one state a restart is worth trying on.
+    #
+    # `degraded` (mongo up, a scheduled service failing every run) answers 503
+    # but is deliberately *not* a healthcheck failure: restarting the process
+    # does not fix a feed that is 404ing, and the restart loop would be worse
+    # than the degraded state. It is a page-a-human signal, which is what the
+    # uptime monitor described in README's Monitoring section is for.
     healthcheck:
       test: ["CMD", "node", "-e",
         "require('http').get('http://localhost:3000/health', (r) => { let b=''; r.on('data', d => b+=d); r.on('end', () => { try { const s = JSON.parse(b).status; process.exit(s === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"]
@@ -110,6 +119,51 @@ services:
         reservations:
           memory: 256m
     stop_grace_period: 30s
+    labels:
+      # Read by the optional `autoheal` service below. Harmless when that
+      # service is not running, which is why it is not commented out: enabling
+      # autoheal is then one flag, with nothing to remember to uncomment here.
+      autoheal: "true"
+
+  # Optional container-level self-healing, off by default:
+  #
+  #   docker compose --profile autoheal up -d
+  #
+  # `restart: unless-stopped` restarts a container whose process *exited*. It
+  # does nothing about a container that is up and failing its healthcheck —
+  # outside Swarm, Docker records `unhealthy` and stops there — so an unhealthy
+  # bot used to sit unhealthy indefinitely with nothing acting on it (#640).
+  # This watches the daemon for that state and restarts the containers labelled
+  # `autoheal=true`.
+  #
+  # It is opt-in because of what it costs: the container holds the Docker API,
+  # and anything that can reach the Docker API can read every environment
+  # variable of every container on the host — `docker inspect clawdia` prints
+  # the bot token and each provider key in full. If you enable this, deliver the
+  # secrets as files (the <NAME>_FILE form documented on the bot service above)
+  # so there is nothing in the environment worth reading.
+  #
+  # The alternative, with no socket involved, is the external uptime monitor in
+  # README's Monitoring section: it sees the same state over HTTP and pages a
+  # human instead of restarting on its own.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: clawdia-autoheal
+    profiles:
+      - autoheal
+    restart: unless-stopped
+    environment:
+      # Only containers carrying the label, never every unhealthy container on
+      # the host — this stack is not necessarily the only thing running here.
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      # Long enough that a bot still inside `start_period` is never a candidate.
+      AUTOHEAL_START_PERIOD: '120'
+      AUTOHEAL_INTERVAL: '30'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # It talks to the daemon over the unix socket and to nothing else, so it
+    # needs no network at all — including not the default bridge.
+    network_mode: none
 
   # Optional scheduled backup (runs mongodump once a day at 03:00 UTC)
   backup:

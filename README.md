@@ -411,6 +411,70 @@ The Daily News feature compiles multiple RSS feeds into a single daily post.
 
 Use the **Send digest now** button in the dashboard's Daily News panel.
 
+## Monitoring
+
+The bot serves `GET /health` on the dashboard port. It is unauthenticated and
+deliberately thin for anonymous callers — status and uptime, nothing else:
+
+```json
+{ "status": "healthy", "uptime": 43200 }
+```
+
+A caller who is logged in and administers a guild the bot is in gets the full
+payload instead: MongoDB connection state, heap and RSS, unhandled-rejection and
+uncaught-exception counts, and a per-service record of the last run, last error
+and success/error/skip counts for every scheduled job.
+
+`status` is one of three values, and the HTTP code follows it:
+
+| `status` | HTTP | Meaning |
+|---|---:|---|
+| `healthy` | 200 | MongoDB connected, every scheduled service's last run succeeded |
+| `degraded` | 503 | MongoDB connected, but a scheduled service is failing |
+| `unhealthy` | 503 | MongoDB is not connected — the bot can neither read nor write |
+
+`degraded` is the state worth wiring up. It is what a dead RSS poller, a stalled
+temp-ban sweep or a raid detector throwing every tick looks like from outside,
+and the bot keeps answering Discord perfectly well while it is in it.
+
+**Point an uptime monitor at `/health`** — Uptime Kuma, Better Stack, Healthchecks.io,
+a Prometheus blackbox probe, anything that can make an HTTP request on a
+schedule. Alert on both:
+
+- a non-200 response, and
+- a body whose `status` is not `"healthy"`, for monitors that can assert on
+  JSON — it survives a proxy that rewrites status codes, and it names which of
+  the two failure states you are in.
+
+A 30–60 second interval matches the scheduler's granularity. Give it a couple of
+minutes of grace on startup: the container healthcheck already allows 90 seconds
+before the first probe counts.
+
+### Restarting an unhealthy container
+
+`restart: unless-stopped` restarts a container whose process exited. It does
+nothing about a container that is up and failing its healthcheck — outside
+Swarm, Docker records `unhealthy` and stops there. `docker-compose.yml` carries
+an optional `autoheal` service for that, off by default:
+
+```bash
+docker compose --profile autoheal up -d
+```
+
+It watches the daemon and restarts containers labelled `autoheal=true`, which
+the bot service already is. `portainer-stack.yml` has the same block, commented
+out.
+
+It is opt-in because it holds the Docker API, and anything that can reach the
+Docker API can read every environment variable of every container on the host —
+`docker inspect clawdia` prints the bot token and each provider key in full. If
+you enable it, move the secrets to the `<NAME>_FILE` form first (see
+`src/config/fileSecrets.js`) so there is nothing in the environment to read.
+
+Note that only `unhealthy` restarts. `degraded` answers 503 to the monitor but
+is not a healthcheck failure: restarting the process does not fix a feed that is
+404ing, and the restart loop would be worse than the degraded state.
+
 ## Troubleshooting
 
 - **Slash commands not appearing**: Run `npm run deploy` and ensure the bot has `applications.commands` scope.
