@@ -65,8 +65,13 @@ function hierarchyDenial(invoker, target, action = 'moderate') {
     return null;
 }
 
+// Discord's "this user is not in the guild" answers. Anything else a fetch
+// throws — 429, 5xx, a timeout — says nothing about membership.
+const UNKNOWN_MEMBER = 10007;
+const UNKNOWN_USER   = 10013;
+
 /**
- * The member behind a user id, or null if they are not in this guild.
+ * Resolve a user id to a member of this guild.
  *
  * The commands used to read `guild.members.cache.get(id)` and treat a miss as
  * "not a member". That is not what a miss means here: GuildMemberManager is
@@ -76,44 +81,59 @@ function hierarchyDenial(invoker, target, action = 'moderate') {
  * attacker skips by picking a target who has been quiet — which is most of the
  * senior staff this guard exists to protect.
  *
- * A genuine non-member (banning a raider by id, the case massban is for) still
- * comes back null; the fetch just makes that answer true rather than assumed.
+ * Three outcomes, and the third is the one that matters:
+ *
+ *   { member }                    — found, so the rank comparison can run
+ *   { member: null }              — confirmed not in the guild; there is no rank
+ *                                   to compare, which is the ban-by-id case
+ *   { member: null, indeterminate: true }
+ *                                 — we could not find out
+ *
+ * Collapsing the third into the second is a fail-open. The ban-shaped commands
+ * proceed when no member is found, so "the fetch failed" would read as "nobody
+ * to outrank" and wave the action through with neither the hierarchy check nor
+ * the bot's own bannable check — and since a rate limit produces exactly that
+ * failure, it is a state a caller can provoke. Callers must refuse on
+ * `indeterminate` instead.
  */
 async function resolveMember(guild, userId) {
     const cached = guild?.members?.cache?.get(userId);
-    if (cached) return cached;
+    if (cached) return { member: cached, indeterminate: false };
+
     try {
-        return await guild.members.fetch(userId);
-    } catch {
-        // Unknown Member, or the fetch failed. Either way there is no member to
-        // compare against; the caller's own permission checks still apply.
-        return null;
+        const fetched = await guild.members.fetch(userId);
+        return { member: fetched ?? null, indeterminate: !fetched };
+    } catch (error) {
+        const absent = error?.code === UNKNOWN_MEMBER || error?.code === UNKNOWN_USER;
+        return { member: null, indeterminate: !absent };
     }
 }
 
 /**
  * The same resolution for a batch of ids, in one round trip rather than fifty.
- * Returns a Map of id -> member, holding only the ids that are members.
+ *
+ * Returns `{ members, indeterminate }`: a Map of id -> member for the ids that
+ * are members, and a Set of the ids we could not settle. The batch fetch omits
+ * non-members rather than erroring on them, so a throw here tells us nothing
+ * about any of the ids it covered — all of them land in `indeterminate`.
  */
 async function resolveMembers(guild, userIds) {
-    const resolved = new Map();
+    const members = new Map();
     for (const id of userIds) {
         const cached = guild?.members?.cache?.get(id);
-        if (cached) resolved.set(id, cached);
+        if (cached) members.set(id, cached);
     }
 
-    const unresolved = userIds.filter(id => !resolved.has(id));
-    if (unresolved.length === 0) return resolved;
+    const unresolved = userIds.filter(id => !members.has(id));
+    if (unresolved.length === 0) return { members, indeterminate: new Set() };
 
     try {
         const fetched = await guild.members.fetch({ user: unresolved });
-        for (const [id, member] of fetched) resolved.set(id, member);
+        for (const [id, member] of fetched) members.set(id, member);
+        return { members, indeterminate: new Set() };
     } catch {
-        // A failed batch fetch leaves the ids unresolved, which reads as "not a
-        // member" — the same answer the cache-only code always gave, and the
-        // bot's own bannable check still stands behind it.
+        return { members, indeterminate: new Set(unresolved) };
     }
-    return resolved;
 }
 
 module.exports = { hierarchyDenial, resolveMember, resolveMembers };

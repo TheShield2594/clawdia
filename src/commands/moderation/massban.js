@@ -45,11 +45,12 @@ module.exports = {
         // One resolution pass for the whole batch: the member cache holds at most
         // 200 per guild, so reading it alone would leave most of these ids
         // looking like non-members and skip both checks below.
-        const members = await resolveMembers(interaction.guild, ids);
+        const { members, indeterminate } = await resolveMembers(interaction.guild, ids);
 
-        const succeeded = [];
-        const failed    = [];
-        const refused   = [];
+        const succeeded  = [];
+        const failed     = [];
+        const refused    = [];
+        const unverified = [];
 
         for (const userId of ids) {
             if (userId === interaction.user.id || userId === interaction.client.user.id) {
@@ -62,6 +63,13 @@ module.exports = {
             // way around the hierarchy rule the others enforce. IDs belonging to
             // nobody in the guild — the raid cleanup this command exists for —
             // have no member to check and fall straight through.
+            // Unsettled, not confirmed absent — banning here would skip both
+            // checks below on someone who may outrank the moderator.
+            if (indeterminate.has(userId)) {
+                unverified.push(userId);
+                continue;
+            }
+
             const member = members.get(userId);
             if (member && !member.bannable) {
                 refused.push(userId);
@@ -87,7 +95,7 @@ module.exports = {
         }
 
         const embed = new EmbedBuilder()
-            .setColor(failed.length === 0 && refused.length === 0 ? '#ff0000' : '#ff9900')
+            .setColor(failed.length === 0 && refused.length === 0 && unverified.length === 0 ? '#ff0000' : '#ff9900')
             .setTitle('Mass Ban Complete')
             .addFields(
                 { name: 'Banned', value: `${succeeded.length} user(s)`, inline: true },
@@ -106,6 +114,14 @@ module.exports = {
             embed.addFields({
                 name: 'Skipped — outranks you or the bot',
                 value: refused.slice(0, 20).join(', ')
+            });
+        }
+
+        // These are the ones worth retrying: nothing was decided about them.
+        if (unverified.length > 0) {
+            embed.addFields({
+                name: 'Skipped — could not be looked up, try again',
+                value: unverified.slice(0, 20).join(', ')
             });
         }
 

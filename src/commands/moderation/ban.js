@@ -68,7 +68,16 @@ module.exports = {
             return interaction.reply({ content: 'I cannot ban myself.', flags: MessageFlags.Ephemeral });
         }
 
-        const member = await resolveMember(interaction.guild, user.id);
+        const { member, indeterminate } = await resolveMember(interaction.guild, user.id);
+        // Not the same as "not in the guild": we could not find out. Proceeding
+        // would skip both checks below on a target who may well outrank you.
+        if (indeterminate) {
+            return interaction.reply({
+                content: 'I could not look this user up just now, so I have not banned them. Try again in a moment.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
         if (member && !member.bannable) {
             return interaction.reply({ content: 'I cannot ban this user — they may have higher permissions.', flags: MessageFlags.Ephemeral });
         }

@@ -105,12 +105,18 @@ describe('hierarchyDenial', () => {
 // hourly (utils/cacheOptions), so the cache is a recently-seen sample, not a
 // roster — these cover the resolution that turns a miss into a real answer.
 describe('resolveMember', () => {
+    // Discord answers "not in this guild" with error code 10007; anything else it
+    // throws is a transport failure that says nothing about membership. The fake
+    // keeps that distinction because the whole point of these tests is that the
+    // code does too.
+    const unknownMember = () => Object.assign(new Error('Unknown Member'), { code: 10007 });
+
     const fakeGuild = ({ cached = {}, fetched = {} } = {}) => ({
         members: {
             cache: { get: id => cached[id] },
             fetch: jest.fn(async arg => {
                 if (typeof arg === 'string') {
-                    if (!fetched[arg]) throw new Error('Unknown Member');
+                    if (!fetched[arg]) throw unknownMember();
                     return fetched[arg];
                 }
                 const wanted = arg.user;
@@ -121,58 +127,82 @@ describe('resolveMember', () => {
 
     test('uses the cache when it has the member, without a round trip', async () => {
         const guild = fakeGuild({ cached: { u1: { id: 'u1' } } });
-        await expect(resolveMember(guild, 'u1')).resolves.toEqual({ id: 'u1' });
+        await expect(resolveMember(guild, 'u1'))
+            .resolves.toEqual({ member: { id: 'u1' }, indeterminate: false });
         expect(guild.members.fetch).not.toHaveBeenCalled();
     });
 
     test('fetches on a cache miss rather than calling them a non-member', async () => {
         const guild = fakeGuild({ fetched: { u2: { id: 'u2' } } });
-        await expect(resolveMember(guild, 'u2')).resolves.toEqual({ id: 'u2' });
+        await expect(resolveMember(guild, 'u2'))
+            .resolves.toEqual({ member: { id: 'u2' }, indeterminate: false });
         expect(guild.members.fetch).toHaveBeenCalledWith('u2');
     });
 
-    test('returns null for someone who really is not in the guild', async () => {
-        await expect(resolveMember(fakeGuild(), 'stranger')).resolves.toBeNull();
+    test('reports a confirmed non-member as absent, not as unsettled', async () => {
+        // The ban-by-id case: Discord said 10007, so there really is no member
+        // and no rank to compare. The commands may proceed.
+        await expect(resolveMember(fakeGuild(), 'stranger'))
+            .resolves.toEqual({ member: null, indeterminate: false });
     });
 
-    test('a failed fetch resolves to null rather than throwing at the command', async () => {
-        const guild = { members: { cache: { get: () => undefined }, fetch: async () => { throw new Error('5xx'); } } };
-        await expect(resolveMember(guild, 'u3')).resolves.toBeNull();
+    // The fail-open this distinction exists to prevent: a 429 or 5xx used to
+    // return the same null as a confirmed non-member, and the ban-shaped commands
+    // proceed when no member is found — so a failed lookup skipped both the
+    // hierarchy check and the bot's own bannable check, on a target who might
+    // well outrank the moderator. A rate limit is a state a caller can provoke.
+    test.each([
+        ['a rate limit', Object.assign(new Error('rate limited'), { code: 0, status: 429 })],
+        ['a server error', Object.assign(new Error('server error'), { status: 500 })],
+        ['a timeout', new Error('ETIMEDOUT')],
+    ])('reports %s as indeterminate, never as absent', async (_label, error) => {
+        const guild = { members: { cache: { get: () => undefined }, fetch: async () => { throw error; } } };
+        await expect(resolveMember(guild, 'u3'))
+            .resolves.toEqual({ member: null, indeterminate: true });
     });
 
     describe('resolveMembers', () => {
         test('asks for the uncached ids only, in one call', async () => {
             const guild = fakeGuild({ cached: { a: { id: 'a' } }, fetched: { b: { id: 'b' }, c: { id: 'c' } } });
-            const out = await resolveMembers(guild, ['a', 'b', 'c']);
+            const { members, indeterminate } = await resolveMembers(guild, ['a', 'b', 'c']);
 
             expect(guild.members.fetch).toHaveBeenCalledTimes(1);
             expect(guild.members.fetch).toHaveBeenCalledWith({ user: ['b', 'c'] });
-            expect([...out.keys()].sort()).toEqual(['a', 'b', 'c']);
+            expect([...members.keys()].sort()).toEqual(['a', 'b', 'c']);
+            expect(indeterminate.size).toBe(0);
         });
 
-        test('omits ids that belong to nobody in the guild', async () => {
+        test('omits ids that belong to nobody in the guild, and settles them', async () => {
+            // The batch fetch drops non-members rather than erroring, so a
+            // successful call is a real answer for every id it covered.
             const guild = fakeGuild({ fetched: { b: { id: 'b' } } });
-            const out = await resolveMembers(guild, ['b', 'ghost']);
+            const { members, indeterminate } = await resolveMembers(guild, ['b', 'ghost']);
 
-            expect(out.has('b')).toBe(true);
-            expect(out.has('ghost')).toBe(false);
+            expect(members.has('b')).toBe(true);
+            expect(members.has('ghost')).toBe(false);
+            expect(indeterminate.size).toBe(0);
         });
 
         test('skips the round trip entirely when everything is cached', async () => {
             const guild = fakeGuild({ cached: { a: { id: 'a' }, b: { id: 'b' } } });
-            await resolveMembers(guild, ['a', 'b']);
+            const { indeterminate } = await resolveMembers(guild, ['a', 'b']);
             expect(guild.members.fetch).not.toHaveBeenCalled();
+            expect(indeterminate.size).toBe(0);
         });
 
-        test('a failed batch leaves the cached half intact', async () => {
+        // Same fail-open as above, with a wider blast radius: massban would have
+        // banned every uncached id in the batch with no check at all.
+        test('a failed batch marks its ids unsettled rather than absent', async () => {
             const guild = {
                 members: {
                     cache: { get: id => (id === 'a' ? { id: 'a' } : undefined) },
                     fetch: async () => { throw new Error('gateway timeout'); },
                 },
             };
-            const out = await resolveMembers(guild, ['a', 'b']);
-            expect([...out.keys()]).toEqual(['a']);
+            const { members, indeterminate } = await resolveMembers(guild, ['a', 'b', 'c']);
+
+            expect([...members.keys()]).toEqual(['a']);
+            expect([...indeterminate].sort()).toEqual(['b', 'c']);
         });
     });
 });
@@ -217,6 +247,28 @@ describe('the commands that take a target call the guard', () => {
             path.join(__dirname, '..', 'src', 'commands', 'moderation', 'massban.js'), 'utf8',
         );
         expect(source).toContain('bannable');
+    });
+
+    // Resolving the target is only half of it: the commands have to refuse when
+    // the lookup came back unsettled. Returning `indeterminate` and then banning
+    // anyway is the same fail-open with an extra field.
+    test.each([
+        ['ban.js', /guild\.members\.ban\(|\.ban\(user/],
+        ['softban.js', /guild\.members\.ban\(/],
+        ['massban.js', /guild\.members\.ban\(userId/],
+    ])('%s refuses before banning when the lookup is unsettled', (file, banPattern) => {
+        const source = fs.readFileSync(
+            path.join(__dirname, '..', 'src', 'commands', 'moderation', file), 'utf8',
+        );
+
+        const check = source.search(/indeterminate/);
+        const ban   = source.search(banPattern);
+        expect(check).toBeGreaterThan(-1);
+        expect(ban).toBeGreaterThan(-1);
+        expect(check).toBeLessThan(ban);
+
+        // And it stops there rather than falling through to the ban.
+        expect(source).toMatch(/indeterminate[\s\S]{0,400}?(return interaction\.reply|continue;)/);
     });
 
     // The ban-shaped commands proceed when no member is found, so a cache-only
