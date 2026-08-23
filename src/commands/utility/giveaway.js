@@ -1,5 +1,8 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
+// Drawing, ending and entrant handling live in the service — `/giveaway end`
+// and the scheduled sweep are two callers of one operation (#614).
+const { endGiveaway, parseDuration, pickWinners, getEntrants } = require('../../services/giveawayService');
 
 const GIVEAWAY_EMOJI = '🎉';
 
@@ -112,76 +115,3 @@ module.exports = {
         }
     }
 };
-
-function parseDuration(str) {
-    const match = str.match(/^(\d+)(s|m|h|d)$/i);
-    if (!match) return null;
-    const amount = parseInt(match[1]);
-    const unit = match[2].toLowerCase();
-    const multipliers = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
-    return amount * multipliers[unit];
-}
-
-// Entrants are persisted on the giveaway subdocument by the giveaway_enter
-// button handler in events/interactionCreate.js, so they survive restarts.
-function getEntrants(ga) {
-    return Array.isArray(ga?.entrantIds) ? [...ga.entrantIds] : [];
-}
-
-// Fisher-Yates. The previous `.sort(() => Math.random() - 0.5)` is not a
-// uniform shuffle — comparison sorts with an inconsistent comparator leave
-// elements strongly biased toward their original positions, so entrants who
-// clicked first were measurably more likely to win.
-function pickWinners(entrants, count) {
-    const shuffled = [...entrants];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled.slice(0, Math.min(count, shuffled.length));
-}
-
-async function endGiveaway(client, guildSettings, ga) {
-    ga.ended = true;
-
-    // Draw before looking anything up. The caller persists the giveaway either
-    // way, so bailing out early on a deleted channel or message used to mark it
-    // ended with an empty winnerIds — the entrants were still there, but the
-    // result was never recorded. Announcing is best-effort; deciding is not.
-    const entrants = getEntrants(ga);
-    const winners = pickWinners(entrants, ga.winners);
-    ga.winnerIds = winners;
-
-    const channel = client.guilds.cache
-        .get(guildSettings.guildId)
-        ?.channels.cache.get(ga.channelId);
-
-    if (!channel) return;
-
-    const msg = await channel.messages.fetch(ga.messageId).catch(() => null);
-    if (!msg) return;
-
-    const winnerText = winners.length
-        ? winners.map(id => `<@${id}>`).join(', ')
-        : 'No valid entrants';
-
-    const endEmbed = new EmbedBuilder()
-        .setColor('#ff0000')
-        .setTitle('🎉 GIVEAWAY ENDED 🎉')
-        .setDescription(`**Prize:** ${ga.prize}\n\n**Winner${winners.length !== 1 ? 's' : ''}:** ${winnerText}`)
-        .addFields({ name: 'Hosted by', value: `<@${ga.hostId}>` })
-        .setTimestamp();
-
-    await msg.edit({ embeds: [endEmbed], components: [] }).catch(console.error);
-
-    if (winners.length) {
-        await channel.send(`🎉 Congratulations ${winnerText}! You won **${ga.prize}**!`).catch(console.error);
-    }
-}
-
-module.exports.endGiveaway = endGiveaway;
-module.exports.parseDuration = parseDuration;
-// Exported for tests: winner selection has to stay a uniform shuffle, and that
-// is only assertable against the real implementation.
-module.exports.pickWinners = pickWinners;
-module.exports.getEntrants = getEntrants;

@@ -14,6 +14,28 @@
 const js = require('@eslint/js');
 const globals = require('globals');
 const prettier = require('eslint-config-prettier/flat');
+const layers = require('./eslint-rules/layer-boundaries');
+
+// The direction dependencies are allowed to run in, lowest layer first (#614).
+// A module may require its own layer and anything below it; requiring anything
+// above is an error. See eslint-rules/layer-boundaries.js.
+const LAYERS = [
+    ['models', 'config', 'data', 'migrations'],
+    ['utils'],
+    ['views'],
+    ['services', 'games'],
+    ['commands', 'bot'],
+    ['dashboard', 'events'],
+];
+
+// The one edge that has to run upward, and does so deliberately. Mongoose only
+// honours middleware registered before model() compiles the schema, so the
+// guild-settings cache invalidation has to be attached in the model file; the
+// require is already lazy, inside the hook, for exactly this reason. See the
+// comment at the hook and tests/guildCacheHooks.test.js.
+const LAYER_EXCEPTIONS = [
+    'models/Guild -> utils/guildSettingsCache',
+];
 
 const shared = {
     // `_`-prefixed arguments and catch bindings are the established way here of
@@ -52,14 +74,23 @@ module.exports = [
 
     // ── The bot and the dashboard server: CommonJS on Node ──────────────
     {
-        files: ['src/**/*.js', 'scripts/**/*.js', '*.js'],
+        files: ['src/**/*.js', 'scripts/**/*.js', 'eslint-rules/**/*.js', '*.js'],
         ignores: ['src/dashboard/public/**'],
         languageOptions: {
             ecmaVersion: 2024,
             sourceType: 'commonjs',
             globals: { ...globals.node },
         },
-        rules: { ...js.configs.recommended.rules, ...shared },
+        plugins: { layers },
+        rules: {
+            ...js.configs.recommended.rules,
+            ...shared,
+            'layers/no-upward-require': ['error', {
+                root: 'src',
+                layers: LAYERS,
+                allow: LAYER_EXCEPTIONS,
+            }],
+        },
     },
 
     // ── The dashboard's browser scripts ─────────────────────────────────

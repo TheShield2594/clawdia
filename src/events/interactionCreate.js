@@ -2,8 +2,8 @@ const { MessageFlags } = require('discord.js');
 const Guild = require('../models/Guild');
 const GuildAnalytics = require('../models/GuildAnalytics');
 const User = require('../models/User');
-const { handlePollVote } = require('../commands/utility/poll');
-const { handleHeistButton } = require('../commands/economy/heist');
+const { handlePollVote } = require('../services/pollService');
+const { handleHeistButton } = require('../services/heistService');
 const { handleSyndicateButton } = require('../commands/economy/syndicate');
 const { handleDmButton } = require('../services/dmService');
 const {

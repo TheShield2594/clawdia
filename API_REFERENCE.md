@@ -22,10 +22,34 @@ src/
 │   ├── routes/       # Express routes
 │   └── views/        # EJS templates
 ├── events/           # Discord.js events
+├── views/            # Discord embeds and component rows
 ├── models/           # MongoDB schemas
+├── data/             # Static tables (drop tables, role definitions)
 ├── services/         # Business logic
+├── games/            # Casino round state machines
+├── bot/              # The gateway facade the dashboard talks to
 └── utils/            # Helper functions
 ```
+
+### Which way dependencies run
+
+These directories are layers, and the direction is enforced — `npm run lint`
+fails on a module requiring one from a layer above it. Lowest first:
+
+| Layer | May require |
+| --- | --- |
+| `models`, `config`, `data`, `migrations` | each other |
+| `utils` | the above |
+| `views` | the above |
+| `services`, `games` | the above |
+| `commands`, `bot` | the above |
+| `dashboard`, `events` | the above |
+
+A module may always require its own layer. If two layers need the same code,
+the code moves *down* — a Discord embed several callers share belongs in
+`views/`, a table belongs in `data/`, an operation belongs in `services/`. The
+rule and the one documented exception live in `eslint-rules/layer-boundaries.js`
+and `eslint.config.js`.
 
 ## Creating a New Command
 

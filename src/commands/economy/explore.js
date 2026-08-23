@@ -49,7 +49,7 @@ const {
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { ensureQuests, onExplore, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
-const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
+const { applyXpGain, announceLevelUp } = require('../../services/levelingService');
 const {
     getEventXpMultiplier, getEventCoinMultiplier,
     hasActiveEvent, getEventCurrencyId, addEventCurrency,

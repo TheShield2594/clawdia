@@ -1,6 +1,16 @@
-const Guild = require('../models/Guild');
+'use strict';
+
+// Moderation logging: post the action to the guild's log channel and persist it
+// as a Case.
+//
+// This was `utils/logger.js`, and it imported `services/caseService` — a util
+// reaching up into a service, which is the direction the layer rule refuses
+// (#614). It was never a utility: it reads a Guild, writes a Case and talks to
+// Discord. Naming it for what it does put it where it belongs.
+
 const { EmbedBuilder } = require('discord.js');
-const { createCase } = require('../services/caseService');
+const Guild = require('../models/Guild');
+const { createCase } = require('./caseService');
 
 async function logModeration(guildId, action, target, moderator, reason, options = {}) {
     try {

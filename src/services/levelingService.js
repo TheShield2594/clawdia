@@ -1,6 +1,14 @@
 'use strict';
 
-const { getTotalBonus } = require('../services/petService');
+// Levelling: applying XP across level thresholds, and announcing a promotion.
+//
+// This was `utils/applyXpGain.js`, and it imported `services/petService` for the
+// Bird's `xp_gain` passive — a util reaching up into a service (#614). The pet
+// bonus is not incidental to it: applying XP *is* consulting the pet passive,
+// which is why the bonus lives here rather than at each call site. So the
+// module is a service, and now sits with the one it depends on.
+
+const { getTotalBonus } = require('./petService');
 
 const TIER_STYLES = [
     { min: 0,   color: '#cd7f32', label: 'Bronze',  glyph: '⬡' },

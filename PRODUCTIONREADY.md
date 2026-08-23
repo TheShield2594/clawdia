@@ -153,7 +153,7 @@ release gate.
 - `src/services/caseService.js`
 - `src/services/escalationService.js`
 - `src/services/tempBanService.js`
-- `src/utils/logger.js`
+- `src/services/moderationLogService.js`
 - `src/events/messageCreate.js` (AutoMod)
 - `src/models/Case.js`
 - `src/models/TempBan.js`

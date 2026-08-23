@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const Case = require('../../models/Case');
-const { logModeration } = require('../../utils/logger');
+const { logModeration } = require('../../services/moderationLogService');
 const { applyEscalation, findStepForCount } = require('../../services/escalationService');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
