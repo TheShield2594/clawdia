@@ -12,8 +12,6 @@ const { jsonForScript } = require('./lib/jsonForScript');
 const { asset } = require('./lib/assets');
 const { createBotGateway } = require('../bot/gateway');
 
-const app = express();
-
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
@@ -96,8 +94,74 @@ function setupPassport() {
     }));
 }
 
-function start(client) {
-    setupPassport();
+/**
+ * The dashboard's terminal error middleware.
+ *
+ * This is the blast-radius boundary (#616). An error that escapes Express does
+ * not fail a request — it reaches the process-level `uncaughtException` /
+ * `unhandledRejection` guards in src/index.js, which exit, which drops the
+ * gateway connection for every guild the bot is in. The dashboard and the bot
+ * share one process, so a bad route is currently a bot-wide outage.
+ *
+ * Splitting the dashboard out is the real fix and `createApp` above is the
+ * first half of it. Until then this handler is what has to hold, so it is
+ * written to have no way out of its own:
+ *
+ *   - `err.status` is honoured, so express.json()'s 400 on a malformed body is
+ *     reported as a bad request rather than laundered into a 500.
+ *   - A response already on the wire cannot be given a status, and trying is
+ *     an `ERR_HTTP_HEADERS_SENT` thrown from inside the error handler. Those
+ *     are delegated to Express's finalhandler, which destroys the socket —
+ *     the only correct end for a half-written response.
+ *   - Writing the reply is itself wrapped: a socket that died between the
+ *     `headersSent` check and the write would otherwise throw here, past the
+ *     last handler Express has.
+ */
+function errorHandler(err, req, res, next) {
+    console.error('[DASHBOARD] Unhandled error:', err);
+
+    if (res.headersSent) return next(err);
+
+    const status = Number.isInteger(err?.status) ? err.status
+        : Number.isInteger(err?.statusCode) ? err.statusCode
+        : 500;
+
+    try {
+        res.status(status >= 400 && status < 600 ? status : 500)
+            .json({ error: status === 500 ? 'Internal server error' : (err.expose ? err.message : 'Bad request') });
+    } catch (sendErr) {
+        console.error('[DASHBOARD] Failed to send the error response:', sendErr.message);
+        try { res.destroy?.(); } catch { /* the socket is already gone */ }
+    }
+}
+
+/**
+ * Builds the dashboard's Express app and returns it, without binding a port.
+ *
+ * This used to be a module-level `const app = express()` configured inside
+ * `start(client)`: one app per process, constructible only from a live Discord
+ * client, and impossible to stand up twice. That shape is what kept the
+ * middleware here untested — supertest needs an app object, not a listening
+ * server — and it is the first thing in the way of running the dashboard as its
+ * own process (#620, #616).
+ *
+ * Everything the app needs from outside arrives through `deps`:
+ *
+ *   bot            the gateway facade (src/bot/gateway.js). Defaults to one
+ *                  built from `client`; pass a stub to construct the app with
+ *                  no Discord connection at all.
+ *   sessionStore   the express-session store. Defaults to the Mongo-backed one,
+ *                  which is the only part of this function that reaches for a
+ *                  database at construction time.
+ *   configurePassport
+ *                  called once before the app is assembled. Defaults to the
+ *                  real Discord strategy registration, which needs
+ *                  CLIENT_ID/CLIENT_SECRET and a valid DASHBOARD_URL.
+ */
+function createApp({ client = null, bot: injectedBot, sessionStore, configurePassport = setupPassport } = {}) {
+    configurePassport();
+
+    const app = express();
 
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
@@ -164,7 +228,7 @@ function start(client) {
     });
 
     app.use(session({
-        store: MongoStore.create({ mongoUrl: process.env.MONGODB_URI, collectionName: 'sessions' }),
+        store: sessionStore ?? MongoStore.create({ mongoUrl: process.env.MONGODB_URI, collectionName: 'sessions' }),
         secret: process.env.SESSION_SECRET,
         resave: false,
         saveUninitialized: false,
@@ -183,7 +247,7 @@ function start(client) {
     // from Discord is a method on it, so nothing downstream holds a live
     // gateway object — which is what lets this be backed by IPC or
     // broadcastEval later without touching a single route.
-    const bot = createBotGateway(client);
+    const bot = injectedBot ?? createBotGateway(client);
     app.use((req, res, next) => {
         req.bot = bot;
         next();
@@ -220,16 +284,35 @@ function start(client) {
         res.render('index', { user: req.user });
     });
 
-    app.use((err, req, res, _next) => {
-        console.error('[DASHBOARD] Unhandled error:', err);
-        res.status(500).json({ error: 'Internal server error' });
-    });
+    app.use(errorHandler);
 
-    const PORT = process.env.DASHBOARD_PORT || 3000;
-    app.listen(PORT, () => {
-        console.log(`[DASHBOARD] Running on port ${PORT}`);
-        console.log(`[DASHBOARD] URL: ${process.env.DASHBOARD_URL || `http://localhost:${PORT}`}`);
-    });
+    return app;
 }
 
-module.exports = { start, discordStrategyOptions };
+/**
+ * Binds the app to a port. Split from `createApp` so the app can be built and
+ * driven in-process — by supertest, or by a future dashboard process that owns
+ * its own listen — without a socket ever being opened.
+ */
+function listen(app, port = process.env.DASHBOARD_PORT || 3000) {
+    const server = app.listen(port, () => {
+        console.log(`[DASHBOARD] Running on port ${port}`);
+        console.log(`[DASHBOARD] URL: ${process.env.DASHBOARD_URL || `http://localhost:${port}`}`);
+    });
+
+    // A server 'error' with no listener is an unhandled 'error' event, which is
+    // a process-level throw — EADDRINUSE on the dashboard port would take the
+    // gateway down with it. The dashboard being unreachable is bad; the bot
+    // leaving every guild because of it is worse.
+    server.on('error', err => {
+        console.error(`[DASHBOARD] Server error on port ${port}:`, err.message);
+    });
+
+    return server;
+}
+
+function start(client) {
+    return listen(createApp({ client }));
+}
+
+module.exports = { createApp, listen, start, errorHandler, discordStrategyOptions };

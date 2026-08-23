@@ -381,11 +381,19 @@ module.exports = router;
 
 ### Adding to Dashboard Server
 
+The app is built by a factory, so it can be constructed without a Discord
+client and driven with supertest; `listen()` is separate and binds the port.
+
 ```javascript
-// src/dashboard/server.js
+// src/dashboard/server.js — inside createApp(), before the error handler
 const customRoutes = require('./routes/custom');
 app.use('/custom', customRoutes);
 ```
+
+Routes read Discord through `req.bot`, the gateway facade, never a live client.
+Anything a route throws — synchronously or from a rejected promise — is caught
+by the terminal error middleware; it must be, because the dashboard shares a
+process with the gateway and an escaped error exits it.
 
 ### Creating a Dashboard View
 
