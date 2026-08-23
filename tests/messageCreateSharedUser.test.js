@@ -16,7 +16,7 @@ jest.mock('../src/models/Case',     () => ({ findOne: jest.fn().mockResolvedValu
 jest.mock('../src/models/Reminder', () => ({ create: jest.fn() }));
 
 jest.mock('../src/services/aiService',      () => ({ handleAIChat: jest.fn() }));
-jest.mock('../src/utils/logger',            () => ({ logModeration: jest.fn().mockResolvedValue(undefined) }));
+jest.mock('../src/services/moderationLogService',            () => ({ logModeration: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../src/services/rivalryService', () => ({ checkRivalry: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../src/services/chatEventService', () => ({ maybeTriggerChatEvent: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../src/utils/wealthMilestone',   () => ({ checkAndBroadcastWealthMilestone: jest.fn().mockResolvedValue(undefined) }));
@@ -42,7 +42,7 @@ jest.mock('../src/services/questService', () => ({
     notifyQuestNearComplete: jest.fn().mockResolvedValue(undefined),
     notifyDailyQuestReset: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock('../src/utils/applyXpGain', () => ({
+jest.mock('../src/services/levelingService', () => ({
     applyXpGain: jest.fn((user, amount) => {
         user.xp = (user.xp || 0) + amount;
         return { leveled: false, newLevel: user.level, gained: amount };

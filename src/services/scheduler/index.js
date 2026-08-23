@@ -146,7 +146,7 @@ const STARTERS = [
     { name: 'summaryService', start: client => require('../summaryService').startSummaryService(client) },
     { name: 'caseService.slaMonitor', start: client => require('../caseService').startSlaMonitor(client) },
     { name: 'questService', start: () => require('../questService').startQuestService() },
-    { name: 'poll.expirations', start: client => require('../../commands/utility/poll').scheduleActivePollExpirations(client) },
+    { name: 'poll.expirations', start: client => require('../pollService').scheduleActivePollExpirations(client) },
     { name: 'dailyBibleService', start: client => require('../dailyBibleService').startDailyBibleService(client) },
     { name: 'rssService.dailyNews', start: client => require('../rssService').scheduleDailyNews(client) },
 ];

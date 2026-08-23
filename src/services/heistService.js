@@ -9,22 +9,19 @@
 // duplicates anyone's coins. The per-user action lock, which is the thing that
 // actually gates money, is in Mongo; see src/utils/activeGameLock.js.
 
+const { EmbedBuilder, MessageFlags } = require('discord.js');
+const Guild = require('../models/Guild');
+const User  = require('../models/User');
 const { assertGuildAffinity } = require('../utils/sharding');
+const { logTransaction } = require('../utils/logTransaction');
+const { debitUpTo } = require('../utils/balanceDebit');
+const { ROLES, TARGETS } = require('../data/heistData');
+const { makeSkillRow, buildLobbyEmbed, buildLobbyRows } = require('../views/heistView');
+
+const SKILL_TIMEOUT_MS = 30_000;
+const LOBBY_POLL_MS    = 5_000; // edit the lobby message every 5s
 
 const activeHeists = new Map();
-
-const ROLES = {
-    hacker:  { emoji: '💻', label: 'Hacker',  desc: 'Bypasses security systems — answer a logic question.' },
-    lookout: { emoji: '👀', label: 'Lookout', desc: 'Monitors guard patterns — identify the duplicate number.' },
-    muscle:  { emoji: '💪', label: 'Muscle',  desc: 'Handles confrontations — play higher-lower.' },
-    driver:  { emoji: '🚗', label: 'Driver',  desc: 'Plans the escape route — pick the safe route.' },
-};
-
-const TARGETS = {
-    bank:    { label: 'Server Bank',    baseReward: 1.0 },
-    vault:   { label: 'Faction Vault',  baseReward: 1.5 },
-    casino:  { label: 'Casino Safe',    baseReward: 1.25 },
-};
 
 function generateHeistId(guildId) {
     return `${guildId}-${Date.now()}`;
@@ -216,6 +213,319 @@ function initActiveHeists() {
     // "no active lobby" when clicked, which is the correct safe fallback.
 }
 
+// ── Skill checks, resolution, and the lobby buttons ────────────────────────
+//
+// These three used to live in `commands/economy/heist.js`, which meant
+// `events/interactionCreate` imported a command to dispatch a button and this
+// service had to be required lazily from inside the handler to dodge the cycle
+// that created (#614). They belong here: a skill check and a payout are the
+// heist, not the slash command that starts one.
+
+async function sendSkillCheck(member, heistId, role) {
+    const check = buildSkillCheck(role);
+    const roleMeta = ROLES[role];
+    const embed = new EmbedBuilder()
+        .setColor('#e74c3c')
+        .setTitle(`🔒 Heist In Progress — ${roleMeta.emoji} ${roleMeta.label} Check`)
+        .setDescription(
+            `**Your role:** ${roleMeta.label}\n${roleMeta.desc}\n\n` +
+            `**Your challenge:**\n${check.question}\n\n` +
+            `⏳ You have **30 seconds** to answer!`
+        )
+        .setFooter({ text: 'This is your private skill check — only you can see this.' });
+
+    try {
+        const dm = await member.send({ embeds: [embed], components: [makeSkillRow(heistId, member.id, check)] });
+        return { dm, check };
+    } catch {
+        return { dm: null, check };
+    }
+}
+
+/**
+ * Resolves a heist exactly once, and never leaves the guild wedged if it cannot.
+ *
+ * `resolving` is set before any await, so a second timeout handler firing mid
+ * resolution turns back. That guard used to be the end of the story: anything
+ * that threw past it — the Guild read, a Discord send — left `resolving` true
+ * and the entry in `activeHeists` forever, so `/heist start` answered "a heist
+ * is already in progress" in that guild until the process restarted. The
+ * rejection also travelled out through the `setTimeout` callbacks that call
+ * this, where nothing was waiting for it: an unhandled rejection, which the
+ * process guard in src/index.js counts toward its exit threshold.
+ *
+ * A failure here terminates the heist rather than retrying it. The state is in
+ * memory and by then partly written — some players may already have been paid —
+ * so re-running would pay them twice, which is the worse of the two failures.
+ * Clearing frees the guild to start a new one.
+ */
+async function resolveHeist(client, heist) {
+    // Atomic guard: prevent concurrent resolution from multiple timeout handlers
+    // or simultaneous allDone checks.
+    if (heist.resolving) return;
+    heist.resolving = true;
+
+    try {
+        await runResolution(client, heist);
+    } catch (err) {
+        console.error(`[heist] resolution failed for guild ${heist.guildId}:`, err);
+        clearHeist(heist.guildId);
+    }
+}
+
+async function runResolution(client, heist) {
+    const guildId  = heist.guildId;
+    const { outcome, passedCount, totalCount, ratio } = calculateOutcome(heist);
+    const { share, total } = computePayouts(heist, passedCount, totalCount, ratio);
+    const guildDoc = await Guild.findOne({ guildId }, 'economy heist').lean();
+    const currency = guildDoc?.economy?.currency ?? '💰';
+    const jailMins = guildDoc?.heist?.jailDurationMinutes ?? 30;
+
+    const players = [...heist.players.entries()];
+    const resultLines = [];
+
+    for (const [userId, player] of players) {
+        const roleMeta = ROLES[player.role];
+        const passed   = player.skillPassed === true;
+        const icon     = passed ? '✅' : '❌';
+        resultLines.push(`${roleMeta.emoji} **${player.username}** (${roleMeta.label}) — ${icon} ${passed ? 'Passed' : 'Failed'}`);
+
+        if (outcome === 'full_success' || (outcome === 'partial_success' && passed)) {
+            // Logged rather than swallowed. A payout that does not land is a
+            // player short of coins they were shown winning, and a silent catch
+            // left no trace of it anywhere. It still does not fail the
+            // resolution: the rest of the crew has to be paid either way, and
+            // making this durable needs a per-player ledger the heist has no
+            // way to keep today.
+            try {
+                await User.findOneAndUpdate(
+                    { userId, guildId },
+                    { $inc: { balance: share } }
+                );
+                if (share > 0) {
+                    const u = await User.findOne({ userId, guildId }, 'balance').lean();
+                    logTransaction({ userId, guildId, type: 'heist_payout', amount: share, balance: u?.balance ?? share, note: `Heist: ${TARGETS[heist.target]?.label}` });
+                }
+            } catch (err) {
+                console.error(`[heist] payout of ${share} to ${userId} in ${guildId} failed:`, err.message);
+            }
+        } else if (outcome === 'failure' || (outcome === 'partial_success' && !passed)) {
+            // Jail the caught players: lock economy commands and apply a fine.
+            // The clamp is inside the update, not against a separate read — a
+            // read-then-clamp-then-$inc takes the amount the read justified even
+            // once the wallet has emptied, which is how a fine walks a balance
+            // negative. See src/utils/balanceDebit.js.
+            const jailUntil = new Date(Date.now() + jailMins * 60_000);
+            const rawFine   = Math.floor(Math.random() * 200) + 50;
+            await debitUpTo(
+                User, { userId, guildId }, rawFine, { heistJailedUntil: jailUntil },
+            ).catch(err => console.error(`[heist] fine for ${userId} in ${guildId} failed:`, err.message));
+        }
+    }
+
+    let title, desc, color;
+    if (outcome === 'full_success') {
+        title = '🎉 Heist Successful!';
+        desc  = `Every crew member executed their role perfectly.\n\n**Payout:** ${currency}${share.toLocaleString()} each\n**Total stolen:** ${currency}${total.toLocaleString()}`;
+        color = '#2ecc71';
+    } else if (outcome === 'partial_success') {
+        title = '⚠️ Partial Success';
+        desc  = `Some crew members were caught, but the job got done.\n\n**Survivors earn:** ${currency}${share.toLocaleString()} each\n**Caught players** serve **${jailMins} min** jail time.`;
+        color = '#f39c12';
+    } else {
+        title = '🚨 Heist Failed!';
+        desc  = `The whole crew was caught. Everyone loses a fine and serves jail time (${jailMins} min).`;
+        color = '#e74c3c';
+    }
+
+    const embed = new EmbedBuilder()
+        .setColor(color)
+        .setTitle(title)
+        .setDescription(desc)
+        .addFields({ name: '👥 Crew Results', value: resultLines.join('\n') || '*No players*' })
+        .setTimestamp();
+
+    try {
+        const dg = await client.guilds.fetch(guildId).catch(() => null);
+        if (dg) {
+            const channel = await dg.channels.fetch(heist.channelId).catch(() => null);
+            if (channel?.isTextBased?.()) await channel.send({ embeds: [embed] });
+        }
+    } catch {}
+
+    clearHeist(guildId);
+}
+
+async function handleHeistButton(interaction, client) {
+    const id = interaction.customId;
+
+    // heist_join_{heistId}_{role}
+    // heistId = <guildId (digits)>-<timestamp (digits)>, no underscores
+    // role is one of: hacker, lookout, muscle, driver — no underscores
+    if (id.startsWith('heist_join_')) {
+        const prefix     = 'heist_join_';
+        const afterPrefix = id.slice(prefix.length);           // "{heistId}_{role}"
+        const lastSep    = afterPrefix.lastIndexOf('_');
+        if (lastSep === -1) return interaction.reply({ content: 'Malformed button ID.', flags: MessageFlags.Ephemeral });
+        const heistId = afterPrefix.slice(0, lastSep);
+        const role    = afterPrefix.slice(lastSep + 1);
+
+        if (!/^\d+-\d+$/.test(heistId) || !ROLES[role]) {
+            return interaction.reply({ content: 'Invalid heist button.', flags: MessageFlags.Ephemeral });
+        }
+
+        const guildId = interaction.guildId;
+        const heist = getHeist(guildId);
+        if (!heist || heist.heistId !== heistId || heist.phase !== 'lobby') {
+            return interaction.reply({ content: 'This heist lobby is no longer active.', flags: MessageFlags.Ephemeral });
+        }
+
+        const result = joinLobby(guildId, interaction.user.id, interaction.user.username, role);
+        if (!result.ok) {
+            return interaction.reply({ content: result.reason, flags: MessageFlags.Ephemeral });
+        }
+
+        // Update the lobby embed
+        await interaction.update({
+            embeds: [buildLobbyEmbed(heist)],
+            components: buildLobbyRows(heistId, heist)
+        }).catch(() => {});
+        return;
+    }
+
+    // heist_skill_{heistId}_{userId}_{answer}
+    // heistId = <guildId>-<timestamp>, userId = Discord snowflake (digits), answer has no underscores
+    if (id.startsWith('heist_skill_')) {
+        const prefix      = 'heist_skill_';
+        const afterPrefix = id.slice(prefix.length);          // "{heistId}_{userId}_{answer}"
+        const lastSep     = afterPrefix.lastIndexOf('_');
+        const beforeLast  = afterPrefix.lastIndexOf('_', lastSep - 1);
+        if (lastSep === -1 || beforeLast === -1) {
+            return interaction.reply({ content: 'Malformed skill-check button.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+        const answer  = afterPrefix.slice(lastSep + 1);
+        const userId  = afterPrefix.slice(beforeLast + 1, lastSep);
+        const heistId = afterPrefix.slice(0, beforeLast);
+
+        // DM interactions don't carry guildId, so extract it from heistId (format: guildId-timestamp)
+        let heist = null;
+        for (const [, h] of activeHeists) {
+            if (h.heistId === heistId) { heist = h; break; }
+        }
+
+        if (!heist || !heist.players.has(userId)) {
+            return interaction.reply({ content: 'This skill check has expired.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+
+        const player = heist.players.get(userId);
+        if (player.skillPassed !== null) {
+            return interaction.reply({ content: 'You already submitted your answer.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+
+        const check = heist._skillChecks?.[userId];
+        const passed = check ? String(answer) === String(check.correct) : false;
+        player.skillPassed = passed;
+
+        // Clear the timeout for this player
+        if (heist.skillTimers?.[userId]) {
+            clearTimeout(heist.skillTimers[userId]);
+            delete heist.skillTimers[userId];
+        }
+
+        await interaction.update({
+            embeds: [
+                new EmbedBuilder()
+                    .setColor(passed ? '#2ecc71' : '#e74c3c')
+                    .setTitle(passed ? '✅ Check Passed!' : '❌ Check Failed')
+                    .setDescription(passed
+                        ? 'You executed your role perfectly. Waiting for the rest of the crew…'
+                        : `Wrong answer. The correct answer was **${check?.correct}**.\nYou may face jail time depending on the heist outcome.`)
+                    .setTimestamp()
+            ],
+            components: []
+        }).catch(() => {});
+
+        // If all players have answered, resolve immediately
+        const allDone = [...heist.players.values()].every(p => p.skillPassed !== null);
+        if (allDone) {
+            await resolveHeist(client, heist);
+        }
+    }
+}
+
+/**
+ * Runs a lobby from the moment its message is posted: the countdown refresh,
+ * the close, the DM'd skill checks, and the resolution once every crew member
+ * has answered or timed out.
+ *
+ * `msg` is the posted lobby message — the one Discord object this takes, and
+ * only so it can be edited in place.
+ */
+function startLobbyCountdown(client, heist, msg, { minPlayers = 2, lobbyDurationSeconds = 60 } = {}) {
+    // Periodically refresh the lobby embed countdown
+    const refreshTimer = setInterval(async () => {
+        if (heist.phase !== 'lobby') { clearInterval(refreshTimer); return; }
+        await msg.edit({ embeds: [buildLobbyEmbed(heist)], components: buildLobbyRows(heist.heistId, heist) }).catch(() => {});
+    }, LOBBY_POLL_MS);
+
+    // Lobby timer
+    setTimeout(async () => {
+        clearInterval(refreshTimer);
+        if (heist.phase !== 'lobby') return;
+
+        if (heist.players.size < minPlayers) {
+            await msg.edit({
+                embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('❌ Heist Cancelled').setDescription(`Not enough crew members joined (need at least ${minPlayers}). Heist called off.`).setTimestamp()],
+                components: []
+            }).catch(() => {});
+            clearHeist(heist.guildId);
+            return;
+        }
+
+        endLobby(heist.guildId);
+        await msg.edit({
+            embeds: [new EmbedBuilder().setColor('#9b59b6').setTitle('🔓 Heist Begins!').setDescription('The lobby is closed. Skill checks are being sent to each crew member via DM…\nResults will be posted here when everyone responds or time runs out.').setTimestamp()],
+            components: []
+        }).catch(() => {});
+
+        // Send skill checks via DM
+        const dg = await client.guilds.fetch(heist.guildId).catch(() => null);
+        heist._skillChecks = {};
+
+        for (const [userId, player] of heist.players) {
+            const member = dg ? await dg.members.fetch(userId).catch(() => null) : null;
+            if (!member) {
+                player.skillPassed = false;
+                continue;
+            }
+            const { dm, check } = await sendSkillCheck(member, heist.heistId, player.role);
+            heist._skillChecks[userId] = check;
+
+            if (!dm) {
+                // Can't DM — auto-fail
+                player.skillPassed = false;
+            } else {
+                // Auto-fail on timeout
+                heist.skillTimers[userId] = setTimeout(async () => {
+                    if (player.skillPassed !== null) return;
+                    player.skillPassed = false;
+                    await dm.edit({
+                        embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⏰ Time\'s up!').setDescription(`You ran out of time. The correct answer was **${check.correct}**.`).setTimestamp()],
+                        components: []
+                    }).catch(() => {});
+                    const allDone = [...heist.players.values()].every(p => p.skillPassed !== null);
+                    if (allDone) await resolveHeist(client, heist).catch(err => console.error('[heist] resolve error:', err));
+                }, SKILL_TIMEOUT_MS);
+            }
+        }
+
+        // If everyone auto-failed (all DMs blocked), resolve immediately
+        const allDone = [...heist.players.values()].every(p => p.skillPassed !== null);
+        if (allDone) await resolveHeist(client, heist).catch(err => console.error('[heist] resolve error:', err));
+
+    }, lobbyDurationSeconds * 1000);
+}
+
 module.exports = {
     ROLES,
     TARGETS,
@@ -229,4 +539,9 @@ module.exports = {
     calculateOutcome,
     computePayouts,
     initActiveHeists,
+    sendSkillCheck,
+    resolveHeist,
+    startLobbyCountdown,
+    handleHeistButton,
+    SKILL_TIMEOUT_MS,
 };

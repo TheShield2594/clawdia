@@ -142,6 +142,15 @@ const userSchema = new Schema({
     dailyMessages: { type: Number, default: 0 },
     lastDailyReset: { type: Date, default: null },
 
+    // Start times for the long slash-command cooldowns, keyed by cooldown
+    // bucket (`command.cooldownKey(interaction)`, or the command name).
+    //
+    // Only cooldowns of 15 minutes or more land here — see
+    // src/utils/commandCooldowns.js. Short ones stay in the process-local map,
+    // where losing them to a restart costs nothing. Written one key at a time
+    // with `$set`, never as a whole-map `save()`.
+    commandCooldowns: { type: Map, of: Date, default: () => new Map() },
+
     birthday: {
         month: { type: Number, min: 1, max: 12, default: null },
         day: { type: Number, min: 1, max: 31, default: null },

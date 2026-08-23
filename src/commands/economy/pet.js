@@ -45,7 +45,7 @@ const {
     RARE_PET_DROP_CHANCE,
 } = require('../../services/petService');
 const { generatePetSprite } = require('../../utils/cardGenerator');
-const { applyXpGain, announceLevelUp } = require('../../utils/applyXpGain');
+const { applyXpGain, announceLevelUp } = require('../../services/levelingService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { MATERIAL_RARITY } = require('../../data/materialRarity');

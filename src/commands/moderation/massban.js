@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
-const { logModeration } = require('../../utils/logger');
+const { logModeration } = require('../../services/moderationLogService');
 const { hierarchyDenial, resolveMembers } = require('../../utils/moderationHierarchy');
 
 module.exports = {

@@ -3,7 +3,7 @@ const Guild = require('../models/Guild');
 const Case = require('../models/Case');
 const Reminder = require('../models/Reminder');
 const { handleAIChat } = require('../services/aiService');
-const { logModeration } = require('../utils/logger');
+const { logModeration } = require('../services/moderationLogService');
 const { ensureQuests, onMessage, onStreakUpdate, notifyQuestComplete, notifyQuestNearComplete, notifyDailyQuestReset } = require('../services/questService');
 const { getStreakMultiplier, checkNewMilestones } = require('../utils/streakMultiplier');
 const { hasEffect, consumeEffect, getXpMultiplier, getServerXpMultiplier } = require('../services/effectsService');
@@ -11,11 +11,12 @@ const { checkRivalry } = require('../services/rivalryService');
 const { checkAndAward, announceAchievements } = require('../services/achievementService');
 const { checkAndBroadcastWealthMilestone } = require('../utils/wealthMilestone');
 const { maybeTriggerChatEvent } = require('../services/chatEventService');
-const { applyXpGain, announceLevelUp } = require('../utils/applyXpGain');
+const { applyXpGain, announceLevelUp } = require('../services/levelingService');
 const BASE_BAD_WORDS = require('../data/profanityList');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const { BoundedRateLimiter } = require('../utils/boundedRateLimiter');
+const { withUserLock } = require('../utils/userMutex');
 
 // Pre-compile base word regexes once at module load — avoids per-message regex construction
 const BASE_BAD_WORD_REGEXES = BASE_BAD_WORDS.map(word => {
@@ -102,45 +103,69 @@ module.exports = {
                 }
             }
 
-            // One read of the author's user document serves the whole handler:
-            // handleLeveling mutates it and hands it back unsaved, handleStreakAndQuests
-            // keeps mutating that same document and performs the single write.
-            let sharedUser = null;
-            if (guildSettings?.leveling.enabled) {
-                sharedUser = await handleLeveling(message, guildSettings);
-            }
+            // Everything that touches the author's User document runs inside a
+            // per-user lock (#617). One read serves the whole chain — handleLeveling
+            // mutates the document and hands it back unsaved, handleStreakAndQuests
+            // keeps mutating that same object and performs the single write — and
+            // `save()` writes each modified path as an absolute `$set`. Two messages
+            // from the same user overlapping in that window is one message's worth of
+            // XP, quest progress and streak state written back to what it was before.
+            // See utils/userMutex.js for why an in-process lock is the right size here.
+            const { blocked, sideWork } = await withUserLock(
+                `${message.guild.id}:${message.author.id}`,
+                async () => {
+                    let sharedUser = null;
+                    if (guildSettings?.leveling.enabled) {
+                        sharedUser = await handleLeveling(message, guildSettings);
+                    }
 
-            if (guildSettings?.moderation.enabled) {
-                const blocked = await handleAutoModeration(message, guildSettings);
-                // A blocked message never reaches the streak/quest write, so the XP
-                // handleLeveling applied has nothing to ride along on.
-                if (blocked) return await flushPendingUser(sharedUser);
-            }
+                    if (guildSettings?.moderation.enabled) {
+                        const stopped = await handleAutoModeration(message, guildSettings);
+                        // A blocked message never reaches the streak/quest write, so the
+                        // XP handleLeveling applied has nothing to ride along on.
+                        if (stopped) {
+                            await flushPendingUser(sharedUser);
+                            return { blocked: true, sideWork: [] };
+                        }
+                    }
 
-            // Automod was the only handler with a say over the ones below — past
-            // that gate they touch different data and issue unrelated writes, so
-            // they run concurrently instead of queueing behind whichever happens
-            // to be slowest.
-            const settled = await Promise.allSettled([
-                // Streak + quests — reuses the document handleLeveling already loaded
-                // and saves it once. It reports whether that write landed; when it
-                // bailed out early or threw before saving, the XP still has to be
-                // persisted. The flush stays inside this chain so it can never race
-                // the fire-and-forget saves that follow a landed write.
-                (async () => {
-                    const persisted = await handleStreakAndQuests(message, guildSettings, sharedUser);
-                    if (!persisted) await flushPendingUser(sharedUser);
-                })(),
-                handleSuggestions(message, guildSettings),
-                guildSettings?.bibleVerse?.autoRespond
-                    ? handleBibleVerseDetection(message, guildSettings)
-                    : null,
-                // Natural language reminders — available to everyone, any channel
-                handleNLReminder(message),
-            ]);
-            for (const outcome of settled) {
+                    // Automod was the only handler with a say over these — past that
+                    // gate they touch different data, issue unrelated writes, and share
+                    // no document with the chain below, so they start here and settle
+                    // alongside it rather than queueing behind it. They are awaited
+                    // outside the lock, so their outcomes are captured now: an early
+                    // rejection must not be an unhandled one while the lock is held.
+                    const sideWork = [
+                        handleSuggestions(message, guildSettings),
+                        guildSettings?.bibleVerse?.autoRespond
+                            ? handleBibleVerseDetection(message, guildSettings)
+                            : null,
+                        // Natural language reminders — available to everyone, any channel
+                        handleNLReminder(message),
+                    ].map(work => Promise.resolve(work).then(
+                        value  => ({ status: 'fulfilled', value }),
+                        reason => ({ status: 'rejected', reason }),
+                    ));
+
+                    // Streak + quests — reuses the document handleLeveling already
+                    // loaded and saves it once. It reports whether that write landed;
+                    // when it bailed out early or threw before saving, the XP still has
+                    // to be persisted.
+                    try {
+                        const persisted = await handleStreakAndQuests(message, guildSettings, sharedUser);
+                        if (!persisted) await flushPendingUser(sharedUser);
+                    } catch (err) {
+                        console.error('Error in messageCreate:', err);
+                    }
+
+                    return { blocked: false, sideWork };
+                },
+            );
+
+            for (const outcome of await Promise.all(sideWork)) {
                 if (outcome.status === 'rejected') console.error('Error in messageCreate:', outcome.reason);
             }
+            if (blocked) return;
 
             // Ambient chat events (airdrops, crates, trivia) — fire-and-forget
             maybeTriggerChatEvent(message, guildSettings).catch(() => {});

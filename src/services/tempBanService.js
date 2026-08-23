@@ -1,5 +1,5 @@
 const TempBan = require('../models/TempBan');
-const { logModeration } = require('../utils/logger');
+const { logModeration } = require('./moderationLogService');
 
 // Discord API error code: the user is not banned. The only fetch failure that
 // means the record has done its job.

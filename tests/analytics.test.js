@@ -51,7 +51,7 @@ jest.mock('../src/services/questService', () => ({
     notifyQuestComplete: jest.fn(),
     notifyQuestNearComplete: jest.fn(),
 }));
-jest.mock('../src/commands/utility/poll', () => ({ handlePollVote: jest.fn() }));
+jest.mock('../src/services/pollService', () => ({ handlePollVote: jest.fn() }));
 
 // Minimal stubs so api.js (and its transitive requires) can be loaded without
 // a real DB or external services.

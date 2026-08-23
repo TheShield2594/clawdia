@@ -13,6 +13,7 @@ const health = require('./health');
 const { makeCache, sweepers } = require('./utils/cacheOptions');
 const { isPrimaryShard, shardTag } = require('./utils/sharding');
 const { loadCommandModules } = require('./utils/commandLoader');
+const { startCooldownSweeper } = require('./utils/commandCooldowns');
 
 // Validate required environment variables before doing anything else.
 // Fail loudly at startup rather than silently misbehaving at runtime.
@@ -44,14 +45,21 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-// Process-local, and correctly so: this is a UX pre-check that answers "you are
-// on cooldown" without a database round trip on every interaction. It is not
-// what enforces a cooldown — every command that pays out claims its own window
-// atomically in Mongo (`lastWork`/`lastDaily`/`lastCrime`/`lastRob` in the
-// update filter, `data.lastCast` on GrindProfile for the grinds), which is what
-// a second process or a restart would still be bound by. See
+// The hot half of the cooldown store: `guildId:bucket -> Map(userId ->
+// startedAt)`, read on every interaction without a database round trip. Short
+// cooldowns live here and nowhere else; from 15 minutes up the same entry is
+// also written to the User document, so a restart no longer hands the window
+// back (#621). Entries expire by being compared against the clock when read,
+// and the sweeper below drops the ones nobody returns for — see
+// utils/commandCooldowns.js.
+//
+// None of it is what *enforces* a cooldown: every command that pays out claims
+// its own window atomically in Mongo (`lastWork`/`lastDaily`/`lastCrime`/
+// `lastRob` in the update filter, `data.lastCast` on GrindProfile for the
+// grinds), which is what a second process would still be bound by. See
 // tests/economyCooldownClaims.test.js, which holds that line.
 client.cooldowns = new Collection();
+startCooldownSweeper(client);
 
 async function loadCommands() {
     // One walk, shared with the deploy and the cap guard — see

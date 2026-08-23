@@ -11,7 +11,7 @@ const {
     isPetActive,
 } = require('../src/services/petService');
 
-const { applyXpGain } = require('../src/utils/applyXpGain');
+const { applyXpGain } = require('../src/services/levelingService');
 
 const alwaysHit  = () => 0;                        // below any drop chance
 const alwaysMiss = () => 0.999;                    // above any drop chance

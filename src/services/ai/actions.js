@@ -66,7 +66,7 @@ async function executeAction(action, message) {
                 const options = (action.options || []).slice(0, 5);
                 if (!action.question || options.length < 2) break;
 
-                const { buildPollEmbed, buildPollRows } = require('../../commands/utility/poll');
+                const { buildPollEmbed, buildPollRows } = require('../../views/pollView');
                 const Poll = require('../../models/Poll');
 
                 const counts = new Array(options.length).fill(0);
