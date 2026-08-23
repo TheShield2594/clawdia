@@ -15,6 +15,7 @@ const {
 const { ensureQuests, onCommandUse, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
+const cooldownStore = require('../utils/commandCooldowns');
 // Giveaway entry/withdrawal.
 //
 // Entrants are toggled directly in the Guild document with $addToSet/$pull
@@ -329,36 +330,31 @@ module.exports = {
             return interaction.reply({ content: policy.reason, flags: MessageFlags.Ephemeral });
         }
 
-        const { cooldowns } = client;
+        // Short cooldowns are process-local; anything from 15 minutes up is read
+        // from and written to the User document, so a deploy no longer hands
+        // every long window back (#621). See utils/commandCooldowns.js.
         const cooldownBucket = getCooldownKey(command, interaction);
-
-        if (!cooldowns.has(cooldownBucket)) {
-            cooldowns.set(cooldownBucket, new Map());
-        }
-
-        const now = Date.now();
-        const timestamps = cooldowns.get(cooldownBucket);
         const cooldownAmount = getCooldownSeconds(command, interaction, guildSettings) * 1000;
+        const cooldownScope = {
+            bucket: cooldownBucket,
+            userId: interaction.user.id,
+            guildId: interaction.guild.id,
+            cooldownMs: cooldownAmount,
+        };
 
-        if (timestamps.has(interaction.user.id)) {
-            const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
+        const expirationTime = await cooldownStore.expiresAt(client, cooldownScope);
+        if (expirationTime) {
+            const expiredTimestamp = Math.round(expirationTime / 1000);
+            const longCooldown = (expirationTime - Date.now()) > 12 * 60 * 60 * 1000;
+            const exactTime = longCooldown ? ` (<t:${expiredTimestamp}:F>)` : '';
 
-            if (now < expirationTime) {
-                const expiredTimestamp = Math.round(expirationTime / 1000);
-                const longCooldown = (expirationTime - now) > 12 * 60 * 60 * 1000;
-                const exactTime = longCooldown ? ` (<t:${expiredTimestamp}:F>)` : '';
-
-                return interaction.reply({
-                    content: `Please wait, you are on cooldown. You can use \`/${command.data.name}\` again <t:${expiredTimestamp}:R>${exactTime}.`,
-                    flags: MessageFlags.Ephemeral
-                });
-            }
+            return interaction.reply({
+                content: `Please wait, you are on cooldown. You can use \`/${command.data.name}\` again <t:${expiredTimestamp}:R>${exactTime}.`,
+                flags: MessageFlags.Ephemeral
+            });
         }
 
-        if (cooldownAmount > 0) {
-            timestamps.set(interaction.user.id, now);
-            setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
-        }
+        await cooldownStore.claim(client, cooldownScope);
 
         try {
             await command.execute(interaction, client);
