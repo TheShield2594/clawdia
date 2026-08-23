@@ -101,8 +101,13 @@ const rule = {
                 if (!resolved.startsWith(absRoot + path.sep)) return;
 
                 const targetRel = toPosix(path.relative(absRoot, resolved));
-                const targetLayer = layerOf(targetRel);
-                if (targetLayer === null || !rankOf.has(targetLayer)) return;
+                // `require('../services')` resolves to the directory itself, so
+                // there is no slash to split on — the path *is* the layer name.
+                // Reading that as "not a layer" let a bare directory import
+                // (which node resolves through the directory's index.js) walk
+                // straight past the rule.
+                const targetLayer = layerOf(targetRel) ?? targetRel;
+                if (!rankOf.has(targetLayer)) return;
 
                 if (rankOf.get(targetLayer) <= sourceRank) return;
                 if (allowed.has(`${strip(relative)}->${strip(targetRel)}`)) return;

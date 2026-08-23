@@ -28,19 +28,31 @@ function parseDuration(str) {
 // Unknown Message, Unknown Channel, Missing Access.
 const MESSAGE_UNREACHABLE = new Set([10008, 10003, 50001]);
 
+// setTimeout stores its delay in a 32-bit signed integer. Anything larger does
+// not fail — Node warns and substitutes 1, so the callback runs on the next
+// tick. `/poll ... duration 30d` is 2.59e9 ms, so it closed the poll roughly
+// immediately instead of in a month. Longer waits are served in hops of this
+// size until the real deadline is in reach.
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
 function scheduleExpiry(msg, question, options, endsAt, createdBy) {
     // Overdue polls close now rather than being dropped. A poll only reaches
     // this already past its end when it is being picked up at startup — the bot
     // was down when it expired, or a transient edit failure left it open — and
     // returning early there is what made "still open" permanent.
     const delay = Math.max(0, endsAt.getTime() - Date.now());
+
+    if (delay > MAX_TIMEOUT_MS) {
+        return setTimeout(() => scheduleExpiry(msg, question, options, endsAt, createdBy), MAX_TIMEOUT_MS);
+    }
+
     // Through runJob like every other scheduled callback (#611): a poll that
     // fails to close is a poll that stays open forever, and a swallowed
     // console.error was the only trace of it. `scope` is the message id
     // because this fires once for one poll and no later tick retries it — two
     // polls expiring in the same second must both run, not one be dropped as
     // an overlap of the other.
-    setTimeout(() => runJob('poll', 'closeExpiredPoll', async () => {
+    return setTimeout(() => runJob('poll', 'closeExpiredPoll', async () => {
         const poll = await Poll.findOne({ messageId: msg.id });
         if (!poll || poll.closed) return;
 

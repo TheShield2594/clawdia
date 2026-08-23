@@ -242,11 +242,38 @@ async function sendSkillCheck(member, heistId, role) {
     }
 }
 
+/**
+ * Resolves a heist exactly once, and never leaves the guild wedged if it cannot.
+ *
+ * `resolving` is set before any await, so a second timeout handler firing mid
+ * resolution turns back. That guard used to be the end of the story: anything
+ * that threw past it — the Guild read, a Discord send — left `resolving` true
+ * and the entry in `activeHeists` forever, so `/heist start` answered "a heist
+ * is already in progress" in that guild until the process restarted. The
+ * rejection also travelled out through the `setTimeout` callbacks that call
+ * this, where nothing was waiting for it: an unhandled rejection, which the
+ * process guard in src/index.js counts toward its exit threshold.
+ *
+ * A failure here terminates the heist rather than retrying it. The state is in
+ * memory and by then partly written — some players may already have been paid —
+ * so re-running would pay them twice, which is the worse of the two failures.
+ * Clearing frees the guild to start a new one.
+ */
 async function resolveHeist(client, heist) {
     // Atomic guard: prevent concurrent resolution from multiple timeout handlers
     // or simultaneous allDone checks.
     if (heist.resolving) return;
     heist.resolving = true;
+
+    try {
+        await runResolution(client, heist);
+    } catch (err) {
+        console.error(`[heist] resolution failed for guild ${heist.guildId}:`, err);
+        clearHeist(heist.guildId);
+    }
+}
+
+async function runResolution(client, heist) {
     const guildId  = heist.guildId;
     const { outcome, passedCount, totalCount, ratio } = calculateOutcome(heist);
     const { share, total } = computePayouts(heist, passedCount, totalCount, ratio);
@@ -264,13 +291,23 @@ async function resolveHeist(client, heist) {
         resultLines.push(`${roleMeta.emoji} **${player.username}** (${roleMeta.label}) — ${icon} ${passed ? 'Passed' : 'Failed'}`);
 
         if (outcome === 'full_success' || (outcome === 'partial_success' && passed)) {
-            await User.findOneAndUpdate(
-                { userId, guildId },
-                { $inc: { balance: share } }
-            ).catch(() => {});
-            if (share > 0) {
-                const u = await User.findOne({ userId, guildId }, 'balance').lean();
-                logTransaction({ userId, guildId, type: 'heist_payout', amount: share, balance: u?.balance ?? share, note: `Heist: ${TARGETS[heist.target]?.label}` });
+            // Logged rather than swallowed. A payout that does not land is a
+            // player short of coins they were shown winning, and a silent catch
+            // left no trace of it anywhere. It still does not fail the
+            // resolution: the rest of the crew has to be paid either way, and
+            // making this durable needs a per-player ledger the heist has no
+            // way to keep today.
+            try {
+                await User.findOneAndUpdate(
+                    { userId, guildId },
+                    { $inc: { balance: share } }
+                );
+                if (share > 0) {
+                    const u = await User.findOne({ userId, guildId }, 'balance').lean();
+                    logTransaction({ userId, guildId, type: 'heist_payout', amount: share, balance: u?.balance ?? share, note: `Heist: ${TARGETS[heist.target]?.label}` });
+                }
+            } catch (err) {
+                console.error(`[heist] payout of ${share} to ${userId} in ${guildId} failed:`, err.message);
             }
         } else if (outcome === 'failure' || (outcome === 'partial_success' && !passed)) {
             // Jail the caught players: lock economy commands and apply a fine.
@@ -282,7 +319,7 @@ async function resolveHeist(client, heist) {
             const rawFine   = Math.floor(Math.random() * 200) + 50;
             await debitUpTo(
                 User, { userId, guildId }, rawFine, { heistJailedUntil: jailUntil },
-            ).catch(() => {});
+            ).catch(err => console.error(`[heist] fine for ${userId} in ${guildId} failed:`, err.message));
         }
     }
 
@@ -477,14 +514,14 @@ function startLobbyCountdown(client, heist, msg, { minPlayers = 2, lobbyDuration
                         components: []
                     }).catch(() => {});
                     const allDone = [...heist.players.values()].every(p => p.skillPassed !== null);
-                    if (allDone) await resolveHeist(client, heist);
+                    if (allDone) await resolveHeist(client, heist).catch(err => console.error('[heist] resolve error:', err));
                 }, SKILL_TIMEOUT_MS);
             }
         }
 
         // If everyone auto-failed (all DMs blocked), resolve immediately
         const allDone = [...heist.players.values()].every(p => p.skillPassed !== null);
-        if (allDone) await resolveHeist(client, heist);
+        if (allDone) await resolveHeist(client, heist).catch(err => console.error('[heist] resolve error:', err));
 
     }, lobbyDurationSeconds * 1000);
 }

@@ -148,13 +148,15 @@ describe('two messages from the same user', () => {
         const order = [];
 
         User.findOne.mockImplementation(async () => {
+            // Logged here, not after the await: a real query reads the document
+            // when it reaches the server, and the round trip is the wait that
+            // follows. Logging after it would show 'read' happening after a
+            // concurrent flow's save and hide the interleaving entirely.
+            order.push('read');
+            await tick(5);
             const doc = makeUserDoc();
             const save = doc.save;
             doc.save = jest.fn(async () => { order.push('save'); return save(); });
-            // A real findOne is a round trip; without it both flows would read in
-            // the same tick whether or not anything serialised them.
-            await tick(5);
-            order.push('read');
             return doc;
         });
 
@@ -164,19 +166,58 @@ describe('two messages from the same user', () => {
         expect(order).toEqual(['read', 'save', 'read', 'save']);
     });
 
-    test('each message still persists its own XP', async () => {
-        const saved = [];
+    // Handing both flows the same in-memory object would not model the bug: JS
+    // has no preemption, so `x = x + 1` still lands twice on one object. The
+    // lost update is a property of the round trip — each read is a snapshot of
+    // what was stored, and each save writes that snapshot's descendant back. So
+    // the mock is a tiny store, and reading from it costs a tick.
+    function backedByStore(stored = { dailyMessages: 0, xp: 0, messages: 0, lastXpGain: null, lastDailyReset: new Date() }) {
+        // lastDailyReset is in here because the counter resets when the stored
+        // date is not today — a store that forgets it hands every read a fresh
+        // day, and the counter can never reach 2 however well it is serialised.
+        const PERSISTED = ['dailyMessages', 'xp', 'messages', 'lastXpGain', 'lastDailyReset', 'level'];
         User.findOne.mockImplementation(async () => {
-            const doc = makeUserDoc();
+            // The snapshot is taken when the query is issued, before the round
+            // trip — which is the whole of the lost update. Snapshotting after
+            // the await would let a concurrent flow's write land first and be
+            // picked up, and no amount of racing would ever lose anything.
+            const snapshot = { ...stored };
+            await tick(5);
+            const doc = makeUserDoc(snapshot);
             const save = doc.save;
-            doc.save = jest.fn(async () => { saved.push(doc.xp); return save(); });
+            doc.save = jest.fn(async () => {
+                for (const field of PERSISTED) stored[field] = doc[field];
+                return save();
+            });
             return doc;
         });
+        return stored;
+    }
+
+    test('the second message counts on top of the first, not instead of it', async () => {
+        const stored = backedByStore();
 
         await Promise.all([run(makeMessage('one')), run(makeMessage('two'))]);
 
-        expect(saved).toHaveLength(2);
-        for (const xp of saved) expect(xp).toBeGreaterThan(0);
+        // Both flows read before either writes — which is what happens without
+        // the lock — and each stores 1. The counter is the plainest reading of
+        // the lost update: two messages, one counted.
+        expect(stored.dailyMessages).toBe(2);
+    });
+
+    test('the first message\'s XP is still there after the second writes', async () => {
+        const stored = backedByStore();
+
+        await run(makeMessage('one'));
+        const afterFirst = stored.xp;
+        expect(afterFirst).toBeGreaterThan(0);
+
+        await run(makeMessage('two'));
+
+        // The second message is inside the 60s XP cooldown the first started,
+        // so it adds none — but it must not write back the pre-first-message
+        // value either.
+        expect(stored.xp).toBe(afterFirst);
     });
 
     test('messages from different users are not queued behind each other', async () => {

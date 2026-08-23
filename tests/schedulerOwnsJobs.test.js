@@ -47,6 +47,7 @@ const NON_JOB_TIMERS = new Set([
     'dashboard/lib/middleware.js',      // in-memory HTTP rate-limit sweep
     'utils/imageRateLimit.js',          // in-memory rate-limit bucket sweep
     'utils/commandCooldowns.js',        // in-memory cooldown map sweep (#621)
+    'services/pollService.js',          // one poll's expiry, re-armed in 24-day hops
     'games/casino/crash.js',            // per-lobby round tick
     'commands/fun/meme.js',             // in-memory meme cache sweep
     'services/heistService.js',         // per-heist lobby countdown

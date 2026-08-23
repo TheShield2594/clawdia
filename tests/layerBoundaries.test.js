@@ -83,6 +83,14 @@ describe('the layer rule', () => {
                     errors: [{ messageId: 'upward' }],
                 },
                 {
+                    // A bare directory require, which node resolves through the
+                    // directory's index.js. There is no slash to split on, so
+                    // the path is the layer name.
+                    filename: at('utils/logger.js'),
+                    ...withOptions("require('../services');"),
+                    errors: [{ messageId: 'upward' }],
+                },
+                {
                     filename: at('views/pollView.js'),
                     ...withOptions("require('../services/pollService');"),
                     errors: [{ messageId: 'upward' }],

@@ -396,7 +396,9 @@ function checkAuth(req, res, next) {
 router.get('/custom', checkAuth, async (req, res) => {
     res.render('custom', {
         user: req.user,
-        client: req.client
+        // The gateway facade, which createApp attaches to every request.
+        // There is no req.client — routes never hold a live Discord client.
+        bot: req.bot
     });
 });
 

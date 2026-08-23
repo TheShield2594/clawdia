@@ -181,6 +181,72 @@ describe('scoping', () => {
     });
 });
 
+describe('claiming is one operation, not a check and then a claim', () => {
+    test('two concurrent uses of a short cooldown: one runs, one is refused', async () => {
+        const client = fakeClient();
+
+        const [first, second] = await Promise.all([
+            store.claimIfAvailable(client, scope({ cooldownMs: SHORT })),
+            store.claimIfAvailable(client, scope({ cooldownMs: SHORT })),
+        ]);
+
+        // 0 means "the window is yours"; anything else is the expiry of the
+        // window someone else holds. Exactly one caller may get 0.
+        expect([first, second].filter(v => v === 0)).toHaveLength(1);
+    });
+
+    test('two concurrent uses of a long cooldown: the Mongo read cannot be raced', async () => {
+        const client = fakeClient();
+        // A slow read is the whole of the window the old check-then-claim left
+        // open: both callers were through the check before either had claimed.
+        User.findOne.mockReturnValue({
+            lean: () => new Promise(resolve => setTimeout(() => resolve(null), 20)),
+        });
+
+        const results = await Promise.all([
+            store.claimIfAvailable(client, scope({ cooldownMs: LONG })),
+            store.claimIfAvailable(client, scope({ cooldownMs: LONG })),
+        ]);
+
+        expect(results.filter(v => v === 0)).toHaveLength(1);
+        expect(User.updateOne).toHaveBeenCalledTimes(1);
+    });
+
+    test('a free window is taken, and reports itself free', async () => {
+        const client = fakeClient();
+
+        expect(await store.claimIfAvailable(client, scope({ cooldownMs: SHORT }))).toBe(0);
+        expect(await store.claimIfAvailable(client, scope({ cooldownMs: SHORT }))).toBeGreaterThan(Date.now());
+    });
+
+    test('a held window is reported without being extended', async () => {
+        const client = fakeClient();
+        await store.claimIfAvailable(client, scope({ cooldownMs: SHORT }));
+        const first = await store.claimIfAvailable(client, scope({ cooldownMs: SHORT }));
+        const second = await store.claimIfAvailable(client, scope({ cooldownMs: SHORT }));
+
+        expect(second).toBe(first);
+    });
+
+    test('a zero cooldown is always free and records nothing', async () => {
+        const client = fakeClient();
+
+        expect(await store.claimIfAvailable(client, scope({ cooldownMs: 0 }))).toBe(0);
+        expect(await store.claimIfAvailable(client, scope({ cooldownMs: 0 }))).toBe(0);
+        expect(User.updateOne).not.toHaveBeenCalled();
+    });
+
+    test('a persisted window from a previous process refuses the first use', async () => {
+        const startedAt = new Date(Date.now() - 60_000);
+        User.findOne.mockReturnValue(leanDoc({ commandCooldowns: { daily: startedAt } }));
+
+        const held = await store.claimIfAvailable(fakeClient(), scope({ cooldownMs: LONG }));
+
+        expect(held).toBe(startedAt.getTime() + LONG);
+        expect(User.updateOne).not.toHaveBeenCalled();
+    });
+});
+
 describe('the User document carries the field', () => {
     test('commandCooldowns is a Map of Dates on the schema', () => {
         jest.isolateModules(() => {

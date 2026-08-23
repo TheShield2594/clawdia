@@ -37,6 +37,7 @@
  */
 
 const User = require('../models/User');
+const { withUserLock } = require('./userMutex');
 
 // Above this, a cooldown outlives a deploy often enough that losing it is a
 // real effect a user can notice and exploit; below it, it does not.
@@ -66,8 +67,32 @@ function bucketFor(cooldowns, bucket) {
     return timestamps;
 }
 
+// A caller holding the lock while Mongo does not answer must not hold up an
+// interaction past the point Discord will still accept a reply.
+const CLAIM_LOCK_TIMEOUT_MS = 3_000;
+
+/**
+ * The live expiry held in memory for this user, or 0. Reading a stale entry is
+ * what deletes it, so no timer has to exist to do that.
+ *
+ * Synchronous on purpose — it is half of a check-and-claim that must not be
+ * interruptible, so it may not contain an await.
+ */
+function liveExpiry(timestamps, userId, cooldownMs, now = Date.now()) {
+    const cached = timestamps.get(userId);
+    if (cached === undefined) return 0;
+
+    const expiry = cached + cooldownMs;
+    if (expiry > now) return expiry;
+    timestamps.delete(userId);
+    return 0;
+}
+
 /**
  * The moment `bucket` stops being on cooldown for this user, or 0 if it is not.
+ *
+ * A read, with no claim in it. `claimIfAvailable` is what the dispatcher calls;
+ * this is for anything that wants to know without taking the window.
  *
  * `cooldownMs` is passed in rather than stored because a guild's
  * `cooldownOverrides` can change the length between two uses — the stored value
@@ -76,31 +101,72 @@ function bucketFor(cooldowns, bucket) {
 async function expiresAt(client, { bucket, userId, guildId, cooldownMs }) {
     if (cooldownMs <= 0) return 0;
 
-    const now = Date.now();
     const timestamps = bucketFor(client.cooldowns, keyFor(bucket, guildId));
-
-    const cached = timestamps.get(userId);
-    if (cached !== undefined) {
-        const expiry = cached + cooldownMs;
-        // Lazy expiry: reading a stale entry is what deletes it, so no timer has
-        // to exist to do it.
-        if (expiry > now) return expiry;
-        timestamps.delete(userId);
-        return 0;
-    }
+    if (timestamps.has(userId)) return liveExpiry(timestamps, userId, cooldownMs);
 
     if (cooldownMs < PERSIST_THRESHOLD_MS || !guildId) return 0;
 
     // A memory miss on a long cooldown is a restart. This is the only query the
-    // path makes, and only until the entry is written back below.
+    // path makes, and only until the entry is written back.
     const startedAt = await readPersisted(bucket, userId, guildId);
     if (!startedAt) return 0;
 
     const expiry = startedAt + cooldownMs;
-    if (expiry <= now) return 0;
+    if (expiry <= Date.now()) return 0;
 
     timestamps.set(userId, startedAt);
     return expiry;
+}
+
+/**
+ * Takes the cooldown window if it is free. Returns 0 when the window was taken
+ * — the caller may run the command — or the existing expiry when it was not.
+ *
+ * This is one operation rather than an `expiresAt` followed by a `claim`
+ * because the two used to be separate awaits, and the yield between them was a
+ * window in which a user firing the same command twice passed the check twice
+ * and ran it twice. The in-memory path takes the window in the same turn it
+ * reads it, so nothing can interleave; the persisted path has a Mongo read
+ * between the two and holds a per-key lock across it.
+ *
+ * The lock is in-process, which is the right size for the same reason the
+ * message pipeline's is (see utils/userMutex.js): a guild's interactions all
+ * arrive on one shard. It is also not the enforcement boundary — every command
+ * that pays out claims its own window atomically inside its update filter — so
+ * the cost of the lock timing out is one duplicated pre-check, not a payout.
+ */
+async function claimIfAvailable(client, scope) {
+    const { bucket, userId, guildId, cooldownMs } = scope;
+    if (cooldownMs <= 0) return 0;
+
+    const timestamps = bucketFor(client.cooldowns, keyFor(bucket, guildId));
+
+    const held = liveExpiry(timestamps, userId, cooldownMs);
+    if (held) return held;
+
+    // Short cooldowns never leave memory, so the claim lands in the same turn
+    // as the check above and no lock is needed to keep them together.
+    if (cooldownMs < PERSIST_THRESHOLD_MS || !guildId) {
+        timestamps.set(userId, Date.now());
+        return 0;
+    }
+
+    return withUserLock(`cooldown:${keyFor(bucket, guildId)}:${userId}`, async () => {
+        // Re-checked inside the lock: whoever held it before us may have taken
+        // the window while we were waiting.
+        const taken = liveExpiry(timestamps, userId, cooldownMs);
+        if (taken) return taken;
+
+        const startedAt = await readPersisted(bucket, userId, guildId);
+        const expiry = startedAt ? startedAt + cooldownMs : 0;
+        if (expiry > Date.now()) {
+            timestamps.set(userId, startedAt);
+            return expiry;
+        }
+
+        await claim(client, scope);
+        return 0;
+    }, { timeoutMs: CLAIM_LOCK_TIMEOUT_MS });
 }
 
 /**
@@ -187,6 +253,7 @@ function startCooldownSweeper(client, intervalMs = SWEEP_INTERVAL_MS) {
 
 module.exports = {
     expiresAt,
+    claimIfAvailable,
     claim,
     sweep,
     startCooldownSweeper,

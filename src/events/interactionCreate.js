@@ -342,7 +342,10 @@ module.exports = {
             cooldownMs: cooldownAmount,
         };
 
-        const expirationTime = await cooldownStore.expiresAt(client, cooldownScope);
+        // One operation, not a check followed by a claim: the yield between two
+        // awaits was a window in which a user firing the same command twice
+        // passed the check twice.
+        const expirationTime = await cooldownStore.claimIfAvailable(client, cooldownScope);
         if (expirationTime) {
             const expiredTimestamp = Math.round(expirationTime / 1000);
             const longCooldown = (expirationTime - Date.now()) > 12 * 60 * 60 * 1000;
@@ -353,8 +356,6 @@ module.exports = {
                 flags: MessageFlags.Ephemeral
             });
         }
-
-        await cooldownStore.claim(client, cooldownScope);
 
         try {
             await command.execute(interaction, client);
