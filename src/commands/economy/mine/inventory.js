@@ -7,7 +7,7 @@ const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureMineData, durabilityBar, pickaxeStatusEmoji } = require('../../../services/mineService');
-const { packFields } = require('../../../utils/embedFields');
+const { packFieldsCapped } = require('../../../utils/embedFields');
 const { BLAST_PACKS, CONSUMABLES, MATERIAL_NAMES } = require('../../../data/mineData');
 
 // ─── INV ──────────────────────────────────────────────────────────────────────
@@ -48,14 +48,12 @@ async function handleInv(interaction, sub) {
             // but only so many: an embed also has a 6,000-character budget across all
             // of its fields, which unbounded spilling would eventually blow instead.
             const PICKAXE_FIELDS = 3;
-            const fields = packFields('🪓 Pickaxes', lines);
-            embed.addFields(...fields.slice(0, PICKAXE_FIELDS));
-            if (fields.length > PICKAXE_FIELDS) {
-                const shown = fields.slice(0, PICKAXE_FIELDS)
-                    .reduce((n, f) => n + f.value.split('\n').length / 2, 0);
+            const { fields, omitted } = packFieldsCapped('🪓 Pickaxes', lines, { maxFields: PICKAXE_FIELDS });
+            embed.addFields(...fields);
+            if (omitted > 0) {
                 embed.addFields({
                     name: '…and more',
-                    value: `${Math.max(0, m.pickaxes.length - Math.round(shown))} further pickaxe(s) not shown. \`/mine inv discard\` clears broken and condemned ones.`,
+                    value: `${omitted} further pickaxe(s) not shown. \`/mine inv discard\` clears broken and condemned ones.`,
                     inline: false
                 });
             }

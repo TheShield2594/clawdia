@@ -12,6 +12,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { awardSeasonXp } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { grantInventoryItem, inventoryAddStages } = require('../../utils/inventoryGrant');
+const { packFieldsCapped } = require('../../utils/embedFields');
 
 // Reset a user's season sub-document to the fresh shape when their stored
 // seasonId is stale (a new season started). Prevents carrying old xp / claimed
@@ -32,6 +33,10 @@ const { TIER_COUNT, XP_PER_TIER, TIER_TABLE, loreForTier } = require('../../data
 
 const MAX_TIERS = TIER_COUNT;
 const DEFAULT_PREMIUM_COST = 100_000;
+// Fields the seasonal event's milestone list may spill into before it is
+// cut short — the embed's other budget is 6,000 characters across all of
+// them, and this embed carries three more.
+const MILESTONE_FIELDS = 3;
 
 function tierDef(tier)     { return TIER_TABLE[tier - 1] ?? null; }
 function rewardFor(tier, premium) {
@@ -839,12 +844,17 @@ async function executeSeasonEvent(interaction) {
         ].join('\n');
     }
 
-    // Milestone list with ✅ / ▶ / ○ indicators
-    const milestoneList = milestones.map(m => {
+    // Milestone list with ✅ / ▶ / ○ indicators. Nothing caps how many
+    // milestones an event carries or how long an admin makes a label, so this
+    // is packed into as many fields as it needs rather than joined into one
+    // that Discord rejects at 1,024 characters.
+    const milestoneLines = milestones.map(m => {
         if (balance >= m.threshold) return `✅ ${m.threshold.toLocaleString()} ${currency.emoji} → ${m.label}`;
         if (m === nextMilestone)    return `▶ ${m.threshold.toLocaleString()} ${currency.emoji} → **${m.label}**  ← next`;
         return `○ ${m.threshold.toLocaleString()} ${currency.emoji} → ${m.label}`;
-    }).join('\n') || '*No milestones defined*';
+    });
+    const { fields: milestoneFields, omitted: milestonesOmitted } =
+        packFieldsCapped('🏆 Milestone Rewards', milestoneLines, { maxFields: MILESTONE_FIELDS });
 
     // Active multiplier info
     const bonusLines = [];
@@ -858,8 +868,19 @@ async function executeSeasonEvent(interaction) {
         .addFields(
             { name: `${currency.emoji} Your ${currency.name}`, value: `**${balance.toLocaleString()}**`, inline: true },
             { name: 'Season Progress', value: progressValue },
-            { name: '🏆 Milestone Rewards', value: milestoneList },
         );
+
+    if (milestoneFields.length) {
+        embed.addFields(...milestoneFields);
+        if (milestonesOmitted > 0) {
+            embed.addFields({
+                name: '🏆 Milestone Rewards — and more',
+                value: `*${milestonesOmitted} further milestone${milestonesOmitted === 1 ? '' : 's'} not shown.*`,
+            });
+        }
+    } else {
+        embed.addFields({ name: '🏆 Milestone Rewards', value: '*No milestones defined*' });
+    }
 
     if (bonusLines.length > 0) {
         embed.addFields({ name: '✨ Active Bonuses', value: bonusLines.join('\n') });

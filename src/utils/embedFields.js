@@ -23,7 +23,29 @@ const EMBED_LIMITS = {
  * @param {object} [opts]  { limit, separator, inline, maxFields }
  * @returns {Array<{name: string, value: string, inline: boolean}>}
  */
-function packFields(name, lines, {
+function packFields(name, lines, opts = {}) {
+    return packFieldsCapped(name, lines, opts).fields;
+}
+
+/**
+ * packFields, told how many fields it may spend and reporting how many lines
+ * did not fit in them.
+ *
+ * An embed has two budgets, not one: 1,024 characters per field value and
+ * 6,000 across the whole embed. Spilling into continuation fields respects the
+ * first and eventually blows the second, so a section that grows with player
+ * progress caps its spill and says what was left out — a count the caller can
+ * print, rather than entries that quietly stop appearing.
+ *
+ * The count is of input lines, kept as the packing runs. It cannot be
+ * recovered afterwards by splitting the packed values on the separator: a
+ * single line may contain the separator itself (an item and its lore line are
+ * one entry joined by a newline), which is how you end up dividing a split
+ * length by two and hoping.
+ *
+ * @returns {{ fields: Array<{name: string, value: string, inline: boolean}>, omitted: number }}
+ */
+function packFieldsCapped(name, lines, {
     limit = EMBED_LIMITS.FIELD_VALUE,
     separator = '\n',
     inline = false,
@@ -31,32 +53,42 @@ function packFields(name, lines, {
 } = {}) {
     const fields = [];
     let current = '';
+    let held  = 0;   // input lines sitting in `current`
+    let shown = 0;   // input lines that reached a field
 
+    /** Push `current` as a field. False when the cap leaves no room for it. */
     const flush = () => {
-        if (!current) return;
+        if (!current) return true;
+        if (fields.length >= maxFields) return false;
         fields.push({
             name: fields.length === 0 ? name : `${name} (cont.)`,
             value: current,
             inline,
         });
+        shown += held;
         current = '';
+        held = 0;
+        return true;
     };
 
     for (const line of lines) {
         const piece = truncate(line, limit);
         if (!current) {
             current = piece;
+            held = 1;
         } else if (current.length + separator.length + piece.length <= limit) {
             current += separator + piece;
+            held += 1;
+        } else if (!flush()) {
+            return { fields, omitted: lines.length - shown };
         } else {
-            flush();
-            if (fields.length >= maxFields) return fields;
             current = piece;
+            held = 1;
         }
     }
     flush();
 
-    return fields.length > maxFields ? fields.slice(0, maxFields) : fields;
+    return { fields, omitted: lines.length - shown };
 }
 
 /**
@@ -129,4 +161,4 @@ function truncate(text, limit) {
     return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-module.exports = { EMBED_LIMITS, packFields, fitDescription, chunkByLength, truncate };
+module.exports = { EMBED_LIMITS, packFields, packFieldsCapped, fitDescription, chunkByLength, truncate };

@@ -10,6 +10,7 @@ const {
 const { addEffect, resolveEffectType } = require('../../services/effectsService');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { paginate, chunkArray } = require('../../utils/paginator');
+const { fitDescription, truncate } = require('../../utils/embedFields');
 
 // Items that grant effects when purchased (grant via effectsService)
 const EFFECT_ITEMS = new Set(['coin_booster_2x', 'xp_booster_2x', 'lucky_charm', 'lucky_streak', 'salary_raise']);
@@ -92,18 +93,26 @@ async function handleBrowse(interaction, ev, def, currency) {
     const chunks = chunkArray(shop, BROWSE_PAGE_SIZE);
     const totalItems = shop.length;
 
+    // An event shop item's name and description are whatever an admin typed
+    // into the dashboard, with no length cap on either — five of them joined
+    // ran past the 4,096 a description allows, and discord.js throws rather
+    // than truncating, so one long blurb took the whole page down. Cut each
+    // entry to a readable length instead of losing items off the end: they are
+    // bought by name, and a name the page never printed cannot be typed.
+    const ITEM_NAME = 100;
+    const ITEM_BLURB = 400;
     const pages = chunks.map((chunk, pageIndex) => {
         const offset = pageIndex * BROWSE_PAGE_SIZE;
         const lines = chunk.map((item, i) => {
             const stockStr = item.stock === -1 ? '∞' : item.stock.toLocaleString();
-            return `**${offset + i + 1}.** ${item.emoji || '•'} **${item.name}** — \`${item.cost} ${currency.emoji}\`\n` +
-                   `   ${item.description || ''}  •  Stock: ${stockStr}`;
+            return `**${offset + i + 1}.** ${item.emoji || '•'} **${truncate(item.name, ITEM_NAME)}** — \`${item.cost} ${currency.emoji}\`\n` +
+                   `   ${truncate(item.description || '', ITEM_BLURB)}  •  Stock: ${stockStr}`;
         });
 
         return new EmbedBuilder()
             .setColor(ev.color ?? '#5865F2')
             .setTitle(`${ev.emoji ?? '🛒'} ${ev.name} — Event Shop`)
-            .setDescription(lines.join('\n\n'))
+            .setDescription(fitDescription(lines, { separator: '\n\n' }).text)
             .addFields({
                 name: `${currency.emoji} Your Balance`,
                 value: 'Use `/eventshop balance` to check your balance',
