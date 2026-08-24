@@ -484,3 +484,7 @@ is not a healthcheck failure: restarting the process does not fix a feed that is
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
