@@ -12,6 +12,7 @@
     "docs:commands": "node scripts/docs-commands.js",
     "docs:api": "node scripts/docs-api.js",
     "docs:panels": "node scripts/docs-panels.js",
+    "favicon": "node scripts/make-favicon.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write",

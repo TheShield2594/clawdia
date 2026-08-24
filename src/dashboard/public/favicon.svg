@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Clawdia">
+    <!-- The same paw the three views draw inline in their nav, sized for a
+         16px tab: the toes are pulled in and enlarged, because at that size the
+         wordmark is gone and the paw is the whole mark. Cream plate behind it so
+         the ink shape reads on a dark browser chrome as well as a light one. -->
+    <rect width="32" height="32" rx="7" fill="#faf6ef"/>
+    <ellipse cx="16" cy="22.5" rx="8.5" ry="6" fill="#14110d"/>
+    <ellipse cx="6.6" cy="13" rx="2.9" ry="4.1" fill="#14110d" transform="rotate(-18 6.6 13)"/>
+    <ellipse cx="12.4" cy="9.2" rx="2.9" ry="4.3" fill="#14110d" transform="rotate(-6 12.4 9.2)"/>
+    <ellipse cx="19.6" cy="9.2" rx="2.9" ry="4.3" fill="#14110d" transform="rotate(6 19.6 9.2)"/>
+    <ellipse cx="25.4" cy="13" rx="2.9" ry="4.1" fill="#14110d" transform="rotate(18 25.4 13)"/>
+    <path d="M13.6 20.8c0.7-1.9 4.1-1.9 4.8 0" stroke="#d97742" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+</svg>
