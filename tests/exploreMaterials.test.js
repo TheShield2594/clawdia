@@ -109,9 +109,9 @@ describe('rollTreasureMaterial', () => {
 
     test('only ever returns a material of a tier its table names', () => {
         for (const [tier, table] of Object.entries(TREASURE_MATERIALS)) {
-            // Sweep the pool-selection roll across its whole range.
+            // Sweep the selection rolls across their whole range.
             for (let i = 0; i < 20; i++) {
-                const id = rollTreasureMaterial(tier, () => i / 20 * (i === 0 ? 0 : 1) || 0);
+                const id = rollTreasureMaterial(tier, () => i / 20);
                 if (!id) continue;
                 expect([tier, id, table.tiers.includes(MATERIAL_RARITY[id].tier)])
                     .toEqual([tier, id, true]);

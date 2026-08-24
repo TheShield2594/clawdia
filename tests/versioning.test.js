@@ -35,11 +35,19 @@ function newestChangelogEntry() {
     return next === -1 ? rest : rest.slice(0, next + 1);
 }
 
-/** `014_scope_item_images_per_guild` — the last migration a deploy will run. */
+/**
+ * `014_scope_item_images_per_guild` — the last migration a deploy will run.
+ *
+ * Ordered on the parsed number, not the filename. The series is zero-padded to
+ * three digits today, which makes the two orderings agree, but the runner does
+ * not require the padding: one `15_thing.js` written without it sorts before
+ * `009_`, and this would then name a migration that is not the highest while
+ * looking like it works.
+ */
 function highestMigration() {
     return fs.readdirSync(path.join(ROOT, 'src', 'migrations'))
         .filter(f => /^\d+_.+\.js$/.test(f))
-        .sort()
+        .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
         .pop()
         .replace(/\.js$/, '');
 }
@@ -81,9 +89,17 @@ describe('the dashboard templates', () => {
 
     // The footers and the hero eyebrow each carried their own copy. Every one
     // of them was wrong, and had been for the entire life of the repo.
+    //
+    // Two checks, because the copies were `v4.2.0` and a bare `4.2.0` is just
+    // as wrong. A blanket `\d+\.\d+\.\d+` is not the way to catch the second:
+    // guild-settings.ejs cites "WCAG 1.4.1" in a comment, and the stylesheet
+    // attributes are full of decimals. Matching the version actually shipped is
+    // both narrower and stricter — it fails on the one string that matters.
     test.each(files)('%s hardcodes no version of its own', file => {
         const body = read(path.join('src', 'dashboard', 'views', file));
+
         expect(body).not.toMatch(/v\d+\.\d+(\.\d+)?\b/);
+        expect(body).not.toContain(pkg.version);
     });
 
     test('at least one of them renders the real version', () => {

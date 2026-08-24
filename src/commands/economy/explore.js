@@ -375,6 +375,17 @@ async function handleGo(interaction) {
         result.featured = isFeatured;
         const firstVisit = result.firstVisit;
 
+        // Rare companions are found, not bought: a legendary treasure is the
+        // only thing that turns the owl up. Rolled here, with the expedition,
+        // so it rides the same save as the treasure that produced it. Rolling
+        // it after the encounter instead would have left the owl riding the
+        // *second* save, and a failure there loses a 4%-of-legendary drop whose
+        // treasure has already been committed by the first.
+        const rarePetDrop = result.treasureTier
+            ? tryGrantRarePet(user, 'explore', result.treasureTier.tier)
+            : null;
+        if (rarePetDrop) user.markModified('pets');
+
         // Commit stamina spend + cooldown timestamp now, before the (up to 20s)
         // encounter prompt below. Once this lands the expedition is real, so the
         // cooldown slot is earned and must not be handed back on a later failure.
@@ -502,13 +513,6 @@ async function handleGo(interaction) {
         // after the encounter has resolved, so it covers every XP the expedition
         // ended up granting — including the survey bonus and the encounter.
         applyExploreXpBonus(user, result, getTotalBonus(user.pets || [], 'explore_xp'));
-
-        // Rare companions are found, not bought: a legendary treasure is the
-        // only thing that turns the owl up. Rolled before the save below.
-        const rarePetDrop = result.treasureTier
-            ? tryGrantRarePet(user, 'explore', result.treasureTier.tier)
-            : null;
-        if (rarePetDrop) user.markModified('pets');
 
         // Guild leveling XP mirrors half the explorer XP
         let mainXp = Math.floor((result.xp ?? 0) * 0.5 * getEventXpMultiplier(guildSettings));

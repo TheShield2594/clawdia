@@ -878,15 +878,27 @@ const EXPLORE_MATERIALS_BY_TIER = Object.entries(MATERIAL_RARITY)
  * A tier the catalog has no material for is skipped rather than producing an
  * undefined id — that is how a table entry naming a tier nobody wrote materials
  * for would otherwise reach the inventory as a blank row.
+ *
+ * The tier is drawn first, uniformly among the eligible ones, and only then a
+ * material within it. Flattening the tiers into one pool and drawing from that
+ * would weight each tier by how many materials happen to be written at it: an
+ * uncommon treasure names tiers 1 and 2, and with three tier-1 materials
+ * against two tier-2 ones it would land tier 1 six times in ten for no reason
+ * anybody chose. Writing a twelfth material would then quietly move the drop
+ * rates. TREASURE_MATERIALS is meant to be the only balance lever here, and
+ * this is what keeps it the only one.
  */
 function rollTreasureMaterial(treasureTier, rng = Math.random) {
     const table = TREASURE_MATERIALS[treasureTier];
     if (!table) return null;
     if (rng() >= table.chance) return null;
 
-    const pool = table.tiers.flatMap(tier => EXPLORE_MATERIALS_BY_TIER[tier] ?? []);
-    if (!pool.length) return null;
-    return pool[Math.floor(rng() * pool.length)] ?? null;
+    const eligible = table.tiers.filter(tier => (EXPLORE_MATERIALS_BY_TIER[tier] ?? []).length > 0);
+    if (!eligible.length) return null;
+
+    const tier = eligible[Math.floor(rng() * eligible.length)] ?? eligible[eligible.length - 1];
+    const materials = EXPLORE_MATERIALS_BY_TIER[tier];
+    return materials[Math.floor(rng() * materials.length)] ?? null;
 }
 
 /**

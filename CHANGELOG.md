@@ -39,5 +39,9 @@ Also in this release:
 - **FEATURES.md's dashboard section list is generated** from the sidebar and the
   panels (#705), via `npm run docs:panels`.
 
-No schema migration is part of this release, so rolling back to it from a later
-version is a matter of the image tag alone.
+No schema migration is part of this release, so its high-water mark is the one
+recorded above. Rolling *back* to it is a matter of the image tag alone only
+from a later version carrying that same mark — once a newer release has run a
+migration past `014_scope_item_images_per_guild`, the database is ahead of this
+version's code and the tag alone will not undo that. Check the mark on the
+version you are leaving before you pin this one.
