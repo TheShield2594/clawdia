@@ -482,6 +482,9 @@ place):
 docker compose up -d --scale backup=0
 ```
 
+`--scale` is Compose-only. On a Portainer stack, delete the `backup` service
+from the stack definition and redeploy.
+
 ### Backup on Demand
 
 ```bash
@@ -498,6 +501,12 @@ An untested backup is a guess, and migrations here are destructive and
 forward-only. `scripts/verify-backup.sh` restores an archive into a throwaway
 database beside the real one, compares per-collection document counts, and drops
 the scratch database on the way out. Nothing touches the live data.
+
+A restored collection is expected to be a little behind the live one, which
+keeps taking writes while the archive restores; one that comes back more than
+10% short fails the run, so a truncated archive is caught rather than passed.
+Set `VERIFY_SHORTFALL` (0–1) to loosen that for a collection written to hard
+enough that a healthy restore trips it.
 
 ```bash
 ./scripts/verify-backup.sh --latest       # newest archive in ./backups
@@ -582,8 +591,8 @@ Both forms prompt for confirmation first. Verify the archive with
   wins over `MONGODB_URI_FILE` — delete that line rather than blanking it. And
   the `backup` service is a stock mongo image with no loader of its own; it
   reads `MONGODB_URI_FILE` in its entrypoint, so mount the same secret there if
-  you move the database URI to a file. Its `MONGODB_URI` mapping carries the
-  same `:-` default as the bot's and needs deleting for the same reason.
+  you move the database URI to a file. Its entrypoint prefers the file over
+  `MONGODB_URI`, so unlike the bot's, its `MONGODB_URI` mapping can stay.
 
 ### Performance
 

@@ -77,6 +77,21 @@ describe.each(stacks)('%s', (name, doc) => {
         }
     });
 
+    it('re-aims at 03:00 each night rather than sleeping a fixed day', () => {
+        // Comments stripped: this file explains the bug in prose that would
+        // otherwise match the pattern the assertion is looking for.
+        const entrypoint = String(doc.services.backup.entrypoint)
+            .split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
+        // `sleep 86400` after the dump starts every run later than the last by
+        // however long the dump took, walking the schedule into working hours.
+        expect([name, /sleep\s+86400/.test(entrypoint)]).toEqual([name, false]);
+        // The next-boundary arithmetic has to sit inside the loop for the
+        // schedule to be re-aimed at all.
+        const loop = entrypoint.slice(entrypoint.indexOf('while true'));
+        expect([name, loop.includes('10800')]).toEqual([name, true]);
+        expect([name, /sleep\s+\$+SLEEP/.test(loop)]).toEqual([name, true]);
+    });
+
     it('serves the dashboard on the port the image exposes', () => {
         const env = doc.services.bot.environment;
         const asMap = Array.isArray(env)
@@ -148,7 +163,11 @@ describe('Dockerfile', () => {
     const dockerfile = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8');
 
     it('health-checks whatever port DASHBOARD_PORT names', () => {
-        const line = dockerfile.split('\n').find(l => l.startsWith('    CMD node -e'));
+        const line = dockerfile.split('\n').find(l => /^\s*CMD\s+node\s+-e/.test(l));
+        // Anchored on content rather than indentation: a reformat used to make
+        // this `undefined` and Jest reported a null-receiver error instead of
+        // the port regression the test exists to catch.
+        expect(line).toBeDefined();
         expect(line).toContain('process.env.DASHBOARD_PORT');
         // Hardcoded, it reported unhealthy forever on any deploy that moved the
         // port — which is exactly what portainer-stack.yml had done.

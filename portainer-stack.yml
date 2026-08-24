@@ -224,8 +224,9 @@ services:
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
       # Mirrors the bot's MONGODB_URI_FILE. This is a stock mongo image with no
-      # loader of its own, so the entrypoint below reads the file itself. As on
-      # the bot, DELETE the `- MONGODB_URI=` line above before uncommenting.
+      # loader of its own, so the entrypoint below reads the file itself — and
+      # prefers it over MONGODB_URI, so unlike the bot's mapping the
+      # `- MONGODB_URI=` line above can stay exactly as it is.
       # - MONGODB_URI_FILE=/run/secrets/mongodb_uri
     # secrets:
     #   - mongodb_uri
@@ -253,14 +254,17 @@ services:
           echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
         fi;
         RETAIN=$${BACKUP_RETENTION_DAYS:-30};
-        NOW=$$(date -u +%s);
-        MIDNIGHT=$$(( ($$NOW / 86400) * 86400 ));
-        TARGET=$$(( $$MIDNIGHT + 10800 ));
-        if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
-        SLEEP=$$(( $$TARGET - $$NOW ));
-        echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
-        sleep $$SLEEP;
         while true; do
+          # Recomputed every iteration. A fixed `sleep 86400` after the dump
+          # would start each run later than the last by however long the dump
+          # and the prune took, walking 03:00 into working hours over a month.
+          NOW=$$(date -u +%s);
+          MIDNIGHT=$$(( ($$NOW / 86400) * 86400 ));
+          TARGET=$$(( $$MIDNIGHT + 10800 ));
+          if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
+          SLEEP=$$(( $$TARGET - $$NOW ));
+          echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
+          sleep $$SLEEP;
           TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
           echo "[backup] Starting backup at $$TIMESTAMP";
           mongodump --uri="$$MONGODB_URI" --gzip --archive="/backups/clawdia-$$TIMESTAMP.gz" &&
@@ -271,7 +275,6 @@ services:
           # bot lands pre-migration-*.gz in the same volume; those are pruned
           # on the same schedule.
           find /backups \( -name "clawdia-*.gz" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
-          sleep 86400;
         done'
 
   # Optional container-level self-healing. Uncomment the whole block to enable.

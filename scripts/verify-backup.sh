@@ -148,20 +148,33 @@ if (!names.length) {
     console.error("[verify] FAIL: the source database has no collections — nothing was verified");
     process.exit(1);
 }
+// The live database keeps taking writes while the archive is restored, so a
+// restored collection is expected to hold somewhat *fewer* documents than the
+// live one — the archive is older. Exact equality would fail on every busy
+// database. What has to be caught is a restore that came up materially short:
+// "at least one document" would pass an archive that restored 1 row of 100000.
+// Override with VERIFY_SHORTFALL when a collection is written to hard enough
+// that the default reports a healthy restore as short.
+const TOLERANCE = Number(process.env.VERIFY_SHORTFALL || 0.9);
+if (!(TOLERANCE > 0 && TOLERANCE <= 1)) {
+    console.error(`[verify] FAIL: VERIFY_SHORTFALL must be >0 and <=1, got ${process.env.VERIFY_SHORTFALL}`);
+    process.exit(1);
+}
 let bad = 0;
 for (const name of names) {
     const a = live[name] ?? 0;
     const b = copy[name] ?? 0;
-    // The live database keeps taking writes while the dump is restored, so it
-    // may legitimately have grown. A restored collection holding *fewer* than
-    // the archive should is the failure worth catching.
-    const ok = b > 0 || a === 0;
+    // A collection emptied since the dump was taken leaves nothing to fall
+    // short of, so it cannot fail here however many rows the archive holds.
+    const floor = Math.ceil(a * TOLERANCE);
+    const ok = a === 0 || b >= floor;
     if (!ok) bad++;
-    console.log(`  ${ok ? "ok  " : "FAIL"} ${name.padEnd(32)} live=${a} restored=${b}`);
+    const short = ok ? "" : `  (expected >= ${floor})`;
+    console.log(`  ${ok ? "ok  " : "FAIL"} ${name.padEnd(32)} live=${a} restored=${b}${short}`);
 }
 if (bad) {
-    console.error(`[verify] FAIL: ${bad} collection(s) restored empty.`);
+    console.error(`[verify] FAIL: ${bad} collection(s) restored short or empty.`);
     process.exit(1);
 }
-console.log(`[verify] OK: ${names.length} collection(s) restored with data.`);
+console.log(`[verify] OK: ${names.length} collection(s) restored within ${Math.round((1 - TOLERANCE) * 100)}% of live.`);
 '
