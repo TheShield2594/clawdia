@@ -313,8 +313,9 @@ const guildSchema = new Schema({
         },
         // Remote MCP servers this guild has connected in the dashboard. Merged
         // with the operator-wide config file at request time; a name defined in
-        // both places resolves to the guild's entry. Anthropic provider only —
-        // it is the only one whose API takes an mcp_servers parameter.
+        // both places resolves to the guild's entry. Whichever provider the
+        // guild picked uses them: Anthropic's API takes the servers directly,
+        // and for the rest the bot is the MCP client (src/services/ai/mcp/).
         mcpServers: {
             type: [{
                 name:               { type: String, required: true },

@@ -1,6 +1,6 @@
 const User = require('../../models/User');
 const { resolveMcpServers } = require('../../config/mcpServers');
-const { providers } = require('./providers');
+const { providers, mcpMode } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, buildKnowledgeContext } = require('./knowledge');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
@@ -106,9 +106,11 @@ async function handleAIChat(message, aiSettings) {
         systemPrompt += buildKnowledgeContext(kbEntries);
     }
     if (aiSettings.actionsEnabled) {
-        // Only Anthropic requests carry MCP servers, and only if any resolve
+        // Every provider can reach MCP servers now — Anthropic through its own
+        // connector, the rest through the bot's MCP client — so this only asks
+        // whether the provider supports them at all and whether any resolve
         // after the config file and the guild's list are merged.
-        const mcpActive = provider === 'anthropic' && resolveMcpServers(mcpServers).length > 0;
+        const mcpActive = Boolean(mcpMode(provider)) && resolveMcpServers(mcpServers).length > 0;
         systemPrompt += buildActionsAddendum(userDoc?.timezone, { mcpActive });
     }
 

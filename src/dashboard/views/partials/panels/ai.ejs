@@ -287,11 +287,9 @@
 
                     <!-- MCP connections -->
                     <div id="ai-mcp" class="ai-inner-panel">
-                        <p class="ai-inner-desc">Connect Claude to external services over <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP</a> — a GitHub repo, a calendar, an internal search. Anthropic opens the connection on their side and Claude calls the tools during a conversation.</p>
+                        <p class="ai-inner-desc">Connect your bot to external services over <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP</a> — a GitHub repo, a calendar, an internal search. Whichever model you picked in the <strong>Chat</strong> tab is the one that uses them: with Claude, Anthropic opens the connection on their side; with every other provider Clawdia is the MCP client and runs the tool calls itself.</p>
 
-                        <div id="mcp-provider-warning" class="mcp-note mcp-note-warn" style="display:none;">
-                            ⚠️ MCP connections only apply to the <strong>Anthropic (Claude)</strong> provider. Your server is currently set to a different provider in the <strong>Chat</strong> tab, so these connections are inactive.
-                        </div>
+                        <div id="mcp-provider-note" class="mcp-note" style="display:none;"></div>
                         <div id="mcp-disabled-warning" class="mcp-note mcp-note-warn" style="display:none;">
                             🔒 The bot operator has disabled dashboard-managed MCP servers. Only the servers in the bot's config file are active.
                         </div>
@@ -317,7 +315,7 @@
                         <div class="field">
                             <label class="field-label" for="mcp-name">Name</label>
                             <input type="text" id="mcp-name" maxlength="64" placeholder="github">
-                            <small>Letters, digits, underscores and hyphens. Claude sees this name when it calls a tool.</small>
+                            <small>Letters, digits, underscores and hyphens. The model sees this name when it calls a tool.</small>
                         </div>
                         <div class="field">
                             <label class="field-label" for="mcp-url">Server URL</label>
@@ -328,7 +326,7 @@
                         <div class="field">
                             <label class="field-label" for="mcp-token">Authorization token <span style="font-weight:400;color:var(--muted,#888)">(optional)</span></label>
                             <input type="password" id="mcp-token" value="" autocomplete="new-password" placeholder="Bearer token, if the server needs one">
-                            <small id="mcp-token-hint">Stored on the bot and sent to Anthropic with each request. It is never shown again once saved.</small>
+                            <small id="mcp-token-hint">Stored on the bot and sent to the MCP server when a tool is called — by Anthropic when Claude is your provider, by the bot itself otherwise. It is never shown again once saved.</small>
                         </div>
                         </form>
                         <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
@@ -344,7 +342,7 @@
                             </div>
                         </div>
                         <label class="toggle">
-                            <span class="toggle-text"><strong>Enabled</strong><span>Offer this server's tools to Claude</span></span>
+                            <span class="toggle-text"><strong>Enabled</strong><span>Offer this server's tools to the model</span></span>
                             <span class="switch"><input type="checkbox" id="mcp-enabled" checked><span class="slider"></span></span>
                         </label>
                         <div class="actions-row">

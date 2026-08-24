@@ -93,14 +93,26 @@ OpenRouter, and a local Ollama instance — configured the same way, with
 [AI_COMPARISON.md](AI_COMPARISON.md) covers what differs between them and which
 to start with.
 
-### MCP Servers (Anthropic only)
+### MCP Servers
 
-When the AI provider is Anthropic, Claude can call tools hosted on remote
+The bot can call tools hosted on remote
 [MCP](https://modelcontextprotocol.io) servers — a GitHub repo, a calendar, an
-internal search. Anthropic makes the connection itself; the bot never speaks
-MCP, it only names the servers.
+internal search. Whichever model is selected in AI → Chat is the one that uses
+them; a connection is configured once and does not need redoing when you switch
+provider.
 
-There are two ways to add one, and they stack:
+Two routes, chosen automatically from the provider:
+
+| Provider | Route | What happens |
+|---|---|---|
+| **Anthropic (Claude)** | Native | The server list travels on the request and Anthropic opens the connections |
+| **OpenAI, Gemini, Ollama, OpenRouter** | Client | The bot connects, lists the tools, offers them to the model as functions and runs the calls it asks for |
+
+On the client route the model must support tool calling. Every current OpenAI
+and Gemini model does; on Ollama and OpenRouter it depends which model you
+picked, and one that cannot call tools simply never uses a connection.
+
+There are two ways to add a server, and they stack:
 
 | | Where | Applies to | Who edits it |
 |---|---|---|---|
@@ -112,24 +124,27 @@ can be defined centrally and pointed at one guild's own credentials.
 
 #### Connecting GitHub from the dashboard
 
-1. Set the provider to **Anthropic (Claude)** in the AI → Chat tab and save.
-2. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens),
+1. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens),
    granting it only the repositories and scopes the bot should reach.
-3. Open AI → **🔌 Connections**, pick **GitHub** under Service. The name and
+2. Open AI → **🔌 Connections**, pick **GitHub** under Service. The name and
    endpoint (`https://api.githubcopilot.com/mcp/`) fill themselves in.
-4. Paste the token, and list anything destructive under **Never these tools**.
-5. Click **Add connection**, then **Test** — Claude makes one real request and
-   reports whether it reached the server.
+3. Paste the token, and list anything destructive under **Never these tools**.
+4. Click **Add connection**, then **Test** — the bot connects to the server and
+   reports how many tools it offers and which of them your filters leave on.
+   The test needs no AI provider key and spends no tokens.
 
-Other services work the same way: choose **Custom server…** and paste the
-server's https endpoint and token. GitHub is the only preset because it is the
-one major service with a documented, publicly hosted MCP endpoint; most others
-(Gmail among them) need a hosted or self-hosted MCP server whose URL you supply.
+The Service dropdown prefills a handful of services with documented public
+endpoints (GitHub, DeepWiki, Context7, Hugging Face, Stripe). Anything else
+works the same way: choose **Custom server…** and paste the server's https
+endpoint and token. Services that only offer an OAuth login flow rather than a
+token are not usable here — the dashboard has one credential field and it holds
+a token.
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over
-the allowlist. Filling in the denylist is worth the minute it takes: Claude
-decides on its own when to call a tool.
+the allowlist. Filling in the denylist is worth the minute it takes: the model
+decides on its own when to call a tool. The **Test** button lists the server's
+tool names, which is the easiest way to fill either list in.
 
 **Tokens are write-only.** A saved token is never sent back to the browser and
 never appears in the rendered page — the panel shows only that one exists. Edit
@@ -209,18 +224,26 @@ malformed config disables the connector, it never stops the bot from starting.
 
 **Notes**
 
-- Anthropic only. The other providers ignore all of this — their APIs have no
-  equivalent parameter.
 - Tokens are not free: every enabled tool's description is sent with each
-  request. Trim with the allow/deny lists if you connect a large server.
+  request, and on the client route each tool call costs another round trip to
+  the model. Trim with the allow/deny lists if you connect a large server.
 - `/forge` and `/questgen` parse the model's reply as JSON and deliberately run
   without MCP tools.
-- Data retention needs checking on both sides. Anthropic's zero-data-retention
-  arrangements do **not** cover the MCP connector, so tool definitions and tool
-  results are retained under their standard policy. Separately, the remote
+- A tool call is capped at four rounds per message, after which the model is
+  asked once more with no tools so it has to answer.
+- A server that is unreachable is skipped with an `[MCP]` warning rather than
+  failing the reply.
+- On the client route the bot opens the connection, so the URL must be a public
+  https address — one that resolves into private or reserved space is refused
+  at the socket, the same guard the Ollama base URL uses.
+- Data retention needs checking on both sides. With Claude, Anthropic's
+  zero-data-retention arrangements do **not** cover the MCP connector, so tool
+  definitions and tool results are retained under their standard policy; on the
+  client route the tool results are sent to your provider as ordinary messages
+  and retained under whatever policy applies to those. Separately, the remote
   server is a third party that sets its own retention and downstream processing
-  for whatever Claude sends it and whatever it holds. Read the privacy policy of
-  every server you connect before pointing it at a Discord server's traffic.
+  for whatever the bot sends it. Read the privacy policy of every server you
+  connect before pointing it at a Discord server's traffic.
 
 ## Daily News Configuration
 
@@ -294,7 +317,7 @@ SESSION_SECRET=random_string_here_32_characters_min
 OPENAI_API_KEY=sk-your_openai_key_here
 GEMINI_API_KEY=AIza_your_gemini_key_here
 
-# MCP servers for the Anthropic provider (Optional)
+# MCP servers, used by whichever AI provider is selected (Optional)
 # Defaults to config/mcp-servers.json; set this only to read it from elsewhere.
 # MCP_SERVERS_CONFIG=/opt/clawdia/config/mcp-servers.json
 

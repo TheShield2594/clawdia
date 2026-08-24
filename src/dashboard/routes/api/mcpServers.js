@@ -9,8 +9,12 @@ const {
     MAX_TOKEN_LENGTH,
     NAME_PATTERN,
     guildServersAllowed,
-    getMcpServers
+    getMcpServers,
+    resolveMcpServers,
+    isToolEnabled
 } = require('../../../config/mcpServers');
+const { McpHttpClient } = require('../../../services/ai/mcp/client');
+const { providers, mcpMode } = require('../../../services/ai/providers');
 
 const MAX_URL_LENGTH = 2048;
 const MAX_TOOL_NAME_LENGTH = 128;
@@ -18,15 +22,60 @@ const MAX_TOOL_NAME_LENGTH = 128;
 // Known remote MCP servers, offered in the dashboard as prefill so an admin does
 // not have to hunt for the endpoint. Only servers with a documented, publicly
 // hosted URL belong here — everything else is added with the "Custom" option.
+//
+// These are a starting point, not a whitelist: the URL is an editable field, and
+// a server that moves is fixed by typing the new address. Servers that only
+// accept an OAuth authorization-code flow are deliberately absent, because the
+// dashboard has one credential field and it holds a token, not a login.
 const PRESETS = [
     {
         id: 'github',
         label: 'GitHub',
         name: 'github',
         url: 'https://api.githubcopilot.com/mcp/',
+        requiresToken: true,
         tokenLabel: 'GitHub personal access token',
         tokenHint: 'Create a fine-grained PAT at github.com/settings/personal-access-tokens and grant it only the repositories and scopes the bot should reach.',
         suggestedBlockedTools: ['delete_file', 'delete_repository']
+    },
+    {
+        id: 'deepwiki',
+        label: 'DeepWiki (open-source repo docs)',
+        name: 'deepwiki',
+        url: 'https://mcp.deepwiki.com/mcp',
+        requiresToken: false,
+        tokenHint: 'No token needed — DeepWiki serves public repository documentation.',
+        suggestedBlockedTools: []
+    },
+    {
+        id: 'context7',
+        label: 'Context7 (library documentation)',
+        name: 'context7',
+        url: 'https://mcp.context7.com/mcp',
+        requiresToken: false,
+        tokenLabel: 'Context7 API key',
+        tokenHint: 'Optional. Works without a key at a lower rate limit; a key from context7.com raises it.',
+        suggestedBlockedTools: []
+    },
+    {
+        id: 'huggingface',
+        label: 'Hugging Face',
+        name: 'huggingface',
+        url: 'https://huggingface.co/mcp',
+        requiresToken: true,
+        tokenLabel: 'Hugging Face access token',
+        tokenHint: 'Create a read token at huggingface.co/settings/tokens. A read token is enough to search models, datasets and papers.',
+        suggestedBlockedTools: []
+    },
+    {
+        id: 'stripe',
+        label: 'Stripe',
+        name: 'stripe',
+        url: 'https://mcp.stripe.com',
+        requiresToken: true,
+        tokenLabel: 'Stripe restricted API key',
+        tokenHint: 'Use a restricted key from the Stripe dashboard with read-only permissions — a Discord bot has no business holding a key that can move money.',
+        suggestedBlockedTools: []
     }
 ];
 
@@ -74,8 +123,12 @@ function validateServerInput(body, name) {
     } catch {
         return { error: 'URL is not valid' };
     }
-    // Anthropic opens this connection, not the bot, so there is no SSRF surface
-    // here — but the API only accepts https and so does the MCP spec.
+    // https only: Anthropic's connector accepts nothing else, and neither does
+    // the MCP spec. The bot now opens this connection itself for every other
+    // provider, so a guild admin is choosing where it dials — the SSRF answer
+    // for that is not this check but src/utils/outboundGuard.js, which refuses
+    // private and reserved space at the socket, on the first request and on
+    // every redirect. This one is here to fail early with a clear message.
     if (parsed.protocol !== 'https:') return { error: 'URL must start with https://' };
     // The URL is listed back to the dashboard; a secret smuggled into it would
     // be readable there and in the audit log, which is exactly what keeping the
@@ -112,6 +165,7 @@ router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (re
     try {
         const guildSettings = await Guild.findOne({ guildId }).lean();
         const servers = (guildSettings?.ai?.mcpServers || []).map(publicServer);
+        const provider = guildSettings?.ai?.provider || 'openai';
 
         res.json({
             servers,
@@ -122,7 +176,18 @@ router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (re
             presets: PRESETS,
             editable: guildServersAllowed(),
             maxServers: MAX_GUILD_SERVERS,
-            provider: guildSettings?.ai?.provider || 'openai'
+            provider,
+            providerLabel: providers.get(provider)?.label || provider,
+            // 'native' (the provider's own API takes the servers), 'client'
+            // (the bot lists and calls the tools itself) or false. The panel
+            // only has to warn when it is false.
+            mcpMode: mcpMode(provider),
+            // The same answer for every provider, so the panel can update its
+            // note when the Chat tab's dropdown changes rather than only after
+            // the change has been saved and reloaded.
+            providerSupport: Object.fromEntries(
+                [...providers.values()].map(p => [p.name, { label: p.label, mcp: p.mcp || false }])
+            )
         });
     } catch (error) {
         console.error('MCP servers list error:', error);
@@ -214,53 +279,55 @@ router.delete('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, 
     }
 });
 
-// Makes a real request through one MCP server and reports whether it connected.
-// Anthropic connects to the server, so the only honest way to check a URL and
-// token is to make a real request and see what comes back. One token of output
-// is enough: the connection and tool listing happen before any generation.
+// Connects to one MCP server and reports what it found.
+//
+// The bot does the handshake itself rather than asking a model to do it, which
+// is what makes the result mean the same thing for every guild: it needs no AI
+// provider key, spends no tokens, and answers the two questions an admin
+// actually has — is the URL right, and is the token accepted — instead of
+// reporting them through whatever the model said back.
 router.post('/guild/:guildId/mcp-servers/:name/test', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const name = String(req.params.name || '').trim();
 
+    let client = null;
     try {
         const guildSettings = await Guild.findOne({ guildId }).lean();
         const stored = (guildSettings?.ai?.mcpServers || []).find(s => s.name === name);
         if (!stored) return res.status(404).json({ error: 'No MCP server with that name' });
 
-        const { resolveProviderConfig, DEFAULT_MODELS } = require('../../../services/aiService');
-        const ai = guildSettings?.ai || {};
-        // The stored model only belongs on this request if Anthropic is the
-        // provider in use — testing from a guild set to OpenAI would otherwise
-        // send a GPT model name to Anthropic and fail for the wrong reason.
-        const { apiKey } = resolveProviderConfig({ ...ai, provider: 'anthropic' });
-        const model = ai.provider === 'anthropic' && ai.model ? ai.model : DEFAULT_MODELS.anthropic;
-        if (!apiKey) {
-            return res.status(400).json({ error: 'No Anthropic API key configured — add one in the Chat tab first' });
-        }
-
-        const Anthropic = require('@anthropic-ai/sdk');
-        const { MCP_BETA, resolveMcpServers } = require('../../../config/mcpServers');
+        // Resolved rather than read straight off the document, so the test
+        // dials exactly what a chat request would — same https check, same
+        // token, same tool filters.
         const resolved = resolveMcpServers([{ ...stored, enabled: true }]).find(s => s.name === name);
         if (!resolved) return res.status(400).json({ error: 'Stored server is not valid — re-save it' });
 
-        const client = new Anthropic({ apiKey });
-        await client.beta.messages.create({
-            model,
-            max_tokens: 1,
-            betas: [MCP_BETA],
-            messages: [{ role: 'user', content: 'ping' }],
-            mcp_servers: [resolved.server],
-            tools: [resolved.toolset]
+        client = new McpHttpClient({
+            url: resolved.connection.url,
+            authorizationToken: resolved.connection.authorizationToken,
+            label: name
         });
+        const tools = await client.listTools();
+        const enabled = tools.filter(tool => isToolEnabled(resolved.toolset, tool.name)).length;
 
-        res.json({ success: true, message: 'Claude connected to the server.' });
+        const serverName = client.serverInfo?.name;
+        res.json({
+            success: true,
+            message: `Connected${serverName ? ` to ${serverName}` : ''} — ${tools.length} tool${tools.length === 1 ? '' : 's'} offered, ` +
+                `${enabled} enabled by your filters.`,
+            toolCount: tools.length,
+            enabledCount: enabled,
+            // Named so an admin filling in the allow/block lists can copy them
+            // instead of guessing at what the server calls things.
+            tools: tools.slice(0, MAX_TOOL_NAMES).map(tool => tool.name)
+        });
     } catch (error) {
         // A failed test is an expected outcome, not a server fault: report what
-        // the API said and let the admin fix the URL or token.
-        const status = error?.status;
-        if (!status) console.error('MCP server test error:', error?.message || error);
-        const detail = error?.error?.error?.message || error?.message || 'Unknown error';
-        res.json({ success: false, message: status ? `HTTP ${status}: ${detail}` : detail });
+        // the server said and let the admin fix the URL or token.
+        if (!error?.status) console.error('MCP server test error:', error?.message || error);
+        res.json({ success: false, message: error?.message || 'Unknown error' });
+    } finally {
+        if (client) client.close().catch(() => {});
     }
 });
 

@@ -3,6 +3,7 @@
 //   {
 //     name, label, defaultModel,
 //     pricing: [{ match: RegExp, in: $/1M input, out: $/1M output }],
+//     mcp: 'native' | 'client' | false,
 //     resolveAuth(aiSettings) -> { apiKey } | { baseUrl },
 //     validateModel?(model)   -> error string | null,
 //     stream(req)             -> async generator of text deltas; sets
@@ -13,6 +14,11 @@
 // Adding a provider means writing one module against this interface and
 // listing it here — dispatch, defaults, labels and pricing all follow from
 // the registry, so there is no second site to edit.
+//
+// `mcp` says how a provider reaches MCP servers: 'native' when the API takes
+// the servers itself (Anthropic), 'client' when the bot lists and calls the
+// tools through src/services/ai/mcp/ and feeds them to the model as functions,
+// false for a provider that cannot do either.
 
 const PROVIDER_LIST = [
     require('./openai'),
@@ -32,4 +38,13 @@ function getProvider(name) {
 
 const DEFAULT_MODELS = Object.fromEntries(PROVIDER_LIST.map(p => [p.name, p.defaultModel]));
 
-module.exports = { providers, getProvider, DEFAULT_MODELS };
+/**
+ * How a provider reaches MCP servers, by name: 'native', 'client', or false for
+ * one that cannot. Asked by the dashboard and the Discord transport, so neither
+ * has to keep its own list of which providers MCP applies to.
+ */
+function mcpMode(providerName) {
+    return providers.get(providerName)?.mcp || false;
+}
+
+module.exports = { providers, getProvider, DEFAULT_MODELS, mcpMode };

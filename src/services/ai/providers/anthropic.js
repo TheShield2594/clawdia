@@ -1,11 +1,13 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { buildAnthropicMcpParams, MCP_BETA } = require('../../../config/mcpServers');
 
-// The MCP connector is Anthropic-specific: Claude opens the connection to each
-// configured server itself, so there is no client-side tool loop here. The
-// server list comes from the config file read by src/config/mcpServers.js —
-// nothing about it is hardcoded, and with no config file present these helpers
-// send exactly the request they always did.
+// Anthropic's MCP connector opens the connection to each configured server on
+// Anthropic's side, so there is no client-side tool loop here — the server list
+// simply travels on the request. Every other provider reaches the same servers
+// through the bot's own MCP client in src/services/ai/mcp/, which is what makes
+// the feature work whichever model a guild has selected. The server list comes
+// from src/config/mcpServers.js either way, and with nothing configured these
+// helpers send exactly the request they always did.
 
 const PRICING = [
     { match: /haiku-4/i,    in: 1.00,  out: 5.00 },
@@ -147,6 +149,9 @@ module.exports = {
     label: 'Claude',
     defaultModel: 'claude-haiku-4-5',
     pricing: PRICING,
+    // Anthropic is the one provider that connects to MCP servers itself, so the
+    // servers travel on the request and no client-side tool loop runs here.
+    mcp: 'native',
     resolveAuth: aiSettings => ({ apiKey: aiSettings.anthropicKey || process.env.ANTHROPIC_API_KEY }),
     stream,
     complete

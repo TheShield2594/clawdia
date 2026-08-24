@@ -2781,6 +2781,10 @@ var _mcpPresets = [];
 var _mcpEditable = true;
 var _mcpMaxServers = 10;
 var _mcpEditing = null;
+// { openai: { label: 'OpenAI', mcp: 'client' }, ... } — how each provider
+// reaches MCP servers, so the note below the heading can answer for whatever is
+// selected in the Chat tab right now, not only for what was saved.
+var _mcpProviderSupport = {};
 
 function mcpEl(id) { return document.getElementById(id); }
 
@@ -2796,6 +2800,7 @@ async function loadMcpServers(force) {
         _mcpPresets = data.presets || [];
         _mcpEditable = data.editable !== false;
         _mcpMaxServers = data.maxServers || 10;
+        _mcpProviderSupport = data.providerSupport || {};
         renderMcpPresets();
         renderMcpServers(data.provider);
     } catch (e) {
@@ -2818,7 +2823,7 @@ function renderMcpPresets() {
 }
 
 var MCP_DEFAULT_PRESET_HINT = 'Pick a known service to prefill its endpoint, or enter any remote MCP server URL yourself.';
-var MCP_DEFAULT_TOKEN_HINT = 'Stored on the bot and sent to Anthropic with each request. It is never shown again once saved.';
+var MCP_DEFAULT_TOKEN_HINT = 'Stored on the bot and sent to the MCP server when a tool is called — by Anthropic when Claude is your provider, by the bot itself otherwise. It is never shown again once saved.';
 
 function resetMcpHints() {
     mcpEl('mcp-preset-hint').textContent = MCP_DEFAULT_PRESET_HINT;
@@ -2842,15 +2847,40 @@ function applyMcpPreset() {
     hint.textContent = preset.tokenHint || MCP_DEFAULT_PRESET_HINT;
     tokenHint.textContent = preset.tokenLabel
         ? preset.tokenLabel + ' — stored on the bot, never shown again once saved.'
-        : MCP_DEFAULT_TOKEN_HINT;
+        : (preset.requiresToken === false
+            ? 'This service needs no token — leave it empty.'
+            : MCP_DEFAULT_TOKEN_HINT);
+}
+
+// What the selected provider does with these connections. Every provider the
+// bot ships can use them — Anthropic through its own connector, the rest through
+// the bot's MCP client — so this is a note about *how*, and only turns into a
+// warning if a provider ever cannot.
+function renderMcpProviderNote(provider) {
+    const note = mcpEl('mcp-provider-note');
+    if (!note) return;
+
+    const selected = provider || (mcpEl('ai-provider') ? mcpEl('ai-provider').value : null);
+    const support = selected ? _mcpProviderSupport[selected] : null;
+    if (!selected || !support) { note.style.display = 'none'; return; }
+
+    const label = support.label || selected;
+    note.style.display = '';
+    if (!support.mcp) {
+        note.className = 'mcp-note mcp-note-warn';
+        note.textContent = '⚠️ ' + label + ', your provider in the Chat tab, cannot use MCP connections, so these are inactive.';
+    } else if (support.mcp === 'native') {
+        note.className = 'mcp-note';
+        note.textContent = '🔌 ' + label + ' is your provider in the Chat tab. Anthropic connects to these servers and calls their tools directly.';
+    } else {
+        note.className = 'mcp-note';
+        note.textContent = '🔌 ' + label + ' is your provider in the Chat tab. Clawdia connects to these servers and offers their tools to the model — '
+            + 'a model that does not support tool calling will simply never use one.';
+    }
 }
 
 function renderMcpServers(provider) {
-    const providerWarn = mcpEl('mcp-provider-warning');
-    if (providerWarn) {
-        const selected = provider || (mcpEl('ai-provider') ? mcpEl('ai-provider').value : null);
-        providerWarn.style.display = selected && selected !== 'anthropic' ? '' : 'none';
-    }
+    renderMcpProviderNote(provider);
     const disabledWarn = mcpEl('mcp-disabled-warning');
     if (disabledWarn) disabledWarn.style.display = _mcpEditable ? 'none' : '';
     updateMcpFormState();
@@ -2997,7 +3027,7 @@ async function saveMcpServer() {
 async function removeMcpServer(name) {
     const ok = await showConfirm({
         title: 'Remove connection',
-        body: 'Remove "' + name + '"? Claude will lose access to its tools, and the stored token is deleted.',
+        body: 'Remove "' + name + '"? The model will lose access to its tools, and the stored token is deleted.',
         okText: 'Remove'
     });
     if (!ok) return;
@@ -3029,6 +3059,16 @@ async function testMcpServer(name, out) {
         const okay = resp.ok && data.success;
         out.className = 'mcp-test-result ' + (okay ? 'ok' : 'bad');
         out.textContent = (okay ? '✓ ' : '✗ ') + (data.message || data.error || (okay ? 'Connected' : 'Failed'));
+        // Tool names come from the server, so they are set as text on their own
+        // element rather than concatenated into any markup.
+        if (okay && Array.isArray(data.tools) && data.tools.length) {
+            const names = document.createElement('small');
+            names.className = 'mcp-test-tools';
+            const shown = data.tools.slice(0, 12);
+            names.textContent = 'Tools: ' + shown.join(', ')
+                + (data.tools.length > shown.length ? ', and ' + (data.tools.length - shown.length) + ' more' : '');
+            out.appendChild(names);
+        }
     } catch (e) {
         console.error(e);
         if (out) { out.className = 'mcp-test-result bad'; out.textContent = '✗ Request failed'; }

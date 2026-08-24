@@ -1,4 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
+const { toolkitFor, MAX_TOOL_ROUNDS } = require('../mcp/toolkit');
 
 // Google's current SDK. It replaces `@google/generative-ai`, which Google
 // retired in favour of this one — that package still installs but no longer
@@ -21,16 +22,86 @@ const PRICING = [
     { match: /flash/i,      in: 0.10,  out: 0.40 }
 ];
 
-function startChat({ apiKey, model, systemPrompt, history, temperature, maxTokens }) {
+// Gemini takes an OpenAPI subset, not JSON Schema: it has its own key list and
+// rejects a declaration outright when it meets one it does not know. MCP servers
+// publish plain JSON Schema — `$schema`, `additionalProperties` and `$ref` and
+// all — so everything outside this list is dropped rather than forwarded.
+const SCHEMA_KEYS = [
+    'description', 'enum', 'format', 'maxItems', 'maximum', 'minItems',
+    'minimum', 'nullable', 'pattern', 'required', 'title'
+];
+
+/**
+ * One MCP tool's JSON Schema as something Gemini will accept.
+ *
+ * Returns undefined for a schema with no properties at all: a declaration for a
+ * tool that takes no arguments is sent without a `parameters` block, which is
+ * what the API expects, rather than with an empty object it may reject.
+ */
+function toGeminiSchema(schema) {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return undefined;
+
+    const out = {};
+    for (const key of SCHEMA_KEYS) {
+        if (schema[key] !== undefined) out[key] = schema[key];
+    }
+
+    // `type: ["string", "null"]` is JSON Schema's way of saying optional; Gemini
+    // spells that as one type plus `nullable`.
+    const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+    const concrete = types.find(t => typeof t === 'string' && t !== 'null');
+    if (concrete) out.type = concrete.toUpperCase();
+    if (types.length > 1 && types.includes('null')) out.nullable = true;
+
+    if (schema.properties && typeof schema.properties === 'object') {
+        const properties = {};
+        for (const [name, value] of Object.entries(schema.properties)) {
+            const converted = toGeminiSchema(value);
+            if (converted) properties[name] = converted;
+        }
+        if (Object.keys(properties).length) out.properties = properties;
+    }
+    if (schema.items) {
+        const items = toGeminiSchema(schema.items);
+        if (items) out.items = items;
+    }
+    if (Array.isArray(schema.anyOf)) {
+        const anyOf = schema.anyOf.map(toGeminiSchema).filter(Boolean);
+        if (anyOf.length) out.anyOf = anyOf;
+    }
+
+    // A required list naming properties that were dropped would be rejected.
+    if (Array.isArray(out.required)) {
+        out.required = out.required.filter(name => out.properties?.[name]);
+        if (!out.required.length) delete out.required;
+    }
+
+    if (out.type === 'OBJECT' && !out.properties) return undefined;
+    return Object.keys(out).length ? out : undefined;
+}
+
+function functionDeclarations(toolkit) {
+    return toolkit.definitions.map(def => {
+        const parameters = toGeminiSchema(def.inputSchema);
+        return {
+            name: def.name,
+            description: def.description,
+            ...(parameters ? { parameters } : {})
+        };
+    });
+}
+
+function startChat({ apiKey, model, systemPrompt, history, temperature, maxTokens }, { toolkit = null, priorHistory = null } = {}) {
     const client = new GoogleGenAI({ apiKey });
     return client.chats.create({
         model,
         config: {
             systemInstruction: systemPrompt,
             temperature,
-            maxOutputTokens: maxTokens
+            maxOutputTokens: maxTokens,
+            ...(toolkit ? { tools: [{ functionDeclarations: functionDeclarations(toolkit) }] } : {})
         },
-        history: history.map(h => ({
+        history: priorHistory || history.map(h => ({
             role: h.role === 'assistant' ? 'model' : 'user',
             parts: [{ text: h.content }]
         }))
@@ -45,31 +116,116 @@ function usageOf(meta) {
     };
 }
 
+// Each round is its own request, so the guild is billed for the sum of them.
+function addUsage(totals, round) {
+    if (!round) return;
+    totals.inputTokens += round.inputTokens;
+    totals.outputTokens += round.outputTokens;
+}
+
+/**
+ * Run the calls Gemini asked for and build the message that answers them.
+ *
+ * Function responses go back as parts of the next message, which is what makes
+ * the loop here look like an ordinary conversation turn.
+ */
+async function runToolCalls(toolkit, calls) {
+    const parts = [];
+    for (const call of calls) {
+        const result = await toolkit.call(call.name, call.args || {});
+        parts.push({
+            functionResponse: {
+                ...(call.id ? { id: call.id } : {}),
+                name: call.name,
+                response: { result }
+            }
+        });
+    }
+    return parts;
+}
+
+/**
+ * The same conversation, continued with no tools declared.
+ *
+ * Falls back to the chat as it is if the SDK cannot hand back its history —
+ * the round counter still ends the loop, and continuing is better than sending
+ * function responses into a chat that never saw the call they answer.
+ */
+function withoutTools(req, chat) {
+    if (typeof chat.getHistory !== 'function') return chat;
+    return startChat(req, { priorHistory: chat.getHistory() });
+}
+
+function callsOf(source) {
+    return (source?.functionCalls || []).filter(call => call && typeof call.name === 'string');
+}
+
 async function* stream(req) {
-    const chat = startChat(req);
-    const result = await chat.sendMessageStream({ message: req.prompt });
+    const toolkit = await toolkitFor(req);
+    let chat = startChat(req, { toolkit });
+    let message = req.prompt;
 
-    // Usage now rides on the chunks rather than on a separate response object
-    // awaited after the stream. Each chunk that carries it carries the running
-    // total, so the last one seen is the total for the turn.
-    let lastUsage = null;
-    for await (const chunk of result) {
-        if (chunk.usageMetadata) lastUsage = chunk.usageMetadata;
-        const text = chunk.text;
-        if (text) yield text;
+    const totals = { inputTokens: 0, outputTokens: 0 };
+    let sawUsage = false;
+
+    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+        const result = await chat.sendMessageStream({ message });
+
+        // Usage now rides on the chunks rather than on a separate response
+        // object awaited after the stream. Each chunk that carries it carries
+        // the running total, so the last one seen is the total for the round.
+        let lastUsage = null;
+        const calls = [];
+        for await (const chunk of result) {
+            if (chunk.usageMetadata) lastUsage = chunk.usageMetadata;
+            calls.push(...callsOf(chunk));
+            const text = chunk.text;
+            if (text) yield text;
+        }
+        if (lastUsage) {
+            sawUsage = true;
+            addUsage(totals, usageOf(lastUsage));
+        }
+
+        if (!calls.length) break;
+        message = await runToolCalls(toolkit, calls);
+        // The next request is the last one allowed, so it goes out with no
+        // tools declared: the model's only remaining move is to answer. The
+        // conversation so far comes from the chat itself, since it holds the
+        // function-call turn these responses answer.
+        if (round + 1 === MAX_TOOL_ROUNDS) chat = withoutTools(req, chat);
     }
 
-    if (req.usageOut && lastUsage) {
-        req.usageOut.usage = usageOf(lastUsage);
-    }
+    if (req.usageOut && sawUsage) req.usageOut.usage = totals;
 }
 
 async function complete(req) {
-    const chat = startChat(req);
-    const response = await chat.sendMessage({ message: req.prompt });
-    // `.text` is undefined when the model returned no text part at all — a
-    // safety block, or a response that was only tool calls.
-    return { text: response.text ?? '', usage: usageOf(response.usageMetadata) };
+    const toolkit = await toolkitFor(req);
+    let chat = startChat(req, { toolkit });
+    let message = req.prompt;
+
+    const totals = { inputTokens: 0, outputTokens: 0 };
+    let sawUsage = false;
+    let text = '';
+
+    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+        const response = await chat.sendMessage({ message });
+        if (response.usageMetadata) {
+            sawUsage = true;
+            addUsage(totals, usageOf(response.usageMetadata));
+        }
+
+        // `.text` is undefined when the model returned no text part at all — a
+        // safety block, or a response that was only tool calls.
+        text = response.text ?? '';
+
+        const calls = callsOf(response);
+        if (!calls.length) break;
+        message = await runToolCalls(toolkit, calls);
+        if (round + 1 === MAX_TOOL_ROUNDS) chat = withoutTools(req, chat);
+    }
+
+    return { text, usage: sawUsage ? totals : null };
 }
 
 module.exports = {
@@ -77,7 +233,11 @@ module.exports = {
     label: 'Gemini',
     defaultModel: 'gemini-2.0-flash',
     pricing: PRICING,
+    // MCP tools are declared as Gemini functions and called from the loop here.
+    mcp: 'client',
     resolveAuth: aiSettings => ({ apiKey: aiSettings.geminiKey || process.env.GEMINI_API_KEY }),
     stream,
-    complete
+    complete,
+    // Exported for the tests that pin what an MCP schema turns into.
+    toGeminiSchema
 };

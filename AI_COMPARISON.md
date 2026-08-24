@@ -11,20 +11,29 @@ live in [SETUP_GUIDE.md](SETUP_GUIDE.md#ai-integration).
 
 ## The providers
 
-| Provider | Default model | Credential | Cost estimates | Notes |
-| --- | --- | --- | --- | --- |
-| **OpenAI** | `gpt-4o-mini` | `OPENAI_API_KEY` | Yes | GPT-4o, GPT-4.1, o1 and o3 families |
-| **Gemini** | `gemini-2.0-flash` | `GEMINI_API_KEY` | Yes | Has a free tier; Flash models are the cheap end |
-| **Claude** | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` | Yes | The only provider that can call [MCP servers](README.md#mcp-servers-anthropic-only) |
-| **Ollama** | `llama3.2` | `OLLAMA_BASE_URL` | Always $0 | Runs on your own hardware; no key, no per-token cost |
-| **OpenRouter** | `openai/gpt-4o-mini` | `OPENROUTER_API_KEY` | No | One key, many vendors' models; names must be `vendor/model` |
+| Provider | Default model | Credential | Cost estimates | [MCP](README.md#mcp-servers) | Notes |
+| --- | --- | --- | --- | --- | --- |
+| **OpenAI** | `gpt-4o-mini` | `OPENAI_API_KEY` | Yes | Client | GPT-4o, GPT-4.1, o1 and o3 families |
+| **Gemini** | `gemini-2.0-flash` | `GEMINI_API_KEY` | Yes | Client | Has a free tier; Flash models are the cheap end |
+| **Claude** | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` | Yes | Native | Anthropic connects to MCP servers itself |
+| **Ollama** | `llama3.2` | `OLLAMA_BASE_URL` | Always $0 | Client | Runs on your own hardware; no key, no per-token cost |
+| **OpenRouter** | `openai/gpt-4o-mini` | `OPENROUTER_API_KEY` | No | Client | One key, many vendors' models; names must be `vendor/model` |
 
 ## What actually differs
 
-**MCP tool use is Anthropic-only.** If you want the bot to reach a GitHub repo,
-a calendar, or an internal search through
-[MCP](https://modelcontextprotocol.io), Claude is the only option — the other
-four providers ignore MCP configuration entirely.
+**MCP works with every provider, by two different routes.** Whichever model is
+selected in the Chat tab is the one that uses your
+[MCP](https://modelcontextprotocol.io) connections. With Claude the servers
+travel on the request and Anthropic opens the connections itself ("native").
+With the other four the bot is the MCP client: it lists each server's tools,
+offers them to the model as functions, runs the calls the model asks for and
+feeds the results back ("client"). The connections are configured in one place
+either way, and switching provider does not mean reconfiguring them.
+
+The one caveat is on the client route: the *model* has to support tool calling.
+Every current OpenAI and Gemini model does. On Ollama and OpenRouter it depends
+on which model you picked — one that cannot call tools simply never uses a
+connection, and answers as it otherwise would.
 
 **Cost tracking depends on a pricing table.** `estimateCost` in
 `src/services/ai/usage.js` matches the model name against the provider's
@@ -49,7 +58,9 @@ container. The operator's own endpoint is exempt: set it as `OLLAMA_BASE_URL`.
 - **General use, paying by the token** — the defaults are chosen to be cheap.
   `gpt-4o-mini` and `gemini-2.0-flash` are the low-cost tiers of their
   families; move up a tier only if answers are visibly weak.
-- **Tool use** — Claude, for MCP.
+- **Tool use** — any of them; Claude does the least work locally, since
+  Anthropic runs the MCP connection. On Ollama or OpenRouter, check that the
+  model you picked supports tool calling.
 - **Private or zero-cost** — Ollama. Nothing leaves your network, and quality
   tracks whatever model you can host.
 - **Comparing models often** — OpenRouter, so you can switch vendors by editing

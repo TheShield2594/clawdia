@@ -302,8 +302,8 @@ Configuration that previously lived behind slash commands (settings link, level 
 
 ## AI Chat Configuration
 
-Five providers are supported. For what actually differs between them — MCP
-support, cost tracking, model naming — see
+Five providers are supported, and MCP connections work with all of them. For
+what actually differs — how each reaches MCP, cost tracking, model naming — see
 [AI_COMPARISON.md](AI_COMPARISON.md).
 
 ### Supported Providers
@@ -334,19 +334,23 @@ support, cost tracking, model naming — see
      could aim the bot at anything reachable from its container. Your own
      endpoint is exempt: set it as `OLLAMA_BASE_URL`
 
-### MCP Servers (Anthropic only)
+### MCP Servers
 
-Claude can call tools on remote [MCP](https://modelcontextprotocol.io) servers —
-a GitHub repo, a calendar, an internal docs search — without the bot
-implementing an MCP client. Anthropic opens the connection server-side; Clawdia
-only names the servers.
+The bot can call tools on remote [MCP](https://modelcontextprotocol.io) servers
+— a GitHub repo, a calendar, an internal docs search. **Whichever model you
+selected in the Chat tab is the one that uses them.** With Claude the server
+list travels on the request and Anthropic opens the connections; with OpenAI,
+Gemini, Ollama or OpenRouter, Clawdia is the MCP client — it lists each server's
+tools, offers them to the model as functions, runs the calls and feeds the
+results back. On that second route the model itself has to support tool calling,
+which every current OpenAI and Gemini model does and some Ollama models do not.
 
 **From the dashboard** (AI → 🔌 Connections): pick a service or paste any https
-MCP endpoint, add a token, and optionally list the tools Claude may or may not
-call. GitHub is available as a preset (`https://api.githubcopilot.com/mcp/`,
-authenticated with a fine-grained PAT). A **Test** button makes one real request
-and reports whether Claude reached the server. Tokens are write-only — once
-saved they are never sent back to the browser.
+MCP endpoint, add a token, and optionally list the tools the model may or may
+not call. GitHub, DeepWiki, Context7, Hugging Face and Stripe come as presets;
+anything else is a URL away. A **Test** button connects to the server and
+reports the tools it offers — no AI provider key needed, no tokens spent.
+Tokens are write-only — once saved they are never sent back to the browser.
 
 **From a config file** for servers that apply to every Discord server, at
 `config/mcp-servers.json`:
@@ -367,9 +371,9 @@ saved they are never sent back to the browser.
 
 Tokens written as `${VAR}` in the file resolve from the environment, so it holds
 no secrets of its own. With neither source configured, requests are exactly what
-they were before — the connector is off. See
-[SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers-anthropic-only) for the full field
-reference and `MCP_ALLOW_GUILD_SERVERS`.
+they were before — no tools are offered at all. See
+[SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers) for the full field reference and
+`MCP_ALLOW_GUILD_SERVERS`.
 
 ### Setup
 

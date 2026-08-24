@@ -123,9 +123,26 @@ function buildToolset(name, raw, label, warnings) {
     return toolset;
 }
 
-// One entry becomes two API pieces: an mcp_servers connection definition and
-// the mcp_toolset that references it by name. The API rejects either half on
-// its own, so they are always built together.
+/**
+ * Whether one tool is on, according to a toolset built above.
+ *
+ * The toolset is the single description of a server's tool policy: Anthropic's
+ * connector reads it directly, and the client-side loop the other providers use
+ * asks this. Deriving both from the same object is what keeps "blocked" meaning
+ * the same thing whichever model a guild has selected.
+ */
+function isToolEnabled(toolset, toolName) {
+    const specific = toolset?.configs?.[toolName];
+    if (specific && typeof specific.enabled === 'boolean') return specific.enabled;
+    const fallback = toolset?.default_config?.enabled;
+    return typeof fallback === 'boolean' ? fallback : true;
+}
+
+// One entry becomes three pieces: an mcp_servers connection definition for
+// Anthropic's server-side connector, the mcp_toolset that references it by name
+// (the API rejects either half on its own, so they are always built together),
+// and the plain url/token pair the bot's own MCP client dials for every other
+// provider.
 function normalizeServer(raw, { label, source, expandEnv, warnings }) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         warnings.push(`${label} is not an object — skipping it`);
@@ -173,7 +190,16 @@ function normalizeServer(raw, { label, source, expandEnv, warnings }) {
     const server = { type: 'url', url, name };
     if (token) server.authorization_token = token;
 
-    return { name, source, server, toolset: buildToolset(name, raw, `${label} ("${name}")`, warnings) };
+    return {
+        name,
+        source,
+        server,
+        // What src/services/ai/mcp/ connects to when the guild is not on
+        // Anthropic. Same url and same token — only the side that opens the
+        // socket differs.
+        connection: { url, authorizationToken: token || null },
+        toolset: buildToolset(name, raw, `${label} ("${name}")`, warnings)
+    };
 }
 
 function readConfigFile(file, warnings) {
@@ -305,6 +331,7 @@ module.exports = {
     MAX_TOKEN_LENGTH,
     NAME_PATTERN,
     guildServersAllowed,
+    isToolEnabled,
     loadMcpServers,
     getMcpServers,
     resolveMcpServers,

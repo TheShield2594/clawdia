@@ -70,6 +70,16 @@ the templates now read it from `package.json` instead of carrying their own copy
 
 Also in this release:
 
+- **MCP connections work with whichever model you picked**, not only Claude.
+  Anthropic's connector opens these connections on their side, so the feature
+  was Anthropic-only; the bot is now an MCP client of its own
+  (`src/services/ai/mcp/`) and offers the same servers' tools to OpenAI, Gemini,
+  Ollama and OpenRouter as functions, running the calls and feeding the results
+  back. Connections are configured once and survive a change of provider. The
+  Connections tab gained presets beyond GitHub, and its **Test** button now
+  connects to the server itself — no AI provider key, no tokens spent, and it
+  reports the tool names so the allow and deny lists can be filled in from what
+  the server actually offers.
 - **Exploration drops fieldcraft materials, and has a rare companion** (#753).
   Exploration was the one grind track with no unpurchasable pet, because a
   companion needs a favourite food that resolves in `MATERIAL_RARITY` and
