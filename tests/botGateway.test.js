@@ -89,6 +89,72 @@ function stubGuild(overrides = {}) {
     };
 }
 
+// #558: the dashboard's session carries the guild list Discord returned at OAuth
+// time and nothing refreshes it, so the gateway is where a second opinion has to
+// come from. `null` is a distinct answer from `false` here — it means nobody
+// could say, and callers treat it as "fall back to the snapshot" rather than as
+// a denial, so a stub that conflates the two would hide a lockout or a bypass.
+describe('canManageGuild', () => {
+    const { PermissionFlagsBits } = require('discord.js');
+
+    function memberWith(bits) {
+        return { permissions: { has: bit => (bits & bit) === bit } };
+    }
+
+    function gatewayFor(fetchImpl, { ownerId = 'owner-1' } = {}) {
+        const fixture = stubGuild({ ownerId, members: { fetch: fetchImpl } });
+        return createBotGateway(stubClient({ guilds: { g1: fixture.guild } }));
+    }
+
+    test('true for a member holding MANAGE_GUILD, and for one holding ADMINISTRATOR', async () => {
+        for (const bits of [PermissionFlagsBits.ManageGuild, PermissionFlagsBits.Administrator]) {
+            const bot = gatewayFor(async () => memberWith(bits));
+            await expect(bot.canManageGuild('g1', 'u1')).resolves.toBe(true);
+        }
+    });
+
+    test('true for the owner without any member fetch at all', async () => {
+        const fetchMember = jest.fn();
+        const bot = gatewayFor(fetchMember, { ownerId: 'u1' });
+
+        await expect(bot.canManageGuild('g1', 'u1')).resolves.toBe(true);
+        expect(fetchMember).not.toHaveBeenCalled();
+    });
+
+    // A cached member is the stale snapshot this method exists to replace, so
+    // the fetch has to go to Discord rather than answer from the cache.
+    test('forces the fetch past the member cache', async () => {
+        const fetchMember = jest.fn(async () => memberWith(PermissionFlagsBits.ManageGuild));
+        const bot = gatewayFor(fetchMember);
+
+        await bot.canManageGuild('g1', 'u1');
+
+        expect(fetchMember).toHaveBeenCalledWith({ user: 'u1', force: true });
+    });
+
+    test('false for a member who holds neither permission', async () => {
+        const bot = gatewayFor(async () => memberWith(PermissionFlagsBits.SendMessages));
+        await expect(bot.canManageGuild('g1', 'u1')).resolves.toBe(false);
+    });
+
+    // Kicked or banned: Discord answered, and the answer is no.
+    test('false when Discord says there is no such member', async () => {
+        for (const code of [10007, 10013]) {
+            const bot = gatewayFor(async () => { throw Object.assign(new Error('Unknown Member'), { code }); });
+            await expect(bot.canManageGuild('g1', 'u1')).resolves.toBe(false);
+        }
+    });
+
+    test('null when the question could not be asked', async () => {
+        const failing = gatewayFor(async () => { throw Object.assign(new Error('Service Unavailable'), { code: 500 }); });
+        await expect(failing.canManageGuild('g1', 'u1')).resolves.toBeNull();
+
+        const elsewhere = gatewayFor(async () => memberWith(PermissionFlagsBits.ManageGuild));
+        await expect(elsewhere.canManageGuild('nope', 'u1')).resolves.toBeNull();
+        await expect(elsewhere.canManageGuild('g1', undefined)).resolves.toBeNull();
+    });
+});
+
 describe('botGateway hands out data, never live objects', () => {
     let fixture;
     let bot;

@@ -20,6 +20,7 @@ const {
     checkCsrfOrigin,
     checkAnyGuildAdmin,
 } = require('../src/dashboard/lib/middleware');
+const { forgetLiveGuildAccess } = require('../src/dashboard/lib/permissions');
 
 const MANAGE_GUILD = (0x20n).toString();
 const NO_PERMS     = '0';
@@ -36,15 +37,26 @@ function makeRes() {
 // `guilds` is what Discord's /users/@me/guilds returned for this session;
 // `botGuilds` is what the bot is actually in. Both matter: dashboard access needs
 // the user to administer the guild *and* the bot to be present in it.
-function makeReq({ authenticated = true, guilds = [], botGuilds = [], params = {}, headers = {} } = {}) {
+// `live` is what Discord says about this user *now*, which is the second gate
+// checkGuildAccess takes (#558): true/false when it answered, null when it could
+// not be asked. The default is null — the answer a gateway gives during an
+// outage — so every pre-existing case below still describes the snapshot rule.
+function makeReq({ authenticated = true, guilds = [], botGuilds = [], params = {}, headers = {}, live = null } = {}) {
     return {
         isAuthenticated: () => authenticated,
         user: authenticated ? { id: 'user-1', guilds } : undefined,
-        bot: { hasGuild: id => botGuilds.includes(id) },
+        bot: {
+            hasGuild: id => botGuilds.includes(id),
+            canManageGuild: async () => live,
+        },
         params,
         headers,
     };
 }
+
+// Live answers are cached for a minute, and every case here reuses the same
+// user and guild ids.
+beforeEach(() => forgetLiveGuildAccess());
 
 const adminOf   = id => ({ id, name: `guild ${id}`, permissions: MANAGE_GUILD });
 const memberOf  = id => ({ id, name: `guild ${id}`, permissions: NO_PERMS });
@@ -73,7 +85,7 @@ describe('checkAuth', () => {
 });
 
 describe('checkGuildAccess', () => {
-    test('rejects a guild the user only belongs to, with no manage permission', () => {
+    test('rejects a guild the user only belongs to, with no manage permission', async () => {
         const res = makeRes();
         const next = jest.fn();
         const req = makeReq({
@@ -82,7 +94,7 @@ describe('checkGuildAccess', () => {
             params: { guildId: 'g1' },
         });
 
-        checkGuildAccess(req, res, next);
+        await checkGuildAccess(req, res, next);
 
         expect(next).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(403);
@@ -90,7 +102,7 @@ describe('checkGuildAccess', () => {
     });
 
     // The IDOR shape: authenticated, genuinely an admin — just not of this guild.
-    test('rejects an admin of one guild reaching for another', () => {
+    test('rejects an admin of one guild reaching for another', async () => {
         const res = makeRes();
         const next = jest.fn();
         const req = makeReq({
@@ -99,13 +111,13 @@ describe('checkGuildAccess', () => {
             params: { guildId: 'g2' },
         });
 
-        checkGuildAccess(req, res, next);
+        await checkGuildAccess(req, res, next);
 
         expect(next).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(403);
     });
 
-    test('rejects a guild the user administers but the bot is not in', () => {
+    test('rejects a guild the user administers but the bot is not in', async () => {
         const res = makeRes();
         const next = jest.fn();
         const req = makeReq({
@@ -114,13 +126,13 @@ describe('checkGuildAccess', () => {
             params: { guildId: 'g1' },
         });
 
-        checkGuildAccess(req, res, next);
+        await checkGuildAccess(req, res, next);
 
         expect(next).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(403);
     });
 
-    test('rejects a guild id the session has never heard of', () => {
+    test('rejects a guild id the session has never heard of', async () => {
         const res = makeRes();
         const next = jest.fn();
         const req = makeReq({
@@ -129,24 +141,79 @@ describe('checkGuildAccess', () => {
             params: { guildId: 'g9' },
         });
 
-        checkGuildAccess(req, res, next);
+        await checkGuildAccess(req, res, next);
 
         expect(res.statusCode).toBe(403);
     });
 
-    test('admits an admin of a guild the bot shares', () => {
+    test('admits an admin of a guild the bot shares', async () => {
         const res = makeRes();
         const next = jest.fn();
         const req = makeReq({
             guilds: [adminOf('g1')],
             botGuilds: ['g1'],
             params: { guildId: 'g1' },
+            live: true,
         });
 
-        checkGuildAccess(req, res, next);
+        await checkGuildAccess(req, res, next);
 
         expect(next).toHaveBeenCalledTimes(1);
         expect(res.statusCode).toBeNull();
+    });
+
+    // #558: the session's guild list is a snapshot from OAuth time and nothing
+    // refreshes it, so this is the only thing standing between a revoked admin
+    // and full write access for the rest of the cookie's life. The snapshot in
+    // this request still says MANAGE_GUILD — that is the point.
+    test('rejects a snapshot admin whom Discord no longer counts as one', async () => {
+        const res = makeRes();
+        const next = jest.fn();
+        const req = makeReq({
+            guilds: [adminOf('g1')],
+            botGuilds: ['g1'],
+            params: { guildId: 'g1' },
+            live: false,
+        });
+
+        await checkGuildAccess(req, res, next);
+
+        expect(next).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(403);
+        expect(res.body).toEqual({ error: 'Forbidden' });
+    });
+
+    // The unknown answer is not a denial: an operator must not lose their own
+    // dashboard because Discord is having an incident.
+    test('falls back to the snapshot when the live check cannot answer', async () => {
+        for (const bot of [
+            { hasGuild: () => true, canManageGuild: async () => null },
+            { hasGuild: () => true, canManageGuild: async () => { throw new Error('Discord is down'); } },
+            { hasGuild: () => true }, // a gateway with no such method at all
+        ]) {
+            forgetLiveGuildAccess();
+            const res = makeRes();
+            const next = jest.fn();
+            const req = makeReq({ guilds: [adminOf('g1')], botGuilds: ['g1'], params: { guildId: 'g1' } });
+            req.bot = bot;
+
+            await checkGuildAccess(req, res, next);
+
+            expect(next).toHaveBeenCalledTimes(1);
+            expect(res.statusCode).toBeNull();
+        }
+    });
+
+    test('asks Discord once per user and guild, not once per request', async () => {
+        const canManageGuild = jest.fn().mockResolvedValue(true);
+        const req = makeReq({ guilds: [adminOf('g1')], botGuilds: ['g1'], params: { guildId: 'g1' } });
+        req.bot = { hasGuild: () => true, canManageGuild };
+
+        await checkGuildAccess(req, makeRes(), jest.fn());
+        await checkGuildAccess(req, makeRes(), jest.fn());
+
+        expect(canManageGuild).toHaveBeenCalledTimes(1);
+        expect(canManageGuild).toHaveBeenCalledWith('g1', 'user-1');
     });
 });
 
@@ -242,14 +309,59 @@ describe('checkCsrfOrigin', () => {
         expect(res.statusCode).toBe(403);
     });
 
-    test('admits a matching Origin, and a request that sends none', () => {
-        for (const headers of [{ origin: DASHBOARD }, {}]) {
+    test('admits a matching Origin', () => {
+        const res = makeRes();
+        const next = jest.fn();
+        checkCsrfOrigin(makeReq({ headers: { origin: DASHBOARD } }), res, next);
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).toBeNull();
+    });
+
+    // #563: a missing Origin used to be waved through, which made the whole
+    // check optional to anything that simply omitted the header — and there is
+    // no CSRF token behind it to catch what got past. This middleware only runs
+    // on state-changing methods, and the Fetch standard has browsers send Origin
+    // on all of those, so nothing legitimate is turned away.
+    test('rejects a write that carries neither Origin nor Fetch Metadata', () => {
+        const res = makeRes();
+        const next = jest.fn();
+
+        checkCsrfOrigin(makeReq({ headers: {} }), res, next);
+
+        expect(next).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(403);
+    });
+
+    test('accepts Fetch Metadata as the fallback when Origin is absent', () => {
+        for (const site of ['same-origin', 'none']) {
             const res = makeRes();
             const next = jest.fn();
-            checkCsrfOrigin(makeReq({ headers }), res, next);
+            checkCsrfOrigin(makeReq({ headers: { 'sec-fetch-site': site } }), res, next);
             expect(next).toHaveBeenCalledTimes(1);
             expect(res.statusCode).toBeNull();
         }
+    });
+
+    test('rejects the cross-site Fetch Metadata values', () => {
+        for (const site of ['cross-site', 'same-site', 'nonsense']) {
+            const res = makeRes();
+            checkCsrfOrigin(makeReq({ headers: { 'sec-fetch-site': site } }), res, jest.fn());
+            expect(res.statusCode).toBe(403);
+        }
+    });
+
+    // Origin is the stronger signal, so a forged Sec-Fetch-Site alongside a
+    // foreign Origin must not rescue the request.
+    test('a same-origin Sec-Fetch-Site does not override a foreign Origin', () => {
+        const res = makeRes();
+        const next = jest.fn();
+
+        checkCsrfOrigin(makeReq({
+            headers: { origin: 'https://evil.example.com', 'sec-fetch-site': 'same-origin' },
+        }), res, next);
+
+        expect(next).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(403);
     });
 });
 

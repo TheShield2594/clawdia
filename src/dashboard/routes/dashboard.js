@@ -17,7 +17,7 @@ function checkAuth(req, res, next) {
     res.redirect('/auth/login');
 }
 
-const { hasManagePermission } = require('../lib/permissions');
+const { hasManagePermission, verifyLiveGuildAccess } = require('../lib/permissions');
 const { CHANNEL_TYPES } = require('../../bot/gateway');
 const { PANELS, DEFAULT_PANEL, isPanel } = require('../lib/panels');
 
@@ -68,6 +68,17 @@ async function buildGuildSettingsLocals(req) {
     const userGuilds = getManageableGuilds(req);
 
     if (!userGuilds.find(g => g.id === guildId)) {
+        return { status: 403, message: 'You do not have permission to manage this guild.' };
+    }
+
+    // The session's guild list is a snapshot from OAuth time, so the panel asks
+    // Discord whether it is still true before rendering a guild's settings
+    // (#558) — the same second opinion the API middleware takes, and for the
+    // same reason: without it a demoted or kicked admin keeps reading this page
+    // until their cookie expires. The guild *list* on /dashboard is still drawn
+    // from the snapshot: it is the guild names the session already holds, and
+    // checking it would mean a member fetch per card.
+    if (await verifyLiveGuildAccess(req.bot, guildId, req.user.id) === false) {
         return { status: 403, message: 'You do not have permission to manage this guild.' };
     }
 
