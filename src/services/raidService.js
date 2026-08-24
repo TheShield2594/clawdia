@@ -42,15 +42,22 @@ async function applyRaidAction(member, rd, minAccountAgeDays) {
     }
 }
 
-async function handleMemberJoin(member, _client) {
+/**
+ * `settings` is the caller's already-resolved guild settings, passed down by
+ * guildMemberAdd so one join costs one settings read rather than three (#593).
+ * Omit it and this reads for itself.
+ */
+async function handleMemberJoin(member, _client, settings) {
     const guildId = member.guild.id;
 
-    let guildSettings;
-    try {
-        guildSettings = await Guild.findOne({ guildId });
-    } catch (err) {
-        console.error(`[RaidService] DB error fetching guild ${guildId}:`, err);
-        return;
+    let guildSettings = settings;
+    if (guildSettings === undefined) {
+        try {
+            guildSettings = await Guild.findOne({ guildId });
+        } catch (err) {
+            console.error(`[RaidService] DB error fetching guild ${guildId}:`, err);
+            return;
+        }
     }
 
     if (!guildSettings?.raidDetection?.enabled) return;

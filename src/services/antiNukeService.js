@@ -284,9 +284,16 @@ async function endLockdown(guild, { endedBy } = {}) {
 
 // --- Join gate ---------------------------------------------------------------
 
-async function enforceJoinGate(member) {
+/**
+ * `settings` is the caller's already-resolved guild settings. guildMemberAdd
+ * resolves them once per join and passes the same object to the join gate,
+ * raid detection and its own handler (#593); each used to issue its own full
+ * uncached read of the guild document. Omit it and this reads for itself, so
+ * a caller that has nothing to hand down still works.
+ */
+async function enforceJoinGate(member, settings) {
     if (member.user?.bot) return false;
-    const settings = await Guild.findOne({ guildId: member.guild.id });
+    if (settings === undefined) settings = await Guild.findOne({ guildId: member.guild.id });
     const gate = settings?.antiNuke?.joinGate;
     if (!gate?.enabled) return false;
 
