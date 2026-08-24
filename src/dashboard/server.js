@@ -11,6 +11,7 @@ const { hasManagePermission } = require('./lib/permissions');
 const { jsonForScript } = require('./lib/jsonForScript');
 const { asset } = require('./lib/assets');
 const { createBotGateway } = require('../bot/gateway');
+const { instanceStats } = require('./lib/instanceStats');
 
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
@@ -165,6 +166,14 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
 
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
+
+    // The version every view renders, read from package.json rather than typed
+    // into the templates. Three of them carried a hardcoded "v4.2.0" while
+    // package.json said 1.0.0 (#708): a footer nobody remembers to edit is a
+    // footer that reports the wrong build, and the whole point of tagging
+    // releases is being able to tell which one is running. `app.locals` so it
+    // reaches every render without a route passing it along.
+    app.locals.version = require('../../package.json').version;
     // No explicit `view cache` here on purpose: guild-settings.ejs is a few
     // hundred KB and must not be recompiled per render, but Express already
     // enables the cache whenever NODE_ENV is 'production', which both the
@@ -299,7 +308,10 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     });
 
     app.get('/', (req, res) => {
-        res.render('index', { user: req.user });
+        // The hero's stat row is measured, not written into the template
+        // (#704). `null` when the client has not been ready yet, and the
+        // template drops the row for that rather than claiming zero servers.
+        res.render('index', { user: req.user, stats: instanceStats(bot) });
     });
 
     app.use(errorHandler);

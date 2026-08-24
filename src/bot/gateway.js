@@ -132,6 +132,37 @@ function createBotGateway(client) {
             return guild ? plainGuild(guild) : null;
         },
 
+        /**
+         * How much of Discord this instance actually serves: guilds the bot is
+         * in, and the members across them.
+         *
+         * The landing page hardcoded "14,200 servers" and "2.1M commands / day"
+         * as facts about the running instance (#704) — figures that on a
+         * self-hosted deploy describe someone else's install, or none at all.
+         * This is the honest version of that row.
+         *
+         * `memberCount` is Discord's own per-guild figure, summed. A member in
+         * two of the instance's guilds is counted in both, which is why the
+         * landing page labels it "members reached" rather than a headcount of
+         * distinct people — the facade returns the number, not a claim about it.
+         *
+         * A guild whose `memberCount` Discord has not sent yet contributes 0
+         * rather than making the whole sum NaN.
+         *
+         * @returns {{guilds: number, members: number}|null} null before the
+         *   client has been ready, when the guild cache is empty because
+         *   nothing has filled it yet rather than because the bot is in no
+         *   guilds. Callers must render "we do not know" for that, not zero.
+         */
+        reach() {
+            if (!client?.readyAt) return null;
+            const guilds = [...client.guilds.cache.values()];
+            return {
+                guilds: guilds.length,
+                members: guilds.reduce((sum, guild) => sum + (Number(guild.memberCount) || 0), 0),
+            };
+        },
+
         /** @returns {Array<object>|null} null when the bot is not in the guild. */
         listChannels(guildId) {
             const guild = guildOf(guildId);

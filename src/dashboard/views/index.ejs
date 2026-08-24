@@ -49,7 +49,7 @@
     <header class="cw-hero">
         <div class="cw-hero-eyebrow">
             <span class="cw-dot"></span>
-            v4.2 · Insights layer is live
+            v<%= version %> · Insights layer is live
         </div>
         <h1 class="font-display cw-hero-title">
             A <em>chill</em> Discord bot<br>
@@ -69,13 +69,20 @@
                 View on GitHub
             </a>
         </div>
+        <%# Measured off this instance, not written here (#704). This row used
+            to read "14,200 servers · 2.1M commands / day · 99.98% uptime · 90d",
+            which on a self-hosted deploy described someone else's install. The
+            whole row is dropped when `stats` is null — the client has not been
+            ready, so the honest answer is nothing rather than zero. %>
         <div class="cw-hero-stats">
-            <div><b>14,200</b><span>servers</span></div>
-            <i></i>
-            <div><b>2.1M</b><span>commands / day</span></div>
-            <i></i>
-            <div><b>99.98%</b><span>uptime · 90d</span></div>
-            <i></i>
+            <% if (stats) { %>
+                <div><b><%= stats.servers %></b><span>servers</span></div>
+                <i></i>
+                <div><b><%= stats.members %></b><span>members reached</span></div>
+                <i></i>
+                <div><b><%= stats.uptime %></b><span>uptime · this instance</span></div>
+                <i></i>
+            <% } %>
             <div><b>MIT</b><span>open source</span></div>
         </div>
 
@@ -194,7 +201,7 @@
     <section id="insights" class="cw-show">
         <div class="cw-show-inner">
             <div>
-                <div class="cw-eyebrow">// Insights, v4.2</div>
+                <div class="cw-eyebrow">// Insights</div>
                 <h2>Decisions, not<br>event logs <em>·</em></h2>
                 <p>Most Discord analytics dump raw events at you. Clawdia surfaces the five questions server owners actually ask — and answers them.</p>
                 <ul>
@@ -407,7 +414,7 @@
         </div>
         <div class="cw-footer-bottom">
             <span>© <%= new Date().getFullYear() %> Clawdia · Built with claws ✦ MIT licensed</span>
-            <span>v4.2.0</span>
+            <span>v<%= version %></span>
         </div>
     </footer>
 
