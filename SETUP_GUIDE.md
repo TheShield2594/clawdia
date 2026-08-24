@@ -57,7 +57,7 @@ https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=8&scope
 
 ## AI Integration
 
-### OpenAI (GPT-3.5/GPT-4)
+### OpenAI
 
 1. Go to [OpenAI Platform](https://platform.openai.com/)
 2. Create an account or sign in
@@ -68,10 +68,8 @@ https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=8&scope
 
 **Alternative:** Add the API key per-server in the bot dashboard under AI Chat settings.
 
-**Pricing:** 
-- GPT-3.5 Turbo: ~$0.002 per 1K tokens
-- GPT-4: ~$0.03 per 1K tokens
-- Check latest pricing at [OpenAI Pricing](https://openai.com/pricing)
+**Default model:** `gpt-4o-mini`. Current rates are at
+[OpenAI Pricing](https://openai.com/api/pricing/).
 
 ### Google Gemini
 
@@ -83,21 +81,17 @@ https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=8&scope
 
 **Alternative:** Add the API key per-server in the bot dashboard under AI Chat settings.
 
-**Pricing:**
-- Gemini Pro: Free tier available (60 requests per minute)
-- Check latest pricing at [Google AI Pricing](https://ai.google.dev/pricing)
+**Default model:** `gemini-2.0-flash`. There is a free tier; current rates and
+its limits are at [Google AI Pricing](https://ai.google.dev/pricing).
 
-### Choosing Between OpenAI and Gemini
+### Choosing a provider
 
-**OpenAI (GPT-3.5/4):**
-- Pros: More mature, better for complex tasks, extensive fine-tuning
-- Cons: Costs money after free trial, requires payment method
+OpenAI and Gemini are two of five. Clawdia also supports Anthropic (Claude),
+OpenRouter, and a local Ollama instance — configured the same way, with
+`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, and `OLLAMA_BASE_URL`.
 
-**Google Gemini:**
-- Pros: Free tier available, fast responses, good for general tasks
-- Cons: Newer platform, fewer customization options
-
-**Recommendation:** Start with Gemini for testing (free), then add OpenAI if you need more advanced capabilities.
+[AI_COMPARISON.md](AI_COMPARISON.md) covers what differs between them and which
+to start with.
 
 ### MCP Servers (Anthropic only)
 
