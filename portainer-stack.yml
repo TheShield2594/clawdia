@@ -92,7 +92,10 @@ services:
       # renaming it does not move data, it just points the bot at an empty
       # database. Change it only alongside a dump-and-restore into the new name.
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
-      - DASHBOARD_PORT=7001
+      # The port *inside* the container, which is also what the image
+      # EXPOSEs and what its own HEALTHCHECK probes. The host-side port is
+      # the `ports:` mapping below and is a separate choice.
+      - DASHBOARD_PORT=${DASHBOARD_PORT:-3000}
       - AUDIT_LOG_RETENTION_DAYS=${AUDIT_LOG_RETENTION_DAYS:-90}
       - NODE_ENV=${NODE_ENV:-production}
       #
@@ -125,15 +128,24 @@ services:
     #   - gemini_api_key
     #   - anthropic_api_key
     #   - openrouter_api_key
-    # A Portainer stack has no repo checkout to mount, so put mcp-servers.json
-    # somewhere on the Docker host and point MCP_SERVERS_CONFIG at it inside the
-    # container. Mounted read-only: the file can hold OAuth tokens.
-    # volumes:
-    #   - /opt/clawdia/config:/app/config:ro
+    volumes:
+      # src/migrations/runner.js dumps the database here before it applies an
+      # irreversible migration. Without a volume that dump lands in the
+      # container's writable layer and the next image pull destroys it — which
+      # is precisely the copy you would want after a bad migration.
+      - backups:/app/backups
+      # A Portainer stack has no repo checkout to mount, so put mcp-servers.json
+      # somewhere on the Docker host and point MCP_SERVERS_CONFIG at it inside
+      # the container. Mounted read-only: the file can hold OAuth tokens.
+      # - /opt/clawdia/config:/app/config:ro
     # Loopback only — put your reverse proxy in front of this. Publish on
     # 0.0.0.0 only if TLS is terminated elsewhere on the host network.
+    #
+    # Host port 7001 by default, container port 3000. Point the reverse proxy at
+    # DASHBOARD_HOST_PORT; DASHBOARD_PORT above is the container's side and
+    # should normally stay 3000 so the image's EXPOSE and HEALTHCHECK match it.
     ports:
-      - "127.0.0.1:7001:7001"
+      - "127.0.0.1:${DASHBOARD_HOST_PORT:-7001}:${DASHBOARD_PORT:-3000}"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -159,7 +171,7 @@ services:
     # uptime monitor described in README's Monitoring section is for.
     healthcheck:
       test: ["CMD", "node", "-e",
-        "require('http').get('http://localhost:7001/health', (r) => { let b=''; r.on('data', d => b+=d); r.on('end', () => { try { const s = JSON.parse(b).status; process.exit(s === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"]
+        "require('http').get('http://127.0.0.1:' + (process.env.DASHBOARD_PORT || 3000) + '/health', (r) => { let b=''; r.on('data', d => b+=d); r.on('end', () => { try { const s = JSON.parse(b).status; process.exit(s === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -186,6 +198,81 @@ services:
       # service does not exist, which is why it is not commented out: enabling
       # autoheal is then one block to uncomment, with nothing to remember here.
       autoheal: "true"
+
+  # Scheduled backup: mongodump once a day at 03:00 UTC into the `backups`
+  # volume, keeping 30 days.
+  #
+  # Not optional and not behind a profile. This is the production deploy and
+  # migrations here are destructive and forward-only — src/migrations/runner.js
+  # dumps before an irreversible step, but that is one archive taken at one
+  # moment, not a backup history. Delete this service only if something outside
+  # the stack (a host cron running scripts/backup.sh, a volume snapshot) is
+  # demonstrably taking its place.
+  #
+  # Archives land in the `backups` named volume, which the bot also mounts at
+  # /app/backups. To copy one to the host:
+  #   docker run --rm -v clawdia_backups:/b -v "$PWD:/out" alpine \
+  #     sh -c 'cp /b/clawdia-<timestamp>.gz /out/'
+  # To restore one, see scripts/restore.sh and scripts/verify-backup.sh.
+  backup:
+    image: mongo:7
+    container_name: clawdia-backup
+    restart: unless-stopped
+    environment:
+      # Same default as the bot, so a stack that never sets MONGODB_URI still
+      # backs up the database the bot is actually writing to.
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+      # Mirrors the bot's MONGODB_URI_FILE. This is a stock mongo image with no
+      # loader of its own, so the entrypoint below reads the file itself. As on
+      # the bot, DELETE the `- MONGODB_URI=` line above before uncommenting.
+      # - MONGODB_URI_FILE=/run/secrets/mongodb_uri
+    # secrets:
+    #   - mongodb_uri
+    volumes:
+      - backups:/backups
+    networks:
+      - db-network   # only needs to reach MongoDB
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: >
+      sh -c '
+        if [ -n "$$MONGODB_URI_FILE" ]; then
+          if [ ! -r "$$MONGODB_URI_FILE" ]; then
+            echo "[backup] MONGODB_URI_FILE=$$MONGODB_URI_FILE is not readable"; exit 1;
+          fi;
+          MONGODB_URI=$$(tr -d "\r\n" < "$$MONGODB_URI_FILE");
+          if [ -z "$$MONGODB_URI" ]; then
+            echo "[backup] MONGODB_URI_FILE=$$MONGODB_URI_FILE is empty"; exit 1;
+          fi;
+          export MONGODB_URI;
+          echo "[backup] Read MONGODB_URI from $$MONGODB_URI_FILE";
+        fi;
+        if [ -z "$$MONGODB_URI" ]; then
+          echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
+        fi;
+        RETAIN=$${BACKUP_RETENTION_DAYS:-30};
+        NOW=$$(date -u +%s);
+        MIDNIGHT=$$(( ($$NOW / 86400) * 86400 ));
+        TARGET=$$(( $$MIDNIGHT + 10800 ));
+        if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
+        SLEEP=$$(( $$TARGET - $$NOW ));
+        echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
+        sleep $$SLEEP;
+        while true; do
+          TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
+          echo "[backup] Starting backup at $$TIMESTAMP";
+          mongodump --uri="$$MONGODB_URI" --gzip --archive="/backups/clawdia-$$TIMESTAMP.gz" &&
+            echo "[backup] Done: /backups/clawdia-$$TIMESTAMP.gz" ||
+            echo "[backup] FAILED";
+          # Prunes the old ultrabot-* prefix too, so archives written before the
+          # rename are still aged out instead of accumulating forever. The
+          # bot lands pre-migration-*.gz in the same volume; those are pruned
+          # on the same schedule.
+          find /backups \( -name "clawdia-*.gz" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
+          sleep 86400;
+        done'
 
   # Optional container-level self-healing. Uncomment the whole block to enable.
   #
@@ -249,6 +336,10 @@ services:
 
 volumes:
   mongodb_data:
+  # Written by the `backup` service and by the bot's pre-migration dump. A named
+  # volume rather than a bind mount because a Portainer stack has no repo
+  # checkout on the host to bind to.
+  backups:
 
 networks:
   clawdia-network:

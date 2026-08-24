@@ -421,10 +421,12 @@ docker logs clawdia -f
 
 ### Health Monitoring
 
-The bot serves `GET /health` on the dashboard port:
+The bot serves `GET /health` on the dashboard port — 3000 inside the container,
+and whatever `DASHBOARD_HOST_PORT` publishes on the host (3000 under
+`docker-compose.yml`, 7001 under `portainer-stack.yml`):
 
 ```bash
-curl -s http://localhost:7001/health
+curl -s http://localhost:3000/health   # or 7001 on the Portainer stack
 # {"status":"healthy","uptime":43200}
 ```
 
@@ -445,19 +447,76 @@ section covers the setup, and the optional `autoheal` service that restarts an
 
 The bot automatically creates the database and collections. No manual setup needed.
 
-### Backup Database
+### Automated Backups
+
+Both `docker-compose.yml` and `portainer-stack.yml` run a `backup` service that
+dumps the database once a day at 03:00 UTC and prunes archives older than
+`BACKUP_RETENTION_DAYS` (30). It is **on by default in both** — it used to exist
+only in the compose file, and only behind a profile, which meant the production
+Portainer deploy had no automated backups at all.
+
+Where the archives land differs, because a Portainer stack has no repo checkout
+on the host to bind-mount:
+
+| Deploy | Location |
+| --- | --- |
+| `docker compose` | `./backups/` in the checkout |
+| Portainer stack | the `backups` named volume (usually `clawdia_backups`) |
+
+The bot mounts the same location at `/app/backups`, which is where
+`src/migrations/runner.js` puts its pre-migration dump. Those archives are named
+`pre-migration-*.gz` and are pruned on the same schedule.
+
+To copy an archive out of the Portainer volume:
 
 ```bash
-docker exec clawdia-mongodb mongodump --out /data/backup
-docker cp clawdia-mongodb:/data/backup ./backup
+docker run --rm -v clawdia_backups:/b -v "$PWD:/out" alpine \
+  sh -c 'cp /b/clawdia-<timestamp>.gz /out/'
 ```
+
+To opt out of the scheduled service (only if something else — a host cron
+running `scripts/backup.sh`, a volume snapshot — is demonstrably taking its
+place):
+
+```bash
+docker compose up -d --scale backup=0
+```
+
+### Backup on Demand
+
+```bash
+./scripts/backup.sh              # → ./backups/clawdia-<timestamp>.gz
+```
+
+It uses `mongodump` if it is on `PATH` and otherwise runs it inside the
+`clawdia-mongodb` container, so it works whether or not the host has the mongo
+tools installed.
+
+### Verify a Backup Restores
+
+An untested backup is a guess, and migrations here are destructive and
+forward-only. `scripts/verify-backup.sh` restores an archive into a throwaway
+database beside the real one, compares per-collection document counts, and drops
+the scratch database on the way out. Nothing touches the live data.
+
+```bash
+./scripts/verify-backup.sh --latest       # newest archive in ./backups
+./scripts/verify-backup.sh ./backups/clawdia-20260101T030000Z.gz
+```
+
+It exits non-zero if any collection comes back empty, so it can be wired into a
+host cron and monitored like any other job. Run it after any change to the
+backup service, and periodically thereafter.
 
 ### Restore Database
 
 ```bash
-docker cp ./backup clawdia-mongodb:/data/backup
-docker exec clawdia-mongodb mongorestore /data/backup
+./scripts/restore.sh ./backups/clawdia-<timestamp>.gz          # merge
+./scripts/restore.sh ./backups/clawdia-<timestamp>.gz --drop   # clean restore
 ```
+
+Both forms prompt for confirmation first. Verify the archive with
+`scripts/verify-backup.sh` before running this against a live database.
 
 ## Troubleshooting
 
@@ -521,9 +580,10 @@ docker exec clawdia-mongodb mongorestore /data/backup
   Two cases need more than uncommenting. In `portainer-stack.yml` the
   `MONGODB_URI` mapping carries a `:-` default, so it is never empty and always
   wins over `MONGODB_URI_FILE` — delete that line rather than blanking it. And
-  the optional `backup` service is a stock mongo image with no loader of its
-  own; it reads `MONGODB_URI_FILE` in its entrypoint, so mount the same secret
-  there if you move the database URI to a file.
+  the `backup` service is a stock mongo image with no loader of its own; it
+  reads `MONGODB_URI_FILE` in its entrypoint, so mount the same secret there if
+  you move the database URI to a file. Its `MONGODB_URI` mapping carries the
+  same `:-` default as the bot's and needs deleting for the same reason.
 
 ### Performance
 
