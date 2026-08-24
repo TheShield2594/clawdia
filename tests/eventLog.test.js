@@ -23,6 +23,7 @@ jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
 jest.mock('../src/services/antiNukeService', () => ({ trackAction: jest.fn().mockResolvedValue(undefined) }));
 
 const Guild = require('../src/models/Guild');
+const { clearGuildSettingsCache } = require('../src/utils/guildSettingsCache');
 const messageDeleteEvent = require('../src/events/messageDelete');
 const messageUpdateEvent = require('../src/events/messageUpdate');
 const guildMemberUpdateEvent = require('../src/events/guildMemberUpdate');
@@ -79,7 +80,13 @@ function makeAuthor(overrides = {}) {
     };
 }
 
-beforeEach(() => jest.clearAllMocks());
+// These handlers read through guildSettingsCache. Its invalidation runs off
+// Mongoose middleware, which the Guild mock above does not have, so each test's
+// mockResolvedValue would otherwise be shadowed by the first test's entry.
+beforeEach(() => {
+    jest.clearAllMocks();
+    clearGuildSettingsCache();
+});
 
 // ---------------------------------------------------------------------------
 // messageDelete

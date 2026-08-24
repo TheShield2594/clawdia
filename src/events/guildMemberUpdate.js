@@ -1,10 +1,10 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const Guild = require('../models/Guild');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 
 module.exports = {
     name: 'guildMemberUpdate',
     async execute(oldMember, newMember, _client) {
-        const guildSettings = await Guild.findOne({ guildId: newMember.guild.id });
+        const guildSettings = await getGuildSettings(newMember.guild.id);
         if (!guildSettings?.eventLog?.enabled || !guildSettings.eventLog.logRoleChanges) return;
 
         const logChannel = newMember.guild.channels.cache.get(guildSettings.eventLog.channelId);

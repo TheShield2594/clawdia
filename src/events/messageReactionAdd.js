@@ -1,6 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 const User = require('../models/User');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { ensureQuests, onReaction, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 
@@ -19,7 +20,10 @@ module.exports = {
         const guild = reaction.message.guild;
         if (!guild) return;
 
-        const guildSettings = await Guild.findOne({ guildId: guild.id });
+        // Read-only for three of the four handlers below; the starboard's one
+        // write claims its message with a targeted update rather than saving
+        // this object, which is shared with every other reader of this guild.
+        const guildSettings = await getGuildSettings(guild.id);
         if (!guildSettings) return;
 
         await handleReactionRole(reaction, user, guild, guildSettings);
@@ -100,8 +104,18 @@ async function handleStarboard(reaction, user, guild, guildSettings) {
 
     if (sb.starredMessages.includes(message.id)) return;
 
-    sb.starredMessages.push(message.id);
-    await guildSettings.save();
+    // Claim the message in one atomic update instead of pushing onto the shared
+    // settings object and saving it. The `$ne` in the filter *is* the claim: if
+    // another reaction crossed the threshold first, the update matches nothing
+    // and modifies nothing, so exactly one of them posts the star. The check
+    // above is now only a cheap pre-filter against the cached list — the old
+    // read-modify-write let two concurrent reactions both clear it and post the
+    // same message twice.
+    const claimed = await Guild.updateOne(
+        { guildId: guild.id, 'starboard.starredMessages': { $ne: message.id } },
+        { $push: { 'starboard.starredMessages': message.id } }
+    );
+    if (!claimed.modifiedCount) return;
 
     const starChannel = guild.channels.cache.get(sb.channelId);
     if (!starChannel) return;

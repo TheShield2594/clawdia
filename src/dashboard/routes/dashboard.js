@@ -10,6 +10,12 @@ const { ACTIVITY_ITEMS } = require('../../data/activityItems');
 const { REGION_LIST } = require('../../data/exploreData');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 
+// A shop item's image is served by /api/item-image/shop/:guildId/:itemId, never
+// inlined into the settings page, so the guild-settings read excludes both
+// fields. Up to 35 items x 512 KB of Buffer per guild that would otherwise be
+// pulled off the wire and deep-copied by toObject() only to be dropped again.
+const SHOP_IMAGES_EXCLUDED = '-shop.imageData -shop.imageType';
+
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
     res.redirect('/auth/login');
@@ -80,7 +86,8 @@ async function buildGuildSettingsLocals(req) {
         return { status: 403, message: 'You do not have permission to manage this guild.' };
     }
 
-    let guildSettings = await Guild.findOne({ guildId });
+    let guildSettings = await Guild.findOne({ guildId }, SHOP_IMAGES_EXCLUDED);
+    let shopIsProjected = true;
     const guild = req.bot.getGuild(guildId);
 
     if (!guild) {
@@ -92,10 +99,25 @@ async function buildGuildSettingsLocals(req) {
             guildId: guild.id,
             name: guild.name
         });
+        shopIsProjected = false;
     }
 
+    // Seeding is a rare backfill: a guild the bot joined before a shop category
+    // existed. Running it against the projection keeps the new items on the page
+    // being rendered, but the *write* goes through a fully selected document.
+    // ensureDefaultShopItems only ever appends, so a save here would in practice
+    // emit `$push`; re-reading rather than trusting that is cheap on a path that
+    // runs once per guild, and the alternative failure — a whole guild's shop
+    // images replaced with nothing — is not one worth a judgement call.
     if (ensureDefaultShopItems(guildSettings)) {
-        await guildSettings.save();
+        if (!shopIsProjected) {
+            await guildSettings.save();
+        } else {
+            const fullSettings = await Guild.findOne({ guildId });
+            if (fullSettings && ensureDefaultShopItems(fullSettings)) {
+                await fullSettings.save();
+            }
+        }
     }
 
     const allChannels = req.bot.listChannels(guildId) || [];
@@ -116,6 +138,8 @@ async function buildGuildSettingsLocals(req) {
         xpReward: a.xpReward, coinReward: a.coinReward
     }));
 
+    // imageData/imageType are already projected out above for an existing guild;
+    // the map still runs because a freshly created document is unprojected.
     const safeSettings = guildSettings.toObject();
     if (Array.isArray(safeSettings.shop)) {
         safeSettings.shop = safeSettings.shop.map(({ imageData, imageType, ...rest }) => rest);

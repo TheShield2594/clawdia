@@ -1,5 +1,6 @@
 const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const Guild = require('../models/Guild');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { trackAction } = require('../services/antiNukeService');
 
 module.exports = {
@@ -9,7 +10,7 @@ module.exports = {
 
         await trackAction(channel.guild, 'channelDelete', AuditLogEvent.ChannelDelete, channel.id).catch(console.error);
 
-        const guildSettings = await Guild.findOne({ guildId: channel.guild.id });
+        const guildSettings = await getGuildSettings(channel.guild.id);
 
         // If a temp voice channel was manually deleted, remove it from the active list
         if (guildSettings?.tempVoice?.enabled && guildSettings.tempVoice.activeChannels.includes(channel.id)) {
