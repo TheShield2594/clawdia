@@ -4,6 +4,7 @@ const Case = require('../../../models/Case');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
 
+// One page of moderation cases, filterable by `?type=` and `?status=`.
 router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -39,6 +40,7 @@ router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res
     }
 });
 
+// Adds a moderator note to a case, or closes it with a resolution.
 router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, caseId } = req.params;
     const { action, note, resolution } = req.body;
@@ -77,6 +79,7 @@ router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, check
     }
 });
 
+// Every active ban and timeout in the guild, read live from Discord.
 router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
@@ -103,6 +106,7 @@ router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, asyn
     }
 });
 
+// Lifts a ban, attributing it to the dashboard user, and writes an audit entry.
 router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });
@@ -117,6 +121,7 @@ router.post('/guild/:guildId/sanctions/unban/:userId', checkAuth, checkGuildAcce
     }
 });
 
+// Clears a member's timeout, attributing it to the dashboard user, and writes an audit entry.
 router.post('/guild/:guildId/sanctions/untimeout/:userId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, userId } = req.params;
     if (!isValidDiscordId(userId)) return res.status(400).json({ error: 'Invalid userId' });

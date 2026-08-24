@@ -5,6 +5,7 @@ const User = require('../../../models/User');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
 
+// One page of 25 members ranked by level then XP.
 router.get('/guild/:guildId/leveling/leaderboard', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -27,6 +28,7 @@ router.get('/guild/:guildId/leveling/leaderboard', checkAuth, checkGuildAccess, 
     }
 });
 
+// Gives, takes, resets or sets one member's XP or level.
 router.post('/guild/:guildId/leveling/adjust', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { userId, action, amount } = req.body;
@@ -66,6 +68,7 @@ router.post('/guild/:guildId/leveling/adjust', checkAuth, checkGuildAccess, chec
     }
 });
 
+// Starts a timed XP multiplier event, replacing any event already running.
 router.post('/guild/:guildId/leveling/xp-event', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { multiplier, durationHours } = req.body;

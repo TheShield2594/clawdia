@@ -3,6 +3,7 @@ const router = express.Router();
 const Guild = require('../../../models/Guild');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 
+// Creates or replaces the AI persona — name and system prompt — for one channel.
 router.post('/guild/:guildId/persona', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { channelId, personaName, systemPrompt } = req.body;
@@ -51,6 +52,7 @@ router.post('/guild/:guildId/persona', checkAuth, checkGuildAccess, checkWriteRa
     }
 });
 
+// Removes a channel's persona, returning it to the guild's default system prompt.
 router.delete('/guild/:guildId/persona/:channelId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, channelId } = req.params;
 
@@ -67,6 +69,7 @@ router.delete('/guild/:guildId/persona/:channelId', checkAuth, checkGuildAccess,
     }
 });
 
+// Token and request usage for the last `?days=` (1-90, default 14), plus the configured rate limits.
 router.get('/guild/:guildId/ai/usage', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 14));

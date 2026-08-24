@@ -5,6 +5,7 @@ const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/
 
 const MAX_SUMMARY_JOBS_PER_GUILD = 10;
 
+// The guild's scheduled channel summary jobs, oldest first.
 router.get('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
@@ -16,6 +17,7 @@ router.get('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, async (r
     }
 });
 
+// Schedules a daily channel summary, up to 10 per guild.
 router.post('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { sourceChannelId, targetChannelId, hour, minute, label } = req.body;
@@ -63,6 +65,7 @@ router.post('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, checkWr
     }
 });
 
+// Deletes one scheduled summary job.
 router.delete('/guild/:guildId/summary-jobs/:jobId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, jobId } = req.params;
 

@@ -6,6 +6,7 @@ const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/
 const SNOWFLAKE_RE = /^\d{17,19}$/;
 function isSnowflake(id) { return typeof id === 'string' && SNOWFLAKE_RE.test(id); }
 
+// The guild's AI daily digest settings.
 router.get('/guild/:guildId/daily-digest', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
@@ -18,6 +19,7 @@ router.get('/guild/:guildId/daily-digest', checkAuth, checkGuildAccess, async (r
     }
 });
 
+// Updates the daily digest: on/off, target and source channels, and the local time it is posted.
 router.put('/guild/:guildId/daily-digest', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { enabled, channelId, sourceChannelIds, hour, minute, timezone } = req.body;

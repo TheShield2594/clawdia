@@ -166,6 +166,7 @@ async function buildGuildStats(guildId) {
     };
 }
 
+// The dashboard's headline numbers for a guild: members, messages, economy and leveling totals.
 router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
@@ -181,6 +182,7 @@ router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res
     }
 });
 
+// Derived analytics: 7 and 30 day retention, activity by hour, and command usage.
 router.get('/guild/:guildId/insights', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 

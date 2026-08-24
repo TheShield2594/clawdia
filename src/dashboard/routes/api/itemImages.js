@@ -39,7 +39,7 @@ function uploadImage(req, res, next) {
     });
 }
 
-// Serve a guild shop item's image
+// Serves a guild shop item's image.
 router.get('/item-image/shop/:guildId/:itemId', async (req, res) => {
     try {
         const guild = await require('../../../models/Guild').findOne({ guildId: req.params.guildId }, { shop: 1 });
@@ -51,7 +51,7 @@ router.get('/item-image/shop/:guildId/:itemId', async (req, res) => {
     } catch { res.status(500).end(); }
 });
 
-// Upload image for a guild shop item
+// Stores the image shown for a guild shop item, replacing any existing one.
 router.post('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, uploadImage, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
     // M4: Verify file contents match a known image signature.
@@ -72,7 +72,7 @@ router.post('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, ch
     }
 });
 
-// Remove image from a guild shop item
+// Removes a guild shop item's image.
 router.delete('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     try {
         const guild = await require('../../../models/Guild').findOne({ guildId: req.params.guildId });
@@ -112,7 +112,7 @@ function invalidItemId(itemId) {
     return null;
 }
 
-// Serve a guild's activity item image, falling back to the shared pre-#561 one.
+// Serves a guild's activity item image, falling back to the shared pre-#561 one.
 router.get('/item-image/activity/:guildId/:itemId', async (req, res) => {
     const { guildId, itemId } = req.params;
     try {
@@ -127,7 +127,7 @@ router.get('/item-image/activity/:guildId/:itemId', async (req, res) => {
     } catch { res.status(500).end(); }
 });
 
-// Upload/replace one guild's activity item image
+// Stores one guild's activity item image, replacing any existing one.
 router.post('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, uploadImage, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
     const { guildId, itemId } = req.params;
@@ -149,7 +149,7 @@ router.post('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess
     }
 });
 
-// Remove one guild's activity item image. The shared fallback is not reachable
+// Removes one guild's activity item image. The shared fallback is not reachable
 // from here: `guildId` is always the caller's own guild, never null.
 router.delete('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, itemId } = req.params;

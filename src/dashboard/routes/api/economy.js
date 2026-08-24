@@ -11,6 +11,7 @@ const { cachedAggregate, invalidatePrefix } = require('../../lib/aggregateCache'
 // reads command names out of it and nothing from the Guild document at all.
 const ECONOMY_ANALYTICS_FIELDS = 'commandUsage';
 
+// Economy overview: richest members by net worth, coins in circulation, active earners and top commands.
 router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
@@ -66,6 +67,7 @@ router.get('/guild/:guildId/economy/stats', checkAuth, checkGuildAccess, async (
     }
 });
 
+// Gives, takes, resets, freezes or unfreezes one member's balance, and writes an audit entry.
 router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { userId, action, amount } = req.body;

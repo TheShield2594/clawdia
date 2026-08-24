@@ -3,6 +3,7 @@ const router = express.Router();
 const KnowledgeBase = require('../../../models/KnowledgeBase');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 
+// The guild's 100 most recent knowledge base entries, newest first.
 router.get('/guild/:guildId/knowledge-base', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {
@@ -14,6 +15,7 @@ router.get('/guild/:guildId/knowledge-base', checkAuth, checkGuildAccess, async 
     }
 });
 
+// Adds a knowledge base entry the AI can draw on, with up to 10 tags.
 router.post('/guild/:guildId/knowledge-base', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { title, content, tags } = req.body;
@@ -42,6 +44,7 @@ router.post('/guild/:guildId/knowledge-base', checkAuth, checkGuildAccess, check
     }
 });
 
+// Deletes one knowledge base entry.
 router.delete('/guild/:guildId/knowledge-base/:entryId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, entryId } = req.params;
 
@@ -61,6 +64,7 @@ router.delete('/guild/:guildId/knowledge-base/:entryId', checkAuth, checkGuildAc
     }
 });
 
+// Replaces one knowledge base entry's title, content and tags.
 router.put('/guild/:guildId/knowledge-base/:entryId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, entryId } = req.params;
     const { title, content, tags } = req.body;

@@ -105,6 +105,7 @@ function validateServerInput(body, name) {
     };
 }
 
+// The guild's MCP servers, the operator's global ones, the presets, and whether editing is allowed at all.
 router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
@@ -129,6 +130,7 @@ router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (re
     }
 });
 
+// Creates or replaces one guild MCP server: URL, token, and its tool allow and block lists.
 router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const name = String(req.params.name || '').trim();
@@ -191,6 +193,7 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
     }
 });
 
+// Removes one guild MCP server.
 router.delete('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const name = String(req.params.name || '').trim();
@@ -211,6 +214,7 @@ router.delete('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, 
     }
 });
 
+// Makes a real request through one MCP server and reports whether it connected.
 // Anthropic connects to the server, so the only honest way to check a URL and
 // token is to make a real request and see what comes back. One token of output
 // is enough: the connection and tool listing happen before any generation.
