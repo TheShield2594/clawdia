@@ -4,8 +4,6 @@
    Existing dark theme preserved for guild-settings compatibility
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-
 /* ── New design tokens ─────────────────────────────── */
 :root {
     /* Existing dark-theme tokens (guild-settings) */
