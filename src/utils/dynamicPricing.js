@@ -41,10 +41,19 @@ function nextPrice(item, band, volatility = 'medium') {
     return Math.round(cur + (target - cur) * 0.6);
 }
 
+// The per-tick decay as a plain multiplier, so a caller can hand it to Mongo's
+// `$mul` and let the decay apply to whatever the stored score is at write time
+// rather than to the value it happened to read a moment earlier. Buys `$inc`
+// this field concurrently (see commands/economy/shop.js), and a decayed value
+// written back with `$set` would swallow any that landed in between.
+function demandDecayFactor(volatility = 'medium') {
+    const cfg = VOLATILITY_FACTORS[volatility] || VOLATILITY_FACTORS.medium;
+    return 1 - cfg.decay;
+}
+
 // Decay demand toward zero (oversupply if negative, demand if positive).
 function decayDemand(item, volatility = 'medium') {
-    const cfg = VOLATILITY_FACTORS[volatility] || VOLATILITY_FACTORS.medium;
-    return (item.demandScore ?? 0) * (1 - cfg.decay);
+    return (item.demandScore ?? 0) * demandDecayFactor(volatility);
 }
 
 // Price history is appended by the recalc job's `$push`/`$slice: -HISTORY_CAP`
@@ -70,6 +79,7 @@ module.exports = {
     HISTORY_CAP,
     ensurePricingFields,
     nextPrice,
+    demandDecayFactor,
     decayDemand,
     trendBucket,
 };

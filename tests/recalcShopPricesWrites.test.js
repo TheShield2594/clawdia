@@ -114,13 +114,81 @@ describe('recalcShopPrices writes', () => {
         expect(seen.writes).toHaveLength(2);
         const [first] = seen.writes;
         expect(first.updateOne.filter).toEqual({ guildId: 'g1', 'shop._id': 'item-a' });
-        expect(Object.keys(first.updateOne.update.$set).sort()).toEqual([
-            'shop.$.basePrice', 'shop.$.currentPrice', 'shop.$.demandScore',
-        ]);
         // Nothing in the write mentions the image, or the shop array as a whole.
         const serialised = JSON.stringify(seen.writes);
         expect(serialised).not.toContain('imageData');
         expect(serialised).not.toMatch(/"shop":/);
+    });
+
+    it('leaves an already-set basePrice alone', async () => {
+        const seen = stubGuild({ shop: items() });
+
+        await recalcShopPrices(client);
+
+        // basePrice belongs to whoever edits the shop in the dashboard. Writing
+        // back the value we read would undo an edit made while we computed, so
+        // the only field this job claims outright is the one it authors.
+        for (const op of seen.writes) {
+            expect(Object.keys(op.updateOne.update.$set)).toEqual(['shop.$.currentPrice']);
+        }
+    });
+
+    it('decays demand with $mul so a concurrent buy is not swallowed', async () => {
+        const seen = stubGuild({ shop: items() });
+
+        await recalcShopPrices(client);
+
+        // /shop buy bumps this field with $inc while the recalc is in flight.
+        // Multiplying applies the decay to whatever is stored at write time;
+        // $set-ing a value read a moment earlier would drop the buy.
+        for (const op of seen.writes) {
+            expect(op.updateOne.update.$mul).toEqual({ 'shop.$.demandScore': 1 - 0.10 });
+            expect(op.updateOne.update.$set).not.toHaveProperty('shop.$.demandScore');
+        }
+    });
+
+    it('uses the volatility tier\'s decay factor', async () => {
+        const seen = stubGuild({
+            shop: items(),
+            dynamicPricing: { enabled: true, priceBand: 0.5, volatility: 'high' },
+        });
+
+        await recalcShopPrices(client);
+
+        expect(seen.writes[0].updateOne.update.$mul['shop.$.demandScore']).toBeCloseTo(1 - 0.15);
+    });
+
+    it('seeds rather than multiplies a demand score that was never stored', async () => {
+        const seen = stubGuild({
+            // Predates demand tracking: $mul would reject the null outright, and
+            // treat an absent field as zero without ever seeding it.
+            shop: [
+                { _id: 'old-1', name: 'Relic', price: 10, basePrice: 10, currentPrice: 10, demandScore: null },
+                { _id: 'old-2', name: 'Idol',  price: 10, basePrice: 10, currentPrice: 10 },
+            ],
+        });
+
+        await recalcShopPrices(client);
+
+        for (const op of seen.writes) {
+            expect(op.updateOne.update.$mul).toBeUndefined();
+            expect(op.updateOne.update.$set['shop.$.demandScore']).toBe(0);
+        }
+    });
+
+    it('never names one field in both $set and $mul', async () => {
+        const seen = stubGuild({
+            shop: [...items(), { _id: 'old-1', name: 'Relic', price: 10 }],
+        });
+
+        await recalcShopPrices(client);
+
+        // Mongo rejects the whole update if it does.
+        for (const op of seen.writes) {
+            const setKeys = Object.keys(op.updateOne.update.$set || {});
+            const mulKeys = Object.keys(op.updateOne.update.$mul || {});
+            expect(setKeys.filter(k => mulKeys.includes(k))).toEqual([]);
+        }
     });
 
     it('appends one history entry per item and caps it in the database', async () => {
@@ -153,6 +221,7 @@ describe('recalcShopPrices writes', () => {
 
         await recalcShopPrices(client);
 
+        // The one case where this job does author basePrice: there was none.
         expect(seen.writes[0].updateOne.update.$set['shop.$.basePrice']).toBe(50);
     });
 

@@ -123,21 +123,30 @@ describe('/stats response cache', () => {
 });
 
 describe('/stats command-log aggregation', () => {
+    // The volume series is a rolling thirty days ending today, so the fixture is
+    // dated relative to the run. Fixed dates would have passed until the day they
+    // fell out of the window and then started failing on their own.
+    // Resolved once, so the fixture and the assertions cannot land on opposite
+    // sides of a UTC midnight that passes mid-test.
+    const dayAgo = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+    const [today, d3, d4] = [dayAgo(0), dayAgo(3), dayAgo(4)];
+    const at = (date, hour) => `${date}T${String(hour).padStart(2, '0')}:00:00Z`;
+
     // Two commands, three channels, and an hour that ties on count so the
     // tie-break is pinned rather than left to whichever hour was seen first.
     const commandUsage = [
-        { command: 'ping',  success: true,  channelId: 'c1', hour: 9,  createdAt: '2026-08-20T09:00:00Z' },
-        { command: 'ping',  success: true,  channelId: 'c1', hour: 14, createdAt: '2026-08-20T14:00:00Z' },
-        { command: 'ping',  success: false, channelId: 'c1', hour: 14, reason: 'execution_error', createdAt: '2026-08-21T14:00:00Z' },
-        { command: 'ping',  success: true,  channelId: 'c1', hour: 9,  createdAt: '2026-08-21T09:00:00Z' },
-        { command: 'daily', success: false, channelId: 'c2', hour: 3,  reason: 'cooldown', createdAt: '2026-08-21T03:00:00Z' },
-        { command: 'daily', success: true,                   hour: 3,  createdAt: '2026-08-21T03:30:00Z' },
+        { command: 'ping',  success: true,  channelId: 'c1', hour: 9,  createdAt: at(d4, 9) },
+        { command: 'ping',  success: true,  channelId: 'c1', hour: 14, createdAt: at(d4, 14) },
+        { command: 'ping',  success: false, channelId: 'c1', hour: 14, reason: 'execution_error', createdAt: at(d3, 14) },
+        { command: 'ping',  success: true,  channelId: 'c1', hour: 9,  createdAt: at(d3, 9) },
+        { command: 'daily', success: false, channelId: 'c2', hour: 3,  reason: 'cooldown', createdAt: at(d3, 3) },
+        { command: 'daily', success: true,                   hour: 3,  createdAt: at(d3, 3) },
     ];
 
     beforeEach(() => {
         stubAnalytics({
             guildId: 'g1',
-            memberEvents: [{ date: new Date().toISOString().slice(0, 10), joins: 5, leaves: 1 }],
+            memberEvents: [{ date: today, joins: 5, leaves: 1 }],
             commandUsage,
         });
     });
@@ -168,17 +177,18 @@ describe('/stats command-log aggregation', () => {
         const { body } = await get('/guild/g1/stats');
 
         const byDate = Object.fromEntries(body.analytics.messageVolume.map(d => [d.date, d.count]));
-        expect(byDate['2026-08-20']).toBe(2);
-        expect(byDate['2026-08-21']).toBe(4);
+        expect(byDate[d4]).toBe(2);
+        expect(byDate[d3]).toBe(4);
         expect(body.analytics.messageVolume).toHaveLength(30);
+        // Every dated event lands somewhere in the window rather than off its end.
+        const total = body.analytics.messageVolume.reduce((sum, d) => sum + d.count, 0);
+        expect(total).toBe(commandUsage.length);
     });
 
     test('reads member growth by date instead of scanning the event log per day', async () => {
         const { body } = await get('/guild/g1/stats');
 
         expect(body.analytics.memberGrowth).toHaveLength(30);
-        expect(body.analytics.memberGrowth.at(-1)).toEqual({
-            date: new Date().toISOString().slice(0, 10), joins: 5, leaves: 1,
-        });
+        expect(body.analytics.memberGrowth.at(-1)).toEqual({ date: today, joins: 5, leaves: 1 });
     });
 });

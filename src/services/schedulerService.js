@@ -3,7 +3,7 @@ const User  = require('../models/User');
 const SeasonRecord = require('../models/SeasonRecord');
 const { createWarVictoryBanner, createSeasonRecapCard } = require('../utils/cardGenerator');
 const { PET_DEFINITIONS, heartBar } = require('./petService');
-const { ensurePricingFields, nextPrice, decayDemand, trendBucket, HISTORY_CAP } = require('../utils/dynamicPricing');
+const { ensurePricingFields, nextPrice, decayDemand, demandDecayFactor, trendBucket, HISTORY_CAP } = require('../utils/dynamicPricing');
 const { softResetElo, tierFor, makeSeasonId } = require('../utils/duelElo');
 const { topByNetWorth } = require('../utils/netWorth');
 const { grantInventoryItem } = require('../utils/inventoryGrant');
@@ -698,17 +698,55 @@ async function recalcShopPrices(client) {
             if (!guildDoc) continue; // another worker already claimed this window
 
             const shop = Array.isArray(guildDoc.shop) ? guildDoc.shop : [];
+            // Captured before the backfill, because the write below names a field
+            // only where this job is the one that changed it. `basePrice` is set by
+            // admins through the dashboard, and writing back the value we read
+            // would undo an edit made while we were computing.
+            const priorState = shop.map(item => ({
+                hadBasePrice: item.basePrice != null,
+                // `$mul` rejects a null, and treats a missing field as zero — which
+                // is the right answer for an item that predates demand tracking, but
+                // has to be reached with `$set` rather than by multiplying.
+                hadDemandScore: typeof item.demandScore === 'number',
+            }));
             ensurePricingFields(shop);
 
-            const band       = guildDoc.dynamicPricing.priceBand ?? 0.5;
-            const volatility = guildDoc.dynamicPricing.volatility ?? 'medium';
+            const band        = guildDoc.dynamicPricing.priceBand ?? 0.5;
+            const volatility  = guildDoc.dynamicPricing.volatility ?? 'medium';
+            const decayFactor = demandDecayFactor(volatility);
             const changedMovers = [];
             const writes = [];
 
-            for (const item of shop) {
+            for (const [index, item] of shop.entries()) {
                 const prev = item.currentPrice ?? item.basePrice ?? item.price;
+                // Both read the demand score as it was at claim time, which is what
+                // the price is supposed to follow; only the stored score is left to
+                // the database to decay.
                 item.currentPrice = nextPrice(item, band, volatility);
                 item.demandScore  = decayDemand(item, volatility);
+
+                // Nothing else writes `currentPrice`, and this job holds the guild's
+                // recalc lease, so it is the sole author of that field.
+                const set = { 'shop.$.currentPrice': item.currentPrice };
+                if (!priorState[index].hadBasePrice) set['shop.$.basePrice'] = item.basePrice;
+
+                const update = {
+                    $set: set,
+                    $push: {
+                        'shop.$.priceHistory': {
+                            // A snapshot of the score this tick's price was computed
+                            // from; a buy landing during the write moves the stored
+                            // score without rewriting this row.
+                            $each: [{ at: now, price: item.currentPrice, demandScore: item.demandScore }],
+                            $slice: -HISTORY_CAP,
+                        },
+                    },
+                };
+                if (priorState[index].hadDemandScore) {
+                    update.$mul = { 'shop.$.demandScore': decayFactor };
+                } else {
+                    set['shop.$.demandScore'] = item.demandScore;
+                }
 
                 // Matched by subdocument `_id` rather than by array index: an admin
                 // adding or removing a shop item between the read and the write
@@ -718,19 +756,7 @@ async function recalcShopPrices(client) {
                 writes.push({
                     updateOne: {
                         filter: { guildId: guildDoc.guildId, 'shop._id': item._id },
-                        update: {
-                            $set: {
-                                'shop.$.basePrice':    item.basePrice,
-                                'shop.$.currentPrice': item.currentPrice,
-                                'shop.$.demandScore':  item.demandScore,
-                            },
-                            $push: {
-                                'shop.$.priceHistory': {
-                                    $each: [{ at: now, price: item.currentPrice, demandScore: item.demandScore }],
-                                    $slice: -HISTORY_CAP,
-                                },
-                            },
-                        },
+                        update,
                     },
                 });
 
