@@ -11,11 +11,11 @@ src/
 ├── commands/          # Slash commands by category
 │   ├── admin/        # Administrator commands
 │   ├── ai/           # AI-related commands
+│   ├── community/    # Community and social commands
 │   ├── economy/      # Economy system
 │   ├── fun/          # Fun/entertainment
 │   ├── leveling/     # XP and leveling
 │   ├── moderation/   # Moderation tools
-│   ├── music/        # Music player
 │   └── utility/      # Utility commands
 ├── dashboard/        # Web dashboard
 │   ├── public/       # Static files (CSS, JS)

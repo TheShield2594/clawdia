@@ -298,9 +298,13 @@ Configuration that previously lived behind slash commands (settings link, level 
 
 ## AI Chat Configuration
 
+Five providers are supported. For what actually differs between them — MCP
+support, cost tracking, model naming — see
+[AI_COMPARISON.md](AI_COMPARISON.md).
+
 ### Supported Providers
 
-1. **OpenAI (GPT-3.5/GPT-4)**
+1. **OpenAI**
    - Get your API key from https://platform.openai.com/
    - Add to `.env` as `OPENAI_API_KEY` or configure per-server in dashboard
 

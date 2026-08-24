@@ -633,15 +633,6 @@ open work items, not wording problems:
 
 ## 🔧 Advanced Features
 
-### Custom Commands
-
-Create simple text response commands in dashboard:
-
-```text
-Trigger: !website
-Response: Visit us at https://example.com
-```
-
 ### Auto-Roles
 
 Automatically assign roles to new members:
