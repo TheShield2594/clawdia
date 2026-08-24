@@ -52,6 +52,17 @@ change, and a script reading them needs updating. See
   drops it. Five indexes are declared in the schema in its place, covering the
   giveaway, RSS, temp voice, dynamic pricing and bank district sweeps; each is
   partial or sparse, so guilds with the feature off cost nothing to index.
+- **MCP connections work with whichever model you picked**, not only Claude.
+  Anthropic's connector opens these connections on their side, so the feature
+  was Anthropic-only; the bot is an MCP client of its own now
+  (`src/services/ai/mcp/`), offering the same servers' tools to OpenAI, Gemini,
+  Ollama and OpenRouter as functions, running the calls and feeding the results
+  back. A connection is configured once and survives a change of provider. The
+  Connections tab gained presets beyond GitHub — Fastmail, DeepWiki, Context7,
+  Hugging Face and Stripe, plus Gmail and Spotify prefilled apart from an
+  address neither of them publishes — and its **Test** button connects to the
+  server itself: no AI provider key, no tokens spent, and it reports the tool
+  names, which is what the allow and deny lists want filling in from.
 
 `015_drop_dead_giveaway_index` drops an index no query uses and creates nothing,
 so the 4.2.0 image reads the migrated database unchanged — rolling back to
@@ -70,18 +81,6 @@ the templates now read it from `package.json` instead of carrying their own copy
 
 Also in this release:
 
-- **MCP connections work with whichever model you picked**, not only Claude.
-  Anthropic's connector opens these connections on their side, so the feature
-  was Anthropic-only; the bot is now an MCP client of its own
-  (`src/services/ai/mcp/`) and offers the same servers' tools to OpenAI, Gemini,
-  Ollama and OpenRouter as functions, running the calls and feeding the results
-  back. Connections are configured once and survive a change of provider. The
-  Connections tab gained presets beyond GitHub — Fastmail, DeepWiki, Context7,
-  Hugging Face and Stripe, plus Gmail and Spotify prefilled apart from an
-  address neither of them publishes — and its **Test** button now
-  connects to the server itself — no AI provider key, no tokens spent, and it
-  reports the tool names so the allow and deny lists can be filled in from what
-  the server actually offers.
 - **Exploration drops fieldcraft materials, and has a rare companion** (#753).
   Exploration was the one grind track with no unpurchasable pet, because a
   companion needs a favourite food that resolves in `MATERIAL_RARITY` and
