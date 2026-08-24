@@ -1,4 +1,4 @@
-const Guild = require('../models/Guild');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 const GuildAnalytics = require('../models/GuildAnalytics');
 const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const { trackAction } = require('../services/antiNukeService');
@@ -39,7 +39,7 @@ module.exports = {
             // Detect kick via audit log; bans fire guildBanAdd separately.
             await trackAction(member.guild, 'kick', AuditLogEvent.MemberKick, member.id).catch(console.error);
 
-            const guildSettings = await Guild.findOne({ guildId: member.guild.id });
+            const guildSettings = await getGuildSettings(member.guild.id);
             if (!guildSettings) return;
 
             const dateKey = new Date().toISOString().slice(0, 10);

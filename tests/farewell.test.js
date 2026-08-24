@@ -25,6 +25,7 @@ jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
 jest.mock('../src/models/GuildAnalytics', () => ({ updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }) }));
 jest.mock('../src/services/antiNukeService', () => ({ trackAction: jest.fn().mockResolvedValue(undefined) }));
 
+const { clearGuildSettingsCache } = require('../src/utils/guildSettingsCache');
 const farewellEvent = require('../src/events/guildMemberRemove');
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,11 @@ describe('farewell applyVariables', () => {
     let member;
 
     beforeEach(() => {
+        // guildMemberRemove reads through guildSettingsCache, whose invalidation
+        // rides on Mongoose middleware the Guild mock above does not have. Without
+        // this, a test's own mockResolvedValue is shadowed by the previous test's
+        // cached entry for the same guild id.
+        clearGuildSettingsCache();
         sendSpy = jest.fn().mockResolvedValue(undefined);
 
         const perms = { has: jest.fn().mockReturnValue(true) };

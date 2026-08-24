@@ -1,5 +1,5 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const Guild = require('../models/Guild');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 
 module.exports = {
     name: 'messageUpdate',
@@ -7,7 +7,7 @@ module.exports = {
         if (newMessage.author?.bot || !newMessage.guild) return;
         if (oldMessage.content === newMessage.content) return;
 
-        const guildSettings = await Guild.findOne({ guildId: newMessage.guild.id });
+        const guildSettings = await getGuildSettings(newMessage.guild.id);
         if (!guildSettings?.eventLog?.enabled || !guildSettings.eventLog.logMessageEdit) return;
 
         const logChannel = newMessage.guild.channels.cache.get(guildSettings.eventLog.channelId);

@@ -18,11 +18,49 @@ const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const { BoundedRateLimiter } = require('../utils/boundedRateLimiter');
 const { withUserLock } = require('../utils/userMutex');
 
-// Pre-compile base word regexes once at module load — avoids per-message regex construction
-const BASE_BAD_WORD_REGEXES = BASE_BAD_WORDS.map(word => {
+function compileBadWordRegex(word) {
     const escaped = word.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`\\b${escaped}\\b`, 'i');
-});
+}
+
+// Pre-compile base word regexes once at module load — avoids per-message regex construction
+const BASE_BAD_WORD_REGEXES = BASE_BAD_WORDS.map(compileBadWordRegex);
+
+// The base list above is compiled once, but a guild's own additions used to be
+// rebuilt from scratch on every message that reached the profanity filter. They
+// change only when an admin edits the word list, so they are compiled once and
+// kept here until that happens.
+//
+// The entry is keyed on the word list itself rather than on a settings version:
+// the cached settings object is replaced wholesale on every invalidation, and a
+// TTL expiry alone would otherwise force a recompile that changed nothing. A
+// guild whose list is unchanged keeps its regexes across settings reloads.
+//
+// guildId -> { signature, regexes }
+const customBadWordRegexes = new Map();
+
+// Bounds memory across a large guild count, the same way guildSettingsCache
+// does: FIFO by insertion order, and an evicted guild simply recompiles on its
+// next filtered message.
+const MAX_CUSTOM_BAD_WORD_GUILDS = 5_000;
+
+function getCustomBadWordRegexes(guildId, customBadWords) {
+    const words = customBadWords || [];
+    if (!words.length) return [];
+
+    // A NUL separator cannot appear in a word an admin typed into the
+    // dashboard, so no two distinct lists share a signature.
+    const signature = words.join('\u0000');
+    const cached = customBadWordRegexes.get(guildId);
+    if (cached && cached.signature === signature) return cached.regexes;
+
+    const regexes = words.map(compileBadWordRegex);
+    if (customBadWordRegexes.size >= MAX_CUSTOM_BAD_WORD_GUILDS && !customBadWordRegexes.has(guildId)) {
+        customBadWordRegexes.delete(customBadWordRegexes.keys().next().value);
+    }
+    customBadWordRegexes.set(guildId, { signature, regexes });
+    return regexes;
+}
 
 // Leet-speak normalization map
 const LEET_MAP = {
@@ -50,6 +88,8 @@ function normalizeToxic(text) {
 
 module.exports = {
     name: 'messageCreate',
+    // Exported for unit testing only
+    _getCustomBadWordRegexes: getCustomBadWordRegexes,
     async execute(message, client) {
         if (message.author.bot || !message.guild) return;
 
@@ -501,11 +541,9 @@ async function handleAutoModeration(message, guildSettings) {
 
     if (mod.profanityFilter && !isModerator) {
         const normalized = normalizeToxic(message.content);
-        const customRegexes = (mod.customBadWords || []).map(word => {
-            const escaped = word.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            return new RegExp(`\\b${escaped}\\b`, 'i');
-        });
-        const hasBadWord = [...BASE_BAD_WORD_REGEXES, ...customRegexes].some(re => re.test(normalized));
+        const customRegexes = getCustomBadWordRegexes(message.guild.id, mod.customBadWords);
+        const hasBadWord = BASE_BAD_WORD_REGEXES.some(re => re.test(normalized))
+            || customRegexes.some(re => re.test(normalized));
 
         if (hasBadWord) {
             await message.delete().catch(console.error);

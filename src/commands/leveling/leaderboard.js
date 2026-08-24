@@ -104,10 +104,20 @@ module.exports = {
                 }
             }
 
+            // One round trip per row turned rendering a ten-name board into ten
+            // serial Discord API calls. Nothing in the loop below depends on the
+            // previous row, so the fetches are issued together and awaited once.
+            // A user the API cannot resolve still yields null and is skipped, and
+            // the medal still comes from the row's rank rather than its position
+            // in the printed list.
+            const discordUsers = await Promise.all(
+                users.map(u => interaction.client.users.fetch(u.userId).catch(() => null))
+            );
+
             let description = descriptionHeader + '\n\n';
             for (let i = 0; i < users.length; i++) {
                 const user = users[i];
-                const discordUser = await interaction.client.users.fetch(user.userId).catch(() => null);
+                const discordUser = discordUsers[i];
                 if (!discordUser) continue;
 
                 const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `**${i + 1}.**`;

@@ -1,5 +1,5 @@
 const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
-const Guild = require('../models/Guild');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { trackAction } = require('../services/antiNukeService');
 
 module.exports = {
@@ -9,7 +9,7 @@ module.exports = {
 
         await trackAction(channel.guild, 'channelCreate', AuditLogEvent.ChannelCreate, channel.id).catch(console.error);
 
-        const guildSettings = await Guild.findOne({ guildId: channel.guild.id });
+        const guildSettings = await getGuildSettings(channel.guild.id);
         if (!guildSettings?.eventLog?.enabled || !guildSettings.eventLog.logChannelChanges) return;
 
         const logChannel = channel.guild.channels.cache.get(guildSettings.eventLog.channelId);

@@ -1,12 +1,12 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const Guild = require('../models/Guild');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 
 module.exports = {
     name: 'messageDelete',
     async execute(message, _client) {
         if (message.author?.bot || !message.guild) return;
 
-        const guildSettings = await Guild.findOne({ guildId: message.guild.id });
+        const guildSettings = await getGuildSettings(message.guild.id);
         if (!guildSettings?.eventLog?.enabled || !guildSettings.eventLog.logMessageDelete) return;
 
         const logChannel = message.guild.channels.cache.get(guildSettings.eventLog.channelId);

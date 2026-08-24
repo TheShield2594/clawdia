@@ -1,4 +1,4 @@
-const Guild = require('../models/Guild');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 const GuildAnalytics = require('../models/GuildAnalytics');
 const { EmbedBuilder, AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const { createWelcomeCard } = require('../utils/cardGenerator');
@@ -52,7 +52,7 @@ module.exports = {
             // Raid detection runs next, independently of guild settings load below
             await raidCheck(member, client).catch(console.error);
 
-            const guildSettings = await Guild.findOne({ guildId: member.guild.id });
+            const guildSettings = await getGuildSettings(member.guild.id);
 
             if (!guildSettings) return;
             const dateKey = new Date().toISOString().slice(0, 10);

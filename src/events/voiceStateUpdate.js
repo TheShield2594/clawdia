@@ -1,5 +1,5 @@
 const { handleVoiceStateUpdate } = require('../services/tempVoiceService');
-const Guild = require('../models/Guild');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 const User = require('../models/User');
 const { checkRivalry } = require('../services/rivalryService');
 
@@ -37,7 +37,7 @@ async function handleVoiceXp(oldState, newState, client) {
     voiceJoinTimes.delete(key);
 
     try {
-        const guildSettings = await Guild.findOne({ guildId });
+        const guildSettings = await getGuildSettings(guildId);
         if (!guildSettings?.leveling?.enabled || !guildSettings.leveling.voiceXpEnabled) return;
         if (!guildSettings.leveling.rewardsEnabled) return;
         if (guildSettings.leveling.noXpRoleIds?.length &&

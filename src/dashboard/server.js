@@ -165,6 +165,11 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
 
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
+    // No explicit `view cache` here on purpose: guild-settings.ejs is a few
+    // hundred KB and must not be recompiled per render, but Express already
+    // enables the cache whenever NODE_ENV is 'production', which both the
+    // Dockerfile and portainer-stack.yml set. Forcing it on would only take
+    // template reloading away from local development.
 
     // Gzip/deflate every compressible response. The guild settings page alone
     // renders a few hundred KB of HTML, and styles.css is another 70 KB — both

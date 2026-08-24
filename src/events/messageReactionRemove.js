@@ -1,4 +1,4 @@
-const Guild = require('../models/Guild');
+const { getGuildSettings } = require('../utils/guildSettingsCache');
 
 module.exports = {
     name: 'messageReactionRemove',
@@ -12,7 +12,7 @@ module.exports = {
         const guild = reaction.message.guild;
         if (!guild) return;
 
-        const guildSettings = await Guild.findOne({ guildId: guild.id });
+        const guildSettings = await getGuildSettings(guild.id);
         if (!guildSettings?.reactionRoles?.length) return;
 
         const emojiKey = reaction.emoji.id
