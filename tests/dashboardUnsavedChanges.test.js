@@ -446,3 +446,64 @@ describe('test isolation', () => {
         document.removeEventListener('keydown', handler);
     });
 });
+
+// A shop item's image is the only setting on this page that lives outside the
+// DOM: the file input's value is a fake path the page cannot read back, so the
+// chosen file waits in a module-level map until the save uploads it. An
+// image-only edit therefore left every readable value matching the baseline.
+describe('shop item images', () => {
+    beforeEach(async () => {
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        document.body.innerHTML = '';
+        bootPage();
+        clickTab('economy');
+        await settle();
+    });
+
+    afterEach(async () => {
+        await settle();
+        forgetDocumentListeners();
+        jest.restoreAllMocks();
+    });
+
+    const economyDirty = () => {
+        window.refreshUnsavedMarks?.();
+        return !document.getElementById('unsaved-banner').hidden;
+    };
+
+    it('opens clean', () => {
+        expect(economyDirty()).toBe(false);
+    });
+
+    it('counts a pending image upload as an unsaved change', async () => {
+        window._shopItemPendingImages['item-1'] = { file: {}, dataUrl: 'data:,' };
+        document.dispatchEvent(new window.Event('click', { bubbles: true }));
+        await tick();
+
+        expect(economyDirty()).toBe(true);
+        expect(document.getElementById('unsaved-banner-sections').textContent)
+            .toMatch(/Economy/i);
+    });
+
+    it('counts a pending image removal as an unsaved change', async () => {
+        window._shopItemClearedImages.add('item-1');
+        document.dispatchEvent(new window.Event('click', { bubbles: true }));
+        await tick();
+
+        expect(economyDirty()).toBe(true);
+    });
+
+    it('goes clean again when the pending image is taken back', async () => {
+        window._shopItemPendingImages['item-1'] = { file: {}, dataUrl: 'data:,' };
+        document.dispatchEvent(new window.Event('click', { bubbles: true }));
+        await tick();
+        expect(economyDirty()).toBe(true);
+
+        // Re-opening the item and cancelling the image undoes the edit, and an
+        // undone edit is not something to warn about on the way out.
+        delete window._shopItemPendingImages['item-1'];
+        document.dispatchEvent(new window.Event('click', { bubbles: true }));
+        await tick();
+        expect(economyDirty()).toBe(false);
+    });
+});

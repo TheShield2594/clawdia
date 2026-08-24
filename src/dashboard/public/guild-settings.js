@@ -4093,6 +4093,18 @@ function scopeSignature(scope) {
     for (const chip of scope.querySelectorAll('[data-role-id], [data-channel-id], [data-user-id]')) {
         parts.push(chip.dataset.roleId || chip.dataset.channelId || chip.dataset.userId);
     }
+    // A shop item's image is the one setting on this page that lives nowhere in
+    // the DOM. The file input is skipped above — its value is a fake path — and
+    // the chosen file waits in _shopItemPendingImages until saveSettings
+    // uploads it. Without this, changing only an item's image leaves every
+    // reachable value identical to the baseline: the scope reads clean, the
+    // banner stays down, beforeunload allows the navigation, and the upload is
+    // dropped. The id sets are enough, because both are emptied only by a save
+    // that succeeded, so any pending entry at all means unsaved work.
+    if (scope.querySelector('#store-items-grid')) {
+        for (const id of Object.keys(_shopItemPendingImages).sort()) parts.push('img+' + id);
+        for (const id of [..._shopItemClearedImages].sort()) parts.push('img-' + id);
+    }
     return parts.join(FIELD_SEP);
 }
 
