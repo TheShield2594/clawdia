@@ -2,31 +2,37 @@ const { AttachmentBuilder } = require('discord.js');
 
 /**
  * Returns { attachment, url } for use in Discord embeds, or null if no image is stored.
- * For guild shop items pass guildId; for activity items (hunt/fish/mine) pass only itemId.
- * Checks the guild shop first, then falls back to the global ItemImage collection.
+ *
+ * `guildId` is the server the image is being rendered for, and every caller
+ * should pass it: activity images (hunt/fish/mine) are per guild since #561,
+ * and a lookup without one can only find the shared pre-#561 image.
+ *
+ * Three places are checked, most specific first: the guild's own shop item,
+ * then that guild's activity image, then the shared image left over from when
+ * the collection was global.
  */
 async function getItemImageAttachment(itemId, guildId = null) {
+    const ItemImage = require('../models/ItemImage');
     let imageData = null;
     let imageType = 'image/png';
+
+    const take = source => {
+        if (!source?.imageData?.length) return false;
+        imageData = source.imageData;
+        imageType = source.imageType || 'image/png';
+        return true;
+    };
 
     if (guildId) {
         const Guild = require('../models/Guild');
         const guild = await Guild.findOne({ guildId }, { shop: 1 });
         const shopItem = guild?.shop?.find(i => i.itemId === itemId);
-        if (shopItem?.imageData?.length) {
-            imageData = shopItem.imageData;
-            imageType = shopItem.imageType || 'image/png';
-        }
+        take(shopItem);
+
+        if (!imageData) take(await ItemImage.findOne({ guildId, itemId }));
     }
 
-    if (!imageData) {
-        const ItemImage = require('../models/ItemImage');
-        const img = await ItemImage.findOne({ itemId });
-        if (img?.imageData?.length) {
-            imageData = img.imageData;
-            imageType = img.imageType || 'image/png';
-        }
-    }
+    if (!imageData) take(await ItemImage.findOne({ guildId: null, itemId }));
 
     if (!imageData) return null;
 

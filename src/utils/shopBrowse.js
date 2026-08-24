@@ -46,8 +46,16 @@ async function loadImagesByItemIds(itemIds, guildId = null) {
 
     const missing = ids.filter(id => !out[id]);
     if (missing.length) {
-        const docs = await ItemImage.find({ itemId: { $in: missing } });
-        for (const d of docs) {
+        // Activity images are per guild since #561, with the pre-#561 shared
+        // rows (guildId: null) still readable as a fallback. Both are fetched in
+        // one query and the shared ones applied first, so a guild's own image
+        // overwrites the shared one rather than racing it.
+        const docs = await ItemImage.find({
+            itemId: { $in: missing },
+            guildId: { $in: [guildId || null, null] },
+        });
+        const sharedFirst = [...docs].sort((a, b) => (a.guildId == null ? 0 : 1) - (b.guildId == null ? 0 : 1));
+        for (const d of sharedFirst) {
             const buf = toBuffer(d.imageData);
             if (buf) out[d.itemId] = buf;
         }

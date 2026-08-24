@@ -37,3 +37,29 @@ describe('009_drop_stale_grind_indexes', () => {
             .toBeGreaterThan(files.indexOf('005_grind_profiles.js'));
     });
 });
+
+// 014 re-keys itemimages from { itemId } to { guildId, itemId } so one guild's
+// admin can no longer overwrite every guild's images (#561). Two things have to
+// agree for that to hold, and neither is visible from the other file: the model
+// declares the compound index, and the migration drops the single-field unique
+// index Mongoose built from the old `unique: true` — which Mongoose will never
+// drop on its own, and which makes a second guild's row a duplicate-key error.
+describe('014_scope_item_images_per_guild', () => {
+    const source = read('014_scope_item_images_per_guild.js');
+    const model = fs.readFileSync(path.join(__dirname, '..', 'src', 'models', 'ItemImage.js'), 'utf8');
+
+    test('creates the index the model declares, under the same name', () => {
+        expect(indexNamesIn(source)).toContain('idx_itemimage_guild_item');
+        expect(model).toContain("name: 'idx_itemimage_guild_item'");
+        expect(model).toContain('unique: true');
+    });
+
+    test('drops the legacy unique index, and the model no longer declares it', () => {
+        expect(source).toContain("dropIndex('itemId_1')");
+        expect(model).not.toMatch(/itemId:\s*\{[^}]*unique/);
+    });
+
+    test('swallows IndexNotFound so a fresh database is not a failure', () => {
+        expect(source).toContain("codeName !== 'IndexNotFound'");
+    });
+});

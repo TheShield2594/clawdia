@@ -15,6 +15,8 @@
 // single route changing. Anything the dashboard needs from Discord gets a
 // method here; anything it needs from the database it reads from Mongo itself.
 
+const { PermissionFlagsBits } = require('discord.js');
+
 // Discord channel type numbers, named so routes filter by meaning.
 const CHANNEL_TYPES = {
     TEXT: 0,
@@ -80,6 +82,49 @@ function createBotGateway(client) {
         /** Is the bot in this guild? The check every permission gate makes. */
         hasGuild(guildId) {
             return client.guilds.cache.has(guildId);
+        },
+
+        /**
+         * Does this user administer the guild *right now*?
+         *
+         * The dashboard's session carries the guild list Discord returned at
+         * OAuth time and nothing refreshes it, so an admin who is demoted or
+         * kicked keeps that snapshot's privileges for as long as the cookie
+         * lives (#558). This is the second opinion: the member is fetched and
+         * their effective guild permissions read, which is what Discord will
+         * enforce anyway the moment the bot acts on their behalf.
+         *
+         * @returns {Promise<boolean|null>} true/false when Discord answered;
+         *   null when it could not be asked — the bot is not in the guild, or
+         *   the fetch failed for a reason other than the member being absent.
+         *   Callers must not read null as a denial; see verifyLiveGuildAccess.
+         */
+        async canManageGuild(guildId, userId) {
+            const guild = guildOf(guildId);
+            if (!guild || !userId) return null;
+            // Ownership is reported by the guild itself and outranks the
+            // bitfield, so it never depends on a member fetch succeeding.
+            if (guild.ownerId === userId) return true;
+
+            let member;
+            try {
+                // `force` skips the member cache. A cached member is exactly the
+                // stale snapshot this method exists to replace — the answer has
+                // to come from Discord. The dashboard caches the result for a
+                // minute (verifyLiveGuildAccess), so this is at most one request
+                // per user per guild per minute.
+                member = await guild.members.fetch({ user: userId, force: true });
+            } catch (err) {
+                // 10007 Unknown Member / 10013 Unknown User is the answer, not a
+                // failure: they are not in this guild any more, so they may not
+                // administer it. Anything else (a 5xx, a timeout, a missing
+                // intent) means Discord did not say, and null is that.
+                if (err?.code === 10007 || err?.code === 10013) return false;
+                return null;
+            }
+            if (!member) return false;
+            return member.permissions.has(PermissionFlagsBits.Administrator)
+                || member.permissions.has(PermissionFlagsBits.ManageGuild);
         },
 
         getGuild(guildId) {

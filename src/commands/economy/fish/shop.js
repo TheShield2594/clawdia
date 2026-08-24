@@ -129,6 +129,9 @@ async function showShopList(interaction, user, currency) {
         activity: 'fish',
         title:    'Fishing Shop',
         currency,
+        // Activity images are per guild since #561; without this the browse view
+        // only ever finds the shared pre-#561 rows.
+        guildId:  interaction.guild.id,
         footer:   'rod • upgrade • buy • use • repair • unlock',
         pages: [
             { id: 'rods',        label: 'Rods',        emoji: '🎣',  subtitle: 'Better rods, better catches.',           items: rodItems,        listText: rodList        },
@@ -168,7 +171,7 @@ async function handleBuyRod(interaction, user, currency) {
         )
         .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
-    const rodImg = await getItemImageAttachment(`fish:${rodData.slug || rodData.id}`).catch(() => null);
+    const rodImg = await getItemImageAttachment(`fish:${rodData.slug || rodData.id}`, interaction.guild.id).catch(() => null);
     if (rodImg) confirmEmbed.setThumbnail(rodImg.url);
 
     const row = new ActionRowBuilder().addComponents(

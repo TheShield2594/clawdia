@@ -227,13 +227,26 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
         next();
     });
 
+    // The session is what the dashboard's authorization rests on, so its
+    // lifetime is part of that rule (#558). It used to be a flat 24 hours from
+    // login, which was also how long a revoked admin kept their access, since
+    // `req.user.guilds` is captured once at OAuth time and never refreshed.
+    //
+    // Two changes: four hours instead of twenty-four, and `rolling: true`, so
+    // the window is an *idle* timeout rather than an absolute one — someone
+    // working in the dashboard is not signed out mid-edit, and a session left
+    // alone is gone in four hours instead of a day. The live permission check
+    // in lib/permissions.js is what closes the window properly (a minute); this
+    // bounds how long a stale snapshot can survive when Discord cannot be
+    // reached to take that second opinion.
     app.use(session({
         store: sessionStore ?? MongoStore.create({ mongoUrl: process.env.MONGODB_URI, collectionName: 'sessions' }),
         secret: process.env.SESSION_SECRET,
         resave: false,
+        rolling: true,
         saveUninitialized: false,
         cookie: {
-            maxAge: 86400000,
+            maxAge: 4 * 60 * 60 * 1000,
             httpOnly: true,
             secure: isProduction,
             sameSite: 'lax'

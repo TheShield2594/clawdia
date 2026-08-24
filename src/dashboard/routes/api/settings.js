@@ -3,6 +3,7 @@ const router = express.Router();
 const Guild = require('../../../models/Guild');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
+const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
 
 // Top-level Guild schema keys that the dashboard is allowed to update.
 // This whitelist prevents prototype pollution (__proto__, constructor, etc.)
@@ -248,6 +249,31 @@ function validateDynamicPricingUpdate(updates) {
     return null;
 }
 
+// `ai` is a whitelisted settings parent with no per-field validation, and one of
+// its fields is a URL the bot then makes a request to (#559). An unparsed value
+// there is an outbound request a guild admin writes: `file://`, or a scheme a
+// client library treats specially, or an address chosen to be somewhere inside
+// the operator's network.
+//
+// The rule is the provider's, not this file's — see validateBaseUrl in
+// services/ai/providers/ollama.js — so the form rejects exactly what the request
+// path would refuse, and accepts the operator's own endpoint even when that is a
+// private address. Empty and null mean "use the operator's endpoint" and are
+// left alone. Where a *hostname* actually resolves to is settled when the
+// request is made: DNS at save time proves nothing about DNS an hour later.
+function validateAiUpdate(updates) {
+    for (const [key, value] of Object.entries(updates)) {
+        let baseUrl;
+        if (key === 'ai.ollamaBaseUrl') baseUrl = value;
+        else if (key === 'ai' && value && typeof value === 'object') baseUrl = value.ollamaBaseUrl;
+        else continue;
+
+        const error = validateOllamaBaseUrl(baseUrl);
+        if (error) return error;
+    }
+    return null;
+}
+
 function validateHeistUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         if (!key.startsWith('heist.') && key !== 'heist') continue;
@@ -296,6 +322,9 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
     const heistError = validateHeistUpdate(updates);
     if (heistError) return res.status(400).json({ error: heistError });
+
+    const aiError = validateAiUpdate(updates);
+    if (aiError) return res.status(400).json({ error: aiError });
 
     const explorationError = validateExplorationUpdate(updates);
     if (explorationError) return res.status(400).json({ error: explorationError });
@@ -362,3 +391,4 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
 
 module.exports = router;
 module.exports.validateEventLogUpdate = validateEventLogUpdate;
+module.exports.validateAiUpdate = validateAiUpdate;

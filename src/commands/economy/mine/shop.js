@@ -116,6 +116,9 @@ async function handleShop(interaction, sub) {
             activity: 'mine',
             title:    'Mining Shop',
             currency,
+            // Activity images are per guild since #561; without this the browse
+            // view only ever finds the shared pre-#561 rows.
+            guildId:  interaction.guild.id,
             footer:   'pickaxe • upgrade • buy • use • repair • unlock',
             pages: [
                 { id: 'pickaxes',    label: 'Pickaxes',    emoji: '🪓',  subtitle: 'Stronger picks bite deeper veins.',     items: pickaxeItems,    listText: pickaxeList    },
@@ -153,7 +156,7 @@ async function handleShop(interaction, sub) {
             )
             .setFooter({ text: 'Confirmation expires in 30 seconds' });
 
-        const pickaxeImg = await getItemImageAttachment(`mine:${pickaxeData.slug || pickaxeData.id}`).catch(() => null);
+        const pickaxeImg = await getItemImageAttachment(`mine:${pickaxeData.slug || pickaxeData.id}`, interaction.guild.id).catch(() => null);
         if (pickaxeImg) confirmEmbed.setThumbnail(pickaxeImg.url);
 
         const row = new ActionRowBuilder().addComponents(

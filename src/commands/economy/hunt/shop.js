@@ -164,6 +164,9 @@ async function showShopList(interaction, user, currency) {
         activity: 'hunt',
         title:    'Hunt Shop',
         currency,
+        // Activity images are per guild since #561; without this the browse view
+        // only ever finds the shared pre-#561 rows.
+        guildId:  interaction.guild.id,
         footer:   'weapon • upgrade • buy • use • repair • unlock',
         pages: [
             { id: 'weapons',     label: 'Weapons',     emoji: '🔫',  subtitle: 'Pick your tier — better gear, better trophies.', items: weaponItems,     listText: weaponList     },
@@ -227,7 +230,7 @@ async function handleBuyWeapon(interaction, user, currency) {
         });
     }
 
-    const weaponImg = await getItemImageAttachment(`hunt:${weaponData.slug || weaponData.id}`).catch(() => null);
+    const weaponImg = await getItemImageAttachment(`hunt:${weaponData.slug || weaponData.id}`, interaction.guild.id).catch(() => null);
     if (weaponImg) confirmEmbed.setThumbnail(weaponImg.url);
 
     const row = new ActionRowBuilder().addComponents(
