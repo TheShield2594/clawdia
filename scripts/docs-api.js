@@ -55,11 +55,14 @@ const MIDDLEWARE_LABELS = [
     ['uploadImage', 'multipart'],
 ];
 
-const ROUTE_RE = /^router\.(get|post|put|patch|delete|all)\(\s*'([^']+)'\s*,([^)]*)/;
+// `head` is listed even though no route uses one today: a HEAD route the
+// parser did not know about would be dropped from the table in silence, which
+// is the one thing generating the table is meant to make impossible.
+const ROUTE_RE = /^router\.(get|head|post|put|patch|delete|all)\(\s*'([^']+)'\s*,([^)]*)/;
 // Anything else that looks like a route definition. Matching one of these means
 // this parser has gone blind to a real endpoint, which is the failure mode a
 // generated list exists to prevent, so it is an error rather than a skip.
-const SUSPECT_RE = /router\.(get|post|put|patch|delete|all|route|use)\s*\(/;
+const SUSPECT_RE = /router\.(get|head|post|put|patch|delete|all|route|use)\s*\(/;
 
 /** Sub-router filenames in the order routes/api.js mounts them. */
 function mountOrder() {
@@ -242,4 +245,5 @@ module.exports = {
     END,
     DOC_PATH,
     API_DIR,
+    API_INDEX,
 };

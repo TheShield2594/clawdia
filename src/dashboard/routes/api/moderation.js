@@ -79,7 +79,8 @@ router.patch('/guild/:guildId/cases/:caseId', checkAuth, checkGuildAccess, check
     }
 });
 
-// Every active ban and timeout in the guild, read live from Discord.
+// Up to 200 active bans and 200 active timeouts, read live from Discord.
+// Each gateway call is capped at 200, so a guild past either cap is truncated.
 router.get('/guild/:guildId/sanctions/active', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
     try {

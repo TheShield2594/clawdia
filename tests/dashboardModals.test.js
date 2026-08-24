@@ -16,7 +16,7 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 // a short viewport with its Save button unreachable and nothing to scroll.
 const fs = require('fs');
 const path = require('path');
-const { PUBLIC, renderPage, bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
+const { PUBLIC, renderPage, renderPanel, bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
 
 const CSS = fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8');
 
@@ -175,14 +175,29 @@ describe('dialog accessibility', () => {
 
     it('marks every dialog in the markup, not only at runtime', () => {
         // The attributes have to ship in the HTML: a screen reader that reaches
-        // the element before the script runs still has to see a dialog.
-        const overlays = [...renderPage().matchAll(/<div[^>]*class="modal-overlay[^"]*"[^>]*>/g)].map(m => m[0]);
-        expect(overlays.length).toBeGreaterThan(0);
-        for (const overlay of overlays) {
-            expect(overlay).toContain('role="dialog"');
-            expect(overlay).toContain('aria-modal="true"');
-            expect(overlay).toMatch(/aria-labelledby="[\w-]+"/);
+        // the element before the script runs still has to see a dialog. Panels
+        // are fetched separately from the page shell, so scanning the shell
+        // alone would check confirm-modal and miss the other eight.
+        const panels = [...new Set(DIALOGS.map(d => d.panel))];
+        const sources = [renderPage(), ...panels.map(renderPanel)];
+
+        const seen = new Map();
+        for (const markup of sources) {
+            for (const [overlay] of markup.matchAll(/<div[^>]*class="modal-overlay[^"]*"[^>]*>/g)) {
+                expect(overlay).toContain('role="dialog"');
+                expect(overlay).toContain('aria-modal="true"');
+                expect(overlay).toMatch(/aria-labelledby="[\w-]+"/);
+
+                const id = /id="([\w-]+)"/.exec(overlay);
+                if (id) seen.set(id[1], overlay);
+            }
         }
+
+        // Named rather than counted, so a dialog that stops being rendered at
+        // all fails here too.
+        expect([...seen.keys()].sort()).toEqual(
+            ['confirm-modal', ...DIALOGS.map(d => d.id)].sort()
+        );
     });
 });
 

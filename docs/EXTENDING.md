@@ -150,45 +150,59 @@ module.exports = {
 ```javascript
 const Guild = require('../models/Guild');
 
-// Get guild settings
+// Read. findOne answers null for a guild that has no document yet — every guild
+// does until something writes one — so nothing may reach into the result
+// unguarded.
 const settings = await Guild.findOne({ guildId: interaction.guild.id });
+if (!settings) return;                     // or create one, below
 
-// Update settings
 settings.leveling.enabled = true;
 await settings.save();
 
-// Create new guild
-await Guild.create({
-    guildId: guild.id,
-    name: guild.name
-});
+// Write without a read first. The upsert creates the document when it is
+// missing, which is what most write paths want; `name` is required by the
+// schema, so it has to be supplied for the insert case.
+await Guild.findOneAndUpdate(
+    { guildId: guild.id },
+    { $set: { 'leveling.enabled': true }, $setOnInsert: { name: guild.name } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+);
 ```
 
+Prefer the second form for anything on a hot path: it is one round trip instead
+of two, and two concurrent read-modify-`save()` pairs on the same document lose
+one of the two writes.
+
 ### Accessing User Data
+
+A user document is per member per guild: the same person in two servers has two
+of them, keyed on `{ userId, guildId }`. Money lives in `balance` (wallet) and
+`bank`, not in a `coins` field.
 
 ```javascript
 const User = require('../models/User');
 
-// Get user data
-const user = await User.findOne({ 
-    userId: interaction.user.id, 
-    guildId: interaction.guild.id 
+// Read, with the same caveat: a member who has never earned anything has no
+// document.
+const user = await User.findOne({
+    userId: interaction.user.id,
+    guildId: interaction.guild.id
 });
+const balance = user?.balance ?? 0;
 
-// Update user data
-user.xp += 50;
-user.coins += 100;
-await user.save();
-
-// Create new user
-await User.create({
-    userId: user.id,
-    guildId: guild.id,
-    xp: 0,
-    level: 1,
-    coins: 0
-});
+// Award XP and coins. `$inc` through an upsert creates the document on a
+// member's first award and is atomic against concurrent awards, which
+// `user.xp += 50; user.save()` is not.
+await User.findOneAndUpdate(
+    { userId: interaction.user.id, guildId: interaction.guild.id },
+    { $inc: { xp: 50, balance: 100 } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+);
 ```
+
+Debits are not the mirror image of credits — a balance may not go negative, and
+the guard belongs in the filter (`balance: { $gte: cost }`) rather than in a
+read beforehand. See `models/User.js` and the economy routes.
 
 ### Creating a New Model
 

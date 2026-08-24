@@ -22,6 +22,7 @@ const {
     END,
     DOC_PATH,
     API_DIR,
+    API_INDEX,
 } = require('../scripts/docs-api');
 
 describe('API_REFERENCE endpoint tables', () => {
@@ -166,6 +167,36 @@ describe('the generator itself', () => {
     test('refuses a route it cannot read rather than dropping it silently', () => {
         withProbe("router.get(buildPath(), handler);\n", () => {
             expect(() => parseRouter('__parser_probe')).toThrow(/cannot read/);
+        });
+    });
+
+    // No router defines a HEAD route today. If one ever does, it has to land in
+    // the table rather than being quietly dropped by a pattern that never
+    // expected it.
+    test('reads a HEAD route like any other', () => {
+        withProbe("// Probes whether an export is ready.\nrouter.head('/export', checkAuth, handler);\n", () => {
+            expect(parseRouter('__parser_probe').routes).toEqual([{
+                method: 'HEAD',
+                path: '/api/export',
+                requires: ['session'],
+                summary: 'Probes whether an export is ready',
+            }]);
+        });
+    });
+
+    test('a new HEAD route makes --check fail until the doc is regenerated', () => {
+        withProbe("// Probes whether an export is ready.\nrouter.head('/export', checkAuth, handler);\n", () => {
+            // parseAll refuses an unmounted router, so mount the probe the way a
+            // real router is mounted and check the doc against what it renders.
+            const index = fs.readFileSync(API_INDEX, 'utf8');
+            fs.writeFileSync(API_INDEX, `${index}\nrouter.use(require('./api/__parser_probe'));\n`);
+            try {
+                const { current, next } = buildDoc();
+                expect(current === next).toBe(false);
+                expect(next).toContain('| `HEAD` | `/api/export` | session | Probes whether an export is ready |');
+            } finally {
+                fs.writeFileSync(API_INDEX, index);
+            }
         });
     });
 

@@ -166,7 +166,8 @@ async function buildGuildStats(guildId) {
     };
 }
 
-// The dashboard's headline numbers for a guild: members, messages, economy and leveling totals.
+// The dashboard's headline numbers for a guild: members, messages, coins in
+// circulation, top levels and average XP.
 router.get('/guild/:guildId/stats', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
 
