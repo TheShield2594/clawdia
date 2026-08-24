@@ -1,797 +1,258 @@
-# Clawdia API Reference
+# Clawdia HTTP API Reference
 
-## Developer Guide for Extending Clawdia
+Every HTTP endpoint the bot serves, who may call it, and what it does.
 
-This guide is for developers who want to add custom features or modify existing functionality.
+This is the dashboard's own API. It is not a public API and there are no API
+keys: every call is authenticated by the Discord OAuth session cookie the
+dashboard sets, and authorized against the guilds that session administers. The
+dashboard's own JavaScript is the only client it was built for, and anything
+else calling it has to carry a browser session.
 
-## Project Structure
+To *write* an endpoint rather than call one, see
+[docs/EXTENDING.md](docs/EXTENDING.md#adding-api-endpoints).
 
-```
-src/
-├── commands/          # Slash commands by category
-│   ├── admin/        # Administrator commands
-│   ├── ai/           # AI-related commands
-│   ├── community/    # Community and social commands
-│   ├── economy/      # Economy system
-│   ├── fun/          # Fun/entertainment
-│   ├── leveling/     # XP and leveling
-│   ├── moderation/   # Moderation tools
-│   └── utility/      # Utility commands
-├── dashboard/        # Web dashboard
-│   ├── public/       # Static files (CSS, JS)
-│   ├── routes/       # Express routes
-│   └── views/        # EJS templates
-├── events/           # Discord.js events
-├── views/            # Discord embeds and component rows
-├── models/           # MongoDB schemas
-├── data/             # Static tables (drop tables, role definitions)
-├── services/         # Business logic
-├── games/            # Casino round state machines
-├── bot/              # The gateway facade the dashboard talks to
-└── utils/            # Helper functions
-```
+## Where it lives
 
-### Which way dependencies run
-
-These directories are layers, and the direction is enforced — `npm run lint`
-fails on a module requiring one from a layer above it. Lowest first:
-
-| Layer | May require |
+| | |
 | --- | --- |
-| `models`, `config`, `data`, `migrations` | each other |
-| `utils` | the above |
-| `views` | the above |
-| `services`, `games` | the above |
-| `commands`, `bot` | the above |
-| `dashboard`, `events` | the above |
-
-A module may always require its own layer. If two layers need the same code,
-the code moves *down* — a Discord embed several callers share belongs in
-`views/`, a table belongs in `data/`, an operation belongs in `services/`. The
-rule and the one documented exception live in `eslint-rules/layer-boundaries.js`
-and `eslint.config.js`.
-
-## Creating a New Command
-
-### Basic Command Template
-
-```javascript
-const { SlashCommandBuilder } = require('discord.js');
-
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('commandname')
-        .setDescription('Command description'),
-    cooldown: 5, // Optional: cooldown in seconds
-    async execute(interaction) {
-        // Command logic here
-        await interaction.reply('Response!');
-    }
-};
-```
-
-### Command with Options
-
-```javascript
-const { SlashCommandBuilder } = require('discord.js');
-
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('greet')
-        .setDescription('Greet a user')
-        .addUserOption(option =>
-            option.setName('user')
-                .setDescription('User to greet')
-                .setRequired(true))
-        .addStringOption(option =>
-            option.setName('message')
-                .setDescription('Custom message')
-                .setRequired(false)),
-    async execute(interaction) {
-        const user = interaction.options.getUser('user');
-        const message = interaction.options.getString('message') || 'Hello';
-        
-        await interaction.reply(`${message}, ${user}!`);
-    }
-};
-```
-
-### Command with Permissions
-
-```javascript
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('announce')
-        .setDescription('Make an announcement')
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
-    async execute(interaction) {
-        // Only users with Manage Messages can use this
-        await interaction.reply('Announcement!');
-    }
-};
-```
-
-### Command with Embeds
-
-```javascript
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('info')
-        .setDescription('Display info'),
-    async execute(interaction) {
-        const embed = new EmbedBuilder()
-            .setColor('#0099ff')
-            .setTitle('Information')
-            .setDescription('Some details here')
-            .addFields(
-                { name: 'Field 1', value: 'Value 1', inline: true },
-                { name: 'Field 2', value: 'Value 2', inline: true }
-            )
-            .setTimestamp()
-            .setFooter({ text: 'Footer text' });
-        
-        await interaction.reply({ embeds: [embed] });
-    }
-};
-```
-
-## Database Models
-
-### Accessing Guild Settings
-
-```javascript
-const Guild = require('../models/Guild');
-
-// Get guild settings
-const settings = await Guild.findOne({ guildId: interaction.guild.id });
-
-// Update settings
-settings.leveling.enabled = true;
-await settings.save();
-
-// Create new guild
-await Guild.create({
-    guildId: guild.id,
-    name: guild.name
-});
-```
-
-### Accessing User Data
-
-```javascript
-const User = require('../models/User');
-
-// Get user data
-const user = await User.findOne({ 
-    userId: interaction.user.id, 
-    guildId: interaction.guild.id 
-});
-
-// Update user data
-user.xp += 50;
-user.coins += 100;
-await user.save();
-
-// Create new user
-await User.create({
-    userId: user.id,
-    guildId: guild.id,
-    xp: 0,
-    level: 1,
-    coins: 0
-});
-```
-
-### Creating a New Model
-
-```javascript
-// src/models/CustomData.js
-const { Schema, model } = require('mongoose');
-
-const customSchema = new Schema({
-    guildId: { type: String, required: true },
-    userId: { type: String, required: true },
-    customField: { type: String, default: '' },
-    customNumber: { type: Number, default: 0 },
-    createdAt: { type: Date, default: Date.now }
-});
-
-// Compound index for faster queries
-customSchema.index({ guildId: 1, userId: 1 }, { unique: true });
-
-module.exports = model('CustomData', customSchema);
-```
-
-## Creating a Service
-
-Services contain reusable business logic.
-
-```javascript
-// src/services/customService.js
-
-async function doSomething(client, data) {
-    try {
-        // Service logic here
-        return result;
-    } catch (error) {
-        console.error('Custom service error:', error);
-        throw error;
-    }
-}
-
-async function scheduledTask(client) {
-    // Runs on a schedule
-}
-
-module.exports = {
-    doSomething,
-    scheduledTask
-};
-```
-
-### Using a Service in Commands
-
-```javascript
-const { doSomething } = require('../../services/customService');
-
-module.exports = {
-    // ... command definition
-    async execute(interaction) {
-        const result = await doSomething(interaction.client, data);
-        await interaction.reply(`Result: ${result}`);
-    }
-};
-```
-
-## AI Service Integration
-
-### Using AI in Custom Commands
-
-```javascript
-const { getChatCompletion } = require('../../services/aiService');
-const Guild = require('../../models/Guild');
-
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('askabout')
-        .setDescription('Ask AI about something')
-        .addStringOption(option =>
-            option.setName('topic')
-                .setDescription('Topic to ask about')
-                .setRequired(true)),
-    async execute(interaction) {
-        await interaction.deferReply();
-        
-        const topic = interaction.options.getString('topic');
-        const settings = await Guild.findOne({ guildId: interaction.guild.id });
-        
-        const provider = settings?.ai.provider || 'openai';
-        const apiKey = provider === 'openai' 
-            ? settings?.ai.openaiKey 
-            : settings?.ai.geminiKey;
-        
-        try {
-            const response = await getChatCompletion(
-                `Tell me about ${topic}`,
-                'You are a knowledgeable assistant.',
-                provider,
-                apiKey
-            );
-            
-            await interaction.editReply(response);
-        } catch (error) {
-            await interaction.editReply('AI service error. Check configuration.');
-        }
-    }
-};
-```
-
-### Custom AI System Prompts
-
-Create AI commands with specific personalities:
-
-```javascript
-// Coding tutor
-const systemPrompt = 'You are a patient coding tutor. Explain concepts simply with examples.';
-
-// D&D Master
-const systemPrompt = 'You are a creative Dungeon Master. Create engaging scenarios.';
-
-// Translator
-const systemPrompt = 'You are a translator. Translate the user input to English.';
-
-const response = await getChatCompletion(userInput, systemPrompt, provider, apiKey);
-```
-
-## RSS Service Integration
-
-### Adding Custom RSS Features
-
-```javascript
-const Parser = require('rss-parser');
-const parser = new Parser();
-
-async function getLatestArticles(feedUrl, count = 5) {
-    try {
-        const feed = await parser.parseURL(feedUrl);
-        return feed.items.slice(0, count).map(item => ({
-            title: item.title,
-            link: item.link,
-            date: new Date(item.pubDate || item.isoDate),
-            description: item.contentSnippet
-        }));
-    } catch (error) {
-        console.error('RSS parse error:', error);
-        return [];
-    }
-}
-
-// Usage in command
-const articles = await getLatestArticles('https://example.com/feed.xml', 3);
-```
-
-### Custom News Digest
-
-```javascript
-const { sendDailyNews } = require('../../services/rssService');
-
-// Manually trigger for specific guild
-await sendDailyNews(client, guildId);
-```
-
-## Event Handling
-
-### Creating a Custom Event
-
-```javascript
-// src/events/customEvent.js
-module.exports = {
-    name: 'messageReactionAdd', // Discord.js event name
-    async execute(reaction, user, client) {
-        // Event logic
-        if (reaction.emoji.name === '⭐') {
-            console.log(`${user.tag} starred a message`);
-        }
-    }
-};
-```
-
-### Common Events
-
-```javascript
-// Message events
-messageCreate, messageDelete, messageUpdate
-
-// Member events
-guildMemberAdd, guildMemberRemove, guildMemberUpdate
-
-// Reaction events
-messageReactionAdd, messageReactionRemove
-
-// Voice events
-voiceStateUpdate
-
-// Guild events
-guildCreate, guildDelete, guildUpdate
-```
-
-## Dashboard Customization
-
-### Adding a Dashboard Route
-
-```javascript
-// src/dashboard/routes/custom.js
-const express = require('express');
-const router = express.Router();
-
-function checkAuth(req, res, next) {
-    if (req.isAuthenticated()) return next();
-    res.redirect('/');
-}
-
-router.get('/custom', checkAuth, async (req, res) => {
-    res.render('custom', {
-        user: req.user,
-        // The gateway facade, which createApp attaches to every request.
-        // There is no req.client — routes never hold a live Discord client.
-        bot: req.bot
-    });
-});
-
-module.exports = router;
-```
-
-### Adding to Dashboard Server
-
-The app is built by a factory, so it can be constructed without a Discord
-client and driven with supertest; `listen()` is separate and binds the port.
-
-```javascript
-// src/dashboard/server.js — inside createApp(), before the error handler
-const customRoutes = require('./routes/custom');
-app.use('/custom', customRoutes);
-```
-
-Routes read Discord through `req.bot`, the gateway facade, never a live client.
-Anything a route throws — synchronously or from a rejected promise — is caught
-by the terminal error middleware; it must be, because the dashboard shares a
-process with the gateway and an escaped error exits it.
-
-### Creating a Dashboard View
-
-```html
-<!-- src/dashboard/views/custom.ejs -->
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Custom Page</title>
-    <link rel="stylesheet" href="/styles.css">
-</head>
-<body>
-    <h1>Custom Dashboard Page</h1>
-    <p>Welcome <%= user.username %></p>
-</body>
-</html>
-```
-
-### Adding API Endpoints
-
-```javascript
-// In src/dashboard/routes/api.js
-
-router.get('/api/custom/:guildId', checkAuth, async (req, res) => {
-    try {
-        const { guildId } = req.params;
-        
-        // Your logic here
-        const data = await getCustomData(guildId);
-        
-        res.json({ success: true, data });
-    } catch (error) {
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-router.post('/api/custom/:guildId', checkAuth, async (req, res) => {
-    try {
-        const { guildId } = req.params;
-        const { field1, field2 } = req.body;
-        
-        // Your logic here
-        await saveCustomData(guildId, field1, field2);
-        
-        res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-```
-
-## Scheduled Tasks
-
-### Using Cron Jobs
-
-```javascript
-// In src/events/ready.js or custom service
-const cron = require('node-cron');
-
-// Run every day at 9 AM
-cron.schedule('0 9 * * *', async () => {
-    await dailyTask(client);
-});
-
-// Run every hour
-cron.schedule('0 * * * *', async () => {
-    await hourlyTask(client);
-});
-
-// Run every 5 minutes
-cron.schedule('*/5 * * * *', async () => {
-    await frequentTask(client);
-});
-```
-
-### Cron Expression Format
-
-```
-*    *    *    *    *
-┬    ┬    ┬    ┬    ┬
-│    │    │    │    │
-│    │    │    │    └─── Day of Week (0-7)
-│    │    │    └──────── Month (1-12)
-│    │    └───────────── Day of Month (1-31)
-│    └────────────────── Hour (0-23)
-└─────────────────────── Minute (0-59)
-```
-
-Examples:
-- `0 9 * * *` - Daily at 9 AM
-- `*/15 * * * *` - Every 15 minutes
-- `0 */6 * * *` - Every 6 hours
-- `0 0 * * 0` - Weekly on Sunday at midnight
-
-## Utility Functions
-
-### Creating Embeds
-
-```javascript
-// src/utils/embedBuilder.js
-const { EmbedBuilder } = require('discord.js');
-
-function createSuccessEmbed(title, description) {
-    return new EmbedBuilder()
-        .setColor('#43b581')
-        .setTitle(`✅ ${title}`)
-        .setDescription(description)
-        .setTimestamp();
-}
-
-function createErrorEmbed(title, description) {
-    return new EmbedBuilder()
-        .setColor('#f04747')
-        .setTitle(`❌ ${title}`)
-        .setDescription(description)
-        .setTimestamp();
-}
-
-module.exports = { createSuccessEmbed, createErrorEmbed };
-```
-
-### Time Parsing
-
-```javascript
-// src/utils/timeParser.js
-function parseTime(timeString) {
-    const units = {
-        s: 1000,
-        m: 60000,
-        h: 3600000,
-        d: 86400000,
-        w: 604800000
-    };
-    
-    const match = timeString.match(/^(\d+)([smhdw])$/);
-    if (!match) return null;
-    
-    const [, amount, unit] = match;
-    return parseInt(amount) * units[unit];
-}
-
-// Usage: parseTime('1h') => 3600000 (milliseconds)
-```
-
-### Permission Checking
-
-```javascript
-function hasPermission(member, permission) {
-    return member.permissions.has(permission);
-}
-
-function hasRole(member, roleId) {
-    return member.roles.cache.has(roleId);
-}
-
-// Usage
-if (!hasPermission(interaction.member, 'ManageMessages')) {
-    return interaction.reply('You need Manage Messages permission!');
-}
-```
-
-## Testing
-
-`npm test` runs the whole suite — every `*.test.js` under `tests/`, about 20
-seconds on a laptop. CI runs the same command on every push and pull request,
-and the `publish` job that builds the Docker image sits behind `needs: test`, so
-a red suite means no image is built at all.
-
-```bash
-npm test                            # everything
-npx jest tests/birthday.test.js     # one file
-npx jest -t "leap day"              # every test whose name matches
-npx jest --watch                    # re-run the affected files on save
-```
-
-`--forceExit` is in the npm script rather than in a config: a few suites leave a
-mongoose connection or a timer handle open, and without it Jest waits on them
-after the last assertion has already passed.
-
-### How the suite is laid out
-
-- One file per subject, named after it: `tests/huntRepair.test.js`,
-  `tests/rollPayout.test.js`. There is no `jest.config.js` — the defaults apply,
-  so anything matching `*.test.js` is collected.
-- Shared fixtures live in `tests/helpers/`. They are not test files and are not
-  collected; require them from a test the way you would any module.
-- Some suites guard an invariant rather than a behaviour, and those are the ones
-  worth knowing about before you add a command or a script:
-  `commandCap.test.js` (Discord's 100-command global limit, plus a ratchet on
-  the current count), `commandDocs.test.js` (README's command list against the
-  loaded set), `lintGate.test.js` (the lint script and its CI step still exist)
-  and `requirePathsResolve.test.js`.
-
-### Writing one
-
-Node is the default environment, and models and services are mocked at the
-`require` boundary rather than being pointed at a live MongoDB:
-
-```javascript
-'use strict';
-
-jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn() }));
-
-const { __test__ } = require('../src/commands/fun/roll');
-const { payoutMultiplier } = __test__;
-
-describe('payoutMultiplier', () => {
-    test('exact-number bets pay at the die odds', () => {
-        expect(payoutMultiplier({ type: 'exact', number: 3 }, 6)).toBe(6);
-    });
-});
-```
-
-Commands export the internals they want covered under a `__test__` key, which
-keeps the test off the interaction plumbing and on the logic that can actually
-be wrong.
-
-Anything that touches dashboard front-end code — `src/dashboard/public/*.js`,
-the EJS views — needs a DOM, requested per file with a docblock at the top:
-
-```javascript
-/**
- * @jest-environment jsdom
- * @jest-environment-options {"customExportConditions": ["node"]}
- */
-```
-
-jsdom omits a few Node globals that mongoose's driver reaches for on require;
-`tests/dashboardAccessibility.test.js` shows the shim those suites use.
-
-### Logging
-
-```javascript
-// Simple console logging
-console.log('[INFO]', 'Something happened');
-console.error('[ERROR]', 'Error occurred:', error);
-
-// With timestamps
-const timestamp = new Date().toISOString();
-console.log(`[${timestamp}] Event occurred`);
-```
-
-## Best Practices
-
-### Error Handling
-
-```javascript
-async execute(interaction) {
-    try {
-        await interaction.deferReply();
-        
-        // Your logic
-        const result = await someAsyncOperation();
-        
-        await interaction.editReply(`Success: ${result}`);
-    } catch (error) {
-        console.error('Command error:', error);
-        
-        const errorMessage = 'An error occurred. Please try again later.';
-        
-        if (interaction.deferred) {
-            await interaction.editReply(errorMessage);
-        } else {
-            await interaction.reply({ content: errorMessage, ephemeral: true });
-        }
-    }
-}
-```
-
-### Deferred Replies
-
-For long-running commands:
-
-```javascript
-async execute(interaction) {
-    // Show "bot is thinking" immediately
-    await interaction.deferReply();
-    
-    // Do long operation
-    const result = await longOperation();
-    
-    // Edit the deferred reply
-    await interaction.editReply(`Result: ${result}`);
-}
-```
-
-### Ephemeral Replies
-
-For private responses:
-
-```javascript
-await interaction.reply({
-    content: 'Only you can see this!',
-    ephemeral: true
-});
-```
-
-### Button Interactions
-
-```javascript
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-
-const row = new ActionRowBuilder()
-    .addComponents(
-        new ButtonBuilder()
-            .setCustomId('confirm')
-            .setLabel('Confirm')
-            .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-            .setCustomId('cancel')
-            .setLabel('Cancel')
-            .setStyle(ButtonStyle.Danger)
-    );
-
-await interaction.reply({
-    content: 'Choose an option:',
-    components: [row]
-});
-
-// Handle button click in interactionCreate event
-if (interaction.isButton()) {
-    if (interaction.customId === 'confirm') {
-        await interaction.update({ content: 'Confirmed!', components: [] });
-    }
-}
-```
-
-## Deployment
-
-### Building Docker Image
-
-```bash
-docker build -t clawdia:latest .
-```
-
-### Running Locally
-
-```bash
-npm install
-npm run deploy  # Deploy commands to Discord
-npm start       # Start the bot
-```
-
-### Environment Variables
-
-Always use environment variables for sensitive data:
-
-```javascript
-const token = process.env.DISCORD_TOKEN;
-const apiKey = process.env.CUSTOM_API_KEY;
-```
-
-Never hardcode tokens or API keys!
-
-## Resources
-
-- [Discord.js Guide](https://discordjs.guide/)
-- [Discord.js Documentation](https://discord.js.org/)
-- [Discord API Documentation](https://discord.com/developers/docs/)
-- [MongoDB Documentation](https://docs.mongodb.com/)
-- [Express.js Documentation](https://expressjs.com/)
-- [Node-cron Documentation](https://www.npmjs.com/package/node-cron)
-
-## Contributing
-
-When adding new features:
-
-1. Create commands in appropriate category folder
-2. Use existing patterns and conventions
-3. Add proper error handling
-4. Test thoroughly before committing
-5. Update documentation
-6. Consider dashboard integration
-
-Happy coding! 🚀
+| Base URL | `DASHBOARD_URL`, or `http://localhost:$DASHBOARD_PORT` (3000 by default) |
+| Mount point | `/api` — every path below already includes it |
+| Source | `src/dashboard/routes/api/`, one file per feature, mounted by `routes/api.js` |
+| Request bodies | JSON, except the image uploads, which are `multipart/form-data` |
+| Responses | JSON, except the image reads, which return the image bytes |
+
+## Authentication
+
+Log in at `/auth/discord`; the OAuth callback sets a session cookie backed by
+MongoDB. Every route below except the two image reads is behind `checkAuth`,
+which answers `401 {"error": "Unauthorized"}` to a request without a session.
+
+## Authorization
+
+Routes with a `:guildId` are behind `checkGuildAccess`, which applies two gates
+in cost order:
+
+1. **The session's own guild list.** Free to read, and rejects anyone who was
+   not an administrator of this guild when they logged in.
+2. **Discord, live.** The session's guild list is a snapshot taken once at OAuth
+   time, so on its own it would hand a demoted or kicked admin full write access
+   until their cookie expired. The second gate asks Discord whether they still
+   administer the guild.
+
+Either gate answering *no* is `403 {"error": "Forbidden"}`. A gate that cannot
+answer — a Discord outage — falls through to the snapshot rather than to a 403,
+deliberately: the alternative is that an unrelated Discord incident locks every
+operator out of their own dashboard. Only a definite *no* denies.
+
+## Cross-origin writes
+
+Every `POST`, `PUT`, `PATCH` and `DELETE` passes `checkCsrfOrigin` before its
+route runs. There is no CSRF token; the check is on the headers a browser sends
+and a cross-site page cannot forge:
+
+- an `Origin` header matching the dashboard's own origin passes;
+- an `Origin` from anywhere else is rejected;
+- no `Origin` at all passes only with `Sec-Fetch-Site: same-origin` or `none`.
+
+Anything else — a stray proxy, a scripted client, a browser sending neither
+header — gets `403 {"error": "Forbidden: cross-origin request rejected"}`. The
+Fetch standard requires browsers to send `Origin` on every non-`GET` request, so
+a real dashboard write always carries one.
+
+## Rate limits
+
+| Scope | Limit | Counted per |
+| --- | --- | --- |
+| Reads (`GET`, `HEAD`) | 120 / minute | session, or IP when unauthenticated |
+| Writes | 60 / minute | session |
+
+Both answer `429 {"error": "Too many requests. Please slow down."}`. The read
+limit is applied router-wide and the write limit per route, which is why
+`write limit` appears in the table below and a read limit does not: it is on
+everything.
+
+The two budgets are counted separately and a route can be in both. `GET` rows
+carrying `write limit` are not a mistake in the table: the member search and
+resolve lookups are reads that each cost a Discord call, so they are charged to
+the write budget as well as the read one. The ceilings are well above what the dashboard itself asks for — a
+page load fires a handful of requests, not a hundred — and exist because several
+reads are expensive: `/stats` and `/insights` each run collection-wide
+aggregations.
+
+## Errors
+
+Failures are a JSON object with an `error` string. Handlers catch their own
+exceptions; anything that still escapes is caught by the terminal error
+middleware, because the dashboard shares a process with the gateway and an
+escaped error would take the bot down with it.
+
+| Status | Means |
+| --- | --- |
+| `400` | The request body or a query parameter failed validation; `error` names the field |
+| `401` | No session |
+| `403` | Not an administrator of this guild, or a rejected cross-origin write |
+| `404` | No such guild, entry, member or case |
+| `409` | The same operation is already in flight for this guild |
+| `429` | Rate limited |
+| `500` | Unhandled server error; the detail is in the bot's logs, not the response |
+| `503` | Discord refused a request the route depends on, usually a missing bot permission |
+
+## Endpoints
+
+The **Requires** column lists what a caller must satisfy beyond the read limit:
+
+- **session** — logged in (`checkAuth`)
+- **guild admin** — administers this `:guildId`, verified live (`checkGuildAccess`)
+- **write limit** — counts against the 60/minute write budget
+  (`checkWriteRateLimit`), on top of the read limit when the route is a `GET`
+- **multipart** — body is `multipart/form-data` with an `image` file part
+- **public** — no session needed; the image reads are served to `<img>` tags
+
+<!-- BEGIN GENERATED ENDPOINTS — npm run docs:api -->
+
+_Generated by `npm run docs:api` from `src/dashboard/routes/api/` — 46 endpoints. Edit the routes and their comments, not this table._
+
+### `settings.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `POST` | `/api/guild/:guildId/settings` | session, guild admin, write limit | Applies a patch of guild settings, rejecting any key outside the allow-list |
+
+### `stats.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/guild/:guildId/stats` | session, guild admin | The dashboard's headline numbers for a guild: members, messages, coins in circulation, top levels and average XP |
+| `GET` | `/api/guild/:guildId/insights` | session, guild admin | Derived analytics: 7 and 30 day retention, activity by hour, and command usage |
+
+### `autorole.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `POST` | `/api/guild/:guildId/autorole` | session, guild admin, write limit | Adds a role to the set every new member is given on join |
+| `DELETE` | `/api/guild/:guildId/autorole/:roleId` | session, guild admin, write limit | Stops giving a role to new members on join |
+
+### `reactionRoles.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `POST` | `/api/guild/:guildId/reactionrole/panel` | session, guild admin, write limit | Posts a reaction role panel to a channel and stores its emoji-to-role mappings |
+| `DELETE` | `/api/guild/:guildId/reactionrole/panel/:messageId` | session, guild admin, write limit | Deletes a reaction role panel, both the stored mappings and the Discord message |
+
+### `rss.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `POST` | `/api/guild/:guildId/validate-feed` | session, guild admin, write limit | Checks that a URL is a fetchable RSS or Atom feed before it is subscribed to |
+| `POST` | `/api/guild/:guildId/rss/add` | session, guild admin, write limit | Subscribes a channel to an RSS or Atom feed |
+| `POST` | `/api/guild/:guildId/dailynews/trigger` | session, guild admin, write limit | Sends the configured daily news digest now, refusing while one is already in flight |
+| `DELETE` | `/api/guild/:guildId/rss/:index` | session, guild admin, write limit | Unsubscribes from the feed at a position in the guild's feed list |
+
+### `knowledgeBase.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/guild/:guildId/knowledge-base` | session, guild admin | The guild's 100 most recent knowledge base entries, newest first |
+| `POST` | `/api/guild/:guildId/knowledge-base` | session, guild admin, write limit | Adds a knowledge base entry the AI can draw on, with up to 10 tags |
+| `DELETE` | `/api/guild/:guildId/knowledge-base/:entryId` | session, guild admin, write limit | Deletes one knowledge base entry |
+| `PUT` | `/api/guild/:guildId/knowledge-base/:entryId` | session, guild admin, write limit | Replaces one knowledge base entry's title, content and tags |
+
+### `summaryJobs.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/guild/:guildId/summary-jobs` | session, guild admin | The guild's scheduled channel summary jobs, oldest first |
+| `POST` | `/api/guild/:guildId/summary-jobs` | session, guild admin, write limit | Schedules a daily channel summary, up to 10 per guild |
+| `DELETE` | `/api/guild/:guildId/summary-jobs/:jobId` | session, guild admin, write limit | Deletes one scheduled summary job |
+
+### `dailyDigest.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/guild/:guildId/daily-digest` | session, guild admin | The guild's AI daily digest settings |
+| `PUT` | `/api/guild/:guildId/daily-digest` | session, guild admin, write limit | Updates the daily digest: on/off, target and source channels, and the local time it is posted |
+
+### `ai.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `POST` | `/api/guild/:guildId/persona` | session, guild admin, write limit | Creates or replaces the AI persona — name and system prompt — for one channel |
+| `DELETE` | `/api/guild/:guildId/persona/:channelId` | session, guild admin, write limit | Removes a channel's persona, returning it to the guild's default system prompt |
+| `GET` | `/api/guild/:guildId/ai/usage` | session, guild admin | Token and request usage for the last `?days=` (1-90, default 14), plus the configured rate limits |
+
+### `mcpServers.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/guild/:guildId/mcp-servers` | session, guild admin | The guild's MCP servers, the operator's global ones, the presets, and whether editing is allowed at all |
+| `PUT` | `/api/guild/:guildId/mcp-servers/:name` | session, guild admin, write limit | Creates or replaces one guild MCP server: URL, token, and its tool allow and block lists |
+| `DELETE` | `/api/guild/:guildId/mcp-servers/:name` | session, guild admin, write limit | Removes one guild MCP server |
+| `POST` | `/api/guild/:guildId/mcp-servers/:name/test` | session, guild admin, write limit | Makes a real request through one MCP server and reports whether it connected |
+
+### `members.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/guild/:guildId/members/search` | session, guild admin, write limit | Up to 10 members matching `?q=` (2 characters or more), for the dashboard's member pickers |
+| `GET` | `/api/guild/:guildId/members/resolve` | session, guild admin, write limit | Resolves up to 50 comma-separated user ids in `?ids=` to names and avatars |
+
+### `achievements.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `POST` | `/api/guild/:guildId/achievements/grant` | session, guild admin, write limit | Grants one of the guild's custom achievements to a member, with its XP and coin rewards |
+
+### `itemImages.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/item-image/shop/:guildId/:itemId` | public | Serves a guild shop item's image |
+| `POST` | `/api/item-image/shop/:guildId/:itemId` | session, guild admin, write limit, multipart | Stores the image shown for a guild shop item, replacing any existing one |
+| `DELETE` | `/api/item-image/shop/:guildId/:itemId` | session, guild admin, write limit | Removes a guild shop item's image |
+| `GET` | `/api/item-image/activity/:guildId/:itemId` | public | Serves a guild's activity item image, falling back to the shared pre-#561 one |
+| `POST` | `/api/item-image/activity/:guildId/:itemId` | session, guild admin, write limit, multipart | Stores one guild's activity item image, replacing any existing one |
+| `DELETE` | `/api/item-image/activity/:guildId/:itemId` | session, guild admin, write limit | Removes one guild's activity item image |
+
+### `moderation.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/guild/:guildId/cases` | session, guild admin | One page of moderation cases, filterable by `?type=` and `?status=` |
+| `PATCH` | `/api/guild/:guildId/cases/:caseId` | session, guild admin, write limit | Adds a moderator note to a case, or closes it with a resolution |
+| `GET` | `/api/guild/:guildId/sanctions/active` | session, guild admin | Up to 200 active bans and 200 active timeouts, read live from Discord |
+| `POST` | `/api/guild/:guildId/sanctions/unban/:userId` | session, guild admin, write limit | Lifts a ban, attributing it to the dashboard user, and writes an audit entry |
+| `POST` | `/api/guild/:guildId/sanctions/untimeout/:userId` | session, guild admin, write limit | Clears a member's timeout, attributing it to the dashboard user, and writes an audit entry |
+
+### `economy.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/guild/:guildId/economy/stats` | session, guild admin | Economy overview: richest members by net worth, coins in circulation, the count of members who worked, claimed a daily or fished in the last 7 days, and the top commands |
+| `POST` | `/api/guild/:guildId/economy/adjust` | session, guild admin, write limit | Gives, takes, resets, freezes or unfreezes one member's balance, and writes an audit entry |
+
+### `leveling.js`
+
+| Method | Path | Requires | Summary |
+| --- | --- | --- | --- |
+| `GET` | `/api/guild/:guildId/leveling/leaderboard` | session, guild admin | One page of 25 members ranked by level then XP |
+| `POST` | `/api/guild/:guildId/leveling/adjust` | session, guild admin, write limit | Gives, takes, resets or sets one member's XP or level |
+| `POST` | `/api/guild/:guildId/leveling/xp-event` | session, guild admin, write limit | Starts a timed XP multiplier event, replacing any event already running |
+
+<!-- END GENERATED ENDPOINTS -->
+
+## Keeping this file honest
+
+The tables above are generated by `npm run docs:api` from the routers
+themselves. Method, path and the **Requires** column are read off each route's
+middleware chain; the summary is the one-sentence `//` comment above it, so it
+lives with the handler and is read by whoever edits it next.
+
+A route with no comment above it fails the generator rather than being rendered
+blank, and `tests/apiDocs.test.js` compares this file against a fresh render, so
+adding, moving or renaming a route turns `npm test` red until `npm run docs:api`
+has been run. This file
+was previously a set of Express snippets whose only endpoint example was a
+`/api/custom/:guildId` that has never existed ([#711]); a hand-maintained list of
+46 routes drifts the week it is written, so it is no longer hand-maintained.
+
+[#711]: https://github.com/TheShield2594/clawdia/issues/711

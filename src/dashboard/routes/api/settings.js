@@ -286,6 +286,7 @@ function validateHeistUpdate(updates) {
     return null;
 }
 
+// Applies a patch of guild settings, rejecting any key outside the allow-list.
 router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const updates = req.body;

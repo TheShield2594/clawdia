@@ -4,6 +4,7 @@ const Guild = require('../../../models/Guild');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
 
+// Posts a reaction role panel to a channel and stores its emoji-to-role mappings.
 router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { channelId, title, description, mappings } = req.body;
@@ -78,6 +79,7 @@ router.post('/guild/:guildId/reactionrole/panel', checkAuth, checkGuildAccess, c
     }
 });
 
+// Deletes a reaction role panel, both the stored mappings and the Discord message.
 router.delete('/guild/:guildId/reactionrole/panel/:messageId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, messageId } = req.params;
 

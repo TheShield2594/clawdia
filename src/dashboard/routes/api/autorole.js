@@ -4,6 +4,7 @@ const Guild = require('../../../models/Guild');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
 
+// Adds a role to the set every new member is given on join.
 router.post('/guild/:guildId/autorole', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { roleId } = req.body;
@@ -27,6 +28,7 @@ router.post('/guild/:guildId/autorole', checkAuth, checkGuildAccess, checkWriteR
     }
 });
 
+// Stops giving a role to new members on join.
 router.delete('/guild/:guildId/autorole/:roleId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, roleId } = req.params;
 

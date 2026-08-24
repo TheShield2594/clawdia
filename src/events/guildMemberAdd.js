@@ -45,14 +45,19 @@ module.exports = {
     _applyVariables: applyVariables,
     async execute(member, client) {
         try {
+            // One settings read serves this whole handler. The join gate and the
+            // raid check each used to issue their own uncached Guild.findOne, so a
+            // single join hydrated the full guild document three times — shop image
+            // Buffers, analytics and all (#593). Resolve once, hand the same object
+            // down, and let the cache absorb the read.
+            const guildSettings = await getGuildSettings(member.guild.id);
+
             // Join gate runs first; if it removes the member, skip the rest.
-            const gated = await enforceJoinGate(member).catch(err => { console.error(err); return false; });
+            const gated = await enforceJoinGate(member, guildSettings).catch(err => { console.error(err); return false; });
             if (gated) return;
 
-            // Raid detection runs next, independently of guild settings load below
-            await raidCheck(member, client).catch(console.error);
-
-            const guildSettings = await getGuildSettings(member.guild.id);
+            // Raid detection runs next, independently of the welcome/autorole work below
+            await raidCheck(member, client, guildSettings).catch(console.error);
 
             if (!guildSettings) return;
             const dateKey = new Date().toISOString().slice(0, 10);

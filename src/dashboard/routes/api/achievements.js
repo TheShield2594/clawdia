@@ -4,6 +4,7 @@ const Guild = require('../../../models/Guild');
 const User = require('../../../models/User');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 
+// Grants one of the guild's custom achievements to a member, with its XP and coin rewards.
 router.post('/guild/:guildId/achievements/grant', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { userId, achievementId } = req.body;

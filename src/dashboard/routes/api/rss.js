@@ -7,6 +7,7 @@ const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/
 const { isValidDiscordId } = require('../../lib/apiHelpers');
 
 
+// Checks that a URL is a fetchable RSS or Atom feed before it is subscribed to.
 // The one write on the router that had no rate limit, and the one that reaches
 // out to a caller-supplied URL — an admin looping it turns the bot into an
 // outbound fetcher on someone else's behalf.
@@ -37,6 +38,7 @@ router.post('/guild/:guildId/validate-feed', checkAuth, checkGuildAccess, checkW
     }
 });
 
+// Subscribes a channel to an RSS or Atom feed.
 router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const { url, channelId } = req.body;
@@ -69,6 +71,7 @@ router.post('/guild/:guildId/rss/add', checkAuth, checkGuildAccess, checkWriteRa
 });
 
 const dailyNewsInFlight = new Set();
+// Sends the configured daily news digest now, refusing while one is already in flight.
 router.post('/guild/:guildId/dailynews/trigger', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     if (dailyNewsInFlight.has(guildId)) {
@@ -86,6 +89,7 @@ router.post('/guild/:guildId/dailynews/trigger', checkAuth, checkGuildAccess, ch
     }
 });
 
+// Unsubscribes from the feed at a position in the guild's feed list.
 router.delete('/guild/:guildId/rss/:index', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId, index } = req.params;
 

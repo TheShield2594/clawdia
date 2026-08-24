@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 
+// Up to 10 members matching `?q=` (2 characters or more), for the dashboard's member pickers.
 router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const { guildId } = req.params;
     const q = (req.query.q || '').trim();
@@ -21,6 +22,7 @@ router.get('/guild/:guildId/members/search', checkAuth, checkGuildAccess, checkW
     }
 });
 
+// Resolves up to 50 comma-separated user ids in `?ids=` to names and avatars.
 router.get('/guild/:guildId/members/resolve', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
     const ids = (req.query.ids || '').split(',').map(s => s.trim()).filter(s => /^\d{17,20}$/.test(s)).slice(0, 50);
     if (!ids.length) return res.json({});
