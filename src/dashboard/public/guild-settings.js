@@ -2781,6 +2781,10 @@ var _mcpPresets = [];
 var _mcpEditable = true;
 var _mcpMaxServers = 10;
 var _mcpEditing = null;
+// { openai: { label: 'OpenAI', mcp: 'client' }, ... } — how each provider
+// reaches MCP servers, so the note below the heading can answer for whatever is
+// selected in the Chat tab right now, not only for what was saved.
+var _mcpProviderSupport = {};
 
 function mcpEl(id) { return document.getElementById(id); }
 
@@ -2796,6 +2800,7 @@ async function loadMcpServers(force) {
         _mcpPresets = data.presets || [];
         _mcpEditable = data.editable !== false;
         _mcpMaxServers = data.maxServers || 10;
+        _mcpProviderSupport = data.providerSupport || {};
         renderMcpPresets();
         renderMcpServers(data.provider);
     } catch (e) {
@@ -2818,39 +2823,69 @@ function renderMcpPresets() {
 }
 
 var MCP_DEFAULT_PRESET_HINT = 'Pick a known service to prefill its endpoint, or enter any remote MCP server URL yourself.';
-var MCP_DEFAULT_TOKEN_HINT = 'Stored on the bot and sent to Anthropic with each request. It is never shown again once saved.';
+var MCP_DEFAULT_URL_PLACEHOLDER = 'https://api.example.com/mcp/';
+var MCP_DEFAULT_TOKEN_HINT = 'Stored on the bot and sent to the MCP server when a tool is called — by Anthropic when Claude is your provider, by the bot itself otherwise. It is never shown again once saved.';
 
 function resetMcpHints() {
     mcpEl('mcp-preset-hint').textContent = MCP_DEFAULT_PRESET_HINT;
     mcpEl('mcp-token-hint').textContent = MCP_DEFAULT_TOKEN_HINT;
+    mcpEl('mcp-url').placeholder = MCP_DEFAULT_URL_PLACEHOLDER;
 }
 
 function applyMcpPreset() {
     const select = mcpEl('mcp-preset');
-    const hint = mcpEl('mcp-preset-hint');
-    const tokenHint = mcpEl('mcp-token-hint');
     const preset = _mcpPresets.find(function(p) { return p.id === select.value; });
     if (!preset) {
         resetMcpHints();
         return;
     }
     mcpEl('mcp-name').value = preset.name;
-    mcpEl('mcp-url').value = preset.url;
+    // Some services have no single hosted endpoint — the server is one you run,
+    // so the URL is the one field the preset cannot fill in. Its placeholder
+    // shows the shape of the address, and the hint says whose it is.
+    mcpEl('mcp-url').value = preset.url || '';
+    mcpEl('mcp-url').placeholder = preset.urlPlaceholder || MCP_DEFAULT_URL_PLACEHOLDER;
     if (preset.suggestedBlockedTools && preset.suggestedBlockedTools.length) {
         mcpEl('mcp-blocked').value = preset.suggestedBlockedTools.join(', ');
     }
-    hint.textContent = preset.tokenHint || MCP_DEFAULT_PRESET_HINT;
-    tokenHint.textContent = preset.tokenLabel
-        ? preset.tokenLabel + ' — stored on the bot, never shown again once saved.'
-        : MCP_DEFAULT_TOKEN_HINT;
+
+    mcpEl('mcp-preset-hint').textContent = preset.hint || MCP_DEFAULT_PRESET_HINT;
+    mcpEl('mcp-token-hint').textContent = preset.tokenHint
+        || (preset.requiresToken === false
+            ? 'This service needs no token — leave it empty.'
+            : MCP_DEFAULT_TOKEN_HINT);
+    if (!preset.url) mcpEl('mcp-url').focus();
+}
+
+// What the selected provider does with these connections. Every provider the
+// bot ships can use them — Anthropic through its own connector, the rest through
+// the bot's MCP client — so this is a note about *how*, and only turns into a
+// warning if a provider ever cannot.
+function renderMcpProviderNote(provider) {
+    const note = mcpEl('mcp-provider-note');
+    if (!note) return;
+
+    const selected = provider || (mcpEl('ai-provider') ? mcpEl('ai-provider').value : null);
+    const support = selected ? _mcpProviderSupport[selected] : null;
+    if (!selected || !support) { note.style.display = 'none'; return; }
+
+    const label = support.label || selected;
+    note.style.display = '';
+    if (!support.mcp) {
+        note.className = 'mcp-note mcp-note-warn';
+        note.textContent = '⚠️ ' + label + ', your provider in the Chat tab, cannot use MCP connections, so these are inactive.';
+    } else if (support.mcp === 'native') {
+        note.className = 'mcp-note';
+        note.textContent = '🔌 ' + label + ' is your provider in the Chat tab. Anthropic connects to these servers and calls their tools directly.';
+    } else {
+        note.className = 'mcp-note';
+        note.textContent = '🔌 ' + label + ' is your provider in the Chat tab. Clawdia connects to these servers and offers their tools to the model — '
+            + 'a model that does not support tool calling will simply never use one.';
+    }
 }
 
 function renderMcpServers(provider) {
-    const providerWarn = mcpEl('mcp-provider-warning');
-    if (providerWarn) {
-        const selected = provider || (mcpEl('ai-provider') ? mcpEl('ai-provider').value : null);
-        providerWarn.style.display = selected && selected !== 'anthropic' ? '' : 'none';
-    }
+    renderMcpProviderNote(provider);
     const disabledWarn = mcpEl('mcp-disabled-warning');
     if (disabledWarn) disabledWarn.style.display = _mcpEditable ? 'none' : '';
     updateMcpFormState();
@@ -2997,7 +3032,7 @@ async function saveMcpServer() {
 async function removeMcpServer(name) {
     const ok = await showConfirm({
         title: 'Remove connection',
-        body: 'Remove "' + name + '"? Claude will lose access to its tools, and the stored token is deleted.',
+        body: 'Remove "' + name + '"? The model will lose access to its tools, and the stored token is deleted.',
         okText: 'Remove'
     });
     if (!ok) return;
@@ -3029,6 +3064,16 @@ async function testMcpServer(name, out) {
         const okay = resp.ok && data.success;
         out.className = 'mcp-test-result ' + (okay ? 'ok' : 'bad');
         out.textContent = (okay ? '✓ ' : '✗ ') + (data.message || data.error || (okay ? 'Connected' : 'Failed'));
+        // Tool names come from the server, so they are set as text on their own
+        // element rather than concatenated into any markup.
+        if (okay && Array.isArray(data.tools) && data.tools.length) {
+            const names = document.createElement('small');
+            names.className = 'mcp-test-tools';
+            const shown = data.tools.slice(0, 12);
+            names.textContent = 'Tools: ' + shown.join(', ')
+                + (data.tools.length > shown.length ? ', and ' + (data.tools.length - shown.length) + ' more' : '');
+            out.appendChild(names);
+        }
     } catch (e) {
         console.error(e);
         if (out) { out.className = 'mcp-test-result bad'; out.textContent = '✗ Request failed'; }

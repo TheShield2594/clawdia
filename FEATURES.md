@@ -31,17 +31,27 @@ OLLAMA_BASE_URL=http://localhost:11434
 - Custom system prompts
 - Dedicated AI chat channel
 
-**MCP Servers** (Anthropic provider only):
+**MCP Servers** (every provider):
 
-Claude can call tools on remote [MCP](https://modelcontextprotocol.io) servers.
-Add them per-server in the dashboard under **AI → 🔌 Connections**, or
+The bot can call tools on remote [MCP](https://modelcontextprotocol.io)
+servers, using whichever model is selected in the Chat tab. With Claude the
+servers travel on the request and Anthropic connects to them; with OpenAI,
+Gemini, Ollama or OpenRouter, Clawdia is the MCP client — it lists the tools,
+offers them to the model as functions and runs the calls it asks for. The model
+has to support tool calling on that second route.
+
+Add servers per-server in the dashboard under **AI → 🔌 Connections**, or
 operator-wide in `config/mcp-servers.json`; a dashboard entry overrides a file
 entry of the same name.
 
 Dashboard:
-- Preset for GitHub (`https://api.githubcopilot.com/mcp/`), or any https MCP endpoint
+- Presets for GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe, or
+  any https MCP endpoint
+- Gmail and Spotify are prefilled apart from the address: neither publishes a
+  hosted endpoint, so the server is one you run and the URL is yours to supply
 - Allow/deny lists per tool, so a destructive tool can be switched off by name
-- **Test** button — one real request, reports whether Claude reached the server
+- **Test** button — connects to the server and lists the tools it offers, with
+  no AI provider key and no tokens spent
 - Tokens are write-only: stored on the bot, never returned to the browser
 
 Config file:
@@ -65,7 +75,7 @@ Config file:
 - `MCP_ALLOW_GUILD_SERVERS=false` makes the file the only way in
 - With neither source configured, requests are unchanged
 
-Full field reference: [SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers-anthropic-only)
+Full field reference: [SETUP_GUIDE.md](SETUP_GUIDE.md#mcp-servers)
 
 ### Usage
 

@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { toolkitFor, MAX_TOOL_ROUNDS } = require('../mcp/toolkit');
 
 // The endpoint the *operator* runs, from the environment or the shipped default.
 // A guild's `ai.ollamaBaseUrl` is a dashboard setting, so it is attacker input
@@ -57,14 +58,88 @@ function buildMessages({ systemPrompt, history, prompt }) {
     ];
 }
 
-async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut }) {
-    const { url, agents } = resolveEndpoint(baseUrl);
-    const response = await axios.post(url, {
+// Ollama takes the same function-tool shape as the OpenAI-compatible APIs.
+// Whether the *model* can use them is another matter — a model without tool
+// support ignores the field, which is why nothing here depends on tools being
+// called, only on handling them when they are.
+function toolParams(toolkit) {
+    return toolkit.definitions.map(def => ({
+        type: 'function',
+        function: {
+            name: def.name,
+            description: def.description,
+            parameters: def.inputSchema
+        }
+    }));
+}
+
+function usageOf(payload) {
+    if (!payload) return null;
+    if (payload.prompt_eval_count == null && payload.eval_count == null) return null;
+    return {
+        inputTokens: payload.prompt_eval_count || 0,
+        outputTokens: payload.eval_count || 0
+    };
+}
+
+function addUsage(totals, round) {
+    if (!round) return;
+    totals.inputTokens += round.inputTokens;
+    totals.outputTokens += round.outputTokens;
+}
+
+// Ollama sends arguments as an object, but some builds send the JSON text
+// instead, so both are accepted rather than trusting one shape.
+function argsOf(call) {
+    const raw = call?.function?.arguments;
+    if (raw && typeof raw === 'object') return raw;
+    if (typeof raw === 'string' && raw.trim()) {
+        try {
+            return JSON.parse(raw);
+        } catch {
+            return null;
+        }
+    }
+    return {};
+}
+
+/** Append the model's tool calls and their results, ready for the next round. */
+async function runToolCalls({ toolkit, messages, calls, content }) {
+    messages.push({ role: 'assistant', content: content || '', tool_calls: calls });
+
+    for (const call of calls) {
+        const name = call?.function?.name || '';
+        const args = argsOf(call);
+        const result = args === null
+            ? `Those arguments were not valid JSON, so the tool was not run: ${call.function.arguments}`
+            : await toolkit.call(name, args);
+        // tool_name is what current Ollama builds use to match a result to its
+        // call; older ones ignore the field and match by order.
+        messages.push({ role: 'tool', tool_name: name, content: result });
+    }
+}
+
+function requestBody({ model, messages, temperature, maxTokens, stream, tools }) {
+    return {
         model,
-        messages: buildMessages({ systemPrompt, history, prompt }),
-        stream: true,
+        messages,
+        stream,
+        ...(tools ? { tools } : {}),
         options: { temperature, num_predict: maxTokens }
-    }, { responseType: 'stream', timeout: 120000, ...agents });
+    };
+}
+
+/**
+ * One streamed round of the NDJSON chat API.
+ *
+ * The text is yielded straight through to the caller, and everything the next
+ * round needs — the tool calls, the token counts, the assistant text as one
+ * string — is collected into `out`. A generator cannot hand back both through
+ * `yield*`, and an out-parameter reads better here than nesting one generator
+ * inside another to get at its return value.
+ */
+async function* streamRound({ url, agents, body, out }) {
+    const response = await axios.post(url, body, { responseType: 'stream', timeout: 120000, ...agents });
 
     let buf = '';
     for await (const chunk of response.data) {
@@ -76,35 +151,81 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
             if (!line) continue;
             try {
                 const json = JSON.parse(line);
-                if (json.message?.content) yield json.message.content;
-                if (json.done) {
-                    if (usageOut) {
-                        usageOut.usage = {
-                            inputTokens: json.prompt_eval_count || 0,
-                            outputTokens: json.eval_count || 0
-                        };
-                    }
-                    return;
+                if (json.message?.content) {
+                    out.content += json.message.content;
+                    yield json.message.content;
                 }
+                if (Array.isArray(json.message?.tool_calls)) out.calls.push(...json.message.tool_calls);
+                if (json.done) out.usage = usageOf(json);
             } catch { /* skip malformed line */ }
         }
     }
 }
 
-async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens }) {
+async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers });
     const { url, agents } = resolveEndpoint(baseUrl);
-    const response = await axios.post(url, {
-        model,
-        messages: buildMessages({ systemPrompt, history, prompt }),
-        stream: false,
-        options: { temperature, num_predict: maxTokens }
-    }, { timeout: 120000, ...agents });
-    const text = response.data?.message?.content || '';
-    const usage = (response.data?.prompt_eval_count != null || response.data?.eval_count != null) ? {
-        inputTokens: response.data.prompt_eval_count || 0,
-        outputTokens: response.data.eval_count || 0
-    } : null;
-    return { text, usage };
+    const messages = buildMessages({ systemPrompt, history, prompt });
+
+    const totals = { inputTokens: 0, outputTokens: 0 };
+    let sawUsage = false;
+
+    for (let round = 0; ; round++) {
+        // Withholding the tools on the final round leaves the model nothing to
+        // do but answer, so a turn can never end on an unanswered tool call.
+        const offerTools = Boolean(toolkit) && round < MAX_TOOL_ROUNDS;
+        const body = requestBody({
+            model, messages, temperature, maxTokens,
+            stream: true,
+            tools: offerTools ? toolParams(toolkit) : null
+        });
+
+        const out = { content: '', calls: [], usage: null };
+        yield* streamRound({ url, agents, body, out });
+
+        if (out.usage) {
+            sawUsage = true;
+            addUsage(totals, out.usage);
+        }
+        // No tools offered means no more rounds, whatever the model sent back.
+        if (!out.calls.length || !offerTools) break;
+        await runToolCalls({ toolkit, messages, calls: out.calls, content: out.content });
+    }
+
+    if (usageOut && sawUsage) usageOut.usage = totals;
+}
+
+async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers });
+    const { url, agents } = resolveEndpoint(baseUrl);
+    const messages = buildMessages({ systemPrompt, history, prompt });
+
+    const totals = { inputTokens: 0, outputTokens: 0 };
+    let sawUsage = false;
+
+    for (let round = 0; ; round++) {
+        const offerTools = Boolean(toolkit) && round < MAX_TOOL_ROUNDS;
+        const response = await axios.post(url, requestBody({
+            model, messages, temperature, maxTokens,
+            stream: false,
+            tools: offerTools ? toolParams(toolkit) : null
+        }), { timeout: 120000, ...agents });
+
+        const usage = usageOf(response.data);
+        if (usage) {
+            sawUsage = true;
+            addUsage(totals, usage);
+        }
+
+        const message = response.data?.message;
+        const content = message?.content || '';
+        const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+
+        // The round that stops calling tools is the answer — or the last round,
+        // where there were none to call. Text alongside a call is a preamble.
+        if (!calls.length || !offerTools) return { text: content, usage: sawUsage ? totals : null };
+        await runToolCalls({ toolkit, messages, calls, content });
+    }
 }
 
 /**
@@ -131,6 +252,9 @@ module.exports = {
     defaultModel: 'llama3.2',
     // Local inference: no per-token cost.
     pricing: [{ match: /.*/, in: 0, out: 0 }],
+    // Tools are offered through the bot's own MCP client. Models without tool
+    // support simply never call one.
+    mcp: 'client',
     resolveAuth: aiSettings => ({
         baseUrl: aiSettings.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || OPERATOR_DEFAULT
     }),

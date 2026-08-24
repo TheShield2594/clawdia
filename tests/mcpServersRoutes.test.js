@@ -17,14 +17,21 @@ jest.mock('../src/dashboard/lib/apiHelpers', () => ({
     ...jest.requireActual('../src/dashboard/lib/apiHelpers'),
     logAuditEvent: jest.fn(async () => {})
 }));
-jest.mock('@anthropic-ai/sdk', () => {
-    const betaCreate = jest.fn();
-    class MockAnthropic {
-        constructor() { this.beta = { messages: { create: betaCreate } }; }
+// The connection test dials the MCP server itself now, so this is the thing to
+// stand in for — no AI provider is involved in it at all.
+const mockListTools = jest.fn();
+const mockClose = jest.fn(async () => {});
+const mockConstructed = [];
+jest.mock('../src/services/ai/mcp/client', () => ({
+    McpHttpClient: class {
+        constructor(options) {
+            mockConstructed.push(options);
+            this.serverInfo = { name: 'GitHub MCP Server' };
+            this.listTools = mockListTools;
+            this.close = mockClose;
+        }
     }
-    MockAnthropic.__betaCreate = betaCreate;
-    return MockAnthropic;
-});
+}));
 
 const Guild = require('../src/models/Guild');
 const { logAuditEvent } = require('../src/dashboard/lib/apiHelpers');
@@ -68,6 +75,7 @@ afterAll(async () => {
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockConstructed.length = 0;
     doc = makeDoc([]);
     // findOne().lean() is used by the read paths; the write path uses the doc.
     Guild.findOne = jest.fn(() => {
@@ -194,66 +202,76 @@ describe('DELETE /guild/:id/mcp-servers/:name', () => {
 });
 
 describe('POST /guild/:id/mcp-servers/:name/test', () => {
-    test('needs an Anthropic key before it can try', async () => {
-        doc = makeDoc([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true, allowedTools: [], blockedTools: [] }]);
-        const originalKey = process.env.ANTHROPIC_API_KEY;
-        delete process.env.ANTHROPIC_API_KEY;
-        try {
-            const { status, body } = await api('POST', '/guild/g1/mcp-servers/github/test');
-            expect(status).toBe(400);
-            expect(body.error).toMatch(/Anthropic API key/);
-        } finally {
-            if (originalKey !== undefined) process.env.ANTHROPIC_API_KEY = originalKey;
-        }
-    });
+    const stored = {
+        name: 'github',
+        url: 'https://api.githubcopilot.com/mcp/',
+        enabled: true,
+        authorizationToken: 'ghp_good',
+        allowedTools: [],
+        blockedTools: ['delete_file']
+    };
 
     test('404s for a server that was never added', async () => {
         const { status } = await api('POST', '/guild/g1/mcp-servers/ghost/test');
         expect(status).toBe(404);
     });
 
-    test('reports a failed connection instead of a 500', async () => {
-        doc = makeDoc([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true, authorizationToken: 'ghp_bad', allowedTools: [], blockedTools: [] }]);
+    test('connects with the stored url and token, and counts what the filters leave on', async () => {
+        doc = makeDoc([stored]);
+        mockListTools.mockResolvedValue([
+            { name: 'search_repositories' },
+            { name: 'get_file_contents' },
+            { name: 'delete_file' }
+        ]);
+
+        const { status, body } = await api('POST', '/guild/g1/mcp-servers/github/test');
+
+        expect(status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(mockConstructed).toEqual([{
+            url: 'https://api.githubcopilot.com/mcp/',
+            authorizationToken: 'ghp_good',
+            label: 'github'
+        }]);
+        expect(body.toolCount).toBe(3);
+        // delete_file is blocked, so it is offered by the server but not enabled.
+        expect(body.enabledCount).toBe(2);
+        expect(body.tools).toEqual(['search_repositories', 'get_file_contents', 'delete_file']);
+        expect(body.message).toMatch(/GitHub MCP Server/);
+    });
+
+    // The test used to spend an Anthropic call to find out whether a URL worked,
+    // which meant a guild on any other provider could not run it at all.
+    test('needs no AI provider key', async () => {
+        doc = makeDoc([stored]);
+        mockListTools.mockResolvedValue([{ name: 'search_repositories' }]);
         const originalKey = process.env.ANTHROPIC_API_KEY;
-        process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
-        const betaCreate = require('@anthropic-ai/sdk').__betaCreate;
-        betaCreate.mockRejectedValue(Object.assign(new Error('mcp server returned 401'), { status: 400 }));
+        delete process.env.ANTHROPIC_API_KEY;
         try {
-            const { status, body } = await api('POST', '/guild/g1/mcp-servers/github/test');
-            expect(status).toBe(200);
-            expect(body.success).toBe(false);
-            expect(body.message).toMatch(/401/);
+            const { body } = await api('POST', '/guild/g1/mcp-servers/github/test');
+            expect(body.success).toBe(true);
         } finally {
-            if (originalKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-            else process.env.ANTHROPIC_API_KEY = originalKey;
+            if (originalKey !== undefined) process.env.ANTHROPIC_API_KEY = originalKey;
         }
     });
 
-    test('sends the stored server and the beta flag on a successful test', async () => {
-        doc = makeDoc([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true, authorizationToken: 'ghp_good', allowedTools: [], blockedTools: ['delete_file'] }]);
-        const originalKey = process.env.ANTHROPIC_API_KEY;
-        process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
-        const betaCreate = require('@anthropic-ai/sdk').__betaCreate;
-        betaCreate.mockResolvedValue({ content: [], stop_reason: 'max_tokens' });
-        try {
-            const { status, body } = await api('POST', '/guild/g1/mcp-servers/github/test');
-            expect(status).toBe(200);
-            expect(body.success).toBe(true);
+    test('reports a failed connection instead of a 500', async () => {
+        doc = makeDoc([{ ...stored, authorizationToken: 'ghp_bad' }]);
+        mockListTools.mockRejectedValue(
+            Object.assign(new Error('HTTP 401 — the server rejected the authorization token'), { status: 401 })
+        );
 
-            const sent = betaCreate.mock.calls[0][0];
-            expect(sent.betas).toEqual(['mcp-client-2025-11-20']);
-            expect(sent.mcp_servers).toEqual([
-                { type: 'url', url: 'https://api.githubcopilot.com/mcp/', name: 'github', authorization_token: 'ghp_good' }
-            ]);
-            expect(sent.tools).toEqual([
-                { type: 'mcp_toolset', mcp_server_name: 'github', configs: { delete_file: { enabled: false } } }
-            ]);
-            // One token is enough: the connection and tool listing happen before
-            // any generation, so this stays cheap.
-            expect(sent.max_tokens).toBe(1);
-        } finally {
-            if (originalKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-            else process.env.ANTHROPIC_API_KEY = originalKey;
-        }
+        const { status, body } = await api('POST', '/guild/g1/mcp-servers/github/test');
+
+        expect(status).toBe(200);
+        expect(body.success).toBe(false);
+        expect(body.message).toMatch(/401/);
+    });
+
+    test('closes the session whether the test passed or failed', async () => {
+        doc = makeDoc([stored]);
+        mockListTools.mockRejectedValue(new Error('nope'));
+        await api('POST', '/guild/g1/mcp-servers/github/test');
+        expect(mockClose).toHaveBeenCalled();
     });
 });
