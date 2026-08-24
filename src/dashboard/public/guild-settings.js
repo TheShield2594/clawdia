@@ -4324,14 +4324,82 @@ document.addEventListener('click', async event => {
     window.location.href = link.href;
 });
 
+// ── One save at a time, and a button that says so (#663) ──────────────────
+//
+// saveSettings() reads a whole section out of the page and POSTs it, and
+// nothing stopped a second click starting a second POST while the first was
+// still open. Two requests carrying the same body can be answered in either
+// order, and for `economy` — which uploads pending shop images after the
+// settings land — the second pass walks a `_shopItemPendingImages` map the
+// first pass is in the middle of emptying.
+//
+// The other half of the problem is that the page said nothing while a save was
+// running. The toast at the end was the only feedback, so on a slow connection
+// the interface looked like it had ignored the click, which is what earns the
+// second one. sendWelcomeCardPreview() has done this properly all along; this
+// is that pattern applied to every save button at once.
+//
+// The section is the unit here, not the button. Moderation spreads three "Save
+// changes" buttons across three inner tabs and all three POST the same
+// section, so a save started from one has to close the other two as well.
+const savesInFlight = new Set();
+const SAVING_LABEL = 'Saving…';
+
+/** The save buttons whose click calls saveSettings() for this section. */
+function saveButtonsForSection(section) {
+    return saveButtonsIn(document).filter(btn => {
+        const match = SAVE_CALL.exec(btn.getAttribute('onclick') || '');
+        return !!match && match[1] === section;
+    });
+}
+
+/**
+ * Put a section's save buttons into their pending state.
+ *
+ * @returns {() => void} restores every button to exactly what it was.
+ */
+function beginSave(section) {
+    const restores = saveButtonsForSection(section).map(btn => {
+        const label = btn.textContent;
+        // Disabling the focused control moves focus to the body, which drops a
+        // keyboard user at the top of a 25-section page. Noted now so it can be
+        // handed back when the button comes alive again.
+        const hadFocus = document.activeElement === btn;
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        btn.textContent = SAVING_LABEL;
+        return () => {
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+            btn.textContent = label;
+            if (hadFocus) btn.focus();
+        };
+    });
+    return () => { for (const restore of restores) restore(); };
+}
+
 // saveSettings is called straight from inline onclick attributes, so the hook
 // goes on the global binding rather than on 28 buttons. The original is
 // captured first: reassigning the name would otherwise make this recurse.
 const saveSettingsUnhooked = saveSettings;
 window.saveSettings = async function saveSettings(section) {
-    const saved = await saveSettingsUnhooked(section);
-    if (saved) markSectionSaved(section);
-    return saved;
+    // Not an error worth a toast — the reader clicked a button that was already
+    // doing what they asked. The save in flight will report for both.
+    if (savesInFlight.has(section)) return false;
+    savesInFlight.add(section);
+    const endSave = beginSave(section);
+    try {
+        const saved = await saveSettingsUnhooked(section);
+        if (saved) markSectionSaved(section);
+        return saved;
+    } finally {
+        // In a finally because saveSettings() only catches around its fetch. A
+        // panel whose fields are not in the document throws out of the reading
+        // half, and a button left disabled and reading "Saving…" forever is a
+        // worse failure than the one that caused it.
+        savesInFlight.delete(section);
+        endSave();
+    }
 };
 
 // The panel that shipped with the page has had its init callbacks run by now —
