@@ -28,15 +28,20 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 const fs = require('fs');
 const path = require('path');
 const ejs = require('ejs');
-const { guildSettingsLocals } = require('./helpers/guildSettingsLocals');
+const { guildSettingsLocals, populatedGuildSettingsLocals } = require('./helpers/guildSettingsLocals');
 
 const VIEWS = path.join(__dirname, '..', 'src', 'dashboard', 'views');
 const PANELS = path.join(VIEWS, 'partials', 'panels');
 
 const panelNames = fs.readdirSync(PANELS).filter(f => f.endsWith('.ejs')).map(f => f.replace(/\.ejs$/, ''));
 
-function render(file) {
-    return ejs.render(fs.readFileSync(file, 'utf8'), guildSettingsLocals(), { filename: file });
+// A sweep that derives what it inspects at runtime reports the same green for
+// "nothing was wrong" as for "nothing was looked at". A renamed directory
+// would otherwise delete this whole suite silently.
+if (!panelNames.length) throw new Error('no panels found — the sweep would inspect nothing');
+
+function render(file, locals) {
+    return ejs.render(fs.readFileSync(file, 'utf8'), locals || guildSettingsLocals(), { filename: file });
 }
 
 function parse(html) {
@@ -66,9 +71,19 @@ const targets = [
     ['guild-settings.ejs', path.join(VIEWS, 'guild-settings.ejs')],
 ];
 
-describe.each(targets)('%s', (name, file) => {
+// Both fixtures, because a fresh Guild document leaves every array-backed list
+// empty: on that fixture alone each panel's `forEach` renders nothing and the
+// rules below never see a repeater row. Two of them held unnamed controls.
+const fixtures = [
+    ['empty', guildSettingsLocals],
+    ['populated', populatedGuildSettingsLocals],
+];
+const cases = targets.flatMap(([name, file]) =>
+    fixtures.map(([fixture, locals]) => [`${name} (${fixture})`, file, locals]));
+
+describe.each(cases)('%s', (name, file, locals) => {
     let root;
-    beforeAll(() => { root = parse(render(file)); });
+    beforeAll(() => { root = parse(render(file, locals())); });
 
     it('has no label that names nothing', () => {
         const orphans = [...root.querySelectorAll('label')]
@@ -121,9 +136,33 @@ describe('markup the script renders at runtime', () => {
     );
 
     it('emits no field-label without a for=', () => {
-        const orphans = (script.match(/<label class="field-label"[^>]*>/g) || [])
-            .filter(tag => !/\bfor=/.test(tag));
-        expect(orphans).toEqual([]);
+        const tags = script.match(/<label class="field-label"[^>]*>/g) || [];
+        // Without this the filter below reports clean when the script stops
+        // emitting field labels at all, and the rule quietly stops applying.
+        expect(tags.length).toBeGreaterThan(0);
+        expect(tags.filter(tag => !/\bfor=/.test(tag))).toEqual([]);
+    });
+
+    // The repeater rows the script appends have no <label> to pair with — they
+    // are bare cells in a grid — so each control carries its own aria-label.
+    // The panel sweep cannot see them: they exist only once a button is clicked.
+    it('names every control in the rows it appends', () => {
+        const builders = ['addLevelRoleReward', 'addSeasonTierRow', 'addRrMapping'];
+        for (const builder of builders) {
+            const start = script.indexOf(`function ${builder}(`);
+            expect([builder, start]).not.toEqual([builder, -1]);
+            const body = script.slice(start, script.indexOf('\n}', start));
+
+            // Controls written as markup in a template string.
+            const markup = body.match(/<(?:input|select|textarea)\b[^>]*>/g) || [];
+            const unnamed = markup.filter(tag => !/aria-label=/.test(tag));
+            expect([builder, unnamed]).toEqual([builder, []]);
+
+            // Controls built through the DOM API instead.
+            const created = (body.match(/createElement\('(input|select|textarea)'\)/g) || []).length;
+            const labelled = (body.match(/setAttribute\('aria-label'/g) || []).length;
+            expect([builder, labelled >= created]).toEqual([builder, true]);
+        }
     });
 
     it('gives each escalation row its own ids, so a two-step ladder has no duplicates', () => {

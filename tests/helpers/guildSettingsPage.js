@@ -30,11 +30,18 @@ function renderPanel(name) {
 // listeners — a stale guard still holding the previous document's fields would
 // otherwise answer for the fresh one.
 const pageListeners = [];
+// Set by bootPage; puts the native addEventListener back once the page's
+// listeners have been removed.
+let restoreAddListener = null;
 
 function forgetDocumentListeners() {
     while (pageListeners.length) {
         const [target, type, fn, opts] = pageListeners.pop();
         target.removeEventListener(type, fn, opts);
+    }
+    if (restoreAddListener) {
+        restoreAddListener();
+        restoreAddListener = null;
     }
 }
 
@@ -78,14 +85,18 @@ function bootPage({ panelFetch } = {}) {
         pageListeners.push([window, type, fn, opts]);
         addWindowListener(type, fn, opts);
     };
-    try {
-        window.eval(fs.readFileSync(path.join(PUBLIC, 'esc-html.js'), 'utf8'));
-        window.eval(bootstrap);
-        window.eval(fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8'));
-    } finally {
+    // Left in place rather than restored once the scripts have run: the page
+    // registers listeners after boot too — openPromptEditor() adds a document
+    // keydown handler when the editor opens — and one registered through the
+    // restored method is invisible to forgetDocumentListeners(), so it leaks
+    // into whatever test runs next. Uninstalled by forgetDocumentListeners().
+    restoreAddListener = () => {
         document.addEventListener = addDocumentListener;
         window.addEventListener = addWindowListener;
-    }
+    };
+    window.eval(fs.readFileSync(path.join(PUBLIC, 'esc-html.js'), 'utf8'));
+    window.eval(bootstrap);
+    window.eval(fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8'));
 }
 
 function clickTab(id) {

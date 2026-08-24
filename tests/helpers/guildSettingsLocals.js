@@ -78,4 +78,48 @@ function guildSettingsLocals(overrides = {}) {
     };
 }
 
-module.exports = { guildSettingsLocals };
+/**
+ * The same locals, with every array-backed list holding a row.
+ *
+ * A fresh Guild document has all of them empty, so each panel's `forEach`
+ * renders nothing and a sweep over the default fixture never sees a single
+ * repeater row — which is how a level-reward row shipped with two unnamed
+ * controls under a suite asserting that every control has a name.
+ *
+ * Ids here have to be ones the fixture's `roles` and `channels` actually
+ * contain: several panels look the id up and skip the row when it is missing.
+ */
+function populatedGuildSettingsLocals(overrides = {}) {
+    const base = guildSettingsLocals();
+    const s = base.settings;
+    const ROLE = '40';
+    const CHANNEL = '10';
+    const USER = '900000000000000001';
+
+    s.levelRoles = [{ level: 5, roleId: ROLE }, { level: 10, roleId: '41' }];
+    s.leveling = { ...s.leveling, noXpRoleIds: [ROLE], noXpChannelIds: [CHANNEL] };
+    s.season = { ...s.season, tierRewards: [{ tier: 1, coins: 100, roleId: ROLE, label: 'Bronze' }] };
+    s.commandPolicies = {
+        ...s.commandPolicies,
+        exceptions: { roleIds: [ROLE], userIds: [USER] },
+        rules: [{ command: 'ban', effect: 'deny', roleIds: [ROLE], channelIds: [CHANNEL] }],
+        cooldowns: [{ command: 'work', roleId: ROLE, seconds: 30 }],
+    };
+    s.antiNuke = { ...s.antiNuke, whitelistUserIds: [USER] };
+    s.autoRoles = [ROLE];
+    s.reactionRoles = [{ messageId: '1', channelId: CHANNEL, emoji: '👍', roleId: ROLE }];
+    s.rssFeeds = [{ url: 'https://example.com/feed.xml', channelId: CHANNEL }];
+    s.moderation = {
+        ...s.moderation,
+        customBadWords: ['badword'],
+        immunityRoleIds: [ROLE],
+        inviteAllowlist: ['discord.gg/example'],
+        linkAllowlist: ['example.com'],
+    };
+    s.exploration = { ...s.exploration, disabledRegions: ['forest'] };
+    s.ai = { ...s.ai, dailyDigest: { ...(s.ai && s.ai.dailyDigest), sourceChannelIds: [CHANNEL] } };
+
+    return { ...base, ...overrides };
+}
+
+module.exports = { guildSettingsLocals, populatedGuildSettingsLocals };

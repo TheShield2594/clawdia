@@ -2146,8 +2146,8 @@ function addRrMapping() {
     const row = document.createElement('div');
     row.style.cssText = 'display:grid;grid-template-columns:1fr 2fr auto;gap:.5rem;align-items:center;';
     row.innerHTML =
-        '<input type="text" placeholder="Emoji (e.g. 👍)" class="rr-emoji" style="font-size:1.1rem;">' +
-        '<select class="rr-role"><option value="">Select role</option>' +
+        '<input type="text" placeholder="Emoji (e.g. 👍)" class="rr-emoji" style="font-size:1.1rem;" aria-label="Emoji">' +
+        '<select class="rr-role" aria-label="Role to assign"><option value="">Select role</option>' +
         rrRoles.map(function(r) { return '<option value="' + r.id + '">@' + escHtml(r.name) + '</option>'; }).join('') +
         '</select>' +
         '<button class="btn btn-sm btn-danger" type="button" onclick="this.parentElement.remove()">×</button>';
@@ -3126,7 +3126,9 @@ function addLevelRoleReward() {
     const sourceSelect = document.getElementById('level-no-xp-roles-select');
     const newSelect = sourceSelect.cloneNode(true);
     newSelect.removeAttribute('id');
+    newSelect.removeAttribute('aria-label');
     newSelect.className = 'level-reward-role';
+    newSelect.setAttribute('aria-label', 'Reward role');
     newSelect.value = '';
     const levelInput = document.createElement('input');
     levelInput.type = 'number';
@@ -3135,6 +3137,7 @@ function addLevelRoleReward() {
     levelInput.max = 999;
     levelInput.style.width = '80px';
     levelInput.placeholder = 'Level';
+    levelInput.setAttribute('aria-label', 'Required level');
     const delBtn = document.createElement('button');
     delBtn.className = 'btn btn-danger';
     delBtn.type = 'button';
@@ -3165,10 +3168,10 @@ function addSeasonTierRow() {
             .join('')
         : '<option value="">No role</option>';
     row.innerHTML =
-        '<input type="number" class="season-tier-num" min="1" style="width:70px" placeholder="Tier">' +
-        '<input type="number" class="season-tier-coins" min="0" style="width:90px" placeholder="Coins">' +
-        '<select class="season-tier-role">' + roleOptionsHtml + '</select>' +
-        '<input type="text" class="season-tier-label" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)">' +
+        '<input type="number" class="season-tier-num" min="1" style="width:70px" placeholder="Tier" aria-label="Tier number">' +
+        '<input type="number" class="season-tier-coins" min="0" style="width:90px" placeholder="Coins" aria-label="Coin reward">' +
+        '<select class="season-tier-role" aria-label="Reward role">' + roleOptionsHtml + '</select>' +
+        '<input type="text" class="season-tier-label" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)" aria-label="Tier label">' +
         '<button class="btn btn-danger" type="button" onclick="this.closest(\'.season-tier-row\').remove()" title="Remove">&times;</button>';
     list.appendChild(row);
 }

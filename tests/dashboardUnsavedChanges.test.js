@@ -369,10 +369,12 @@ describe('the markup the tracking rests on', () => {
 
     it('gives every save button a scope owned by exactly one section', () => {
         const shared = [];
+        let found = 0;
         for (const file of fs.readdirSync(PANELS).filter(f => f.endsWith('.ejs'))) {
             const host = document.createElement('div');
             host.innerHTML = render(path.join(PANELS, file));
             for (const [scope, sections] of scopesIn(host)) {
+                found++;
                 // Two sections in one scope means saving either would clear
                 // the other's dirty state and lose the edits it covers.
                 if (sections.size > 1) {
@@ -380,6 +382,12 @@ describe('the markup the tracking rests on', () => {
                 }
             }
         }
+        // The scopes are discovered by walking the rendered panels, so a
+        // changed class or a move from inline onclick to addEventListener
+        // would empty the set and leave this reporting clean forever. The
+        // panels carry 28 save buttons; a floor well under that still catches
+        // the sweep going blind.
+        expect(found).toBeGreaterThan(20);
         expect(shared).toEqual([]);
     });
 
@@ -393,5 +401,48 @@ describe('the markup the tracking rests on', () => {
             }
         }
         expect(orphaned).toEqual([]);
+    });
+});
+
+// The page keeps registering document listeners after boot — openPromptEditor()
+// adds a keydown handler when the editor opens. bootPage() used to put the
+// native addEventListener back as soon as the scripts had run, so those escaped
+// the helper's bookkeeping and survived into the next test's document.
+describe('test isolation', () => {
+    beforeEach(() => {
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        document.body.innerHTML = '';
+        bootPage();
+    });
+
+    afterEach(async () => {
+        await settle();
+        forgetDocumentListeners();
+        jest.restoreAllMocks();
+    });
+
+    it('removes a document listener the page registers after boot', () => {
+        const seen = [];
+        const handler = () => seen.push('fired');
+        // Stands in for openPromptEditor's keydown: registered by page code
+        // once the document is already live.
+        document.addEventListener('keydown', handler);
+
+        document.dispatchEvent(new window.Event('keydown', { bubbles: true }));
+        expect(seen).toEqual(['fired']);
+
+        forgetDocumentListeners();
+        document.dispatchEvent(new window.Event('keydown', { bubbles: true }));
+        expect(seen).toEqual(['fired']);
+    });
+
+    it('hands addEventListener back once the page is torn down', () => {
+        forgetDocumentListeners();
+        // Anything registered after teardown is the next test's business, and
+        // must not accumulate in the helper's list.
+        const handler = () => {};
+        document.addEventListener('keydown', handler);
+        forgetDocumentListeners();
+        document.removeEventListener('keydown', handler);
     });
 });
