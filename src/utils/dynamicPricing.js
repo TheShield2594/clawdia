@@ -41,24 +41,24 @@ function nextPrice(item, band, volatility = 'medium') {
     return Math.round(cur + (target - cur) * 0.6);
 }
 
-// Decay demand toward zero (oversupply if negative, demand if positive).
-function decayDemand(item, volatility = 'medium') {
+// The per-tick decay as a plain multiplier, so a caller can hand it to Mongo's
+// `$mul` and let the decay apply to whatever the stored score is at write time
+// rather than to the value it happened to read a moment earlier. Buys `$inc`
+// this field concurrently (see commands/economy/shop.js), and a decayed value
+// written back with `$set` would swallow any that landed in between.
+function demandDecayFactor(volatility = 'medium') {
     const cfg = VOLATILITY_FACTORS[volatility] || VOLATILITY_FACTORS.medium;
-    return (item.demandScore ?? 0) * (1 - cfg.decay);
+    return 1 - cfg.decay;
 }
 
-// Record a price-history entry and trim to cap.
-function pushHistory(item, at = new Date()) {
-    if (!Array.isArray(item.priceHistory)) item.priceHistory = [];
-    item.priceHistory.push({
-        at,
-        price: item.currentPrice ?? item.basePrice ?? item.price,
-        demandScore: item.demandScore ?? 0,
-    });
-    if (item.priceHistory.length > HISTORY_CAP) {
-        item.priceHistory.splice(0, item.priceHistory.length - HISTORY_CAP);
-    }
+// Decay demand toward zero (oversupply if negative, demand if positive).
+function decayDemand(item, volatility = 'medium') {
+    return (item.demandScore ?? 0) * demandDecayFactor(volatility);
 }
+
+// Price history is appended by the recalc job's `$push`/`$slice: -HISTORY_CAP`
+// write rather than by rebuilding the array in JS, so the cap is enforced by the
+// database. HISTORY_CAP is exported for that write and for readers of the chart.
 
 // Convenience: % change between currentPrice and basePrice for /market trends display.
 function trendBucket(item) {
@@ -79,7 +79,7 @@ module.exports = {
     HISTORY_CAP,
     ensurePricingFields,
     nextPrice,
+    demandDecayFactor,
     decayDemand,
-    pushHistory,
     trendBucket,
 };

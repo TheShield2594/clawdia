@@ -3,7 +3,7 @@ const User  = require('../models/User');
 const SeasonRecord = require('../models/SeasonRecord');
 const { createWarVictoryBanner, createSeasonRecapCard } = require('../utils/cardGenerator');
 const { PET_DEFINITIONS, heartBar } = require('./petService');
-const { ensurePricingFields, nextPrice, decayDemand, pushHistory, trendBucket } = require('../utils/dynamicPricing');
+const { ensurePricingFields, nextPrice, decayDemand, demandDecayFactor, trendBucket, HISTORY_CAP } = require('../utils/dynamicPricing');
 const { softResetElo, tierFor, makeSeasonId } = require('../utils/duelElo');
 const { topByNetWorth } = require('../utils/netWorth');
 const { grantInventoryItem } = require('../utils/inventoryGrant');
@@ -648,10 +648,22 @@ async function announceHourlyWinners(client) {
     }
 }
 
-// ─── Dynamic shop pricing recalculation (issue #354) ─────────────────────────
+// ─── Dynamic shop pricing recalculation (issue #354) ────────────────────────
+//
+// Shop items carry their icon inline, as an `imageData` Buffer on the subdocument
+// (see the `shop` array in models/Guild.js). That makes the whole-document
+// read-mutate-`save()` shape this job used to have proportional to the size of a
+// guild's uploaded artwork rather than to the handful of numbers it changes:
+// every fifteen minutes it pulled every icon of every dynamic-pricing guild into
+// the process, and `markModified('shop')` then wrote all of them back untouched.
+//
+// So the shop is read under a projection that names only the pricing fields, and
+// the new prices go back as a `bulkWrite` of per-item `$set`s. The Buffers are
+// never read and never rewritten.
 async function recalcShopPrices(client) {
     const { EmbedBuilder } = require('discord.js');
-    const guilds = await Guild.find({ 'dynamicPricing.enabled': true });
+    // Only the lease window is needed here; the claim below re-reads the guild.
+    const guilds = await Guild.find({ 'dynamicPricing.enabled': true }, 'guildId dynamicPricing.recalcMinutes').lean();
 
     for (const guildSummary of guilds) {
         try {
@@ -663,6 +675,10 @@ async function recalcShopPrices(client) {
             // succeeds when lastRecalcAt is null or older than the lease window,
             // ensuring concurrent workers (multi-instance deployments) don't
             // both run the recalc for the same guild.
+            //
+            // `priceHistory` is deliberately absent from the projection: the write
+            // below appends to it with `$push`/`$slice` rather than replacing it,
+            // so there is no reason to carry thirty entries per item back and forth.
             const guildDoc = await Guild.findOneAndUpdate(
                 {
                     guildId: guildSummary.guildId,
@@ -673,27 +689,104 @@ async function recalcShopPrices(client) {
                     ],
                 },
                 { $set: { 'dynamicPricing.lastRecalcAt': now } },
-                { new: true }
-            );
+                {
+                    new: true,
+                    projection: 'guildId dynamicPricing economy.announcementChannelId economy.currency '
+                        + 'shop._id shop.name shop.price shop.basePrice shop.currentPrice shop.demandScore',
+                }
+            ).lean();
             if (!guildDoc) continue; // another worker already claimed this window
 
-            ensurePricingFields(guildDoc.shop);
+            const shop = Array.isArray(guildDoc.shop) ? guildDoc.shop : [];
+            // Captured before the backfill, because the write below names a field
+            // only where this job is the one that changed it. `basePrice` is set by
+            // admins through the dashboard, and writing back the value we read
+            // would undo an edit made while we were computing.
+            const priorState = shop.map(item => ({
+                hadBasePrice: item.basePrice != null,
+                // `$mul` rejects a null, and treats a missing field as zero — which
+                // is the right answer for an item that predates demand tracking, but
+                // has to be reached with `$set` rather than by multiplying.
+                hadDemandScore: typeof item.demandScore === 'number',
+            }));
+            ensurePricingFields(shop);
 
-            const band       = guildDoc.dynamicPricing.priceBand ?? 0.5;
-            const volatility = guildDoc.dynamicPricing.volatility ?? 'medium';
+            const band        = guildDoc.dynamicPricing.priceBand ?? 0.5;
+            const volatility  = guildDoc.dynamicPricing.volatility ?? 'medium';
+            const decayFactor = demandDecayFactor(volatility);
             const changedMovers = [];
+            const writes = [];
 
-            for (const item of guildDoc.shop) {
+            for (const [index, item] of shop.entries()) {
                 const prev = item.currentPrice ?? item.basePrice ?? item.price;
+                // Both read the demand score as it was at claim time, which is what
+                // the price is supposed to follow; only the stored score is left to
+                // the database to decay.
                 item.currentPrice = nextPrice(item, band, volatility);
                 item.demandScore  = decayDemand(item, volatility);
-                pushHistory(item, now);
+
+                // Nothing else writes `currentPrice`, and this job holds the guild's
+                // recalc lease, so it is the sole author of that field.
+                const set = { 'shop.$.currentPrice': item.currentPrice };
+                if (!priorState[index].hadBasePrice) set['shop.$.basePrice'] = item.basePrice;
+
+                const update = {
+                    $set: set,
+                    $push: {
+                        'shop.$.priceHistory': {
+                            // A snapshot of the score this tick's price was computed
+                            // from; a buy landing during the write moves the stored
+                            // score without rewriting this row.
+                            $each: [{ at: now, price: item.currentPrice, demandScore: item.demandScore }],
+                            $slice: -HISTORY_CAP,
+                        },
+                    },
+                };
+                if (priorState[index].hadDemandScore) {
+                    update.$mul = { 'shop.$.demandScore': decayFactor };
+                } else {
+                    set['shop.$.demandScore'] = item.demandScore;
+                }
+
+                // Matched by subdocument `_id` rather than by array index: an admin
+                // adding or removing a shop item between the read and the write
+                // shifts the indices, and an index-addressed `$set` would then land
+                // the new price on somebody else's item. A stale `_id` simply
+                // matches nothing.
+                //
+                // Backfilling an item additionally requires that it still have no
+                // basePrice. That is the one field here whose value is read rather
+                // than derived, so an admin setting it between the claim and this
+                // write is a real edit to lose. Failing the predicate skips the item
+                // for this tick — including its currentPrice and history entry,
+                // which were computed from the basePrice that no longer applies —
+                // and the next tick recomputes from the admin's value.
+                //
+                // `{ basePrice: null }` matches an absent field as well as an
+                // explicit null, which is the same set `item.basePrice == null`
+                // selected when priorState was captured.
+                const filter = priorState[index].hadBasePrice
+                    ? { guildId: guildDoc.guildId, 'shop._id': item._id }
+                    : { guildId: guildDoc.guildId, shop: { $elemMatch: { _id: item._id, basePrice: null } } };
+
+                writes.push({
+                    updateOne: {
+                        filter,
+                        update,
+                    },
+                });
+
+                // Movers are collected from the computed values rather than from
+                // what the write matched, since bulkWrite reports matches only in
+                // aggregate. A backfill item losing its predicate could therefore be
+                // named in the embed without its price having landed — cosmetic, and
+                // it needs an admin edit to land inside the same few milliseconds.
                 if (Math.abs(item.currentPrice - prev) / Math.max(1, prev) > 0.05) {
                     changedMovers.push({ name: item.name, prev, next: item.currentPrice, item });
                 }
             }
-            guildDoc.markModified('shop');
-            await guildDoc.save();
+
+            if (writes.length) await Guild.bulkWrite(writes);
 
             const channelId = guildDoc.economy?.announcementChannelId;
             if (channelId && changedMovers.length) {
