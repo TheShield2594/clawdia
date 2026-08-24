@@ -19,10 +19,7 @@
                                 <% } }); %>
                             </div>
                             <div style="display:flex;gap:.5rem;align-items:center">
-                                <select id="cp-exc-roles-select" aria-label="Role to exempt" data-no-dirty>
-                                    <option value="">Select a role</option>
-                                    <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
-                                </select>
+                                <%- include('../role-select', { id: 'cp-exc-roles-select', ariaLabel: 'Role to exempt', noDirty: true, placeholder: 'Select a role' }) %>
                                 <button class="btn btn-sm" type="button" onclick="addCpExcRole()">Add</button>
                             </div>
                         </div>
@@ -59,14 +56,10 @@
                             <div class="field"><label class="field-label" for="cp-r-command">Command name</label><input type="text" id="cp-r-command" placeholder="e.g. ban"></div>
                             <div class="field"><label class="field-label" for="cp-r-effect">Effect</label><select id="cp-r-effect"><option value="allow">Allow</option><option value="deny">Deny</option></select></div>
                             <div class="field"><label class="field-label" for="cp-r-roles">Roles <small>(leave empty for all)</small></label>
-                                <select id="cp-r-roles" multiple size="4" style="height:auto;">
-                                    <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
-                                </select>
+                                <%- include('../role-select', { id: 'cp-r-roles', multiple: true, size: 4 }) %>
                             </div>
                             <div class="field"><label class="field-label" for="cp-r-channels">Channels <small>(leave empty for all)</small></label>
-                                <select id="cp-r-channels" multiple size="4" style="height:auto;">
-                                    <% channels.forEach(function(ch){ %><option value="<%= ch.id %>">#<%= ch.name %></option><% }); %>
-                                </select>
+                                <%- include('../channel-select', { id: 'cp-r-channels', multiple: true, size: 4 }) %>
                             </div>
                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                                 <div class="field"><label class="field-label" for="cp-r-start-hour">Start hour UTC (0–23)</label><input type="number" id="cp-r-start-hour" min="0" max="23" placeholder="Any"></div>
@@ -84,10 +77,7 @@
                         <div class="modal-body" style="display:flex;flex-direction:column;gap:.9rem;">
                             <div class="field"><label class="field-label" for="cp-cd-command">Command name</label><input type="text" id="cp-cd-command" placeholder="e.g. daily"></div>
                             <div class="field"><label class="field-label" for="cp-cd-role">Role</label>
-                                <select id="cp-cd-role">
-                                    <option value="">Select a role</option>
-                                    <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
-                                </select>
+                                <%- include('../role-select', { id: 'cp-cd-role', placeholder: 'Select a role' }) %>
                             </div>
                             <div class="field"><label class="field-label" for="cp-cd-seconds">Cooldown (seconds)</label><input type="number" id="cp-cd-seconds" min="0" placeholder="0 = no cooldown"></div>
                         </div>

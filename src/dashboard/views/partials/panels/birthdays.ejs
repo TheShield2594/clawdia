@@ -9,12 +9,7 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="birthday-channel">Happy birthday wishing channel</label>
-                        <select id="birthday-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.birthdays?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'birthday-channel', placeholder: 'Select a channel', selected: settings.birthdays?.channelId }) %>
                     </div>
                     <div class="field">
                         <label class="field-label" for="birthday-hour">Happy birthday wishing hour (UTC)</label>
@@ -22,12 +17,7 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="birthday-role">Birthday role</label>
-                        <select id="birthday-role">
-                            <option value="">No birthday role</option>
-                            <% roles.forEach(role => { %>
-                                <option value="<%= role.id %>" <%= settings.birthdays?.roleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../role-select', { id: 'birthday-role', placeholder: 'No birthday role', selected: settings.birthdays?.roleId }) %>
                     </div>
                     <div class="field">
                         <label class="field-label" for="birthday-message">Birthday message template</label>

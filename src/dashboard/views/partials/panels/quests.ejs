@@ -11,10 +11,7 @@
                     <div class="panel-head" style="margin-top:1.25rem"><h3>Notifications</h3></div>
                     <div class="field">
                         <label class="field-label" for="quests-notif-channel">Quest completion channel <small>— post a rich embed here when a member finishes a quest (leave blank to post in the current channel)</small></label>
-                        <select id="quests-notif-channel">
-                            <option value="">— Same channel as activity —</option>
-                            <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.quests?.notificationChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'quests-notif-channel', placeholder: '— Same channel as activity —', selected: settings.quests?.notificationChannelId }) %>
                     </div>
 
                     <div class="panel-head" style="margin-top:1.25rem"><h3>Quest slots per reset</h3></div>

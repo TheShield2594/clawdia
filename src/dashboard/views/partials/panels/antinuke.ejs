@@ -9,10 +9,7 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="an-alert-channel">Alert channel</label>
-                        <select id="an-alert-channel">
-                            <option value="">None</option>
-                            <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.antiNuke?.alertChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'an-alert-channel', placeholder: 'None', selected: settings.antiNuke?.alertChannelId }) %>
                     </div>
                     <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                         <div>

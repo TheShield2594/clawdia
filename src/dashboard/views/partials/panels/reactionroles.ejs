@@ -44,12 +44,7 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="rr-channel">Target channel</label>
-                        <select id="rr-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(function(channel) { %>
-                                <option value="<%= channel.id %>">#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'rr-channel', placeholder: 'Select a channel' }) %>
                     </div>
                     <div class="field">
                         <label class="field-label" for="rr-title">Embed title</label>

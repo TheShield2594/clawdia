@@ -12,10 +12,7 @@
                     <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
                         <div>
                             <label class="field-label" for="newspaper-channel">Delivery channel</label>
-                            <select id="newspaper-channel">
-                                <option value="">— Select a channel —</option>
-                                <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.newspaper?.channelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'newspaper-channel', placeholder: '— Select a channel —', selected: settings.newspaper?.channelId }) %>
                         </div>
                         <div>
                             <label class="field-label" for="newspaper-day">Delivery day</label>

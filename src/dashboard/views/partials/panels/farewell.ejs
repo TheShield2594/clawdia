@@ -9,12 +9,7 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="farewell-channel">Farewell channel</label>
-                        <select id="farewell-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.farewell?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'farewell-channel', placeholder: 'Select a channel', selected: settings.farewell?.channelId }) %>
                     </div>
                     <div class="field">
                         <label class="field-label" for="farewell-message">Farewell message</label>

@@ -209,10 +209,18 @@ body {
     white-space: nowrap;
     font-family: inherit;
 }
-.btn:hover {
+/* Hover is excluded while a button is disabled (#663): a control that lifts
+   and brightens under the pointer reads as pressable, which is the whole
+   reason a save in flight gets clicked a second time. `:not(:disabled)` is
+   never false for an <a class="btn">, so links keep their hover. */
+.btn:hover:not(:disabled) {
     background: var(--surface-strong);
     border-color: rgba(255,255,255,0.25);
     transform: translateY(-1px);
+}
+.btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 .btn-primary {
     border-color: transparent;
@@ -220,7 +228,7 @@ body {
     color: #0d0b0a;
     box-shadow: 0 10px 30px -10px rgba(249, 115, 22, 0.5);
 }
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
     box-shadow: 0 14px 40px -10px rgba(249, 115, 22, 0.7);
     background: linear-gradient(135deg, #fb923c 0%, #fbbf24 100%);
 }
@@ -234,7 +242,7 @@ body {
     background: rgba(248, 113, 113, 0.12);
     color: #fecaca;
 }
-.btn-danger:hover { background: rgba(248, 113, 113, 0.22); }
+.btn-danger:hover:not(:disabled) { background: rgba(248, 113, 113, 0.22); }
 .btn-ghost { background: transparent; }
 .btn-sm { padding: 0.45rem 0.85rem; font-size: 0.82rem; }
 
@@ -503,60 +511,13 @@ body {
 .user-chip span { font-size: 0.88rem; color: var(--text-dim); }
 
 /* ── Settings page (guild-settings) ───────────────── */
-.settings-layout {
-    display: grid;
-    grid-template-columns: 240px 1fr;
-    gap: 1.75rem;
-    padding: 2.5rem 0 4rem;
-}
-.sidebar {
-    position: sticky;
-    top: 90px;
-    align-self: start;
-    padding: 1rem;
-    border-radius: var(--radius);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    max-height: calc(100vh - 110px);
-    overflow-y: auto;
-}
-.nav-item {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.7rem 0.85rem;
-    border-radius: 10px;
-    color: var(--text-dim);
-    font-size: 0.93rem;
-    font-weight: 500;
-    cursor: pointer;
-    border: none;
-    background: transparent;
-    text-align: left;
-    width: 100%;
-    transition: background .2s ease, color .2s ease;
-}
-.nav-item:hover { background: var(--surface-strong); color: var(--text); }
-.nav-item.active {
-    background: linear-gradient(135deg, rgba(249,115,22,0.18), rgba(245,158,11,0.1));
-    color: var(--text);
-    border: 1px solid var(--border-strong);
-}
-.nav-item .nav-emoji { font-size: 1.05rem; }
-.nav-section-header {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted, var(--text-dim));
-    padding: 0.9rem 0.85rem 0.25rem;
-    opacity: 0.6;
-}
-.nav-section-header:first-child { padding-top: 0.25rem; }
-.settings-content { min-width: 0; }
+/* The sidebar and page grid this section used to open with are gone (#676): the
+   settings page was rebuilt on .dash / .dash-side / .dash-nav further down, and
+   the .settings-layout / .sidebar / .nav-item / .nav-section-header rules that
+   were left behind matched nothing the markup renders any more. The one rule
+   that still had an effect — font-weight on the nav buttons — moved to
+   `.dash-nav .nav-item`, which is where every other property of theirs is set.
+   The panels below are shared with the current markup and are still live. */
 .panel {
     display: none;
     padding: 2rem;
@@ -835,12 +796,6 @@ textarea { resize: vertical; min-height: 80px; }
     border-radius: 8px;
 }
 .dash-main:focus:not(:focus-visible) { outline: none; }
-
-@media (max-width: 860px) {
-    .settings-layout { grid-template-columns: 1fr; }
-    .sidebar { position: static; flex-direction: row; overflow-x: auto; max-height: none; }
-    .nav-item { flex: 0 0 auto; }
-}
 
 /* ── Economy redesign ──────────────────────────────── */
 .eco-section-head {
@@ -1365,7 +1320,7 @@ textarea.auto-resize {
    and clicked. Keeping the list item intact is the point — the old markup put
    role="button" on the <li> itself, which took `listitem` away from it (#660). */
 .dash-nav li { display: block; }
-.dash-nav .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; font-size: 14px; color: var(--ink-200); cursor: pointer; border: none; background: transparent; width: 100%; text-align: left; font-family: inherit; transition: background .12s, color .12s; }
+.dash-nav .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; font-size: 14px; font-weight: 500; color: var(--ink-200); cursor: pointer; border: none; background: transparent; width: 100%; text-align: left; font-family: inherit; transition: background .12s, color .12s; }
 .dash-nav .nav-item:hover { background: var(--ink-850); color: var(--cream-50); }
 .dash-nav .nav-item.active { background: var(--claw-500); color: #fff; }
 .dash-nav .nav-item.active .badge { background: rgba(255,255,255,.2); color: #fff; }
@@ -1516,6 +1471,15 @@ textarea.auto-resize {
     .dash-two-col { grid-template-columns: 1fr; }
     .dash-three-col { grid-template-columns: 1fr; }
 }
+/* This is the settings page's narrow layout, and the only one (#676). An older
+   860px block written against the pre-rename class names survived here for a
+   while matching nothing; it stacked the page the same way this does, and also
+   laid the nav out as one horizontally scrolling row. That last part is not
+   reproduced deliberately: the sidebar is no longer a flat list but a search
+   box, five labelled groups and a user footer, none of which read as a row. It
+   stacks above the content instead, which is why max-height is lifted — the
+   sticky column's scroll cap would otherwise trap the nav in a short box with
+   the page already scrolling behind it. */
 @media (max-width: 768px) {
     .dash { grid-template-columns: 1fr; }
     .dash-side { min-height: auto; max-height: none; position: static; }

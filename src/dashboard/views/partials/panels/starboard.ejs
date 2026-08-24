@@ -9,12 +9,7 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="starboard-channel">Starboard channel</label>
-                        <select id="starboard-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.starboard?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'starboard-channel', placeholder: 'Select a channel', selected: settings.starboard?.channelId }) %>
                     </div>
                     <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                         <div>

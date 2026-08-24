@@ -1,0 +1,44 @@
+<%#
+    One role picker: a <select> with an <option> per role in the guild.
+
+    The counterpart of channel-select.ejs, and the same story — this loop was
+    copy-pasted into 11 places (#671). The two are kept as separate partials
+    rather than one parameterised by collection because the call sites read
+    better for it, and because the only thing they share beyond the loop is the
+    sigil in front of the name.
+
+    `roles` comes from the page's own locals, so no call site passes it.
+
+    Locals, all optional, though a select wants either an `id` or a `cls`:
+
+      id           the id its <label for=""> points at
+      cls          a class instead of an id, for the repeater rows that are
+                   addressed as a group and so cannot each carry one
+      ariaLabel    a name for a select with no visible label of its own
+      placeholder  text for a leading empty option; omit for none, which is
+                   what a multi-select wants
+      selected     the chosen role id, or an array of them
+      multiple     render a multi-select
+      size         visible rows — only meaningful with `multiple`
+      noDirty      mark it `data-no-dirty`: an "add one" picker feeding a chip
+                   list is not itself a setting, and the unsaved-changes
+                   tracking must not read it as one (#662)
+-%>
+<%_ const chosenRoles = new Set([].concat(locals.selected == null ? [] : locals.selected).map(String)); _%>
+<select
+<%_ if (locals.id) { _%>
+ id="<%= locals.id %>"
+<%_ } _%>
+<%_ if (locals.cls) { _%>
+ class="<%= locals.cls %>"
+<%_ } _%>
+<%_ if (locals.ariaLabel) { _%>
+ aria-label="<%= locals.ariaLabel %>"
+<%_ } _%>
+<%_ if (locals.multiple) { _%>
+ multiple<% if (locals.size) { %> size="<%= locals.size %>"<% } %>
+<%_ } _%>
+<%_ if (locals.noDirty) { _%>
+ data-no-dirty
+<%_ } _%>
+><% if (locals.placeholder) { %><option value=""><%= locals.placeholder %></option><% } %><% roles.forEach(function (role) { %><option value="<%= role.id %>"<%= chosenRoles.has(String(role.id)) ? ' selected' : '' %>>@<%= role.name %></option><% }); %></select>

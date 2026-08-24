@@ -456,6 +456,53 @@ process with the gateway and an escaped error exits it.
 </html>
 ```
 
+### Styles and handlers in dashboard views
+
+New views and panels use a class in `public/styles.css` and `addEventListener`
+— not a `style=""` attribute and not an `onclick=""` attribute.
+
+This is a security rule, not a taste one. The dashboard's CSP gives each
+request its own nonce, but an HTML *attribute* cannot carry a nonce, so the
+hundreds of inline styles and handlers already in the views are why the policy
+in `src/dashboard/server.js` still has to say `style-src 'unsafe-inline'` and
+`script-src-attr 'unsafe-inline'`. The second is the expensive one: it is what
+would turn a stored-XSS bug from blocked into exploitable.
+
+Rewriting every existing view at once is not worth doing (#692), so the count
+is ratcheted instead. `tests/dashboardInlineAttributes.test.js` records what
+each view has today; a file may lower its count but never raise it, and a view
+not in that table must have none at all. So:
+
+```html
+<!-- No: neither can carry a nonce, and both hold the CSP open. -->
+<button class="btn" style="margin-top:1rem" onclick="saveThing()">Save</button>
+```
+
+```html
+<!-- Yes: the class carries the layout, and the id carries the wiring. -->
+<button class="btn panel-save" id="thing-save">Save</button>
+```
+
+```javascript
+// public/guild-settings.js — panels arrive after the page does, so wire them
+// from the panel's own init callback rather than at file scope.
+onPanel('thing', panel => {
+    panel.querySelector('#thing-save').addEventListener('click', () => saveSettings('thing'));
+});
+```
+
+If you remove some inline attributes from an existing view, lower its numbers
+in that test in the same commit. A stale count is a budget nobody is spending.
+
+Two related conventions worth knowing while writing a panel:
+
+- Channel and role pickers come from `partials/channel-select.ejs` and
+  `partials/role-select.ejs` — do not write the option loop again (#671).
+  Their locals are documented at the top of each partial.
+- A third-party script belongs in `public/vendor/`, vendored from an
+  exact-pinned dependency by a `scripts/vendor-*.sh` helper, never loaded from
+  a CDN (#685). `script-src` is `'self'` and a nonce, and it stays that way.
+
 ### Adding API Endpoints
 
 API routes live one feature per file in `src/dashboard/routes/api/`, and

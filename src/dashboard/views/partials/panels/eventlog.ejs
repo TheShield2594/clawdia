@@ -9,12 +9,7 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="eventlog-channel">Log channel</label>
-                        <select id="eventlog-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.eventLog?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'eventlog-channel', placeholder: 'Select a channel', selected: settings.eventLog?.channelId }) %>
                     </div>
 
                     <div class="panel-head" style="margin-top:1rem"><h3>Messages</h3></div>

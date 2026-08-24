@@ -26,7 +26,7 @@
                         <textarea id="level-message" rows="2"><%= settings.leveling.levelUpMessage %></textarea>
                         <small>Variables: <code>{user}</code> · <code>{level}</code></small>
                     </div>
-                    <div class="field"><label class="field-label" for="level-reward-channel">Reward announcement channel</label><select id="level-reward-channel"><option value="">Use current channel</option><% channels.forEach(channel => { %><option value="<%= channel.id %>" <%= settings.leveling.rewardChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option><% }); %></select></div>
+                    <div class="field"><label class="field-label" for="level-reward-channel">Reward announcement channel</label><%- include('../channel-select', { id: 'level-reward-channel', placeholder: 'Use current channel', selected: settings.leveling.rewardChannelId }) %></div>
                     <div class="field" role="group" aria-labelledby="level-no-xp-roles-label">
                         <div class="field-label" id="level-no-xp-roles-label">No-XP roles</div>
                         <div id="level-no-xp-roles-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
@@ -37,10 +37,7 @@
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
-                            <select id="level-no-xp-roles-select" aria-label="Role to exclude from XP" data-no-dirty>
-                                <option value="">Select a role</option>
-                                <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
-                            </select>
+                            <%- include('../role-select', { id: 'level-no-xp-roles-select', ariaLabel: 'Role to exclude from XP', noDirty: true, placeholder: 'Select a role' }) %>
                             <button class="btn btn-primary" type="button" onclick="addLevelNoXpRole()">Add role</button>
                         </div>
                     </div>
@@ -54,10 +51,7 @@
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
-                            <select id="level-no-xp-channels-select" aria-label="Channel to exclude from XP" data-no-dirty>
-                                <option value="">Select a channel</option>
-                                <% channels.forEach(function(ch){ %><option value="<%= ch.id %>">#<%= ch.name %></option><% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'level-no-xp-channels-select', ariaLabel: 'Channel to exclude from XP', noDirty: true, placeholder: 'Select a channel' }) %>
                             <button class="btn btn-primary" type="button" onclick="addLevelNoXpChannel()">Add channel</button>
                         </div>
                     </div>
@@ -67,10 +61,7 @@
                             <% (settings.levelRoles || []).forEach(function(r) { %>
                                 <div class="level-reward-row" style="display:flex;gap:.5rem;align-items:center">
                                     <input type="number" class="level-reward-level" value="<%= r.level %>" min="1" max="999" style="width:80px" placeholder="Level" aria-label="Required level">
-                                    <select class="level-reward-role" aria-label="Reward role">
-                                        <option value="">Select a role</option>
-                                        <% roles.forEach(function(role){ %><option value="<%= role.id %>" <%= r.roleId === role.id ? 'selected' : '' %>>@<%= role.name %></option><% }); %>
-                                    </select>
+                                    <%- include('../role-select', { cls: 'level-reward-role', ariaLabel: 'Reward role', placeholder: 'Select a role', selected: r.roleId }) %>
                                     <button class="btn btn-danger" type="button" onclick="removeLevelRoleReward(this)" title="Remove">&times;</button>
                                 </div>
                             <% }); %>

@@ -21,11 +21,7 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="mod-immunity-roles">Immunity roles</label>
-                        <select id="mod-immunity-roles" multiple size="4" style="height:auto;">
-                            <% roles.forEach(role => { %>
-                                <option value="<%= role.id %>" <%= (settings.moderation.immunityRoleIds || []).includes(role.id) ? 'selected' : '' %>>@<%= role.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../role-select', { id: 'mod-immunity-roles', multiple: true, size: 4, selected: settings.moderation.immunityRoleIds || [] }) %>
                         <small>Members with these roles bypass auto-moderation. Hold Ctrl/Cmd to select multiple.</small>
                     </div>
                     <label class="toggle">
@@ -113,21 +109,11 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="mod-log-channel">Audit log channel</label>
-                        <select id="mod-log-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.moderation.logChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'mod-log-channel', placeholder: 'Select a channel', selected: settings.moderation.logChannelId }) %>
                     </div>
                     <div class="field">
                         <label class="field-label" for="mod-mute-role">Mute role</label>
-                        <select id="mod-mute-role">
-                            <option value="">Select a role (or use Discord timeout)</option>
-                            <% roles.forEach(role => { %>
-                                <option value="<%= role.id %>" <%= settings.moderation.muteRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../role-select', { id: 'mod-mute-role', placeholder: 'Select a role (or use Discord timeout)', selected: settings.moderation.muteRoleId }) %>
                         <small>Assigned when a member is muted. Leave empty to use Discord's native timeout.</small>
                     </div>
                     <div class="actions-row">
@@ -144,10 +130,7 @@
                         </div>
                         <div>
                             <label class="field-label" for="cs-sla-channel">SLA alert channel</label>
-                            <select id="cs-sla-channel">
-                                <option value="">None</option>
-                                <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= settings.caseSettings?.slaChannelId === ch.id ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'cs-sla-channel', placeholder: 'None', selected: settings.caseSettings?.slaChannelId }) %>
                         </div>
                     </div>
                     <div class="actions-row">
@@ -164,12 +147,7 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="mod-appeal-channel">Appeals channel</label>
-                        <select id="mod-appeal-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.moderation.appealChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'mod-appeal-channel', placeholder: 'Select a channel', selected: settings.moderation.appealChannelId }) %>
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>

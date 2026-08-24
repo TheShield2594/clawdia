@@ -3453,7 +3453,14 @@ function setAnalyticsRange(days, btn) {
     _analyticsRange = days;
     document.querySelectorAll('.analytics-range').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    if (_analyticsData) renderAnalyticsCharts(_analyticsData, _analyticsInsights);
+    if (_analyticsData) renderAnalyticsCharts(_analyticsData, _analyticsInsights).catch(chartsUnavailable);
+}
+
+/** The rest of the analytics panel is readable without its charts, so a library
+ *  that would not load is reported and left there rather than failing the tab. */
+function chartsUnavailable(err) {
+    console.error('[dashboard]', err);
+    toast('Charts could not be loaded', 'error');
 }
 
 const _chartDefaults = {
@@ -3462,7 +3469,42 @@ const _chartDefaults = {
     scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' } } }
 };
 
-function renderAnalyticsCharts(data, insights) {
+// ── Chart.js, fetched when a chart is actually going to be drawn (#685) ────
+//
+// This used to be a <script> in the page head pointing at cdn.jsdelivr.net at a
+// floating `chart.js@4` with no integrity attribute: 200 KB downloaded and
+// parsed on every guild-settings page, and one third-party origin allowed to
+// execute whatever it resolved to that day on a page whose CSP is otherwise a
+// per-request nonce. It is vendored under /vendor/ now, so script-src is back
+// to 'self' alone.
+//
+// Injected on the first chart rather than in the head because only the
+// Analytics panel and the Economy panel's Health tab draw one, and most
+// sessions open neither.
+let _chartJsLoad = null;
+
+function loadChartJs() {
+    if (window.Chart) return Promise.resolve();
+    // One promise shared by every caller: the analytics panel starts six charts
+    // in a row and each of them asks.
+    if (_chartJsLoad) return _chartJsLoad;
+    _chartJsLoad = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = BOOT.chartJsUrl;
+        script.onload = () => resolve();
+        script.onerror = () => {
+            // Forgotten, so reopening the tab retries rather than settling
+            // against a load that never happened.
+            _chartJsLoad = null;
+            reject(new Error('Could not load Chart.js'));
+        };
+        document.head.appendChild(script);
+    });
+    return _chartJsLoad;
+}
+
+async function renderAnalyticsCharts(data, insights) {
+    await loadChartJs();
     const a = data.analytics || {};
     const days = _analyticsRange;
 
@@ -3657,8 +3699,10 @@ async function loadAnalytics() {
             kpiRow.insertAdjacentHTML('beforeend', `<div class="eco-kpi-tile"><div class="eco-kpi-label">${kpi.label}</div><div class="eco-kpi-value">${kpi.value}</div></div>`);
         }
 
-        // Render charts
-        renderAnalyticsCharts(data, insights);
+        // Render charts. Not awaited: Chart.js is fetched on demand now (#685)
+        // and the KPI tiles, insights and command tables below are worth having
+        // whether or not it arrives.
+        renderAnalyticsCharts(data, insights).catch(chartsUnavailable);
 
         // Insights text
         const insightsCont = document.getElementById('analytics-insights-content');
@@ -3966,14 +4010,22 @@ async function loadEcoHealth() {
         if (_ecoCmdChart) _ecoCmdChart.destroy();
         const ctx = document.getElementById('eco-cmd-chart')?.getContext('2d');
         if (ctx && cmds.length) {
-            _ecoCmdChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: cmds.map(c => `/${c.cmd}`),
-                    datasets: [{ label: 'Uses', data: cmds.map(c => c.count), backgroundColor: 'rgba(217,119,66,0.75)', borderRadius: 4 }]
-                },
-                options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#b8a898' } }, y: { ticks: { color: '#b8a898' } } } }
-            });
+            // Its own try, inside the tab's: Chart.js is fetched on demand now
+            // (#685), and a library that would not load must not take down the
+            // totals and the top-earners table that already rendered above.
+            try {
+                await loadChartJs();
+                _ecoCmdChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: cmds.map(c => `/${c.cmd}`),
+                        datasets: [{ label: 'Uses', data: cmds.map(c => c.count), backgroundColor: 'rgba(217,119,66,0.75)', borderRadius: 4 }]
+                    },
+                    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#b8a898' } }, y: { ticks: { color: '#b8a898' } } } }
+                });
+            } catch (err) {
+                chartsUnavailable(err);
+            }
         }
     } catch {
         document.getElementById('eco-top-earners-loading').style.display = 'none';
@@ -4324,14 +4376,82 @@ document.addEventListener('click', async event => {
     window.location.href = link.href;
 });
 
+// ── One save at a time, and a button that says so (#663) ──────────────────
+//
+// saveSettings() reads a whole section out of the page and POSTs it, and
+// nothing stopped a second click starting a second POST while the first was
+// still open. Two requests carrying the same body can be answered in either
+// order, and for `economy` — which uploads pending shop images after the
+// settings land — the second pass walks a `_shopItemPendingImages` map the
+// first pass is in the middle of emptying.
+//
+// The other half of the problem is that the page said nothing while a save was
+// running. The toast at the end was the only feedback, so on a slow connection
+// the interface looked like it had ignored the click, which is what earns the
+// second one. sendWelcomeCardPreview() has done this properly all along; this
+// is that pattern applied to every save button at once.
+//
+// The section is the unit here, not the button. Moderation spreads three "Save
+// changes" buttons across three inner tabs and all three POST the same
+// section, so a save started from one has to close the other two as well.
+const savesInFlight = new Set();
+const SAVING_LABEL = 'Saving…';
+
+/** The save buttons whose click calls saveSettings() for this section. */
+function saveButtonsForSection(section) {
+    return saveButtonsIn(document).filter(btn => {
+        const match = SAVE_CALL.exec(btn.getAttribute('onclick') || '');
+        return !!match && match[1] === section;
+    });
+}
+
+/**
+ * Put a section's save buttons into their pending state.
+ *
+ * @returns {() => void} restores every button to exactly what it was.
+ */
+function beginSave(section) {
+    const restores = saveButtonsForSection(section).map(btn => {
+        const label = btn.textContent;
+        // Disabling the focused control moves focus to the body, which drops a
+        // keyboard user at the top of a 25-section page. Noted now so it can be
+        // handed back when the button comes alive again.
+        const hadFocus = document.activeElement === btn;
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        btn.textContent = SAVING_LABEL;
+        return () => {
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+            btn.textContent = label;
+            if (hadFocus) btn.focus();
+        };
+    });
+    return () => { for (const restore of restores) restore(); };
+}
+
 // saveSettings is called straight from inline onclick attributes, so the hook
 // goes on the global binding rather than on 28 buttons. The original is
 // captured first: reassigning the name would otherwise make this recurse.
 const saveSettingsUnhooked = saveSettings;
 window.saveSettings = async function saveSettings(section) {
-    const saved = await saveSettingsUnhooked(section);
-    if (saved) markSectionSaved(section);
-    return saved;
+    // Not an error worth a toast — the reader clicked a button that was already
+    // doing what they asked. The save in flight will report for both.
+    if (savesInFlight.has(section)) return false;
+    savesInFlight.add(section);
+    const endSave = beginSave(section);
+    try {
+        const saved = await saveSettingsUnhooked(section);
+        if (saved) markSectionSaved(section);
+        return saved;
+    } finally {
+        // In a finally because saveSettings() only catches around its fetch. A
+        // panel whose fields are not in the document throws out of the reading
+        // half, and a button left disabled and reading "Saving…" forever is a
+        // worse failure than the one that caused it.
+        savesInFlight.delete(section);
+        endSave();
+    }
 };
 
 // The panel that shipped with the page has had its init callbacks run by now —

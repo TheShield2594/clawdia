@@ -213,9 +213,19 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     // L3: Baseline security response headers for all routes.
     // A fresh nonce is generated per request and made available to EJS templates
     // via res.locals.cspNonce so inline <script> tags can opt in safely.
-    // Note: style-src retains 'unsafe-inline' because the templates contain ~400
-    // inline style="" attributes which cannot accept nonces (nonces only apply to
-    // <style> blocks). Removing it requires a separate CSS refactor.
+    //
+    // Two directives below still carry 'unsafe-inline', and both are the same
+    // fact about the views rather than two decisions: an HTML *attribute*
+    // cannot carry a nonce, and the views hold hundreds of `style=""` and
+    // `onclick=""` attributes. `script-src-attr 'unsafe-inline'` is the one
+    // that costs the most — it is what makes a stored-XSS finding exploitable
+    // rather than blocked.
+    //
+    // Rewriting all of them at once is not worth doing (#692), so instead the
+    // count is ratcheted: tests/dashboardInlineAttributes.test.js records what
+    // every view has today and fails on any increase, and a new view must have
+    // none. New panels use classes in styles.css and addEventListener — see
+    // docs/EXTENDING.md — so these two allowances can eventually be dropped.
     app.use((req, res, next) => {
         const nonce = crypto.randomBytes(16).toString('base64');
         res.locals.cspNonce = nonce;
@@ -227,9 +237,13 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
         res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
         res.setHeader('Content-Security-Policy', [
             "default-src 'self'",
-            `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net`,
-            // Inline event handlers (onclick, onchange, etc.) cannot carry nonces,
-            // so allow them the same way inline styles are allowed.
+            // No third-party origin. Chart.js was the only reason one was ever
+            // listed here, and it is vendored under public/vendor/ now (#685) —
+            // pinned to an exact version in package.json and checked by
+            // package-lock's integrity hash at install time, which is the
+            // guarantee the CDN tag's missing SRI attribute would have given.
+            `script-src 'self' 'nonce-${nonce}'`,
+            // Both ratcheted down rather than fixed outright; see the note above.
             "script-src-attr 'unsafe-inline'",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: https: cdn.discordapp.com",

@@ -14,9 +14,7 @@
                     </div>
                     <div class="field" style="margin-top:.75rem;">
                         <label class="field-label" for="pt-helper-channels">Helper channels <small>— select channels that count for the Helper track bonus</small></label>
-                        <select id="pt-helper-channels" multiple style="height:120px;">
-                            <% channels.forEach(ch => { %><option value="<%= ch.id %>" <%= (settings.progressionTracks?.helperChannels||[]).includes(ch.id) ? 'selected' : '' %>>#<%= ch.name %></option><% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'pt-helper-channels', multiple: true, size: 6, selected: settings.progressionTracks?.helperChannels || [] }) %>
                         <small>Hold Ctrl/Cmd to select multiple channels</small>
                     </div>
                     <div class="actions-row"><button class="btn btn-primary" onclick="saveSettings('progressiontracks')">Save changes</button></div>

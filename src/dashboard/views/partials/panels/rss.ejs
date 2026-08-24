@@ -36,12 +36,7 @@
                         </div>
                         <div class="field">
                             <label class="field-label" for="rss-channel">Post to channel</label>
-                            <select id="rss-channel">
-                                <option value="">Select a channel</option>
-                                <% channels.forEach(channel => { %>
-                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'rss-channel', placeholder: 'Select a channel' }) %>
                         </div>
                         <div class="actions-row">
                             <button class="btn btn-primary" onclick="addRssFeed()">Add feed</button>
@@ -57,12 +52,7 @@
                         </label>
                         <div class="field">
                             <label class="field-label" for="dailynews-channel">Post to channel</label>
-                            <select id="dailynews-channel">
-                                <option value="">Select a channel</option>
-                                <% channels.forEach(channel => { %>
-                                    <option value="<%= channel.id %>" <%= settings.dailyNews?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'dailynews-channel', placeholder: 'Select a channel', selected: settings.dailyNews?.channelId }) %>
                         </div>
                         <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                             <div>

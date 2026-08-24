@@ -69,7 +69,9 @@ const shared = {
 
 module.exports = [
     {
-        ignores: ['node_modules/**', 'coverage/**'],
+        // public/vendor holds third-party bundles copied in verbatim by the
+        // scripts/vendor-*.sh helpers (#685). Minified and not ours to fix.
+        ignores: ['node_modules/**', 'coverage/**', 'src/dashboard/public/vendor/**'],
     },
 
     // ── The bot and the dashboard server: CommonJS on Node ──────────────
@@ -97,7 +99,7 @@ module.exports = [
     // These are <script> tags, not modules: their top-level functions are the
     // globals that the views' inline handlers call, which is why unused *global*
     // declarations are allowed here and nowhere else. `escHtml` comes from
-    // esc-html.js, `Chart` from the CDN bundle the page loads.
+    // esc-html.js, `Chart` from the vendored bundle loadChartJs() injects.
     {
         files: ['src/dashboard/public/**/*.js'],
         languageOptions: {
@@ -122,9 +124,10 @@ module.exports = [
     },
 
     // guild-settings.js consumes two globals it does not declare: escHtml from
-    // esc-html.js, loaded as its own <script>, and Chart from the CDN bundle
-    // the page pulls in. Scoped to this file so esc-html.js is still checked
-    // against its own declaration.
+    // esc-html.js, loaded as its own <script>, and Chart from public/vendor/,
+    // which loadChartJs() injects the first time a chart is drawn (#685).
+    // Scoped to this file so esc-html.js is still checked against its own
+    // declaration.
     {
         files: ['src/dashboard/public/guild-settings.js'],
         languageOptions: {

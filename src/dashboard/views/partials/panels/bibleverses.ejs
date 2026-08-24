@@ -11,12 +11,7 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="bv-channel">Post to channel</label>
-                        <select id="bv-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= (settings.bibleVerse && settings.bibleVerse.channelId === channel.id) ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'bv-channel', placeholder: 'Select a channel', selected: settings.bibleVerse && settings.bibleVerse.channelId }) %>
                     </div>
                     <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                         <div>
