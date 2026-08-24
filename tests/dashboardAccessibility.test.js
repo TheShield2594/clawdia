@@ -412,3 +412,30 @@ describe('analytics charts', () => {
         expect(document.getElementById('chart-economy-data').textContent).toMatch(/no data/i);
     });
 });
+
+// #678. Six avatars were injected without an alt attribute, so a screen reader
+// fell back to reading the CDN URL out beside the username already sitting next
+// to it. They are decorative — the name is the content — which makes `alt=""`
+// the fix, and a missing attribute the failure. The sweep is over the source
+// rather than the rendered page because three of the six are drawn from data
+// only a live moderation or economy panel has.
+describe('injected images', () => {
+    const script = fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8');
+
+    it('every <img> the script writes carries an alt', () => {
+        const withoutAlt = [...script.matchAll(/<img\b[^>]*>/g)]
+            .map(m => m[0])
+            // An `<img` with no src is one of the two the comments above
+            // openStoreImagePicker and the autorole chip escape talk about, not
+            // markup the script writes.
+            .filter(tag => /\bsrc=/.test(tag) && !/\balt=/.test(tag));
+
+        expect(withoutAlt).toEqual([]);
+    });
+
+    it('sets alt on the one avatar built as an element rather than markup', () => {
+        // createElement('img') takes no HTML attribute list, so the sweep above
+        // cannot see it — it is asserted by name instead.
+        expect(script).toMatch(/imgEl\.alt\s*=/);
+    });
+});

@@ -76,6 +76,15 @@ change, and a script reading them needs updating. See
   fell through the static handler and all three routers to a 404. An SVG and an
   ICO of the Clawdia paw ship under `public/`, linked from one partial the three
   views share; `npm run favicon` regenerates the ICO from the SVG.
+- **A slow search result can no longer overwrite a fresh one** (#691). Both
+  member-search dropdowns debounced their keystrokes and then let the answers
+  race: the response to `ali`, still in flight, landed after the response to
+  `alice` and repainted the list with results for a prefix already typed past.
+  Each widget cancels the request it supersedes.
+- **Injected avatars are marked decorative** (#678). Six avatars in the search
+  dropdowns, the moderation case table and the economy top-earners table were
+  written without an `alt`, so a screen reader read the CDN URL out beside the
+  username sitting next to it.
 
 Both migrations in this release only drop an index no query uses, and neither
 creates anything, so the 4.2.0 image reads the migrated database unchanged —

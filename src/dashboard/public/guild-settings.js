@@ -2047,6 +2047,11 @@ async function deleteCustomAch(idx) {
 // ── Achievement Grant ───────────────────────────────────────────────────────
 var _grantAchId = '';
 var _memberSearchTimer = null;
+// The in-flight search, so a new keystroke can cancel the one it supersedes.
+// Debouncing alone does not order the responses: a slow request for "ali" that
+// the server is still working on resolves after the quick one for "alice" and
+// repaints the dropdown with results for what the user has stopped typing.
+var _memberSearchAbort = null;
 
 function openAchGrantModal(achId, achName) {
     _grantAchId = achId;
@@ -2061,20 +2066,35 @@ function openAchGrantModal(achId, achName) {
     openModal('ach-grant-modal', { initialFocus: 'grant-member-search' });
 }
 
-function closeAchGrantModal() { closeModal('ach-grant-modal'); }
+function closeAchGrantModal() {
+    // Nothing is left running behind a closed modal: the pending keystroke and
+    // the request already out both belong to a dropdown that is going away.
+    clearTimeout(_memberSearchTimer);
+    abortMemberSearch();
+    closeModal('ach-grant-modal');
+}
 
 function debouncedMemberSearch() {
     clearTimeout(_memberSearchTimer);
     _memberSearchTimer = setTimeout(runMemberSearch, 350);
 }
 
+/** Cancel whatever search is in flight; called before starting the next one. */
+function abortMemberSearch() {
+    if (_memberSearchAbort) _memberSearchAbort.abort();
+    _memberSearchAbort = null;
+}
+
 async function runMemberSearch() {
     const q = document.getElementById('grant-member-search').value.trim();
     const resultsEl = document.getElementById('grant-member-results');
+    abortMemberSearch();
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
     const guildId = BOOT.guildId;
+    const controller = new AbortController();
+    _memberSearchAbort = controller;
     try {
-        const resp = await fetch('/api/v1/guild/' + guildId + '/members/search?q=' + encodeURIComponent(q));
+        const resp = await fetch('/api/v1/guild/' + guildId + '/members/search?q=' + encodeURIComponent(q), { signal: controller.signal });
         if (!resp.ok) throw new Error('non-ok');
         const members = (await resp.json()).items || [];
         if (!members.length) {
@@ -2083,16 +2103,22 @@ async function runMemberSearch() {
             resultsEl.innerHTML = members.map(function(m) {
                 return '<div class="grant-member-option" style="padding:.45rem .75rem;cursor:pointer;font-size:.88rem;display:flex;align-items:center;gap:.5rem;" ' +
                     'data-action="member-select" data-member-id="' + escHtml(m.id) + '" data-member-name="' + escHtml(m.displayName || m.username) + '">' +
-                    (m.avatarURL ? '<img src="' + escHtml(m.avatarURL) + '" style="width:22px;height:22px;border-radius:50%;">' : '') +
+                    (m.avatarURL ? '<img src="' + escHtml(m.avatarURL) + '" alt="" style="width:22px;height:22px;border-radius:50%;">' : '') +
                     '<span>' + escHtml(m.displayName || m.username) + '</span>' +
                     '<span style="color:var(--text-dim);margin-left:auto;font-size:.8rem">' + escHtml(m.id) + '</span>' +
                 '</div>';
             }).join('');
         }
         resultsEl.style.display = '';
-    } catch {
+    } catch (err) {
+        // A cancelled request is this widget replacing its own search, not a
+        // failure — the newer one is already on its way, and painting an error
+        // over its results would be a lie about a search still running.
+        if (err && err.name === 'AbortError') return;
         resultsEl.innerHTML = '<div style="padding:.5rem .75rem;font-size:.88rem;color:var(--bad)">Search failed</div>';
         resultsEl.style.display = '';
+    } finally {
+        if (_memberSearchAbort === controller) _memberSearchAbort = null;
     }
 }
 
@@ -4148,7 +4174,7 @@ async function loadCaseHistory(page = 1) {
         for (const c of items) {
             const date = new Date(c.createdAt).toLocaleDateString();
             const targetCell = c.targetUserTag
-                ? `<span title="${escHtml(c.targetUserId)}">${c.targetAvatarUrl ? `<img src="${escHtml(c.targetAvatarUrl)}" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(c.targetUserTag)}</span>`
+                ? `<span title="${escHtml(c.targetUserId)}">${c.targetAvatarUrl ? `<img src="${escHtml(c.targetAvatarUrl)}" alt="" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(c.targetUserTag)}</span>`
                 : `<span style="font-size:.8em">${escHtml(c.targetUserId)}</span>`;
             const modCell = c.moderatorTag
                 ? `<span title="${escHtml(c.moderatorId)}">${escHtml(c.moderatorTag)}</span>`
@@ -4253,7 +4279,7 @@ async function loadEcoHealth() {
         for (let i = 0; i < topEarners.length; i++) {
             const u = topEarners[i];
             const userCell = u.userTag
-                ? `<span title="${escHtml(u.userId)}">${u.avatarUrl ? `<img src="${escHtml(u.avatarUrl)}" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(u.userTag)}</span>`
+                ? `<span title="${escHtml(u.userId)}">${u.avatarUrl ? `<img src="${escHtml(u.avatarUrl)}" alt="" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(u.userTag)}</span>`
                 : `<span style="font-size:.8em">${escHtml(u.userId)}</span>`;
             tbody.insertAdjacentHTML('beforeend', `<tr><td>#${i+1}</td><td>${userCell}</td><td>${(u.balance||0).toLocaleString()}</td><td>${(u.bank||0).toLocaleString()}</td><td>${(u.total||0).toLocaleString()}</td></tr>`);
         }
@@ -4366,13 +4392,23 @@ async function ecoAdminAction(action) {
         }
 
         let _debounce;
+        // The request this widget currently has out. The 280ms debounce keeps
+        // the server from seeing every keystroke, but it says nothing about the
+        // order the answers come back in: a slow response for an earlier, less
+        // specific query resolves last and repaints the dropdown with results
+        // for a prefix the user has already typed past. Each new search cancels
+        // the one it replaces, so only the newest can paint (#691).
+        let _inFlight = null;
         input.addEventListener('input', function() {
             clearTimeout(_debounce);
+            if (_inFlight) { _inFlight.abort(); _inFlight = null; }
             const q = this.value.trim();
             if (q.length < 2) { dropdown.style.display = 'none'; return; }
             _debounce = setTimeout(async () => {
+                const controller = new AbortController();
+                _inFlight = controller;
                 try {
-                    const results = await fetch(`/api/v1/guild/${_gId}/members/search?q=${encodeURIComponent(q)}`)
+                    const results = await fetch(`/api/v1/guild/${_gId}/members/search?q=${encodeURIComponent(q)}`, { signal: controller.signal })
                         .then(r => r.json())
                         .then(d => d.items);
                     if (!Array.isArray(results) || !results.length) { dropdown.style.display = 'none'; return; }
@@ -4381,7 +4417,7 @@ async function ecoAdminAction(action) {
                         const id   = escHtml(u.id);
                         const av   = u.avatarURL ? escHtml(u.avatarURL) : '';
                         return `<div class="user-search-item" data-id="${id}" data-name="${name}" data-avatar="${av}">
-                            ${av ? `<img src="${av}" style="width:20px;height:20px;border-radius:50%" onerror="this.style.display='none'">` : ''}
+                            ${av ? `<img src="${av}" alt="" style="width:20px;height:20px;border-radius:50%" onerror="this.style.display='none'">` : ''}
                             <span>${name}</span>
                             <span style="opacity:.5;font-size:.75em;margin-left:auto">${escHtml(u.username)}</span>
                         </div>`;
@@ -4395,7 +4431,14 @@ async function ecoAdminAction(action) {
                             dropdown.style.display = 'none';
                         });
                     });
-                } catch { dropdown.style.display = 'none'; }
+                } catch (err) {
+                    // An abort means a newer search is already running; hiding
+                    // the dropdown here would close what it is about to fill.
+                    if (err && err.name === 'AbortError') return;
+                    dropdown.style.display = 'none';
+                } finally {
+                    if (_inFlight === controller) _inFlight = null;
+                }
             }, 280);
         });
 
@@ -4414,7 +4457,7 @@ async function ecoAdminAction(action) {
         const safeId   = escHtml(id);
         const safeName = escHtml(name);
         const safeAv   = avatarUrl ? escHtml(avatarUrl) : '';
-        tag.innerHTML  = `${safeAv ? `<img src="${safeAv}" style="width:16px;height:16px;border-radius:50%" onerror="this.style.display='none'">` : ''}<span title="${safeId}">${safeName}</span><button type="button" title="Remove">&times;</button>`;
+        tag.innerHTML  = `${safeAv ? `<img src="${safeAv}" alt="" style="width:16px;height:16px;border-radius:50%" onerror="this.style.display='none'">` : ''}<span title="${safeId}">${safeName}</span><button type="button" title="Remove">&times;</button>`;
         tag.querySelector('button').addEventListener('click', function() {
             const ta = document.getElementById(widgetId);
             if (ta) ta.value = ta.value.split('\n').map(s => s.trim()).filter(s => s && s !== id).join('\n');
