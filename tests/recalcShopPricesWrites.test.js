@@ -225,6 +225,33 @@ describe('recalcShopPrices writes', () => {
         expect(seen.writes[0].updateOne.update.$set['shop.$.basePrice']).toBe(50);
     });
 
+    it('guards the basePrice backfill with a predicate that it is still unset', async () => {
+        const seen = stubGuild({
+            shop: [{ _id: 'item-c', name: 'Potion', price: 50 }],
+        });
+
+        await recalcShopPrices(client);
+
+        // basePrice is the one field here read rather than derived, so an admin
+        // setting it between the claim and this write is a real edit to lose. The
+        // predicate makes the whole item's update a no-op in that case, and the
+        // next tick recomputes from the admin's value.
+        expect(seen.writes[0].updateOne.filter).toEqual({
+            guildId: 'g1',
+            shop: { $elemMatch: { _id: 'item-c', basePrice: null } },
+        });
+    });
+
+    it('does not add that predicate for an item that already has a basePrice', async () => {
+        const seen = stubGuild({ shop: items() });
+
+        await recalcShopPrices(client);
+
+        for (const op of seen.writes) {
+            expect(Object.keys(op.updateOne.filter).sort()).toEqual(['guildId', 'shop._id']);
+        }
+    });
+
     it('issues no write for a guild with an empty shop', async () => {
         stubGuild({ shop: [] });
 

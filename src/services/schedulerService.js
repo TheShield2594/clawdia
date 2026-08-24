@@ -753,13 +753,34 @@ async function recalcShopPrices(client) {
                 // shifts the indices, and an index-addressed `$set` would then land
                 // the new price on somebody else's item. A stale `_id` simply
                 // matches nothing.
+                //
+                // Backfilling an item additionally requires that it still have no
+                // basePrice. That is the one field here whose value is read rather
+                // than derived, so an admin setting it between the claim and this
+                // write is a real edit to lose. Failing the predicate skips the item
+                // for this tick — including its currentPrice and history entry,
+                // which were computed from the basePrice that no longer applies —
+                // and the next tick recomputes from the admin's value.
+                //
+                // `{ basePrice: null }` matches an absent field as well as an
+                // explicit null, which is the same set `item.basePrice == null`
+                // selected when priorState was captured.
+                const filter = priorState[index].hadBasePrice
+                    ? { guildId: guildDoc.guildId, 'shop._id': item._id }
+                    : { guildId: guildDoc.guildId, shop: { $elemMatch: { _id: item._id, basePrice: null } } };
+
                 writes.push({
                     updateOne: {
-                        filter: { guildId: guildDoc.guildId, 'shop._id': item._id },
+                        filter,
                         update,
                     },
                 });
 
+                // Movers are collected from the computed values rather than from
+                // what the write matched, since bulkWrite reports matches only in
+                // aggregate. A backfill item losing its predicate could therefore be
+                // named in the embed without its price having landed — cosmetic, and
+                // it needs an admin edit to land inside the same few milliseconds.
                 if (Math.abs(item.currentPrice - prev) / Math.max(1, prev) > 0.05) {
                     changedMovers.push({ name: item.name, prev, next: item.currentPrice, item });
                 }
