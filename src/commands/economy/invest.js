@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { logTransaction } = require('../../utils/logTransaction');
+const COLORS = require('../../utils/embedColors');
 
 const DISTRICTS = [
     {
@@ -117,7 +118,7 @@ module.exports = {
         // ── STATUS ──────────────────────────────────────────────────────────
         if (sub === 'status') {
             const embed = new EmbedBuilder()
-                .setColor('#f39c12')
+                .setColor(COLORS.WARN)
                 .setTitle('🏙️ Server Investment Districts')
                 .setDescription(
                     'Members collectively fund districts. When fully funded, the district activates its ' +
@@ -274,7 +275,7 @@ module.exports = {
                 const announceChannel = interaction.guild?.channels?.cache?.get(announceChannelId);
                 if (announceChannel) {
                     const broadcastEmbed = new EmbedBuilder()
-                        .setColor('#FFD700')
+                        .setColor(COLORS.PRIZE)
                         .setTitle(`🏙️ ${distMeta.emoji} ${distMeta.name} District — FUNDED!`)
                         .setDescription(
                             `The community invested and it paid off!\n\n` +

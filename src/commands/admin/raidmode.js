@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { setRaidMode, raidModeActive, raidModeActivatedBy } = require('../../services/raidService');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -149,7 +150,7 @@ module.exports = {
             if (!rd?.enabled) {
                 return interaction.editReply({
                     embeds: [new EmbedBuilder()
-                        .setColor('#888888')
+                        .setColor(COLORS.NEUTRAL)
                         .setTitle('Raid Detection: Disabled')
                         .setDescription('Raid detection is not configured. Use `/raidmode raid enabled:true` to set it up.')
                         .setTimestamp()]
@@ -206,7 +207,7 @@ module.exports = {
 
             return interaction.reply({
                 embeds: [new EmbedBuilder()
-                    .setColor('#5865F2')
+                    .setColor(COLORS.INFO)
                     .setTitle('Case Settings Updated')
                     .addFields(
                         { name: 'SLA Hours', value: (slaHours ?? '(unchanged)').toString(), inline: true },

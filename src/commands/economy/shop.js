@@ -17,6 +17,8 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { ensurePricingFields, trendBucket } = require('../../utils/dynamicPricing');
 const { hasUnlock } = require('../../utils/prestige');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const CONFIRM_THRESHOLD = 500;
 const NEW_ITEM_TTL_MS   = 48 * 3_600_000; // 48 hours
@@ -372,7 +374,7 @@ module.exports = {
                 : 'No recalcs yet — pricing will adjust on the next scheduled run.';
 
             const embed = new EmbedBuilder()
-                .setColor('#3498db')
+                .setColor(COLORS.INFO)
                 .setTitle('📊 Market Trends')
                 .setDescription(lines.length ? lines.join('\n') : 'No price movement yet.')
                 .setFooter({ text: `${recalcStr} · Volatility: ${guildSettings.dynamicPricing.volatility}` })
@@ -612,7 +614,7 @@ module.exports = {
                     ? `You bought ${boughtLabel} for ${currency}${freshTotal.toLocaleString()}.\n\n*${successLore}*`
                     : `You bought ${boughtLabel} for ${currency}${freshTotal.toLocaleString()}.`;
                 const successEmbed = new EmbedBuilder()
-                    .setColor('#00ff00')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('Purchase Successful')
                     .setDescription(successDesc)
                     .addFields({ name: 'New Balance', value: `${currency}${chargedUser.balance.toLocaleString()}`, inline: true });
@@ -647,7 +649,7 @@ module.exports = {
                     ? `Buy ${buyLabel} for **${currency}${totalCost.toLocaleString()}**?\n\n*${confirmLore}*`
                     : `Buy ${buyLabel} for **${currency}${totalCost.toLocaleString()}**?`;
                 const confirmEmbed = new EmbedBuilder()
-                    .setColor('#f39c12')
+                    .setColor(COLORS.WARN)
                     .setTitle('Confirm Purchase')
                     .setDescription(confirmDesc);
 
@@ -674,7 +676,7 @@ module.exports = {
 
                 const collector = msg.createMessageComponentCollector({
                     componentType: ComponentType.Button,
-                    filter: i => i.user.id === interaction.user.id,
+                    filter: ownedBy(interaction.user.id, "This isn't your purchase."),
                     time: 30_000,
                     max: 1
                 });

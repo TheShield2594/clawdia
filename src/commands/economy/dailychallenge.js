@@ -5,6 +5,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { hasUnlock } = require('../../utils/prestige');
 const { logTransaction } = require('../../utils/logTransaction');
+const COLORS = require('../../utils/embedColors');
 
 const CLAIM_COOLDOWN_MS = 24 * 3_600_000;
 const BASE_REWARD_COINS = 5_000;
@@ -58,7 +59,7 @@ module.exports = {
         if (onCooldown) {
             const nextAt = Math.floor((lastClaim.getTime() + CLAIM_COOLDOWN_MS) / 1000);
             const embed = new EmbedBuilder()
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('📋 Daily Challenge Board')
                 .setDescription(
                     `**Today's Objective:** ${objective.emoji} ${objective.text}\n\n` +
@@ -90,7 +91,7 @@ module.exports = {
         if (!updated) {
             const nextAt = Math.floor((Date.now() + CLAIM_COOLDOWN_MS) / 1000);
             const embed = new EmbedBuilder()
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('📋 Daily Challenge Board')
                 .setDescription(
                     `**Today's Objective:** ${objective.emoji} ${objective.text}\n\n` +
@@ -110,7 +111,7 @@ module.exports = {
         });
 
         const embed = new EmbedBuilder()
-            .setColor('#FFD700')
+            .setColor(COLORS.PRIZE)
             .setTitle('📋 Daily Challenge Board — Claimed!')
             .setDescription(
                 `**Today's Objective:** ${objective.emoji} ${objective.text}\n\n` +

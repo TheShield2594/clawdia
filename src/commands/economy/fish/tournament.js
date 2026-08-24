@@ -13,6 +13,7 @@ const {
 } = require('../../../services/tournamentService');
 const { EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../../models/Guild');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TOURNAMENT
@@ -30,7 +31,7 @@ async function handleTournamentStatus(interaction) {
         return interaction.editReply({
             embeds: [
                 new EmbedBuilder()
-                    .setColor('#95a5a6')
+                    .setColor(COLORS.NEUTRAL)
                     .setTitle('🎣 No Active Tournament')
                     .setDescription('There is no fishing tournament running right now.\n\nAdmins can start one with `/fish tournament start`.')
                     .setTimestamp()
@@ -114,7 +115,7 @@ async function handleRecords(interaction) {
     if (!records.length) {
         return interaction.editReply({
             embeds: [new EmbedBuilder()
-                .setColor('#3498db')
+                .setColor(COLORS.INFO)
                 .setTitle('🐟 Server Fishing Records')
                 .setDescription('No records yet — start fishing to claim the top spot!')
                 .setTimestamp()]

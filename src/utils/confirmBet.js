@@ -1,4 +1,5 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } = require('discord.js');
+const { ownedBy } = require('../utils/collectorOwner');
 
 const DEFAULT_THRESHOLD = 10_000;
 
@@ -42,7 +43,7 @@ async function confirmBet(interaction, amount, walletBalance, gameName, guildSet
     try {
         const response = await reply.awaitMessageComponent({
             time: 15_000,
-            filter: i => i.user.id === interaction.user.id,
+            filter: ownedBy(interaction.user.id, "This isn't your bet."),
         });
 
         if (response.customId === 'confirm_large_bet') {

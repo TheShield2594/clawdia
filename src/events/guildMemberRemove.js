@@ -2,6 +2,7 @@ const { getGuildSettings } = require('../utils/guildSettingsCache');
 const GuildAnalytics = require('../models/GuildAnalytics');
 const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const { trackAction } = require('../services/antiNukeService');
+const COLORS = require('../utils/embedColors');
 async function trackMemberEvent(guildId, dateKey, field) {
     const result = await GuildAnalytics.updateOne(
         { guildId, 'memberEvents.date': dateKey },
@@ -63,7 +64,7 @@ module.exports = {
             const message = applyVariables(guildSettings.farewell.message, member);
 
             const embed = new EmbedBuilder()
-                .setColor('#ED4245')
+                .setColor(COLORS.ERROR)
                 .setTitle('Goodbye!')
                 .setDescription(message)
                 .setThumbnail(member.user.displayAvatarURL())
@@ -75,7 +76,7 @@ module.exports = {
                 const logChannel = member.guild.channels.cache.get(guildSettings.eventLog.channelId);
                 if (logChannel) {
                     const logEmbed = new EmbedBuilder()
-                        .setColor('#ED4245')
+                        .setColor(COLORS.ERROR)
                         .setTitle('Member Left')
                         .setAuthor({ name: member.user.username, iconURL: member.user.displayAvatarURL() })
                         .addFields(

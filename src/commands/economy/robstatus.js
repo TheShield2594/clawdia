@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { getPublicProtectionStatus, timeRemaining } = require('../../services/effectsService');
+const COLORS = require('../../utils/embedColors');
 
 const STATUS_COOLDOWN_MS = 2 * 60_000; // 2 minutes
 const VICTIM_IMMUNITY_MS = 30 * 60_000;
@@ -85,7 +86,7 @@ module.exports = {
         const myRate      = myTotal > 0 ? `${Math.round((mySuccesses / myTotal) * 100)}%` : '—';
 
         const embed = new EmbedBuilder()
-            .setColor('#9b59b6')
+            .setColor(COLORS.RARE)
             .setTitle(`🔍 Rob Status: ${target.username}`)
             .setDescription(lines.join('\n'))
             .addFields({

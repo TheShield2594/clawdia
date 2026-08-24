@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { MATERIAL_RARITY, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
 const { ACHIEVEMENTS } = require('../../data/achievements');
+const COLORS = require('../../utils/embedColors');
 
 const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
 
@@ -90,7 +91,7 @@ module.exports = {
             const hasAnything = topAchs.length > 0 || allMaterials.length > 0;
             if (!hasAnything) {
                 const emptyEmbed = new EmbedBuilder()
-                    .setColor('#9e9e9e')
+                    .setColor(COLORS.NEUTRAL)
                     .setTitle(`✨ Showcase — ${target.username}`)
                     .setThumbnail(target.displayAvatarURL({ dynamic: true }))
                     .setDescription(

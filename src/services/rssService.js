@@ -5,6 +5,7 @@ const cron = require('node-cron');
 
 const { safeFetchFeed } = require('../utils/safeFeedFetch');
 const { runJob } = require('../utils/jobRunner');
+const COLORS = require('../utils/embedColors');
 
 const parser = new Parser();
 
@@ -176,7 +177,7 @@ async function deliverFeedUpdate(client, guild, feed, parsedFeed, latestItem, it
 
         if (channel) {
             const embed = new EmbedBuilder()
-                .setColor('#00ff00')
+                .setColor(COLORS.INFO)
                 .setTitle(latestItem.title || 'New Post')
                 .setURL(latestItem.link)
                 .setDescription(latestItem.contentSnippet?.substring(0, 200) || 'No description available')
@@ -312,7 +313,7 @@ async function sendDailyNewsForProfile(client, guild, profile) {
     uniqueItems.sort(compareByDateDesc);
 
     const embed = new EmbedBuilder()
-        .setColor('#0099ff')
+        .setColor(COLORS.INFO)
         .setTitle(profile.title)
         .setDescription('Here are the top stories from the last 24 hours:')
         .setTimestamp();

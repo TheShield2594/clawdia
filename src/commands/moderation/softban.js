@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../services/moderationLogService');
 const { hierarchyDenial, resolveMember } = require('../../utils/moderationHierarchy');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -75,7 +76,7 @@ module.exports = {
         }
 
         const embed = new EmbedBuilder()
-            .setColor('#ff9900')
+            .setColor(COLORS.WARN)
             .setTitle('User Softbanned')
             .setDescription(`**${user.globalName ?? user.username}** has been softbanned — their last ${deleteDays} day(s) of messages were removed and they may rejoin.`)
             .addFields(

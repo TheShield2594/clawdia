@@ -2,6 +2,7 @@ const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js
 const Guild = require('../models/Guild');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { trackAction } = require('../services/antiNukeService');
+const COLORS = require('../utils/embedColors');
 
 module.exports = {
     name: 'channelDelete',
@@ -28,7 +29,7 @@ module.exports = {
         if (!logChannel.permissionsFor(channel.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) return;
 
         const embed = new EmbedBuilder()
-            .setColor('#ff0000')
+            .setColor(COLORS.ERROR)
             .setTitle('Channel Deleted')
             .addFields(
                 { name: 'Name', value: channel.name, inline: true },

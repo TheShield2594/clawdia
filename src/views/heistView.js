@@ -13,6 +13,7 @@
 
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { ROLES, TARGETS } = require('../data/heistData');
+const COLORS = require('../utils/embedColors');
 
 function makeSkillRow(heistId, userId, check) {
     const row = new ActionRowBuilder();
@@ -36,7 +37,7 @@ function buildLobbyEmbed(heist) {
     });
 
     return new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle(`🎭 Heist Lobby — ${target.label}`)
         .setDescription(
             `**Initiator:** <@${heist.initiatorId}>\n\n` +

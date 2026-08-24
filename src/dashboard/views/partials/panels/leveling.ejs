@@ -140,10 +140,12 @@
                         <button class="btn btn-sm" onclick="loadLevelLeaderboard(1,true)">Retry</button>
                     </div>
                     <div id="level-leaderboard-content" style="display:none">
-                        <table class="cases-table" style="width:100%">
-                            <thead><tr><th>#</th><th>User ID</th><th>Level</th><th>Total XP</th><th>Messages</th></tr></thead>
-                            <tbody id="level-leaderboard-tbody"></tbody>
-                        </table>
+                        <div class="table-scroll" role="region" tabindex="0" aria-label="Level leaderboard">
+                            <table class="cases-table">
+                                <thead><tr><th>#</th><th>User ID</th><th>Level</th><th>Total XP</th><th>Messages</th></tr></thead>
+                                <tbody id="level-leaderboard-tbody"></tbody>
+                            </table>
+                        </div>
                         <div id="level-leaderboard-pagination" style="display:flex;gap:.5rem;align-items:center;justify-content:center;margin-top:.75rem"></div>
                     </div>
                     <div id="level-leaderboard-empty" style="display:none;padding:1.5rem 0;text-align:center;color:var(--text-dim);font-size:.9rem">No members with XP yet.</div>

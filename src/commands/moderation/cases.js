@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getCasesForUser } = require('../../services/caseService');
+const COLORS = require('../../utils/embedColors');
 
 const TYPE_EMOJI = {
     ban: '🔨', kick: '👢', mute: '🔇', warn: '⚠️',
@@ -35,7 +36,7 @@ module.exports = {
         );
 
         const embed = new EmbedBuilder()
-            .setColor('#5865F2')
+            .setColor(COLORS.INFO)
             .setTitle(`Cases for ${user.globalName ?? user.username}`)
             .setThumbnail(user.displayAvatarURL())
             .setDescription(lines.join('\n'))

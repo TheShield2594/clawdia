@@ -13,6 +13,7 @@ const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { SEASONAL_EVENTS, RARITY_COLORS, rollLootBox } = require('../../data/seasonalEvents');
 const { PET_DEFINITIONS, MAX_SLOT_EXPANSIONS, petCapacity, hasFreePetSlot, countSlotPets } = require('../../services/petService');
 const { MAX_STAMINA_UPGRADES } = require('../../data/crossSystemData');
+const COLORS = require('../../utils/embedColors');
 
 // itemId of a seasonal loot box -> the event definition that owns it
 const LOOT_BOX_EVENTS = new Map(
@@ -122,7 +123,7 @@ module.exports = {
             await dropEmptyInventorySlots();
 
             const embed = new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle(`${cfg.emoji} Activated: ${cfg.label}`)
                 .setTimestamp();
 
@@ -175,7 +176,7 @@ module.exports = {
 
             const newFreezes = user.streak?.freezes ?? 0;
             const embed = new EmbedBuilder()
-                .setColor('#5dade2')
+                .setColor(COLORS.INFO)
                 .setTitle('🧊 Streak Freeze Banked')
                 .setDescription(
                     `One freeze is now stored. If you miss a daily, it auto-consumes to keep your streak alive.\n\n` +
@@ -296,7 +297,7 @@ module.exports = {
             await dropEmptyInventorySlots();
 
             const embed = new EmbedBuilder()
-                .setColor('#8e44ad')
+                .setColor(COLORS.RARE)
                 .setTitle('🐾 Pet Slot Added')
                 .setDescription(
                     `Room for one more companion.\n\n` +
@@ -461,7 +462,7 @@ module.exports = {
         const genericDesc = loreText ? `${baseDesc}\n\n> *${loreText}*` : baseDesc;
 
         const embed = new EmbedBuilder()
-            .setColor('#2ecc71')
+            .setColor(COLORS.SUCCESS)
             .setTitle(`✅ Used: ${shopItem?.name ?? itemName}`)
             .setDescription(genericDesc)
             .setTimestamp();

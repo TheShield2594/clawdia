@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
+const COLORS = require('../../utils/embedColors');
 
 const XP_COOLDOWN_SECONDS = 60;
 const FIELD_LIMIT = 1024;
@@ -52,7 +53,7 @@ module.exports = {
                 : 'You are currently earning XP normally.';
 
             const embed = new EmbedBuilder()
-                .setColor('#3498db')
+                .setColor(COLORS.INFO)
                 .setTitle(`📊 XP Settings for ${interaction.guild.name}`)
                 .addFields(
                     { name: 'XP Rate', value: xpRateLabel, inline: true },

@@ -12,6 +12,8 @@ const { advanceMissions } = require('../../services/seasonMissionService');
 const Guild = require('../../models/Guild');
 const { isDistrictActive } = require('../../services/districtService');
 const { START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duelElo');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const DUEL_COOLDOWN_MS = 5 * 60_000;
 const ACCEPT_TIMEOUT_MS = 60_000;
@@ -273,7 +275,7 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
         const winLine    = winnerPayout.toLocaleString();
 
         const victoryCard = new EmbedBuilder()
-            .setColor('#FFD700')
+            .setColor(COLORS.PRIZE)
             .setTitle('🏆 Duel Victory')
             .setDescription(
                 `<@${winnerUser.id}> defeated <@${loserUser.id}> in a ${GAME_NAMES[game]}\n\n` +
@@ -293,7 +295,7 @@ async function finalizeDuel({ interaction, targetUser, challengerId, opponentId,
 }
 
 function errorEmbed(title, description) {
-    return new EmbedBuilder().setColor('#e74c3c').setTitle(title).setDescription(description).setTimestamp();
+    return new EmbedBuilder().setColor(COLORS.ERROR).setTitle(title).setDescription(description).setTimestamp();
 }
 
 async function runInstantGame(interaction, targetUser, amount, currency, houseCut, game, isRanked = false) {
@@ -341,7 +343,7 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
 
     try {
         await interaction.editReply({
-            embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('✊ Rock Paper Scissors').setDescription(`**${interaction.user.username}**, choose your move! (30s)`).setTimestamp()],
+            embeds: [new EmbedBuilder().setColor(COLORS.INFO).setTitle('✊ Rock Paper Scissors').setDescription(`**${interaction.user.username}**, choose your move! (30s)`).setTimestamp()],
             components: [buildRpsRow('c', duelId)],
         });
     } catch (err) {
@@ -352,7 +354,11 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
 
     const cPrefix = `rpsc_${duelId}_`;
     const challengerCollector = msg.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id && i.customId.startsWith(cPrefix) && RPS_MOVES.includes(i.customId.slice(cPrefix.length)),
+        filter: ownedBy(
+            interaction.user.id,
+            i => i.customId.startsWith(cPrefix) && RPS_MOVES.includes(i.customId.slice(cPrefix.length)),
+            "This isn't your duel.",
+        ),
         time: RPS_TIMEOUT_MS,
         max: 1,
     });
@@ -363,13 +369,17 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
             const challengerMove = ci.customId.slice(cPrefix.length);
 
             await interaction.editReply({
-                embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('✊ Rock Paper Scissors').setDescription(`**${targetUser.username}**, choose your move! (30s)`).setTimestamp()],
+                embeds: [new EmbedBuilder().setColor(COLORS.INFO).setTitle('✊ Rock Paper Scissors').setDescription(`**${targetUser.username}**, choose your move! (30s)`).setTimestamp()],
                 components: [buildRpsRow('o', duelId)],
             });
 
             const oPrefix = `rpso_${duelId}_`;
             const opponentCollector = msg.createMessageComponentCollector({
-                filter: i => i.user.id === targetUser.id && i.customId.startsWith(oPrefix) && RPS_MOVES.includes(i.customId.slice(oPrefix.length)),
+                filter: ownedBy(
+                    targetUser.id,
+                    i => i.customId.startsWith(oPrefix) && RPS_MOVES.includes(i.customId.slice(oPrefix.length)),
+                    "This isn't your duel.",
+                ),
                 time: RPS_TIMEOUT_MS,
                 max: 1,
             });
@@ -416,7 +426,7 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
                     await settle(async () => {
                         await refundEscrow(interaction.user.id, targetUser.id, guildId, amount).catch(console.error);
                         await interaction.editReply({
-                            embeds: [new EmbedBuilder().setColor('#95a5a6').setTitle('⚔️ Duel Expired').setDescription(`**${targetUser.username}** didn't pick a move in time. Both bets refunded.`).setTimestamp()],
+                            embeds: [new EmbedBuilder().setColor(COLORS.NEUTRAL).setTitle('⚔️ Duel Expired').setDescription(`**${targetUser.username}** didn't pick a move in time. Both bets refunded.`).setTimestamp()],
                             components: [],
                         }).catch(() => {});
                     });
@@ -436,7 +446,7 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
             await settle(async () => {
                 await refundEscrow(interaction.user.id, targetUser.id, guildId, amount).catch(console.error);
                 await interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor('#95a5a6').setTitle('⚔️ Duel Expired').setDescription(`**${interaction.user.username}** didn't pick a move in time. Both bets refunded.`).setTimestamp()],
+                    embeds: [new EmbedBuilder().setColor(COLORS.NEUTRAL).setTitle('⚔️ Duel Expired').setDescription(`**${interaction.user.username}** didn't pick a move in time. Both bets refunded.`).setTimestamp()],
                     components: [],
                 }).catch(() => {});
             });
@@ -528,7 +538,11 @@ async function runChallenge(interaction, isRanked) {
     const msg = await interaction.fetchReply();
 
     const acceptCollector = msg.createMessageComponentCollector({
-        filter: i => i.user.id === target.id && (i.customId === `duel_accept_${duelId}` || i.customId === `duel_decline_${duelId}`),
+        filter: ownedBy(
+            target.id,
+            i => i.customId === `duel_accept_${duelId}` || i.customId === `duel_decline_${duelId}`,
+            "This isn't your duel.",
+        ),
         time: ACCEPT_TIMEOUT_MS,
         max: 1,
     });
@@ -541,7 +555,7 @@ async function runChallenge(interaction, isRanked) {
 
             if (i.customId === `duel_decline_${duelId}`) {
                 return interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Declined').setDescription(`**${target.username}** declined the challenge.`).setTimestamp()],
+                    embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('⚔️ Duel Declined').setDescription(`**${target.username}** declined the challenge.`).setTimestamp()],
                     components: [],
                 });
             }
@@ -554,7 +568,7 @@ async function runChallenge(interaction, isRanked) {
             if (!cooldownClaim.ok) {
                 const who = cooldownClaim.reason === 'challenger' ? interaction.user.username : target.username;
                 return interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** is on duel cooldown.`).setTimestamp()],
+                    embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** is on duel cooldown.`).setTimestamp()],
                     components: [],
                 });
             }
@@ -566,7 +580,7 @@ async function runChallenge(interaction, isRanked) {
                 cooldownClaim = null;
                 const who = escrow.reason === 'challenger' ? interaction.user.username : target.username;
                 return interaction.editReply({
-                    embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** no longer has enough ${currency}.`).setTimestamp()],
+                    embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('⚔️ Duel Cancelled').setDescription(`**${who}** no longer has enough ${currency}.`).setTimestamp()],
                     components: [],
                 });
             }
@@ -595,7 +609,7 @@ async function runChallenge(interaction, isRanked) {
     acceptCollector.on('end', async (collected, reason) => {
         if (reason === 'time' && collected.size === 0) {
             await interaction.editReply({
-                embeds: [new EmbedBuilder().setColor('#95a5a6').setTitle('⚔️ Duel Expired').setDescription(`The duel challenge to **${target.username}** expired.`).setTimestamp()],
+                embeds: [new EmbedBuilder().setColor(COLORS.NEUTRAL).setTitle('⚔️ Duel Expired').setDescription(`The duel challenge to **${target.username}** expired.`).setTimestamp()],
                 components: [],
             }).catch(() => {});
         }
@@ -625,7 +639,7 @@ async function runRankView(interaction) {
         ?? makeSeasonId(guildSettings?.rankedDuels?.seasonNumber ?? 1);
 
     const embed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle(`${tier.icon} ${target.username} — ${tier.label}`)
         .setThumbnail(target.displayAvatarURL({ dynamic: true }))
         .setDescription(`Current **${elo}** ELO · Server rank **#${rankPosition}**`)
@@ -678,7 +692,7 @@ async function runLeaderboard(interaction) {
         : '';
 
     const embed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle(`🏆 Ranked Duel Ladder — ${seasonId}`)
         .setDescription(lines.join('\n') + seasonEnds)
         .setFooter({ text: 'Top 3 at season end earn coins, a title, and bragging rights.' })

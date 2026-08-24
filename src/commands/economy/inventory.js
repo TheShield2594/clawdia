@@ -7,9 +7,19 @@ const { pruneEffects, EFFECT_CONFIGS, timeRemaining } = require('../../services/
 const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS } = require('../../data/materialRarity');
 const { getItemLore } = require('../../data/defaultShopItems');
 const { getRelicMeta } = require('../../data/exploreData');
-const { packFields } = require('../../utils/embedFields');
+const { packFieldsCapped, EMBED_LIMITS } = require('../../utils/embedFields');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
+
+// Characters the item sections may spend between them. An embed's ceiling is
+// 6,000 across its title, description and every field — the second budget, the
+// one a per-field cap does not protect: four sections spilling into two 1,024
+// character fields each is 8,192 and a rejected embed, every field of which
+// was individually legal. What is left over from this covers the title, the
+// footer and the relic footnote.
+const SECTIONS_BUDGET = 4_200;
 
 const TAB_KEYS   = ['items', 'hunt', 'fish', 'mine', 'explore'];
 const TAB_LABELS = { items: '🎒 Items', hunt: '⚔️ Hunt', fish: '🎣 Fish', mine: '⛏️ Mine', explore: '🧭 Explore' };
@@ -91,6 +101,46 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
 
     let hasContent = false;
 
+    // The sections share one budget rather than each holding a fixed number of
+    // fields, and take an even slice of whatever is left when their turn comes
+    // — so a long shop list cannot starve the relics below it, while a player
+    // who only has relics gets the whole allowance for them. Never less than
+    // one field: a section that exists should be visible, even if only its
+    // first few entries are.
+    let budgetLeft = SECTIONS_BUDGET;
+    // Counted up front, effects included, so the last section to be added is
+    // still working from a share and not from whatever happens to be left.
+    let sectionsLeft = activeEffects.length ? 1 : 0;
+
+    /**
+     * Add one packed section to the embed, and say how much of it did not fit.
+     * Returns whether anything was added, for the sections that carry a
+     * footnote of their own.
+     */
+    const addSection = (name, lines, noun) => {
+        if (!lines.length) return false;
+
+        const share = Math.max(0, budgetLeft) / Math.max(1, sectionsLeft);
+        const { fields, omitted } = packFieldsCapped(name, lines, {
+            maxFields: Math.max(1, Math.floor(share / EMBED_LIMITS.FIELD_VALUE)),
+        });
+        embed.addFields(...fields);
+        budgetLeft  -= fields.reduce((n, f) => n + f.name.length + f.value.length, 0);
+        sectionsLeft = Math.max(0, sectionsLeft - 1);
+
+        if (omitted > 0) {
+            const note = {
+                name: `${name} — and more`,
+                value: `*${omitted} further ${noun}${omitted === 1 ? '' : 's'} not shown.*`,
+                inline: false,
+            };
+            embed.addFields(note);
+            budgetLeft -= note.name.length + note.value.length;
+        }
+        hasContent = true;
+        return true;
+    };
+
     if (inventory.length) {
         const shopLines  = [];
         const aiLines    = [];
@@ -123,23 +173,22 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
                 shopLines.push(`**${displayName}** ×${entry.quantity}${worth}${loreLine}`);
             }
         }
-        if (shopLines.length) {
-            embed.addFields({ name: '🛍️ Shop Items', value: shopLines.join('\n'), inline: false });
-            hasContent = true;
-        }
-        if (aiLines.length) {
-            embed.addFields({ name: '⚒️ Forged Items', value: aiLines.join('\n'), inline: false });
-            hasContent = true;
-        }
-        if (relicLines.length) {
-            // A full collection is 25 relics — well past one field's budget.
-            embed.addFields(...packFields('🏺 Relics', relicLines));
+        // Every one of these grows with what the player owns, and shop and
+        // forged items each carry a lore line on top of the entry — so an
+        // inventory does not have to be remarkable before one joined field is
+        // past 1,024 characters and discord.js throws the whole embed out.
+        // Relics were packed and these two were not, which is the same bug
+        // waiting in the section next to the fix.
+        sectionsLeft += [shopLines, aiLines, relicLines].filter(l => l.length).length;
+        addSection('🛍️ Shop Items',   shopLines,  'shop item');
+        addSection('⚒️ Forged Items', aiLines,    'forged item');
+        // A full collection is 25 relics — well past one field's budget.
+        if (addSection('🏺 Relics', relicLines, 'relic')) {
             embed.addFields({
                 name: '​',
                 value: '*Every distinct relic pays a standing bonus on exploration coins — see `/explore relics`.*',
                 inline: false,
             });
-            hasContent = true;
         }
     }
 
@@ -155,10 +204,7 @@ function buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, f
             return `${cfg.emoji} **${cfg.label}** — ${durationStr}`;
         }).filter(Boolean);
 
-        if (lines.length) {
-            embed.addFields({ name: '✨ Active Effects', value: lines.join('\n'), inline: false });
-            hasContent = true;
-        }
+        addSection('✨ Active Effects', lines, 'active effect');
     }
 
     if (!hasContent) {
@@ -230,7 +276,7 @@ module.exports = {
 
         if (!hasItems && !hasMaterials) {
             const emptyEmbed = new EmbedBuilder()
-                .setColor('#9e9e9e')
+                .setColor(COLORS.NEUTRAL)
                 .setTitle('🎒 Inventory — Empty')
                 .setDescription('Nothing here yet.\nTry `/hunt`, `/fish`, `/mine`, or `/explore` to find materials.')
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }));
@@ -259,8 +305,11 @@ module.exports = {
 
         const collector = message.createMessageComponentCollector({
             componentType: ComponentType.Button,
-            filter: btn => btn.user.id === interaction.user.id
-                && TAB_KEYS.some(k => btn.customId === `inv_${k}_${interaction.id}`),
+            filter: ownedBy(
+                interaction.user.id,
+                btn => TAB_KEYS.some(k => btn.customId === `inv_${k}_${interaction.id}`),
+                "This isn't your inventory — run `/inventory` for your own.",
+            ),
             time: 120_000
         });
 
@@ -277,5 +326,7 @@ module.exports = {
                 components: [buildTabRow(activeTab, interaction.id, true)]
             }).catch(() => {});
         });
-    }
+    },
+
+    __test__: { buildItemsEmbed },
 };

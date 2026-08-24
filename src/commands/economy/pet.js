@@ -51,6 +51,8 @@ const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { MATERIAL_RARITY } = require('../../data/materialRarity');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { onPetCare, notifyQuestComplete } = require('../../services/questService');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const NO_SUCH_PET = "Couldn't find that pet — pick one from the list `/pet status` shows, or start typing to choose from your pets.";
 const HUNGER_BAR_LENGTH = 10;
@@ -482,7 +484,7 @@ async function executeAdopt(interaction) {
     const personalityDef = PERSONALITY_TRAITS[personality];
     const displayName = petName || def.name;
     const embed = new EmbedBuilder()
-        .setColor('#4caf50')
+        .setColor(COLORS.SUCCESS)
         .setTitle(`${def.emoji} New Pet Adopted!`)
         .setDescription(
             `Welcome **${displayName}** to your family! Take good care of them.\n\n` +
@@ -530,7 +532,7 @@ async function executeStatus(interaction) {
     });
 
     const collector = reply.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id,
+        filter: ownedBy(interaction.user.id, "This isn't your pet."),
         time:   90_000,
     });
 
@@ -825,7 +827,7 @@ async function executeRelease(interaction) {
     const cancelId  = `pet_release_no:${interaction.id}`;
     const confirm = await interaction.reply({
         embeds: [new EmbedBuilder()
-            .setColor('#e74c3c')
+            .setColor(COLORS.ERROR)
             .setTitle(`Release ${name}?`)
             .setDescription(
                 `${getPetDisplay(pet).emoji} **${getPetDisplay(pet).titledName}** — Lv.${level}, ` +
@@ -846,7 +848,7 @@ async function executeRelease(interaction) {
     let choice;
     try {
         choice = await message.awaitMessageComponent({
-            filter: i => i.user.id === interaction.user.id && [confirmId, cancelId].includes(i.customId),
+            filter: ownedBy(interaction.user.id, i => [confirmId, cancelId].includes(i.customId), "This isn't your pet."),
             time: 30_000,
         });
     } catch {
@@ -1058,7 +1060,7 @@ async function wildBattle(interaction, user, myPetId, currency, guildSettings) {
 
     const da = getPetDisplay(mySnap), db = getPetDisplay(wild);
     const intro = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle('⚔️ A wild challenger appears!')
         .setDescription(`${da.emoji} **${da.titledName}** squares off against ${db.emoji} **${db.name}** (Lv.${wild.level})…`);
     await interaction.editReply({ embeds: [intro] });
@@ -1108,7 +1110,7 @@ async function pvpBattle(interaction, ctx) {
     const acceptId  = `petb_accept_${interaction.id}`;
     const declineId = `petb_decline_${interaction.id}`;
     const challengeEmbed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle('⚔️ Pet Battle Challenge!')
         .setDescription(
             `${da.emoji} **${interaction.member?.displayName ?? interaction.user.username}'s ${da.titledName}** (Lv.${myPet.level ?? 1}) ` +
@@ -1129,23 +1131,23 @@ async function pvpBattle(interaction, ctx) {
     const msg = await interaction.fetchReply();
 
     const collector = msg.createMessageComponentCollector({
-        filter: i => i.user.id === opponent.id && [acceptId, declineId].includes(i.customId),
+        filter: ownedBy(opponent.id, i => [acceptId, declineId].includes(i.customId), "This isn't your pet."),
         max: 1, time: 60_000,
     });
 
     collector.on('collect', async i => {
         if (i.customId === declineId) {
-            return i.update({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor('#95a5a6').setDescription(`${opponent.username} declined the battle.`)], components: [] }).catch(() => {});
+            return i.update({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor(COLORS.NEUTRAL).setDescription(`${opponent.username} declined the battle.`)], components: [] }).catch(() => {});
         }
 
         // Escrow wagers atomically (challenger then opponent), refund on shortfall
         if (bet > 0) {
             const ch = await User.findOneAndUpdate({ userId: interaction.user.id, guildId, balance: { $gte: bet } }, { $inc: { balance: -bet } });
-            if (!ch) return i.update({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor('#e74c3c').setDescription(`${interaction.user.username} can no longer cover the wager.`)], components: [] }).catch(() => {});
+            if (!ch) return i.update({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor(COLORS.ERROR).setDescription(`${interaction.user.username} can no longer cover the wager.`)], components: [] }).catch(() => {});
             const op = await User.findOneAndUpdate({ userId: opponent.id, guildId, balance: { $gte: bet } }, { $inc: { balance: -bet } });
             if (!op) {
                 await User.updateOne({ userId: interaction.user.id, guildId }, { $inc: { balance: bet } });
-                return i.update({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor('#e74c3c').setDescription(`${opponent.username} can't cover the wager.`)], components: [] }).catch(() => {});
+                return i.update({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor(COLORS.ERROR).setDescription(`${opponent.username} can't cover the wager.`)], components: [] }).catch(() => {});
             }
         }
 
@@ -1170,7 +1172,7 @@ async function pvpBattle(interaction, ctx) {
                 if (rA.status === 'rejected') console.error('[pet battle] refund failed for challenger:', rA.reason);
                 if (rB.status === 'rejected') console.error('[pet battle] refund failed for opponent:', rB.reason);
             }
-            return interaction.editReply({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor('#e74c3c').setDescription(`${reason} — the battle was cancelled${bet > 0 ? ' and any wagers refunded' : ''}.`)], components: [] }).catch(() => {});
+            return interaction.editReply({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor(COLORS.ERROR).setDescription(`${reason} — the battle was cancelled${bet > 0 ? ' and any wagers refunded' : ''}.`)], components: [] }).catch(() => {});
         };
         if (!aPet || !bPet) return refundAndCancel('A pet is no longer available');
         if (!petUsable(aPet).ok || !petUsable(bPet).ok) return refundAndCancel('A pet is no longer battle-ready');
@@ -1182,7 +1184,7 @@ async function pvpBattle(interaction, ctx) {
         const aWon   = result.winner === 'a';
 
         const intro = new EmbedBuilder()
-            .setColor('#9b59b6').setTitle('⚔️ Battle commencing…')
+            .setColor(COLORS.RARE).setTitle('⚔️ Battle commencing…')
             .setDescription(`${getPetDisplay(aPet).emoji} **${getPetDisplay(aPet).titledName}**  🆚  ${getPetDisplay(bPet).emoji} **${getPetDisplay(bPet).titledName}**`);
         await interaction.editReply({ content: null, embeds: [intro], components: [] }).catch(() => {});
         await _delay(1800);
@@ -1271,7 +1273,7 @@ async function pvpBattle(interaction, ctx) {
 
     collector.on('end', (collected, reason) => {
         if (reason === 'time' && collected.size === 0) {
-            interaction.editReply({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor('#95a5a6').setDescription(`${opponent.username} didn't respond in time.`)], components: [] }).catch(() => {});
+            interaction.editReply({ content: null, embeds: [EmbedBuilder.from(challengeEmbed).setColor(COLORS.NEUTRAL).setDescription(`${opponent.username} didn't respond in time.`)], components: [] }).catch(() => {});
         }
     });
 }
@@ -1283,7 +1285,7 @@ async function executeList(interaction) {
                 + `Bonus: +${d.bonusPct}% ${d.bonusType.replace(/_/g, ' ')} → **+${(d.bonusPct * 2.5).toFixed(1)}%** at Lv.${PET_MAX_LEVEL}  |  Fave food: \`${d.favoriteMaterial}\``);
 
     const embed = new EmbedBuilder()
-        .setColor('#ff9800')
+        .setColor(COLORS.WARN)
         .setTitle('🐾 Pet Shop')
         .setDescription(`Pets level up from feeding and battling, and their passive grows with them.\n\n${lines.join('\n\n')}`)
         .setFooter({ text: `Eagle, Shark and Crystal Fox aren't sold — each has a ${Math.round(RARE_PET_DROP_CHANCE * 100)}% chance to appear on a legendary hunt / fish / mine` })
@@ -1347,7 +1349,7 @@ async function executeLeaderboard(interaction) {
     const lines  = top.map((e, i) => lineBuilder(e, medals[i] ?? `${i + 1}.`));
 
     const embed = new EmbedBuilder()
-        .setColor('#ff9800')
+        .setColor(COLORS.WARN)
         .setTitle(`🐾 Pet Leaderboard — ${titleLabel}`)
         .setDescription(lines.length > 0 ? lines.join('\n') : '*No pets in this server yet!*')
         .setFooter({ text: 'Pet of the Week is chosen weekly by most interactions • 🌟 = current POTW' })

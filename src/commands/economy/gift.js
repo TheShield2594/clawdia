@@ -4,6 +4,7 @@ const Guild = require('../../models/Guild');
 const { getItemLore } = require('../../data/defaultShopItems');
 const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
+const COLORS = require('../../utils/embedColors');
 
 const DAILY_COIN_CAP = 10_000;
 // Incoming cap is higher than the outgoing cap (several friends can legitimately
@@ -198,7 +199,7 @@ module.exports = {
                 .setTimestamp();
 
             const recipientEmbed = new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('🎁 You Received a Gift!')
                 .setDescription(`**${interaction.user.username}** sent you **${currency}${amount.toLocaleString()}**!`)
                 .setTimestamp();
@@ -312,7 +313,7 @@ module.exports = {
                 : `**${interaction.user.username}** sent you **${qty}x \`${itemId}\`**!`;
 
             const recipientEmbed = new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('🎁 You Received a Gift!')
                 .setDescription(recipientDesc)
                 .setTimestamp();

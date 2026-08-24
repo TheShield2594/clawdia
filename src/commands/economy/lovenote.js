@@ -10,6 +10,7 @@ const {
     addEventCurrency,
 } = require('../../services/seasonalEventService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const COLORS = require('../../utils/embedColors');
 
 const COOLDOWN_MS    = 60 * 60 * 1000; // 1 hour
 const HEART_REWARD   = 5;              // event currency
@@ -118,7 +119,7 @@ module.exports = {
             };
 
             embed = new EmbedBuilder()
-                .setColor('#888888')
+                .setColor(COLORS.NEUTRAL)
                 .setTitle(`${rejection.emoji} AWKWARD!`)
                 .setDescription(
                     `**${rejection.name}**\n${rejection.description}\n\n` +

@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -12,7 +13,7 @@ module.exports = {
         const user = interaction.options.getUser('user') || interaction.user;
 
         const embed = new EmbedBuilder()
-            .setColor('#00ff00')
+            .setColor(COLORS.INFO)
             .setTitle(`${user.username}'s Avatar`)
             .setImage(user.displayAvatarURL({ dynamic: true, size: 1024 }))
             .setTimestamp();

@@ -3,6 +3,7 @@
 const { ACHIEVEMENTS } = require('../data/achievements');
 const { delay } = require('../utils/delay');
 const { createAchievementCard } = require('../utils/cardGenerator');
+const COLORS = require('../utils/embedColors');
 
 /**
  * Check all applicable achievements for a user and award any newly earned ones.
@@ -103,7 +104,7 @@ async function broadcastAchievementUnlock(client, guildSettings, mention, def, r
     if (tier === 'legendary') {
         const bar = '⚡ ════════════════════════ ⚡';
         embed = new EmbedBuilder()
-            .setColor(0xFFD700)
+            .setColor(COLORS.PRIZE)
             .setTitle(`${bar}`)
             .setDescription(
                 `${bar}\n👑 ${mention} just achieved the legendary\n\n` +
@@ -113,7 +114,7 @@ async function broadcastAchievementUnlock(client, guildSettings, mention, def, r
             .setTimestamp();
     } else if (tier === 'secret') {
         embed = new EmbedBuilder()
-            .setColor(0x9c27b0)
+            .setColor(COLORS.RARE)
             .setTitle('✨ Secret Achievement Discovered!')
             .setDescription(
                 `${mention} just discovered a **secret achievement**…\n\n🔒 *"[REDACTED]"*\n\nCan you find it too?`
@@ -157,7 +158,7 @@ async function announceAchievements(client, guildSettings, user, member, achieve
 
         // Step 1 — mystery beat
         const mysteryEmbed = new EmbedBuilder()
-            .setColor(0x5865F2)
+            .setColor(COLORS.INFO)
             .setTitle('🏅 Achievement Unlocked...')
             .setDescription('???');
 

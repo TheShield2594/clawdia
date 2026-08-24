@@ -3,6 +3,7 @@ const Guild = require('../../models/Guild');
 // Drawing, ending and entrant handling live in the service — `/giveaway end`
 // and the scheduled sweep are two callers of one operation (#614).
 const { endGiveaway, parseDuration, pickWinners, getEntrants } = require('../../services/giveawayService');
+const COLORS = require('../../utils/embedColors');
 
 const GIVEAWAY_EMOJI = '🎉';
 
@@ -51,7 +52,7 @@ module.exports = {
             const endsAt = new Date(Date.now() + durationMs);
 
             const embed = new EmbedBuilder()
-                .setColor('#FFD700')
+                .setColor(COLORS.PRIZE)
                 .setTitle(`${GIVEAWAY_EMOJI} GIVEAWAY ${GIVEAWAY_EMOJI}`)
                 .setDescription(`**Prize:** ${prize}\n\nClick the button below to enter!`)
                 .addFields(

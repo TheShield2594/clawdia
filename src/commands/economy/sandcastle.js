@@ -10,6 +10,7 @@ const {
     addEventCurrency,
 } = require('../../services/seasonalEventService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const COLORS = require('../../utils/embedColors');
 
 const COOLDOWN_MS   = 60 * 60 * 1000; // 1 hour
 const SHELL_REWARD  = 5;              // event currency
@@ -118,7 +119,7 @@ module.exports = {
             };
 
             embed = new EmbedBuilder()
-                .setColor('#1565c0')
+                .setColor(COLORS.ERROR)
                 .setTitle(`${wave.emoji} WIPED OUT!`)
                 .setDescription(
                     `**${wave.name}**\n${wave.description}\n\n` +
@@ -149,7 +150,7 @@ module.exports = {
             };
 
             embed = new EmbedBuilder()
-                .setColor('#ffd700')
+                .setColor(COLORS.PRIZE)
                 .setTitle(`${prize.emoji} BUILT! — ${prize.name}`)
                 .setDescription(
                     `Your sandcastle drew a crowd and won a **${prize.name}**!\n\n` +

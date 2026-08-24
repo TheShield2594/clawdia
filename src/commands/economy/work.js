@@ -18,6 +18,7 @@ const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 function resolveTiers(guildSettings) {
     const saved = guildSettings?.jobTiers;
@@ -343,7 +344,7 @@ module.exports = {
                 try {
                     const response = await reply.awaitMessageComponent({
                         time: challenge.timeLimit,
-                        filter: i => i.user.id === interaction.user.id,
+                        filter: ownedBy(interaction.user.id, "This isn't your shift."),
                     });
                     responseRef = response;
                     await responseRef.deferUpdate();

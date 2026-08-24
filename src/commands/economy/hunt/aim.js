@@ -4,6 +4,8 @@
 // profile that decides what the prompt reads like for the quarry in front of you.
 
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const COLORS = require('../../../utils/embedColors');
+const { ownedBy } = require('../../../utils/collectorOwner');
 
 // ── Aim phase timing ─────────────────────────────────────────────────────────
 // How long the shot stays perfect once the window opens, and how long after
@@ -76,7 +78,7 @@ async function runAimPhase(interaction, huntMsg) {
     const aimTime = Date.now();
 
     const collector = huntMsg.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id && i.customId === fireId,
+        filter: ownedBy(interaction.user.id, i => i.customId === fireId, "This isn't your shot."),
         time: aimWaitMs + AIM_LATE_MS,
         max: 1,
     });
@@ -100,7 +102,7 @@ async function runAimPhase(interaction, huntMsg) {
     if (!shotTaken) {
         await interaction.editReply({
             embeds: [new EmbedBuilder()
-                .setColor('#FF0000')
+                .setColor(COLORS.ERROR)
                 .setTitle('💥 FIRE!')
                 .setDescription('**Take the shot — NOW!**')],
             components: [aimRow],

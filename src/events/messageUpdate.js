@@ -1,5 +1,6 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const COLORS = require('../utils/embedColors');
 
 module.exports = {
     name: 'messageUpdate',
@@ -16,7 +17,7 @@ module.exports = {
         if (!logChannel.permissionsFor(newMessage.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) return;
 
         const embed = new EmbedBuilder()
-            .setColor('#FFA500')
+            .setColor(COLORS.WARN)
             .setTitle('Message Edited')
             .setAuthor({ name: newMessage.author.globalName ?? newMessage.author.username, iconURL: newMessage.author.displayAvatarURL() })
             .addFields(

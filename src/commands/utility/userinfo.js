@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -13,7 +14,7 @@ module.exports = {
         const member = interaction.guild.members.cache.get(user.id);
 
         const embed = new EmbedBuilder()
-            .setColor('#00ff00')
+            .setColor(COLORS.INFO)
             .setTitle('User Information')
             .setThumbnail(user.displayAvatarURL({ dynamic: true }))
             .addFields(

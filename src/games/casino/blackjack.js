@@ -11,6 +11,8 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const { randomFrom, BJ_WIN_LINES, BJ_LOSE_LINES, BJ_BUST_LINES, BJ_PUSH_LINES } = require('../../utils/copyLines');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -137,7 +139,7 @@ function buildDealerRevealEmbed(interaction, dealerHand, playerHand, splitHands,
     const embed = new EmbedBuilder()
         .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
         .setThumbnail(THUMB)
-        .setColor('#5865F2')
+        .setColor(COLORS.INFO)
         .setTitle('🃏 Blackjack — Dealer\'s Turn')
         .setDescription('Dealer flips the hole card…')
         .addFields({ name: `Dealer (${dealerVal})`, value: dealerStr, inline: false })
@@ -272,7 +274,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
                 .setThumbnail(THUMB)
-                .setColor('#FFD700')
+                .setColor(COLORS.PRIZE)
                 .setTitle('🃏 Blackjack — Natural 21')
                 .setDescription(`> Perfect hand. Pays 3:2.`)
                 .addFields(
@@ -313,7 +315,7 @@ module.exports = {
                 const peekMsg = await interaction.fetchReply();
                 try {
                     const insI = await peekMsg.awaitMessageComponent({
-                        filter: i2 => i2.user.id === interaction.user.id && i2.customId === `bj_insurance_${gameId}`,
+                        filter: ownedBy(interaction.user.id, i2 => i2.customId === `bj_insurance_${gameId}`, "This isn't your hand."),
                         time: 15_000,
                     });
                     await insI.deferUpdate();
@@ -373,10 +375,10 @@ module.exports = {
 
         const msg       = await interaction.fetchReply();
         const collector = msg.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && [
+            filter: ownedBy(interaction.user.id, i => [
                 `bj_hit_${gameId}`, `bj_stand_${gameId}`, `bj_double_${gameId}`,
                 `bj_split_${gameId}`, `bj_insurance_${gameId}`,
-            ].includes(i.customId),
+            ].includes(i.customId), "This isn't your hand."),
             time: 60_000,
         });
 

@@ -1,5 +1,6 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const COLORS = require('../utils/embedColors');
 
 module.exports = {
     name: 'messageDelete',
@@ -15,7 +16,7 @@ module.exports = {
         if (!logChannel.permissionsFor(message.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) return;
 
         const embed = new EmbedBuilder()
-            .setColor('#ff0000')
+            .setColor(COLORS.ERROR)
             .setTitle('Message Deleted')
             .setAuthor({ name: message.author?.globalName ?? message.author?.username ?? 'Unknown', iconURL: message.author?.displayAvatarURL() })
             .addFields(

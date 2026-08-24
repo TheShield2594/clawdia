@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../services/moderationLogService');
 const { hierarchyDenial } = require('../../utils/moderationHierarchy');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -46,7 +47,7 @@ module.exports = {
             await member.kick(reason);
 
             const embed = new EmbedBuilder()
-                .setColor('#ff9900')
+                .setColor(COLORS.WARN)
                 .setTitle('User Kicked')
                 .setDescription(`**${user.globalName ?? user.username}** has been kicked from the server.`)
                 .addFields(

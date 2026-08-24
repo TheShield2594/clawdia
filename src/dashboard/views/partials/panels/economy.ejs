@@ -240,14 +240,17 @@
                             <button class="btn btn-sm" onclick="loadEcoHealth()">Retry</button>
                         </div>
                         <div id="eco-top-earners-empty" style="display:none" class="empty-state"><h3>No economy activity yet</h3><p>Once members earn coins, the richest users will appear here.</p></div>
-                        <table id="eco-top-earners-table" class="cases-table" style="display:none">
-                            <thead><tr><th>Rank</th><th>User</th><th>Wallet</th><th>Bank</th><th>Total</th></tr></thead>
-                            <tbody id="eco-top-earners-tbody"></tbody>
-                        </table>
+                        <div class="table-scroll" role="region" tabindex="0" aria-label="Top earners" style="display:none">
+                            <table id="eco-top-earners-table" class="cases-table">
+                                <thead><tr><th>Rank</th><th>User</th><th>Wallet</th><th>Bank</th><th>Total</th></tr></thead>
+                                <tbody id="eco-top-earners-tbody"></tbody>
+                            </table>
+                        </div>
 
                         <!-- Command frequency chart -->
                         <div class="panel-head" style="margin-top:1.5rem"><h3>Most-Used Economy Commands</h3></div>
-                        <div style="max-width:540px;position:relative"><canvas id="eco-cmd-chart" height="200"></canvas></div>
+                        <div style="max-width:540px;position:relative"><canvas id="eco-cmd-chart" height="200" role="img" aria-label="Most-used economy commands chart — no data loaded yet"></canvas>
+                        <div id="eco-cmd-chart-data" class="chart-a11y-data"></div></div>
                     </div>
 
                     <!-- Hunting item images -->

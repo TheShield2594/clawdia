@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { logTransaction } = require('../../utils/logTransaction');
+const COLORS = require('../../utils/embedColors');
 
 async function getCurrency(guildId) {
     const guildSettings = await Guild.findOne({ guildId });
@@ -53,7 +54,7 @@ async function handleDeposit(interaction) {
         : null;
 
     const depositEmbed = new EmbedBuilder()
-        .setColor('#00ff00')
+        .setColor(COLORS.SUCCESS)
         .setTitle(depositTitle)
         .addFields(
             { name: 'Deposited', value: `${currency}${amount.toLocaleString()}`, inline: true },
@@ -105,7 +106,7 @@ async function handleWithdraw(interaction) {
     });
 
     const embed = new EmbedBuilder()
-        .setColor('#00ff00')
+        .setColor(COLORS.SUCCESS)
         .setTitle('Withdrawal Successful')
         .addFields(
             { name: 'Withdrawn', value: `${currency}${Number(amount).toLocaleString()}`, inline: true },
@@ -161,7 +162,7 @@ async function handleTransfer(interaction) {
         });
 
         const embed = new EmbedBuilder()
-            .setColor('#00ff00')
+            .setColor(COLORS.SUCCESS)
             .setTitle('Transfer Successful')
             .setDescription(`You transferred **${amount.toLocaleString()}** coins to ${recipient}`)
             .addFields({ name: 'Your New Balance', value: `${sender.balance.toLocaleString()} coins` })

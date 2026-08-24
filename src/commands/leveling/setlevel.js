@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -73,7 +74,7 @@ module.exports = {
         }
 
         const embed = new EmbedBuilder()
-            .setColor('#5865F2')
+            .setColor(COLORS.INFO)
             .setTitle('Level Assigned')
             .setDescription(`${targetUser} has been set to **level ${newLevel}**.`)
             .addFields(

@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } =
 const Guild = require('../../models/Guild');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { buildClearedEvent } = require('../../services/seasonalEventService');
+const COLORS = require('../../utils/embedColors');
 
 const EVENT_TYPE_CHOICES = [
     { name: '❄️ Winter Wonderland',   value: 'winter_wonderland' },
@@ -219,7 +220,7 @@ async function handleEnd(interaction) {
 
     return interaction.editReply({
         embeds: [new EmbedBuilder()
-            .setColor('#888888')
+            .setColor(COLORS.NEUTRAL)
             .setTitle('Event Ended')
             .setDescription(`**${current.name}** has been ended early by ${interaction.user}.`)
             .setTimestamp()]

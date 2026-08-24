@@ -3,6 +3,7 @@ const Guild = require('../models/Guild');
 const Case = require('../models/Case');
 const TempBan = require('../models/TempBan');
 const { createCase } = require('./caseService');
+const COLORS = require('../utils/embedColors');
 
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 
@@ -105,7 +106,7 @@ async function applyEscalation({ guild, targetUser, warningCount, triggeringCase
     });
 
     const embed = new EmbedBuilder()
-        .setColor('#cc3300')
+        .setColor(COLORS.WARN)
         .setTitle(`AutoMod | ${step.action.toUpperCase()} | ${targetUser.globalName ?? targetUser.username}`)
         .setDescription(`Triggered by warning threshold **${step.threshold}** (user reached **${warningCount}** active warnings).`)
         .addFields(

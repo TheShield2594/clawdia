@@ -4,6 +4,7 @@ const User = require('../models/User');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { ensureQuests, onReaction, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
+const COLORS = require('../utils/embedColors');
 
 module.exports = {
     name: 'messageReactionAdd',
@@ -121,7 +122,7 @@ async function handleStarboard(reaction, user, guild, guildSettings) {
     if (!starChannel) return;
 
     const embed = new EmbedBuilder()
-        .setColor('#FFD700')
+        .setColor(COLORS.PRIZE)
         .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL({ dynamic: true }) })
         .setDescription(message.content || null)
         .addFields({ name: 'Source', value: `[Jump to message](${message.url})` })

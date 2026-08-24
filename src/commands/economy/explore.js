@@ -64,6 +64,8 @@ const { logBigWin } = require('../../utils/bigWinLogger');
 const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
 const { progressBar } = require('../../utils/progressBar');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const REGION_CHOICES = REGION_LIST.map(r => ({
     name: `${r.emoji} ${r.name}${r.seasonalEventId ? ' (seasonal)' : ''}`,
@@ -486,7 +488,7 @@ async function handleGo(interaction) {
             const msg = await interaction.fetchReply();
             const choice = await new Promise(resolve => {
                 const col = msg.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith(encId),
+                    filter: ownedBy(interaction.user.id, i => i.customId.startsWith(encId), "This isn't your expedition."),
                     time: 20_000,
                     max: 1,
                 });
@@ -632,7 +634,7 @@ async function handleGo(interaction) {
             const announceChannel = resolved?.isTextBased() ? resolved : interaction.channel;
             announceChannel.send({
                 embeds: [new EmbedBuilder()
-                    .setColor('#FFD700')
+                    .setColor(COLORS.PRIZE)
                     .setTitle('✨ A Secret Has Been Found')
                     .setDescription(
                         `<@${interaction.user.id}> just uncovered **${result.secret.name}** in ${region.emoji} **${region.name}**.\n\n` +
@@ -733,11 +735,11 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
             lines.push(`*${result.landmark.line}*`);
             break;
         case 'lore':
-            embed.setColor('#b39ddb').setTitle('📜 Lore Fragment Recovered');
+            embed.setColor(COLORS.RARE).setTitle('📜 Lore Fragment Recovered');
             lines.push(`*You find words someone meant to be found:*`, '', `> ${result.lore.text}`);
             break;
         case 'secret':
-            embed.setColor('#FFD700').setTitle(`✨ SECRET UNCOVERED — ${result.secret.name}`);
+            embed.setColor(COLORS.PRIZE).setTitle(`✨ SECRET UNCOVERED — ${result.secret.name}`);
             lines.push(`*${result.secret.reveal}*`);
             break;
         case 'treasure': {
@@ -770,7 +772,7 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
         case 'encounter': {
             const enc = result.encounter;
             if (result.outcome === 'win') {
-                embed.setColor('#00CC55').setTitle(`${enc.emoji} ${enc.name} — Well Played`);
+                embed.setColor(COLORS.SUCCESS).setTitle(`${enc.emoji} ${enc.name} — Well Played`);
                 lines.push(`*${enc.winLine}*`);
             } else if (result.outcome === 'safe') {
                 embed.setColor(region.color).setTitle(`${enc.emoji} ${enc.name} — Watched From the Ferns`);
@@ -783,7 +785,7 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
             break;
         }
         default:
-            embed.setColor('#78909c').setTitle('🌫️ A Quiet Expedition');
+            embed.setColor(COLORS.NEUTRAL).setTitle('🌫️ A Quiet Expedition');
             lines.push(`*${result.quietLine}*`);
             break;
     }

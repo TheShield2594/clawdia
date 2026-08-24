@@ -12,6 +12,7 @@ const { ensureHuntData, FIELD_TROPHY_FLAGS } = require('../../services/huntServi
 const { FIELD_TROPHIES } = require('../../data/huntData');
 const { ensureMineData } = require('../../services/mineService');
 const { ensureFishingData } = require('../../services/fishService');
+const COLORS = require('../../utils/embedColors');
 
 const ALL_RECIPES   = { ...HUNT_RECIPES, ...MINE_RECIPES, ...FISH_CRAFT_RECIPES, ...CROSS_CRAFT_RECIPES };
 const ALL_MAT_NAMES = { ...HUNT_MAT_NAMES, ...MINE_MAT_NAMES, ...FISH_MAT_NAMES };
@@ -326,7 +327,7 @@ module.exports = {
                           : 'Use /hunt inv materials to check your remaining stock';
 
             const embed = new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle(`${recipe.emoji} Crafted: ${recipe.name}`)
                 .setDescription(`You crafted ${outputDesc}!`)
                 .addFields({ name: 'Materials Consumed', value: usedLines, inline: false })

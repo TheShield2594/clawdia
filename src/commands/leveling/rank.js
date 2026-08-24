@@ -6,6 +6,7 @@ const { createRankCard } = require('../../utils/cardGenerator');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
 const { badgeFor, titleForExactRank: prestigeTitle } = require('../../utils/prestige');
 const { tierFor: eloTierFor, START_ELO } = require('../../utils/duelElo');
+const COLORS = require('../../utils/embedColors');
 
 const BOOSTER_TYPES  = new Set(['coin_booster_2x', 'xp_booster_2x', 'lucky_streak', 'salary_raise']);
 const BOOST_TYPES    = new Set(['coin_booster_2x', 'xp_booster_2x']);
@@ -113,18 +114,18 @@ module.exports = {
                     lines.push(`${cfg.emoji} **${cfg.label}** — ${timeRemaining(e.expiresAt)}`);
                 }
                 const boosterEmbed = new EmbedBuilder()
-                    .setColor('#f39c12')
+                    .setColor(COLORS.WARN)
                     .addFields({ name: '🚀 Active Boosters', value: lines.join('\n'), inline: false });
                 if (identityField) boosterEmbed.addFields(identityField);
                 if (xpHint) boosterEmbed.setFooter({ text: xpHint });
                 await interaction.reply({ files: [attachment], embeds: [boosterEmbed] });
             } else if (identityField) {
-                const idEmbed = new EmbedBuilder().setColor('#9b59b6').addFields(identityField);
+                const idEmbed = new EmbedBuilder().setColor(COLORS.RARE).addFields(identityField);
                 if (xpHint) idEmbed.setFooter({ text: xpHint });
                 await interaction.reply({ files: [attachment], embeds: [idEmbed] });
             } else if (xpHint) {
                 const hintEmbed = new EmbedBuilder()
-                    .setColor('#95a5a6')
+                    .setColor(COLORS.NEUTRAL)
                     .setFooter({ text: xpHint });
                 await interaction.reply({ files: [attachment], embeds: [hintEmbed] });
             } else {

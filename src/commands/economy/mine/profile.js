@@ -21,6 +21,7 @@ const { getActiveSynergies } = require('../../../services/synergyService');
 const GrindProfile = require('../../../models/GrindProfile');
 const { MAX_MINER_LEVEL, MAX_MINE_PRESTIGE, PRESTIGE_BADGES } = require('./shared');
 const { buildXpBar, prestigeBonusLines } = require('./embeds');
+const COLORS = require('../../../utils/embedColors');
 
 async function handlePrestige(interaction) {
     const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
@@ -43,7 +44,7 @@ async function handlePrestige(interaction) {
     if (prestige >= MAX_MINE_PRESTIGE) {
         return interaction.reply({
             embeds: [new EmbedBuilder()
-                .setColor('#f39c12')
+                .setColor(COLORS.WARN)
                 .setTitle(`${badge} Maximum Prestige`)
                 .setDescription(`You are a **P${prestige} Master Miner** — the deepest rank there is.`)
                 .addFields({ name: 'Your Bonuses', value: prestigeBonusLines(PRESTIGE_BONUSES[prestige]).join('\n') || 'None' })
@@ -80,7 +81,7 @@ async function handlePrestige(interaction) {
         .map(syn => `${syn.emoji} ${syn.name}`);
 
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle(`${nextBadge} Ascend to Prestige ${prestige + 1}?`)
         .setDescription(
             `You've reached **Miner Level ${MAX_MINER_LEVEL}**. Ascending is permanent and cannot be undone.\n\n` +
@@ -162,7 +163,7 @@ async function handlePrestige(interaction) {
                 m.xp       = 0;
 
                 const embed = new EmbedBuilder()
-                    .setColor('#f39c12')
+                    .setColor(COLORS.WARN)
                     .setTitle(`${nextBadge} Prestige ${prestige + 1} — ${getLevelData(1).title} Again`)
                     .setDescription(
                         `You climb back to the surface, hand in your papers, and start over as a **P${prestige + 1}** miner.\n` +

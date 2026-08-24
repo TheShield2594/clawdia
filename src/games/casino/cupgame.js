@@ -10,6 +10,8 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0bd.png';
 const MIN_BET = 10;
@@ -109,7 +111,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle(`🃏 Three Card Monte${roundLabel} — Cards Flipped!`)
                 .setDescription(
                     `Cards are now face down — follow the Queen!\n\n` +
@@ -137,7 +139,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
                     .setThumbnail(THUMB)
-                    .setColor('#5865F2')
+                    .setColor(COLORS.INFO)
                     .setTitle(`🃏 Three Card Monte${roundLabel} — Shuffling…`)
                     .setDescription(
                         `Swap ${step + 1}/${steps} — cards **${a + 1}** ↔ **${b + 1}**\n\n` +
@@ -187,7 +189,11 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
         let guess;
         try {
             const resp = await msg.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.startsWith('monte_') && i.customId.endsWith(gameId),
+                filter: ownedBy(
+                    interaction.user.id,
+                    i => i.customId.startsWith('monte_') && i.customId.endsWith(gameId),
+                    "This isn't your game.",
+                ),
                 time: 30_000,
             });
             await resp.deferUpdate();
@@ -289,7 +295,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
 
             const replyMsg = await interaction.fetchReply();
             replyMsg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId === replayId,
+                filter: ownedBy(interaction.user.id, i => i.customId === replayId, "This isn't your game."),
                 max: 1,
                 time: 60_000,
             }).on('collect', async i => {
@@ -311,7 +317,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
                     .setThumbnail(THUMB)
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle(`🃏 Correct! Round ${round}/${MAX_ROUNDS} Complete!`)
                     .setDescription(
                         `> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n` +
@@ -335,7 +341,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
             let decided = false;
             try {
                 const decision = await decisionMsg.awaitMessageComponent({
-                    filter: i => i.user.id === interaction.user.id && [takeId, doubleId].includes(i.customId),
+                    filter: ownedBy(interaction.user.id, i => [takeId, doubleId].includes(i.customId), "This isn't your game."),
                     time: 30_000,
                 });
                 decided = true;
@@ -356,7 +362,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
                         embeds: [new EmbedBuilder()
                             .setAuthor(embedAuthor(interaction))
                             .setThumbnail(THUMB)
-                            .setColor('#2ecc71')
+                            .setColor(COLORS.SUCCESS)
                             .setTitle('🃏 Cashed Out!')
                             .setDescription(`> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n💰 You took the money after Round ${round}!`)
                             .addFields(
@@ -373,7 +379,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
 
                     const replyMsg = await interaction.fetchReply();
                     replyMsg.createMessageComponentCollector({
-                        filter: i => i.user.id === interaction.user.id && i.customId === replayId,
+                        filter: ownedBy(interaction.user.id, i => i.customId === replayId, "This isn't your game."),
                         max: 1, time: 60_000,
                     }).on('collect', async i => {
                         await i.deferUpdate();

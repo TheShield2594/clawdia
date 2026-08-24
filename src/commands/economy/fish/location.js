@@ -10,6 +10,7 @@ const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureFishingData } = require('../../../services/fishService');
 const { LOCATION_LIST, LOCATIONS } = require('../../../data/fishData');
 const { formatTierWeights } = require('./embeds');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LOCATION
@@ -54,7 +55,7 @@ async function showLocationList(interaction, user, currency) {
     });
 
     const embed = new EmbedBuilder()
-        .setColor('#3498db')
+        .setColor(COLORS.INFO)
         .setTitle('🗺️ Fishing Locations')
         .setDescription(locationLines.join('\n\n'))
         .setFooter({ text: 'Unlock new locations with /fish shop unlock • Switch with /fish location set' })
@@ -97,7 +98,7 @@ async function setLocation(interaction, user, _currency) {
     return interaction.reply({
         embeds: [
             new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle(`📍 Location Changed`)
                 .setDescription(`You are now fishing at **${location.emoji} ${location.name}**.`)
                 .addFields({ name: 'About', value: location.description, inline: false })

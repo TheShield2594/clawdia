@@ -4,6 +4,7 @@ const FishingTournament = require('../models/FishingTournament');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
 const { EmbedBuilder } = require('discord.js');
+const COLORS = require('../utils/embedColors');
 
 const PRIZE_SPLITS = [0.60, 0.25, 0.15];
 
@@ -178,7 +179,7 @@ function buildWinnersEmbed(tournament, currency = '💰') {
     });
 
     return new EmbedBuilder()
-        .setColor('#FFD700')
+        .setColor(COLORS.PRIZE)
         .setTitle('🏆 Fishing Tournament Results!')
         .setDescription(lines.length ? lines.join('\n') : '*No participants.*')
         .setTimestamp();

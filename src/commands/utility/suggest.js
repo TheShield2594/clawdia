@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -25,7 +26,7 @@ module.exports = {
         }
 
         const embed = new EmbedBuilder()
-            .setColor('#5865F2')
+            .setColor(COLORS.INFO)
             .setAuthor({
                 name: interaction.member?.displayName || interaction.user.username,
                 iconURL: interaction.user.displayAvatarURL()

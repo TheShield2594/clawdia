@@ -18,6 +18,8 @@ const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featured
 const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { isDistrictActive } = require('../../services/districtService');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
@@ -210,7 +212,7 @@ module.exports = {
         }).join('\n\n');
 
         const selectionEmbed = new EmbedBuilder()
-            .setColor('#f39c12')
+            .setColor(COLORS.WARN)
             .setTitle('🌆 Tonight\'s Jobs')
             .setDescription(`Three options on the table. Pick your play — or let the clock decide.\n\n${crimeLines}`)
             .setFooter({ text: `${timeBand.emoji} ${timeBand.label} · 15 seconds. No choice and it gets chosen for you.` })
@@ -222,7 +224,7 @@ module.exports = {
         let crimeButtonInteraction = null;
         try {
             crimeButtonInteraction = await response.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id,
+                filter: ownedBy(interaction.user.id, "This isn't your job."),
                 time: 15_000,
             });
             crime = CRIMES.find(c => c.name === crimeButtonInteraction.customId);
@@ -283,7 +285,7 @@ module.exports = {
         let execMethod;
         try {
             const execButtonInteraction = await response.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id,
+                filter: ownedBy(interaction.user.id, "This isn't your job."),
                 time: 15_000,
             });
             execMethod = execData.methods.find(m => `exec_${m.id}` === execButtonInteraction.customId);
@@ -463,7 +465,7 @@ module.exports = {
                     const undergroundStr = undergroundActive ? '\n> 🌑 *Underground district active — fine reduced by 15%!*' : '';
 
                     embed = new EmbedBuilder()
-                        .setColor('#e74c3c')
+                        .setColor(COLORS.ERROR)
                         .setTitle(`${crime.emoji} ${crime.displayName} — Busted`)
                         .setDescription(`${bustNarrative}\n\n> *${flavorText}*${undergroundStr}${wantedStr}`)
                         .addFields(
@@ -485,7 +487,7 @@ module.exports = {
 
             // Suspense delay between execution method selection and result reveal
             const suspenseEmbed = new EmbedBuilder()
-                .setColor('#f39c12')
+                .setColor(COLORS.WARN)
                 .setTitle(`${crime.emoji} Running the Job…`)
                 .setDescription(`*${crime.displayName} in progress…*`);
             await interaction.editReply({ embeds: [suspenseEmbed], components: [] });

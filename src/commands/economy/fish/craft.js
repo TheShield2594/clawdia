@@ -11,6 +11,7 @@ const { ensureFishingData } = require('../../../services/fishService');
 const { ensureHuntData } = require('../../../services/huntService');
 const { FISH_CRAFT_RECIPES, CONSUMABLES, MATERIAL_NAMES } = require('../../../data/fishData');
 const { MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../../data/huntData');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CRAFT
@@ -53,7 +54,7 @@ async function handleCraft(interaction, sub) {
         });
 
         const embed = new EmbedBuilder()
-            .setColor('#3498db')
+            .setColor(COLORS.INFO)
             .setTitle('🎣 Fishing Crafting Recipes')
             .setDescription(lines.join('\n\n'))
             .setFooter({ text: '✅ = you can craft now  •  Use /fish craft make <recipe> to craft  •  /fish inv materials to check stock' });
@@ -147,7 +148,7 @@ async function handleCraft(interaction, sub) {
         }).join('\n');
 
         const embed = new EmbedBuilder()
-            .setColor('#2ecc71')
+            .setColor(COLORS.SUCCESS)
             .setTitle(`${recipe.emoji} Crafted: ${recipe.name}`)
             .setDescription(`You crafted ${outputDesc}!`)
             .addFields({ name: 'Materials Consumed', value: usedLines, inline: false })

@@ -4,6 +4,8 @@ const { logModeration } = require('../../services/moderationLogService');
 const { applyEscalation, findStepForCount } = require('../../services/escalationService');
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
+const { fitDescription, truncate, EMBED_LIMITS } = require('../../utils/embedFields');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -69,11 +71,11 @@ module.exports = {
                     : null;
 
                 const embed = new EmbedBuilder()
-                    .setColor('#ffff00')
+                    .setColor(COLORS.WARN)
                     .setTitle('User Warned')
                     .setDescription(`**${user.globalName ?? user.username}** has been warned.`)
                     .addFields(
-                        { name: 'Reason', value: reason },
+                        { name: 'Reason', value: truncate(reason, EMBED_LIMITS.FIELD_VALUE) },
                         { name: 'Total Warnings', value: warningCount.toString() },
                         { name: 'Moderator', value: interaction.user.globalName ?? interaction.user.username }
                     )
@@ -101,7 +103,7 @@ module.exports = {
                     if (result?.applied) {
                         await interaction.followUp({
                             embeds: [new EmbedBuilder()
-                                .setColor('#cc3300')
+                                .setColor(COLORS.WARN)
                                 .setTitle('Auto-Escalation Triggered')
                                 .setDescription(`Threshold **${result.step.threshold}** reached — applied **${result.step.action.toUpperCase()}**${result.step.durationMinutes ? ` for ${result.step.durationMinutes} minute(s)` : ''}.`)
                                 .addFields({ name: 'Target', value: `${user.globalName ?? user.username}`, inline: true })
@@ -139,16 +141,25 @@ module.exports = {
                     return interaction.reply({ content: `${user.globalName ?? user.username} has no warnings.`, flags: MessageFlags.Ephemeral });
                 }
 
+                // `reason` is a required string option with no length cap, so
+                // it arrives at up to Discord's own 6,000-character ceiling —
+                // one long-winded warning was enough to put this list past the
+                // 4,096 an embed description allows, and discord.js throws
+                // rather than truncating. Cap each line, then drop whole lines
+                // off the end and say how many, so a moderator sees the recent
+                // warnings instead of an error.
+                const PER_WARNING = 300;
                 const lines = warnings.map(w => {
                     const date = w.createdAt.toISOString().slice(0, 10);
-                    return `**#${w.caseId}** \`${date}\` — ${w.reason}`;
+                    return truncate(`**#${w.caseId}** \`${date}\` — ${w.reason}`, PER_WARNING);
                 });
+                const { text, omitted } = fitDescription(lines);
 
                 const embed = new EmbedBuilder()
-                    .setColor('#ffff00')
+                    .setColor(COLORS.WARN)
                     .setTitle(`Warnings for ${user.globalName ?? user.username}`)
-                    .setDescription(lines.join('\n'))
-                    .setFooter({ text: `${warnings.length} warning(s) shown · use /warn remove <case_id> to clear one` })
+                    .setDescription(text)
+                    .setFooter({ text: `${warnings.length - omitted} of ${warnings.length} warning(s) shown · use /warn remove <case_id> to clear one` })
                     .setTimestamp();
 
                 await interaction.reply({ embeds: [embed] });
@@ -175,11 +186,11 @@ module.exports = {
                 await Case.deleteOne({ _id: warnCase._id });
 
                 const embed = new EmbedBuilder()
-                    .setColor('#00ff00')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('Warning Removed')
                     .setDescription(`Case **#${caseId}** has been deleted.`)
                     .addFields(
-                        { name: 'Original Reason', value: warnCase.reason },
+                        { name: 'Original Reason', value: truncate(warnCase.reason, EMBED_LIMITS.FIELD_VALUE) },
                         { name: 'Removed by', value: interaction.user.globalName ?? interaction.user.username }
                     )
                     .setTimestamp();

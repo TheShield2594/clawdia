@@ -11,6 +11,8 @@ const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const Guild = require('../../models/Guild');
 const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES } = require('../../utils/copyLines');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
 
@@ -100,7 +102,7 @@ function spinEmbed(display, bet, stage, interaction, jackpotPool) {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
-        .setColor('#FFD700')
+        .setColor(COLORS.PRIZE)
         .setTitle('🎰 Slot Machine')
         .setDescription(`${statuses[stage]}\n\n> **[ ${display} ]**`)
         .addFields(
@@ -173,7 +175,7 @@ function jackpotBroadcastEmbed(interaction, wonAmount, newPool) {
 
 function paytableEmbed() {
     return new EmbedBuilder()
-        .setColor('#FFD700')
+        .setColor(COLORS.PRIZE)
         .setThumbnail(THUMB)
         .setTitle('🎰 Slot Machine — Paytable')
         .setDescription('Match **3 symbols** (or **2 + a Wild 🃏**) to win!\n⚡ Boost on any reel multiplies your payout.\n​')
@@ -415,7 +417,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId ?? null;
             if (announceChannelId) {
                 const bigWinEmbed = new EmbedBuilder()
-                    .setColor('#FFD700')
+                    .setColor(COLORS.PRIZE)
                     .setDescription(
                         `🎰 ${interaction.user} just hit a **${winMult.toFixed(0)}× ${result.symbol?.name ?? 'win'}** on slots for **${adjustedPayout.toLocaleString()} coins**!`
                     )
@@ -453,7 +455,11 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
 
         const msg = await interaction.fetchReply();
         const collector = msg.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && [replayId, paytableId].includes(i.customId),
+            filter: ownedBy(
+                interaction.user.id,
+                i => [replayId, paytableId].includes(i.customId),
+                "This isn't your spin — run `/slots` for your own.",
+            ),
             time: 60_000,
         });
 

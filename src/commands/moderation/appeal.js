@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const { getCase } = require('../../services/caseService');
 const Case = require('../../models/Case');
 const Guild = require('../../models/Guild');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -70,7 +71,7 @@ module.exports = {
             if (!channel || !channel.isTextBased()) return;
 
             const embed = new EmbedBuilder()
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle(`Appeal Filed — Case #${caseId}`)
                 .addFields(
                     { name: 'User', value: `${interaction.user.globalName ?? interaction.user.username} (<@${interaction.user.id}>)`, inline: true },

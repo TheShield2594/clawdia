@@ -15,6 +15,8 @@ const { claimStarterKit } = require('../../utils/starterKit');
 const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -196,7 +198,7 @@ module.exports = {
                 user.streak.revivalToken  = false;
 
                 const revivalEmbed = new EmbedBuilder()
-                    .setColor('#9b59b6')
+                    .setColor(COLORS.RARE)
                     .setTitle('💫 Streak Revival Token Activated!')
                     .setDescription(
                         `Your **Streak Revival Token** automatically restored your streak!\n\n` +
@@ -228,7 +230,7 @@ module.exports = {
                 );
 
                 const freezeEmbed = new EmbedBuilder()
-                    .setColor('#ff4444')
+                    .setColor(COLORS.ERROR)
                     .setTitle('💔 Your streak was broken!')
                     .setDescription(
                         `Your **${currentPendingRestore}-day streak** was broken!\n\n` +
@@ -244,7 +246,7 @@ module.exports = {
                 try {
                     const resp = await promptReply.awaitMessageComponent({
                         time: 30000,
-                        filter: i => i.user.id === interaction.user.id,
+                        filter: ownedBy(interaction.user.id, "This isn't your claim."),
                     });
 
                     if (resp.customId === 'freeze_restore') {
@@ -262,7 +264,7 @@ module.exports = {
                         await resp.update({
                             embeds: [
                                 EmbedBuilder.from(freezeEmbed)
-                                    .setColor('#00ff00')
+                                    .setColor(COLORS.SUCCESS)
                                     .setDescription(
                                         `✅ Streak restored! Your **${currentPendingRestore}-day streak** continues!\n\n` +
                                         `1 Streak Freeze consumed. **${user.streak.freezes}** remaining.`
@@ -281,7 +283,7 @@ module.exports = {
                         await resp.update({
                             embeds: [
                                 EmbedBuilder.from(freezeEmbed)
-                                    .setColor('#888888')
+                                    .setColor(COLORS.NEUTRAL)
                                     .setDescription('Starting fresh! Build that streak back up 💪')
                                     .setFields()
                             ],
@@ -488,7 +490,7 @@ module.exports = {
 
             const challenge = generateDailyChallenge();
             const challengeEmbed = new EmbedBuilder()
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('⚡ Quick Challenge — Earn +50%')
                 .setDescription(`> ${challenge.description}\n\nYou have **${Math.round(challenge.timeLimit / 1000)} seconds**.`);
 
@@ -556,7 +558,7 @@ module.exports = {
             try {
                 const response = await reply.awaitMessageComponent({
                     time: challenge.timeLimit,
-                    filter: i => i.user.id === interaction.user.id && i.customId !== CALENDAR_BUTTON_ID,
+                    filter: ownedBy(interaction.user.id, i => i.customId !== CALENDAR_BUTTON_ID, "This isn't your claim."),
                 });
                 if (activateTimer) clearTimeout(activateTimer);
 
@@ -601,13 +603,13 @@ module.exports = {
                         buildRewardBlock(actualAmount, streakCurrent, streakMult, coinMult, serverMult, combined, finalBalance, capActive, droppedItem, isMilestone, streakCurrent, currency)
                     );
                     const winChallengeEmbed = new EmbedBuilder()
-                        .setColor('#ffd700')
+                        .setColor(COLORS.PRIZE)
                         .setTitle('⚡ Quick Challenge — Earned!')
                         .setDescription(`✅ Correct! You earned an extra **+${bonusAmount.toLocaleString()} coins**!`);
                     await response.update({ embeds: [rewardEmbed, winChallengeEmbed], components: [calendarRow] });
                 } else {
                     const loseChallengeEmbed = new EmbedBuilder()
-                        .setColor('#5865F2')
+                        .setColor(COLORS.INFO)
                         .setTitle('⚡ Quick Challenge')
                         .setDescription('❌ Wrong answer! No bonus this time — your daily reward is still yours.');
                     await response.update({ embeds: [rewardEmbed, loseChallengeEmbed], components: [calendarRow] });
@@ -616,7 +618,7 @@ module.exports = {
                 if (activateTimer) clearTimeout(activateTimer);
                 if (err.name === 'InteractionCollectorError') {
                     const timeoutChallengeEmbed = new EmbedBuilder()
-                        .setColor('#5865F2')
+                        .setColor(COLORS.INFO)
                         .setTitle('⚡ Quick Challenge')
                         .setDescription("⏱️ Time's up! No bonus this time — your daily reward is still yours.");
                     await reply.edit({ embeds: [rewardEmbed, timeoutChallengeEmbed], components: [calendarRow] }).catch(() => {});
@@ -630,7 +632,7 @@ module.exports = {
             try {
                 const calendarResponse = await reply.awaitMessageComponent({
                     time: 60_000,
-                    filter: i => i.user.id === interaction.user.id && i.customId === CALENDAR_BUTTON_ID,
+                    filter: ownedBy(interaction.user.id, i => i.customId === CALENDAR_BUTTON_ID, "This isn't your claim."),
                 });
                 const dailyAmountForCalendar = guildSettings?.economy?.dailyAmount ?? 100;
                 const calendarEmbed = buildCalendarEmbed(updated, dailyAmountForCalendar, streakCurrent);

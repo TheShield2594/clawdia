@@ -3,6 +3,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild  = require('../../models/Guild');
 const BigWin = require('../../models/BigWin');
+const COLORS = require('../../utils/embedColors');
 
 const SOURCE_LABELS = {
     hunt:         '🏹 Hunt',
@@ -46,7 +47,7 @@ module.exports = {
             return interaction.reply({
                 embeds: [
                     new EmbedBuilder()
-                        .setColor('#888888')
+                        .setColor(COLORS.NEUTRAL)
                         .setTitle('📡 Big Win Feed')
                         .setDescription('No big wins recorded yet. Hit 50,000+ coins or land a Legendary to appear here!')
                 ],
@@ -61,7 +62,7 @@ module.exports = {
         }).join('\n\n');
 
         const embed = new EmbedBuilder()
-            .setColor('#FFD700')
+            .setColor(COLORS.PRIZE)
             .setTitle('📡 Big Win Feed')
             .setDescription(
                 `The ${wins.length} most recent big wins on **${interaction.guild.name}**.\n` +

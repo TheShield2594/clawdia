@@ -10,6 +10,8 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
+const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -208,7 +210,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
                     .setThumbnail(THUMB)
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('♠ Poker — Dealer Folded Pre-Flop!')
                     .setDescription(
                         `The dealer peeked at their hand (**${handStr(dealerHole)}**) and folded immediately.\n\n` +
@@ -253,7 +255,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('♠ Poker — Pre-Flop')
                 .addFields(
                     { name: '🃏 Your Hand',    value: handStr(playerHole), inline: false },
@@ -270,7 +272,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         let preFlopAction;
         try {
             const r = await msg1.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(gameId),
+                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(gameId), "This isn't your hand."),
                 time: 30_000,
             });
             await r.deferUpdate();
@@ -307,7 +309,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const foldEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#e74c3c')
+                .setColor(COLORS.ERROR)
                 .setTitle('♠ Poker — Folded')
                 .setDescription(`You folded. The dealer had: **${handStr(dealerHole)}**`)
                 .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
@@ -344,7 +346,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
                     .setThumbnail(THUMB)
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('♠ Poker — Dealer Folded on the Flop!')
                     .setDescription(
                         `**Flop:** ${flopStr}\n\n` +
@@ -380,7 +382,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('♠ Poker — The Flop')
                 .addFields(
                     { name: '🃏 Your Hand',  value: handStr(playerHole),          inline: false },
@@ -397,7 +399,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         let flopAction;
         try {
             const r = await msg2.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(flopRound),
+                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(flopRound), "This isn't your hand."),
                 time: 30_000,
             });
             await r.deferUpdate();
@@ -435,7 +437,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const foldEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#e74c3c')
+                .setColor(COLORS.ERROR)
                 .setTitle('♠ Poker — Folded')
                 .setDescription(`You folded. The dealer had: **${handStr(dealerHole)}**\nCommunity: **${flopStr} (+ 2 more)**`)
                 .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
@@ -471,7 +473,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
                     .setThumbnail(THUMB)
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('♠ Poker — Dealer Folded on the Turn!')
                     .setDescription(`**Turn:** ${turnStr}\n\nThe dealer couldn't justify calling. You win!\n\n**Dealer's hand:** ${handStr(dealerHole)} → *${bestHand([...dealerHole, ...turnBoard])?.name}*`)
                     .addFields(
@@ -503,7 +505,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('♠ Poker — The Turn')
                 .addFields(
                     { name: '🃏 Your Hand',  value: handStr(playerHole),                     inline: false },
@@ -520,7 +522,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         let turnAction;
         try {
             const r = await msg3.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(turnRound),
+                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(turnRound), "This isn't your hand."),
                 time: 30_000,
             });
             await r.deferUpdate();
@@ -556,7 +558,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const foldEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#e74c3c')
+                .setColor(COLORS.ERROR)
                 .setTitle('♠ Poker — Folded')
                 .setDescription(`You folded. The dealer had: **${handStr(dealerHole)}**\nCommunity: **${flopStr}  ${turnStr} (+ 1 more)**`)
                 .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
@@ -592,7 +594,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
                     .setThumbnail(THUMB)
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('♠ Poker — Dealer Folded on the River!')
                     .setDescription(`**River:** ${riverStr}\n\nThe dealer missed the river and folded. You win!\n\n**Dealer's hand:** ${handStr(dealerHole)} → *${bestHand([...dealerHole, ...riverBoard])?.name}*`)
                     .addFields(
@@ -624,7 +626,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('♠ Poker — The River')
                 .addFields(
                     { name: '🃏 Your Hand',  value: handStr(playerHole),                     inline: false },
@@ -641,7 +643,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         let riverAction;
         try {
             const r = await msg4.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(riverRound),
+                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(riverRound), "This isn't your hand."),
                 time: 30_000,
             });
             await r.deferUpdate();
@@ -677,7 +679,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
             const foldEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#e74c3c')
+                .setColor(COLORS.ERROR)
                 .setTitle('♠ Poker — Folded')
                 .setDescription(`You folded on the river. The dealer had: **${handStr(dealerHole)}**\nCommunity: **${flopStr}  ${turnStr}  ${riverStr}**`)
                 .addFields({ name: '💰 Balance', value: `**${debited.balance.toLocaleString()}** coins` })
@@ -758,7 +760,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
 
         const replyMsg = await interaction.fetchReply();
         replyMsg.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && i.customId === replayId,
+            filter: ownedBy(interaction.user.id, i => i.customId === replayId, "This isn't your hand."),
             max: 1,
             time: 60_000,
         }).on('collect', async i => {

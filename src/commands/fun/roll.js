@@ -9,6 +9,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { createReplaySession, replayButtonRow } = require('../../utils/replaySession');
 const { refundWager } = require('../../utils/refundWager');
 const { delay } = require('../../utils/delay');
+const COLORS = require('../../utils/embedColors');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b2.png';
 
@@ -216,7 +217,7 @@ async function playRollBet(interaction, guildSettings, sides, bet, call) {
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('🎲 Dice Roll')
                 .setDescription(`🎲 **Rolling…**\n\n${stakeLine}`)
                 .setFooter({ text: `d${sides}` })],

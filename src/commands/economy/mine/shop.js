@@ -30,6 +30,7 @@ const { runShopBrowse } = require('../../../utils/shopBrowse');
 const { getItemImageAttachment } = require('../../../utils/itemImageHelper');
 const GrindProfile = require('../../../models/GrindProfile');
 const { chargeBalance, refundBalance, resolveConsumableDef } = require('./shared');
+const COLORS = require('../../../utils/embedColors');
 
 // ─── SHOP ─────────────────────────────────────────────────────────────────────
 
@@ -145,7 +146,7 @@ async function handleShop(interaction, sub) {
         }
 
         const confirmEmbed = new EmbedBuilder()
-            .setColor('#f39c12')
+            .setColor(COLORS.WARN)
             .setTitle(`${pickaxeData.emoji} Purchase ${pickaxeData.name}?`)
             .addFields(
                 { name: 'Cost',          value: `${currency}${pickaxeData.cost.toLocaleString()}`, inline: true },
@@ -350,7 +351,7 @@ async function handleShop(interaction, sub) {
             : `${m.consumables[itemId] ?? 0}/${consumableDef.maxStack} in stock`;
 
         const confirmEmbed = new EmbedBuilder()
-            .setColor('#f39c12')
+            .setColor(COLORS.WARN)
             .setTitle(`${itemDef.emoji ?? '🛒'} Confirm Purchase`)
             .setDescription(itemDef.description ?? '')
             .addFields(
@@ -436,7 +437,7 @@ async function handleShop(interaction, sub) {
                 await interaction.editReply({
                     embeds: [
                         new EmbedBuilder()
-                            .setColor('#2ecc71')
+                            .setColor(COLORS.SUCCESS)
                             .setTitle('✅ Purchase Complete')
                             .setDescription(`Bought **${received}** for **${currency}${totalCost.toLocaleString()}**.`)
                             .addFields({ name: 'Balance', value: `${currency}${balanceUpdated.balance.toLocaleString()}`, inline: true })
@@ -478,7 +479,7 @@ async function handleShop(interaction, sub) {
         return interaction.reply({
             embeds: [
                 new EmbedBuilder()
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle(`${def?.emoji ?? '✅'} ${def?.name ?? itemId} Activated!`)
                     .setDescription(def?.description ?? 'Consumable activated.')
                     .setTimestamp()

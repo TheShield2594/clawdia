@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
+const COLORS = require('../../utils/embedColors');
 
 const TRACK_INFO = {
     none: {
@@ -60,7 +61,7 @@ module.exports = {
             const info = TRACK_INFO[chosen];
             return interaction.reply({
                 embeds: [new EmbedBuilder()
-                    .setColor('#5865F2')
+                    .setColor(COLORS.INFO)
                     .setTitle(`Track Set: ${info.emoji} ${info.label}`)
                     .setDescription(info.description)
                     .setFooter({ text: 'Your XP bonuses will apply from your next message.' })],
@@ -81,7 +82,7 @@ module.exports = {
         });
 
         const embed = new EmbedBuilder()
-            .setColor('#5865F2')
+            .setColor(COLORS.INFO)
             .setTitle('Progression Tracks')
             .setDescription(trackLines.join('\n\n'))
             .setFooter({ text: 'Use /track choose:<track> to switch your track' })

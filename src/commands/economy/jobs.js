@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
+const COLORS = require('../../utils/embedColors');
 
 const TIER_EMOJIS = { 1: '🟢', 2: '🔵', 3: '🟣', 4: '🟡' };
 
@@ -91,7 +92,7 @@ module.exports = {
             }
 
             const embed = new EmbedBuilder()
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('📋 Job Listings')
                 .setDescription(header + body)
                 .setFooter({ text: footerText })

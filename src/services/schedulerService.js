@@ -7,6 +7,7 @@ const { ensurePricingFields, nextPrice, decayDemand, demandDecayFactor, trendBuc
 const { softResetElo, tierFor, makeSeasonId } = require('../utils/duelElo');
 const { topByNetWorth } = require('../utils/netWorth');
 const { grantInventoryItem } = require('../utils/inventoryGrant');
+const COLORS = require('../utils/embedColors');
 
 const WAR_BOOSTER_DURATION_MS = 24 * 60 * 60 * 1000;
 const WAR_BADGE_DURATION_MS   = 30 * 24 * 60 * 60 * 1000;
@@ -118,7 +119,7 @@ async function resolveOneWar(client, guildDoc) {
         // perspective: 'winner' | 'loser' | 'tie'
         if (perspective === 'tie') {
             return new EmbedBuilder()
-                .setColor('#95a5a6')
+                .setColor(COLORS.NEUTRAL)
                 .setTitle('⚔️ War Ended — Tie!')
                 .setDescription(
                     `The war between **${guildDoc.name}** and **${oppName}** ended in a tie!\n\n` +
@@ -128,7 +129,7 @@ async function resolveOneWar(client, guildDoc) {
         }
         if (perspective === 'winner') {
             const embed = new EmbedBuilder()
-                .setColor('#FFD700')
+                .setColor(COLORS.PRIZE)
                 .setTitle(`🏆 ${winnerName} WINS THE WAR`)
                 .setDescription(
                     `**${winnerName}** has crushed **${loserName}**!\n\n` +
@@ -143,7 +144,7 @@ async function resolveOneWar(client, guildDoc) {
         }
         // loser perspective
         return new EmbedBuilder()
-            .setColor('#e74c3c')
+            .setColor(COLORS.ERROR)
             .setTitle('⚔️ War Lost')
             .setDescription(
                 `**${oppName}** has defeated **${guildDoc.name}**.\n\n` +
@@ -315,7 +316,7 @@ async function resolveOneSeason(client, guildDoc) {
     ).join('\n') || '*No participants*';
 
     const embed = new EmbedBuilder()
-        .setColor('#ffd700')
+        .setColor(COLORS.PRIZE)
         .setTitle(`🏁 Season Ended: ${season.name ?? season.id}`)
         .setDescription('The season leaderboard has been frozen and season coins have been reset.')
         .addFields({ name: '🏆 Final Top 3', value: winnerLines })
@@ -431,7 +432,7 @@ async function awardWeeklyLeaderboardBadges(client) {
             }
 
             const embed = new EmbedBuilder()
-                .setColor('#ffd700')
+                .setColor(COLORS.PRIZE)
                 .setTitle('👑 Last Week\'s Champions')
                 .setDescription(
                     'These legends dominated the leaderboards this week.\n' +
@@ -538,7 +539,7 @@ async function selectPetOfTheWeek(client) {
             const bondDays = Math.floor((Date.now() - new Date(bestPet.adoptedAt).getTime()) / 86400000);
 
             const embed = new EmbedBuilder()
-                .setColor('#ffd700')
+                .setColor(COLORS.PRIZE)
                 .setTitle('🌟 Pet of the Week!')
                 .setDescription(
                     `This week's most beloved pet is:\n\n` +
@@ -635,7 +636,7 @@ async function announceHourlyWinners(client) {
             if (!lines.length) continue;
 
             const embed = new EmbedBuilder()
-                .setColor('#FFD700')
+                .setColor(COLORS.PRIZE)
                 .setTitle('🏆 Last Hour\'s Champions')
                 .setDescription(lines.join('\n\n'))
                 .setFooter({ text: 'Hourly micro-competitions reset each hour. Hunt, fish, mine and explore to compete!' })
@@ -799,7 +800,7 @@ async function recalcShopPrices(client) {
                     return `${tb.arrow} **${m.name}** — ${currency}${m.prev.toLocaleString()} → ${currency}${m.next.toLocaleString()}`;
                 });
                 const embed = new EmbedBuilder()
-                    .setColor('#3498db')
+                    .setColor(COLORS.INFO)
                     .setTitle('📊 Market Update')
                     .setDescription(lines.join('\n'))
                     .setFooter({ text: 'Supply and demand shifted shop prices. Use /shop trends for the full board.' })
@@ -938,7 +939,7 @@ async function resolveRankedSeasons(client) {
                     ? top.map((u, i) => `${medals[i]} <@${u.userId}> — ${u.ranked?.seasonPeakElo ?? 1000} ELO · earned **${currency}${rewards[i].toLocaleString()}** + title *"${seasonId} ${i === 0 ? 'Champion' : i === 1 ? 'Runner-Up' : 'Third Place'}"*`).join('\n')
                     : '_No ranked games played this season._';
                 const embed = new EmbedBuilder()
-                    .setColor('#9b59b6')
+                    .setColor(COLORS.RARE)
                     .setTitle(`🏆 Ranked Season Ended — ${seasonId}`)
                     .setDescription(lines)
                     .setFooter({ text: `Season ${newSeasonNumber} starts now — ELO soft-reset toward 1200.` })
