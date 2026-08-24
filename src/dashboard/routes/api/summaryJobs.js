@@ -2,15 +2,27 @@ const express = require('express');
 const router = express.Router();
 const SummaryJob = require('../../../models/SummaryJob');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
+const { readPage, pageEnvelope } = require('../../lib/apiPage');
 
 const MAX_SUMMARY_JOBS_PER_GUILD = 10;
 
-// The guild's scheduled channel summary jobs, oldest first.
+// One page of the guild's scheduled channel summary jobs, oldest first.
+//
+// The create route caps a guild at MAX_SUMMARY_JOBS_PER_GUILD, so this list is
+// short today — but that cap is a constant someone may raise, and it was never
+// enforced on the read side (#583): the query was unbounded, and lowering the
+// cap would have stranded the jobs above it exactly as the knowledge base
+// stranded its entries. The page size defaults to the cap so the common case is
+// still one request.
 router.get('/guild/:guildId/summary-jobs', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
+    const { page, limit, skip } = readPage(req, { defaultLimit: MAX_SUMMARY_JOBS_PER_GUILD, maxLimit: 100 });
     try {
-        const jobs = await SummaryJob.find({ guildId }).sort({ createdAt: 1 });
-        res.json(jobs);
+        const [items, total] = await Promise.all([
+            SummaryJob.find({ guildId }).sort({ createdAt: 1 }).skip(skip).limit(limit),
+            SummaryJob.countDocuments({ guildId }),
+        ]);
+        res.json(pageEnvelope({ items, total, page, limit }));
     } catch (error) {
         console.error('Summary jobs list error:', error);
         res.status(500).json({ error: 'Internal server error' });

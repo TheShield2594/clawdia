@@ -300,6 +300,15 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
 
     app.use('/auth', authRoutes);
     app.use('/dashboard', dashboardRoutes);
+
+    // Versioned mount (#582). Everything the dashboard's own JavaScript calls
+    // goes to /api/v1; /api stays mounted beside it because it is what every
+    // deployed dashboard's cached bundle, and anything anyone scripted against
+    // this instance, is already asking for. The two are the same router, so
+    // there is no second implementation to keep in step — /api is an alias with
+    // an expiry, not a v0 with its own behaviour, and the day it is removed is
+    // a one-line change here.
+    app.use('/api/v1', apiRoutes);
     app.use('/api', apiRoutes);
 
     // Everyone gets status + uptime — enough for the compose healthcheck and any

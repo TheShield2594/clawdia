@@ -101,7 +101,14 @@ router.post('/guild/:guildId/economy/adjust', checkAuth, checkGuildAccess, check
             update = { $set: { economyFrozen: false } };
         }
 
-        const user = await User.findOneAndUpdate(filter, update, { upsert: true, new: true, setDefaultsOnInsert: true });
+        // No upsert (#584). A snowflake is 17-19 digits with no checksum, so a
+        // mistyped one is still a well-formed id: upserting created a member
+        // document for a user who is not in the guild — and possibly does not
+        // exist — while reporting success, and the admin's coins went nowhere
+        // anyone could see. A member with no row has never run a command here,
+        // which is a 404, not a row to create.
+        const user = await User.findOneAndUpdate(filter, update, { new: true });
+        if (!user) return res.status(404).json({ error: 'That member has no economy record in this server' });
         // An admin who has just moved someone's coins expects to see it, and a
         // thirty-second-old total would read as the adjustment not having applied.
         invalidatePrefix(`${guildId}:`);

@@ -14,6 +14,50 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.3.0] - 2026-08-24
+
+Migrations through `015_drop_dead_giveaway_index`.
+
+The dashboard API is mounted at `/api/v1` and answers one response shape per
+kind of response. The unversioned `/api` stays mounted beside it as an alias to
+the same router, so a browser holding a cached bundle and anything scripted
+against an instance keeps working; the response *bodies* of five endpoints did
+change, and a script reading them needs updating. See
+[API_REFERENCE.md](API_REFERENCE.md#response-shapes).
+
+- **One envelope, and a version** (#582). Bare arrays, `{entries,…}`,
+  `{cases,…}`, bare objects and `{success:true,…}` all coexisted, so a caller
+  had to learn each endpoint separately. A list is `{ items, page, limit, total,
+  pages }` now — `items` for every endpoint, built by
+  `src/dashboard/lib/apiPage.js` — a single resource is the object itself, and a
+  write is `{success:true,…}`. No endpoint answers with a bare JSON array, which
+  is the shape that cannot grow a field later without breaking every caller.
+- **The knowledge base and summary job lists page** (#583). The knowledge base
+  had a hard `.limit(100)` and no cursor, so a guild's hundred-and-first entry
+  was not on a later page — it was unreachable through the API, and unremovable
+  through the dashboard that lists it. Summary jobs were unbounded. Both take
+  `?page=` and `?limit=` now, and the knowledge base panel has a pager.
+- **A mistyped snowflake no longer creates a phantom member** (#584). The
+  economy and leveling admin adjust endpoints passed `upsert: true`. A Discord
+  snowflake carries no checksum, so a typo is still a well-formed id: the
+  adjustment created a member document for someone who may not exist and
+  reported success, while the coins went somewhere nobody could see. Both
+  return `404` when no member document matches.
+- **The Guild schema is the single home for its indexes** (#576). The model
+  declared one thing — `unique` on guildId — while migration 001 created two
+  more on the same collection, so "what is indexed on guilds" had no single
+  answer, and the two halves had drifted: 001's `idx_giveaways_active` covers
+  paths (`giveaways.ended`, `giveaways.endsAt`) that no query filters on any
+  more, because the giveaway sweep was rewritten. `015_drop_dead_giveaway_index`
+  drops it. Five indexes are declared in the schema in its place, covering the
+  giveaway, RSS, temp voice, dynamic pricing and bank district sweeps; each is
+  partial or sparse, so guilds with the feature off cost nothing to index.
+
+`015_drop_dead_giveaway_index` drops an index no query uses and creates nothing,
+so the 4.2.0 image reads the migrated database unchanged — rolling back to
+4.2.0 is the image tag alone. It would rebuild `idx_giveaways_active` on its
+next boot, which is the state it started from.
+
 ## [4.2.0] - 2026-08-24
 
 Migrations through `014_scope_item_images_per_guild`.

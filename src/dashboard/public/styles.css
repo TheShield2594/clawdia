@@ -1609,3 +1609,10 @@ textarea.auto-resize {
         align-self: flex-end;
     }
 }
+
+/* ── List pager ───────────────────────────────────────────────────
+   Shared by the paged lists (#583). A class rather than the inline
+   `style=""` the older pagers carry, so new markup does not spend from the
+   inline-style budget tests/dashboardInlineAttributes.test.js ratchets down. */
+.pager { display: flex; gap: .5rem; align-items: center; justify-content: center; margin-top: .75rem; }
+.pager-info { font-size: .85rem; opacity: .7; }

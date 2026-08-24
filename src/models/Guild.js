@@ -793,6 +793,67 @@ const guildSchema = new Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 
+// ── Indexes ─────────────────────────────────────────────────────────────────
+//
+// #576. The schema is the home for index definitions — here and in User.js,
+// which already declared eleven this way. Index truth used to be split: the
+// only thing this model said was `unique` on guildId, while migration 001
+// created two more on the guilds collection, so answering "what is indexed"
+// meant reading both files and hoping neither had drifted. It had: 001's
+// `idx_giveaways_active` was built for a giveaway sweep that has since been
+// rewritten, and indexes paths (`giveaways.ended`, `giveaways.endsAt`) that no
+// query in the codebase filters on. Migration 015 drops it.
+//
+// A migration still creates an index when — and only when — the schema cannot
+// say the thing: dropping one Mongoose would never drop on its own, or renaming
+// one in place. `idx_guilds_rssfeeds` below is declared under the exact name and
+// spec 001 built it with, so an existing deployment already has it and
+// autoIndex finds nothing to do; a fresh one gets it from here.
+//
+// Every index below is partial or sparse, which matters more on this collection
+// than on most: a guild document carries analytics history and inline shop item
+// image Buffers, and each of these queries is a scheduled sweep looking for the
+// few guilds that have a feature turned on. A partial index holds only the
+// documents matching its filter, so guilds with the feature off cost nothing to
+// index and are never read.
+
+// giveawayService.checkGiveaways — every guild holding at least one giveaway.
+guildSchema.index({ 'giveaways.0': 1 }, { name: 'idx_guilds_giveaways', sparse: true });
+
+// rssService.checkFeeds — every guild with at least one feed. Declared here
+// under the name and spec migration 001 created it with.
+guildSchema.index({ 'rssFeeds.0': 1 }, { name: 'idx_guilds_rssfeeds', sparse: true });
+
+// tempVoiceService.checkTempVoice — guilds with temp voice on and channels open.
+guildSchema.index(
+    { 'tempVoice.activeChannels.0': 1 },
+    { name: 'idx_guilds_tempvoice_active', partialFilterExpression: { 'tempVoice.enabled': true } }
+);
+
+// schedulerService.recalcShopPrices — guilds with dynamic pricing on. The key
+// is the flag itself because the sweep filters on nothing else; the partial
+// filter is what keeps the index to just those guilds.
+guildSchema.index(
+    { 'dynamicPricing.enabled': 1 },
+    { name: 'idx_guilds_dynamic_pricing', partialFilterExpression: { 'dynamicPricing.enabled': true } }
+);
+
+// schedulerService bank-district payout — an $elemMatch on districtId and
+// activeUntil. Both keys are paths into the same array, so this is one multikey
+// index rather than the parallel-array case Mongo refuses.
+guildSchema.index(
+    { 'districts.districtId': 1, 'districts.activeUntil': 1 },
+    { name: 'idx_guilds_district_active' }
+);
+
+// Not indexed, deliberately: the hourly and per-minute sweeps in
+// schedulerService, birthdayService, newspaperService, dailyBibleService and
+// summaryService follow this same "feature enabled, due now" shape and would
+// each take a partial index of their own. They are left alone here because #576
+// scoped this to the queries it named, and because ten more indexes on the
+// collection every settings save writes is a cost worth measuring first rather
+// than assuming. The pattern to copy is directly above.
+
 guildSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
     next();
