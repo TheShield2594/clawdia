@@ -36,12 +36,7 @@
                         </div>
                         <div class="field">
                             <label class="field-label" for="economy-announcement-channel">Announcements channel</label>
-                            <select id="economy-announcement-channel">
-                                <option value="">None (no announcements)</option>
-                                <% channels.forEach(channel => { %>
-                                    <option value="<%= channel.id %>" <%= settings.economy.announcementChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'economy-announcement-channel', placeholder: 'None (no announcements)', selected: settings.economy.announcementChannelId }) %>
                             <small>Channel where shop purchases and economy events are announced</small>
                         </div>
 
@@ -463,12 +458,7 @@
                             </div>
                             <div class="field">
                                 <label class="field-label" for="modal-item-role">Role to grant on purchase</label>
-                                <select id="modal-item-role">
-                                    <option value="">None</option>
-                                    <% roles.forEach(role => { %>
-                                        <option value="<%= role.id %>">@<%= role.name %></option>
-                                    <% }); %>
-                                </select>
+                                <%- include('../role-select', { id: 'modal-item-role', placeholder: 'None' }) %>
                             </div>
                             <div class="field" role="group" aria-labelledby="modal-item-stock-label">
                                 <div class="field-label" id="modal-item-stock-label">Stock</div>

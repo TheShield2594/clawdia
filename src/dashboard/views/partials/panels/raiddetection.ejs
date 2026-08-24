@@ -34,22 +34,12 @@
                     </div>
                     <div class="field">
                         <label class="field-label" for="raid-quarantine-role">Quarantine role</label>
-                        <select id="raid-quarantine-role">
-                            <option value="">None</option>
-                            <% roles.forEach(role => { %>
-                                <option value="<%= role.id %>" <%= settings.raidDetection?.quarantineRoleId === role.id ? 'selected' : '' %>>@<%= role.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../role-select', { id: 'raid-quarantine-role', placeholder: 'None', selected: settings.raidDetection?.quarantineRoleId }) %>
                         <small>Assigned to raiders when action is "Quarantine".</small>
                     </div>
                     <div class="field">
                         <label class="field-label" for="raid-alert-channel">Alert channel</label>
-                        <select id="raid-alert-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.raidDetection?.alertChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'raid-alert-channel', placeholder: 'Select a channel', selected: settings.raidDetection?.alertChannelId }) %>
                     </div>
                     <div class="actions-row">
                         <button class="btn btn-primary" onclick="saveSettings('raiddetection')">Save changes</button>

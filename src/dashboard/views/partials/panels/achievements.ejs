@@ -11,12 +11,7 @@
 
                     <div class="field">
                         <label class="field-label" for="ach-announce-channel">Announcement channel</label>
-                        <select id="ach-announce-channel">
-                            <option value="">None (no announcements)</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.achievements?.announcementChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'ach-announce-channel', placeholder: 'None (no announcements)', selected: settings.achievements?.announcementChannelId }) %>
                         <small>Channel where achievement unlocks are posted</small>
                     </div>
 

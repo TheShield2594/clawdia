@@ -9,12 +9,7 @@
                     </label>
                     <div class="field">
                         <label class="field-label" for="welcome-channel">Welcome channel</label>
-                        <select id="welcome-channel">
-                            <option value="">Select a channel</option>
-                            <% channels.forEach(channel => { %>
-                                <option value="<%= channel.id %>" <%= settings.welcome?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                            <% }); %>
-                        </select>
+                        <%- include('../channel-select', { id: 'welcome-channel', placeholder: 'Select a channel', selected: settings.welcome?.channelId }) %>
                     </div>
                     <div class="field">
                         <label class="field-label" for="welcome-message">Welcome message</label>
@@ -53,12 +48,7 @@
                             <% }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
-                            <select id="autorole-select" aria-label="Role to add on join" data-no-dirty>
-                                <option value="">Select a role</option>
-                                <% roles.forEach(role => { %>
-                                    <option value="<%= role.id %>">@<%= role.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../role-select', { id: 'autorole-select', ariaLabel: 'Role to add on join', noDirty: true, placeholder: 'Select a role' }) %>
                             <button class="btn btn-primary" onclick="addAutoRole()">Add role</button>
                         </div>
                     </div>

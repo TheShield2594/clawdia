@@ -22,10 +22,7 @@
                                 <div class="season-tier-row" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
                                     <input type="number" class="season-tier-num" value="<%= r.tier %>" min="1" style="width:70px" placeholder="Tier" aria-label="Tier number">
                                     <input type="number" class="season-tier-coins" value="<%= r.coins %>" min="0" style="width:90px" placeholder="Coins" aria-label="Coin reward">
-                                    <select class="season-tier-role" aria-label="Reward role">
-                                        <option value="">No role</option>
-                                        <% roles.forEach(function(role){ %><option value="<%= role.id %>" <%= r.roleId === role.id ? 'selected' : '' %>>@<%= role.name %></option><% }); %>
-                                    </select>
+                                    <%- include('../role-select', { cls: 'season-tier-role', ariaLabel: 'Reward role', placeholder: 'No role', selected: r.roleId }) %>
                                     <input type="text" class="season-tier-label" value="<%= r.label || '' %>" style="flex:1;min-width:100px" placeholder="Label (e.g. Bronze Tier)" aria-label="Tier label">
                                     <button class="btn btn-danger" type="button" onclick="this.closest('.season-tier-row').remove()" title="Remove">&times;</button>
                                 </div>

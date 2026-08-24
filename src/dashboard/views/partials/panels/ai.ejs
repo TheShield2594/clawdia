@@ -64,12 +64,7 @@
                         </div>
                         <div class="field">
                             <label class="field-label" for="ai-channel">Restrict to channel <span style="font-weight:400;color:var(--muted,#888)">(optional — leave blank to respond in all channels)</span></label>
-                            <select id="ai-channel">
-                                <option value="">All channels</option>
-                                <% channels.forEach(channel => { %>
-                                    <option value="<%= channel.id %>" <%= settings.ai.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'ai-channel', placeholder: 'All channels', selected: settings.ai.channelId }) %>
                         </div>
                         <div class="field">
                             <div class="prompt-field-head">
@@ -184,20 +179,11 @@
                         </label>
                         <div class="field">
                             <label class="field-label" for="digest-channel">Digest channel (where the embed is posted)</label>
-                            <select id="digest-channel">
-                                <option value="">Select a channel</option>
-                                <% channels.forEach(channel => { %>
-                                    <option value="<%= channel.id %>" <%= settings.ai?.dailyDigest?.channelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'digest-channel', placeholder: 'Select a channel', selected: settings.ai?.dailyDigest?.channelId }) %>
                         </div>
                         <div class="field">
                             <label class="field-label" for="digest-sources">Source channels <small style="font-weight:normal;opacity:.7;">(leave empty to include all text channels)</small></label>
-                            <select id="digest-sources" multiple style="min-height:80px;">
-                                <% channels.forEach(channel => { %>
-                                    <option value="<%= channel.id %>" <%= (settings.ai?.dailyDigest?.sourceChannelIds || []).includes(channel.id) ? 'selected' : '' %>>#<%= channel.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'digest-sources', multiple: true, size: 4, selected: settings.ai?.dailyDigest?.sourceChannelIds || [] }) %>
                         </div>
                         <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
                             <div>
@@ -235,21 +221,11 @@
                         <div class="panel-head" style="margin-top:1rem"><h3>Add summary job</h3></div>
                         <div class="field">
                             <label class="field-label" for="summary-source">Source channel (channel to summarize)</label>
-                            <select id="summary-source">
-                                <option value="">Select a channel</option>
-                                <% channels.forEach(channel => { %>
-                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'summary-source', placeholder: 'Select a channel' }) %>
                         </div>
                         <div class="field">
                             <label class="field-label" for="summary-target">Target channel (where the summary is posted)</label>
-                            <select id="summary-target">
-                                <option value="">Select a channel</option>
-                                <% channels.forEach(channel => { %>
-                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'summary-target', placeholder: 'Select a channel' }) %>
                         </div>
                         <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                             <div>
@@ -287,12 +263,7 @@
                         <div class="panel-head" style="margin-top:1rem"><h3>Add / update persona</h3></div>
                         <div class="field">
                             <label class="field-label" for="persona-channel">Channel</label>
-                            <select id="persona-channel">
-                                <option value="">Select a channel</option>
-                                <% channels.forEach(channel => { %>
-                                    <option value="<%= channel.id %>">#<%= channel.name %></option>
-                                <% }); %>
-                            </select>
+                            <%- include('../channel-select', { id: 'persona-channel', placeholder: 'Select a channel' }) %>
                         </div>
                         <div class="field">
                             <label class="field-label" for="persona-name">Persona name</label>
