@@ -46,14 +46,29 @@ const PET_DEFINITIONS = {
     wolf:         { petId: 'wolf',        emoji: '🐺', name: 'Wolf',        cost: 8000,  purchasable: true,  bonusType: 'hunt_yield',        bonusPct: 10, favoriteMaterial: 'wolf_pelt',      materialSource: 'hunt' },
     eagle:        { petId: 'eagle',       emoji: '🦅', name: 'Eagle',       cost: null,  purchasable: false, bonusType: 'hunt_xp',           bonusPct: 15, favoriteMaterial: 'eagle_talon',    materialSource: 'hunt' },
     shark:        { petId: 'shark',       emoji: '🦈', name: 'Shark',       cost: null,  purchasable: false, bonusType: 'fish_yield',        bonusPct: 15, favoriteMaterial: 'shark_tooth',    materialSource: 'fish' },
-    crystal_fox:  { petId: 'crystal_fox', emoji: '💎', name: 'Crystal Fox', cost: null,  purchasable: false, bonusType: 'mine_yield',        bonusPct: 15, favoriteMaterial: 'crystal_sliver', materialSource: 'mine' }
+    crystal_fox:  { petId: 'crystal_fox', emoji: '💎', name: 'Crystal Fox', cost: null,  purchasable: false, bonusType: 'mine_yield',        bonusPct: 15, favoriteMaterial: 'crystal_sliver', materialSource: 'mine' },
+    lantern_owl:  { petId: 'lantern_owl', emoji: '🦉', name: 'Lantern Owl', cost: null,  purchasable: false, bonusType: 'explore_xp',        bonusPct: 15, favoriteMaterial: 'lantern_glass',  materialSource: 'explore' }
 };
 
 // ── Acquisition ───────────────────────────────────────────────────────────────
 //
-// Purchasable pets come from /pet adopt. The three rare pets are not sold
+// Purchasable pets come from /pet adopt. The four rare pets are not sold
 // anywhere: each is tied to one grind system via its materialSource and only
 // ever turns up alongside a legendary-tier result there.
+//
+// The Lantern Owl was the last one added (#753), and it could not be added
+// earlier for a reason worth keeping written down: a rare companion needs a
+// favourite food, `feedPet` matches that food by id against MATERIAL_RARITY,
+// and exploration produced no materials at all — only coins, Explorer XP and
+// relics. Relics were the wrong thing to point it at, since the relic case pays
+// a standing bonus on *distinct* relics and eating a duplicate would delete
+// part of it. Exploration got its own fieldcraft materials first; the owl
+// follows from them.
+//
+// Its bonus is Explorer XP rather than another yield multiplier on purpose:
+// exploration coin payouts already run through a rolling daily cap and two
+// standing bonuses (the relic case and a surveyed-map bonus), so a coin
+// multiplier there compounds into something the cap then eats anyway.
 
 const RARE_PET_DROP_CHANCE = 0.04;
 

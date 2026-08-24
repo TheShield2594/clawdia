@@ -95,18 +95,33 @@ function getInventoryQuantity(user, itemId) {
     return user.inventory?.find(i => i.itemId === itemId)?.quantity ?? 0;
 }
 
+// Every grind system that keeps a material pile, in the order feeding draws
+// from them. `exploration` joined the list with the fieldcraft materials the
+// Lantern Owl eats (#753) — a favourite food nothing could hold is the reason
+// exploration had no companion for so long.
+const MATERIAL_SYSTEMS = ['hunt', 'fishing', 'mining', 'exploration'];
+
+/** How much of one material the player holds, per pile and in total. */
 function getMaterialSource(user, materialId) {
-    const huntMat = user.hunt?.materials?.[materialId]   ?? 0;
-    const fishMat = user.fishing?.materials?.[materialId] ?? 0;
-    const mineMat = user.mining?.materials?.[materialId]  ?? 0;
-    const invMat  = getInventoryQuantity(user, materialId);
-    return { huntMat, fishMat, mineMat, invMat, total: huntMat + fishMat + mineMat + invMat };
+    const bySystem = Object.fromEntries(
+        MATERIAL_SYSTEMS.map(system => [system, user[system]?.materials?.[materialId] ?? 0])
+    );
+    const invMat = getInventoryQuantity(user, materialId);
+    return {
+        ...bySystem,
+        invMat,
+        total: Object.values(bySystem).reduce((sum, qty) => sum + qty, 0) + invMat,
+    };
 }
 
 function decrementMaterial(user, materialId) {
-    if ((user.hunt?.materials?.[materialId]    ?? 0) > 0) { user.hunt.materials[materialId]--;    user.markModified('hunt.materials');    return true; }
-    if ((user.fishing?.materials?.[materialId] ?? 0) > 0) { user.fishing.materials[materialId]--; user.markModified('fishing.materials'); return true; }
-    if ((user.mining?.materials?.[materialId]  ?? 0) > 0) { user.mining.materials[materialId]--;  user.markModified('mining.materials');  return true; }
+    for (const system of MATERIAL_SYSTEMS) {
+        if ((user[system]?.materials?.[materialId] ?? 0) > 0) {
+            user[system].materials[materialId]--;
+            user.markModified(`${system}.materials`);
+            return true;
+        }
+    }
     const slot = user.inventory?.find(i => i.itemId === materialId);
     if (slot && slot.quantity > 0) {
         slot.quantity--;
@@ -364,7 +379,7 @@ async function materialAutocomplete(interaction, focused) {
         if (!id || !(qty > 0)) return;
         held.set(id, (held.get(id) ?? 0) + qty);
     };
-    for (const system of ['hunt', 'fishing', 'mining']) {
+    for (const system of MATERIAL_SYSTEMS) {
         for (const [id, qty] of Object.entries(user?.[system]?.materials ?? {})) add(id, qty);
     }
     for (const entry of user?.inventory ?? []) add(entry.itemId, entry.quantity);

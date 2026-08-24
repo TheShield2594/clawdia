@@ -11,27 +11,36 @@ const { packFields } = require('../../utils/embedFields');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
 
-const TAB_KEYS   = ['items', 'hunt', 'fish', 'mine'];
-const TAB_LABELS = { items: '🎒 Items', hunt: '⚔️ Hunt', fish: '🎣 Fish', mine: '⛏️ Mine' };
+const TAB_KEYS   = ['items', 'hunt', 'fish', 'mine', 'explore'];
+const TAB_LABELS = { items: '🎒 Items', hunt: '⚔️ Hunt', fish: '🎣 Fish', mine: '⛏️ Mine', explore: '🧭 Explore' };
 
-function highestRarityColor(huntMats, fishMats, mineMats, fallback) {
+// Which pile each material's `source` is read from. This used to be a ternary
+// chain ending in `: mineMats[key]`, so a fourth source would have counted its
+// materials against the mining pile — silently, and only ever showing zero.
+// Exploration became that fourth source with #753.
+function pilesBySource(mats) {
+    return { hunt: mats.hunt, fish: mats.fish, mine: mats.mine, explore: mats.explore };
+}
+
+/** How many of `key` the player holds, from whichever pile owns that source. */
+function quantityOf(piles, key, data) {
+    return piles[data.source]?.[key] ?? 0;
+}
+
+function highestRarityColor(mats, fallback) {
+    const piles = pilesBySource(mats);
     let highest = 0;
     for (const [key, data] of Object.entries(MATERIAL_RARITY)) {
-        const qty = data.source === 'hunt' ? huntMats[key]
-                  : data.source === 'fish' ? fishMats[key]
-                  : mineMats[key];
-        if ((qty ?? 0) > 0 && data.tier > highest) highest = data.tier;
+        if (quantityOf(piles, key, data) > 0 && data.tier > highest) highest = data.tier;
     }
     return highest > 0 ? TIER_COLORS[highest] : fallback;
 }
 
-function countOwned(huntMats, fishMats, mineMats) {
+function countOwned(mats) {
+    const piles = pilesBySource(mats);
     let n = 0;
     for (const [key, data] of Object.entries(MATERIAL_RARITY)) {
-        const qty = data.source === 'hunt' ? huntMats[key]
-                  : data.source === 'fish' ? fishMats[key]
-                  : mineMats[key];
-        if ((qty ?? 0) > 0) n++;
+        if (quantityOf(piles, key, data) > 0) n++;
     }
     return n;
 }
@@ -191,9 +200,14 @@ module.exports = {
         // Matches the pattern in /balance, /rank, and /profile.
         if (userData) pruneEffects(userData);
 
-        const huntMats    = userData?.hunt?.materials    ?? {};
-        const fishMats    = userData?.fishing?.materials ?? {};
-        const mineMats    = userData?.mining?.materials  ?? {};
+        // Keyed by MATERIAL_RARITY `source`, not by the profile name that holds
+        // it, so a new source is one entry here and one tab below.
+        const mats = {
+            hunt:    userData?.hunt?.materials        ?? {},
+            fish:    userData?.fishing?.materials     ?? {},
+            mine:    userData?.mining?.materials      ?? {},
+            explore: userData?.exploration?.materials ?? {},
+        };
         const inventory   = userData?.inventory          ?? [];
         const activeEffects = userData?.activeEffects    ?? [];
         const shopItems   = guildSettings?.shop          ?? [];
@@ -212,32 +226,28 @@ module.exports = {
         const aiItemMap = Object.fromEntries(aiItemDocs.map(d => [d.itemId, d]));
 
         const hasItems = inventory.length > 0 || activeEffects.length > 0;
-        const hasMaterials = Object.entries(MATERIAL_RARITY).some(([key, data]) => {
-            const qty = data.source === 'hunt' ? huntMats[key]
-                      : data.source === 'fish' ? fishMats[key]
-                      : mineMats[key];
-            return (qty ?? 0) > 0;
-        });
+        const hasMaterials = countOwned(mats) > 0;
 
         if (!hasItems && !hasMaterials) {
             const emptyEmbed = new EmbedBuilder()
                 .setColor('#9e9e9e')
                 .setTitle('🎒 Inventory — Empty')
-                .setDescription('Nothing here yet.\nTry `/hunt`, `/fish`, or `/mine` to find materials.')
+                .setDescription('Nothing here yet.\nTry `/hunt`, `/fish`, `/mine`, or `/explore` to find materials.')
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }));
             return interaction.reply({ embeds: [emptyEmbed], flags: MessageFlags.Ephemeral });
         }
 
-        const color    = highestRarityColor(huntMats, fishMats, mineMats, hasItems ? '#5865F2' : '#9e9e9e');
-        const owned    = countOwned(huntMats, fishMats, mineMats);
+        const color    = highestRarityColor(mats, hasItems ? '#5865F2' : '#9e9e9e');
+        const owned    = countOwned(mats);
         const footer   = `Collection: ${owned} / ${TOTAL_MATERIALS} materials found`;
         const avatarURL = target.displayAvatarURL({ dynamic: true });
 
         const embeds = {
             items: buildItemsEmbed(inventory, shopItems, activeEffects, currency, color, footer, target, avatarURL, aiItemMap),
-            hunt:  buildMaterialsEmbed('hunt', huntMats, color, footer, target, avatarURL),
-            fish:  buildMaterialsEmbed('fish', fishMats, color, footer, target, avatarURL),
-            mine:  buildMaterialsEmbed('mine', mineMats, color, footer, target, avatarURL),
+            hunt:    buildMaterialsEmbed('hunt',    mats.hunt,    color, footer, target, avatarURL),
+            fish:    buildMaterialsEmbed('fish',    mats.fish,    color, footer, target, avatarURL),
+            mine:    buildMaterialsEmbed('mine',    mats.mine,    color, footer, target, avatarURL),
+            explore: buildMaterialsEmbed('explore', mats.explore, color, footer, target, avatarURL),
         };
 
         let activeTab = 'items';

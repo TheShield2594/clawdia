@@ -355,7 +355,7 @@ evolution track.
 ```
 
 - **Six purchasable pets** — Dog and Cat (2,000), Bird and Fish (3,000), Fox (5,000), Wolf (8,000) — each granting a different passive: work earnings, crime success, XP gain, fish yield, rob success, or hunt yield.
-- **Three rare pets** — Eagle, Shark, and Crystal Fox — are not sold anywhere. Each is tied to one grind track and drops at a 4% chance alongside a legendary-tier result there.
+- **Four rare pets** — Eagle, Shark, Crystal Fox, and Lantern Owl — are not sold anywhere. Each is tied to one grind track and drops at a 4% chance alongside a legendary-tier result there. Rare pets are exempt from the slot limit, so a full roster can never lock one out.
 - **Progression:** pets level to 30 across three evolution stages (1–9, 10–19, 20+), with stage multipliers of 1.0×/1.5×/2.0× on the passive plus per-level growth. Stacked bonuses of the same type cap at **40%**.
 - **Upkeep:** hunger decays 10/day (5/day while resting). Below 30 a pet is starving, and a pet left starving for 3 days runs away. Base capacity is 3 slots, expandable 3 times.
 
@@ -514,6 +514,11 @@ Narrated expeditions in Clawdia's voice. Players set out into distinct regions, 
 - **Level-ups are announced** on the result embed, and name any region the new Explorer Level just brought within reach
 - **Daily coin caps ramp** — the first 100,000 coins in a rolling 24h window pay in full, everything up to 150,000 pays at 50%, and past that expeditions still chart the map and pay Explorer XP but stop paying cash
 - Losses scale with how deep the region is, and deliberately *not* with the seasonal coin bonus or the admin drop-rate knob
+
+**Fieldcraft materials:**
+- Treasure finds carry **fieldcraft materials** — Survey Chalk, Compass Shard, Charted Vellum, Lantern Glass, Wayfarer's Seal and the rest — tier-matched to the treasure, from 35% of a common find up to every legendary one
+- They stack in their own `/inventory` tab (**🧭 Explore**), count toward the `/showcase` collection total, and are feedable to pets like any other grind material
+- They are why exploration has a rare companion at all: the **🦉 Lantern Owl** (+15% Explorer XP) drops from legendary treasure and eats **Lantern Glass** as its favourite. A companion's favourite food has to be a real material, and until this exploration produced none
 
 **Integration:**
 - Treasure coins feed the economy (transaction-logged, daily-capped — and the embed says so when the cap trims a haul); relics land in `/inventory` under their own section
