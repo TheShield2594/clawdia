@@ -45,7 +45,10 @@ operator-wide in `config/mcp-servers.json`; a dashboard entry overrides a file
 entry of the same name.
 
 Dashboard:
-- Presets for GitHub, DeepWiki, Context7, Hugging Face and Stripe, or any https MCP endpoint
+- Presets for GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe, or
+  any https MCP endpoint
+- Gmail and Spotify are prefilled apart from the address: neither publishes a
+  hosted endpoint, so the server is one you run and the URL is yours to supply
 - Allow/deny lists per tool, so a destructive tool can be switched off by name
 - **Test** button — connects to the server and lists the tools it offers, with
   no AI provider key and no tokens spent

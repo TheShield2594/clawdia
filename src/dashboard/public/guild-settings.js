@@ -2823,33 +2823,38 @@ function renderMcpPresets() {
 }
 
 var MCP_DEFAULT_PRESET_HINT = 'Pick a known service to prefill its endpoint, or enter any remote MCP server URL yourself.';
+var MCP_DEFAULT_URL_PLACEHOLDER = 'https://api.example.com/mcp/';
 var MCP_DEFAULT_TOKEN_HINT = 'Stored on the bot and sent to the MCP server when a tool is called — by Anthropic when Claude is your provider, by the bot itself otherwise. It is never shown again once saved.';
 
 function resetMcpHints() {
     mcpEl('mcp-preset-hint').textContent = MCP_DEFAULT_PRESET_HINT;
     mcpEl('mcp-token-hint').textContent = MCP_DEFAULT_TOKEN_HINT;
+    mcpEl('mcp-url').placeholder = MCP_DEFAULT_URL_PLACEHOLDER;
 }
 
 function applyMcpPreset() {
     const select = mcpEl('mcp-preset');
-    const hint = mcpEl('mcp-preset-hint');
-    const tokenHint = mcpEl('mcp-token-hint');
     const preset = _mcpPresets.find(function(p) { return p.id === select.value; });
     if (!preset) {
         resetMcpHints();
         return;
     }
     mcpEl('mcp-name').value = preset.name;
-    mcpEl('mcp-url').value = preset.url;
+    // Some services have no single hosted endpoint — the server is one you run,
+    // so the URL is the one field the preset cannot fill in. Its placeholder
+    // shows the shape of the address, and the hint says whose it is.
+    mcpEl('mcp-url').value = preset.url || '';
+    mcpEl('mcp-url').placeholder = preset.urlPlaceholder || MCP_DEFAULT_URL_PLACEHOLDER;
     if (preset.suggestedBlockedTools && preset.suggestedBlockedTools.length) {
         mcpEl('mcp-blocked').value = preset.suggestedBlockedTools.join(', ');
     }
-    hint.textContent = preset.tokenHint || MCP_DEFAULT_PRESET_HINT;
-    tokenHint.textContent = preset.tokenLabel
-        ? preset.tokenLabel + ' — stored on the bot, never shown again once saved.'
-        : (preset.requiresToken === false
+
+    mcpEl('mcp-preset-hint').textContent = preset.hint || MCP_DEFAULT_PRESET_HINT;
+    mcpEl('mcp-token-hint').textContent = preset.tokenHint
+        || (preset.requiresToken === false
             ? 'This service needs no token — leave it empty.'
             : MCP_DEFAULT_TOKEN_HINT);
+    if (!preset.url) mcpEl('mcp-url').focus();
 }
 
 // What the selected provider does with these connections. Every provider the

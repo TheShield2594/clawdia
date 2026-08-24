@@ -133,12 +133,21 @@ can be defined centrally and pointed at one guild's own credentials.
    reports how many tools it offers and which of them your filters leave on.
    The test needs no AI provider key and spends no tokens.
 
-The Service dropdown prefills a handful of services with documented public
-endpoints (GitHub, DeepWiki, Context7, Hugging Face, Stripe). Anything else
-works the same way: choose **Custom server…** and paste the server's https
-endpoint and token. Services that only offer an OAuth login flow rather than a
-token are not usable here — the dashboard has one credential field and it holds
-a token.
+The Service dropdown prefills the services with a documented hosted endpoint —
+GitHub, Fastmail (`https://api.fastmail.com/mcp`), DeepWiki, Context7, Hugging
+Face and Stripe.
+
+**Gmail and Spotify** are in the list too, marked *your own endpoint*: neither
+Google nor Spotify publishes a hosted MCP endpoint, so the server is one you
+run yourself or one a hosting provider spins up per account. Picking either
+fills in the name and the credential guidance and leaves the URL for you, with
+a placeholder showing the shape of the address. Everything after that is
+identical.
+
+Anything else works the same way: choose **Custom server…** and paste the
+server's https endpoint and token. Services that only offer an OAuth login flow
+rather than a token are not usable here — the dashboard has one credential field
+and it holds a token.
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over

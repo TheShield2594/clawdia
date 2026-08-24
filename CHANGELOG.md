@@ -76,7 +76,9 @@ Also in this release:
   (`src/services/ai/mcp/`) and offers the same servers' tools to OpenAI, Gemini,
   Ollama and OpenRouter as functions, running the calls and feeding the results
   back. Connections are configured once and survive a change of provider. The
-  Connections tab gained presets beyond GitHub, and its **Test** button now
+  Connections tab gained presets beyond GitHub — Fastmail, DeepWiki, Context7,
+  Hugging Face and Stripe, plus Gmail and Spotify prefilled apart from an
+  address neither of them publishes — and its **Test** button now
   connects to the server itself — no AI provider key, no tokens spent, and it
   reports the tool names so the allow and deny lists can be filled in from what
   the server actually offers.

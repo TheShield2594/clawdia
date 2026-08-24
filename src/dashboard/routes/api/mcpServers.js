@@ -19,14 +19,18 @@ const { providers, mcpMode } = require('../../../services/ai/providers');
 const MAX_URL_LENGTH = 2048;
 const MAX_TOOL_NAME_LENGTH = 128;
 
-// Known remote MCP servers, offered in the dashboard as prefill so an admin does
-// not have to hunt for the endpoint. Only servers with a documented, publicly
-// hosted URL belong here — everything else is added with the "Custom" option.
+// Services offered in the dashboard as prefill, so an admin does not have to
+// hunt for an endpoint or work out what kind of credential it wants.
 //
-// These are a starting point, not a whitelist: the URL is an editable field, and
-// a server that moves is fixed by typing the new address. Servers that only
+// These are a starting point, not a whitelist: every field is editable, and a
+// server that moves is fixed by typing the new address. Services that only
 // accept an OAuth authorization-code flow are deliberately absent, because the
 // dashboard has one credential field and it holds a token, not a login.
+//
+// A preset with an empty `url` is a service with no single hosted endpoint to
+// point at — the server is one you run or one a hosting provider spins up per
+// account, so the address is yours and only the rest can be prefilled. Those
+// carry a `urlPlaceholder` and say so in their `hint`.
 const PRESETS = [
     {
         id: 'github',
@@ -34,9 +38,45 @@ const PRESETS = [
         name: 'github',
         url: 'https://api.githubcopilot.com/mcp/',
         requiresToken: true,
+        hint: 'GitHub hosts this one: repositories, issues, pull requests and code search.',
         tokenLabel: 'GitHub personal access token',
         tokenHint: 'Create a fine-grained PAT at github.com/settings/personal-access-tokens and grant it only the repositories and scopes the bot should reach.',
         suggestedBlockedTools: ['delete_file', 'delete_repository']
+    },
+    {
+        id: 'fastmail',
+        label: 'Fastmail',
+        name: 'fastmail',
+        url: 'https://api.fastmail.com/mcp',
+        requiresToken: true,
+        hint: 'Fastmail hosts this one: mail, contacts and calendar for the account the token belongs to.',
+        tokenLabel: 'Fastmail API token',
+        tokenHint: 'Create one in Fastmail under Settings → Privacy & Security → Integrations, with only the scopes the bot needs. Run Test after saving and block anything that sends or deletes mail.',
+        suggestedBlockedTools: []
+    },
+    {
+        id: 'gmail',
+        label: 'Gmail (your own endpoint)',
+        name: 'gmail',
+        url: '',
+        urlPlaceholder: 'https://your-mcp-host.example.com/gmail/mcp',
+        requiresToken: true,
+        hint: 'Google does not publish a hosted Gmail MCP endpoint. Run a Gmail MCP server yourself, or use a hosting provider that gives you a per-account https URL, and paste that URL here.',
+        tokenLabel: 'The token your Gmail MCP server expects',
+        tokenHint: 'Whatever bearer token your server issues — not a Google password. Run Test after saving and block anything that sends, trashes or deletes mail.',
+        suggestedBlockedTools: []
+    },
+    {
+        id: 'spotify',
+        label: 'Spotify (your own endpoint)',
+        name: 'spotify',
+        url: '',
+        urlPlaceholder: 'https://your-mcp-host.example.com/spotify/mcp',
+        requiresToken: true,
+        hint: 'Spotify does not publish a hosted MCP endpoint. Run a Spotify MCP server yourself, or use a hosting provider that gives you a per-account https URL, and paste that URL here.',
+        tokenLabel: 'The token your Spotify MCP server expects',
+        tokenHint: 'Whatever bearer token your server issues. Playback control needs a Premium account on Spotify\'s side; search and library reads do not.',
+        suggestedBlockedTools: []
     },
     {
         id: 'deepwiki',
@@ -44,6 +84,7 @@ const PRESETS = [
         name: 'deepwiki',
         url: 'https://mcp.deepwiki.com/mcp',
         requiresToken: false,
+        hint: 'Documentation for public repositories. No account and no token.',
         tokenHint: 'No token needed — DeepWiki serves public repository documentation.',
         suggestedBlockedTools: []
     },
@@ -53,6 +94,7 @@ const PRESETS = [
         name: 'context7',
         url: 'https://mcp.context7.com/mcp',
         requiresToken: false,
+        hint: 'Up-to-date documentation for open-source libraries, by version.',
         tokenLabel: 'Context7 API key',
         tokenHint: 'Optional. Works without a key at a lower rate limit; a key from context7.com raises it.',
         suggestedBlockedTools: []
@@ -63,6 +105,7 @@ const PRESETS = [
         name: 'huggingface',
         url: 'https://huggingface.co/mcp',
         requiresToken: true,
+        hint: 'Search models, datasets, Spaces and papers on the Hub.',
         tokenLabel: 'Hugging Face access token',
         tokenHint: 'Create a read token at huggingface.co/settings/tokens. A read token is enough to search models, datasets and papers.',
         suggestedBlockedTools: []
@@ -73,6 +116,7 @@ const PRESETS = [
         name: 'stripe',
         url: 'https://mcp.stripe.com',
         requiresToken: true,
+        hint: 'Customers, payments and subscriptions for the account the key belongs to.',
         tokenLabel: 'Stripe restricted API key',
         tokenHint: 'Use a restricted key from the Stripe dashboard with read-only permissions — a Discord bot has no business holding a key that can move money.',
         suggestedBlockedTools: []

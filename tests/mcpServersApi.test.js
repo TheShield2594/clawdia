@@ -102,18 +102,53 @@ describe('publicServer', () => {
 });
 
 describe('presets', () => {
-    test('every preset points at an https endpoint and has a name the API accepts', () => {
+    const hosted = PRESETS.filter(p => p.url);
+    const bringYourOwn = PRESETS.filter(p => !p.url);
+
+    test('every preset has a name the API accepts and something to say about itself', () => {
         const { NAME_PATTERN } = require('../src/config/mcpServers');
         expect(PRESETS.length).toBeGreaterThan(0);
         for (const preset of PRESETS) {
             expect(NAME_PATTERN.test(preset.name)).toBe(true);
-            expect(new URL(preset.url).protocol).toBe('https:');
+            expect(preset.hint).toBeTruthy();
+            expect(typeof preset.requiresToken).toBe('boolean');
         }
     });
 
-    test('a preset survives validation unchanged', () => {
-        for (const preset of PRESETS) {
+    test('preset ids and names are unique, so one cannot quietly shadow another', () => {
+        expect(new Set(PRESETS.map(p => p.id)).size).toBe(PRESETS.length);
+        expect(new Set(PRESETS.map(p => p.name)).size).toBe(PRESETS.length);
+    });
+
+    test('a hosted preset points at https and survives validation unchanged', () => {
+        expect(hosted.length).toBeGreaterThan(0);
+        for (const preset of hosted) {
+            expect(new URL(preset.url).protocol).toBe('https:');
             expect(validateServerInput({ url: preset.url }, preset.name).error).toBeUndefined();
+        }
+    });
+
+    // Gmail and Spotify have no single hosted endpoint to point at: the server
+    // is one the operator runs or a hosting provider spins up per account. The
+    // preset fills in everything except the address, so it has to show what
+    // kind of address to type and explain why it is asking.
+    test('a preset with no endpoint says so and shows the shape of one', () => {
+        for (const preset of bringYourOwn) {
+            expect(preset.urlPlaceholder).toMatch(/^https:\/\//);
+            expect(preset.hint).toMatch(/paste that URL here/);
+            expect(preset.label).toMatch(/your own endpoint/);
+        }
+    });
+
+    test('an empty endpoint is still rejected on save rather than stored', () => {
+        for (const preset of bringYourOwn) {
+            expect(validateServerInput({ url: preset.url }, preset.name).error).toBeTruthy();
+        }
+    });
+
+    test('a preset that wants no token does not ask for one', () => {
+        for (const preset of PRESETS.filter(p => p.requiresToken === false)) {
+            expect(preset.tokenHint).toBeTruthy();
         }
     });
 });

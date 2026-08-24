@@ -347,8 +347,10 @@ which every current OpenAI and Gemini model does and some Ollama models do not.
 
 **From the dashboard** (AI → 🔌 Connections): pick a service or paste any https
 MCP endpoint, add a token, and optionally list the tools the model may or may
-not call. GitHub, DeepWiki, Context7, Hugging Face and Stripe come as presets;
-anything else is a URL away. A **Test** button connects to the server and
+not call. GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe come as
+presets; Gmail and Spotify are prefilled except for the address, since neither
+publishes a hosted endpoint and the server is one you run. Anything else is a
+URL away. A **Test** button connects to the server and
 reports the tools it offers — no AI provider key needed, no tokens spent.
 Tokens are write-only — once saved they are never sent back to the browser.
 
