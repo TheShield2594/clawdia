@@ -11,11 +11,18 @@
  * time. Bounding writes to ids the game actually reads turns "how much can be
  * stored" from a question about the caller's patience into a property of this
  * file.
+ *
+ * Which makes the list's completeness load-bearing: an id the shop renders and
+ * this file omits is an image nobody can upload. So the groups here are every
+ * group the `/hunt shop`, `/fish shop` and `/mine shop` browse views ask for an
+ * image by — gear, upgrades, packs and consumables, *and* the zones, locations
+ * and depths those views also draw. The panel renders a subset of these; the
+ * route validates against all of them.
  */
 
-const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES } = require('./huntData');
-const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES } = require('./fishData');
-const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES } = require('./mineData');
+const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES, ZONE_LIST } = require('./huntData');
+const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES, LOCATION_LIST } = require('./fishData');
+const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES, DEPTH_LIST } = require('./mineData');
 
 // Tiered gear is keyed by `slug`; everything else by `id`. That difference is
 // in the game data, so it is honoured here rather than normalised away — the
@@ -34,18 +41,21 @@ const ACTIVITY_ITEMS = {
         upgrades:    Object.values(WEAPON_UPGRADES).map(u => toItem('hunt', u)),
         ammo:        AMMO_PACKS.map(a => toItem('hunt', a)),
         consumables: Object.values(HUNT_CONSUMABLES).map(c => toItem('hunt', c)),
+        zones:       ZONE_LIST.map(z => toItem('hunt', z)),
     },
     fish: {
         rods:        ROD_TIERS.map(r => toItem('fish', r, 'slug')),
         upgrades:    Object.values(ROD_UPGRADES).map(u => toItem('fish', u)),
         bait:        BAIT_PACKS.map(b => toItem('fish', b)),
         consumables: Object.values(FISH_CONSUMABLES).map(c => toItem('fish', c)),
+        locations:   LOCATION_LIST.map(l => toItem('fish', l)),
     },
     mine: {
         pickaxes:    PICKAXE_TIERS.map(p => toItem('mine', p, 'slug')),
         upgrades:    Object.values(PICKAXE_UPGRADES).map(u => toItem('mine', u)),
         blasts:      BLAST_PACKS.map(b => toItem('mine', b)),
         consumables: Object.values(MINE_CONSUMABLES).map(c => toItem('mine', c)),
+        depths:      DEPTH_LIST.map(d => toItem('mine', d)),
     },
 };
 

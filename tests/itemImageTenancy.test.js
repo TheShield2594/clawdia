@@ -136,6 +136,26 @@ describe('what may be written', () => {
         expect(ItemImage.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
+    // The catalog has to cover every id the shop views render, not just the ones
+    // the dashboard panel shows cards for — the browse views draw a zone,
+    // location and depth image too, and those were briefly un-uploadable.
+    test.each([
+        ['hunt', require('../src/data/huntData').ZONE_LIST[0].id],
+        ['fish', require('../src/data/fishData').LOCATION_LIST[0].id],
+        ['mine', require('../src/data/mineData').DEPTH_LIST[0].id],
+    ])('accepts a %s id the browse view renders but the panel does not list', async (namespace, id) => {
+        const itemId = `${namespace}:${id}`;
+
+        const res = await upload('g1', itemId);
+
+        expect(res.status).toBe(200);
+        expect(ItemImage.findOneAndUpdate).toHaveBeenCalledWith(
+            { guildId: 'g1', itemId },
+            expect.objectContaining({ imageType: 'image/png' }),
+            { upsert: true },
+        );
+    });
+
     test('a malformed id is refused as malformed', async () => {
         const res = await upload('g1', 'Hunt:../../etc/passwd');
 
