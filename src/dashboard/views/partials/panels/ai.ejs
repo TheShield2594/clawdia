@@ -382,7 +382,7 @@
                     </div>
 
                     <!-- Full-screen prompt editor (shared by ai-prompt and persona-prompt) -->
-                    <div id="prompt-editor-modal" class="modal-overlay prompt-editor-modal" style="display:none;" onclick="if(event.target===this)closePromptEditor(false)">
+                    <div id="prompt-editor-modal" class="modal-overlay prompt-editor-modal" style="display:none;" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="prompt-editor-title">
                         <div class="modal-box modal-box-wide">
                             <div class="modal-head">
                                 <h3 id="prompt-editor-title">Edit prompt</h3>

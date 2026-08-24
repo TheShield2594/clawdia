@@ -1319,17 +1319,139 @@ var _cpCooldowns = boot('commandPolicyCooldowns');
 var _cpRuleIdx = -1;
 var _cpCdIdx   = -1;
 
+// ── Shared modal machinery ───────────────────────────────────────────
+// One dialog on this page was built properly and the other eight were not:
+// they were shown with a bare `style.display = 'flex'`, which leaves the
+// dialog unannounced, Escape dead, Tab free to walk out into the page behind
+// it, and focus dumped on <body> when it closes (#658). The implementation
+// that was already written and working now lives here, and every dialog goes
+// through it.
+//
+// A stack rather than one current dialog: showConfirm() is called from inside
+// open dialogs — clearing a store item's image, for one — and closing the
+// confirm has to hand focus back to the dialog underneath rather than to
+// whatever was focused before both of them opened.
+var _modalStack = [];
+var _modalBodyOverflow = '';
+
+// Visibility test that answers the same way in a browser and in the jsdom the
+// dashboard suites run under, which has no layout engine and reports
+// offsetParent === null for everything. Dialogs and conditional fields on this
+// page are all toggled through inline `style.display`, so walking inline
+// styles is both accurate here and portable.
+function _modalHidden(el) {
+    for (var node = el; node && node !== document.body; node = node.parentElement) {
+        if (node.hidden || (node.style && node.style.display === 'none')) return true;
+    }
+    return false;
+}
+
+function _modalFocusables(modal) {
+    return Array.from(modal.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), ' +
+        'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter(function(el) { return !_modalHidden(el); });
+}
+
+/**
+ * Shows `modal` as a dialog: displays it, moves focus inside, traps Tab, and
+ * dismisses on Escape or a click on the backdrop.
+ *
+ * opts.initialFocus — element or element id to focus first. Defaults to the
+ *                     first focusable that is not the ✕ button, so a form
+ *                     opens on its first field.
+ * opts.onDismiss    — run instead of closeModal(modal) for Escape and backdrop
+ *                     click. Pass the dialog's own close function when it has
+ *                     state of its own to unwind.
+ * opts.display      — overlay display value, default 'flex'.
+ */
+function openModal(modal, opts) {
+    modal = typeof modal === 'string' ? document.getElementById(modal) : modal;
+    if (!modal) return null;
+    opts = opts || {};
+
+    // Re-opening an already-open dialog must not push a second entry, or its
+    // close would restore focus into the copy of itself it just hid.
+    if (_modalStack.some(function(e) { return e.modal === modal; })) closeModal(modal);
+
+    const entry = { modal: modal, prevFocus: document.activeElement };
+    entry.dismiss = typeof opts.onDismiss === 'function'
+        ? opts.onDismiss
+        : function() { closeModal(modal); };
+
+    entry.onKeydown = function(e) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); entry.dismiss(); return; }
+        if (e.key !== 'Tab') return;
+        const focusables = _modalFocusables(modal);
+        if (!focusables.length) { e.preventDefault(); return; }
+        const first = focusables[0], last = focusables[focusables.length - 1];
+        const inside = modal.contains(document.activeElement);
+        if (e.shiftKey) {
+            if (!inside || document.activeElement === first) { e.preventDefault(); last.focus(); }
+        } else {
+            if (!inside || document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+    };
+    entry.onClick = function(e) { if (e.target === modal) entry.dismiss(); };
+
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = opts.display || 'flex';
+    modal.addEventListener('keydown', entry.onKeydown);
+    modal.addEventListener('click', entry.onClick);
+    _modalStack.push(entry);
+
+    // The page behind must not scroll while a dialog is up. Restored by the
+    // close of the last one, so nested dialogs do not each clobber the value.
+    if (_modalStack.length === 1) {
+        _modalBodyOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+    }
+
+    let target = typeof opts.initialFocus === 'string'
+        ? document.getElementById(opts.initialFocus)
+        : opts.initialFocus;
+    if (!target || _modalHidden(target)) {
+        const focusables = _modalFocusables(modal);
+        target = focusables.filter(function(el) { return !el.classList.contains('modal-close'); })[0]
+            || focusables[0];
+    }
+    if (target) target.focus();
+
+    return modal;
+}
+
+/** Hides a dialog opened by openModal and returns focus where it came from. */
+function closeModal(modal) {
+    modal = typeof modal === 'string' ? document.getElementById(modal) : modal;
+    if (!modal) return;
+
+    const idx = _modalStack.findIndex(function(e) { return e.modal === modal; });
+    if (idx === -1) {
+        // Not open through openModal — hide it anyway rather than leave a
+        // dialog on screen because a caller got out of step.
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+        return;
+    }
+
+    const entry = _modalStack.splice(idx, 1)[0];
+    modal.removeEventListener('keydown', entry.onKeydown);
+    modal.removeEventListener('click', entry.onClick);
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+    if (!_modalStack.length) document.body.style.overflow = _modalBodyOverflow;
+
+    // Focus goes back to whatever opened the dialog. Letting it fall to <body>
+    // strands a keyboard user at the top of the page.
+    if (entry.prevFocus && typeof entry.prevFocus.focus === 'function' && document.contains(entry.prevFocus)) {
+        entry.prevFocus.focus();
+    }
+}
+
 // ── Styled confirmation modal ────────────────────────────────────────
 var _confirmResolve = null;
-var _confirmPrevFocus = null;
-var _confirmTrapHandler = null;
-
-function _confirmFocusables() {
-    const modal = document.getElementById('confirm-modal');
-    return Array.from(modal.querySelectorAll(
-        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter(function(el) { return el.offsetParent !== null; });
-}
 
 function showConfirm(opts) {
     return new Promise(function(resolve) {
@@ -1351,31 +1473,9 @@ function showConfirm(opts) {
             typeArea.style.display = 'none';
         }
         const modal = document.getElementById('confirm-modal');
-        _confirmPrevFocus = document.activeElement;
-        modal.setAttribute('aria-hidden', 'false');
-        modal.style.display = 'flex';
 
-        // Move focus into dialog
-        setTimeout(function() {
-            (typeRequired ? typeInput : document.getElementById('confirm-modal-ok')).focus();
-        }, 0);
-
-        // Focus trap
-        if (_confirmTrapHandler) modal.removeEventListener('keydown', _confirmTrapHandler);
-        _confirmTrapHandler = function(e) {
-            if (e.key === 'Escape') { e.preventDefault(); _confirmResolve(false); return; }
-            if (e.key !== 'Tab') return;
-            const focusables = _confirmFocusables();
-            if (!focusables.length) { e.preventDefault(); return; }
-            const first = focusables[0], last = focusables[focusables.length - 1];
-            if (e.shiftKey) {
-                if (document.activeElement === first) { e.preventDefault(); last.focus(); }
-            } else {
-                if (document.activeElement === last) { e.preventDefault(); first.focus(); }
-            }
-        };
-        modal.addEventListener('keydown', _confirmTrapHandler);
-
+        // Defined before the dialog opens: Escape and a backdrop click both
+        // route through it, and either can fire from the moment it is up.
         _confirmResolve = function(ok) {
             if (ok && typeRequired && typeInput.value.trim() !== typeRequired) {
                 typeInput.focus();
@@ -1383,16 +1483,17 @@ function showConfirm(opts) {
                 return;
             }
             typeInput.style.borderColor = '';
-            modal.removeEventListener('keydown', _confirmTrapHandler);
-            _confirmTrapHandler = null;
-            modal.setAttribute('aria-hidden', 'true');
-            modal.style.display = 'none';
-            if (_confirmPrevFocus && typeof _confirmPrevFocus.focus === 'function') {
-                _confirmPrevFocus.focus();
-            }
+            closeModal(modal);
             _confirmResolve = function(){};
             resolve(ok);
         };
+
+        openModal(modal, {
+            // Type-to-confirm resets open on the input; everything else opens
+            // on the button the user is here to press.
+            initialFocus: typeRequired ? typeInput : document.getElementById('confirm-modal-ok'),
+            onDismiss: function() { _confirmResolve(false); }
+        });
     });
 }
 
@@ -1431,9 +1532,9 @@ function openCpRuleModal(idx) {
     Array.from(document.getElementById('cp-r-channels').options).forEach(function(o) { o.selected = rChans.includes(o.value); });
     document.getElementById('cp-r-start-hour').value = r.startHourUtc != null ? r.startHourUtc : '';
     document.getElementById('cp-r-end-hour').value   = r.endHourUtc   != null ? r.endHourUtc   : '';
-    document.getElementById('cp-rule-modal').style.display = 'flex';
+    openModal('cp-rule-modal', { initialFocus: 'cp-r-command' });
 }
-function closeCpRuleModal() { document.getElementById('cp-rule-modal').style.display = 'none'; }
+function closeCpRuleModal() { closeModal('cp-rule-modal'); }
 function saveCpRuleModal() {
     const cmd = document.getElementById('cp-r-command').value.trim();
     if (!cmd) { toast('Command name is required', 'error'); return; }
@@ -1457,9 +1558,9 @@ function openCpCooldownModal(idx) {
     document.getElementById('cp-cd-command').value = c.command || '';
     document.getElementById('cp-cd-role').value    = c.roleId  || '';
     document.getElementById('cp-cd-seconds').value = c.cooldownSeconds != null ? c.cooldownSeconds : '';
-    document.getElementById('cp-cooldown-modal').style.display = 'flex';
+    openModal('cp-cooldown-modal', { initialFocus: 'cp-cd-command' });
 }
-function closeCpCooldownModal() { document.getElementById('cp-cooldown-modal').style.display = 'none'; }
+function closeCpCooldownModal() { closeModal('cp-cooldown-modal'); }
 function saveCpCooldownModal() {
     const cmd = document.getElementById('cp-cd-command').value.trim();
     const role = document.getElementById('cp-cd-role').value.trim();
@@ -1618,10 +1719,10 @@ function openItemModal(idx) {
         placeholder.style.display = 'block';
         clearBtn.style.display = 'none';
     }
-    document.getElementById('item-modal').style.display = 'flex';
+    openModal('item-modal', { initialFocus: 'modal-item-name' });
 }
 
-function closeItemModal() { document.getElementById('item-modal').style.display = 'none'; }
+function closeItemModal() { closeModal('item-modal'); }
 function toggleStockInput(cb) {
     document.getElementById('modal-item-stock').style.display = cb.checked ? 'none' : '';
 }
@@ -1760,10 +1861,10 @@ function openJobModal(idx) {
     document.getElementById('modal-job-tier').value = String(job.tier || 1);
     document.getElementById('modal-job-min-pay').value = job.minPay != null ? job.minPay : '';
     document.getElementById('modal-job-max-pay').value = job.maxPay != null ? job.maxPay : '';
-    document.getElementById('job-modal').style.display = 'flex';
+    openModal('job-modal', { initialFocus: 'modal-job-name' });
 }
 
-function closeJobModal() { document.getElementById('job-modal').style.display = 'none'; }
+function closeJobModal() { closeModal('job-modal'); }
 
 function saveJobModal() {
     const name = document.getElementById('modal-job-name').value.trim();
@@ -1911,10 +2012,10 @@ function openAchModal(idx) {
     document.getElementById('modal-ach-category').value = a.category    || 'custom';
     document.getElementById('modal-ach-xp').value       = a.xpReward    != null ? a.xpReward   : 0;
     document.getElementById('modal-ach-coins').value    = a.coinReward  != null ? a.coinReward  : 0;
-    document.getElementById('ach-modal').style.display = 'flex';
+    openModal('ach-modal', { initialFocus: 'modal-ach-name' });
 }
 
-function closeAchModal() { document.getElementById('ach-modal').style.display = 'none'; }
+function closeAchModal() { closeModal('ach-modal'); }
 
 function saveAchModal() {
     const name = document.getElementById('modal-ach-name').value.trim();
@@ -1957,10 +2058,10 @@ function openAchGrantModal(achId, achName) {
     document.getElementById('grant-member-id').value = '';
     document.getElementById('grant-selected-member').style.display = 'none';
     document.getElementById('grant-selected-member').textContent = '';
-    document.getElementById('ach-grant-modal').style.display = 'flex';
+    openModal('ach-grant-modal', { initialFocus: 'grant-member-search' });
 }
 
-function closeAchGrantModal() { document.getElementById('ach-grant-modal').style.display = 'none'; }
+function closeAchGrantModal() { closeModal('ach-grant-modal'); }
 
 function debouncedMemberSearch() {
     clearTimeout(_memberSearchTimer);
@@ -2897,13 +2998,11 @@ function updatePromptCount(textareaId) {
 }
 
 var _promptEditorTarget = null;
+// Only the commit shortcut: Escape is the shared dialog machinery's job now.
 function _promptEditorKeydown(e) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
         closePromptEditor(true);
-    } else if (e.key === 'Escape') {
-        e.preventDefault();
-        closePromptEditor(false);
     }
 }
 function openPromptEditor(textareaId, title) {
@@ -2914,10 +3013,13 @@ function openPromptEditor(textareaId, title) {
     const editor = document.getElementById('prompt-editor-textarea');
     editor.value = ta.value;
     editor.setAttribute('maxlength', ta.getAttribute('maxlength') || 4000);
-    document.getElementById('prompt-editor-modal').style.display = 'flex';
     updatePromptEditorCount();
     document.addEventListener('keydown', _promptEditorKeydown);
-    setTimeout(function() { editor.focus(); }, 50);
+    openModal('prompt-editor-modal', {
+        initialFocus: editor,
+        // Escape and backdrop click discard the edit, matching Cancel.
+        onDismiss: function() { closePromptEditor(false); }
+    });
 }
 function updatePromptEditorCount() {
     const editor = document.getElementById('prompt-editor-textarea');
@@ -2936,7 +3038,7 @@ function closePromptEditor(commit) {
             updatePromptCount(_promptEditorTarget);
         }
     }
-    modal.style.display = 'none';
+    closeModal(modal);
     document.removeEventListener('keydown', _promptEditorKeydown);
     _promptEditorTarget = null;
 }
@@ -3798,9 +3900,9 @@ function openCaseNoteModal(caseId, mode) {
         document.getElementById('case-note-content').placeholder = 'Add a moderator note...';
         document.getElementById('case-note-submit-btn').textContent = 'Save note';
     }
-    document.getElementById('case-note-modal').style.display = '';
+    openModal('case-note-modal', { initialFocus: 'case-note-content' });
 }
-function closeCaseNoteModal() { document.getElementById('case-note-modal').style.display = 'none'; }
+function closeCaseNoteModal() { closeModal('case-note-modal'); }
 
 async function submitCaseAction() {
     const guildId = BOOT.guildId;

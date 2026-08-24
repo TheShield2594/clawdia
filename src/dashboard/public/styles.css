@@ -935,22 +935,43 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .job-btn:hover { color: var(--text); }
 
-/* Modal */
+/* Modal
+   The box is a capped flex column: header and action bar keep their height and
+   `.modal-body` takes what is left and scrolls. Before that, `.modal-box` was
+   `overflow: hidden` with no `max-height` inside a centred fixed overlay, so a
+   tall dialog — the ten-field job form, the store item form with its image
+   upload, the prompt editor's 60vh textarea — simply overflowed a short or
+   mobile viewport with the Save button off-screen and nothing to scroll (#656). */
 .modal-overlay {
     position: fixed; inset: 0;
     background: rgba(0,0,0,.65); backdrop-filter: blur(6px);
-    z-index: 1000; display: flex; align-items: center; justify-content: center;
+    z-index: 1000; display: flex; justify-content: center;
     padding: 1.5rem;
+    /* Safety net for any dialog that ends up taller than the cap below (an
+       opted-out max-width override, a browser without dvh): the overlay
+       scrolls, and `safe` keeps the box's top edge reachable, which plain
+       `center` does not once content overflows. Browsers that do not know
+       `safe center` drop that line and keep the `center` above it. */
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    align-items: center;
+    align-items: safe center;
 }
 .modal-box {
     background: var(--bg-2); border: 1px solid var(--border-strong);
     border-radius: var(--radius); width: 100%; max-width: 500px;
     box-shadow: var(--shadow-card); overflow: hidden;
     animation: panel-in .2s ease;
+    display: flex; flex-direction: column;
+    /* 3rem is the overlay's own padding, top plus bottom. dvh follows mobile
+       browser chrome as it collapses; vh is the fallback for browsers without it. */
+    max-height: calc(100vh - 3rem);
+    max-height: calc(100dvh - 3rem);
 }
 .modal-head {
     display: flex; align-items: center; justify-content: space-between;
     padding: 1.2rem 1.5rem; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
 }
 .modal-head h3 { font-size: 1.05rem; font-weight: 700; }
 .modal-close {
@@ -958,10 +979,13 @@ textarea { resize: vertical; min-height: 80px; }
     font-size: 1.4rem; cursor: pointer; line-height: 1; padding: 0 .2rem;
 }
 .modal-close:hover { color: var(--text); }
-.modal-body { padding: 1.25rem 1.5rem; }
+/* The only part of the box that scrolls, so the action bar stays reachable
+   however long the form is. */
+.modal-body { padding: 1.25rem 1.5rem; overflow-y: auto; min-height: 0; }
 .modal-actions {
     display: flex; gap: .5rem; justify-content: flex-end;
     padding: 1rem 1.5rem; border-top: 1px solid var(--border);
+    flex-shrink: 0;
 }
 
 /* Prompt editor with header (label + char counter + fullscreen button) */

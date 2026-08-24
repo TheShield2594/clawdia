@@ -52,10 +52,10 @@
                 </section>
 
                 <!-- Command Policies — Rule Modal -->
-                <div id="cp-rule-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeCpRuleModal()">
+                <div id="cp-rule-modal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="cp-rule-modal-title">
                     <div class="modal-box" style="max-width:520px;">
                         <div class="modal-head"><span id="cp-rule-modal-title">Add Rule</span><button class="modal-close" onclick="closeCpRuleModal()">✕</button></div>
-                        <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
+                        <div class="modal-body" style="display:flex;flex-direction:column;gap:.9rem;">
                             <div class="field"><label class="field-label" for="cp-r-command">Command name</label><input type="text" id="cp-r-command" placeholder="e.g. ban"></div>
                             <div class="field"><label class="field-label" for="cp-r-effect">Effect</label><select id="cp-r-effect"><option value="allow">Allow</option><option value="deny">Deny</option></select></div>
                             <div class="field"><label class="field-label" for="cp-r-roles">Roles <small>(leave empty for all)</small></label>
@@ -73,15 +73,15 @@
                                 <div class="field"><label class="field-label" for="cp-r-end-hour">End hour UTC (0–23)</label><input type="number" id="cp-r-end-hour" min="0" max="23" placeholder="Any"></div>
                             </div>
                         </div>
-                        <div class="modal-foot"><button class="btn" onclick="closeCpRuleModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpRuleModal()">Save</button></div>
+                        <div class="modal-actions"><button class="btn" onclick="closeCpRuleModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpRuleModal()">Save</button></div>
                     </div>
                 </div>
 
                 <!-- Command Policies — Cooldown Modal -->
-                <div id="cp-cooldown-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeCpCooldownModal()">
+                <div id="cp-cooldown-modal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="cp-cooldown-modal-title">
                     <div class="modal-box" style="max-width:420px;">
-                        <div class="modal-head"><span>Cooldown Override</span><button class="modal-close" onclick="closeCpCooldownModal()">✕</button></div>
-                        <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
+                        <div class="modal-head"><span id="cp-cooldown-modal-title">Cooldown Override</span><button class="modal-close" onclick="closeCpCooldownModal()">✕</button></div>
+                        <div class="modal-body" style="display:flex;flex-direction:column;gap:.9rem;">
                             <div class="field"><label class="field-label" for="cp-cd-command">Command name</label><input type="text" id="cp-cd-command" placeholder="e.g. daily"></div>
                             <div class="field"><label class="field-label" for="cp-cd-role">Role</label>
                                 <select id="cp-cd-role">
@@ -91,6 +91,6 @@
                             </div>
                             <div class="field"><label class="field-label" for="cp-cd-seconds">Cooldown (seconds)</label><input type="number" id="cp-cd-seconds" min="0" placeholder="0 = no cooldown"></div>
                         </div>
-                        <div class="modal-foot"><button class="btn" onclick="closeCpCooldownModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpCooldownModal()">Save</button></div>
+                        <div class="modal-actions"><button class="btn" onclick="closeCpCooldownModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpCooldownModal()">Save</button></div>
                     </div>
                 </div>
