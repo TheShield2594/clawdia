@@ -348,11 +348,6 @@ const guildSchema = new Schema({
         }
     },
 
-    customCommands: [{
-        name: { type: String, required: true },
-        response: { type: String, required: true }
-    }],
-
     autoRoles: [{
         roleId: { type: String, required: true }
     }],
