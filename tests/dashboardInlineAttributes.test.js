@@ -61,8 +61,12 @@ const BASELINE = {
     'partials/panels/welcome.ejs': [5, 4],
 };
 
-const STYLE_ATTR = /\sstyle\s*=\s*"/g;
-const HANDLER_ATTR = /\son[a-z]+\s*=\s*"/g;
+// Either quote style. HTML treats style='x' and onclick='x()' exactly like
+// their double-quoted forms, and the CSP does too — a regex that only saw one
+// of them let a view not in BASELINE carry inline handlers and still report
+// clean, which is the case this whole file exists to prevent.
+const STYLE_ATTR = /\sstyle\s*=\s*["']/g;
+const HANDLER_ATTR = /\son[a-z]+\s*=\s*["']/g;
 
 function views(dir = VIEWS) {
     const found = [];
@@ -91,9 +95,11 @@ describe('inline styles and handlers only ever decrease', () => {
 
         // A new view is expected to be clean: use a class in styles.css and
         // addEventListener. See docs/EXTENDING.md, "Styles and handlers in
-        // dashboard views".
-        expect({ file, styles: styles <= maxStyles, handlers: handlers <= maxHandlers })
-            .toEqual({ file, styles: true, handlers: true });
+        // dashboard views". Compared as numbers rather than booleans so a
+        // failure reports what the file has and what it is allowed to have;
+        // it.each already names the file.
+        expect(styles).toBeLessThanOrEqual(maxStyles);
+        expect(handlers).toBeLessThanOrEqual(maxHandlers);
     });
 
     it('records no file that has since been cleaned up or removed', () => {

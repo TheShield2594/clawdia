@@ -77,8 +77,20 @@ describe('Chart.js is served from this origin', () => {
         if (!fs.existsSync(installed)) {
             throw new Error('chart.js is not installed — run npm ci before the suite.');
         }
-        const strip = s => s.replace(/^\/\/# sourceMappingURL=.*$/m, '').trim();
-        expect(read(VENDOR)).toContain(strip(read(installed)));
+        // Split rather than searched: `toContain` would accept code appended
+        // after the library, which is exactly the supply-chain edit the
+        // lockfile's integrity hash cannot see once the file is vendored.
+        // scripts/vendor-chartjs.sh writes a three-line banner and then the
+        // artifact, so everything past line three must match it byte for byte.
+        const BANNER_LINES = 3;
+        const lines = read(VENDOR).split('\n');
+        const banner = lines.slice(0, BANNER_LINES).join('\n');
+        const body = lines.slice(BANNER_LINES).join('\n');
+
+        expect(banner).toContain(`Chart.js v${pkg.devDependencies['chart.js']}`);
+        expect(banner).toContain('scripts/vendor-chartjs.sh');
+        const strip = s => s.replace(/^\/\/# sourceMappingURL=.*$/m, '').trimEnd();
+        expect(body).toBe(`${strip(read(installed))}\n`);
     });
 });
 
@@ -94,7 +106,6 @@ describe('Chart.js is fetched only when a chart is drawn', () => {
         expect(view).toMatch(/chartJsUrl:\s*<%-\s*jsonForScript\(asset\('\/vendor\/chart\.umd\.min\.js'\)\)\s*%>/);
         expect(dashboardJs).toContain('BOOT.chartJsUrl');
     });
-
 });
 
 describe('the page it loads into', () => {
