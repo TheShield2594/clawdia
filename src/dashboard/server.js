@@ -227,7 +227,12 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
         res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
         res.setHeader('Content-Security-Policy', [
             "default-src 'self'",
-            `script-src 'self' 'nonce-${nonce}' https://cdn.jsdelivr.net`,
+            // No third-party origin. Chart.js was the only reason one was ever
+            // listed here, and it is vendored under public/vendor/ now (#685) —
+            // pinned to an exact version in package.json and checked by
+            // package-lock's integrity hash at install time, which is the
+            // guarantee the CDN tag's missing SRI attribute would have given.
+            `script-src 'self' 'nonce-${nonce}'`,
             // Inline event handlers (onclick, onchange, etc.) cannot carry nonces,
             // so allow them the same way inline styles are allowed.
             "script-src-attr 'unsafe-inline'",

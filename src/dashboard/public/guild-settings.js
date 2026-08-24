@@ -3453,7 +3453,14 @@ function setAnalyticsRange(days, btn) {
     _analyticsRange = days;
     document.querySelectorAll('.analytics-range').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    if (_analyticsData) renderAnalyticsCharts(_analyticsData, _analyticsInsights);
+    if (_analyticsData) renderAnalyticsCharts(_analyticsData, _analyticsInsights).catch(chartsUnavailable);
+}
+
+/** The rest of the analytics panel is readable without its charts, so a library
+ *  that would not load is reported and left there rather than failing the tab. */
+function chartsUnavailable(err) {
+    console.error('[dashboard]', err);
+    toast('Charts could not be loaded', 'error');
 }
 
 const _chartDefaults = {
@@ -3462,7 +3469,42 @@ const _chartDefaults = {
     scales: { x: { ticks: { color: '#b8a898', maxTicksLimit: 8 } }, y: { ticks: { color: '#b8a898' } } }
 };
 
-function renderAnalyticsCharts(data, insights) {
+// ── Chart.js, fetched when a chart is actually going to be drawn (#685) ────
+//
+// This used to be a <script> in the page head pointing at cdn.jsdelivr.net at a
+// floating `chart.js@4` with no integrity attribute: 200 KB downloaded and
+// parsed on every guild-settings page, and one third-party origin allowed to
+// execute whatever it resolved to that day on a page whose CSP is otherwise a
+// per-request nonce. It is vendored under /vendor/ now, so script-src is back
+// to 'self' alone.
+//
+// Injected on the first chart rather than in the head because only the
+// Analytics panel and the Economy panel's Health tab draw one, and most
+// sessions open neither.
+let _chartJsLoad = null;
+
+function loadChartJs() {
+    if (window.Chart) return Promise.resolve();
+    // One promise shared by every caller: the analytics panel starts six charts
+    // in a row and each of them asks.
+    if (_chartJsLoad) return _chartJsLoad;
+    _chartJsLoad = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = BOOT.chartJsUrl;
+        script.onload = () => resolve();
+        script.onerror = () => {
+            // Forgotten, so reopening the tab retries rather than settling
+            // against a load that never happened.
+            _chartJsLoad = null;
+            reject(new Error('Could not load Chart.js'));
+        };
+        document.head.appendChild(script);
+    });
+    return _chartJsLoad;
+}
+
+async function renderAnalyticsCharts(data, insights) {
+    await loadChartJs();
     const a = data.analytics || {};
     const days = _analyticsRange;
 
@@ -3657,8 +3699,10 @@ async function loadAnalytics() {
             kpiRow.insertAdjacentHTML('beforeend', `<div class="eco-kpi-tile"><div class="eco-kpi-label">${kpi.label}</div><div class="eco-kpi-value">${kpi.value}</div></div>`);
         }
 
-        // Render charts
-        renderAnalyticsCharts(data, insights);
+        // Render charts. Not awaited: Chart.js is fetched on demand now (#685)
+        // and the KPI tiles, insights and command tables below are worth having
+        // whether or not it arrives.
+        renderAnalyticsCharts(data, insights).catch(chartsUnavailable);
 
         // Insights text
         const insightsCont = document.getElementById('analytics-insights-content');
@@ -3966,14 +4010,22 @@ async function loadEcoHealth() {
         if (_ecoCmdChart) _ecoCmdChart.destroy();
         const ctx = document.getElementById('eco-cmd-chart')?.getContext('2d');
         if (ctx && cmds.length) {
-            _ecoCmdChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: cmds.map(c => `/${c.cmd}`),
-                    datasets: [{ label: 'Uses', data: cmds.map(c => c.count), backgroundColor: 'rgba(217,119,66,0.75)', borderRadius: 4 }]
-                },
-                options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#b8a898' } }, y: { ticks: { color: '#b8a898' } } } }
-            });
+            // Its own try, inside the tab's: Chart.js is fetched on demand now
+            // (#685), and a library that would not load must not take down the
+            // totals and the top-earners table that already rendered above.
+            try {
+                await loadChartJs();
+                _ecoCmdChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: cmds.map(c => `/${c.cmd}`),
+                        datasets: [{ label: 'Uses', data: cmds.map(c => c.count), backgroundColor: 'rgba(217,119,66,0.75)', borderRadius: 4 }]
+                    },
+                    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#b8a898' } }, y: { ticks: { color: '#b8a898' } } } }
+                });
+            } catch (err) {
+                chartsUnavailable(err);
+            }
         }
     } catch {
         document.getElementById('eco-top-earners-loading').style.display = 'none';

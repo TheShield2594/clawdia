@@ -6,7 +6,10 @@
     <title><%= guild.name %> · Dashboard — Clawdia</title>
     <link rel="stylesheet" href="<%= asset('/fonts/fonts.css') %>">
     <link rel="stylesheet" href="<%= asset('/styles.css') %>">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
+    <%# Chart.js is deliberately not here (#685). It is vendored under /vendor/
+        and injected by loadChartJs() the first time a chart is about to be
+        drawn — only the Analytics panel and the Economy panel's Health tab draw
+        one, and most sessions open neither. %>
     <script src="<%= asset('/esc-html.js') %>"></script>
 </head>
 <body style="background:var(--ink-950);margin:0;">
@@ -301,6 +304,10 @@
             disabledAchievements:   <%- jsonForScript(settings.achievements?.disabledAchievements || []) %>,
             customAchievements:     <%- jsonForScript(settings.achievements?.customAchievements || []) %>,
             personas:               <%- jsonForScript((settings.ai && settings.ai.channelPersonas) || []) %>,
+            // Stamped with the file's content hash here, where asset() lives,
+            // so the lazily injected <script> is cached as hard as every other
+            // asset and still busts on a version bump.
+            chartJsUrl:             <%- jsonForScript(asset('/vendor/chart.umd.min.js')) %>,
         };
     </script>
     <script src="<%= asset('/guild-settings.js') %>"></script>
