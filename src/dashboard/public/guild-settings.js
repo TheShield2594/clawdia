@@ -3597,8 +3597,92 @@ function loadChartJs() {
     return _chartJsLoad;
 }
 
+/**
+ * Give a chart the accessible equivalent a <canvas> cannot have (#669).
+ *
+ * A canvas is an opaque bitmap. With no ARIA it is announced as nothing at
+ * all, so six charts made the whole Insights panel — and the economy command
+ * breakdown — unreadable to a screen reader, WCAG 1.1.1. Each chart gets two
+ * things instead: a role="img" carrying a one-line summary of what it shows,
+ * and the series itself as a real <table> alongside, visually hidden but
+ * navigable with table commands.
+ *
+ * Built from the same arrays the chart is drawn from, and called whether or
+ * not Chart.js loaded — so when the library is unavailable the numbers are
+ * still there rather than the panel being simply blank.
+ *
+ * @param {string} canvasId id of the <canvas>; the table goes in `<id>-data`
+ * @param {object} spec     { title, summary, columns, rows }
+ */
+function describeChart(canvasId, { title, summary, columns = [], rows = [] }) {
+    const canvas = document.getElementById(canvasId);
+    if (canvas) {
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', summary || `${title} — no data yet`);
+    }
+
+    const host = document.getElementById(`${canvasId}-data`);
+    if (!host) return;
+    host.textContent = '';
+
+    if (!rows.length) {
+        const p = document.createElement('p');
+        p.textContent = summary || `${title} — no data yet`;
+        host.appendChild(p);
+        return;
+    }
+
+    const table = document.createElement('table');
+    const caption = document.createElement('caption');
+    caption.textContent = title;
+    table.appendChild(caption);
+
+    const head = document.createElement('tr');
+    for (const col of columns) {
+        const th = document.createElement('th');
+        th.setAttribute('scope', 'col');
+        th.textContent = col;
+        head.appendChild(th);
+    }
+    const thead = document.createElement('thead');
+    thead.appendChild(head);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const row of rows) {
+        const tr = document.createElement('tr');
+        // First cell is the row's label — a date, a command, a cohort — so it
+        // is a header, and the ones after it are values it names.
+        row.forEach((cell, i) => {
+            const el = document.createElement(i === 0 ? 'th' : 'td');
+            if (i === 0) el.setAttribute('scope', 'row');
+            el.textContent = String(cell);
+            tr.appendChild(el);
+        });
+        tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    host.appendChild(table);
+}
+
+/** Sum one numeric key across a daily series, for the chart summaries. */
+function sumBy(rows, key) {
+    return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+}
+
 async function renderAnalyticsCharts(data, insights) {
-    await loadChartJs();
+    // The summaries and data tables below are built from the same arrays the
+    // charts are drawn from, and they have to survive a library that would not
+    // load: a reader who cannot see the canvas anyway should not also lose the
+    // numbers because a script fetch failed. So a load failure is reported and
+    // the drawing skipped, rather than the whole render abandoned at the top.
+    let charts = true;
+    try {
+        await loadChartJs();
+    } catch (err) {
+        charts = false;
+        chartsUnavailable(err);
+    }
     const a = data.analytics || {};
     const days = _analyticsRange;
 
@@ -3607,7 +3691,7 @@ async function renderAnalyticsCharts(data, insights) {
     const growthSlice = growthAll.slice(-days);
     if (_chartMemberGrowth) _chartMemberGrowth.destroy();
     const ctxG = document.getElementById('chart-member-growth')?.getContext('2d');
-    if (ctxG) {
+    if (charts && ctxG) {
         _chartMemberGrowth = new Chart(ctxG, {
             type: 'bar',
             data: {
@@ -3621,12 +3705,23 @@ async function renderAnalyticsCharts(data, insights) {
         });
     }
 
+    describeChart('chart-member-growth', {
+        title: `Member growth, last ${days} days`,
+        summary: growthSlice.length
+            ? `Member growth over the last ${days} days: ${sumBy(growthSlice, 'joins')} joins, ${sumBy(growthSlice, 'leaves')} leaves.`
+            : 'Member growth — no data yet',
+        columns: ['Date', 'Joins', 'Leaves'],
+        rows: growthSlice.map(d => [d.date, d.joins || 0, d.leaves || 0]),
+    });
+
     // Command activity chart — real per-command daily counts
     if (_chartCommandActivity) _chartCommandActivity.destroy();
     const ctxCA = document.getElementById('chart-command-activity')?.getContext('2d');
-    if (ctxCA) {
-        const cmdDaily = a.commandDaily || [];
-        const cmdSlice = cmdDaily.slice(-days);
+    const cmdSlice = (a.commandDaily || []).slice(-days);
+    // Fallback when no daily breakdown has been recorded yet: the running
+    // per-command totals, as a horizontal bar.
+    const cmdRows = Object.entries(a.commandUsage || {}).sort((x, y) => y[1].total - x[1].total).slice(0, 8);
+    if (charts && ctxCA) {
         if (cmdSlice.length) {
             _chartCommandActivity = new Chart(ctxCA, {
                 type: 'bar',
@@ -3637,8 +3732,6 @@ async function renderAnalyticsCharts(data, insights) {
                 options: _chartDefaults
             });
         } else {
-            // Fallback: aggregate top commands as horizontal bar
-            const cmdRows = Object.entries(a.commandUsage || {}).sort((x,y) => y[1].total - x[1].total).slice(0, 8);
             _chartCommandActivity = new Chart(ctxCA, {
                 type: 'bar',
                 data: {
@@ -3650,13 +3743,29 @@ async function renderAnalyticsCharts(data, insights) {
         }
     }
 
+    describeChart('chart-command-activity', cmdSlice.length
+        ? {
+            title:   `Command activity, last ${days} days`,
+            summary: `Command activity over the last ${days} days: ${sumBy(cmdSlice, 'count')} commands run.`,
+            columns: ['Date', 'Commands'],
+            rows:    cmdSlice.map(d => [d.date, d.count || 0]),
+        }
+        : {
+            title:   'Most-used commands',
+            summary: cmdRows.length
+                ? `Most-used commands: ${cmdRows.map(([cmd, m]) => `/${cmd}, ${m.total}`).join('; ')}.`
+                : 'Command activity — no data yet',
+            columns: ['Command', 'Total runs'],
+            rows:    cmdRows.map(([cmd, m]) => [`/${cmd}`, m.total || 0]),
+        });
+
     // Retention cohort chart (D7/D30 by join month)
     if (_chartRetention) _chartRetention.destroy();
     const ctxR = document.getElementById('chart-retention')?.getContext('2d');
     const cohorts = insights?.retentionCohorts || [];
     const ret7 = insights?.retention?.retained7Pct || 0;
     const ret30 = insights?.retention?.retained30Pct || 0;
-    if (ctxR) {
+    if (charts && ctxR) {
         if (cohorts.length) {
             _chartRetention = new Chart(ctxR, {
                 type: 'bar',
@@ -3681,6 +3790,21 @@ async function renderAnalyticsCharts(data, insights) {
         }
     }
 
+    describeChart('chart-retention', cohorts.length
+        ? {
+            title:   'Retention by join month',
+            summary: `Retention by join month, ${cohorts.length} cohorts: ` +
+                     `${cohorts.map(c => `${c.month}, D7 ${c.d7Pct || 0}%, D30 ${c.d30Pct || 0}%`).join('; ')}.`,
+            columns: ['Cohort', 'D7 %', 'D30 %'],
+            rows:    cohorts.map(c => [c.month, c.d7Pct || 0, c.d30Pct || 0]),
+        }
+        : {
+            title:   'Retention',
+            summary: `Retention: ${ret7}% of members still active after 7 days, ${ret30}% after 30 days.`,
+            columns: ['Window', 'Retained %'],
+            rows:    [['D7 retention', ret7], ['D30 retention', ret30]],
+        });
+
     // Helper: remove any stale "no data" placeholder from a chart card container
     function clearChartPlaceholder(container) {
         const p = container.querySelector('p.chart-no-data');
@@ -3690,10 +3814,9 @@ async function renderAnalyticsCharts(data, insights) {
     // Economy activity chart
     if (_chartEconomy) _chartEconomy.destroy();
     const ctxE = document.getElementById('chart-economy')?.getContext('2d');
-    if (ctxE) {
+    const ecoSlice = (a.economyDaily || []).slice(-days);
+    if (charts && ctxE) {
         clearChartPlaceholder(ctxE.canvas.parentElement);
-        const ecoDaily = a.economyDaily || [];
-        const ecoSlice = ecoDaily.slice(-days);
         if (ecoSlice.length) {
             _chartEconomy = new Chart(ctxE, {
                 type: 'bar',
@@ -3710,14 +3833,22 @@ async function renderAnalyticsCharts(data, insights) {
             ctxE.canvas.parentElement.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No economy data yet</p>');
         }
     }
+    describeChart('chart-economy', {
+        title:   `Economy activity, last ${days} days`,
+        summary: ecoSlice.length
+            ? `Economy activity over the last ${days} days: ${sumBy(ecoSlice, 'earned')} coins earned, ` +
+              `${sumBy(ecoSlice, 'spent')} spent.`
+            : 'Economy activity — no data yet',
+        columns: ['Date', 'Coins earned', 'Coins spent'],
+        rows:    ecoSlice.map(d => [d.date, d.earned || 0, d.spent || 0]),
+    });
 
     // Leveling / XP chart
     if (_chartLeveling) _chartLeveling.destroy();
     const ctxL = document.getElementById('chart-leveling')?.getContext('2d');
-    if (ctxL) {
+    const xpSlice = (a.xpDaily || []).slice(-days);
+    if (charts && ctxL) {
         clearChartPlaceholder(ctxL.canvas.parentElement);
-        const xpDaily = a.xpDaily || [];
-        const xpSlice = xpDaily.slice(-days);
         if (xpSlice.length) {
             _chartLeveling = new Chart(ctxL, {
                 type: 'bar',
@@ -3734,14 +3865,22 @@ async function renderAnalyticsCharts(data, insights) {
             ctxL.canvas.parentElement.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No leveling data yet</p>');
         }
     }
+    describeChart('chart-leveling', {
+        title:   `XP and level-ups, last ${days} days`,
+        summary: xpSlice.length
+            ? `XP and level-ups over the last ${days} days: ${sumBy(xpSlice, 'xp')} XP awarded, ` +
+              `${sumBy(xpSlice, 'levelUps')} level-ups.`
+            : 'XP and level-ups — no data yet',
+        columns: ['Date', 'XP awarded', 'Level-ups'],
+        rows:    xpSlice.map(d => [d.date, d.xp || 0, d.levelUps || 0]),
+    });
 
     // AI requests chart
     if (_chartAiRequests) _chartAiRequests.destroy();
     const ctxAI = document.getElementById('chart-ai-requests')?.getContext('2d');
-    if (ctxAI) {
+    const aiSlice = (a.aiRequestsDaily || []).slice(-days);
+    if (charts && ctxAI) {
         clearChartPlaceholder(ctxAI.canvas.parentElement);
-        const aiDaily = a.aiRequestsDaily || [];
-        const aiSlice = aiDaily.slice(-days);
         if (aiSlice.length) {
             _chartAiRequests = new Chart(ctxAI, {
                 type: 'line',
@@ -3755,6 +3894,14 @@ async function renderAnalyticsCharts(data, insights) {
             ctxAI.canvas.parentElement.insertAdjacentHTML('beforeend', '<p class="chart-no-data" style="text-align:center;opacity:.4;font-size:.82rem;margin-top:.5rem">No AI usage data yet</p>');
         }
     }
+    describeChart('chart-ai-requests', {
+        title:   `AI requests, last ${days} days`,
+        summary: aiSlice.length
+            ? `AI requests over the last ${days} days: ${sumBy(aiSlice, 'count')} in total.`
+            : 'AI requests — no data yet',
+        columns: ['Date', 'Requests'],
+        rows:    aiSlice.map(d => [d.date, d.count || 0]),
+    });
 }
 
 async function loadAnalytics() {
@@ -3864,6 +4011,18 @@ function setSanctionsFilter(filter, btn) {
     if (_sanctionsData) renderSanctions(_sanctionsData);
 }
 
+/** Show or hide a wide table (#668).
+ *
+ *  These tables live inside a `.table-scroll` wrapper, and it is the wrapper —
+ *  not the table — that carries the visibility, because the wrapper is a
+ *  labelled region with a tabindex. Toggling the table alone would leave an
+ *  empty region behind as a tab stop announcing a table that is not there. */
+function setTableVisible(id, visible) {
+    const table = document.getElementById(id);
+    if (!table) return;
+    (table.closest('.table-scroll') || table).style.display = visible ? '' : 'none';
+}
+
 function renderSanctions(data) {
     const items = [
         ...(data.bans || []).map(b => ({ ...b, type: 'ban' })),
@@ -3871,8 +4030,7 @@ function renderSanctions(data) {
     ].filter(i => _sanctionsFilter === 'all' || i.type === _sanctionsFilter);
 
     document.getElementById('sanctions-empty').style.display = items.length ? 'none' : '';
-    const table = document.getElementById('sanctions-table');
-    table.style.display = items.length ? '' : 'none';
+    setTableVisible('sanctions-table', items.length > 0);
     const tbody = document.getElementById('sanctions-tbody');
     tbody.innerHTML = '';
     for (const item of items) {
@@ -3925,7 +4083,7 @@ async function loadActiveSanctions() {
     document.getElementById('sanctions-loading').style.display = '';
     document.getElementById('sanctions-error').style.display = 'none';
     document.getElementById('sanctions-empty').style.display = 'none';
-    document.getElementById('sanctions-table').style.display = 'none';
+    setTableVisible('sanctions-table', false);
     try {
         const resp = await fetch(`/api/v1/guild/${guildId}/sanctions/active`);
         if (!resp.ok) throw new Error('Non-OK');
@@ -3973,7 +4131,7 @@ async function loadCaseHistory(page = 1) {
     document.getElementById('cases-loading').style.display = '';
     document.getElementById('cases-error').style.display = 'none';
     document.getElementById('cases-empty').style.display = 'none';
-    document.getElementById('cases-table').style.display = 'none';
+    setTableVisible('cases-table', false);
     const paginEl = document.getElementById('cases-pagination');
     paginEl.style.display = 'none';
     try {
@@ -4008,7 +4166,7 @@ async function loadCaseHistory(page = 1) {
                 </td>
             </tr>`);
         }
-        document.getElementById('cases-table').style.display = '';
+        setTableVisible('cases-table', true);
         if (pages > 1) {
             paginEl.style.display = 'flex';
             paginEl.innerHTML = '';
@@ -4076,7 +4234,7 @@ async function loadEcoHealth() {
     document.getElementById('eco-top-earners-loading').style.display = '';
     document.getElementById('eco-top-earners-error').style.display = 'none';
     document.getElementById('eco-top-earners-empty').style.display = 'none';
-    document.getElementById('eco-top-earners-table').style.display = 'none';
+    setTableVisible('eco-top-earners-table', false);
     try {
         const resp = await fetch(`/api/v1/guild/${guildId}/economy/stats`);
         if (!resp.ok) throw new Error('Non-OK');
@@ -4088,7 +4246,7 @@ async function loadEcoHealth() {
         if (!topEarners.length) {
             document.getElementById('eco-top-earners-empty').style.display = '';
         } else {
-            document.getElementById('eco-top-earners-table').style.display = '';
+            setTableVisible('eco-top-earners-table', true);
         }
         const tbody = document.getElementById('eco-top-earners-tbody');
         tbody.innerHTML = '';
@@ -4103,6 +4261,14 @@ async function loadEcoHealth() {
         const cmds = stats.commandFrequency || [];
         if (_ecoCmdChart) _ecoCmdChart.destroy();
         const ctx = document.getElementById('eco-cmd-chart')?.getContext('2d');
+        describeChart('eco-cmd-chart', {
+            title:   'Most-used economy commands',
+            summary: cmds.length
+                ? `Most-used economy commands: ${cmds.map(c => `/${c.cmd}, ${c.count} uses`).join('; ')}.`
+                : 'Most-used economy commands — no data yet',
+            columns: ['Command', 'Uses'],
+            rows:    cmds.map(c => [`/${c.cmd}`, c.count || 0]),
+        });
         if (ctx && cmds.length) {
             // Its own try, inside the tab's: Chart.js is fetched on demand now
             // (#685), and a library that would not load must not take down the

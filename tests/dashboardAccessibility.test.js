@@ -14,7 +14,9 @@ global.TextDecoder = global.TextDecoder || TextDecoder;
 // left the nav inert without JS, and reported the selected section with
 // aria-pressed. The toast, the dashboard's only feedback channel, was not a
 // live region and told success from failure by border colour alone.
-const { bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
+const fs = require('fs');
+const path = require('path');
+const { PUBLIC, renderPanel, bootPage, clickTab, settle, forgetDocumentListeners } = require('./helpers/guildSettingsPage');
 
 describe('sidebar navigation', () => {
     beforeEach(() => {
@@ -207,5 +209,206 @@ describe('toast', () => {
         // make it interactive, or it covers whatever sits underneath it.
         expect(toastEl().classList.contains('show')).toBe(false);
         expect(toastEl().className).toBe('toast');
+    });
+});
+
+// #668. `.cases-table` is up to seven columns wide and `body` is
+// `overflow-x: hidden`, so on a narrow screen the right-hand columns — the
+// Actions column on three of these four — were clipped with nothing that could
+// scroll to them.
+describe('wide tables', () => {
+    beforeEach(() => {
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        document.body.innerHTML = '';
+        bootPage();
+    });
+
+    afterEach(async () => {
+        await settle();
+        forgetDocumentListeners();
+        jest.restoreAllMocks();
+    });
+
+    const styles = fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8');
+
+    it('gives every wide table a container that can actually scroll', () => {
+        const rule = /\.table-scroll\s*\{([^}]*)\}/.exec(styles);
+        expect(rule).not.toBeNull();
+        expect(rule[1]).toMatch(/overflow-x:\s*auto/);
+
+        // Without a min-width the table is width:100% inside an auto-overflow
+        // parent, so it shrinks to fit and squeezes the columns rather than
+        // overflowing — nothing to scroll, and the clipping just moves inside
+        // the cells.
+        expect(styles).toMatch(/\.table-scroll\s*>\s*\.cases-table\s*\{[^}]*min-width:/);
+    });
+
+    it.each(['moderation', 'economy', 'leveling'])('wraps every table in the %s panel', panel => {
+        document.body.insertAdjacentHTML('beforeend', renderPanel(panel));
+        const tables = [...document.querySelectorAll('table.cases-table')];
+        expect(tables.length).toBeGreaterThan(0);
+
+        for (const table of tables) {
+            const wrap = table.parentElement;
+            expect([table.id, wrap.classList.contains('table-scroll')]).toEqual([table.id, true]);
+            // Scrollable by keyboard and not only by touch, and named so the
+            // region it becomes says which table it holds.
+            expect(wrap.getAttribute('tabindex')).toBe('0');
+            expect(wrap.getAttribute('role')).toBe('region');
+            expect(wrap.getAttribute('aria-label')).toBeTruthy();
+        }
+    });
+
+    it('hides the wrapper with the table, leaving no empty region in the tab order', async () => {
+        document.body.insertAdjacentHTML('beforeend', renderPanel('moderation'));
+        const wrap = document.getElementById('cases-table').closest('.table-scroll');
+
+        // The three data tables start hidden behind their empty states, and a
+        // focusable labelled region announcing a table that is not rendered is
+        // worse than no region at all.
+        expect(wrap.style.display).toBe('none');
+
+        window.setTableVisible('cases-table', true);
+        expect(wrap.style.display).toBe('');
+
+        window.setTableVisible('cases-table', false);
+        expect(wrap.style.display).toBe('none');
+    });
+});
+
+// #669. Six analytics charts, plus the economy command breakdown, drew into
+// bare <canvas> elements: no role, no label, no fallback and no table. A canvas
+// is an opaque bitmap, so the whole Insights panel was announced as nothing at
+// all — WCAG 1.1.1.
+describe('analytics charts', () => {
+    const ANALYTICS = {
+        analytics: {
+            memberGrowth:    [{ date: '2026-08-01', joins: 4, leaves: 1 }, { date: '2026-08-02', joins: 6, leaves: 2 }],
+            commandDaily:    [{ date: '2026-08-01', count: 30 }, { date: '2026-08-02', count: 12 }],
+            economyDaily:    [{ date: '2026-08-01', earned: 500, spent: 200 }],
+            xpDaily:         [{ date: '2026-08-01', xp: 900, levelUps: 3 }],
+            aiRequestsDaily: [{ date: '2026-08-01', count: 7 }],
+        },
+    };
+    const INSIGHTS = { retention: { retained7Pct: 61, retained30Pct: 44 } };
+
+    const CANVASES = [
+        'chart-member-growth', 'chart-command-activity', 'chart-retention',
+        'chart-economy', 'chart-leveling', 'chart-ai-requests',
+    ];
+
+    /** Chart.js stands in for the real library, which jsdom cannot run. */
+    function stubChartJs() {
+        window.Chart = function Chart() { this.destroy = () => {}; };
+    }
+
+    beforeEach(() => {
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        document.head.innerHTML = '';
+        document.body.innerHTML = '';
+        bootPage();
+        document.body.insertAdjacentHTML('beforeend', renderPanel('analytics'));
+    });
+
+    afterEach(async () => {
+        await settle();
+        forgetDocumentListeners();
+        delete window.Chart;
+        jest.restoreAllMocks();
+    });
+
+    it('ships every canvas already labelled, before any data arrives', () => {
+        for (const id of CANVASES) {
+            const canvas = document.getElementById(id);
+            expect([id, canvas.getAttribute('role')]).toEqual([id, 'img']);
+            expect(canvas.getAttribute('aria-label')).toBeTruthy();
+            // The table alternative has somewhere to land.
+            expect(document.getElementById(`${id}-data`)).not.toBeNull();
+        }
+    });
+
+    it('names each chart with the numbers it is drawing, not just its title', async () => {
+        stubChartJs();
+        await window.renderAnalyticsCharts(ANALYTICS, INSIGHTS);
+
+        const label = id => document.getElementById(id).getAttribute('aria-label');
+        expect(label('chart-member-growth')).toMatch(/10 joins.*3 leaves/);
+        expect(label('chart-command-activity')).toMatch(/42 commands/);
+        expect(label('chart-retention')).toMatch(/61%.*44%/);
+        expect(label('chart-economy')).toMatch(/500 coins earned.*200 spent/);
+        expect(label('chart-leveling')).toMatch(/900 XP awarded.*3 level-ups/);
+        expect(label('chart-ai-requests')).toMatch(/7 in total/);
+    });
+
+    it('puts the series itself beside the canvas as a real table', async () => {
+        stubChartJs();
+        await window.renderAnalyticsCharts(ANALYTICS, INSIGHTS);
+
+        const table = document.querySelector('#chart-member-growth-data table');
+        expect(table).not.toBeNull();
+        expect(table.querySelector('caption').textContent).toMatch(/Member growth/);
+        expect([...table.querySelectorAll('thead th')].map(th => th.textContent))
+            .toEqual(['Date', 'Joins', 'Leaves']);
+        // Every column header scoped, and the date leading each row a header of
+        // its own, so the numbers are announced with what they belong to.
+        expect([...table.querySelectorAll('thead th')].every(th => th.getAttribute('scope') === 'col')).toBe(true);
+        expect([...table.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(c => c.textContent)))
+            .toEqual([['2026-08-01', '4', '1'], ['2026-08-02', '6', '2']]);
+        expect(table.querySelector('tbody th').getAttribute('scope')).toBe('row');
+
+        for (const id of CANVASES) {
+            expect([id, !!document.querySelector(`#${id}-data table`)]).toEqual([id, true]);
+        }
+    });
+
+    it('hides the tables from sight without hiding them from the reader', () => {
+        // `display: none` would take the table out of the accessibility tree
+        // along with everything in it, which is the whole point of having it.
+        const styles = fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8');
+        const rule = /\.chart-a11y-data\s*\{([^}]*)\}/.exec(styles);
+        expect(rule).not.toBeNull();
+        expect(rule[1]).not.toMatch(/display:\s*none/);
+        expect(rule[1]).not.toMatch(/visibility:\s*hidden/);
+        expect(rule[1]).toMatch(/clip-path:|clip:/);
+    });
+
+    it('still gives the numbers when Chart.js does not load', async () => {
+        // The reader who needs the table is exactly the one who gets nothing
+        // from the canvas, so a failed script fetch must not take it with it.
+        const render = window.renderAnalyticsCharts(ANALYTICS, INSIGHTS);
+        const script = [...document.head.querySelectorAll('script[src]')].pop();
+        script.onerror(new window.Event('error'));
+        await render;
+
+        expect(document.querySelector('#chart-member-growth-data table')).not.toBeNull();
+        expect(document.getElementById('chart-member-growth').getAttribute('aria-label')).toMatch(/10 joins/);
+    });
+
+    it('covers the economy panel\'s command chart too', async () => {
+        document.body.insertAdjacentHTML('beforeend', renderPanel('economy'));
+        const canvas = document.getElementById('eco-cmd-chart');
+        expect(canvas.getAttribute('role')).toBe('img');
+        expect(document.getElementById('eco-cmd-chart-data')).not.toBeNull();
+
+        window.fetch = jest.fn(async () => ({
+            ok: true, status: 200,
+            json: async () => ({ topEarners: [], commandFrequency: [{ cmd: 'daily', count: 91 }] }),
+        }));
+        stubChartJs();
+        await window.loadEcoHealth();
+
+        expect(canvas.getAttribute('aria-label')).toMatch(/\/daily, 91 uses/);
+        expect([...document.querySelectorAll('#eco-cmd-chart-data tbody tr')]
+            .map(tr => [...tr.children].map(c => c.textContent))).toEqual([['/daily', '91']]);
+    });
+
+    it('says so in the label when a chart has no data at all', async () => {
+        stubChartJs();
+        await window.renderAnalyticsCharts({ analytics: {} }, {});
+
+        const canvas = document.getElementById('chart-economy');
+        expect(canvas.getAttribute('aria-label')).toMatch(/no data/i);
+        expect(document.querySelector('#chart-economy-data table')).toBeNull();
+        expect(document.getElementById('chart-economy-data').textContent).toMatch(/no data/i);
     });
 });

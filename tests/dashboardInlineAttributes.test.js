@@ -45,7 +45,7 @@ const BASELINE = {
     'partials/panels/eventlog.ejs': [6, 1],
     'partials/panels/exploration.ejs': [5, 1],
     'partials/panels/farewell.ejs': [0, 2],
-    'partials/panels/leveling.ejs': [29, 14],
+    'partials/panels/leveling.ejs': [28, 14],
     'partials/panels/moderation.ejs': [28, 19],
     'partials/panels/newspaper.ejs': [4, 1],
     'partials/panels/overview.ejs': [20, 7],

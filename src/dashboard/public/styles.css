@@ -1520,6 +1520,21 @@ textarea.auto-resize {
 .game-item-upload-btn { cursor: pointer; }
 
 /* ── Cases / Sanctions tables ────────────────────────────────── */
+/* #668. `body { overflow-x: hidden }` above kills page-level horizontal
+   scrolling, so a table wider than the viewport simply had its right-hand
+   columns — Actions, on three of these four — clipped away with no way to
+   reach them. Each wide table gets its own scroll container instead.
+
+   min-width is what makes it scroll at all: `.cases-table` is width:100%, so
+   inside an auto-overflow parent it would otherwise shrink to fit and squeeze
+   the columns to nothing rather than overflow. The wrapper is a labelled
+   region with a tabindex so it can be scrolled by keyboard and not only by
+   touch; it carries the show/hide of the table it wraps (see
+   setTableVisible) so a hidden table never leaves an empty region behind in
+   the tab order. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll > .cases-table { min-width: 34rem; }
+.table-scroll:focus-visible { outline: 2px solid var(--claw-500); outline-offset: 2px; }
 .cases-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .cases-table th { text-align: left; padding: .5rem .6rem; color: var(--text-dim); font-weight: 600; border-bottom: 1px solid var(--border); }
 .cases-table td { padding: .45rem .6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -1549,6 +1564,22 @@ textarea.auto-resize {
 .analytics-rec-link:hover { text-decoration: underline; }
 .analytics-chart-card { background: var(--surface-2, #1a1510); border: 1px solid var(--border); border-radius: 8px; padding: .85rem 1rem; }
 .analytics-chart-title { font-size: .8rem; font-weight: 600; color: var(--text-dim); margin-bottom: .5rem; text-transform: uppercase; letter-spacing: .04em; }
+/* #669. The numbers behind each chart, as a real table beside the canvas.
+   Clipped rather than `display: none` — a hidden element is dropped from the
+   accessibility tree along with everything in it, which is the very thing this
+   is here to avoid. */
+.chart-a11y-data {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
 .analytics-range { opacity: .6; }
 .grant-member-option:hover { background: var(--surface-2, #1a1510); }
 .analytics-range.active { opacity: 1; border-color: var(--claw-500); }
