@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const ItemImage = require('../../../models/ItemImage');
-const { checkAuth, checkGuildAccess, checkWriteRateLimit, checkAnyGuildAdmin } = require('../../lib/middleware');
+const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
+const { isActivityItemId } = require('../../../data/activityItems');
 
 // M4: Validate image files by magic bytes rather than trusting the client-supplied
 // MIME type. Prevents disguised file uploads (e.g. PHP named as image/jpeg).
@@ -87,28 +88,57 @@ router.delete('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, 
     }
 });
 
-// Serve a global activity item image (hunt/fish/mine)
-router.get('/item-image/activity/:itemId', async (req, res) => {
+// Activity item images (hunt/fish/mine) are per guild.
+//
+// They were not (#561). `ItemImage` had no guildId, the collection was keyed on
+// itemId alone, and the write routes were gated on "admin of *any* guild the bot
+// is in" — so an admin of one server could replace, or delete, the icons every
+// other server sees. The routes are guild-scoped now and carry the same
+// checkGuildAccess every other guild-scoped route does; the id in the path is
+// the guild whose images are being changed, so administering that guild is
+// exactly the permission required.
+//
+// Documents with `guildId: null` are the images uploaded before this change.
+// They are read as a fallback so nothing disappeared on deploy, and no route
+// writes them: an upload lands on the caller's own guild, a delete removes only
+// that guild's row. See migration 014.
+function invalidItemId(itemId) {
+    // The shape check first, so a wildly malformed id is rejected as malformed,
+    // then membership of the catalog the game actually renders. The catalog is
+    // also what bounds this collection: without it any id at all could be
+    // stored, at 512 KB and 60 writes a minute.
+    if (typeof itemId !== 'string' || !/^[a-z0-9_:-]{1,64}$/.test(itemId)) return 'Invalid itemId';
+    if (!isActivityItemId(itemId)) return 'Unknown activity item';
+    return null;
+}
+
+// Serve a guild's activity item image, falling back to the shared pre-#561 one.
+router.get('/item-image/activity/:guildId/:itemId', async (req, res) => {
+    const { guildId, itemId } = req.params;
     try {
-        const img = await ItemImage.findOne({ itemId: req.params.itemId });
+        const img = await ItemImage.findOne({ guildId, itemId })
+            || await ItemImage.findOne({ guildId: null, itemId });
         if (!img?.imageData?.length) return res.status(404).end();
         res.set('Content-Type', img.imageType || 'image/png');
+        // Per guild, so the cache key must be too: this URL carries the guild id,
+        // and the response varies by nothing else.
         res.set('Cache-Control', 'public, max-age=86400');
         res.send(img.imageData);
     } catch { res.status(500).end(); }
 });
 
-// Upload/replace a global activity item image (any guild admin)
-router.post('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, checkWriteRateLimit, uploadImage, async (req, res) => {
+// Upload/replace one guild's activity item image
+router.post('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, uploadImage, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });
-    const { itemId } = req.params;
-    if (!/^[a-z0-9_:-]{1,64}$/.test(itemId)) return res.status(400).json({ error: 'Invalid itemId' });
+    const { guildId, itemId } = req.params;
+    const idError = invalidItemId(itemId);
+    if (idError) return res.status(400).json({ error: idError });
     // M4: Verify file contents match a known image signature.
     const detectedType = detectImageType(req.file.buffer);
     if (!detectedType) return res.status(400).json({ error: 'Invalid image file: unrecognized format' });
     try {
         await ItemImage.findOneAndUpdate(
-            { itemId },
+            { guildId, itemId },
             { imageData: req.file.buffer, imageType: detectedType, updatedAt: new Date() },
             { upsert: true }
         );
@@ -119,10 +149,16 @@ router.post('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, check
     }
 });
 
-// Remove a global activity item image
-router.delete('/item-image/activity/:itemId', checkAuth, checkAnyGuildAdmin, checkWriteRateLimit, async (req, res) => {
+// Remove one guild's activity item image. The shared fallback is not reachable
+// from here: `guildId` is always the caller's own guild, never null.
+router.delete('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, checkWriteRateLimit, async (req, res) => {
+    const { guildId, itemId } = req.params;
+    // The POST validated the id and the DELETE did not, which is how a delete
+    // ends up matching on something the upload path could never have written.
+    const idError = invalidItemId(itemId);
+    if (idError) return res.status(400).json({ error: idError });
     try {
-        await ItemImage.deleteOne({ itemId: req.params.itemId });
+        await ItemImage.deleteOne({ guildId, itemId });
         res.json({ success: true });
     } catch (err) {
         console.error('Activity item image delete error:', err);

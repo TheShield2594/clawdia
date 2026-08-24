@@ -1124,6 +1124,13 @@ async function saveSettings(section) {
     }
 }
 
+// Activity images belong to this guild, not to every guild the bot is in (#561),
+// so the guild id is part of the path. `_guildId` is assigned further down this
+// file; both callers run on a click, long after the script has finished.
+function activityImageUrl(itemId) {
+    return '/api/item-image/activity/' + encodeURIComponent(_guildId) + '/' + encodeURIComponent(itemId);
+}
+
 async function uploadActivityImage(itemId, input) {
     const file = input.files[0];
     if (!file) return;
@@ -1132,7 +1139,7 @@ async function uploadActivityImage(itemId, input) {
     const fd = new FormData();
     fd.append('image', file);
     try {
-        const r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'POST', body: fd });
+        const r = await fetch(activityImageUrl(itemId), { method: 'POST', body: fd });
         if (r.ok) {
             const dataUrl = await new Promise(function(res) {
                 const reader = new FileReader();
@@ -1167,7 +1174,7 @@ async function removeActivityImage(itemId) {
     const ok = await showConfirm({ title: 'Remove image', body: 'Remove the image for this activity item?', okText: 'Remove' });
     if (!ok) return;
     try {
-        const r = await fetch('/api/item-image/activity/' + encodeURIComponent(itemId), { method: 'DELETE' });
+        const r = await fetch(activityImageUrl(itemId), { method: 'DELETE' });
         if (r.ok) {
             const imgEl = document.getElementById('gic-img-' + itemId);
             const emojiEl = document.getElementById('gic-emoji-' + itemId);

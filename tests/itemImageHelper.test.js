@@ -26,7 +26,7 @@ describe('getItemImageAttachment', () => {
         expect(result).not.toBeNull();
         expect(result.url).toBe('attachment://item-hunt_wooden_rifle.png');
         expect(result.attachment.name).toBe('item-hunt_wooden_rifle.png');
-        expect(ItemImage.findOne).toHaveBeenCalledWith({ itemId: 'hunt:wooden_rifle' });
+        expect(ItemImage.findOne).toHaveBeenCalledWith({ guildId: null, itemId: 'hunt:wooden_rifle' });
     });
 
     test('leaves plain itemIds untouched', async () => {
@@ -54,5 +54,32 @@ describe('getItemImageAttachment', () => {
 
         expect(result.url).toBe('attachment://item-fish_bamboo_rod.png');
         expect(ItemImage.findOne).not.toHaveBeenCalled();
+    });
+
+    // #561: activity images belong to a guild now. The guild's own row is what
+    // it must render — the shared pre-#561 row is a fallback, not a peer.
+    test('prefers the guild\'s own activity image over the shared one', async () => {
+        Guild.findOne.mockResolvedValue({ shop: [] });
+        ItemImage.findOne.mockImplementation(async ({ guildId }) => ({
+            imageData: Buffer.from(guildId === 'g1' ? 'guild-bytes' : 'shared-bytes'),
+            imageType: guildId === 'g1' ? 'image/png' : 'image/gif',
+        }));
+
+        const result = await getItemImageAttachment('mine:stone_pickaxe', 'g1');
+
+        expect(ItemImage.findOne).toHaveBeenCalledWith({ guildId: 'g1', itemId: 'mine:stone_pickaxe' });
+        expect(result.attachment.name).toBe('item-mine_stone_pickaxe.png');
+    });
+
+    test('falls back to the shared image when this guild has none of its own', async () => {
+        Guild.findOne.mockResolvedValue({ shop: [] });
+        ItemImage.findOne.mockImplementation(async ({ guildId }) =>
+            guildId === null ? { imageData: Buffer.from('shared-bytes'), imageType: 'image/gif' } : null);
+
+        const result = await getItemImageAttachment('mine:stone_pickaxe', 'g1');
+
+        expect(ItemImage.findOne).toHaveBeenNthCalledWith(1, { guildId: 'g1', itemId: 'mine:stone_pickaxe' });
+        expect(ItemImage.findOne).toHaveBeenNthCalledWith(2, { guildId: null, itemId: 'mine:stone_pickaxe' });
+        expect(result.attachment.name).toBe('item-mine_stone_pickaxe.gif');
     });
 });

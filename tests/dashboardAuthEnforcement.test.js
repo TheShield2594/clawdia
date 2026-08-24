@@ -18,7 +18,6 @@ const {
     checkAuth,
     checkGuildAccess,
     checkCsrfOrigin,
-    checkAnyGuildAdmin,
 } = require('../src/dashboard/lib/middleware');
 const { forgetLiveGuildAccess } = require('../src/dashboard/lib/permissions');
 
@@ -217,48 +216,6 @@ describe('checkGuildAccess', () => {
     });
 });
 
-describe('checkAnyGuildAdmin', () => {
-    test('rejects an unauthenticated caller with 401', () => {
-        const res = makeRes();
-        const next = jest.fn();
-
-        checkAnyGuildAdmin(makeReq({ authenticated: false }), res, next);
-
-        expect(next).not.toHaveBeenCalled();
-        expect(res.statusCode).toBe(401);
-    });
-
-    test('rejects a signed-in user who administers nothing', () => {
-        const res = makeRes();
-        const next = jest.fn();
-
-        checkAnyGuildAdmin(makeReq({ guilds: [memberOf('g1')], botGuilds: ['g1'] }), res, next);
-
-        expect(next).not.toHaveBeenCalled();
-        expect(res.statusCode).toBe(403);
-        expect(res.body).toEqual({ error: 'Forbidden' });
-    });
-
-    test('rejects an admin whose only guilds are ones the bot is absent from', () => {
-        const res = makeRes();
-        const next = jest.fn();
-
-        checkAnyGuildAdmin(makeReq({ guilds: [adminOf('g1')], botGuilds: [] }), res, next);
-
-        expect(next).not.toHaveBeenCalled();
-        expect(res.statusCode).toBe(403);
-    });
-
-    test('admits an admin of at least one shared guild', () => {
-        const res = makeRes();
-        const next = jest.fn();
-
-        checkAnyGuildAdmin(makeReq({ guilds: [adminOf('g1')], botGuilds: ['g1'] }), res, next);
-
-        expect(next).toHaveBeenCalledTimes(1);
-    });
-});
-
 describe('checkCsrfOrigin', () => {
     const DASHBOARD = 'https://dash.example.com';
     let saved;
@@ -395,7 +352,7 @@ describe('every API route mounts its guards', () => {
     // saying why, not slipping past a wildcard.
     const PUBLIC_ROUTES = new Set([
         'itemImages.js GET /item-image/shop/:guildId/:itemId',
-        'itemImages.js GET /item-image/activity/:itemId',
+        'itemImages.js GET /item-image/activity/:guildId/:itemId',
     ]);
 
     const guarded = routes.filter(r => !PUBLIC_ROUTES.has(label(r)));

@@ -6,9 +6,7 @@ const DEFAULT_JOBS = require('../../data/defaultJobs');
 const DEFAULT_TIERS = require('../../data/defaultTiers');
 const { ACHIEVEMENTS } = require('../../data/achievements');
 const { ensureDefaultShopItems } = require('../../data/defaultShopItems');
-const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES } = require('../../data/huntData');
-const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES } = require('../../data/fishData');
-const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES } = require('../../data/mineData');
+const { ACTIVITY_ITEMS } = require('../../data/activityItems');
 const { REGION_LIST } = require('../../data/exploreData');
 const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 
@@ -131,33 +129,28 @@ async function buildGuildSettingsLocals(req) {
     }
 
     // Pre-load the set of activity item images that actually exist so the
-    // template can skip rendering <img> tags that would otherwise 404.
-    const uploadedImageDocs = await ItemImage.find({}, { itemId: 1 }).lean();
+    // template can skip rendering <img> tags that would otherwise 404. Scoped to
+    // this guild plus the shared pre-#561 rows, which is exactly what the image
+    // route will serve back for these ids.
+    const uploadedImageDocs = await ItemImage.find(
+        { guildId: { $in: [guildId, null] } },
+        { itemId: 1 },
+    ).lean();
     const uploadedImageIds = new Set(uploadedImageDocs.map(d => d.itemId));
 
-    const toItem = (ns, item, idField = 'id') => {
-        const id = `${ns}:${item[idField]}`;
-        return { id, label: item.name, emoji: item.emoji || '📦', hasImage: uploadedImageIds.has(id) };
-    };
+    // The item list itself comes from data/activityItems.js, which is also what
+    // the upload route validates against — one catalog, so the panel cannot
+    // offer an id the route would refuse.
+    const withImageFlags = groups => Object.fromEntries(
+        Object.entries(groups).map(([group, items]) => [
+            group,
+            items.map(item => ({ ...item, hasImage: uploadedImageIds.has(item.id) })),
+        ])
+    );
 
-    const huntItems = {
-        weapons:     WEAPON_TIERS.map(w => toItem('hunt', w, 'slug')),
-        upgrades:    Object.values(WEAPON_UPGRADES).map(u => toItem('hunt', u)),
-        ammo:        AMMO_PACKS.map(a => toItem('hunt', a)),
-        consumables: Object.values(HUNT_CONSUMABLES).map(c => toItem('hunt', c))
-    };
-    const fishItems = {
-        rods:        ROD_TIERS.map(r => toItem('fish', r, 'slug')),
-        upgrades:    Object.values(ROD_UPGRADES).map(u => toItem('fish', u)),
-        bait:        BAIT_PACKS.map(b => toItem('fish', b)),
-        consumables: Object.values(FISH_CONSUMABLES).map(c => toItem('fish', c))
-    };
-    const mineItems = {
-        pickaxes:    PICKAXE_TIERS.map(p => toItem('mine', p, 'slug')),
-        upgrades:    Object.values(PICKAXE_UPGRADES).map(u => toItem('mine', u)),
-        blasts:      BLAST_PACKS.map(b => toItem('mine', b)),
-        consumables: Object.values(MINE_CONSUMABLES).map(c => toItem('mine', c))
-    };
+    const huntItems = withImageFlags(ACTIVITY_ITEMS.hunt);
+    const fishItems = withImageFlags(ACTIVITY_ITEMS.fish);
+    const mineItems = withImageFlags(ACTIVITY_ITEMS.mine);
 
     // Canonical exploration region catalog for the dashboard panel —
     // derived from exploreData so the template never drifts from the game data.

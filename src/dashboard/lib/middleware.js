@@ -109,11 +109,10 @@ function checkCsrfOrigin(req, res, next) {
     return reject();
 }
 
-function checkAnyGuildAdmin(req, res, next) {
-    if (!req.isAuthenticated()) return res.status(401).json({ error: 'Unauthorized' });
-    const adminGuilds = req.user.guilds.filter(g => hasManagePermission(g) && req.bot.hasGuild(g.id));
-    if (!adminGuilds.length) return res.status(403).json({ error: 'Forbidden' });
-    next();
-}
+// `checkAnyGuildAdmin` — "an admin of any guild the bot is in" — used to live
+// here, and the two routes that used it were the cross-tenant write in #561.
+// It is gone with them: on a multi-tenant dashboard there is no request whose
+// correct authorization is "administers something, somewhere", and leaving the
+// helper in place is an invitation for the next route to reach for it.
 
-module.exports = { checkAuth, checkGuildAccess, checkWriteRateLimit, checkReadRateLimit, checkCsrfOrigin, checkAnyGuildAdmin };
+module.exports = { checkAuth, checkGuildAccess, checkWriteRateLimit, checkReadRateLimit, checkCsrfOrigin };
