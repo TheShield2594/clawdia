@@ -160,6 +160,26 @@ const TREASURE_TIERS = [
     { tier: 'legendary', weight: 2,  min: 8_000, max: 15_000, relicChance: 1.00, stars: '⭐⭐⭐⭐⭐' },
 ];
 
+// What a treasure find yields in fieldcraft materials (#753), by treasure tier.
+//
+// `tiers` are the MATERIAL_RARITY tiers a drop may roll, picked uniformly from
+// whichever of them the catalog actually has materials for. `chance` is how
+// often a treasure of that tier carries one at all — a common treasure usually
+// does not, which keeps the tier-1 pile from becoming the only thing a player
+// ever sees while still letting a patient explorer stock up.
+//
+// Deliberately tied to treasure and nothing else. Exploration's other event
+// types already pay in Explorer XP, lore and secrets; hanging materials off all
+// of them would make the drop rate a function of the region's event weights,
+// which admins can shift from the dashboard.
+const TREASURE_MATERIALS = {
+    common:    { chance: 0.35, tiers: [1] },
+    uncommon:  { chance: 0.50, tiers: [1, 2] },
+    rare:      { chance: 0.70, tiers: [2, 3] },
+    epic:      { chance: 0.85, tiers: [3, 4] },
+    legendary: { chance: 1.00, tiers: [4, 5] },
+};
+
 const TIER_COLORS = {
     common:    '#9e9e9e',
     uncommon:  '#4caf50',
@@ -1082,6 +1102,7 @@ module.exports = {
     MAX_EXPLORER_PRESTIGE: EXPLORER_PRESTIGE.length - 1,
     EVENT_XP,
     TREASURE_TIERS,
+    TREASURE_MATERIALS,
     TIER_COLORS,
     REGIONS,
     REGION_LIST,

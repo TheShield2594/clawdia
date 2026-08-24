@@ -33,6 +33,9 @@ describe('rare pet sources', () => {
         expect(rarePetForSource('hunt').petId).toBe('eagle');
         expect(rarePetForSource('fish').petId).toBe('shark');
         expect(rarePetForSource('mine').petId).toBe('crystal_fox');
+        // #753: exploration was the one grind system with no companion, because
+        // it produced nothing a pet could eat. It has one now.
+        expect(rarePetForSource('explore').petId).toBe('lantern_owl');
         expect(rarePetForSource('nonsense')).toBeNull();
     });
 });

@@ -8,11 +8,16 @@ const ACHIEVEMENT_BY_ID = Object.fromEntries(ACHIEVEMENTS.map(a => [a.id, a]));
 
 const DIVIDER = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
+// Every grind profile that keeps a material pile. `exploration` joined them
+// with the fieldcraft materials from #753; leaving it out here would have made
+// the "N / total materials" line unreachable by eleven, since the denominator
+// counts the whole MATERIAL_RARITY catalog.
+const MATERIAL_TRACKS = ['hunt', 'fishing', 'mining', 'exploration'];
+
 function collectMaterials(user) {
     const results = [];
-    const tracks = ['hunt', 'fishing', 'mining'];
 
-    for (const track of tracks) {
+    for (const track of MATERIAL_TRACKS) {
         const mats = user[track]?.materials ?? {};
         for (const [key, qty] of Object.entries(mats)) {
             if (qty > 0 && MATERIAL_RARITY[key]) {
@@ -35,9 +40,8 @@ function topAchievements(user) {
 }
 
 function countMaterials(user) {
-    const tracks = ['hunt', 'fishing', 'mining'];
     let total = 0;
-    for (const track of tracks) {
+    for (const track of MATERIAL_TRACKS) {
         const mats = user[track]?.materials ?? {};
         for (const qty of Object.values(mats)) if (qty > 0) total++;
     }
@@ -91,7 +95,7 @@ module.exports = {
                     .setThumbnail(target.displayAvatarURL({ dynamic: true }))
                     .setDescription(
                         'Nothing remarkable yet.\n' +
-                        'Keep hunting, fishing, and mining.\n' +
+                        'Keep hunting, fishing, mining, and exploring.\n' +
                         'Your showcase fills up over time.'
                     )
                     .setTimestamp();

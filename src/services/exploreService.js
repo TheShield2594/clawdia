@@ -9,12 +9,14 @@ const {
     PRESTIGE_TITLES,
     EVENT_XP,
     TREASURE_TIERS,
+    TREASURE_MATERIALS,
     REGIONS,
     REGION_LIST,
     RELIC_INDEX,
     QUIET_LINES,
 } = require('../data/exploreData');
 const { getExploreWayfinderStaminaBonus } = require('./synergyService');
+const { MATERIAL_RARITY } = require('../data/materialRarity');
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +60,11 @@ function ensureExploreData(user) {
     seedArray('unlockedRegions');
     seedArray('regions');
     seedArray('journal');
+    // Fieldcraft materials, keyed by material id (#753). Same shape as
+    // hunt/fishing/mining hold, so /pet feed and the inventory tabs read it the
+    // same way. GrindProfile.data is schemaless, so this needs no migration —
+    // an existing explorer picks it up on their next expedition.
+    if (!e.materials || typeof e.materials !== 'object') { e.materials = {}; dirty = true; }
 
     if (!e.unlockedRegions.includes('whispering_forest')) {
         e.unlockedRegions.push('whispering_forest');
@@ -746,6 +753,11 @@ function finishAsTreasure(user, region, progress, result, coinMult, { fallback =
         }
     }
 
+    // Fieldcraft materials, tier-matched to the treasure (#753). Exploration
+    // produced nothing feedable before this, which is the whole reason it had
+    // no rare companion.
+    result.material = grantTreasureMaterial(user, tier.tier);
+
     countTowardPity(user, result);
     finalizeStats(user, region, progress, result, isRegionFullyCharted(region, progress));
     user.markModified('exploration');
@@ -846,6 +858,86 @@ function grantXp(user, amount, result = null) {
         };
     }
     return amount;
+}
+
+// The fieldcraft materials a treasure of each tier can drop, resolved once at
+// load rather than filtered per expedition. Keyed by material tier.
+const EXPLORE_MATERIALS_BY_TIER = Object.entries(MATERIAL_RARITY)
+    .filter(([, data]) => data.source === 'explore')
+    .reduce((byTier, [id, data]) => {
+        (byTier[data.tier] ??= []).push(id);
+        return byTier;
+    }, {});
+
+/**
+ * Roll the fieldcraft material a treasure carries, if any (#753).
+ *
+ * Pure, and returns the material id or null, so the caller decides what to do
+ * with it and a test can drive the roll without a user document.
+ *
+ * A tier the catalog has no material for is skipped rather than producing an
+ * undefined id — that is how a table entry naming a tier nobody wrote materials
+ * for would otherwise reach the inventory as a blank row.
+ *
+ * The tier is drawn first, uniformly among the eligible ones, and only then a
+ * material within it. Flattening the tiers into one pool and drawing from that
+ * would weight each tier by how many materials happen to be written at it: an
+ * uncommon treasure names tiers 1 and 2, and with three tier-1 materials
+ * against two tier-2 ones it would land tier 1 six times in ten for no reason
+ * anybody chose. Writing a twelfth material would then quietly move the drop
+ * rates. TREASURE_MATERIALS is meant to be the only balance lever here, and
+ * this is what keeps it the only one.
+ */
+function rollTreasureMaterial(treasureTier, rng = Math.random) {
+    const table = TREASURE_MATERIALS[treasureTier];
+    if (!table) return null;
+    if (rng() >= table.chance) return null;
+
+    const eligible = table.tiers.filter(tier => (EXPLORE_MATERIALS_BY_TIER[tier] ?? []).length > 0);
+    if (!eligible.length) return null;
+
+    const tier = eligible[Math.floor(rng() * eligible.length)] ?? eligible[eligible.length - 1];
+    const materials = EXPLORE_MATERIALS_BY_TIER[tier];
+    return materials[Math.floor(rng() * materials.length)] ?? null;
+}
+
+/**
+ * Roll a material for this treasure and add it to the explorer's pile.
+ * Returns the granted material's id and catalog entry, or null.
+ */
+function grantTreasureMaterial(user, treasureTier, rng = Math.random) {
+    const id = rollTreasureMaterial(treasureTier, rng);
+    if (!id) return null;
+
+    const e = user.exploration;
+    if (!e.materials || typeof e.materials !== 'object') e.materials = {};
+    e.materials[id] = (e.materials[id] ?? 0) + 1;
+    return { id, ...MATERIAL_RARITY[id] };
+}
+
+/**
+ * Adds the Lantern Owl's Explorer XP passive on top of whatever the expedition
+ * already granted (#753).
+ *
+ * Applied after the fact rather than threaded through the eleven grantXp call
+ * sites, which is also what lets it cover XP granted *after* executeExplore
+ * returns — the encounter the player is still deciding on, and the survey
+ * bonus. Level-ups from the bonus merge into `result.explorerLevelUp` the same
+ * way grantXp merges its own, so a level crossed on the bonus alone is still
+ * announced.
+ *
+ * @returns {number} the bonus XP granted, 0 when there was none
+ */
+function applyExploreXpBonus(user, result, bonusPct) {
+    const base = result?.xp ?? 0;
+    if (!(bonusPct > 0) || !(base > 0)) return 0;
+
+    const bonus = Math.round(base * (bonusPct / 100));
+    if (bonus <= 0) return 0;
+
+    result.petXp = (result.petXp ?? 0) + bonus;
+    result.xp = base + grantXp(user, bonus, result);
+    return bonus;
 }
 
 function addRelicToInventory(user, relic) {
@@ -1005,6 +1097,10 @@ module.exports = {
     encounterLossBand,
     getEncounterStakes,
     addJournalEntry,
+    applyExploreXpBonus,
+    rollTreasureMaterial,
+    grantTreasureMaterial,
+    EXPLORE_MATERIALS_BY_TIER,
     regionCompletion,
     renderMap,
     formatMs,

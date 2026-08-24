@@ -14,6 +14,7 @@ const {
     FOOTER_LINES, INJURY_LINES,
     EXPLORER_PRESTIGE, PRESTIGE_BADGES, MAX_EXPLORER_LEVEL, MAX_EXPLORER_PRESTIGE,
 } = require('../../data/exploreData');
+const { TIER_STARS } = require('../../data/materialRarity');
 const { fitDescription, chunkByLength, EMBED_LIMITS } = require('../../utils/embedFields');
 const { paginate } = require('../../utils/paginator');
 const {
@@ -38,6 +39,7 @@ const {
     canPrestige,
     getSecretOdds,
     executeExplore,
+    applyExploreXpBonus,
     resolveEncounter,
     getEncounterStakes,
     addJournalEntry,
@@ -46,6 +48,7 @@ const {
     randomFrom,
     formatMs,
 } = require('../../services/exploreService');
+const { getTotalBonus, tryGrantRarePet } = require('../../services/petService');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { ensureQuests, onExplore, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplete } = require('../../services/questService');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
@@ -372,6 +375,17 @@ async function handleGo(interaction) {
         result.featured = isFeatured;
         const firstVisit = result.firstVisit;
 
+        // Rare companions are found, not bought: a legendary treasure is the
+        // only thing that turns the owl up. Rolled here, with the expedition,
+        // so it rides the same save as the treasure that produced it. Rolling
+        // it after the encounter instead would have left the owl riding the
+        // *second* save, and a failure there loses a 4%-of-legendary drop whose
+        // treasure has already been committed by the first.
+        const rarePetDrop = result.treasureTier
+            ? tryGrantRarePet(user, 'explore', result.treasureTier.tier)
+            : null;
+        if (rarePetDrop) user.markModified('pets');
+
         // Commit stamina spend + cooldown timestamp now, before the (up to 20s)
         // encounter prompt below. Once this lands the expedition is real, so the
         // cooldown slot is earned and must not be handed back on a later failure.
@@ -494,6 +508,12 @@ async function handleGo(interaction) {
             eventDrop = { currencyId, amount };
         }
 
+        // Lantern Owl: +15% Explorer XP (only while its hunger holds). Applied
+        // here rather than threaded through the eleven grantXp call sites, and
+        // after the encounter has resolved, so it covers every XP the expedition
+        // ended up granting — including the survey bonus and the encounter.
+        applyExploreXpBonus(user, result, getTotalBonus(user.pets || [], 'explore_xp'));
+
         // Guild leveling XP mirrors half the explorer XP
         let mainXp = Math.floor((result.xp ?? 0) * 0.5 * getEventXpMultiplier(guildSettings));
         let leveledUp = false;
@@ -585,6 +605,16 @@ async function handleGo(interaction) {
 
         // ── Result embed ──────────────────────────────────────────────────────────
         const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, hourlyLeader);
+
+        if (rarePetDrop) {
+            embed.addFields({
+                name: `${rarePetDrop.emoji} A Rare Companion Appears!`,
+                value: `A **${rarePetDrop.name}** came down out of the canopy and followed you back. It joined your pets at full hunger.\n`
+                     + `Passive: **+${rarePetDrop.bonusPct}% ${rarePetDrop.bonusType.replace(/_/g, ' ')}** · Favourite food: \`${rarePetDrop.favoriteMaterial}\`\n`
+                     + `*Name it with \`/pet rename\` and keep it fed with \`/pet feed\`.*`,
+                inline: false,
+            });
+        }
 
         if (payoutOwed > 0) {
             embed.addFields({
@@ -723,6 +753,13 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
                     `> It's in your \`/inventory\` now, and in \`/explore relics\`, where it earns its keep.`,
                 );
             }
+            if (result.material) {
+                lines.push(
+                    '',
+                    `${result.material.emoji} **Fieldcraft: ${result.material.label}** — ${TIER_STARS[result.material.tier]}`,
+                    `> Packed away with the rest of your kit. \`/inventory\` has it under **Explore**, and a companion will eat it.`,
+                );
+            }
             break;
         }
         case 'trap':
@@ -777,7 +814,7 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
         gains.push(`*(trimmed from ${currency}${result.grossPayout.toLocaleString()} — daily cap)*`);
     }
     if (result.penalty > 0) gains.push(`−${currency}${result.penalty.toLocaleString()}`);
-    if (result.xp > 0)      gains.push(`+${result.xp} Explorer XP`);
+    if (result.xp > 0)      gains.push(`+${result.xp} Explorer XP${result.petXp > 0 ? ` *(🦉 +${result.petXp})*` : ''}`);
     if (mainXp > 0)         gains.push(`+${mainXp} XP`);
     if (eventDrop) {
         const def = Object.values(SEASONAL_EVENTS).find(s => s.currency?.id === eventDrop.currencyId);

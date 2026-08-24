@@ -64,7 +64,28 @@ const MATERIAL_RARITY = {
     zenith_essence:    { tier: 5, emoji: '⭐', label: 'Zenith Essence',      source: 'mine' },
     primordial_ash:    { tier: 5, emoji: '🌋', label: 'Primordial Ash',      source: 'mine' },
     stardust:          { tier: 5, emoji: '✨', label: 'Stardust',            source: 'mine' },
-    void_essence:      { tier: 5, emoji: '🌑', label: 'Void Essence',        source: 'mine' }
+    void_essence:      { tier: 5, emoji: '🌑', label: 'Void Essence',        source: 'mine' },
+
+    // Exploration materials (#753). Exploration used to produce coins, Explorer
+    // XP and relics and nothing else, which is why it was the one grind system
+    // with no rare companion: a pet's favourite food has to resolve here to be
+    // feedable at all, and relics are the wrong shape to point one at — their
+    // standing payout bonus counts *distinct* relics, so eating a duplicate
+    // would delete part of that bonus.
+    //
+    // The theme is fieldcraft rather than carcass or ore: what a surveyor comes
+    // back with. They drop from treasure finds, tier-matched to the treasure.
+    survey_chalk:      { tier: 1, emoji: '🖍️', label: 'Survey Chalk',        source: 'explore' },
+    pressed_fern:      { tier: 1, emoji: '🌿', label: 'Pressed Fern',         source: 'explore' },
+    frayed_map_corner: { tier: 1, emoji: '🗒️', label: 'Frayed Map Corner',    source: 'explore' },
+    waypoint_flint:    { tier: 2, emoji: '🪨', label: 'Waypoint Flint',       source: 'explore' },
+    compass_shard:     { tier: 2, emoji: '🧭', label: 'Compass Shard',        source: 'explore' },
+    charted_vellum:    { tier: 3, emoji: '📜', label: 'Charted Vellum',       source: 'explore' },
+    surveyors_lens:    { tier: 3, emoji: '🔎', label: 'Surveyor\'s Lens',     source: 'explore' },
+    lantern_glass:     { tier: 4, emoji: '🏮', label: 'Lantern Glass',        source: 'explore' },
+    trailwardens_knot: { tier: 4, emoji: '🪢', label: 'Trailwarden\'s Knot',  source: 'explore' },
+    wayfarers_seal:    { tier: 5, emoji: '🕯️', label: 'Wayfarer\'s Seal',     source: 'explore' },
+    cartographers_ink: { tier: 5, emoji: '🖋️', label: 'Cartographer\'s Ink',  source: 'explore' }
 };
 
 // Tier 6 is the `event` rarity that hunt, fish and mine all roll (Thunderbird,
