@@ -23,6 +23,7 @@ const { getActiveSynergies } = require('../../../services/synergyService');
 const GrindProfile = require('../../../models/GrindProfile');
 const { MAX_PRESTIGE, PRESTIGE_BADGES, PRESTIGE_LABELS } = require('./shared');
 const { buildXpBar, formatBonuses } = require('./embeds');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PROFILE (was /huntprofile)
@@ -283,7 +284,7 @@ async function executePrestige(interaction) {
     const nextBonuses     = PRESTIGE_BONUSES[nextPrestige];
 
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle('⚠️ Prestige Confirmation')
         .setDescription(
             `You are about to prestige from **P${currentPrestige}** → **P${nextPrestige}** (${PRESTIGE_LABELS[nextPrestige]}).\n\n` +
@@ -352,7 +353,7 @@ async function executePrestige(interaction) {
         checkGrandPrestige(i.client, freshUser, interaction.guild, interaction.guildId).catch(() => null);
 
         const resultEmbed = new EmbedBuilder()
-            .setColor('#f39c12')
+            .setColor(COLORS.WARN)
             .setTitle(`✨ Prestige ${fh.prestige} Achieved!`)
             .setDescription(
                 `You are now **${PRESTIGE_LABELS[fh.prestige]}**!\n\n` +
@@ -442,7 +443,7 @@ async function executeRecords(interaction) {
     }
 
     const embed = new EmbedBuilder()
-        .setColor('#c0392b')
+        .setColor(COLORS.ERROR)
         .setTitle('🏹 Server Hunting Records')
         .setDescription('The all-time boards. The hourly leader resets every hour — these never do.')
         .setFooter({ text: 'Records never reset · Your own numbers live in /hunt profile' })
@@ -485,7 +486,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
     if (announceChannelId && client) {
         const { EmbedBuilder } = require('discord.js');
         const broadcastEmbed = new EmbedBuilder()
-            .setColor('#FFD700')
+            .setColor(COLORS.PRIZE)
             .setTitle('⚜️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜️')
             .setDescription(
                 `**GRAND MASTER ACHIEVED!**\n\n` +

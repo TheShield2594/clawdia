@@ -9,6 +9,7 @@ const { getStreakMultiplier, MILESTONES } = require('../../utils/streakMultiplie
 const { badgeFor, titleForExactRank } = require('../../utils/prestige');
 const { getActiveSynergies } = require('../../services/synergyService');
 const { isPetActive } = require('../../services/petService');
+const COLORS = require('../../utils/embedColors');
 
 const PRESTIGE_BADGES = ['', '🥉', '🥈', '🥇', '🏆', '💎'];
 
@@ -200,7 +201,7 @@ module.exports = {
 
             // ── Build embed ───────────────────────────────────────────────────
             const embed = new EmbedBuilder()
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle(`${targetUser.username}'s Profile`)
                 .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
                 .addFields(

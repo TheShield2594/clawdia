@@ -2,6 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags
 const DmSession = require('../models/DmSession');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 const Guild = require('../models/Guild');
+const COLORS = require('../utils/embedColors');
 
 const MAX_PLAYERS = 6;
 const MAX_STORY_LOG = 20;
@@ -108,7 +109,7 @@ async function joinSession(interaction) {
 
     const embed = new EmbedBuilder()
         .setTitle('🧙 New Adventurer Joined!')
-        .setColor('#4169e1')
+        .setColor(COLORS.INFO)
         .setDescription(
             `**${characterName}** (${characterClass}) has joined the party!\n` +
             `HP: **${hp}** | Inventory: ${inventory.join(', ')}\n\n` +
@@ -357,7 +358,7 @@ async function stopSession(interaction) {
 
     const embed = new EmbedBuilder()
         .setTitle('🏁 Session Ended')
-        .setColor('#808080')
+        .setColor(COLORS.NEUTRAL)
         .setDescription(`The DM session has been ended by **${user.displayName || user.username}**.\n\nStory entries recorded: **${session.storyLog.length}**`)
         .setFooter({ text: 'Thanks for playing!' });
 
@@ -391,7 +392,7 @@ function buildStatCardEmbed(session) {
 
     return new EmbedBuilder()
         .setTitle('🗡️ Party Status')
-        .setColor('#2f3136')
+        .setColor(COLORS.NEUTRAL)
         .addFields(fields)
         .setFooter({ text: 'Updated after each action' })
         .setTimestamp();

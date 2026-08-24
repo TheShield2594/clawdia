@@ -11,6 +11,7 @@ const { addEffect, resolveEffectType } = require('../../services/effectsService'
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { paginate, chunkArray } = require('../../utils/paginator');
 const { fitDescription, truncate } = require('../../utils/embedFields');
+const COLORS = require('../../utils/embedColors');
 
 // Items that grant effects when purchased (grant via effectsService)
 const EFFECT_ITEMS = new Set(['coin_booster_2x', 'xp_booster_2x', 'lucky_charm', 'lucky_streak', 'salary_raise']);
@@ -69,7 +70,7 @@ async function handleBalance(interaction, guildSettings, currency) {
 
     return interaction.reply({
         embeds: [new EmbedBuilder()
-            .setColor('#5865F2')
+            .setColor(COLORS.INFO)
             .setTitle(`${currency.emoji} Event Currency Balance`)
             .setDescription(`You have **${balance.toLocaleString()} ${currency.name}** ${currency.emoji}`)
             .setFooter({ text: 'Earn more through event mini-games and activities!' })

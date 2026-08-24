@@ -22,6 +22,7 @@ const { randomFrom, HUNT_EMPTY_LINES } = require('../../../utils/copyLines');
 const { buildPityStreakField, PITY_COPY } = require('../../../utils/pityBonus');
 const { FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
 const { WILDERNESS_YIELD_BONUS } = require('./shared');
+const COLORS = require('../../../utils/embedColors');
 
 function buildHuntEmbed(result, user, zone, weapon, currency, _discordUser) {
     const h = user.hunt;
@@ -137,7 +138,7 @@ function buildHuntEmbed(result, user, zone, weapon, currency, _discordUser) {
 
     const { failure, xpEarned, levelUp, animal: failAnimal, traits: failTraits, traitEffects: failTraitEffects } = result;
     const embed = new EmbedBuilder()
-        .setColor('#e74c3c')
+        .setColor(COLORS.ERROR)
         .setTitle(buildFailureTitle(failure.severity.id))
         .setDescription(failAnimal ? `*Encountered: ${failAnimal.emoji} **${failAnimal.name}***\n${failure.message}` : `*${failure.severity.id === 'clean_miss' ? randomFrom(HUNT_EMPTY_LINES) : failure.message}*`)
         .addFields(

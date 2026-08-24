@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../services/moderationLogService');
 const { hierarchyDenial } = require('../../utils/moderationHierarchy');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -49,7 +50,7 @@ module.exports = {
             await member.timeout(duration * 60 * 1000, reason);
 
             const embed = new EmbedBuilder()
-                .setColor('#ff6600')
+                .setColor(COLORS.WARN)
                 .setTitle('User Muted')
                 .setDescription(`**${user.globalName ?? user.username}** has been muted.`)
                 .addFields(

@@ -4,6 +4,7 @@ const Guild = require('../models/Guild');
 const { getCompletion, resolveProviderConfig } = require('./aiService');
 const { runJob } = require('../utils/jobRunner');
 const { EmbedBuilder } = require('discord.js');
+const COLORS = require('../utils/embedColors');
 
 const MAX_TRANSCRIPT_CHARS = 6000;
 const DIGEST_LOOKBACK_MS = 24 * 60 * 60 * 1000;
@@ -137,7 +138,7 @@ async function runDailyDigest(guildSettings, client) {
         const embed = new EmbedBuilder()
             .setTitle('Daily Server Digest')
             .setDescription('No activity in the last 24 hours.')
-            .setColor(0x5865F2)
+            .setColor(COLORS.INFO)
             .setTimestamp();
         await dstChannel.send({ embeds: [embed] });
         guildSettings.ai.dailyDigest.lastRun = new Date();
@@ -170,7 +171,7 @@ async function runDailyDigest(guildSettings, client) {
         .setTitle('Daily Server Digest')
         .setDescription(summary?.slice(0, 4096) || '(no summary generated)')
         .setFooter({ text: date })
-        .setColor(0x5865F2)
+        .setColor(COLORS.INFO)
         .setTimestamp();
 
     await dstChannel.send({ embeds: [embed] });

@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { logTransaction } = require('../../utils/logTransaction');
+const COLORS = require('../../utils/embedColors');
 
 const TRAP_COST     = 6_000;
 const TRAP_DURATION = 12 * 3_600_000; // 12 hours
@@ -100,7 +101,7 @@ module.exports = {
         });
 
         const embed = new EmbedBuilder()
-            .setColor('#f39c12')
+            .setColor(COLORS.WARN)
             .setTitle('🪤 Trap Set!')
             .setDescription(
                 `You've armed a **Tripwire** on your wallet.\n\n` +

@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const axios = require('axios');
 const { checkImageRateLimit } = require('../../utils/imageRateLimit');
+const COLORS = require('../../utils/embedColors');
 
 const TEMPLATES = [
     { name: 'Drake',                  value: '181913649' },
@@ -108,7 +109,7 @@ module.exports = {
 function buildEmbed(interaction, url, templateId) {
     const name = TEMPLATES.find(t => t.value === templateId)?.name || 'Meme';
     return new EmbedBuilder()
-        .setColor('#ff6b6b')
+        .setColor(COLORS.ERROR)
         .setTitle(`🎭 ${name}`)
         .setImage(url)
         .setFooter({

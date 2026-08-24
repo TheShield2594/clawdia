@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { closeCase, getCase } = require('../../services/caseService');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -29,7 +30,7 @@ module.exports = {
         await closeCase(interaction.guild.id, caseId, interaction.user.id, resolution);
 
         const embed = new EmbedBuilder()
-            .setColor('#00ff00')
+            .setColor(COLORS.SUCCESS)
             .setTitle(`Case #${caseId} Closed`)
             .addFields(
                 { name: 'Target', value: `<@${modCase.targetUserId}>`, inline: true },

@@ -13,6 +13,7 @@
 
 const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
+const COLORS = require('../utils/embedColors');
 
 // Ended giveaways are kept around so `/giveaway reroll` still works, but not
 // forever: each one carries a full entrant list, and nothing else prunes the
@@ -114,7 +115,7 @@ async function endGiveaway(client, guildSettings, ga) {
         : 'No valid entrants';
 
     const endEmbed = new EmbedBuilder()
-        .setColor('#ff0000')
+        .setColor(COLORS.NEUTRAL)
         .setTitle('🎉 GIVEAWAY ENDED 🎉')
         .setDescription(`**Prize:** ${ga.prize}\n\n**Winner${winners.length !== 1 ? 's' : ''}:** ${winnerText}`)
         .addFields({ name: 'Hosted by', value: `<@${ga.hostId}>` })

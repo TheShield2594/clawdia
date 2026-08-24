@@ -10,6 +10,7 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
+const COLORS = require('../../utils/embedColors');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b1.png';
 const MIN_BET = 10;
@@ -137,7 +138,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
             const embed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle(phaseTitle(hits, i))
                 .setDescription(formatKenoGrid(picked, drawn, i))
                 .addFields(
@@ -164,7 +165,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
             const midEmbed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('🎱 Halfway — Drawing 6 of 10…')
                 .setDescription(formatKenoGrid(picked, drawn, 5))
                 .addFields(
@@ -182,7 +183,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
             const embed = new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle(phaseTitle(hits, i))
                 .setDescription(formatKenoGrid(picked, drawn, i))
                 .addFields(
@@ -248,7 +249,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         if (matches === 5 && !animState.skipped) {
             await delay(400);
             const stage1 = new EmbedBuilder()
-                .setColor('#FFD700')
+                .setColor(COLORS.PRIZE)
                 .setTitle('🎱 Wait…')
                 .setDescription('> Counting your matches…')
                 .setAuthor(embedAuthor(interaction));
@@ -256,7 +257,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
             await delay(900);
 
             const stage2 = new EmbedBuilder()
-                .setColor('#FFD700')
+                .setColor(COLORS.PRIZE)
                 .setTitle('🎱 1… 2… 3… 4…')
                 .setDescription('> 🟨🟨🟨🟨 — one more…')
                 .setAuthor(embedAuthor(interaction));
@@ -265,7 +266,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
         } else if (matches === 4 && !animState.skipped) {
             await delay(400);
             const stage1 = new EmbedBuilder()
-                .setColor('#00FF88')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('🎱 4 Matches…')
                 .setDescription('> 🟨🟨🟨🟨 — **That\'s a massive hit!**')
                 .setAuthor(embedAuthor(interaction));

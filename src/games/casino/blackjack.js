@@ -11,6 +11,7 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const { randomFrom, BJ_WIN_LINES, BJ_LOSE_LINES, BJ_BUST_LINES, BJ_PUSH_LINES } = require('../../utils/copyLines');
+const COLORS = require('../../utils/embedColors');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -137,7 +138,7 @@ function buildDealerRevealEmbed(interaction, dealerHand, playerHand, splitHands,
     const embed = new EmbedBuilder()
         .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
         .setThumbnail(THUMB)
-        .setColor('#5865F2')
+        .setColor(COLORS.INFO)
         .setTitle('🃏 Blackjack — Dealer\'s Turn')
         .setDescription('Dealer flips the hole card…')
         .addFields({ name: `Dealer (${dealerVal})`, value: dealerStr, inline: false })
@@ -272,7 +273,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setAuthor({ name: interaction.member?.displayName || interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
                 .setThumbnail(THUMB)
-                .setColor('#FFD700')
+                .setColor(COLORS.PRIZE)
                 .setTitle('🃏 Blackjack — Natural 21')
                 .setDescription(`> Perfect hand. Pays 3:2.`)
                 .addFields(

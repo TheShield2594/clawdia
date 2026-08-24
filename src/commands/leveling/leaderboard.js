@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { netWorthOf, topByNetWorth, netWorthRank } = require('../../utils/netWorth');
+const COLORS = require('../../utils/embedColors');
 
 // A leaderboard page prints ten names and one number each. Hydrating whole user
 // documents to do it dragged the pet, inventory, achievement and quest arrays
@@ -104,7 +105,7 @@ module.exports = {
             }
 
             const embed = new EmbedBuilder()
-                .setColor('#ffd700')
+                .setColor(COLORS.PRIZE)
                 .setTitle(`${title} — ${interaction.guild.name}`)
                 .setTimestamp();
 

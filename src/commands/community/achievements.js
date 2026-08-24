@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { ACHIEVEMENTS } = require('../../data/achievements');
+const COLORS = require('../../utils/embedColors');
 
 const CATEGORY_ORDER = ['economy', 'leveling', 'hunt', 'fishing', 'exploration', 'community', 'moderation', 'custom'];
 
@@ -225,7 +226,7 @@ module.exports = {
                 if (totalCoins) lines.push(`+${totalCoins.toLocaleString()} coins`);
 
                 const embed = new EmbedBuilder()
-                    .setColor(0x2ECC71)
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('🎉 Rewards Claimed!')
                     .setDescription(names.join('\n') || 'No rewards.')
                     .addFields({ name: 'Total rewards', value: lines.join(' · ') || 'None', inline: false });
@@ -335,7 +336,7 @@ async function handlePin(interaction, guildSettings) {
 
     return interaction.reply({
         embeds: [new EmbedBuilder()
-            .setColor(0x2ECC71)
+            .setColor(COLORS.SUCCESS)
             .setTitle('📌 Featured Achievement Set!')
             .setDescription(`${def.emoji} **${def.name}** — ${def.description}\n\nThis achievement will now be displayed prominently on your profile.`)
         ],

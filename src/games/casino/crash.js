@@ -10,6 +10,7 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
+const COLORS = require('../../utils/embedColors');
 const {
     LOBBY_JOIN_WINDOW_MS,
     MAX_PLAYERS,
@@ -135,7 +136,7 @@ async function buildWeeklyLeaderboard(guildId, _client) {
 
     if (topUsers.length === 0) {
         return new EmbedBuilder()
-            .setColor('#5865F2')
+            .setColor(COLORS.INFO)
             .setTitle('💥 Crash — Weekly Multiplier Leaderboard')
             .setDescription('No crash cash-outs recorded this week yet. Be the first!')
             .setFooter({ text: 'Resets every Monday at midnight UTC' });
@@ -150,7 +151,7 @@ async function buildWeeklyLeaderboard(guildId, _client) {
     }
 
     return new EmbedBuilder()
-        .setColor('#ffdd00')
+        .setColor(COLORS.PRIZE)
         .setTitle('💥 Crash — Weekly Multiplier Leaderboard')
         .setDescription(lines.join('\n'))
         .setFooter({ text: `Week of ${weekStart.toDateString()} · Resets every Monday` })
@@ -169,7 +170,7 @@ function lobbyEmbed(lobby, playerNames, autoCashout, crashHistory) {
         ? `\n💥 Recent Crashes: ${crashHistory.slice(-5).map(c => `**${multLabel(c)}**`).join(' · ')}\n*Is a big one coming?* 🤔`
         : '';
     return new EmbedBuilder()
-        .setColor('#5865F2')
+        .setColor(COLORS.INFO)
         .setTitle('💥 Crash — Lobby Open')
         .setDescription(
             `**Bet:** ${lobby.bet.toLocaleString()} coins each\n` +
@@ -233,7 +234,7 @@ async function buildFinalEmbed(crashPoint, bet, players, client, _guildId) {
         }
     }
     return new EmbedBuilder()
-        .setColor('#ff3333')
+        .setColor(COLORS.ERROR)
         .setTitle(`💥 Crashed at ${crashLabel}!`)
         .setDescription(lines.join('\n') || '*No players*')
         .setFooter({ text: 'The house always has a 1% edge — play responsibly!' })

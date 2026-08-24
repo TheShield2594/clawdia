@@ -17,6 +17,7 @@ const { logTransaction } = require('../utils/logTransaction');
 const { debitUpTo } = require('../utils/balanceDebit');
 const { ROLES, TARGETS } = require('../data/heistData');
 const { makeSkillRow, buildLobbyEmbed, buildLobbyRows } = require('../views/heistView');
+const COLORS = require('../utils/embedColors');
 
 const SKILL_TIMEOUT_MS = 30_000;
 const LOBBY_POLL_MS    = 5_000; // edit the lobby message every 5s
@@ -225,7 +226,7 @@ async function sendSkillCheck(member, heistId, role) {
     const check = buildSkillCheck(role);
     const roleMeta = ROLES[role];
     const embed = new EmbedBuilder()
-        .setColor('#e74c3c')
+        .setColor(COLORS.ERROR)
         .setTitle(`🔒 Heist In Progress — ${roleMeta.emoji} ${roleMeta.label} Check`)
         .setDescription(
             `**Your role:** ${roleMeta.label}\n${roleMeta.desc}\n\n` +
@@ -475,7 +476,7 @@ function startLobbyCountdown(client, heist, msg, { minPlayers = 2, lobbyDuration
 
         if (heist.players.size < minPlayers) {
             await msg.edit({
-                embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('❌ Heist Cancelled').setDescription(`Not enough crew members joined (need at least ${minPlayers}). Heist called off.`).setTimestamp()],
+                embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('❌ Heist Cancelled').setDescription(`Not enough crew members joined (need at least ${minPlayers}). Heist called off.`).setTimestamp()],
                 components: []
             }).catch(() => {});
             clearHeist(heist.guildId);
@@ -484,7 +485,7 @@ function startLobbyCountdown(client, heist, msg, { minPlayers = 2, lobbyDuration
 
         endLobby(heist.guildId);
         await msg.edit({
-            embeds: [new EmbedBuilder().setColor('#9b59b6').setTitle('🔓 Heist Begins!').setDescription('The lobby is closed. Skill checks are being sent to each crew member via DM…\nResults will be posted here when everyone responds or time runs out.').setTimestamp()],
+            embeds: [new EmbedBuilder().setColor(COLORS.RARE).setTitle('🔓 Heist Begins!').setDescription('The lobby is closed. Skill checks are being sent to each crew member via DM…\nResults will be posted here when everyone responds or time runs out.').setTimestamp()],
             components: []
         }).catch(() => {});
 
@@ -510,7 +511,7 @@ function startLobbyCountdown(client, heist, msg, { minPlayers = 2, lobbyDuration
                     if (player.skillPassed !== null) return;
                     player.skillPassed = false;
                     await dm.edit({
-                        embeds: [new EmbedBuilder().setColor('#e74c3c').setTitle('⏰ Time\'s up!').setDescription(`You ran out of time. The correct answer was **${check.correct}**.`).setTimestamp()],
+                        embeds: [new EmbedBuilder().setColor(COLORS.ERROR).setTitle('⏰ Time\'s up!').setDescription(`You ran out of time. The correct answer was **${check.correct}**.`).setTimestamp()],
                         components: []
                     }).catch(() => {});
                     const allDone = [...heist.players.values()].every(p => p.skillPassed !== null);

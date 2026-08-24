@@ -8,6 +8,7 @@ const { MATERIAL_RARITY, TIER_LABELS, TIER_STARS, TIER_COLORS } = require('../..
 const { getItemLore } = require('../../data/defaultShopItems');
 const { getRelicMeta } = require('../../data/exploreData');
 const { packFieldsCapped, EMBED_LIMITS } = require('../../utils/embedFields');
+const COLORS = require('../../utils/embedColors');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
 
@@ -274,7 +275,7 @@ module.exports = {
 
         if (!hasItems && !hasMaterials) {
             const emptyEmbed = new EmbedBuilder()
-                .setColor('#9e9e9e')
+                .setColor(COLORS.NEUTRAL)
                 .setTitle('🎒 Inventory — Empty')
                 .setDescription('Nothing here yet.\nTry `/hunt`, `/fish`, `/mine`, or `/explore` to find materials.')
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }));

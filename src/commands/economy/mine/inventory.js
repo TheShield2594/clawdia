@@ -9,6 +9,7 @@ const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureMineData, durabilityBar, pickaxeStatusEmoji } = require('../../../services/mineService');
 const { packFieldsCapped } = require('../../../utils/embedFields');
 const { BLAST_PACKS, CONSUMABLES, MATERIAL_NAMES } = require('../../../data/mineData');
+const COLORS = require('../../../utils/embedColors');
 
 // ─── INV ──────────────────────────────────────────────────────────────────────
 
@@ -180,7 +181,7 @@ async function handleInv(interaction, sub) {
         return interaction.reply({
             embeds: [
                 new EmbedBuilder()
-                    .setColor('#e74c3c')
+                    .setColor(COLORS.ERROR)
                     .setTitle('🗑️ Pickaxe Discarded')
                     .setDescription(
                         `**${pickaxe.name}** has been discarded.` +

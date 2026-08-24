@@ -12,6 +12,7 @@ const { RAID_COOLDOWN_MS, RAID_SHIELD_MS, RAID_STEAL_MIN, RAID_STEAL_MAX, MATERI
 const GrindProfile = require('../../../models/GrindProfile');
 const { economyLockKey } = require('../../../utils/economyLock');
 const { tryAcquire: _lockAcquire, release: _lockRelease } = require('../../../utils/activeGameLock');
+const COLORS = require('../../../utils/embedColors');
 
 // ─── RAID ─────────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ async function handleRaid(interaction) {
             await raider.save().catch(() => null);
             return interaction.reply({
                 embeds: [new EmbedBuilder()
-                    .setColor('#e74c3c')
+                    .setColor(COLORS.ERROR)
                     .setTitle('🔒 Mine Lock Triggered!')
                     .setDescription(
                         `**${targetUser.username}**'s mine was protected by a **Mine Lock**.\n` +
@@ -242,7 +243,7 @@ async function handleRaid(interaction) {
 
     // Notify defender if possible
     const dmEmbed = new EmbedBuilder()
-        .setColor('#e74c3c')
+        .setColor(COLORS.ERROR)
         .setTitle('⚠️ Your Mine Was Raided!')
         .setDescription(
             `**${interaction.user.username}** broke into your mine on **${interaction.guild.name}** ` +

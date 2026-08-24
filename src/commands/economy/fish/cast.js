@@ -43,6 +43,7 @@ const { logBigWin } = require('../../../utils/bigWinLogger');
 const { PITY_COPY } = require('../../../utils/pityBonus');
 const { FISH_TIER_SCORE } = require('./shared');
 const { buildCastEmbed } = require('./embeds');
+const COLORS = require('../../../utils/embedColors');
 
 // ─── Staged loot reveal for rare+ drops ──────────────────────────────────────
 async function stagedLootReveal(interaction, tier, finalEmbed) {
@@ -234,7 +235,7 @@ async function handleCast(interaction) {
                     const durLine = result.durabilityLost > 0 ? ` Rod took ${result.durabilityLost} durability damage.` : '';
                     await interaction.editReply({
                         embeds: [new EmbedBuilder()
-                            .setColor('#888888')
+                            .setColor(COLORS.NEUTRAL)
                             .setTitle('💨 It Got Away!')
                             .setDescription(`*The ${result.fish.name} snapped the line and vanished into the depths.*\n\nStamina spent — nothing to show for it.${durLine}`)
                             .setAuthor(authorOpts)],
@@ -248,7 +249,7 @@ async function handleCast(interaction) {
 
                     await interaction.editReply({
                         embeds: [new EmbedBuilder()
-                            .setColor('#aaaaaa')
+                            .setColor(COLORS.NEUTRAL)
                             .setTitle('😬 Slipped Away Partially…')
                             .setDescription(`*The ${result.fish.name} struggled free but you still pulled something in.*\n\nCatch downgraded to Uncommon.`)
                             .setAuthor(authorOpts)],

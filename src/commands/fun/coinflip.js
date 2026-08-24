@@ -12,6 +12,7 @@ const { logTransaction } = require('../../utils/logTransaction');
 const { createReplaySession, replayButtonRow } = require('../../utils/replaySession');
 const { refundWager } = require('../../utils/refundWager');
 const { delay } = require('../../utils/delay');
+const COLORS = require('../../utils/embedColors');
 
 const HEADS_THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1fa99.png';
 
@@ -42,7 +43,7 @@ function spinningEmbed(interaction, frame, stakeLine = null) {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(HEADS_THUMB)
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle('🪙 Coin Flip')
         .setDescription(`${SPIN_FRAMES[frame % SPIN_FRAMES.length]} **Flipping…**${stakeLine ? `\n\n${stakeLine}` : ''}`)
         .setFooter({ text: 'Heads or Tails?' });
@@ -326,7 +327,7 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent, challen
     const declineId = `cfv_decline_${interaction.id}`;
 
     const challengeEmbed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setThumbnail(HEADS_THUMB)
         .setTitle('🪙 Coinflip Challenge!')
         .setDescription(
@@ -442,7 +443,7 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent, challen
             logTransaction({ userId: loserUser.id,  guildId, type: 'coinflip', amount: -bet, balance: loserDoc?.balance ?? 0, relatedUserId: winnerUser.id, note: `PvP coinflip loss (${result})` });
 
             const resultEmbedPvp = new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setThumbnail(HEADS_THUMB)
                 .setTitle(result === HEADS ? '🪙 HEADS!' : '🪙 TAILS!')
                 .setDescription(

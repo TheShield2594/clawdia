@@ -25,6 +25,7 @@ const {
     computeSyndicateOutcome,
 } = require('../../services/syndicateService');
 const { hasUnlock } = require('../../utils/prestige');
+const COLORS = require('../../utils/embedColors');
 
 const CREATION_COST    = 50_000;
 const MAX_MEMBERS      = 10;
@@ -62,7 +63,7 @@ function buildLobbyEmbed(heist, synName, target) {
     const highHeat = heist.heatAtStart > 50;
 
     return new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle(`${target.emoji} Syndicate Heist — ${target.label}`)
         .setDescription(
             `**Syndicate:** ${synName}\n` +
@@ -119,7 +120,7 @@ async function sendSkillCheck(member, heistId, role) {
     const check = buildSkillCheck(roleMeta.skillType);
 
     const embed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle(`🔒 Syndicate Heist — ${roleMeta.emoji} ${roleMeta.label} Check`)
         .setDescription(
             `**Your role:** ${roleMeta.label}\n${roleMeta.desc}\n\n` +
@@ -467,7 +468,7 @@ async function executeCreate(interaction, guildDoc) {
     });
 
     const embed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle('🦹 Syndicate Founded!')
         .setDescription(
             `**${name}**${tag ? ` [${tag}]` : ''} is now operational.\n\n` +
@@ -519,7 +520,7 @@ async function executeJoin(interaction) {
     );
 
     const embed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle('🦹 Joined Syndicate')
         .setDescription(`You've joined **${synDoc.name}**${synDoc.tag ? ` [${synDoc.tag}]` : ''}! You are member ${synDoc.memberIds.length} of ${memberCap}.`)
         .setTimestamp();
@@ -678,7 +679,7 @@ async function executeInfo(interaction, guildDoc) {
     );
 
     const embed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle(`🦹 ${synDoc.name}${synDoc.tag ? ` [${synDoc.tag}]` : ''}`)
         .addFields(
             { name: '🌡️ Heat',              value: heatBar(effectiveHeat),                                                  inline: false },
@@ -714,7 +715,7 @@ async function executeLeaderboard(interaction, guildDoc) {
     });
 
     const embed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle('🏆 Syndicate Leaderboard')
         .setDescription(lines.join('\n'))
         .setTimestamp();
@@ -798,7 +799,7 @@ async function executeHeist(interaction, guildDoc, client) {
         if (heist.players.size < effectiveMinPlayers) {
             await msg.edit({
                 embeds: [new EmbedBuilder()
-                    .setColor('#e74c3c')
+                    .setColor(COLORS.ERROR)
                     .setTitle('❌ Heist Cancelled')
                     .setDescription(`Not enough crew joined (need ${effectiveMinPlayers}, got ${heist.players.size}). **${synDoc.name}**'s operation is called off.`)
                     .setTimestamp()],
@@ -811,7 +812,7 @@ async function executeHeist(interaction, guildDoc, client) {
         endSyndicateLobby(heist.guildId);
         await msg.edit({
             embeds: [new EmbedBuilder()
-                .setColor('#9b59b6')
+                .setColor(COLORS.RARE)
                 .setTitle('🔓 Heist Underway!')
                 .setDescription('Lobby closed. Skill checks are being sent to each crew member via DM.\nResults will post here when everyone responds or time runs out.')
                 .setTimestamp()],
@@ -838,7 +839,7 @@ async function executeHeist(interaction, guildDoc, client) {
                     player.skillPassed = false;
                     await dm.edit({
                         embeds: [new EmbedBuilder()
-                            .setColor('#e74c3c')
+                            .setColor(COLORS.ERROR)
                             .setTitle("⏰ Time's up!")
                             .setDescription(`You ran out of time. The correct answer was **${check.correct}**.`)
                             .setTimestamp()],
@@ -897,7 +898,7 @@ async function executeSabotage(interaction, _guildDoc) {
     activeHeist.sabotageCount++;
 
     const embed = new EmbedBuilder()
-        .setColor('#e74c3c')
+        .setColor(COLORS.ERROR)
         .setTitle('⚡ Sabotage Deployed!')
         .setDescription(
             `**${synDoc.name}** has compromised **${rivalName}**'s ongoing heist!\n\n` +
@@ -946,7 +947,7 @@ async function executeUpgrade(interaction, guildDoc) {
 
     const currency = guildDoc?.economy?.currency ?? '💰';
     const embed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle(`${upgrade.emoji} Upgrade Purchased: ${upgrade.label}`)
         .setDescription(
             `**${synDoc.name}** has unlocked a new upgrade!\n\n` +

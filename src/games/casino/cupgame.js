@@ -10,6 +10,7 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
+const COLORS = require('../../utils/embedColors');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0bd.png';
 const MIN_BET = 10;
@@ -109,7 +110,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
             embeds: [new EmbedBuilder()
                 .setAuthor(embedAuthor(interaction))
                 .setThumbnail(THUMB)
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle(`🃏 Three Card Monte${roundLabel} — Cards Flipped!`)
                 .setDescription(
                     `Cards are now face down — follow the Queen!\n\n` +
@@ -137,7 +138,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
                     .setThumbnail(THUMB)
-                    .setColor('#5865F2')
+                    .setColor(COLORS.INFO)
                     .setTitle(`🃏 Three Card Monte${roundLabel} — Shuffling…`)
                     .setDescription(
                         `Swap ${step + 1}/${steps} — cards **${a + 1}** ↔ **${b + 1}**\n\n` +
@@ -311,7 +312,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
                 embeds: [new EmbedBuilder()
                     .setAuthor(embedAuthor(interaction))
                     .setThumbnail(THUMB)
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle(`🃏 Correct! Round ${round}/${MAX_ROUNDS} Complete!`)
                     .setDescription(
                         `> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n` +
@@ -356,7 +357,7 @@ async function playMonte(interaction, bet, round = 1, releaseLock, onWager) {
                         embeds: [new EmbedBuilder()
                             .setAuthor(embedAuthor(interaction))
                             .setThumbnail(THUMB)
-                            .setColor('#2ecc71')
+                            .setColor(COLORS.SUCCESS)
                             .setTitle('🃏 Cashed Out!')
                             .setDescription(`> ${reveal.join('   ')}\n> 1️⃣  ·  2️⃣  ·  3️⃣\n\n💰 You took the money after Round ${round}!`)
                             .addFields(

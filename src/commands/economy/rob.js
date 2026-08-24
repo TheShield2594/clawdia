@@ -7,6 +7,7 @@ const { getTotalBonus } = require('../../services/petService');
 const { randomFrom, ROB_WIN_LINES, ROB_FAIL_LINES } = require('../../utils/copyLines');
 const { delay } = require('../../utils/delay');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const COLORS = require('../../utils/embedColors');
 
 const ROBBER_COOLDOWN_MS  = 1 * 3_600_000; // 1 hour
 const VICTIM_IMMUNITY_MS  = 30 * 60_000;   // 30 minutes
@@ -227,7 +228,7 @@ module.exports = {
                 await robber.save();
                 return interaction.reply({
                     embeds: [new EmbedBuilder()
-                        .setColor('#9b59b6')
+                        .setColor(COLORS.RARE)
                         .setTitle('🧥 Target Invisible!')
                         .setDescription(`**${target.username}** is wearing an Invisibility Cloak. You can't find them! (${timeRemaining(cloak?.expiresAt)} remaining)`)
                         .setFooter({ text: 'Cooldown: 1h' })
@@ -241,7 +242,7 @@ module.exports = {
                 await robber.save();
                 return interaction.reply({
                     embeds: [new EmbedBuilder()
-                        .setColor('#3498db')
+                        .setColor(COLORS.INFO)
                         .setTitle('🛡️ Robbery Blocked!')
                         .setDescription(`**${target.username}** blocked your robbery attempt with a Shield. (${timeRemaining(shield?.expiresAt)} remaining)`)
                         .setFooter({ text: 'Cooldown: 1h' })
@@ -331,14 +332,14 @@ module.exports = {
                     // Trap triggered: suspense then reveal the trap
                     await interaction.editReply({
                         embeds: [new EmbedBuilder()
-                            .setColor('#f39c12')
+                            .setColor(COLORS.WARN)
                             .setTitle('🦹 Successful Heist!')
                             .setDescription(`${randomFrom(ROB_WIN_LINES)} You took **${currency}${stolen.toLocaleString()}** from **${target.username}**.${bagNote}`)]
                     });
                     await delay(900);
 
                     embed = new EmbedBuilder()
-                        .setColor('#e74c3c')
+                        .setColor(COLORS.ERROR)
                         .setTitle('💥 TRAP TRIGGERED!')
                         .setDescription(
                             `**${target.username}** set a **Tripwire**!\n\n` +
@@ -360,7 +361,7 @@ module.exports = {
                         : null;
                     if (announceChannel?.isTextBased()) {
                         const trapAnnounce = new EmbedBuilder()
-                            .setColor('#e74c3c')
+                            .setColor(COLORS.ERROR)
                             .setTitle('🪤 Trap Sprung!')
                             .setDescription(
                                 `<@${target.id}>'s trap just caught <@${interaction.user.id}> red-handed!\n\n` +
@@ -371,7 +372,7 @@ module.exports = {
                     }
                 } else {
                     embed = new EmbedBuilder()
-                        .setColor('#f39c12')
+                        .setColor(COLORS.WARN)
                         .setTitle('🦹 Successful Heist!')
                         .setDescription(`${randomFrom(ROB_WIN_LINES)} You took **${currency}${stolen.toLocaleString()}** from **${target.username}**.${bagNote}`)
                         .addFields(
@@ -447,7 +448,7 @@ module.exports = {
                     await saveRobState(robber, victim, robberSnapshot, null, victimOrigBalance, victimOrigBank);
 
                     embed = new EmbedBuilder()
-                        .setColor('#e74c3c')
+                        .setColor(COLORS.ERROR)
                         .setTitle('🚔 Caught Red-Handed!')
                         .setDescription(`${randomFrom(ROB_FAIL_LINES)} **${target.username}** had you fined **${currency}${paid.toLocaleString()}**, which went straight to them.`)
                         .addFields(

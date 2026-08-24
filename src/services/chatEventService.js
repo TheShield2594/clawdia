@@ -17,6 +17,7 @@ const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
 const { grantInventoryItem } = require('../utils/inventoryGrant');
 const QUIZ_FALLBACK = require('../data/quizFallback');
+const COLORS = require('../utils/embedColors');
 
 const EVENT_CHANCE         = 0.04;
 const MIN_MESSAGES_BETWEEN = 20;
@@ -134,7 +135,7 @@ async function spawnAirdrop(message, guildSettings) {
 
         await i.update({
             embeds: [EmbedBuilder.from(embed)
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('🪂 Supply drop claimed!')
                 .setDescription(`**${i.member?.displayName ?? i.user.username}** grabbed **${currency}${amount.toLocaleString()}**! 💨`)
                 .setFooter({ text: 'Keep chatting — more drops are coming.' })],
@@ -146,7 +147,7 @@ async function spawnAirdrop(message, guildSettings) {
         if (reason !== 'claimed') {
             sent.edit({
                 embeds: [EmbedBuilder.from(embed)
-                    .setColor('#95a5a6')
+                    .setColor(COLORS.NEUTRAL)
                     .setTitle('🪂 The supply drop drifted away…')
                     .setDescription('Nobody grabbed it in time.')
                     .setFooter({ text: 'Stay alert for the next one!' })],
@@ -201,7 +202,7 @@ async function spawnCrate(message, _guildSettings) {
 
         await i.update({
             embeds: [EmbedBuilder.from(embed)
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('📦 Crate cracked open!')
                 .setDescription(`**${i.member?.displayName ?? i.user.username}** found ${item.emoji} **${item.name}** inside!\n\n> Use it with \`/use ${item.itemId}\``)
                 .setFooter({ text: 'Keep chatting — more crates are coming.' })],
@@ -213,7 +214,7 @@ async function spawnCrate(message, _guildSettings) {
         if (reason !== 'claimed') {
             sent.edit({
                 embeds: [EmbedBuilder.from(embed)
-                    .setColor('#95a5a6')
+                    .setColor(COLORS.NEUTRAL)
                     .setTitle('📦 The crate crumbled to dust…')
                     .setDescription('Nobody opened it in time.')
                     .setFooter({ text: 'Stay alert for the next one!' })],
@@ -235,7 +236,7 @@ async function spawnTrivia(message, guildSettings) {
     const baseId  = `chatev_triv_${message.id}`;
 
     const embed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle('⚡ Flash Trivia!')
         .setDescription(`**${q.question}**\n\nFirst correct answer wins **${currency}${TRIVIA_REWARD.toLocaleString()}**. One guess each!`)
         .setFooter({ text: 'Expires in 60 seconds' });
@@ -294,7 +295,7 @@ async function spawnTrivia(message, guildSettings) {
 
         await i.update({
             embeds: [EmbedBuilder.from(embed)
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('⚡ Trivia solved!')
                 .setDescription(`**${i.member?.displayName ?? i.user.username}** nailed it — **${q.correct_answer}** — and wins **${currency}${TRIVIA_REWARD.toLocaleString()}**! 🧠`)
                 .setFooter({ text: 'Keep chatting — more trivia is coming.' })],
@@ -306,7 +307,7 @@ async function spawnTrivia(message, guildSettings) {
         if (reason !== 'solved') {
             sent.edit({
                 embeds: [EmbedBuilder.from(embed)
-                    .setColor('#95a5a6')
+                    .setColor(COLORS.NEUTRAL)
                     .setTitle('⚡ Trivia expired…')
                     .setDescription(`Nobody got it. The answer was **${q.correct_answer}**.`)
                     .setFooter({ text: 'Stay sharp for the next one!' })],

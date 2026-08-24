@@ -10,6 +10,7 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
+const COLORS = require('../../utils/embedColors');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a1.png';
 const MIN_BET = 10;
@@ -87,7 +88,7 @@ function spinningEmbed(currentIndex, betKey, target, bet, interaction) {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
-        .setColor('#c0392b')
+        .setColor(COLORS.ERROR)
         .setTitle('🎡 Roulette — Spinning…')
         .setDescription(
             `${pocketStrip(currentIndex)}\n\n` +

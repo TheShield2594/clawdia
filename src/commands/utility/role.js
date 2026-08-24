@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -31,7 +32,7 @@ module.exports = {
 
             const lines = selfRoleIds.map(id => `<@&${id}>`).join('\n');
             const embed = new EmbedBuilder()
-                .setColor('#5865F2')
+                .setColor(COLORS.INFO)
                 .setTitle('Self-Assignable Roles')
                 .setDescription(lines)
                 .setFooter({ text: 'Use /role add <role> to assign one' });

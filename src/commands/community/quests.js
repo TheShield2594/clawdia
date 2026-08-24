@@ -3,6 +3,7 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const AiQuest = require('../../models/AiQuest');
 const { ensureQuests, getDailyPool, getWeeklyPool, getCategoryEmojis, getDifficultyColors } = require('../../services/questService');
+const COLORS = require('../../utils/embedColors');
 
 const DIFFICULTY_LABELS = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
 const AI_MECHANIC_EMOJIS = {
@@ -109,7 +110,7 @@ module.exports = {
         const totalWeekly = weeklyLines.length;
 
         const embed = new EmbedBuilder()
-            .setColor(0x5865F2)
+            .setColor(COLORS.INFO)
             .setAuthor({
                 name: `${interaction.user.displayName}'s Quest Board`,
                 iconURL: interaction.user.displayAvatarURL({ dynamic: true })

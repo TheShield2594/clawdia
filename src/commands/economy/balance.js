@@ -4,6 +4,7 @@ const Guild = require('../../models/Guild');
 const { pruneEffects, EFFECT_CONFIGS, timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
 const { getStreakMultiplier } = require('../../utils/streakMultiplier');
 const { claimStarterKit } = require('../../utils/starterKit');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -53,7 +54,7 @@ module.exports = {
             const titleName = isSelf ? 'Your' : `${targetUser.username}'s`;
 
             const embed = new EmbedBuilder()
-                .setColor('#FFD700')
+                .setColor(COLORS.PRIZE)
                 .setAuthor({ name: `${titleName} Dashboard`, iconURL: targetUser.displayAvatarURL({ dynamic: true }) })
                 .setDescription(
                     `**💰 Wallet** · ${user.balance.toLocaleString()} coins\n` +

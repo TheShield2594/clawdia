@@ -10,6 +10,7 @@ const { ensureMineData, assignDailyMineQuests, applyXp, getLevelData } = require
 const { MINE_QUEST_TEMPLATES } = require('../../../data/mineData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { buildProgressBar, formatExpiry } = require('./embeds');
+const COLORS = require('../../../utils/embedColors');
 
 // ─── QUESTS ───────────────────────────────────────────────────────────────────
 
@@ -148,7 +149,7 @@ async function handleQuests(interaction, sub) {
         }
 
         const embed = new EmbedBuilder()
-            .setColor('#2ecc71')
+            .setColor(COLORS.SUCCESS)
             .setTitle(`${template.emoji} Quest Complete — ${template.name}!`)
             .setDescription(template.description)
             .addFields(

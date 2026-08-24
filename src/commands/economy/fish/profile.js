@@ -33,6 +33,7 @@ const { chunkByLength } = require('../../../utils/embedFields');
 const { paginate } = require('../../../utils/paginator');
 const { MAX_PRESTIGE, PRESTIGE_BADGES, PRESTIGE_LABELS } = require('./shared');
 const { buildXpBar, formatPrestigeBonuses } = require('./embeds');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PROFILE
@@ -224,7 +225,7 @@ async function handlePrestige(interaction) {
     const nextBonuses    = PRESTIGE_BONUSES[nextPrestige];
 
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle('⚠️ Fishing Prestige Confirmation')
         .setDescription(
             `You are about to prestige from **P${currentPrestige}** → **P${nextPrestige}** (${PRESTIGE_LABELS[nextPrestige]}).\n\n` +
@@ -300,7 +301,7 @@ async function handlePrestige(interaction) {
         checkGrandPrestige(i.client, freshUser, interaction.guild, interaction.guildId).catch(() => null);
 
         const resultEmbed = new EmbedBuilder()
-            .setColor('#f39c12')
+            .setColor(COLORS.WARN)
             .setTitle(`✨ Fishing Prestige ${ff.prestige} Achieved!`)
             .setDescription(
                 `You are now **${PRESTIGE_LABELS[ff.prestige]}**!\n\n` +
@@ -383,7 +384,7 @@ async function showRods(interaction, user) {
     });
 
     const pages = chunkByLength(lines, { separator: '\n\n', maxPerChunk: 8 }).map((chunk, _i, all) => new EmbedBuilder()
-        .setColor('#3498db')
+        .setColor(COLORS.INFO)
         .setTitle(all.length > 1 ? `🎣 ${interaction.user.username}'s Rods (${f.rods.length})` : `🎣 ${interaction.user.username}'s Rods`)
         .setDescription(chunk.join('\n\n'))
         .setFooter({ text: 'Use /fish inv equip <number> to equip a rod • /fish shop repair to repair' })
@@ -419,7 +420,7 @@ async function equipRod(interaction, user) {
     return interaction.reply({
         embeds: [
             new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('✅ Rod Equipped')
                 .setDescription(`You equipped **${rod.name}** (Slot ${number}).`)
                 .addFields({ name: 'Durability', value: `${durabilityBar(rod.currentDurability, rod.maxDurability)} ${rod.currentDurability}/${rod.maxDurability}`, inline: true })
@@ -455,7 +456,7 @@ async function showBait(interaction, user, _currency) {
     if (f.activeXpScroll) activeLines.push(`📜 XP Scroll queued`);
 
     const embed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle(`🎒 ${interaction.user.username}'s Fishing Supplies`)
         .addFields(
             { name: '🪱 Bait Stock', value: baitLines.length ? baitLines.join('\n') : 'None', inline: false },
@@ -482,7 +483,7 @@ async function showMaterials(interaction, user) {
     }).filter(Boolean);
 
     const embed = new EmbedBuilder()
-        .setColor('#95a5a6')
+        .setColor(COLORS.NEUTRAL)
         .setTitle(`🪨 ${interaction.user.username}'s Fishing Materials`)
         .addFields(
             { name: 'Fishing Materials', value: matLines.length ? matLines.join('\n') : 'None yet — catch fish for material drops!', inline: false }
@@ -525,7 +526,7 @@ async function checkGrandPrestige(client, user, guild, guildId) {
 
     if (announceChannelId && client) {
         const broadcastEmbed = new EmbedBuilder()
-            .setColor('#FFD700')
+            .setColor(COLORS.PRIZE)
             .setTitle('⚜️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚜️')
             .setDescription(
                 `**GRAND MASTER ACHIEVED!**\n\n` +

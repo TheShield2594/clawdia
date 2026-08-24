@@ -30,6 +30,7 @@ function normalizeSeason(user, seasonId) {
 // Premium is unlocked with a large coin payment (/season unlock) — the economy's
 // primary deliberate money sink.
 const { TIER_COUNT, XP_PER_TIER, TIER_TABLE, loreForTier } = require('../../data/seasonPass');
+const COLORS = require('../../utils/embedColors');
 
 const MAX_TIERS = TIER_COUNT;
 const DEFAULT_PREMIUM_COST = 100_000;
@@ -347,7 +348,7 @@ async function executeUnlock(interaction) {
 
     const unlockedTier = getTierFromXp(unlocked.season?.xp ?? 0);
     const embed = new EmbedBuilder()
-        .setColor('#ffd700')
+        .setColor(COLORS.PRIZE)
         .setTitle('✨ Premium Season Pass Unlocked!')
         .setDescription(
             `You paid **${currency}${cost.toLocaleString()}** to unlock the **premium track** for **${season.name ?? 'this season'}**.\n\n` +
@@ -387,7 +388,7 @@ async function executeMissions(interaction) {
     resetAt.setUTCHours(24, 0, 0, 0);
 
     const embed = new EmbedBuilder()
-        .setColor('#5865f2')
+        .setColor(COLORS.INFO)
         .setTitle('📋 Daily Missions')
         .setDescription(missionLines.join('\n\n') || '*No missions generated*')
         .setFooter({ text: `Resets at midnight UTC` })
@@ -622,7 +623,7 @@ async function executeLeaderboard(interaction) {
         : '*No end date*';
 
     const embed = new EmbedBuilder()
-        .setColor('#ffd700')
+        .setColor(COLORS.PRIZE)
         .setTitle(`📊 Season Leaderboard — ${currentSeason.name ?? currentSeason.id}`)
         .setDescription(lines.join('\n'))
         .addFields({ name: '⏰ Season Ends', value: endsAt, inline: true })
@@ -654,7 +655,7 @@ async function executeSeasonMe(interaction) {
     }) + 1;
 
     const embed = new EmbedBuilder()
-        .setColor('#5865f2')
+        .setColor(COLORS.INFO)
         .setTitle(`📊 Your Season Stats — ${currentSeason.name ?? currentSeason.id}`)
         .addFields(
             { name: 'Season Rank', value: `#${rank}`, inline: true },
@@ -685,7 +686,7 @@ async function executeHistory(interaction) {
     }));
 
     const embed = new EmbedBuilder()
-        .setColor('#9e9e9e')
+        .setColor(COLORS.NEUTRAL)
         .setTitle('📜 Season History')
         .addFields(fields)
         .setTimestamp();
@@ -778,7 +779,7 @@ async function executeAdminEnd(interaction) {
     ).join('\n') || '*No participants*';
 
     const embed = new EmbedBuilder()
-        .setColor('#ffd700')
+        .setColor(COLORS.PRIZE)
         .setTitle(`🏁 Season Ended: ${currentSeason.name ?? currentSeason.id}`)
         .setDescription('The season leaderboard has been frozen and season coins have been reset.')
         .addFields({ name: '🏆 Final Top 3', value: winnerLines })
@@ -947,7 +948,7 @@ async function executeTierSkip(interaction) {
 
     const newTier = getTierFromXp(updatedUser.season?.xp ?? 0);
     const embed = new EmbedBuilder()
-        .setColor('#FFD700')
+        .setColor(COLORS.PRIZE)
         .setTitle('⏭️ Tier Skipped!')
         .setDescription(
             `Your Tier Skip Token was consumed.\n\n` +

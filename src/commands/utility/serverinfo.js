@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { raidModeActive, raidModeActivatedBy } = require('../../services/raidService');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -24,7 +25,7 @@ module.exports = {
         }
 
         const embed = new EmbedBuilder()
-            .setColor('#00ff00')
+            .setColor(COLORS.INFO)
             .setTitle('Server Information')
             .setThumbnail(guild.iconURL({ dynamic: true }))
             .addFields(

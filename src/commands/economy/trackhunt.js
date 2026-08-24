@@ -10,6 +10,7 @@ const {
     addEventCurrency,
 } = require('../../services/seasonalEventService');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
+const COLORS = require('../../utils/embedColors');
 
 const COOLDOWN_MS    = 60 * 60 * 1000; // 1 hour
 const FROST_REWARD   = 5;              // event currency
@@ -118,7 +119,7 @@ module.exports = {
             };
 
             embed = new EmbedBuilder()
-                .setColor('#888888')
+                .setColor(COLORS.NEUTRAL)
                 .setTitle(`${lost.emoji} TRAIL LOST!`)
                 .setDescription(
                     `**${lost.name}**\n${lost.description}\n\n` +
@@ -149,7 +150,7 @@ module.exports = {
             };
 
             embed = new EmbedBuilder()
-                .setColor('#6ab4f5')
+                .setColor(COLORS.INFO)
                 .setTitle(`${find.emoji} FOUND! — ${find.name}`)
                 .setDescription(
                     `You followed the trail and turned up a **${find.name}**!\n\n` +

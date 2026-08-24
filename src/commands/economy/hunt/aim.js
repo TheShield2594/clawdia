@@ -4,6 +4,7 @@
 // profile that decides what the prompt reads like for the quarry in front of you.
 
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const COLORS = require('../../../utils/embedColors');
 
 // ── Aim phase timing ─────────────────────────────────────────────────────────
 // How long the shot stays perfect once the window opens, and how long after
@@ -100,7 +101,7 @@ async function runAimPhase(interaction, huntMsg) {
     if (!shotTaken) {
         await interaction.editReply({
             embeds: [new EmbedBuilder()
-                .setColor('#FF0000')
+                .setColor(COLORS.ERROR)
                 .setTitle('💥 FIRE!')
                 .setDescription('**Take the shot — NOW!**')],
             components: [aimRow],

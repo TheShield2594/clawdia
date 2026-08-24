@@ -10,6 +10,7 @@ const { placeWager } = require('../../utils/placeWager');
 const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
+const COLORS = require('../../utils/embedColors');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -94,7 +95,7 @@ function questionEmbed(card, bet, history, interaction, streak) {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
-        .setColor('#5865F2')
+        .setColor(COLORS.INFO)
         .setTitle('🃏 Higher or Lower')
         .setDescription(`**Current Card**\n\`\`\`\n${cardDisplay(card)}\n\`\`\`${streakLine}`)
         .addFields(
@@ -136,7 +137,7 @@ function lossEmbed(interaction, current, next, pickedHigher, bet, newBalance) {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
-        .setColor('#e74c3c')
+        .setColor(COLORS.ERROR)
         .setTitle('🃏 Wrong!')
         .setDescription(`❌ ${cardInline(current)} → ${cardInline(next)} — you guessed **${pickedHigher ? 'Higher' : 'Lower'}** incorrectly.\n\n💀 You lost your bet.`)
         .addFields(
@@ -153,7 +154,7 @@ function cashOutEmbed(interaction, bet, payout, newBalance, streak) {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
-        .setColor('#2ecc71')
+        .setColor(COLORS.SUCCESS)
         .setTitle(`🃏 Cashed Out! 🔥×${streak}`)
         .setDescription(`💰 You locked in **${payout.toLocaleString()}** coins at **${mult.toFixed(1)}×**!`)
         .addFields(
@@ -169,7 +170,7 @@ function timeoutEmbed(interaction, card, bet, newBalance) {
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
-        .setColor('#95a5a6')
+        .setColor(COLORS.NEUTRAL)
         .setTitle('🃏 Higher or Lower — Timed Out')
         .setDescription(`⏱️ You didn't pick in time. Your bet of **${bet.toLocaleString()}** coins has been refunded.`)
         .addFields(
@@ -319,7 +320,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                     embeds: [new EmbedBuilder()
                         .setAuthor(embedAuthor(interaction))
                         .setThumbnail(THUMB)
-                        .setColor('#f39c12')
+                        .setColor(COLORS.WARN)
                         .setTitle('🃏 Wrong — Lucky Save!')
                         .setDescription(`${cardInline(current)} → ${cardInline(next)}\n🍀 **Lucky Charm** returned your bet!`)
                         .addFields({ name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true })
@@ -339,7 +340,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
                     embeds: [new EmbedBuilder()
                         .setAuthor(embedAuthor(interaction))
                         .setThumbnail(THUMB)
-                        .setColor('#f39c12')
+                        .setColor(COLORS.WARN)
                         .setTitle('🃏 Wrong — Lucky Streak Save!')
                         .setDescription(`${cardInline(current)} → ${cardInline(next)}\n🎯 **Lucky Streak** returned your bet!`)
                         .addFields({ name: '💰 Balance', value: `**${(updated?.balance ?? 0).toLocaleString()}** coins`, inline: true })

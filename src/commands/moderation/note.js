@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { addNote, getCase } = require('../../services/caseService');
 const Case = require('../../models/Case');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -40,7 +41,7 @@ module.exports = {
         }
 
         const embed = new EmbedBuilder()
-            .setColor('#888888')
+            .setColor(COLORS.NEUTRAL)
             .setTitle(`Note added to Case #${caseId}`)
             .addFields({ name: 'Note', value: text });
 

@@ -13,6 +13,7 @@ const Guild = require('../../models/Guild');
 const FALLBACK_QUESTIONS = require('../../data/quizFallback');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { debitUpTo } = require('../../utils/balanceDebit');
+const COLORS = require('../../utils/embedColors');
 
 const THUMB         = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f393.png';
 const TIMER_SECONDS = 30;
@@ -181,7 +182,7 @@ function timeoutEmbed(interaction, question, correctAnswer, difficulty, penalty,
     return new EmbedBuilder()
         .setAuthor(embedAuthor(interaction))
         .setThumbnail(THUMB)
-        .setColor('#ff9900')
+        .setColor(COLORS.WARN)
         .setTitle('🎓 ⏱️ Time\'s Up!')
         .setDescription(`**${question}**\n\n*You ran out of time!*`)
         .addFields(

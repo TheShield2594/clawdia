@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { logModeration } = require('../../services/moderationLogService');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -36,7 +37,7 @@ module.exports = {
             await interaction.guild.members.unban(userId, reason);
 
             const embed = new EmbedBuilder()
-                .setColor('#00ff00')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('User Unbanned')
                 .setDescription(`**${ban.user.globalName ?? ban.user.username}** has been unbanned.`)
                 .addFields(

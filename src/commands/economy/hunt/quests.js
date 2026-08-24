@@ -10,6 +10,7 @@ const { ensureHuntData, assignDailyHuntQuests, applyXp, getLevelData } = require
 const { HUNT_QUEST_TEMPLATES } = require('../../../data/huntData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { buildProgressBar, formatExpiry } = require('./embeds');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // QUESTS (was /huntquests)
@@ -152,7 +153,7 @@ async function executeQuests(interaction, sub) {
         }
 
         const embed = new EmbedBuilder()
-            .setColor('#2ecc71')
+            .setColor(COLORS.SUCCESS)
             .setTitle(`${template.emoji} Quest Complete — ${template.name}!`)
             .setDescription(template.description)
             .addFields(

@@ -4,6 +4,7 @@ const { EmbedBuilder, AttachmentBuilder, PermissionFlagsBits } = require('discor
 const { createWelcomeCard } = require('../utils/cardGenerator');
 const { handleMemberJoin: raidCheck } = require('../services/raidService');
 const { enforceJoinGate } = require('../services/antiNukeService');
+const COLORS = require('../utils/embedColors');
 
 async function trackMemberEvent(guildId, dateKey, field) {
     // Try to atomically increment today's existing entry (fix #8 — simpler, no spurious $push).
@@ -85,7 +86,7 @@ module.exports = {
                             const attachment = new AttachmentBuilder(card, { name: 'welcome.png' });
 
                             const embed = new EmbedBuilder()
-                                .setColor('#5865F2')
+                                .setColor(COLORS.INFO)
                                 .setDescription(message)
                                 .setImage('attachment://welcome.png')
                                 .setTimestamp();
@@ -93,7 +94,7 @@ module.exports = {
                             await channel.send({ embeds: [embed], files: [attachment] });
                         } else {
                             const embed = new EmbedBuilder()
-                                .setColor('#5865F2')
+                                .setColor(COLORS.INFO)
                                 .setTitle('Welcome!')
                                 .setDescription(message)
                                 // Remove deprecated { dynamic: true } option (fix #4)
@@ -129,7 +130,7 @@ module.exports = {
                 const logChannel = member.guild.channels.cache.get(guildSettings.eventLog.channelId);
                 if (logChannel) {
                     const logEmbed = new EmbedBuilder()
-                        .setColor('#5865F2')
+                        .setColor(COLORS.INFO)
                         .setTitle('Member Joined')
                         // Use username instead of deprecated .tag (fix #5); drop deprecated dynamic option (fix #4)
                         .setAuthor({ name: member.user.username, iconURL: member.user.displayAvatarURL() })

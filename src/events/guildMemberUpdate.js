@@ -1,5 +1,6 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
+const COLORS = require('../utils/embedColors');
 
 module.exports = {
     name: 'guildMemberUpdate',
@@ -21,7 +22,7 @@ module.exports = {
         if (!added.size && !removed.size) return;
 
         const embed = new EmbedBuilder()
-            .setColor('#5865F2')
+            .setColor(COLORS.INFO)
             .setTitle('Member Roles Updated')
             .setAuthor({ name: newMember.user.globalName ?? newMember.user.username, iconURL: newMember.user.displayAvatarURL() })
             .setTimestamp();

@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } =
 const { logModeration } = require('../../services/moderationLogService');
 const { hierarchyDenial, resolveMember } = require('../../utils/moderationHierarchy');
 const TempBan = require('../../models/TempBan');
+const COLORS = require('../../utils/embedColors');
 
 const DURATION_RE = /^(\d+)(m|h|d)$/i;
 
@@ -109,7 +110,7 @@ module.exports = {
             await interaction.guild.members.ban(user, { deleteMessageSeconds: deleteDays * 86400, reason });
 
             const embed = new EmbedBuilder()
-                .setColor('#ff0000')
+                .setColor(COLORS.ERROR)
                 .setTitle(durationMs ? 'User Temporarily Banned' : 'User Banned')
                 .setDescription(`**${user.globalName ?? user.username}** has been banned from the server.`)
                 .addFields(

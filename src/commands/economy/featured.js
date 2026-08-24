@@ -4,6 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const Guild = require('../../models/Guild');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS, FEATURED_RARE_BONUS } = require('../../data/featuredRotation');
 const { getTimeBand } = require('../../utils/timeBand');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -31,7 +32,7 @@ module.exports = {
         const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
         const embed = new EmbedBuilder()
-            .setColor('#FFD700')
+            .setColor(COLORS.PRIZE)
             .setTitle(`🌟 Today's Featured Rotation`)
             .setDescription(
                 `Resets <t:${resetTs}:R> · **+${payoutPct}% payout** and **+${rarePct}% rare chance** on each featured pick.\n\n` +

@@ -30,6 +30,7 @@ const { runShopBrowse } = require('../../../utils/shopBrowse');
 const { getItemImageAttachment } = require('../../../utils/itemImageHelper');
 const GrindProfile = require('../../../models/GrindProfile');
 const { chargeBalance, refundBalance } = require('./shared');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHOP
@@ -158,7 +159,7 @@ async function handleBuyRod(interaction, user, currency) {
     }
 
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#3498db')
+        .setColor(COLORS.WARN)
         .setTitle(`${rodData.emoji} Purchase ${rodData.name}?`)
         .setDescription(rodData.description)
         .addFields(
@@ -246,7 +247,7 @@ async function handleBuyRod(interaction, user, currency) {
         return btn.update({
             embeds: [
                 new EmbedBuilder()
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle(`${rodData.emoji} ${rodData.name} Purchased!`)
                     .setDescription(`You now own a **${rodData.name}**. Equip it with \`/fish inv equip ${rodIndex}\`.`)
                     .addFields(
@@ -298,7 +299,7 @@ async function handleBuyUpgrade(interaction, user, currency) {
     }
 
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle(`${upgradeDef.emoji} Install ${upgradeDef.name}?`)
         .setDescription(`Installing on **${rod.name}**\n${upgradeDef.description}`)
         .addFields(
@@ -371,7 +372,7 @@ async function handleBuyUpgrade(interaction, user, currency) {
         return btn.update({
             embeds: [
                 new EmbedBuilder()
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle(`${upgradeDef.emoji} ${upgradeDef.name} Installed!`)
                     .setDescription(`**${freshRod.name}** now has **${upgradeDef.name}** installed permanently.`)
                     .addFields(
@@ -431,7 +432,7 @@ async function handleBuy(interaction, user, currency) {
         : `${f.consumables[itemId] ?? 0}/${consumable.maxStack ?? 99} in stock`;
 
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle(`${itemDef.emoji} Confirm Purchase`)
         .setDescription(itemDef.description ?? '')
         .addFields(
@@ -498,7 +499,7 @@ async function handleBuy(interaction, user, currency) {
                 return interaction.editReply({
                     embeds: [
                         new EmbedBuilder()
-                            .setColor('#2ecc71')
+                            .setColor(COLORS.SUCCESS)
                             .setTitle(`${baitPack.emoji} Purchased!`)
                             .setDescription(`Bought **${quantity}× ${baitPack.name}** (+${addedQty} ${baitPack.baitType.replace(/_/g, ' ')}).`)
                             .addFields(
@@ -547,7 +548,7 @@ async function handleBuy(interaction, user, currency) {
             return interaction.editReply({
                 embeds: [
                     new EmbedBuilder()
-                        .setColor('#2ecc71')
+                        .setColor(COLORS.SUCCESS)
                         .setTitle(`${consumable.emoji} Purchased!`)
                         .setDescription(`Bought **${quantity}× ${consumable.name}**.`)
                         .addFields(
@@ -599,7 +600,7 @@ async function handleUse(interaction, user) {
     return interaction.reply({
         embeds: [
             new EmbedBuilder()
-                .setColor('#9b59b6')
+                .setColor(COLORS.RARE)
                 .setTitle(`${def?.emoji ?? '✅'} ${def?.name ?? itemId} Activated!`)
                 .setDescription(`*${def?.description ?? 'Effect applied.'}*`)
                 .addFields({ name: 'Active Buffs', value: statusLines.length ? statusLines.join('\n') : 'None' })
@@ -654,7 +655,7 @@ async function handleRepair(interaction, user, currency) {
         return interaction.reply({
             embeds: [
                 new EmbedBuilder()
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle(`${kitId === 'repair_kit_small' ? '🔧' : '🔨'} ${kitName} Used`)
                     .addFields(
                         { name: 'Rod',       value: rod.name,                                                                               inline: true },
@@ -706,7 +707,7 @@ async function handleRepair(interaction, user, currency) {
     }
 
     const embed = new EmbedBuilder()
-        .setColor('#2ecc71')
+        .setColor(COLORS.SUCCESS)
         .setTitle('🔧 Rod Repaired')
         .addFields(
             { name: 'Rod',        value: rod.name,                                                                               inline: true },
@@ -719,7 +720,7 @@ async function handleRepair(interaction, user, currency) {
         .setTimestamp();
 
     if (result.condemned) {
-        embed.setColor('#e74c3c');
+        embed.setColor(COLORS.ERROR);
         embed.addFields({ name: '⚠️ Condemned', value: 'This rod has been repaired too many times and cannot be repaired again. Consider buying a new one with `/fish shop rod`.', inline: false });
     } else {
         embed.addFields({ name: 'ℹ️ Note', value: `Max durability slightly reduced to ${rod.maxDurability} after this repair.`, inline: false });
@@ -795,7 +796,7 @@ async function handleUnlock(interaction, user, currency) {
     return interaction.reply({
         embeds: [
             new EmbedBuilder()
-                .setColor('#f39c12')
+                .setColor(COLORS.WARN)
                 .setTitle(`🗺️ ${location.emoji} ${location.name} Unlocked!`)
                 .setDescription(location.description)
                 .addFields(

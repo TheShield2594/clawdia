@@ -3,6 +3,7 @@ const { EmbedBuilder } = require('discord.js');
 const Case = require('../models/Case');
 const Guild = require('../models/Guild');
 const { runJob } = require('../utils/jobRunner');
+const COLORS = require('../utils/embedColors');
 
 async function getNextCaseId(guildId) {
     // Aggregation-pipeline update atomically initializes nextCaseId to 1 when the field
@@ -104,7 +105,7 @@ function startSlaMonitor(client) {
                 if (!channel) continue;
 
                 const embed = new EmbedBuilder()
-                    .setColor('#ff9900')
+                    .setColor(COLORS.WARN)
                     .setTitle('SLA Overdue — Open Case')
                     .setDescription(`Case **#${modCase.caseId}** has exceeded its SLA deadline and is still open.`)
                     .addFields(

@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const Guild = require('../../models/Guild');
 const { timeRemaining, getServerCoinMultiplier, getServerXpMultiplier } = require('../../services/effectsService');
+const COLORS = require('../../utils/embedColors');
 
 const BOOST_LABELS = {
     coin: { emoji: '💰', label: 'Coin Boost', description: 'Increases coin earnings from work, daily, and games' },
@@ -71,7 +72,7 @@ module.exports = {
 
                 const announcementChannelId = guildSettings.economy?.announcementChannelId;
                 const embed = new EmbedBuilder()
-                    .setColor('#f39c12')
+                    .setColor(COLORS.WARN)
                     .setTitle(`🚀 Server Boost Activated!`)
                     .setDescription(`${info.emoji} **${multiplier}x ${info.label}** is now active!\n${info.description}.`)
                     .addFields(
@@ -106,7 +107,7 @@ module.exports = {
 
                 const info = BOOST_LABELS[endedType];
                 const embed = new EmbedBuilder()
-                    .setColor('#e74c3c')
+                    .setColor(COLORS.ERROR)
                     .setTitle('Server Boost Ended')
                     .setDescription(`${info.emoji} The **${info.label}** has been manually ended.`)
                     .setTimestamp();
@@ -126,7 +127,7 @@ module.exports = {
 
                 const info = BOOST_LABELS[sb.type];
                 const embed = new EmbedBuilder()
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('🚀 Server Boost Status')
                     .addFields(
                         { name: 'Type',       value: `${info.emoji} ${info.label}`,                inline: true },

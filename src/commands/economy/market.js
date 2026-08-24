@@ -11,6 +11,7 @@ const { DEFAULT_SHOP_ITEMS, getItemLore, getItemRarity, RARITY_ORDER } = require
 const { EFFECT_CONFIGS } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
+const COLORS = require('../../utils/embedColors');
 
 const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
 
@@ -148,7 +149,7 @@ async function handleList(interaction, currency) {
     }
 
     const embed = new EmbedBuilder()
-        .setColor('#3498db')
+        .setColor(COLORS.INFO)
         .setTitle('📦 Item Listed!')
         .setDescription(`**${qty}x \`${itemId}\`** listed for **${currency}${price.toLocaleString()}** per unit.`)
         .addFields(
@@ -248,7 +249,7 @@ async function handleBrowse(interaction, currency) {
 
         const sortLabel = sortMode === SORT_RARITY ? '🏷️ Rarity sort' : '💰 Price sort';
         return new EmbedBuilder()
-            .setColor('#3498db')
+            .setColor(COLORS.INFO)
             .setTitle(title)
             .setDescription(lines.join('\n\n') || 'No listings.')
             .setFooter({ text: `Page ${safePage + 1}/${totalPages} · ${sorted.length} listings · 5% fee · ${sortLabel}` })
@@ -366,7 +367,7 @@ async function handleBuy(interaction, currency) {
 
         return editReply({
             embeds: [new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('✅ Purchase Complete!')
                 .setDescription(`You bought **${listing.quantity}x \`${listing.itemId}\`** for **${currency}${totalCost.toLocaleString()}**.`)
                 .addFields(
@@ -389,7 +390,7 @@ async function handleBuy(interaction, currency) {
             new ButtonBuilder().setCustomId('mkt_buy_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
         );
         const confirmEmbed = new EmbedBuilder()
-            .setColor('#f39c12')
+            .setColor(COLORS.WARN)
             .setTitle('🛒 Confirm Market Purchase')
             .setDescription(`Buy **${listing.quantity}x ${displayName}** for **${currency}${totalCost.toLocaleString()}**?`)
             .addFields(

@@ -1,5 +1,6 @@
 const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits, PermissionsBitField, ChannelType } = require('discord.js');
 const Guild = require('../models/Guild');
+const COLORS = require('../utils/embedColors');
 
 // Permission keys the lockdown engine touches. Used to compute proper
 // per-key restoration from the original allow/deny bitfields.
@@ -88,7 +89,7 @@ async function punish(member, settings, action, count) {
     const reason = `[AntiNuke] Burst of ${action} (${count} in ${an.windowSeconds || 30}s)`;
 
     const embed = new EmbedBuilder()
-        .setColor('#ff0000')
+        .setColor(COLORS.ERROR)
         .setTitle('Anti-Nuke Triggered')
         .setDescription(`Detected destructive burst by ${member.user.tag} (${member.id})`)
         .addFields(
@@ -211,7 +212,7 @@ async function startLockdown(guild, client, { startedBy, reason }) {
     });
 
     const embed = new EmbedBuilder()
-        .setColor('#ff0000')
+        .setColor(COLORS.ERROR)
         .setTitle('SERVER LOCKDOWN')
         .setDescription(reason || 'Manual lockdown initiated.')
         .addFields({ name: 'Channels Locked', value: affected.length.toString(), inline: true })
@@ -270,7 +271,7 @@ async function endLockdown(guild, { endedBy } = {}) {
     });
 
     const embed = new EmbedBuilder()
-        .setColor('#00ff00')
+        .setColor(COLORS.SUCCESS)
         .setTitle('Lockdown Lifted')
         .addFields(
             { name: 'Channels Restored', value: restored.toString(), inline: true },
@@ -313,7 +314,7 @@ async function enforceJoinGate(member, settings) {
     }
 
     const embed = new EmbedBuilder()
-        .setColor('#ff9900')
+        .setColor(COLORS.WARN)
         .setTitle('Join Gate Triggered')
         .addFields(
             { name: 'User', value: `${member.user.tag} (${member.id})`, inline: false },

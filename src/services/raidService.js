@@ -1,6 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const Guild = require('../models/Guild');
 const { assertGuildAffinity } = require('../utils/sharding');
+const COLORS = require('../utils/embedColors');
 
 // guildId -> [{timestamp, userId, accountAgeDays}]
 //
@@ -101,7 +102,7 @@ async function handleMemberJoin(member, _client, settings) {
     const newAccounts = entries.filter(e => e.accountAgeDays < minAccountAgeDays).length;
 
     const embed = new EmbedBuilder()
-        .setColor('#ff0000')
+        .setColor(COLORS.ERROR)
         .setTitle('⚠️ Raid Detected! Raid Mode Auto-Enabled')
         .setDescription(
             `**${entries.length}** members joined within **${rd.windowSeconds}s** (threshold: ${threshold})`
@@ -167,7 +168,7 @@ async function setRaidMode(guildId, guild, active, guildSettings) {
 
         if (alertChannel) {
             const embed = new EmbedBuilder()
-                .setColor('#ff9900')
+                .setColor(COLORS.WARN)
                 .setTitle('🔒 Raid Mode Manually Enabled')
                 .setDescription('Raid mode has been manually enabled by a moderator.')
                 .setTimestamp();
@@ -187,7 +188,7 @@ async function setRaidMode(guildId, guild, active, guildSettings) {
 
         if (alertChannel) {
             const embed = new EmbedBuilder()
-                .setColor('#00ff00')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('🔓 Raid Mode Manually Disabled')
                 .setDescription('Raid mode has been manually disabled by a moderator.')
                 .setTimestamp();
@@ -261,7 +262,7 @@ async function sweepRaidModes(client) {
 
         if (alertChannel) {
             const embed = new EmbedBuilder()
-                .setColor('#00ff00')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('✅ Raid Stopped — Raid Mode Auto-Disabled')
                 .setDescription('Raid appears to have stopped. Raid mode auto-disabled.')
                 .setTimestamp();

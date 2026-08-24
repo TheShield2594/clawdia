@@ -11,6 +11,7 @@ const { getCurrentWeather } = require('../../../services/weatherService');
 const { stackBar } = require('../../../utils/rewardReveal');
 const { buildPityStreakField, PITY_COPY } = require('../../../utils/pityBonus');
 const { formatMs, rodStatusEmoji, durabilityBar, getMaxStamina, xpToNextLevel, getLevelData } = require('../../../services/fishService');
+const COLORS = require('../../../utils/embedColors');
 
 // ─── EMBED BUILDER ────────────────────────────────────────────────────────────
 
@@ -184,7 +185,7 @@ function buildCastEmbed(result, user, location, rod, currency, _discordUser) {
     // ── Failure embed ──────────────────────────────────────────────────────
     const { failure, xpEarned, levelUp } = result;
     const embed = new EmbedBuilder()
-        .setColor('#e74c3c')
+        .setColor(COLORS.ERROR)
         .setTitle(buildFailureTitle(failure.severity.id))
         .setDescription(`*${failure.message}*`)
         .addFields(

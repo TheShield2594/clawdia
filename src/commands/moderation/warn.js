@@ -5,6 +5,7 @@ const { applyEscalation, findStepForCount } = require('../../services/escalation
 const Guild = require('../../models/Guild');
 const User = require('../../models/User');
 const { fitDescription, truncate, EMBED_LIMITS } = require('../../utils/embedFields');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -70,7 +71,7 @@ module.exports = {
                     : null;
 
                 const embed = new EmbedBuilder()
-                    .setColor('#ffff00')
+                    .setColor(COLORS.WARN)
                     .setTitle('User Warned')
                     .setDescription(`**${user.globalName ?? user.username}** has been warned.`)
                     .addFields(
@@ -102,7 +103,7 @@ module.exports = {
                     if (result?.applied) {
                         await interaction.followUp({
                             embeds: [new EmbedBuilder()
-                                .setColor('#cc3300')
+                                .setColor(COLORS.WARN)
                                 .setTitle('Auto-Escalation Triggered')
                                 .setDescription(`Threshold **${result.step.threshold}** reached — applied **${result.step.action.toUpperCase()}**${result.step.durationMinutes ? ` for ${result.step.durationMinutes} minute(s)` : ''}.`)
                                 .addFields({ name: 'Target', value: `${user.globalName ?? user.username}`, inline: true })
@@ -155,7 +156,7 @@ module.exports = {
                 const { text, omitted } = fitDescription(lines);
 
                 const embed = new EmbedBuilder()
-                    .setColor('#ffff00')
+                    .setColor(COLORS.WARN)
                     .setTitle(`Warnings for ${user.globalName ?? user.username}`)
                     .setDescription(text)
                     .setFooter({ text: `${warnings.length - omitted} of ${warnings.length} warning(s) shown · use /warn remove <case_id> to clear one` })
@@ -185,7 +186,7 @@ module.exports = {
                 await Case.deleteOne({ _id: warnCase._id });
 
                 const embed = new EmbedBuilder()
-                    .setColor('#00ff00')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('Warning Removed')
                     .setDescription(`Case **#${caseId}** has been deleted.`)
                     .addFields(

@@ -19,6 +19,7 @@ const { FEATURED_PAYOUT_BONUS } = require('../../../data/featuredRotation');
 const { stackBar } = require('../../../utils/rewardReveal');
 const { buildPityStreakField, PITY_COPY } = require('../../../utils/pityBonus');
 const { WILDERNESS_YIELD_BONUS } = require('./shared');
+const COLORS = require('../../../utils/embedColors');
 
 function prestigeBonusLines(bonus) {
     return [
@@ -145,7 +146,7 @@ function buildMineEmbed(result, user, depth, pickaxe, currency, _discordUser) {
 
     const { failure, xpEarned, levelUp } = result;
     const embed = new EmbedBuilder()
-        .setColor('#e74c3c')
+        .setColor(COLORS.ERROR)
         .setTitle(buildFailureTitle(failure.severity.id))
         .setDescription(`*${failure.message}*`)
         .addFields(

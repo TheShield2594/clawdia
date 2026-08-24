@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
+const COLORS = require('../../utils/embedColors');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -24,7 +25,7 @@ module.exports = {
             await member.timeout(null);
 
             const embed = new EmbedBuilder()
-                .setColor('#00ff00')
+                .setColor(COLORS.SUCCESS)
                 .setTitle('User Unmuted')
                 .setDescription(`**${user.globalName ?? user.username}** has been unmuted.`)
                 .setTimestamp();

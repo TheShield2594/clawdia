@@ -36,6 +36,7 @@ const { runShopBrowse } = require('../../../utils/shopBrowse');
 const { getItemImageAttachment } = require('../../../utils/itemImageHelper');
 const GrindProfile = require('../../../models/GrindProfile');
 const { ACTIVATABLE, chargeBalance, refundBalance } = require('./shared');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHOP (was /huntshop)
@@ -198,7 +199,7 @@ async function handleBuyWeapon(interaction, user, currency) {
         : 'None required';
 
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle(`${weaponData.emoji} Purchase ${weaponData.name}?`)
         .setDescription(weaponData.description)
         .addFields(
@@ -329,7 +330,7 @@ async function completePurchase(interactionOrBtn, user, weaponData, autoEquip, c
 
     const equipped = h.equippedWeaponIndex === newIndex;
     const embed = new EmbedBuilder()
-        .setColor('#2ecc71')
+        .setColor(COLORS.SUCCESS)
         .setTitle(`${weaponData.emoji} ${weaponData.name} Purchased!`)
         .setDescription(weaponData.description)
         .addFields(
@@ -402,7 +403,7 @@ async function handleBuyUpgrade(interaction, user, currency) {
     return interaction.reply({
         embeds: [
             new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle(`${upgradeDef.emoji} Upgrade Installed!`)
                 .setDescription(`**${upgradeDef.name}** has been installed on your **${weapon.name}**.`)
                 .addFields(
@@ -455,7 +456,7 @@ async function handleBuy(interaction, user, currency) {
         : `${quantity}× ${consumableDef.name}`;
 
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle(`${itemDef.emoji} Confirm Purchase`)
         .setDescription(itemDef.description ?? '')
         .addFields(
@@ -540,7 +541,7 @@ async function handleBuy(interaction, user, currency) {
             const ammoNote    = isAmmo ? `\nAmmo stock for **${ammoDef.ammoType.replace(/_/g, ' ')}**: ${h.ammo[ammoDef.ammoType]}` : '';
 
             const successEmbed = new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle(`${itemDef.emoji} Purchase Successful`)
                 .setDescription(`You bought **${finalGained}** for ${currency}${totalCost.toLocaleString()}.${ammoNote}`)
                 .addFields(
@@ -589,7 +590,7 @@ async function handleUse(interaction, user) {
     return interaction.reply({
         embeds: [
             new EmbedBuilder()
-                .setColor('#2ecc71')
+                .setColor(COLORS.SUCCESS)
                 .setTitle(`${def.emoji} ${def.name} Activated!`)
                 .setDescription(`${def.description}\n${statusMsg}`)
                 .setFooter({ text: 'Go hunt! Use /hunt start' })
@@ -639,7 +640,7 @@ async function handleRepair(interaction, user, currency) {
         return interaction.reply({
             embeds: [
                 new EmbedBuilder()
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle(`${kitDef.emoji} Repair Kit Used`)
                     .setDescription(`Your **${weapon.name}** has been field-repaired.`)
                     .addFields(
@@ -790,7 +791,7 @@ async function handleUnlock(interaction, user, currency) {
         .join(' · ');
 
     const unlockEmbed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle(`${zone.emoji} Zone Unlocked: ${zone.name}!`)
         .setDescription(zone.description)
         .addFields(

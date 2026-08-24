@@ -10,6 +10,7 @@ const { ensureFishingData, assignDailyFishQuests, formatMs, applyXp, getLevelDat
 const { FISH_QUEST_TEMPLATES } = require('../../../data/fishData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { buildQuestProgressBar } = require('./embeds');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // QUESTS
@@ -72,7 +73,7 @@ async function showQuests(interaction, user, currency) {
     }).filter(Boolean);
 
     const embed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle(`🎣 ${interaction.user.username}'s Daily Fishing Quests`)
         .setDescription(lines.join('\n\n'))
         .setFooter({ text: 'Quests refresh every 24h after all are completed or claimed' })
@@ -135,7 +136,7 @@ async function claimQuest(interaction, user, currency) {
     }
 
     const embed = new EmbedBuilder()
-        .setColor('#2ecc71')
+        .setColor(COLORS.SUCCESS)
         .setTitle(`${template.emoji} Quest Reward Claimed!`)
         .setDescription(`**${template.name}** completed!`)
         .addFields(

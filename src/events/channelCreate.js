@@ -1,6 +1,7 @@
 const { EmbedBuilder, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { trackAction } = require('../services/antiNukeService');
+const COLORS = require('../utils/embedColors');
 
 module.exports = {
     name: 'channelCreate',
@@ -18,7 +19,7 @@ module.exports = {
         if (!logChannel.permissionsFor(channel.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) return;
 
         const embed = new EmbedBuilder()
-            .setColor('#00ff00')
+            .setColor(COLORS.SUCCESS)
             .setTitle('Channel Created')
             .addFields(
                 { name: 'Name', value: channel.name, inline: true },

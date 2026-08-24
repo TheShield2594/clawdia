@@ -9,6 +9,7 @@ const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { ensureHuntData } = require('../../../services/huntService');
 const { ZONE_LIST, ZONES } = require('../../../data/huntData');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ZONE (was /huntzone)
@@ -50,7 +51,7 @@ async function executeZone(interaction, sub) {
         });
 
         const embed = new EmbedBuilder()
-            .setColor('#3498db')
+            .setColor(COLORS.INFO)
             .setTitle('🗺️ Hunting Zones')
             .setDescription(lines.join('\n\n'))
             .setFooter({ text: `Unlock new zones with /hunt shop unlock • Active zone: ${ZONES[h.activeZone]?.name ?? 'Unknown'} • Your level: ${h.level}` });
@@ -89,7 +90,7 @@ async function executeZone(interaction, sub) {
         return interaction.reply({
             embeds: [
                 new EmbedBuilder()
-                    .setColor('#2ecc71')
+                    .setColor(COLORS.SUCCESS)
                     .setTitle('🗺️ Zone Changed')
                     .setDescription(`Switched from **${oldZone?.emoji} ${oldZone?.name}** → **${zone.emoji} ${zone.name}**`)
                     .addFields(

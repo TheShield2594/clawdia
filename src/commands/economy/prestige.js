@@ -5,6 +5,7 @@ const {
 } = require('discord.js');
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
+const COLORS = require('../../utils/embedColors');
 const {
     PRESTIGE_TIERS, UNLOCK_LABELS, tierFor, titleForExactRank, nextTierAfter, badgeFor,
 } = require('../../utils/prestige');
@@ -83,7 +84,7 @@ async function handleStatus(interaction) {
 async function handleInfo(interaction) {
     const lines = PRESTIGE_TIERS.filter(t => t.rank > 0).map(describeTier).join('\n\n');
     const embed = new EmbedBuilder()
-        .setColor('#9b59b6')
+        .setColor(COLORS.RARE)
         .setTitle('✨ Prestige Tiers')
         .setDescription(lines)
         .setFooter({ text: 'Each prestige resets your level to 0 but grants permanent bonuses and exclusive content.' })
@@ -120,7 +121,7 @@ async function handleUp(interaction) {
 
     // Confirmation prompt — prestige is irreversible.
     const confirmEmbed = new EmbedBuilder()
-        .setColor('#f39c12')
+        .setColor(COLORS.WARN)
         .setTitle('✨ Confirm Prestige')
         .setDescription(
             `You're about to **prestige to ${newTier.title || `Rank ${newRank}`}**.\n\n` +
@@ -187,7 +188,7 @@ async function handleUp(interaction) {
             ?? null;
         if (newRank > announcedRank && announceChannelId) {
             const ceremony = new EmbedBuilder()
-                .setColor('#FFD700')
+                .setColor(COLORS.PRIZE)
                 .setTitle('✨ A New Ascension')
                 .setDescription(
                     `<@${interaction.user.id}> has ascended to **${newTier.title || `Rank ${newRank}`}** ` +
@@ -212,7 +213,7 @@ async function handleUp(interaction) {
         }
 
         const doneEmbed = new EmbedBuilder()
-            .setColor('#FFD700')
+            .setColor(COLORS.PRIZE)
             .setTitle(`${badgeFor(newRank)} Welcome to ${newTier.title || `Rank ${newRank}`}`)
             .setDescription(
                 `Your level has been reset, but you carry forward:\n\n` +

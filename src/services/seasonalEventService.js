@@ -1,5 +1,6 @@
 const Guild = require('../models/Guild');
 const { SEASONAL_EVENTS, getActiveSeasonalEvent } = require('../data/seasonalEvents');
+const COLORS = require('../utils/embedColors');
 
 /**
  * Check all guilds for seasonal event auto-start/auto-end and apply changes.
@@ -203,7 +204,7 @@ async function announceEventEnd(discordGuild, eventData, guildDoc) {
         if (!channel?.isTextBased()) return;
         const { EmbedBuilder } = require('discord.js');
         const embed = new EmbedBuilder()
-            .setColor('#888888')
+            .setColor(COLORS.NEUTRAL)
             .setTitle(`${eventData.emoji ?? '🎉'} ${eventData.name} Has Ended`)
             .setDescription('Thank you for participating! The event has concluded.')
             .setTimestamp();

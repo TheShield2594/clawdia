@@ -5,6 +5,7 @@ const User     = require('../../models/User');
 const Guild    = require('../../models/Guild');
 const AiQuest  = require('../../models/AiQuest');
 const { resolveProviderConfig, getCompletion } = require('../../services/aiService');
+const COLORS = require('../../utils/embedColors');
 
 const COST         = 200;       // coins to generate
 const COOLDOWN_MS  = 23 * 60 * 60 * 1000; // 23h — allow slight drift
@@ -270,7 +271,7 @@ Create a legendary quest that feels fitting for their journey so far.`;
         const mechLabel = MECHANIC_LABELS[mechanic];
 
         const embed = new EmbedBuilder()
-            .setColor(0xFFD700)
+            .setColor(COLORS.PRIZE)
             .setTitle(`⚔️ Legendary Quest Forged!`)
             .setDescription(`*${lore}*`)
             .addFields(

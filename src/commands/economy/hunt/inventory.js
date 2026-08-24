@@ -10,6 +10,7 @@ const { MessageFlags, EmbedBuilder } = require('discord.js');
 const User = require('../../../models/User');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { paginate } = require('../../../utils/paginator');
+const COLORS = require('../../../utils/embedColors');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // INV (was /huntinv)
@@ -73,7 +74,7 @@ async function executeInv(interaction, sub) {
         }
 
         const pages = buildWeaponPages(h).map((lines, page, all) => new EmbedBuilder()
-            .setColor('#3498db')
+            .setColor(COLORS.INFO)
             .setTitle(all.length > 1 ? `🔫 Your Weapons (${h.weapons.length})` : '🔫 Your Weapons')
             .setDescription(lines.join(WEAPON_SEPARATOR))
             .setFooter({ text: 'Use /hunt inv equip <#> to change weapon • /hunt shop repair to restore durability • /hunt shop upgrade for modules' }));
@@ -99,7 +100,7 @@ async function executeInv(interaction, sub) {
         await user.save();
 
         const embed = new EmbedBuilder()
-            .setColor('#2ecc71')
+            .setColor(COLORS.SUCCESS)
             .setTitle('⚔️ Weapon Equipped')
             .setDescription(`**${weapon.name}** is now equipped and ready for hunting.`)
             .addFields(
@@ -158,7 +159,7 @@ async function executeInv(interaction, sub) {
         if (h.activeXpScroll) activeParts.push(`📜 **XP Scroll** — queued for next hunt`);
 
         const embed = new EmbedBuilder()
-            .setColor('#9b59b6')
+            .setColor(COLORS.RARE)
             .setTitle('🧪 Consumables')
             .addFields({ name: 'In Stock', value: lines.length ? lines.join('\n') : 'None', inline: false });
 
@@ -226,7 +227,7 @@ async function executeInv(interaction, sub) {
         await user.save();
 
         const embed = new EmbedBuilder()
-            .setColor('#e74c3c')
+            .setColor(COLORS.ERROR)
             .setTitle('🗑️ Weapon Discarded')
             .setDescription(`**${weapon.name}** has been discarded.`)
             .setFooter({ text: h.weapons.length === 0 ? 'Buy a new weapon with /hunt shop weapon' : 'Use /hunt inv weapons to view remaining weapons' });
