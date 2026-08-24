@@ -106,6 +106,7 @@
 
                     <!-- Logging tab -->
                     <div id="mod-tab-logging" class="ai-inner-panel">
+                    <div data-save-scope="moderation">
                     <label class="toggle">
                         <span class="toggle-text"><strong>Enable moderation</strong><span>Master switch for all moderation features</span></span>
                         <span class="switch"><input type="checkbox" id="mod-enabled" <%= settings.moderation.enabled ? 'checked' : '' %>><span class="slider"></span></span>
@@ -129,6 +130,11 @@
                         </select>
                         <small>Assigned when a member is muted. Leave empty to use Discord's native timeout.</small>
                     </div>
+                    <div class="actions-row">
+                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
+                    </div>
+                    </div><!-- end moderation scope -->
+                    <div data-save-scope="casesettings">
                     <div class="panel-head" style="margin-top:1.5rem"><h3>Case Management</h3><p>Configure SLA monitoring for open moderation cases.</p></div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                         <div>
@@ -145,9 +151,9 @@
                         </div>
                     </div>
                     <div class="actions-row">
-                        <button class="btn btn-primary" onclick="saveSettings('moderation')">Save changes</button>
-                        <button class="btn btn-primary" onclick="saveSettings('casesettings')" style="margin-left:.5rem">Save case settings</button>
+                        <button class="btn btn-primary" onclick="saveSettings('casesettings')">Save case settings</button>
                     </div>
+                    </div><!-- end casesettings scope -->
                     </div><!-- end mod-tab-logging -->
 
                     <!-- Appeals tab -->

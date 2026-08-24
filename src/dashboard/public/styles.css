@@ -1441,6 +1441,47 @@ textarea.auto-resize {
 .dash-nav-search:focus { border-color: var(--claw-500); }
 .dash-nav-search::-webkit-search-cancel-button { display: none; }
 
+/* ── Unsaved changes (#662) ───────────────────────────────────────────
+   A section with edits that have not reached the server yet. The dot is
+   the glance-level cue; #unsaved-banner in the topbar is what states it
+   in words, because colour and shape alone would fail WCAG 1.4.1. */
+.unsaved-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--warn); flex-shrink: 0;
+    display: inline-block;
+}
+.unsaved-banner {
+    display: flex; align-items: center; gap: 8px; margin: 0;
+    padding: 6px 12px; border-radius: 999px;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.32);
+    color: var(--cream-100); font-size: 12.5px; white-space: nowrap;
+}
+.unsaved-banner strong { color: var(--cream-50); font-weight: 600; }
+.unsaved-banner[hidden] { display: none; }
+
+/* The sidebar item. An ::after rather than an appended element, so the
+   nav keeps the shape activateTab's label lookup depends on. */
+.dash-nav .nav-item.has-unsaved::after {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--warn); flex-shrink: 0; margin-left: auto;
+}
+.dash-nav .nav-item.has-unsaved.active::after { background: #fff; }
+
+/* The save button that would clear it. */
+.btn.has-unsaved {
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.45);
+}
+.btn.has-unsaved::after {
+    content: ""; display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: currentColor; margin-left: 8px;
+    vertical-align: middle;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .unsaved-banner { transition: opacity .15s; }
+}
+
 /* Quick-action bar at top of settings panels */
 .dash-panel-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--ink-800); }
 .dash-panel-bar h1 { font-family: 'Instrument Serif', serif; font-size: 32px; margin: 0; color: var(--cream-50); }

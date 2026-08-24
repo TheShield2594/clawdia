@@ -53,7 +53,7 @@
                             <% }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
-                            <select id="autorole-select" aria-label="Role to add on join">
+                            <select id="autorole-select" aria-label="Role to add on join" data-no-dirty>
                                 <option value="">Select a role</option>
                                 <% roles.forEach(role => { %>
                                     <option value="<%= role.id %>">@<%= role.name %></option>

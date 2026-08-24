@@ -69,6 +69,10 @@ function loadPanel(id) {
             const queued = pendingPanelInit.get(id) || [];
             pendingPanelInit.delete(id);
             queued.forEach(fn => runPanelInit(id, fn));
+            // After the init callbacks, not before: several of them populate
+            // fields, and a baseline taken first would read as an edit the
+            // moment they finished (#662).
+            registerSaveScopes(panel);
             return panel;
         })
         .catch(err => {
@@ -695,6 +699,9 @@ async function validateProfileFeeds(index) {
     ).join('<br>');
 }
 
+// Returns true when the settings reached the server, false when they did not.
+// The unsaved-changes tracking below reads it: a section is only clean once a
+// save has actually succeeded, so a failed POST must leave the dirty mark up.
 async function saveSettings(section) {
     const guildId = BOOT.guildId;
     let data = {};
@@ -1090,7 +1097,7 @@ async function saveSettings(section) {
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
             toast(err.error || 'Failed to save settings', 'error');
-            return;
+            return false;
         }
 
         // After saving economy settings, upload/delete pending shop item images
@@ -1109,18 +1116,23 @@ async function saveSettings(section) {
             );
             const results = await Promise.all([...uploads, ...deletes]);
             const errors = results.filter(Boolean);
-            if (errors.length) toast('Settings saved, but image update failed: ' + errors[0], 'error');
-            else {
-                Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]);
-                _shopItemClearedImages.clear();
-                toast('Settings saved', 'success');
+            if (errors.length) {
+                toast('Settings saved, but image update failed: ' + errors[0], 'error');
+                // The settings landed but the images did not, and the pending
+                // image is still unsaved work — so this is not a clean save.
+                return false;
             }
+            Object.keys(_shopItemPendingImages).forEach(k => delete _shopItemPendingImages[k]);
+            _shopItemClearedImages.clear();
+            toast('Settings saved', 'success');
         } else {
             toast('Settings saved', 'success');
         }
+        return true;
     } catch (error) {
         console.error(error);
         toast('An error occurred', 'error');
+        return false;
     }
 }
 
@@ -3996,3 +4008,216 @@ async function ecoAdminAction(action) {
     onPanel('antinuke', () => initUserSearchWidget('an-whitelist-users'));
     onPanel('commandpolicies', () => initUserSearchWidget('cp-exc-users'));
 })();
+
+// ── Unsaved-changes tracking (#662) ───────────────────────────────────
+//
+// 22 panels carry 28 "Save changes" buttons and nothing anywhere knew whether
+// what was on screen had been saved. Leaving the page — the "← All servers"
+// link, a reload, closing the tab — threw away every unsaved edit in silence.
+//
+// Switching sections does not, despite how it looks: activateTab() only sets
+// display:none on the panel it leaves, so its fields and their values stay in
+// the document and are still there when the reader comes back. What is missing
+// there is not a barrier but a reminder, so a section holding unsaved edits is
+// marked in the sidebar and named in a banner rather than trapping navigation
+// behind a dialog that would be wrong every time it appeared.
+//
+// A *save scope* is the region of a panel owned by exactly one saveSettings()
+// section — an inner tab, or the panel itself, or whatever data-save-scope
+// marks where one container holds two sections' fields. One POST saves its
+// whole section, so a successful save re-baselines every scope of that section
+// however many tabs they are spread across.
+//
+// Dirty is decided by comparing a scope with a snapshot taken when its markup
+// landed, not by a flag raised on the first keystroke: typing a character and
+// deleting it again leaves the settings exactly as they were, and a warning
+// there is how people learn to click through warnings.
+
+// Matched by reading the attribute rather than with [onclick*="saveSettings("]:
+// a bare "(" inside an attribute selector's quoted value is legal CSS that not
+// every selector engine parses, and one that quietly matches nothing would
+// leave every panel looking permanently saved.
+const SAVE_CALL = /saveSettings\(\s*'([^']+)'/;
+function saveButtonsIn(root) {
+    return Array.from(root.querySelectorAll('[onclick]'))
+        .filter(el => SAVE_CALL.test(el.getAttribute('onclick') || ''));
+}
+// Search boxes, "pick one to add" selects and one-shot admin fields live
+// inside panels but are not settings — saveSettings() never reads them.
+const NOT_A_SETTING = '[data-no-dirty], [data-no-dirty] *';
+// Unit separator. A value containing it would have to be typed on purpose;
+// anything more ordinary could forge a boundary between two fields.
+const FIELD_SEP = '\u001f';
+
+// scope element -> { section, baseline }
+const saveScopes = new Map();
+// What the banner last said, so it is only rewritten — and only re-announced —
+// when the set of unsaved sections actually changes.
+let announcedSections = '';
+let leavingDeliberately = false;
+
+function saveScopeOf(el) {
+    return el.closest('[data-save-scope]')
+        || el.closest('.ai-inner-panel')
+        || el.closest('section.panel');
+}
+
+function sectionOfSaveButton(btn) {
+    const scoped = btn.closest('[data-save-scope]');
+    if (scoped) return scoped.dataset.saveScope;
+    const match = SAVE_CALL.exec(btn.getAttribute('onclick') || '');
+    return match ? match[1] : null;
+}
+
+function scopeSignature(scope) {
+    const parts = [];
+    for (const el of scope.querySelectorAll('input, select, textarea')) {
+        // A modal is a scratch editor for one row. The row it commits to is in
+        // the scope already, so counting both would report an edit twice — and
+        // would report a cancelled modal as an edit that never happened.
+        if (el.closest('.modal-overlay')) continue;
+        if (el.matches(NOT_A_SETTING)) continue;
+        // A file input's value is a fake path the page cannot set back, so it
+        // could never match a baseline and would pin the scope dirty forever.
+        if (el.type === 'file') continue;
+        if (el.type === 'checkbox' || el.type === 'radio') parts.push(el.checked ? '1' : '0');
+        else if (el.multiple) parts.push(Array.from(el.selectedOptions, o => o.value).join(','));
+        else parts.push(el.value);
+    }
+    // Role, channel and member chips are spans rather than controls, and on
+    // several panels they *are* the setting — removing one is an edit that no
+    // amount of reading form controls would notice.
+    for (const chip of scope.querySelectorAll('[data-role-id], [data-channel-id], [data-user-id]')) {
+        parts.push(chip.dataset.roleId || chip.dataset.channelId || chip.dataset.userId);
+    }
+    return parts.join(FIELD_SEP);
+}
+
+function registerSaveScopes(root) {
+    for (const btn of saveButtonsIn(root)) {
+        const section = sectionOfSaveButton(btn);
+        const scope = saveScopeOf(btn);
+        if (!section || !scope || saveScopes.has(scope)) continue;
+        saveScopes.set(scope, { section, baseline: scopeSignature(scope) });
+    }
+    refreshUnsavedMarks();
+}
+
+function scopeIsDirty(scope) {
+    const entry = saveScopes.get(scope);
+    return !!entry && scopeSignature(scope) !== entry.baseline;
+}
+
+function unsavedScopes() {
+    return Array.from(saveScopes.keys()).filter(scopeIsDirty);
+}
+
+/** Re-baseline a section's scopes. Only ever called after a save succeeded. */
+function markSectionSaved(section) {
+    for (const [scope, entry] of saveScopes) {
+        if (entry.section === section) entry.baseline = scopeSignature(scope);
+    }
+    refreshUnsavedMarks();
+}
+
+function refreshUnsavedMarks() {
+    const dirtyTabs = new Set();
+    for (const [scope] of saveScopes) {
+        const dirty = scopeIsDirty(scope);
+        scope.classList.toggle('has-unsaved', dirty);
+        for (const btn of saveButtonsIn(scope)) btn.classList.toggle('has-unsaved', dirty);
+        const panel = scope.closest('.panel');
+        if (dirty && panel) dirtyTabs.add(panel.id);
+    }
+
+    const names = [];
+    for (const item of navItems) {
+        const dirty = dirtyTabs.has(item.dataset.tab);
+        // A CSS dot rather than an appended element, so the sidebar keeps the
+        // shape both the nav tests and activateTab's label lookup rely on.
+        item.classList.toggle('has-unsaved', dirty);
+        if (dirty) names.push(item.querySelector('span:last-child')?.textContent?.trim() || item.dataset.tab);
+    }
+
+    // The dot on its own would be colour and shape carrying meaning, which
+    // WCAG 1.4.1 rules out. The banner says it in words and names the sections,
+    // which is also the only way to see an unsaved section that is scrolled
+    // out of the sidebar.
+    const banner = document.getElementById('unsaved-banner');
+    if (!banner) return;
+    const summary = names.join(', ');
+    if (summary === announcedSections) return;
+    announcedSections = summary;
+    if (summary) document.getElementById('unsaved-banner-sections').textContent = summary;
+    banner.hidden = !summary;
+}
+
+function noteEdit(event) {
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const scope = saveScopeOf(target);
+    if (scope && saveScopes.has(scope)) refreshUnsavedMarks();
+}
+
+// Capture, so an edit still registers if something downstream stops the event.
+document.addEventListener('input', noteEdit, true);
+document.addEventListener('change', noteEdit, true);
+// Adding or removing a chip or a repeater row changes what would be saved
+// without any control firing input or change. The click that did it is the
+// signal; the state it produces exists a tick later.
+document.addEventListener('click', () => {
+    if (saveScopes.size) setTimeout(refreshUnsavedMarks, 0);
+}, true);
+
+// The one place edits are genuinely lost. Browsers ignore any message we pass
+// and show their own wording, but returnValue still has to be set for Chrome
+// and Safari to show the prompt at all.
+window.addEventListener('beforeunload', event => {
+    if (leavingDeliberately || !unsavedScopes().length) return undefined;
+    event.preventDefault();
+    event.returnValue = '';
+    return '';
+});
+
+// "← All servers", and any other link that leaves this page. Intercepting it
+// means the reader gets a dialog naming the unsaved sections rather than the
+// browser's anonymous one.
+document.addEventListener('click', async event => {
+    if (event.defaultPrevented || event.button !== 0) return;
+    // A modified click opens a new tab or a download; this page is not going
+    // anywhere, so there is nothing to warn about.
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest && event.target.closest('a[href]');
+    if (!link || link.target === '_blank' || link.hasAttribute('download')) return;
+    const href = link.getAttribute('href');
+    // In-page anchors (the skip link) and javascript: handlers go nowhere.
+    if (!href || href.startsWith('#') || href.toLowerCase().startsWith('javascript:')) return;
+    if (!unsavedScopes().length) return;
+
+    event.preventDefault();
+    const sections = announcedSections || 'this page';
+    const leave = await showConfirm({
+        title: 'Leave without saving?',
+        body: `Unsaved changes in ${sections} will be lost.`,
+        okText: 'Leave without saving',
+    });
+    if (!leave) return;
+    // Past the reader's own confirmation, so beforeunload must not ask again.
+    leavingDeliberately = true;
+    window.location.href = link.href;
+});
+
+// saveSettings is called straight from inline onclick attributes, so the hook
+// goes on the global binding rather than on 28 buttons. The original is
+// captured first: reassigning the name would otherwise make this recurse.
+const saveSettingsUnhooked = saveSettings;
+window.saveSettings = async function saveSettings(section) {
+    const saved = await saveSettingsUnhooked(section);
+    if (saved) markSectionSaved(section);
+    return saved;
+};
+
+// The panel that shipped with the page has had its init callbacks run by now —
+// they ran inline as this file executed — so it can be baselined here. Every
+// other panel is baselined by loadPanel() when its markup lands.
+registerSaveScopes(document);

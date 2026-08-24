@@ -19,7 +19,7 @@
                                 <% } }); %>
                             </div>
                             <div style="display:flex;gap:.5rem;align-items:center">
-                                <select id="cp-exc-roles-select" aria-label="Role to exempt">
+                                <select id="cp-exc-roles-select" aria-label="Role to exempt" data-no-dirty>
                                     <option value="">Select a role</option>
                                     <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
                                 </select>
@@ -31,7 +31,7 @@
                             <div class="user-search-widget" role="group" aria-labelledby="cp-exc-users-label">
                                 <div class="user-tag-list" id="cp-exc-users-tags"></div>
                                 <div style="position:relative">
-                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" aria-label="Search members to exempt" data-widget="cp-exc-users">
+                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" aria-label="Search members to exempt" data-no-dirty data-widget="cp-exc-users">
                                     <div class="user-search-dropdown" id="cp-exc-users-dropdown" style="display:none"></div>
                                 </div>
                                 <textarea id="cp-exc-users" style="display:none"><%= (settings.commandPolicies?.exceptions?.userIds||[]).join('\n') %></textarea>

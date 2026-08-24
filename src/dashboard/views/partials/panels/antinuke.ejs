@@ -52,7 +52,7 @@
                             <div class="user-search-widget" role="group" aria-labelledby="an-whitelist-users-label">
                                 <div class="user-tag-list" id="an-whitelist-users-tags"></div>
                                 <div style="position:relative">
-                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" aria-label="Search members to whitelist" data-widget="an-whitelist-users">
+                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" aria-label="Search members to whitelist" data-no-dirty data-widget="an-whitelist-users">
                                     <div class="user-search-dropdown" id="an-whitelist-users-dropdown" style="display:none"></div>
                                 </div>
                                 <textarea id="an-whitelist-users" style="display:none"><%= (settings.antiNuke?.whitelistUserIds||[]).join('\n') %></textarea>

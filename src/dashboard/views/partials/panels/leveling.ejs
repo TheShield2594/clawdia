@@ -37,7 +37,7 @@
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
-                            <select id="level-no-xp-roles-select" aria-label="Role to exclude from XP">
+                            <select id="level-no-xp-roles-select" aria-label="Role to exclude from XP" data-no-dirty>
                                 <option value="">Select a role</option>
                                 <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
                             </select>
@@ -54,7 +54,7 @@
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
-                            <select id="level-no-xp-channels-select" aria-label="Channel to exclude from XP">
+                            <select id="level-no-xp-channels-select" aria-label="Channel to exclude from XP" data-no-dirty>
                                 <option value="">Select a channel</option>
                                 <% channels.forEach(function(ch){ %><option value="<%= ch.id %>">#<%= ch.name %></option><% }); %>
                             </select>
@@ -92,6 +92,7 @@
                     </div>
 
                     <!-- Admin XP Actions -->
+                    <div data-no-dirty>
                     <div class="panel-head" style="margin-top:1.75rem">
                         <h3>Admin XP Actions</h3>
                         <p>Give, take, reset, or set the level of a specific member.</p>
@@ -108,8 +109,10 @@
                         <button class="btn btn-sm btn-danger" onclick="levelAdminAction('reset')">Reset XP</button>
                     </div>
                     <div id="level-admin-msg" style="min-height:1.4em;font-size:.85em"></div>
+                    </div><!-- end Admin XP Actions -->
 
                     <!-- Boost Events -->
+                    <div data-no-dirty>
                     <div class="panel-head" style="margin-top:1.75rem">
                         <h3>Boost Events</h3>
                         <p>Run a timed XP multiplier for all members in this server.</p>
@@ -127,6 +130,7 @@
                         <button class="btn btn-primary" onclick="startBoostEvent()">Activate boost</button>
                     </div>
                     <div id="level-boost-msg" style="min-height:1.4em;font-size:.85em"></div>
+                    </div><!-- end Boost Events -->
 
                     <!-- Leaderboard -->
                     <div class="panel-head" style="margin-top:1.75rem">

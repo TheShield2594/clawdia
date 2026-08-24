@@ -147,6 +147,16 @@
             <div style="flex:1;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-400);">
                 <%= guild.name %> / <span style="color:var(--cream-100);" id="topbar-section">Overview</span>
             </div>
+            <%# Names the sections holding unsaved edits. The sidebar marks them
+                with a dot too, but a dot is colour and shape carrying meaning on
+                its own (WCAG 1.4.1) and says nothing about a section scrolled out
+                of view — so this is where the state is actually stated. `polite`,
+                and rewritten only when the set of sections changes, so it is
+                announced once rather than on every keystroke. %>
+            <p class="unsaved-banner" id="unsaved-banner" role="status" aria-live="polite" aria-atomic="true" hidden>
+                <span class="unsaved-dot" aria-hidden="true"></span>
+                Unsaved changes in <strong id="unsaved-banner-sections"></strong>
+            </p>
             <a href="/dashboard" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:var(--ink-850);border:1px solid var(--ink-800);color:var(--ink-200);font-size:13px;font-family:inherit;text-decoration:none;transition:border-color .15s,color .15s;" onmouseover="this.style.color='var(--cream-50)'" onmouseout="this.style.color='var(--ink-200)'">← All servers</a>
         </div>
 

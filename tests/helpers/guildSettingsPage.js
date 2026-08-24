@@ -24,14 +24,17 @@ function renderPanel(name) {
     return ejs.render(fs.readFileSync(file, 'utf8'), guildSettingsLocals(), { filename: file });
 }
 
-// The script wires delegated handlers onto `document`, which survives a body
-// swap. Record them so each test can start from a clean document.
-const documentListeners = [];
+// The script wires delegated handlers onto `document` and an unsaved-changes
+// guard onto `window`, both of which survive a body swap. Record them so each
+// test starts from a clean page rather than inheriting the last one's
+// listeners — a stale guard still holding the previous document's fields would
+// otherwise answer for the fresh one.
+const pageListeners = [];
 
 function forgetDocumentListeners() {
-    while (documentListeners.length) {
-        const [type, fn, opts] = documentListeners.pop();
-        document.removeEventListener(type, fn, opts);
+    while (pageListeners.length) {
+        const [target, type, fn, opts] = pageListeners.pop();
+        target.removeEventListener(type, fn, opts);
     }
 }
 
@@ -66,9 +69,14 @@ function bootPage({ panelFetch } = {}) {
 
     const bootstrap = html.match(/<script nonce="[^"]*">([\s\S]*?)<\/script>/)[1];
     const addDocumentListener = document.addEventListener.bind(document);
+    const addWindowListener = window.addEventListener.bind(window);
     document.addEventListener = (type, fn, opts) => {
-        documentListeners.push([type, fn, opts]);
+        pageListeners.push([document, type, fn, opts]);
         addDocumentListener(type, fn, opts);
+    };
+    window.addEventListener = (type, fn, opts) => {
+        pageListeners.push([window, type, fn, opts]);
+        addWindowListener(type, fn, opts);
     };
     try {
         window.eval(fs.readFileSync(path.join(PUBLIC, 'esc-html.js'), 'utf8'));
@@ -76,6 +84,7 @@ function bootPage({ panelFetch } = {}) {
         window.eval(fs.readFileSync(path.join(PUBLIC, 'guild-settings.js'), 'utf8'));
     } finally {
         document.addEventListener = addDocumentListener;
+        window.addEventListener = addWindowListener;
     }
 }
 
