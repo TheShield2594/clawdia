@@ -485,18 +485,18 @@ function renderEscalationLadder() {
         const needsDuration = step.action === 'mute' || step.action === 'tempban';
         return `
         <div class="field esc-ladder-row">
-            <div><label class="field-label" style="font-size:.75rem;">Warnings</label><input type="number" min="1" value="${step.threshold || 1}" data-esc-idx="${idx}" data-esc-key="threshold"></div>
-            <div><label class="field-label" style="font-size:.75rem;">Action</label>
-                <select data-esc-idx="${idx}" data-esc-key="action">
+            <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-threshold">Warnings</label><input type="number" id="esc-${idx}-threshold" min="1" value="${step.threshold || 1}" data-esc-idx="${idx}" data-esc-key="threshold"></div>
+            <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-action">Action</label>
+                <select id="esc-${idx}-action" data-esc-idx="${idx}" data-esc-key="action">
                     <option value="mute" ${step.action === 'mute' ? 'selected' : ''}>Mute</option>
                     <option value="tempban" ${step.action === 'tempban' ? 'selected' : ''}>Tempban</option>
                     <option value="kick" ${step.action === 'kick' ? 'selected' : ''}>Kick</option>
                     <option value="ban" ${step.action === 'ban' ? 'selected' : ''}>Ban</option>
                 </select>
             </div>
-            <div><label class="field-label" style="font-size:.75rem;">Duration (min)</label><input type="number" min="1" max="40320" value="${step.durationMinutes ?? ''}" ${needsDuration ? '' : 'disabled'} data-esc-idx="${idx}" data-esc-key="durationMinutes"></div>
-            <div><label class="field-label" style="font-size:.75rem;">DM</label><input type="checkbox" ${step.dmUser !== false ? 'checked' : ''} data-esc-idx="${idx}" data-esc-key="dmUser"></div>
-            <div><label class="field-label" style="font-size:.75rem;">Reason (supports {count})</label><input type="text" value="${escapeHtml(step.reason || '')}" data-esc-idx="${idx}" data-esc-key="reason"></div>
+            <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-duration">Duration (min)</label><input type="number" id="esc-${idx}-duration" min="1" max="40320" value="${step.durationMinutes ?? ''}" ${needsDuration ? '' : 'disabled'} data-esc-idx="${idx}" data-esc-key="durationMinutes"></div>
+            <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-dm">DM</label><input type="checkbox" id="esc-${idx}-dm" ${step.dmUser !== false ? 'checked' : ''} data-esc-idx="${idx}" data-esc-key="dmUser"></div>
+            <div><label class="field-label" style="font-size:.75rem;" for="esc-${idx}-reason">Reason (supports {count})</label><input type="text" id="esc-${idx}-reason" value="${escapeHtml(step.reason || '')}" data-esc-idx="${idx}" data-esc-key="reason"></div>
             <div><button type="button" class="btn btn-sm" onclick="removeEscalationStep(${idx})">✕</button></div>
         </div>`;
     }).join('');

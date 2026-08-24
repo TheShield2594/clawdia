@@ -60,8 +60,8 @@
                         <textarea id="rr-description" rows="3" placeholder="Click a reaction below to assign yourself a role." maxlength="3500"></textarea>
                         <small>The emoji → role list is appended automatically below your description.</small>
                     </div>
-                    <div class="field">
-                        <label class="field-label">Emoji → Role mappings</label>
+                    <div class="field" role="group" aria-labelledby="rr-mappings-label">
+                        <div class="field-label" id="rr-mappings-label">Emoji → Role mappings</div>
                         <div id="rr-mappings-list" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.5rem;"></div>
                         <button class="btn btn-sm" type="button" onclick="addRrMapping()">+ Add mapping</button>
                         <small style="display:block;margin-top:.4rem">Use a standard emoji (e.g. <code>👍</code>) or a custom Discord emoji (<code>&lt;:name:id&gt;</code>).</small>

@@ -9,8 +9,8 @@
                     </label>
                     <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Global Exceptions <small style="font-weight:400;color:var(--text-dim)">— these users/roles bypass all rules</small></div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                        <div>
-                            <label class="field-label">Exempt roles</label>
+                        <div role="group" aria-labelledby="cp-exc-roles-label">
+                            <div class="field-label" id="cp-exc-roles-label">Exempt roles</div>
                             <div id="cp-exc-roles-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
                                 <% (settings.commandPolicies?.exceptions?.roleIds||[]).forEach(function(rId) {
                                    var role = roles.find(function(r){ return r.id === rId; });
@@ -19,7 +19,7 @@
                                 <% } }); %>
                             </div>
                             <div style="display:flex;gap:.5rem;align-items:center">
-                                <select id="cp-exc-roles-select">
+                                <select id="cp-exc-roles-select" aria-label="Role to exempt">
                                     <option value="">Select a role</option>
                                     <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
                                 </select>
@@ -27,11 +27,11 @@
                             </div>
                         </div>
                         <div>
-                            <label class="field-label">Exempt users</label>
-                            <div class="user-search-widget">
+                            <div class="field-label" id="cp-exc-users-label">Exempt users</div>
+                            <div class="user-search-widget" role="group" aria-labelledby="cp-exc-users-label">
                                 <div class="user-tag-list" id="cp-exc-users-tags"></div>
                                 <div style="position:relative">
-                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" data-widget="cp-exc-users">
+                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" aria-label="Search members to exempt" data-widget="cp-exc-users">
                                     <div class="user-search-dropdown" id="cp-exc-users-dropdown" style="display:none"></div>
                                 </div>
                                 <textarea id="cp-exc-users" style="display:none"><%= (settings.commandPolicies?.exceptions?.userIds||[]).join('\n') %></textarea>
@@ -56,21 +56,21 @@
                     <div class="modal-box" style="max-width:520px;">
                         <div class="modal-head"><span id="cp-rule-modal-title">Add Rule</span><button class="modal-close" onclick="closeCpRuleModal()">✕</button></div>
                         <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
-                            <div class="field"><label class="field-label">Command name</label><input type="text" id="cp-r-command" placeholder="e.g. ban"></div>
-                            <div class="field"><label class="field-label">Effect</label><select id="cp-r-effect"><option value="allow">Allow</option><option value="deny">Deny</option></select></div>
-                            <div class="field"><label class="field-label">Roles <small>(leave empty for all)</small></label>
+                            <div class="field"><label class="field-label" for="cp-r-command">Command name</label><input type="text" id="cp-r-command" placeholder="e.g. ban"></div>
+                            <div class="field"><label class="field-label" for="cp-r-effect">Effect</label><select id="cp-r-effect"><option value="allow">Allow</option><option value="deny">Deny</option></select></div>
+                            <div class="field"><label class="field-label" for="cp-r-roles">Roles <small>(leave empty for all)</small></label>
                                 <select id="cp-r-roles" multiple size="4" style="height:auto;">
                                     <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
                                 </select>
                             </div>
-                            <div class="field"><label class="field-label">Channels <small>(leave empty for all)</small></label>
+                            <div class="field"><label class="field-label" for="cp-r-channels">Channels <small>(leave empty for all)</small></label>
                                 <select id="cp-r-channels" multiple size="4" style="height:auto;">
                                     <% channels.forEach(function(ch){ %><option value="<%= ch.id %>">#<%= ch.name %></option><% }); %>
                                 </select>
                             </div>
                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-                                <div class="field"><label class="field-label">Start hour UTC (0–23)</label><input type="number" id="cp-r-start-hour" min="0" max="23" placeholder="Any"></div>
-                                <div class="field"><label class="field-label">End hour UTC (0–23)</label><input type="number" id="cp-r-end-hour" min="0" max="23" placeholder="Any"></div>
+                                <div class="field"><label class="field-label" for="cp-r-start-hour">Start hour UTC (0–23)</label><input type="number" id="cp-r-start-hour" min="0" max="23" placeholder="Any"></div>
+                                <div class="field"><label class="field-label" for="cp-r-end-hour">End hour UTC (0–23)</label><input type="number" id="cp-r-end-hour" min="0" max="23" placeholder="Any"></div>
                             </div>
                         </div>
                         <div class="modal-foot"><button class="btn" onclick="closeCpRuleModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpRuleModal()">Save</button></div>
@@ -82,14 +82,14 @@
                     <div class="modal-box" style="max-width:420px;">
                         <div class="modal-head"><span>Cooldown Override</span><button class="modal-close" onclick="closeCpCooldownModal()">✕</button></div>
                         <div style="display:flex;flex-direction:column;gap:.9rem;padding:1.25rem;">
-                            <div class="field"><label class="field-label">Command name</label><input type="text" id="cp-cd-command" placeholder="e.g. daily"></div>
-                            <div class="field"><label class="field-label">Role</label>
+                            <div class="field"><label class="field-label" for="cp-cd-command">Command name</label><input type="text" id="cp-cd-command" placeholder="e.g. daily"></div>
+                            <div class="field"><label class="field-label" for="cp-cd-role">Role</label>
                                 <select id="cp-cd-role">
                                     <option value="">Select a role</option>
                                     <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
                                 </select>
                             </div>
-                            <div class="field"><label class="field-label">Cooldown (seconds)</label><input type="number" id="cp-cd-seconds" min="0" placeholder="0 = no cooldown"></div>
+                            <div class="field"><label class="field-label" for="cp-cd-seconds">Cooldown (seconds)</label><input type="number" id="cp-cd-seconds" min="0" placeholder="0 = no cooldown"></div>
                         </div>
                         <div class="modal-foot"><button class="btn" onclick="closeCpCooldownModal()">Cancel</button><button class="btn btn-primary" onclick="saveCpCooldownModal()">Save</button></div>
                     </div>
