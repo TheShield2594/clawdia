@@ -18,7 +18,7 @@
     --border-strong: rgba(255, 215, 180, 0.16);
     --text: #faf5f0;
     --text-dim: #a49b92;
-    --text-mute: #6b6258;
+    --text-mute: #8f857a;
     --accent: #f97316;
     --accent-2: #f59e0b;
     --accent-3: #10b981;
@@ -42,7 +42,7 @@
     --ink-800: #2a241e;
     --ink-700: #3a322a;
     --ink-600: #4f463c;
-    --ink-500: #6f6457;
+    --ink-500: #6f6457; /* on-light only — see --ink-400 for dark surfaces */
     --ink-400: #8f8475;
     --ink-300: #b5ab9a;
     --ink-200: #d4cbb9;
@@ -1154,7 +1154,7 @@ textarea.auto-resize {
 
 .cw-show-card { background: var(--ink-900); border-radius: 24px; padding: 28px; border: 1px solid var(--ink-800); }
 .cw-heatmap { display: grid; grid-template-columns: 36px repeat(24, 1fr); gap: 3px; }
-.cw-heatmap .h { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--ink-500); display: flex; align-items: center; justify-content: flex-start; padding-left: 2px; }
+.cw-heatmap .h { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--ink-400); display: flex; align-items: center; justify-content: flex-start; padding-left: 2px; }
 .cw-heatmap .lbl { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-400); display: flex; align-items: center; }
 .cw-heatmap .cell { aspect-ratio: 1; border-radius: 4px; background: var(--ink-800); }
 
@@ -1337,7 +1337,7 @@ textarea.auto-resize {
 .dash-server-name { flex: 1; min-width: 0; }
 .dash-server-name b { font-size: 14px; display: block; color: var(--cream-50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dash-server-name span { font-size: 11.5px; color: var(--ink-400); }
-.dash-nav-label { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-500); margin: 18px 8px 8px; }
+.dash-nav-label { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-400); margin: 18px 8px 8px; }
 .dash-nav { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 1px; }
 /* The <li> is a plain wrapper; the button inside it is what is styled, focused
    and clicked. Keeping the list item intact is the point — the old markup put
@@ -1420,7 +1420,7 @@ textarea.auto-resize {
 .dash-feed-body { font-size: 13.5px; color: var(--cream-100); flex: 1; line-height: 1.4; }
 .dash-feed-body b { color: var(--cream-50); font-weight: 600; }
 .dash-feed-body .who { color: var(--claw-300); }
-.dash-feed-time { font-size: 11.5px; color: var(--ink-500); font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
+.dash-feed-time { font-size: 11.5px; color: var(--ink-400); font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
 
 /* Bot card */
 .dash-bot-card { background: linear-gradient(135deg, var(--claw-500) 0%, var(--claw-600) 100%); border: none; color: #fff; }
@@ -1437,9 +1437,9 @@ textarea.auto-resize {
 
 /* Sidebar search */
 .dash-nav-search-wrap { position: relative; margin-bottom: 14px; }
-.dash-nav-search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink-500); pointer-events: none; }
+.dash-nav-search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink-400); pointer-events: none; }
 .dash-nav-search { width: 100%; box-sizing: border-box; background: var(--ink-850); border: 1px solid var(--ink-800); border-radius: 10px; padding: 7px 10px 7px 30px; font-size: 13px; font-family: inherit; color: var(--cream-100); outline: none; transition: border-color .15s; }
-.dash-nav-search::placeholder { color: var(--ink-500); }
+.dash-nav-search::placeholder { color: var(--ink-400); }
 .dash-nav-search:focus { border-color: var(--claw-500); }
 .dash-nav-search::-webkit-search-cancel-button { display: none; }
 

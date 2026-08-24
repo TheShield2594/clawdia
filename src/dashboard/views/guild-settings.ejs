@@ -59,7 +59,7 @@
             <svg class="dash-nav-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="search" id="sidebar-search" class="dash-nav-search" placeholder="Search sections… (/ or Ctrl+K)" autocomplete="off" aria-label="Filter dashboard sections">
         </div>
-        <div id="sidebar-no-results" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true" style="display:none;font-size:.8rem;color:var(--ink-500);padding:6px 8px;">No sections match</div>
+        <div id="sidebar-no-results" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true" style="display:none;font-size:.8rem;color:var(--ink-400);padding:6px 8px;">No sections match</div>
 
         <!-- Configure -->
         <div class="dash-nav-label" id="nav-group-configure">// Configure</div>
@@ -145,7 +145,7 @@
 
         <!-- Top bar -->
         <div class="dash-topbar">
-            <div style="flex:1;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-500);">
+            <div style="flex:1;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-400);">
                 <%= guild.name %> / <span style="color:var(--cream-100);" id="topbar-section">Overview</span>
             </div>
             <a href="/dashboard" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:var(--ink-850);border:1px solid var(--ink-800);color:var(--ink-200);font-size:13px;font-family:inherit;text-decoration:none;transition:border-color .15s,color .15s;" onmouseover="this.style.color='var(--cream-50)'" onmouseout="this.style.color='var(--ink-200)'">← All servers</a>
