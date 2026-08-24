@@ -148,7 +148,7 @@ the files a change already touches.
 - `GEMINI_API_KEY` - (Optional) Google Gemini API key for AI features
 - `ANTHROPIC_API_KEY` - (Optional) Anthropic Claude API key for AI features
 - `OPENROUTER_API_KEY` - (Optional) OpenRouter API key for AI features
-- `OLLAMA_BASE_URL` - (Optional) Local Ollama endpoint (e.g., `http://localhost:11434`)
+- `OLLAMA_BASE_URL` - (Optional) Local Ollama endpoint (e.g., `http://localhost:11434`). This is the operator's endpoint: a base URL a server admin types into the dashboard is only allowed to reach a private or internal address if it matches this value (or the `localhost:11434` default), so set it when Ollama runs somewhere on your LAN or compose network
 - `MCP_SERVERS_CONFIG` - (Optional) Path to the MCP server list (default: `config/mcp-servers.json`)
 - `MCP_ALLOW_GUILD_SERVERS` - (Optional) Set to `false` to disable dashboard-managed MCP servers
 - `IMGFLIP_USERNAME` / `IMGFLIP_PASSWORD` - (Optional) Imgflip credentials for `/meme` command
@@ -321,6 +321,10 @@ Configuration that previously lived behind slash commands (settings link, level 
    - Point `OLLAMA_BASE_URL` to your local instance
    - Configure `OLLAMA_MODEL` in dashboard (e.g., `llama3.2`, `mistral`)
    - Ideal for private, zero-cost inference
+   - The per-server base URL in the dashboard must be an `http(s)` address that
+     does not resolve into private or reserved space — otherwise a server admin
+     could aim the bot at anything reachable from its container. Your own
+     endpoint is exempt: set it as `OLLAMA_BASE_URL`
 
 ### MCP Servers (Anthropic only)
 
