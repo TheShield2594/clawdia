@@ -219,11 +219,11 @@
                         <!-- Admin Actions -->
                         <div class="panel-head"><h3>Admin Actions</h3><p>Give, take, reset, or freeze a member's economy account.</p></div>
                         <div class="field" style="max-width:360px">
-                            <label class="field-label">User ID</label>
+                            <label class="field-label" for="eco-admin-user-id">User ID</label>
                             <input type="text" id="eco-admin-user-id" placeholder="Discord user ID (17–20 digits)">
                         </div>
                         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
-                            <input type="number" id="eco-admin-amount" placeholder="Amount" min="1" style="width:120px">
+                            <input type="number" id="eco-admin-amount" placeholder="Amount" aria-label="Amount" min="1" style="width:120px">
                             <button class="btn btn-sm btn-primary" onclick="ecoAdminAction('give')">Give coins</button>
                             <button class="btn btn-sm" onclick="ecoAdminAction('take')">Take coins</button>
                             <button class="btn btn-sm btn-danger" onclick="ecoAdminAction('reset')">Reset balance</button>
@@ -450,19 +450,19 @@
                         </div>
                         <div class="modal-body">
                             <div class="field">
-                                <label class="field-label">Item name *</label>
+                                <label class="field-label" for="modal-item-name">Item name *</label>
                                 <input type="text" id="modal-item-name" placeholder="e.g. VIP Role">
                             </div>
                             <div class="field">
-                                <label class="field-label">Description</label>
+                                <label class="field-label" for="modal-item-desc">Description</label>
                                 <input type="text" id="modal-item-desc" placeholder="e.g. Access to the VIP channel">
                             </div>
                             <div class="field">
-                                <label class="field-label">Price *</label>
+                                <label class="field-label" for="modal-item-price">Price *</label>
                                 <input type="number" id="modal-item-price" placeholder="500" min="0">
                             </div>
                             <div class="field">
-                                <label class="field-label">Role to grant on purchase</label>
+                                <label class="field-label" for="modal-item-role">Role to grant on purchase</label>
                                 <select id="modal-item-role">
                                     <option value="">None</option>
                                     <% roles.forEach(role => { %>
@@ -470,16 +470,16 @@
                                     <% }); %>
                                 </select>
                             </div>
-                            <div class="field">
-                                <label class="field-label">Stock</label>
+                            <div class="field" role="group" aria-labelledby="modal-item-stock-label">
+                                <div class="field-label" id="modal-item-stock-label">Stock</div>
                                 <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;cursor:pointer">
                                     <input type="checkbox" id="modal-item-unlimited" onchange="toggleStockInput(this)" checked>
                                     <span>Unlimited stock</span>
                                 </label>
-                                <input type="number" id="modal-item-stock" placeholder="100" min="1" style="display:none">
+                                <input type="number" id="modal-item-stock" placeholder="100" min="1" aria-label="Stock quantity" style="display:none">
                             </div>
-                            <div class="field">
-                                <label class="field-label">Item Image</label>
+                            <div class="field" role="group" aria-labelledby="modal-item-image-label">
+                                <div class="field-label" id="modal-item-image-label">Item Image</div>
                                 <div class="shop-img-upload-row">
                                     <div class="shop-img-preview-wrap" id="shop-img-preview-wrap">
                                         <img id="shop-img-preview" src="" alt="" style="display:none;width:64px;height:64px;object-fit:contain;border-radius:6px;border:1px solid var(--border)">
@@ -512,15 +512,15 @@
                         </div>
                         <div class="modal-body">
                             <div class="field">
-                                <label class="field-label">Job name *</label>
+                                <label class="field-label" for="modal-job-name">Job name *</label>
                                 <input type="text" id="modal-job-name" placeholder="e.g. Astronaut">
                             </div>
                             <div class="field">
-                                <label class="field-label">Emoji (optional)</label>
+                                <label class="field-label" for="modal-job-emoji">Emoji (optional)</label>
                                 <input type="text" id="modal-job-emoji" placeholder="🚀" maxlength="4">
                             </div>
                             <div class="field">
-                                <label class="field-label">Career tier *</label>
+                                <label class="field-label" for="modal-job-tier">Career tier *</label>
                                 <select id="modal-job-tier">
                                     <option value="1">Tier 1 — Intern (0 shifts)</option>
                                     <option value="2">Tier 2 — Skilled Worker (10 shifts)</option>
@@ -531,11 +531,11 @@
                             </div>
                             <div style="display:flex;gap:.75rem">
                                 <div class="field" style="flex:1">
-                                    <label class="field-label">Min pay *</label>
+                                    <label class="field-label" for="modal-job-min-pay">Min pay *</label>
                                     <input type="number" id="modal-job-min-pay" placeholder="50" min="0">
                                 </div>
                                 <div class="field" style="flex:1">
-                                    <label class="field-label">Max pay *</label>
+                                    <label class="field-label" for="modal-job-max-pay">Max pay *</label>
                                     <input type="number" id="modal-job-max-pay" placeholder="150" min="0">
                                 </div>
                             </div>

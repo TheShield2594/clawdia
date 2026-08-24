@@ -63,8 +63,13 @@ EXPOSE 3000
 # this. /health returns 503 when MongoDB is down; the unauthenticated payload is
 # just {status, uptime}, which is all this needs to parse.
 # start-period matches compose: migrations run before the port opens.
+#
+# The port is read from DASHBOARD_PORT rather than hardcoded. Baked in as 3000
+# it silently failed forever on any deploy that moved the port — which is how
+# portainer-stack.yml came to run on 7001 with an image healthcheck probing
+# 3000, masked only because the stack overrode the check (#641).
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=90s \
-    CMD node -e "require('http').get('http://127.0.0.1:3000/health', r => { let b=''; r.on('data', d => b += d); r.on('end', () => { try { process.exit(JSON.parse(b).status === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"
+    CMD node -e "require('http').get('http://127.0.0.1:' + (process.env.DASHBOARD_PORT || 3000) + '/health', r => { let b=''; r.on('data', d => b += d); r.on('end', () => { try { process.exit(JSON.parse(b).status === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"
 
 # tini as PID 1 reaps zombies and forwards signals. Exec'ing node directly
 # (rather than `npm start`) means SIGTERM reaches the process that installed

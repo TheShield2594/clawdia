@@ -48,11 +48,11 @@
                     <div class="field-label" style="margin-top:1rem;margin-bottom:.4rem;font-weight:600;">Whitelist <small style="font-weight:400;color:var(--text-dim)">— one ID per line</small></div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
                         <div>
-                            <label class="field-label">Whitelisted users</label>
-                            <div class="user-search-widget">
+                            <div class="field-label" id="an-whitelist-users-label">Whitelisted users</div>
+                            <div class="user-search-widget" role="group" aria-labelledby="an-whitelist-users-label">
                                 <div class="user-tag-list" id="an-whitelist-users-tags"></div>
                                 <div style="position:relative">
-                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" data-widget="an-whitelist-users">
+                                    <input type="text" class="user-search-input" placeholder="Search member by name…" autocomplete="off" aria-label="Search members to whitelist" data-no-dirty data-widget="an-whitelist-users">
                                     <div class="user-search-dropdown" id="an-whitelist-users-dropdown" style="display:none"></div>
                                 </div>
                                 <textarea id="an-whitelist-users" style="display:none"><%= (settings.antiNuke?.whitelistUserIds||[]).join('\n') %></textarea>

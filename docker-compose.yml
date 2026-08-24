@@ -26,6 +26,10 @@ services:
 
   bot:
     build: .
+    # Tag the local build with the same name portainer-stack.yml pulls, so
+    # `docker compose build` produces the image the production stack expects
+    # and `docker compose push` publishes it.
+    image: ghcr.io/theshield2594/clawdia:latest
     container_name: clawdia
     restart: unless-stopped
     env_file:
@@ -46,8 +50,8 @@ services:
     #   DISCORD_TOKEN_FILE: /run/secrets/discord_token
     #   CLIENT_SECRET_FILE: /run/secrets/client_secret
     #   SESSION_SECRET_FILE: /run/secrets/session_secret
-    #   # The optional `backup` service reads MONGODB_URI too; uncomment the
-    #   # matching lines on it so both sides come from the same secret.
+    #   # The `backup` service reads MONGODB_URI too; uncomment the matching
+    #   # lines on it so both sides come from the same secret.
     #   MONGODB_URI_FILE: /run/secrets/mongodb_uri
     #   ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
     #   OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
@@ -65,10 +69,14 @@ services:
     # Bound to loopback only. DASHBOARD_URL is required to be HTTPS in
     # production, which means a TLS-terminating reverse proxy sits in front of
     # this; publishing on 0.0.0.0 would also expose the dashboard directly over
-    # plaintext HTTP, bypassing it. Change to "3000:3000" only if you are
+    # plaintext HTTP, bypassing it. Drop the "127.0.0.1:" prefix only if you are
     # deliberately terminating TLS elsewhere on the host network.
+    #
+    # DASHBOARD_PORT is the container's side and should normally stay 3000, which
+    # is what the image EXPOSEs and what its own HEALTHCHECK probes.
+    # DASHBOARD_HOST_PORT is the host's side and is yours to pick.
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${DASHBOARD_HOST_PORT:-3000}:${DASHBOARD_PORT:-3000}"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -97,7 +105,7 @@ services:
     # uptime monitor described in README's Monitoring section is for.
     healthcheck:
       test: ["CMD", "node", "-e",
-        "require('http').get('http://localhost:3000/health', (r) => { let b=''; r.on('data', d => b+=d); r.on('end', () => { try { const s = JSON.parse(b).status; process.exit(s === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"]
+        "require('http').get('http://127.0.0.1:' + (process.env.DASHBOARD_PORT || 3000) + '/health', (r) => { let b=''; r.on('data', d => b+=d); r.on('end', () => { try { const s = JSON.parse(b).status; process.exit(s === 'unhealthy' ? 1 : 0); } catch { process.exit(1); } }); }).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -165,19 +173,31 @@ services:
     # needs no network at all — including not the default bridge.
     network_mode: none
 
-  # Optional scheduled backup (runs mongodump once a day at 03:00 UTC)
+  # Scheduled backup: mongodump once a day at 03:00 UTC into ./backups, keeping
+  # BACKUP_RETENTION_DAYS (30) days.
+  #
+  # On by default. It used to sit behind `profiles: [backup]`, which meant a
+  # plain `docker compose up -d` ran the bot with no backups at all — and the
+  # migration runner's own pre-migration dump is one archive at one moment, not
+  # a history. Set BACKUP_RETENTION_DAYS to tune retention; to opt out entirely,
+  # `docker compose up -d --scale backup=0`.
   backup:
     image: mongo:7
     container_name: clawdia-backup
-    profiles:
-      - backup
     restart: unless-stopped
     env_file:
       - .env
-    # Mirrors the bot's MONGODB_URI_FILE. This is a stock mongo image with no
-    # loader of its own, so the entrypoint below reads the file itself.
-    # environment:
-    #   MONGODB_URI_FILE: /run/secrets/mongodb_uri
+    environment:
+      # .env normally supplies this; the default matches portainer-stack.yml so
+      # a checkout without MONGODB_URI still backs up the right database
+      # instead of exiting at boot.
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/ultrabot}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      # Mirrors the bot's MONGODB_URI_FILE. This is a stock mongo image with no
+      # loader of its own, so the entrypoint below reads the file itself — and
+      # prefers it over MONGODB_URI, so the mapping above can stay exactly as
+      # it is. Uncomment this line and the `secrets:` block below together.
+      # MONGODB_URI_FILE: /run/secrets/mongodb_uri
     # secrets:
     #   - mongodb_uri
     volumes:
@@ -203,23 +223,28 @@ services:
         if [ -z "$$MONGODB_URI" ]; then
           echo "[backup] Neither MONGODB_URI nor MONGODB_URI_FILE is set"; exit 1;
         fi;
-        NOW=$$(date -u +%s);
-        MIDNIGHT=$$(( ($$NOW / 86400) * 86400 ));
-        TARGET=$$(( $$MIDNIGHT + 10800 ));
-        if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
-        SLEEP=$$(( $$TARGET - $$NOW ));
-        echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
-        sleep $$SLEEP;
+        RETAIN=$${BACKUP_RETENTION_DAYS:-30};
         while true; do
+          # Recomputed every iteration. A fixed `sleep 86400` after the dump
+          # would start each run later than the last by however long the dump
+          # and the prune took, walking 03:00 into working hours over a month.
+          NOW=$$(date -u +%s);
+          MIDNIGHT=$$(( ($$NOW / 86400) * 86400 ));
+          TARGET=$$(( $$MIDNIGHT + 10800 ));
+          if [ $$NOW -ge $$TARGET ]; then TARGET=$$(( $$TARGET + 86400 )); fi;
+          SLEEP=$$(( $$TARGET - $$NOW ));
+          echo "[backup] Sleeping $${SLEEP}s until next 03:00 UTC";
+          sleep $$SLEEP;
           TIMESTAMP=$$(date -u +"%Y%m%dT%H%M%SZ");
           echo "[backup] Starting backup at $$TIMESTAMP";
           mongodump --uri="$$MONGODB_URI" --gzip --archive="/backups/clawdia-$$TIMESTAMP.gz" &&
             echo "[backup] Done: /backups/clawdia-$$TIMESTAMP.gz" ||
             echo "[backup] FAILED";
           # Prunes the old ultrabot-* prefix too, so archives written before the
-          # rename are still aged out instead of accumulating forever.
-          find /backups \( -name "clawdia-*.gz" -o -name "ultrabot-*.gz" \) -mtime +30 -delete;
-          sleep 86400;
+          # rename are still aged out instead of accumulating forever. The bot
+          # lands pre-migration-*.gz in the same directory; those are pruned on
+          # the same schedule.
+          find /backups \( -name "clawdia-*.gz" -o -name "ultrabot-*.gz" -o -name "pre-migration-*.gz" \) -mtime +$$RETAIN -delete;
         done'
 
 # Host files mounted read-only at /run/secrets/<name> inside the container.

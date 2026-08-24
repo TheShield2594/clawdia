@@ -27,8 +27,8 @@
                         <small>Variables: <code>{user}</code> · <code>{level}</code></small>
                     </div>
                     <div class="field"><label class="field-label" for="level-reward-channel">Reward announcement channel</label><select id="level-reward-channel"><option value="">Use current channel</option><% channels.forEach(channel => { %><option value="<%= channel.id %>" <%= settings.leveling.rewardChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option><% }); %></select></div>
-                    <div class="field">
-                        <label class="field-label">No-XP roles</label>
+                    <div class="field" role="group" aria-labelledby="level-no-xp-roles-label">
+                        <div class="field-label" id="level-no-xp-roles-label">No-XP roles</div>
                         <div id="level-no-xp-roles-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
                             <% (settings.leveling.noXpRoleIds || []).forEach(function(rId) {
                                var role = roles.find(function(r){ return r.id === rId; });
@@ -37,15 +37,15 @@
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
-                            <select id="level-no-xp-roles-select">
+                            <select id="level-no-xp-roles-select" aria-label="Role to exclude from XP" data-no-dirty>
                                 <option value="">Select a role</option>
                                 <% roles.forEach(function(role){ %><option value="<%= role.id %>">@<%= role.name %></option><% }); %>
                             </select>
                             <button class="btn btn-primary" type="button" onclick="addLevelNoXpRole()">Add role</button>
                         </div>
                     </div>
-                    <div class="field">
-                        <label class="field-label">No-XP channels</label>
+                    <div class="field" role="group" aria-labelledby="level-no-xp-channels-label">
+                        <div class="field-label" id="level-no-xp-channels-label">No-XP channels</div>
                         <div id="level-no-xp-channels-list" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
                             <% (settings.leveling.noXpChannelIds || []).forEach(function(cId) {
                                var ch = channels.find(function(c){ return c.id === cId; });
@@ -54,20 +54,20 @@
                             <% } }); %>
                         </div>
                         <div style="display:flex;gap:.5rem;align-items:center">
-                            <select id="level-no-xp-channels-select">
+                            <select id="level-no-xp-channels-select" aria-label="Channel to exclude from XP" data-no-dirty>
                                 <option value="">Select a channel</option>
                                 <% channels.forEach(function(ch){ %><option value="<%= ch.id %>">#<%= ch.name %></option><% }); %>
                             </select>
                             <button class="btn btn-primary" type="button" onclick="addLevelNoXpChannel()">Add channel</button>
                         </div>
                     </div>
-                    <div class="field">
-                        <label class="field-label">Level role rewards</label>
+                    <div class="field" role="group" aria-labelledby="level-role-rewards-label">
+                        <div class="field-label" id="level-role-rewards-label">Level role rewards</div>
                         <div id="level-role-rewards-list" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem">
                             <% (settings.levelRoles || []).forEach(function(r) { %>
                                 <div class="level-reward-row" style="display:flex;gap:.5rem;align-items:center">
-                                    <input type="number" class="level-reward-level" value="<%= r.level %>" min="1" max="999" style="width:80px" placeholder="Level">
-                                    <select class="level-reward-role">
+                                    <input type="number" class="level-reward-level" value="<%= r.level %>" min="1" max="999" style="width:80px" placeholder="Level" aria-label="Required level">
+                                    <select class="level-reward-role" aria-label="Reward role">
                                         <option value="">Select a role</option>
                                         <% roles.forEach(function(role){ %><option value="<%= role.id %>" <%= r.roleId === role.id ? 'selected' : '' %>>@<%= role.name %></option><% }); %>
                                     </select>
@@ -92,6 +92,7 @@
                     </div>
 
                     <!-- Admin XP Actions -->
+                    <div data-no-dirty>
                     <div class="panel-head" style="margin-top:1.75rem">
                         <h3>Admin XP Actions</h3>
                         <p>Give, take, reset, or set the level of a specific member.</p>
@@ -101,15 +102,17 @@
                         <input type="text" id="level-admin-user-id" placeholder="17–20 digit user ID">
                     </div>
                     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center">
-                        <input type="number" id="level-admin-amount" placeholder="Amount / Level" min="0" style="width:130px">
+                        <input type="number" id="level-admin-amount" placeholder="Amount / Level" aria-label="Amount or level" min="0" style="width:130px">
                         <button class="btn btn-sm btn-primary" onclick="levelAdminAction('give')">Give XP</button>
                         <button class="btn btn-sm" onclick="levelAdminAction('take')">Take XP</button>
                         <button class="btn btn-sm" onclick="levelAdminAction('set_level')">Set level</button>
                         <button class="btn btn-sm btn-danger" onclick="levelAdminAction('reset')">Reset XP</button>
                     </div>
                     <div id="level-admin-msg" style="min-height:1.4em;font-size:.85em"></div>
+                    </div><!-- end Admin XP Actions -->
 
                     <!-- Boost Events -->
+                    <div data-no-dirty>
                     <div class="panel-head" style="margin-top:1.75rem">
                         <h3>Boost Events</h3>
                         <p>Run a timed XP multiplier for all members in this server.</p>
@@ -127,6 +130,7 @@
                         <button class="btn btn-primary" onclick="startBoostEvent()">Activate boost</button>
                     </div>
                     <div id="level-boost-msg" style="min-height:1.4em;font-size:.85em"></div>
+                    </div><!-- end Boost Events -->
 
                     <!-- Leaderboard -->
                     <div class="panel-head" style="margin-top:1.75rem">

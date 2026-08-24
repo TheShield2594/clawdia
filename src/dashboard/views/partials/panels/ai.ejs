@@ -389,7 +389,7 @@
                                 <button class="modal-close" onclick="closePromptEditor(false)">&times;</button>
                             </div>
                             <div class="modal-body">
-                                <textarea id="prompt-editor-textarea" maxlength="4000" oninput="updatePromptEditorCount()"></textarea>
+                                <textarea id="prompt-editor-textarea" maxlength="4000" aria-labelledby="prompt-editor-title" oninput="updatePromptEditorCount()"></textarea>
                                 <div style="display:flex;justify-content:flex-end;margin-top:.5rem;font-size:.78rem;color:var(--text-mute);">
                                     <span id="prompt-editor-count">0 / 4000</span>
                                 </div>
