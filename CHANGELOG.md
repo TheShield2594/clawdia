@@ -16,7 +16,7 @@ whose schema predates a migration that has already run.
 
 ## [4.3.0] - 2026-08-24
 
-Migrations through `015_drop_dead_giveaway_index`.
+Migrations through `016_fishing_tournament_status_index`.
 
 The dashboard API is mounted at `/api/v1` and answers one response shape per
 kind of response. The unversioned `/api` stays mounted beside it as an alias to
@@ -63,11 +63,34 @@ change, and a script reading them needs updating. See
   address neither of them publishes — and its **Test** button connects to the
   server itself: no AI provider key, no tokens spent, and it reports the tool
   names, which is what the allow and deny lists want filling in from.
+- **Fishing tournaments are indexed on what they are looked up by** (#585). The
+  collection was indexed on `guildId` alone while every query in
+  `tournamentService` pairs the guild with a status — the read before each
+  scoring cast, and the check before a new tournament starts — so a lookup
+  narrowed to the guild and then scanned every tournament it had ever run, each
+  document carrying its whole entries array. `{ guildId, status }` is declared in
+  the schema, and `016_fishing_tournament_status_index` drops the single-field
+  index the compound one now covers as its prefix.
+- **The dashboard has a tab icon** (#688). It had none, and no view linked one,
+  so every fresh page load spent a request on `/favicon.ico` that fell through
+  the static handler and all three routers to a 404. An SVG and an ICO of the
+  Clawdia paw ship under `public/`, linked from one partial the three views
+  share; `npm run favicon` regenerates the ICO from the SVG.
+- **A slow search result can no longer overwrite a fresh one** (#691). Both
+  member-search dropdowns debounced their keystrokes and then let the answers
+  race: the response to `ali`, still in flight, landed after the response to
+  `alice` and repainted the list with results for a prefix already typed past.
+  Each widget cancels the request it supersedes.
+- **Injected avatars are marked decorative** (#678). Six avatars in the search
+  dropdowns, the moderation case table and the economy top-earners table were
+  written without an `alt`, so a screen reader read the CDN URL out beside the
+  username sitting next to it.
 
-`015_drop_dead_giveaway_index` drops an index no query uses and creates nothing,
-so the 4.2.0 image reads the migrated database unchanged — rolling back to
-4.2.0 is the image tag alone. It would rebuild `idx_giveaways_active` on its
-next boot, which is the state it started from.
+Both migrations in this release only drop an index no query uses, and neither
+creates anything, so the 4.2.0 image reads the migrated database unchanged —
+rolling back to 4.2.0 is the image tag alone. It would rebuild
+`idx_giveaways_active` and the single-field `guildId_1` on its next boot, which
+is the state it started from.
 
 ## [4.2.0] - 2026-08-24
 

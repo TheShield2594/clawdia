@@ -1,0 +1,14 @@
+<%# The tab icon, in one place for all three views (#688). Without a usable
+    link a browser falls back to requesting /favicon.ico on every fresh page
+    load, which fell through the static handler and all three routers to a 404.
+
+    Two files rather than one: the SVG is what modern browsers pick and it
+    scales to whatever the OS asks for, and the ICO is there because Safari
+    reads no SVG icon at all — and a browser with no icon it can read is exactly
+    the one that goes looking for /favicon.ico. Both are served out of public/,
+    so the bare /favicon.ico request now resolves too.
+
+    asset() stamps each URL with the file's content hash, so these get the same
+    year-long immutable cache as the stylesheet and change when the icon does. %>
+<link rel="icon" href="<%= asset('/favicon.ico') %>" sizes="32x32">
+<link rel="icon" href="<%= asset('/favicon.svg') %>" type="image/svg+xml">

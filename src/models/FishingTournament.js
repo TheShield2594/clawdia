@@ -14,7 +14,7 @@ const entrySchema = new Schema({
 }, { _id: false });
 
 const tournamentSchema = new Schema({
-    guildId: { type: String, required: true, index: true },
+    guildId: { type: String, required: true },
 
     status:    { type: String, enum: ['scheduled', 'active', 'ended'], default: 'scheduled' },
     startedAt: { type: Date, default: null },
@@ -38,5 +38,17 @@ const tournamentSchema = new Schema({
 
     winnersAnnouncedAt: { type: Date, default: null }
 }, { timestamps: true });
+
+// Every lookup this collection gets asks for a guild *and* a status —
+// tournamentService reads `{ guildId, status: 'active' }` before each cast that
+// might score, and `{ guildId, status: { $in: [...] } }` before starting one. A
+// single-field index on guildId (which is what this schema declared) narrows to
+// the guild and then scans every tournament that guild has ever run, and the
+// documents being scanned carry the whole entries array.
+//
+// `guildId` alone stays covered as this index's prefix, so nothing is lost by
+// dropping the single-field one — migration 016 removes it, since Mongoose
+// leaves an index it built earlier exactly where it is (#585).
+tournamentSchema.index({ guildId: 1, status: 1 }, { name: 'idx_tournament_guild_status' });
 
 module.exports = model('FishingTournament', tournamentSchema);
