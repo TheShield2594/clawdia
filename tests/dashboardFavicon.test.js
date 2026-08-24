@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * #688. public/ held nothing but styles.css and no view linked an icon, so
+ * #688. The dashboard shipped no icon of any kind and no view linked one, so
  * every fresh page load spent a request on /favicon.ico that fell through the
  * static handler and all three routers to a default 404 — and the tab showed a
  * blank page glyph.

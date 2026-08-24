@@ -81,3 +81,75 @@ describe('016_fishing_tournament_status_index', () => {
         expect(typeof migration.down).toBe('function');
     });
 });
+
+// The migration is run against a stand-in collection rather than a real one:
+// the integration suite needs a mongod binary, and what matters here is the
+// order of the two operations and that neither half of the pair is missing.
+describe('016 run against a recording collection', () => {
+    const mongoose = require('mongoose');
+    const migration = require('../src/migrations/016_fishing_tournament_status_index');
+
+    let calls;
+    let dropIndex;
+    let realDb;
+
+    beforeEach(() => {
+        calls = [];
+        dropIndex = jest.fn(async name => { calls.push(['dropIndex', name]); });
+        realDb = mongoose.connection.db;
+        mongoose.connection.db = {
+            collection: name => {
+                calls.push(['collection', name]);
+                return {
+                    createIndex: async (keys, opts) => { calls.push(['createIndex', keys, opts]); },
+                    dropIndex,
+                };
+            },
+        };
+    });
+
+    afterEach(() => {
+        mongoose.connection.db = realDb;
+    });
+
+    /** An error shaped the way the driver reports the two tolerated cases. */
+    const driverError = fields => Object.assign(new Error('index not found'), fields);
+
+    test('up builds the compound index before dropping the one it replaces', async () => {
+        await migration.up();
+
+        // Order is the assertion: dropping first would leave a guild's
+        // tournament lookups with no index until autoIndex caught up, which
+        // nothing awaits.
+        expect(calls).toEqual([
+            ['collection', 'fishingtournaments'],
+            ['createIndex', { guildId: 1, status: 1 }, { name: 'idx_tournament_guild_status' }],
+            ['dropIndex', 'guildId_1'],
+        ]);
+    });
+
+    test('down restores the single-field index and removes the compound one', async () => {
+        await migration.down();
+
+        expect(calls).toEqual([
+            ['collection', 'fishingtournaments'],
+            ['createIndex', { guildId: 1 }, { name: 'guildId_1' }],
+            ['dropIndex', 'idx_tournament_guild_status'],
+        ]);
+    });
+
+    test.each([
+        ['up', { codeName: 'IndexNotFound' }],
+        ['up', { code: 26 }],
+        ['down', { codeName: 'IndexNotFound' }],
+        ['down', { code: 26 }],
+    ])('%s tolerates a missing index or collection', async (direction, fields) => {
+        dropIndex.mockRejectedValueOnce(driverError(fields));
+        await expect(migration[direction]()).resolves.toBeUndefined();
+    });
+
+    test.each(['up', 'down'])('%s still reports a drop that failed for any other reason', async direction => {
+        dropIndex.mockRejectedValueOnce(driverError({ codeName: 'Unauthorized', code: 13 }));
+        await expect(migration[direction]()).rejects.toThrow('index not found');
+    });
+});

@@ -71,11 +71,11 @@ change, and a script reading them needs updating. See
   document carrying its whole entries array. `{ guildId, status }` is declared in
   the schema, and `016_fishing_tournament_status_index` drops the single-field
   index the compound one now covers as its prefix.
-- **The dashboard has a tab icon** (#688). `public/` held nothing but the
-  stylesheet, so every fresh page load spent a request on `/favicon.ico` that
-  fell through the static handler and all three routers to a 404. An SVG and an
-  ICO of the Clawdia paw ship under `public/`, linked from one partial the three
-  views share; `npm run favicon` regenerates the ICO from the SVG.
+- **The dashboard has a tab icon** (#688). It had none, and no view linked one,
+  so every fresh page load spent a request on `/favicon.ico` that fell through
+  the static handler and all three routers to a 404. An SVG and an ICO of the
+  Clawdia paw ship under `public/`, linked from one partial the three views
+  share; `npm run favicon` regenerates the ICO from the SVG.
 - **A slow search result can no longer overwrite a fresh one** (#691). Both
   member-search dropdowns debounced their keystrokes and then let the answers
   race: the response to `ali`, still in flight, landed after the response to
