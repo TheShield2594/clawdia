@@ -65,6 +65,7 @@ const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/h
 const { progressBar } = require('../../utils/progressBar');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const REGION_CHOICES = REGION_LIST.map(r => ({
     name: `${r.emoji} ${r.name}${r.seasonalEventId ? ' (seasonal)' : ''}`,
@@ -487,7 +488,7 @@ async function handleGo(interaction) {
             const msg = await interaction.fetchReply();
             const choice = await new Promise(resolve => {
                 const col = msg.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith(encId),
+                    filter: ownedBy(interaction.user.id, i => i.customId.startsWith(encId), "This isn't your expedition."),
                     time: 20_000,
                     max: 1,
                 });

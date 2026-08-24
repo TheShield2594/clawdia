@@ -1,4 +1,5 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, EmbedBuilder, MessageFlags } = require('discord.js');
+const { ownedBy } = require('../utils/collectorOwner');
 
 function chunkArray(items, chunkSize) {
     if (!Array.isArray(items) || chunkSize <= 0) return [];
@@ -58,7 +59,11 @@ async function paginate(interaction, pages) {
 
     const collector = message.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        filter: btn => btn.user.id === interaction.user.id && (btn.customId === prevId || btn.customId === nextId),
+        filter: ownedBy(
+            interaction.user.id,
+            btn => btn.customId === prevId || btn.customId === nextId,
+            "This isn't your list — run the command yourself to page through your own.",
+        ),
         time: 120_000
     });
 

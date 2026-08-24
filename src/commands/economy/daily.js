@@ -16,6 +16,7 @@ const { ensureQuests, onEconomyEarn, notifyQuestComplete, notifyQuestNearComplet
 const { saveWithBalanceDelta } = require('../../utils/balanceDelta');
 const { recordMissionProgress } = require('../../services/seasonMissionService');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 function getStreakColor(streak) {
     if (streak >= 100) return '#9b59b6';
@@ -245,7 +246,7 @@ module.exports = {
                 try {
                     const resp = await promptReply.awaitMessageComponent({
                         time: 30000,
-                        filter: i => i.user.id === interaction.user.id,
+                        filter: ownedBy(interaction.user.id, "This isn't your claim."),
                     });
 
                     if (resp.customId === 'freeze_restore') {
@@ -557,7 +558,7 @@ module.exports = {
             try {
                 const response = await reply.awaitMessageComponent({
                     time: challenge.timeLimit,
-                    filter: i => i.user.id === interaction.user.id && i.customId !== CALENDAR_BUTTON_ID,
+                    filter: ownedBy(interaction.user.id, i => i.customId !== CALENDAR_BUTTON_ID, "This isn't your claim."),
                 });
                 if (activateTimer) clearTimeout(activateTimer);
 
@@ -631,7 +632,7 @@ module.exports = {
             try {
                 const calendarResponse = await reply.awaitMessageComponent({
                     time: 60_000,
-                    filter: i => i.user.id === interaction.user.id && i.customId === CALENDAR_BUTTON_ID,
+                    filter: ownedBy(interaction.user.id, i => i.customId === CALENDAR_BUTTON_ID, "This isn't your claim."),
                 });
                 const dailyAmountForCalendar = guildSettings?.economy?.dailyAmount ?? 100;
                 const calendarEmbed = buildCalendarEmbed(updated, dailyAmountForCalendar, streakCurrent);

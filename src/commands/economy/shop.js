@@ -18,6 +18,7 @@ const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { ensurePricingFields, trendBucket } = require('../../utils/dynamicPricing');
 const { hasUnlock } = require('../../utils/prestige');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const CONFIRM_THRESHOLD = 500;
 const NEW_ITEM_TTL_MS   = 48 * 3_600_000; // 48 hours
@@ -675,7 +676,7 @@ module.exports = {
 
                 const collector = msg.createMessageComponentCollector({
                     componentType: ComponentType.Button,
-                    filter: i => i.user.id === interaction.user.id,
+                    filter: ownedBy(interaction.user.id, "This isn't your purchase."),
                     time: 30_000,
                     max: 1
                 });

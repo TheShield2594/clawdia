@@ -13,6 +13,7 @@ const { createReplaySession, replayButtonRow } = require('../../utils/replaySess
 const { refundWager } = require('../../utils/refundWager');
 const { delay } = require('../../utils/delay');
 const COLORS = require('../../utils/embedColors');
+const { rejectOtherUser } = require('../../utils/collectorOwner');
 
 const HEADS_THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1fa99.png';
 
@@ -352,10 +353,18 @@ async function playVersusFlip(interaction, guildSettings, bet, opponent, challen
     }).catch(() => {});
 
     const collector = message.createMessageComponentCollector({
-        // Decline doubles as the challenger's cancel — misfiring a challenge at
-        // the wrong member otherwise leaves it live for the full minute.
-        filter: i => (i.user.id === opponent.id && [acceptId, declineId].includes(i.customId))
-                  || (i.user.id === interaction.user.id && i.customId === declineId),
+        filter: i => {
+            if (![acceptId, declineId].includes(i.customId)) return false;
+            // Decline doubles as the challenger's cancel — misfiring a
+            // challenge at the wrong member otherwise leaves it live for the
+            // full minute. Accept is the opponent's alone. Everyone else, and
+            // the challenger reaching for Accept, is told so rather than left
+            // looking at a click that failed.
+            const allowed = i.customId === declineId ? [opponent.id, interaction.user.id] : [opponent.id];
+            return !rejectOtherUser(i, allowed, i.user.id === interaction.user.id
+                ? `Only ${opponent} can accept — press Decline to call it off.`
+                : `That challenge is between ${interaction.user} and ${opponent}.`);
+        },
         max:    1,
         time:   ACCEPT_TIMEOUT_MS,
     });

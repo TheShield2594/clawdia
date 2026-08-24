@@ -24,6 +24,7 @@ const GrindProfile = require('../../../models/GrindProfile');
 const { MAX_PRESTIGE, PRESTIGE_BADGES, PRESTIGE_LABELS } = require('./shared');
 const { buildXpBar, formatBonuses } = require('./embeds');
 const COLORS = require('../../../utils/embedColors');
+const { ownedBy } = require('../../../utils/collectorOwner');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PROFILE (was /huntprofile)
@@ -311,8 +312,11 @@ async function executePrestige(interaction) {
     const reply = await interaction.reply({ embeds: [confirmEmbed], components: [row], fetchReply: true });
 
     const collector = reply.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id &&
-                     ['prestige_confirm', 'prestige_cancel'].includes(i.customId),
+        filter: ownedBy(
+            interaction.user.id,
+            i => ['prestige_confirm', 'prestige_cancel'].includes(i.customId),
+            "This isn't your prestige confirmation.",
+        ),
         time:   30_000,
         max:    1
     });

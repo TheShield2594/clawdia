@@ -41,6 +41,7 @@ const { ZONES } = require('../../../data/huntData');
 const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { pickApproachProfile, runAimPhase } = require('./aim');
 const { buildBonusLines, buildHuntEmbed } = require('./embeds');
+const { ownedBy } = require('../../../utils/collectorOwner');
 
 // ─── Staged loot reveal for rare+ drops ──────────────────────────────────────
 // tier: 'common'|'uncommon'|'rare'|'epic'|'legendary'|'event'|null
@@ -208,7 +209,7 @@ async function executeStart(interaction) {
 
             const pickedId = await new Promise(resolve => {
                 const col = huntMsg.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith('stealth_'),
+                    filter: ownedBy(interaction.user.id, i => i.customId.startsWith('stealth_'), "This isn't your hunt."),
                     time: 15_000,
                     max: 1,
                 });
@@ -505,7 +506,7 @@ async function executeStart(interaction) {
                 const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
                 return new Promise(resolve => {
                     const collector = fetchReply.createMessageComponentCollector({
-                        filter: i => i.user.id === interaction.user.id && validIds.includes(i.customId),
+                        filter: ownedBy(interaction.user.id, i => validIds.includes(i.customId), "This isn't your hunt."),
                         time: 30_000, max: 1
                     });
                     collector.on('collect', async btn => {

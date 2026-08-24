@@ -33,6 +33,7 @@ const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../../util
 const { randomFrom, MINE_CAVE_LINES } = require('../../../utils/copyLines');
 const { PITY_COPY } = require('../../../utils/pityBonus');
 const { buildMineEmbed } = require('./embeds');
+const { ownedBy } = require('../../../utils/collectorOwner');
 
 // Presentation timings for the pre-dig prompt and the vein read. The ladder itself
 // and the promotion rule live with the rest of the mine's rules, in mineData and
@@ -243,7 +244,7 @@ async function handleDig(interaction) {
         if (!pickedIntensity) {
             const chosenId = await new Promise(resolve => {
                 const col = mineMsg.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith('digint_'),
+                    filter: ownedBy(interaction.user.id, i => i.customId.startsWith('digint_'), "This isn't your dig."),
                     time: INTENSITY_PICK_MS,
                     max: 1,
                 });
@@ -295,7 +296,7 @@ async function handleDig(interaction) {
 
         const picked = await new Promise(resolve => {
             const col = mineMsg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId.startsWith('vein_'),
+                filter: ownedBy(interaction.user.id, i => i.customId.startsWith('vein_'), "This isn't your dig."),
                 time: VEIN_ANSWER_MS,
                 max: 1,
             });
@@ -374,7 +375,7 @@ async function handleDig(interaction) {
 
             const caveInChoice = await new Promise(resolve => {
                 const col = caveInMsg.createMessageComponentCollector({
-                    filter: i => i.user.id === interaction.user.id && i.customId.startsWith(caveInId),
+                    filter: ownedBy(interaction.user.id, i => i.customId.startsWith(caveInId), "This isn't your dig."),
                     time: 20_000,
                     max: 1,
                 });

@@ -9,6 +9,7 @@ const { getItemLore } = require('../../data/defaultShopItems');
 const { getRelicMeta } = require('../../data/exploreData');
 const { packFieldsCapped, EMBED_LIMITS } = require('../../utils/embedFields');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
 
@@ -304,8 +305,11 @@ module.exports = {
 
         const collector = message.createMessageComponentCollector({
             componentType: ComponentType.Button,
-            filter: btn => btn.user.id === interaction.user.id
-                && TAB_KEYS.some(k => btn.customId === `inv_${k}_${interaction.id}`),
+            filter: ownedBy(
+                interaction.user.id,
+                btn => TAB_KEYS.some(k => btn.customId === `inv_${k}_${interaction.id}`),
+                "This isn't your inventory — run `/inventory` for your own.",
+            ),
             time: 120_000
         });
 

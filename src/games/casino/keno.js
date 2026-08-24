@@ -11,6 +11,7 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b1.png';
 const MIN_BET = 10;
@@ -123,7 +124,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
             const msg = await interaction.fetchReply().catch(() => null);
             if (!msg) return;
             skipCollector = msg.createMessageComponentCollector({
-                filter: i => i.user.id === interaction.user.id && i.customId === skipId,
+                filter: ownedBy(interaction.user.id, i => i.customId === skipId, "This isn't your card."),
                 time: 8_000,
             });
             skipCollector.on('collect', async i => {
@@ -367,7 +368,7 @@ async function playKeno(interaction, bet, picked, alreadyDebited = false, releas
 
         const msg = await interaction.fetchReply();
         msg.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && [replayId, rerollId].includes(i.customId),
+            filter: ownedBy(interaction.user.id, i => [replayId, rerollId].includes(i.customId), "This isn't your card."),
             max: 1,
             time: 60_000,
         }).on('collect', async i => {

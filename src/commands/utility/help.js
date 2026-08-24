@@ -11,6 +11,7 @@ const {
 // The catalog is derived from the commands this process actually loaded, not
 // from a list kept alongside them — see utils/helpCatalog.js for why (#665).
 const { buildCategories } = require('../../utils/helpCatalog');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const TIMEOUT_MS = 3 * 60 * 1000;
 const PAGE_SIZE = 10;
@@ -126,7 +127,7 @@ module.exports = {
         const message = await interaction.fetchReply();
 
         const collector = message.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id,
+            filter: ownedBy(interaction.user.id, "This isn't your help menu — run `/help` for your own."),
             time: TIMEOUT_MS,
         });
 

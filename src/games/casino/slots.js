@@ -12,6 +12,7 @@ const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultipli
 const Guild = require('../../models/Guild');
 const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES } = require('../../utils/copyLines');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png';
 
@@ -454,7 +455,11 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
 
         const msg = await interaction.fetchReply();
         const collector = msg.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && [replayId, paytableId].includes(i.customId),
+            filter: ownedBy(
+                interaction.user.id,
+                i => [replayId, paytableId].includes(i.customId),
+                "This isn't your spin — run `/slots` for your own.",
+            ),
             time: 60_000,
         });
 

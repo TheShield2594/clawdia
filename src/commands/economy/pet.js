@@ -52,6 +52,7 @@ const { MATERIAL_RARITY } = require('../../data/materialRarity');
 const { checkAndAward, announceAchievements } = require('../../services/achievementService');
 const { onPetCare, notifyQuestComplete } = require('../../services/questService');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const NO_SUCH_PET = "Couldn't find that pet — pick one from the list `/pet status` shows, or start typing to choose from your pets.";
 const HUNGER_BAR_LENGTH = 10;
@@ -531,7 +532,7 @@ async function executeStatus(interaction) {
     });
 
     const collector = reply.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id,
+        filter: ownedBy(interaction.user.id, "This isn't your pet."),
         time:   90_000,
     });
 
@@ -847,7 +848,7 @@ async function executeRelease(interaction) {
     let choice;
     try {
         choice = await message.awaitMessageComponent({
-            filter: i => i.user.id === interaction.user.id && [confirmId, cancelId].includes(i.customId),
+            filter: ownedBy(interaction.user.id, i => [confirmId, cancelId].includes(i.customId), "This isn't your pet."),
             time: 30_000,
         });
     } catch {
@@ -1130,7 +1131,7 @@ async function pvpBattle(interaction, ctx) {
     const msg = await interaction.fetchReply();
 
     const collector = msg.createMessageComponentCollector({
-        filter: i => i.user.id === opponent.id && [acceptId, declineId].includes(i.customId),
+        filter: ownedBy(opponent.id, i => [acceptId, declineId].includes(i.customId), "This isn't your pet."),
         max: 1, time: 60_000,
     });
 

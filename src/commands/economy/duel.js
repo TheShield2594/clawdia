@@ -13,6 +13,7 @@ const Guild = require('../../models/Guild');
 const { isDistrictActive } = require('../../services/districtService');
 const { START_ELO, tierFor, applyElo, makeSeasonId } = require('../../utils/duelElo');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const DUEL_COOLDOWN_MS = 5 * 60_000;
 const ACCEPT_TIMEOUT_MS = 60_000;
@@ -353,7 +354,11 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
 
     const cPrefix = `rpsc_${duelId}_`;
     const challengerCollector = msg.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id && i.customId.startsWith(cPrefix) && RPS_MOVES.includes(i.customId.slice(cPrefix.length)),
+        filter: ownedBy(
+            interaction.user.id,
+            i => i.customId.startsWith(cPrefix) && RPS_MOVES.includes(i.customId.slice(cPrefix.length)),
+            "This isn't your duel.",
+        ),
         time: RPS_TIMEOUT_MS,
         max: 1,
     });
@@ -370,7 +375,11 @@ async function runRPS(interaction, msg, targetUser, amount, currency, houseCut, 
 
             const oPrefix = `rpso_${duelId}_`;
             const opponentCollector = msg.createMessageComponentCollector({
-                filter: i => i.user.id === targetUser.id && i.customId.startsWith(oPrefix) && RPS_MOVES.includes(i.customId.slice(oPrefix.length)),
+                filter: ownedBy(
+                    targetUser.id,
+                    i => i.customId.startsWith(oPrefix) && RPS_MOVES.includes(i.customId.slice(oPrefix.length)),
+                    "This isn't your duel.",
+                ),
                 time: RPS_TIMEOUT_MS,
                 max: 1,
             });
@@ -529,7 +538,11 @@ async function runChallenge(interaction, isRanked) {
     const msg = await interaction.fetchReply();
 
     const acceptCollector = msg.createMessageComponentCollector({
-        filter: i => i.user.id === target.id && (i.customId === `duel_accept_${duelId}` || i.customId === `duel_decline_${duelId}`),
+        filter: ownedBy(
+            target.id,
+            i => i.customId === `duel_accept_${duelId}` || i.customId === `duel_decline_${duelId}`,
+            "This isn't your duel.",
+        ),
         time: ACCEPT_TIMEOUT_MS,
         max: 1,
     });

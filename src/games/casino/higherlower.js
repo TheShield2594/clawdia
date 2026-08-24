@@ -11,6 +11,7 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -283,7 +284,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
     const message   = await interaction.fetchReply();
     const collector = message.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id && [upId, downId].includes(i.customId),
+        filter: ownedBy(interaction.user.id, i => [upId, downId].includes(i.customId), "This isn't your game."),
         max:    1,
         time:   15_000,
     });
@@ -398,7 +399,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
             const riskMsg = await interaction.fetchReply();
             const riskCollector = riskMsg.createMessageComponentCollector({
-                filter: r => r.user.id === interaction.user.id && [cashId, riskId].includes(r.customId),
+                filter: ownedBy(interaction.user.id, r => [cashId, riskId].includes(r.customId), "This isn't your game."),
                 max:    1,
                 time:   30_000,
             });
@@ -467,7 +468,7 @@ async function playHigherLower(interaction, bet, userFilter, guildSettings, hist
 
 function attachReplay(message, replayId, interaction, bet, userFilter, guildSettings, onWager) {
     message.createMessageComponentCollector({
-        filter: ri => ri.user.id === interaction.user.id && ri.customId === replayId,
+        filter: ownedBy(interaction.user.id, ri => ri.customId === replayId, "This isn't your game."),
         max: 1,
         time: 60_000,
     }).on('collect', async ri => {

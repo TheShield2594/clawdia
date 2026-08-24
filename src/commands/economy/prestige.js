@@ -6,6 +6,7 @@ const {
 const User  = require('../../models/User');
 const Guild = require('../../models/Guild');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 const {
     PRESTIGE_TIERS, UNLOCK_LABELS, tierFor, titleForExactRank, nextTierAfter, badgeFor,
 } = require('../../utils/prestige');
@@ -142,7 +143,7 @@ async function handleUp(interaction) {
 
     const collector = msg.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        filter: i => i.user.id === interaction.user.id,
+        filter: ownedBy(interaction.user.id, "This isn't your prestige confirmation."),
         time: CONFIRM_TIMEOUT_MS,
         max: 1,
     });

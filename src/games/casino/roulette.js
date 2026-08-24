@@ -11,6 +11,7 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3a1.png';
 const MIN_BET = 10;
@@ -313,7 +314,7 @@ async function playRoulette(interaction, betKey, bet, target, releaseLock, onWag
 
         const msg = await interaction.fetchReply();
         const collector = msg.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && i.customId === replayId,
+            filter: ownedBy(interaction.user.id, i => i.customId === replayId, "This isn't your spin."),
             max: 1,
             time: 60_000,
         });

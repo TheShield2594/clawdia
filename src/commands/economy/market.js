@@ -12,6 +12,7 @@ const { EFFECT_CONFIGS } = require('../../services/effectsService');
 const { logTransaction } = require('../../utils/logTransaction');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const ITEM_META = Object.fromEntries(DEFAULT_SHOP_ITEMS.map(i => [i.itemId, i]));
 
@@ -278,7 +279,7 @@ async function handleBrowse(interaction, currency) {
 
     const collector = msg.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        filter: btn => btn.user.id === interaction.user.id,
+        filter: ownedBy(interaction.user.id, "This isn't your listing."),
         time: 3 * 60_000,
     });
 
@@ -403,7 +404,7 @@ async function handleBuy(interaction, currency) {
         const msg = await interaction.reply({ embeds: [confirmEmbed], components: [row], fetchReply: true });
         const collector = msg.createMessageComponentCollector({
             componentType: ComponentType.Button,
-            filter: i => i.user.id === interaction.user.id,
+            filter: ownedBy(interaction.user.id, "This isn't your listing."),
             time: 30_000,
             max: 1,
         });

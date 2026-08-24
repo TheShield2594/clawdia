@@ -11,6 +11,7 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB   = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f0cf.png';
 const MIN_BET = 10;
@@ -271,7 +272,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         let preFlopAction;
         try {
             const r = await msg1.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(gameId),
+                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(gameId), "This isn't your hand."),
                 time: 30_000,
             });
             await r.deferUpdate();
@@ -398,7 +399,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         let flopAction;
         try {
             const r = await msg2.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(flopRound),
+                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(flopRound), "This isn't your hand."),
                 time: 30_000,
             });
             await r.deferUpdate();
@@ -521,7 +522,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         let turnAction;
         try {
             const r = await msg3.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(turnRound),
+                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(turnRound), "This isn't your hand."),
                 time: 30_000,
             });
             await r.deferUpdate();
@@ -642,7 +643,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
         let riverAction;
         try {
             const r = await msg4.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id && i.customId.endsWith(riverRound),
+                filter: ownedBy(interaction.user.id, i => i.customId.endsWith(riverRound), "This isn't your hand."),
                 time: 30_000,
             });
             await r.deferUpdate();
@@ -759,7 +760,7 @@ async function playPoker(interaction, bet, releaseLock, onWager) {
 
         const replyMsg = await interaction.fetchReply();
         replyMsg.createMessageComponentCollector({
-            filter: i => i.user.id === interaction.user.id && i.customId === replayId,
+            filter: ownedBy(interaction.user.id, i => i.customId === replayId, "This isn't your hand."),
             max: 1,
             time: 60_000,
         }).on('collect', async i => {

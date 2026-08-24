@@ -19,6 +19,7 @@ const { getTimeBand } = require('../../utils/timeBand');
 const { logBigWin } = require('../../utils/bigWinLogger');
 const { isDistrictActive } = require('../../services/districtService');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const COOLDOWN_MS    = 1.5 * 3_600_000; // 1.5 hours
 const DEATH_RATE     = 0.08;            // 8% of failures trigger critical death
@@ -223,7 +224,7 @@ module.exports = {
         let crimeButtonInteraction = null;
         try {
             crimeButtonInteraction = await response.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id,
+                filter: ownedBy(interaction.user.id, "This isn't your job."),
                 time: 15_000,
             });
             crime = CRIMES.find(c => c.name === crimeButtonInteraction.customId);
@@ -284,7 +285,7 @@ module.exports = {
         let execMethod;
         try {
             const execButtonInteraction = await response.awaitMessageComponent({
-                filter: i => i.user.id === interaction.user.id,
+                filter: ownedBy(interaction.user.id, "This isn't your job."),
                 time: 15_000,
             });
             execMethod = execData.methods.find(m => `exec_${m.id}` === execButtonInteraction.customId);

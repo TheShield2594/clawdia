@@ -14,6 +14,7 @@ const FALLBACK_QUESTIONS = require('../../data/quizFallback');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { debitUpTo } = require('../../utils/balanceDebit');
 const COLORS = require('../../utils/embedColors');
+const { ownedBy } = require('../../utils/collectorOwner');
 
 const THUMB         = 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f393.png';
 const TIMER_SECONDS = 30;
@@ -352,7 +353,7 @@ async function runQuizWithUser(interaction, diffChoice, user, guildSettings = nu
 
     const message   = await interaction.fetchReply();
     const collector = message.createMessageComponentCollector({
-        filter: i => i.user.id === interaction.user.id && i.customId === menuId,
+        filter: ownedBy(interaction.user.id, i => i.customId === menuId, "This isn't your quiz."),
         max:    1,
         time:   TIMER_SECONDS * 1000,
     });

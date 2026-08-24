@@ -11,6 +11,7 @@ const Guild = require('../../models/Guild');
 const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, luckySaveEligible } = require('../../services/effectsService');
 const COLORS = require('../../utils/embedColors');
+const { ownedByMembers } = require('../../utils/collectorOwner');
 const {
     LOBBY_JOIN_WINDOW_MS,
     MAX_PLAYERS,
@@ -492,7 +493,11 @@ async function startCrashGame(interaction, lobby, lobbyId) {
     if (!message) { deleteLobby(channelId); return; }
 
     const collector = message.createMessageComponentCollector({
-        filter: i => i.customId === `crash_co_${lobbyId}` && lobby.players.has(i.user.id),
+        filter: ownedByMembers(
+            userId => lobby.players.has(userId),
+            i => i.customId === `crash_co_${lobbyId}`,
+            "You're not in this round — join the next lobby to play.",
+        ),
         time:   collectorMs,
     });
 
