@@ -69,9 +69,9 @@ describe('the endpoints it finds', () => {
         expect(routers.map(r => `${r.file}.js`).sort()).toEqual(onDisk);
     });
 
-    test('are all under the /api mount', () => {
+    test('are all under the /api/v1 mount', () => {
         for (const route of routes) {
-            expect([route.path, route.path.startsWith('/api/')]).toEqual([route.path, true]);
+            expect([route.path, route.path.startsWith('/api/v1/')]).toEqual([route.path, true]);
         }
     });
 
@@ -84,7 +84,7 @@ describe('the endpoints it finds', () => {
             const label = `${route.method} ${route.path}`;
             // The two image reads are deliberately public: they are served to
             // <img> tags, and the guild id in the path is the only key.
-            if (route.method === 'GET' && route.path.startsWith('/api/item-image/')) {
+            if (route.method === 'GET' && route.path.startsWith('/api/v1/item-image/')) {
                 expect([label, route.requires]).toEqual([label, ['public']]);
                 continue;
             }
@@ -177,7 +177,7 @@ describe('the generator itself', () => {
         withProbe("// Probes whether an export is ready.\nrouter.head('/export', checkAuth, handler);\n", () => {
             expect(parseRouter('__parser_probe').routes).toEqual([{
                 method: 'HEAD',
-                path: '/api/export',
+                path: '/api/v1/export',
                 requires: ['session'],
                 summary: 'Probes whether an export is ready',
             }]);
@@ -193,7 +193,7 @@ describe('the generator itself', () => {
             try {
                 const { current, next } = buildDoc();
                 expect(current === next).toBe(false);
-                expect(next).toContain('| `HEAD` | `/api/export` | session | Probes whether an export is ready |');
+                expect(next).toContain('| `HEAD` | `/api/v1/export` | session | Probes whether an export is ready |');
             } finally {
                 fs.writeFileSync(API_INDEX, index);
             }

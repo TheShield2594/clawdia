@@ -4,24 +4,23 @@ const Guild = require('../../../models/Guild');
 const User = require('../../../models/User');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId } = require('../../lib/apiHelpers');
+const { readPage, pageEnvelope } = require('../../lib/apiPage');
 
-// One page of 25 members ranked by level then XP.
+// One page of members ranked by level then XP, 25 to a page.
 router.get('/guild/:guildId/leveling/leaderboard', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = 25;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = readPage(req, { defaultLimit: 25, maxLimit: 25 });
     try {
         const [users, total] = await Promise.all([
             User.find({ guildId, $or: [{ level: { $gt: 0 } }, { xp: { $gt: 0 } }] }).sort({ level: -1, xp: -1 }).skip(skip).limit(limit).select('userId level xp messages'),
             User.countDocuments({ guildId, $or: [{ level: { $gt: 0 } }, { xp: { $gt: 0 } }] })
         ]);
-        res.json({
-            entries: users.map((u, i) => ({ rank: skip + i + 1, userId: u.userId, level: u.level, xp: u.xp, messages: u.messages })),
+        res.json(pageEnvelope({
+            items: users.map((u, i) => ({ rank: skip + i + 1, userId: u.userId, level: u.level, xp: u.xp, messages: u.messages })),
             total,
             page,
-            pages: Math.ceil(total / limit)
-        });
+            limit
+        }));
     } catch (err) {
         console.error('Leveling leaderboard error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -60,7 +59,11 @@ router.post('/guild/:guildId/leveling/adjust', checkAuth, checkGuildAccess, chec
         } else {
             update = { $set: { level: Number(amount) } };
         }
-        const user = await User.findOneAndUpdate(filter, update, { upsert: true, new: true, setDefaultsOnInsert: true });
+        // No upsert (#584) — see the note on the economy adjust route: a mistyped
+        // snowflake is still a well-formed one, and upserting turned it into a
+        // phantom member document instead of an error the admin could act on.
+        const user = await User.findOneAndUpdate(filter, update, { new: true });
+        if (!user) return res.status(404).json({ error: 'That member has no leveling record in this server' });
         res.json({ success: true, level: user.level, xp: user.xp });
     } catch (err) {
         console.error('Leveling adjust error:', err);

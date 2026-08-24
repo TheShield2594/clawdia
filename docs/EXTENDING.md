@@ -699,6 +699,8 @@ after the last assertion has already passed.
   so anything matching `*.test.js` is collected.
 - Shared fixtures live in `tests/helpers/`. They are not test files and are not
   collected; require them from a test the way you would any module.
+- `tests/integration/` holds the suites that run against a real MongoDB rather
+  than a stub — see [Integration tests](#integration-tests) below.
 - Some suites guard an invariant rather than a behaviour, and those are the ones
   worth knowing about before you add a command or a script:
   `commandCap.test.js` (Discord's 100-command global limit, plus a ratchet on
@@ -742,6 +744,51 @@ the EJS views — needs a DOM, requested per file with a docblock at the top:
 
 jsdom omits a few Node globals that mongoose's driver reaches for on require;
 `tests/dashboardAccessibility.test.js` shows the shim those suites use.
+
+### Integration tests
+
+Mocking at the `require` boundary is the default, and it stops being enough
+whenever the thing that can be wrong is a decision the *server* makes. A stub
+can be told that a duplicate insert throws; only a server can tell you whether
+the unique index that would throw exists. A stub can be told what an update
+returns; only a server evaluates `{ $max: [0, { $subtract: ['$balance', 5] }] }`.
+
+`tests/integration/` is where those live. They run against a real mongod started
+in-process by `tests/helpers/mongo.js` (#631):
+
+```javascript
+const { useMongo, buildIndexes } = require('../helpers/mongo');
+
+useMongo();                            // boots mongod, connects, cleans between tests
+
+const User = require('../../src/models/User');
+
+describe('User', () => {
+    beforeEach(() => buildIndexes(User));
+
+    test('refuses a second row for the same member in the same guild', async () => {
+        await User.create({ userId: '1', guildId: '2' });
+        await expect(User.create({ userId: '1', guildId: '2' }))
+            .rejects.toMatchObject({ code: 11000 });
+    });
+});
+```
+
+Two things to know before writing one:
+
+- **Indexes are not built for you.** The connection sets `autoIndex: false`,
+  because Mongoose otherwise builds schema indexes in the background without
+  waiting — and a test asserting that a unique index rejects a duplicate would
+  then be racing the connection. Call `buildIndexes(Model, …)` for the indexes
+  your test depends on. It is also the only place a malformed
+  `partialFilterExpression` is ever rejected.
+- **Documents and indexes are both cleared between tests**, so a test never
+  passes on its neighbour's setup.
+
+`mongodb-memory-server` downloads a mongod binary the first time it runs and
+caches it per machine. If that host is unreachable the suite fails rather than
+skipping — a green run has to mean the tests ran — and the failure names the two
+ways out, `MONGOMS_SYSTEM_BINARY` and `MONGOMS_DOWNLOAD_URL`.
 
 ### Logging
 

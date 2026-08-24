@@ -340,7 +340,7 @@ async function sendWelcomeCardPreview() {
     btn.disabled = true;
     btn.textContent = 'Sending…';
     try {
-        const resp = await fetch(`/api/guild/${guildId}/welcome/preview`, {
+        const resp = await fetch(`/api/v1/guild/${guildId}/welcome/preview`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ channelId })
@@ -661,7 +661,7 @@ function updateDailyNewsProfile(index, key, value) {
 }
 
 async function validateFeedUrl(url, guildId) {
-    const resp = await fetch(`/api/guild/${guildId}/validate-feed`, {
+    const resp = await fetch(`/api/v1/guild/${guildId}/validate-feed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url })
@@ -1089,7 +1089,7 @@ async function saveSettings(section) {
     }
 
     try {
-        const response = await fetch(`/api/guild/${guildId}/settings`, {
+        const response = await fetch(`/api/v1/guild/${guildId}/settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -1105,12 +1105,12 @@ async function saveSettings(section) {
             const uploads = Object.entries(_shopItemPendingImages).map(([itemId, info]) => {
                 const fd = new FormData();
                 fd.append('image', info.file);
-                return fetch(`/api/item-image/shop/${guildId}/${itemId}`, { method: 'POST', body: fd })
+                return fetch(`/api/v1/item-image/shop/${guildId}/${itemId}`, { method: 'POST', body: fd })
                     .then(r => r.ok ? null : r.json().then(e => e.error || 'Upload failed'))
                     .catch(() => 'Upload error');
             });
             const deletes = [..._shopItemClearedImages].map(itemId =>
-                fetch(`/api/item-image/shop/${guildId}/${itemId}`, { method: 'DELETE' })
+                fetch(`/api/v1/item-image/shop/${guildId}/${itemId}`, { method: 'DELETE' })
                     .then(r => r.ok ? null : 'Delete failed')
                     .catch(() => 'Delete error')
             );
@@ -1140,7 +1140,7 @@ async function saveSettings(section) {
 // so the guild id is part of the path. `_guildId` is assigned further down this
 // file; both callers run on a click, long after the script has finished.
 function activityImageUrl(itemId) {
-    return '/api/item-image/activity/' + encodeURIComponent(_guildId) + '/' + encodeURIComponent(itemId);
+    return '/api/v1/item-image/activity/' + encodeURIComponent(_guildId) + '/' + encodeURIComponent(itemId);
 }
 
 async function uploadActivityImage(itemId, input) {
@@ -1210,7 +1210,7 @@ async function triggerDailyNewsNow() {
     const ok = await showConfirm({ title: 'Send digest now', body: 'Send the daily digest right now to the configured channel?', okText: 'Send' });
     if (!ok) return;
     try {
-        const response = await fetch(`/api/guild/${guildId}/dailynews/trigger`, { method: 'POST' });
+        const response = await fetch(`/api/v1/guild/${guildId}/dailynews/trigger`, { method: 'POST' });
         if (response.ok) toast('Digest sent', 'success');
         else {
             const err = await response.json().catch(() => ({}));
@@ -1231,7 +1231,7 @@ async function addAutoRole() {
         toast('Role already added', 'error'); return;
     }
     try {
-        const response = await fetch(`/api/guild/${guildId}/autorole`, {
+        const response = await fetch(`/api/v1/guild/${guildId}/autorole`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ roleId })
@@ -1267,7 +1267,7 @@ async function addAutoRole() {
 async function removeAutoRole(roleId) {
     const guildId = BOOT.guildId;
     try {
-        const response = await fetch(`/api/guild/${guildId}/autorole/${roleId}`, { method: 'DELETE' });
+        const response = await fetch(`/api/v1/guild/${guildId}/autorole/${roleId}`, { method: 'DELETE' });
         if (response.ok) {
             const chip = document.querySelector(`#autorole-list [data-role-id="${roleId}"]`);
             if (chip) chip.remove();
@@ -1285,7 +1285,7 @@ async function addRssFeed() {
     const channelId = document.getElementById('rss-channel').value;
     if (!url || !channelId) { toast('Please fill in all fields', 'error'); return; }
     try {
-        const response = await fetch(`/api/guild/${guildId}/rss/add`, {
+        const response = await fetch(`/api/v1/guild/${guildId}/rss/add`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, channelId })
@@ -1303,7 +1303,7 @@ async function deleteRssFeed(index) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const response = await fetch(`/api/guild/${guildId}/rss/${index}`, { method: 'DELETE' });
+        const response = await fetch(`/api/v1/guild/${guildId}/rss/${index}`, { method: 'DELETE' });
         if (response.ok) { toast('RSS feed removed', 'success'); setTimeout(() => location.reload(), 600); }
         else toast('Failed to delete RSS feed', 'error');
     } catch (error) {
@@ -1622,7 +1622,7 @@ function renderStoreItems() {
         const stockText = (item.stock === -1 || item.stock == null) ? '∞ Unlimited' : item.stock + ' left';
         const imgSrc = (item.itemId && _shopItemPendingImages[item.itemId])
             ? _shopItemPendingImages[item.itemId].dataUrl
-            : (item.itemId ? '/api/item-image/shop/' + _guildId + '/' + escHtml(item.itemId) : '');
+            : (item.itemId ? '/api/v1/item-image/shop/' + _guildId + '/' + escHtml(item.itemId) : '');
         const thumbHtml = imgSrc ? '<img class="store-card-thumb" src="' + imgSrc + '" alt="" onerror="this.style.display=\'none\'">' : '';
         return '<div class="store-card">' +
             (thumbHtml ? '<div class="store-card-thumb-wrap">' + thumbHtml + '</div>' : '') +
@@ -1704,7 +1704,7 @@ function openItemModal(idx) {
         placeholder.style.display = 'none';
         clearBtn.style.display = 'inline-flex';
     } else if (item.itemId) {
-        const imgSrc = '/api/item-image/shop/' + _guildId + '/' + item.itemId;
+        const imgSrc = '/api/v1/item-image/shop/' + _guildId + '/' + item.itemId;
         preview.src = imgSrc;
         preview.style.display = 'block';
         placeholder.style.display = 'none';
@@ -2074,9 +2074,9 @@ async function runMemberSearch() {
     if (q.length < 2) { resultsEl.style.display = 'none'; return; }
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/members/search?q=' + encodeURIComponent(q));
+        const resp = await fetch('/api/v1/guild/' + guildId + '/members/search?q=' + encodeURIComponent(q));
         if (!resp.ok) throw new Error('non-ok');
-        const members = await resp.json();
+        const members = (await resp.json()).items || [];
         if (!members.length) {
             resultsEl.innerHTML = '<div style="padding:.5rem .75rem;font-size:.88rem;color:var(--text-dim)">No members found</div>';
         } else {
@@ -2111,7 +2111,7 @@ async function submitAchGrant() {
     if (!userId) { toast('Select a member first', 'error'); return; }
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/achievements/grant', {
+        const resp = await fetch('/api/v1/guild/' + guildId + '/achievements/grant', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId: userId, achievementId: achId })
@@ -2139,11 +2139,11 @@ function loadLevelLeaderboard(page, force) {
     skel.style.display = ''; err.style.display = 'none';
     content.style.display = 'none'; empty.style.display = 'none';
     const guildId = BOOT.guildId;
-    fetch('/api/guild/' + guildId + '/leveling/leaderboard?page=' + page)
+    fetch('/api/v1/guild/' + guildId + '/leveling/leaderboard?page=' + page)
         .then(function(r) { if (!r.ok) throw new Error('non-ok'); return r.json(); })
         .then(function(data) {
             skel.style.display = 'none';
-            const entries = data.entries || [];
+            const entries = data.items || [];
             if (!entries.length) { empty.style.display = ''; return; }
             const medals = ['🥇','🥈','🥉'];
             const tbody = document.getElementById('level-leaderboard-tbody');
@@ -2197,7 +2197,7 @@ async function levelAdminAction(action) {
     }
     msgEl.style.color = ''; msgEl.textContent = 'Working…';
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/leveling/adjust', {
+        const resp = await fetch('/api/v1/guild/' + guildId + '/leveling/adjust', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId, action, amount })
@@ -2222,7 +2222,7 @@ async function startBoostEvent() {
     if (!Number.isFinite(hours) || hours < 1) { msgEl.style.color = 'var(--bad)'; msgEl.textContent = 'Duration must be at least 1 hour.'; return; }
     msgEl.style.color = ''; msgEl.textContent = 'Activating…';
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/leveling/xp-event', {
+        const resp = await fetch('/api/v1/guild/' + guildId + '/leveling/xp-event', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ multiplier, durationHours: hours })
@@ -2271,7 +2271,7 @@ async function publishRrPanel() {
 
     const guildId = BOOT.guildId;
     try {
-        const response = await fetch('/api/guild/' + guildId + '/reactionrole/panel', {
+        const response = await fetch('/api/v1/guild/' + guildId + '/reactionrole/panel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2299,7 +2299,7 @@ async function deleteRrPanel(messageId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const response = await fetch('/api/guild/' + guildId + '/reactionrole/panel/' + messageId, { method: 'DELETE' });
+        const response = await fetch('/api/v1/guild/' + guildId + '/reactionrole/panel/' + messageId, { method: 'DELETE' });
         if (response.ok) {
             toast('Panel deleted', 'success');
             setTimeout(function() { location.reload(); }, 600);
@@ -2314,21 +2314,37 @@ async function deleteRrPanel(messageId) {
 
 // ── Knowledge Base ─────────────────────────────────────────────────────
 var kbLoaded = false;
+// The page currently on screen, so that adding, editing or deleting an entry
+// reloads the page the admin was looking at rather than dropping them back to
+// the first one. The list is paged now (#583) — before, everything past the
+// hundredth entry simply did not come back.
+var kbPage = 1;
 
-async function loadKnowledgeBase() {
-    if (kbLoaded) return;
+async function loadKnowledgeBase(page) {
+    if (kbLoaded && page === undefined) return;
+    const wanted = page || kbPage;
     const guildId = BOOT.guildId;
     const skel = document.getElementById('kb-skeleton');
     const err  = document.getElementById('kb-error');
     if (skel) skel.style.display = '';
     if (err)  err.style.display  = 'none';
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/knowledge-base');
+        const resp = await fetch('/api/v1/guild/' + guildId + '/knowledge-base?page=' + wanted);
         if (!resp.ok) throw new Error('non-ok');
-        const entries = await resp.json();
+        const data = await resp.json();
+        const pages = data.pages || 1;
+        // Deleting the last entry on the last page shrinks the collection out
+        // from under the page number the admin is on. One step back, not a
+        // loop: `pages` is at least 1, so the retry always lands.
+        if (wanted > pages) {
+            kbLoaded = false;
+            return loadKnowledgeBase(pages);
+        }
         kbLoaded = true;
+        kbPage = data.page || wanted;
         if (skel) skel.style.display = 'none';
-        renderKbEntries(entries);
+        renderKbEntries(data.items || []);
+        renderKbPagination(kbPage, pages, data.total || 0);
     } catch {
         if (skel) skel.style.display = 'none';
         if (err)  err.style.display  = '';
@@ -2347,6 +2363,34 @@ function renderKbEntries(entries) {
     entries.forEach(function(entry) {
         container.appendChild(buildKbRow(entry));
     });
+}
+
+// Built with createElement and .onclick rather than innerHTML: the page's CSP
+// allows no inline handlers, and `total` is a number from our own API but the
+// rest of this file has settled on not interpolating anything into markup.
+function renderKbPagination(page, pages, total) {
+    const pag = document.getElementById('kb-pagination');
+    if (!pag) return;
+    pag.innerHTML = '';
+    if (pages <= 1) return;
+    if (page > 1) {
+        const prev = document.createElement('button');
+        prev.className = 'btn btn-sm';
+        prev.textContent = '← Prev';
+        prev.onclick = function() { loadKnowledgeBase(page - 1); };
+        pag.appendChild(prev);
+    }
+    const info = document.createElement('span');
+    info.className = 'pager-info';
+    info.textContent = 'Page ' + page + ' of ' + pages + ' (' + total + ' entries)';
+    pag.appendChild(info);
+    if (page < pages) {
+        const next = document.createElement('button');
+        next.className = 'btn btn-sm';
+        next.textContent = 'Next →';
+        next.onclick = function() { loadKnowledgeBase(page + 1); };
+        pag.appendChild(next);
+    }
 }
 
 function buildKbRow(entry) {
@@ -2401,7 +2445,7 @@ async function saveKbEntry(id) {
     const tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
     if (!title || !content) { toast('Title and content are required', 'error'); return; }
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, {
+        const resp = await fetch('/api/v1/guild/' + guildId + '/knowledge-base/' + id, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: title, content: content, tags: tags })
@@ -2428,7 +2472,7 @@ async function addKbEntry() {
     const tags = tagsRaw ? tagsRaw.split(',').map(function(t) { return t.trim(); }).filter(Boolean) : [];
     if (!title || !content) { toast('Title and content are required', 'error'); return; }
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/knowledge-base', {
+        const resp = await fetch('/api/v1/guild/' + guildId + '/knowledge-base', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: title, content: content, tags: tags })
@@ -2440,7 +2484,9 @@ async function addKbEntry() {
             document.getElementById('kb-content').value = '';
             document.getElementById('kb-tags').value = '';
             kbLoaded = false;
-            loadKnowledgeBase();
+            // Newest first, so the entry just added is on page 1 whatever page
+            // the admin was reading.
+            loadKnowledgeBase(1);
         } else {
             toast(data.error || 'Failed to add entry', 'error');
         }
@@ -2455,7 +2501,7 @@ async function deleteKbEntry(id) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/knowledge-base/' + id, { method: 'DELETE' });
+        const resp = await fetch('/api/v1/guild/' + guildId + '/knowledge-base/' + id, { method: 'DELETE' });
         if (resp.ok) {
             toast('Entry removed', 'success');
             kbLoaded = false;
@@ -2504,12 +2550,15 @@ async function loadSummaryJobs() {
     if (skel) skel.style.display = '';
     if (err)  err.style.display  = 'none';
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/summary-jobs');
+        const resp = await fetch('/api/v1/guild/' + guildId + '/summary-jobs');
         if (!resp.ok) throw new Error('non-ok');
-        const jobs = await resp.json();
+        const data = await resp.json();
         summaryJobsLoaded = true;
         if (skel) skel.style.display = 'none';
-        renderSummaryJobs(jobs);
+        // One request is the whole list: the create route caps a guild at ten
+        // jobs and the endpoint's default page size is that same cap, so there
+        // is no pager here to go stale.
+        renderSummaryJobs(data.items || []);
     } catch {
         if (skel) skel.style.display = 'none';
         if (err)  err.style.display  = '';
@@ -2563,7 +2612,7 @@ async function saveDailyDigest() {
     if (!validateTimezoneInput(tzInput)) { toast('Please enter a valid IANA timezone (e.g. UTC, America/New_York)', 'error'); return; }
 
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/daily-digest', {
+        const resp = await fetch('/api/v1/guild/' + guildId + '/daily-digest', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled, channelId, sourceChannelIds: sourceOpts, hour, minute, timezone })
@@ -2589,7 +2638,7 @@ async function addSummaryJob() {
     const label = document.getElementById('summary-label').value.trim();
     if (!sourceChannelId || !targetChannelId) { toast('Please select both source and target channels', 'error'); return; }
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/summary-jobs', {
+        const resp = await fetch('/api/v1/guild/' + guildId + '/summary-jobs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sourceChannelId: sourceChannelId, targetChannelId: targetChannelId, hour: hour, minute: minute, label: label })
@@ -2618,7 +2667,7 @@ async function deleteSummaryJob(jobId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/summary-jobs/' + jobId, { method: 'DELETE' });
+        const resp = await fetch('/api/v1/guild/' + guildId + '/summary-jobs/' + jobId, { method: 'DELETE' });
         if (resp.ok) {
             toast('Summary job removed', 'success');
             summaryJobsLoaded = false;
@@ -2678,7 +2727,7 @@ async function addPersona() {
     const systemPrompt = document.getElementById('persona-prompt').value.trim();
     if (!channelId || !personaName || !systemPrompt) { toast('All fields are required', 'error'); return; }
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/persona', {
+        const resp = await fetch('/api/v1/guild/' + guildId + '/persona', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ channelId: channelId, personaName: personaName, systemPrompt: systemPrompt })
@@ -2705,7 +2754,7 @@ async function removePersona(channelId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
+        const resp = await fetch('/api/v1/guild/' + guildId + '/persona/' + encodeURIComponent(channelId), { method: 'DELETE' });
         if (resp.ok) {
             toast('Persona removed', 'success');
             _personas = _personas.filter(function(p) { return p.channelId !== channelId; });
@@ -2739,7 +2788,7 @@ async function loadMcpServers(force) {
     if (_mcpServers && !force) { renderMcpServers(); return; }
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/mcp-servers');
+        const resp = await fetch('/api/v1/guild/' + guildId + '/mcp-servers');
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'Failed to load');
         _mcpServers = data.servers || [];
@@ -2928,7 +2977,7 @@ async function saveMcpServer() {
     if (token) body.authorizationToken = token;
 
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), {
+        const resp = await fetch('/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -2954,7 +3003,7 @@ async function removeMcpServer(name) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), { method: 'DELETE' });
+        const resp = await fetch('/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name), { method: 'DELETE' });
         const data = await resp.json();
         if (!resp.ok) { toast(data.error || 'Failed to remove', 'error'); return; }
         toast('Connection removed', 'success');
@@ -2974,7 +3023,7 @@ async function testMcpServer(name, out) {
     const guildId = BOOT.guildId;
     if (out) { out.className = 'mcp-test-result'; out.textContent = 'Testing…'; }
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/test', { method: 'POST' });
+        const resp = await fetch('/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/test', { method: 'POST' });
         const data = await resp.json();
         if (!out) return;
         const okay = resp.ok && data.success;
@@ -3116,7 +3165,7 @@ async function loadAiUsage() {
     const guildId = BOOT.guildId;
     const statusEl = document.getElementById('ai-usage-status');
     try {
-        const resp = await fetch('/api/guild/' + guildId + '/ai/usage?days=14');
+        const resp = await fetch('/api/v1/guild/' + guildId + '/ai/usage?days=14');
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const data = await resp.json();
         document.getElementById('ai-usage-today-tokens').textContent = formatTokens(data.today.tokens);
@@ -3318,8 +3367,8 @@ async function loadOverviewStats() {
     const guildId = BOOT.guildId;
     try {
         const [statsResp, insightsResp] = await Promise.all([
-            fetch(`/api/guild/${guildId}/stats`),
-            fetch(`/api/guild/${guildId}/insights`)
+            fetch(`/api/v1/guild/${guildId}/stats`),
+            fetch(`/api/v1/guild/${guildId}/insights`)
         ]);
         if (!statsResp.ok || !insightsResp.ok) throw new Error('stats fetch failed');
         const stats = await statsResp.json();
@@ -3671,8 +3720,8 @@ async function loadAnalytics() {
 
     try {
         const [statsResp, insightsResp] = await Promise.all([
-            fetch(`/api/guild/${guildId}/stats`),
-            fetch(`/api/guild/${guildId}/insights`)
+            fetch(`/api/v1/guild/${guildId}/stats`),
+            fetch(`/api/v1/guild/${guildId}/insights`)
         ]);
         if (!statsResp.ok || !insightsResp.ok) throw new Error('Non-OK response');
         const data = await statsResp.json();
@@ -3833,7 +3882,7 @@ async function loadActiveSanctions() {
     document.getElementById('sanctions-empty').style.display = 'none';
     document.getElementById('sanctions-table').style.display = 'none';
     try {
-        const resp = await fetch(`/api/guild/${guildId}/sanctions/active`);
+        const resp = await fetch(`/api/v1/guild/${guildId}/sanctions/active`);
         if (!resp.ok) throw new Error('Non-OK');
         _sanctionsData = await resp.json();
         document.getElementById('sanctions-loading').style.display = 'none';
@@ -3849,7 +3898,7 @@ async function doUnban(userId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch(`/api/guild/${guildId}/sanctions/unban/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const resp = await fetch(`/api/v1/guild/${guildId}/sanctions/unban/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
         const data = await resp.json();
         if (!resp.ok) return alert(data.error || 'Failed to unban');
         await loadActiveSanctions();
@@ -3861,7 +3910,7 @@ async function doRemoveTimeout(userId) {
     if (!ok) return;
     const guildId = BOOT.guildId;
     try {
-        const resp = await fetch(`/api/guild/${guildId}/sanctions/untimeout/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const resp = await fetch(`/api/v1/guild/${guildId}/sanctions/untimeout/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
         const data = await resp.json();
         if (!resp.ok) return alert(data.error || 'Failed to remove timeout');
         await loadActiveSanctions();
@@ -3886,14 +3935,14 @@ async function loadCaseHistory(page = 1) {
         const params = new URLSearchParams({ page, limit: 20 });
         if (type) params.set('type', type);
         if (status) params.set('status', status);
-        const resp = await fetch(`/api/guild/${guildId}/cases?${params}`);
+        const resp = await fetch(`/api/v1/guild/${guildId}/cases?${params}`);
         if (!resp.ok) throw new Error('Non-OK');
-        const { cases, total, pages } = await resp.json();
+        const { items, total, pages } = await resp.json();
         document.getElementById('cases-loading').style.display = 'none';
-        if (!cases.length) { document.getElementById('cases-empty').style.display = ''; return; }
+        if (!items.length) { document.getElementById('cases-empty').style.display = ''; return; }
         const tbody = document.getElementById('cases-tbody');
         tbody.innerHTML = '';
-        for (const c of cases) {
+        for (const c of items) {
             const date = new Date(c.createdAt).toLocaleDateString();
             const targetCell = c.targetUserTag
                 ? `<span title="${escHtml(c.targetUserId)}">${c.targetAvatarUrl ? `<img src="${escHtml(c.targetAvatarUrl)}" style="width:16px;height:16px;border-radius:50%;margin-right:4px;vertical-align:middle" onerror="this.style.display='none'">` : ''}${escHtml(c.targetUserTag)}</span>`
@@ -3958,7 +4007,7 @@ async function submitCaseAction() {
         : { action: 'add_note', note };
     if (mode === 'add_note' && !note) return alert('Note cannot be empty');
     try {
-        const resp = await fetch(`/api/guild/${guildId}/cases/${caseId}`, {
+        const resp = await fetch(`/api/v1/guild/${guildId}/cases/${caseId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -3984,7 +4033,7 @@ async function loadEcoHealth() {
     document.getElementById('eco-top-earners-empty').style.display = 'none';
     document.getElementById('eco-top-earners-table').style.display = 'none';
     try {
-        const resp = await fetch(`/api/guild/${guildId}/economy/stats`);
+        const resp = await fetch(`/api/v1/guild/${guildId}/economy/stats`);
         if (!resp.ok) throw new Error('Non-OK');
         const stats = await resp.json();
         document.getElementById('eco-stat-total-coins').textContent = (stats.totalCoins || 0).toLocaleString();
@@ -4056,7 +4105,7 @@ async function ecoAdminAction(action) {
     try {
         const body = { userId, action };
         if (['give', 'take'].includes(action)) body.amount = amount;
-        const resp = await fetch(`/api/guild/${guildId}/economy/adjust`, {
+        const resp = await fetch(`/api/v1/guild/${guildId}/economy/adjust`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -4094,7 +4143,7 @@ async function ecoAdminAction(action) {
 
         const existingIds = textarea.value.split('\n').map(s => s.trim()).filter(Boolean);
         if (existingIds.length) {
-            fetch(`/api/guild/${_gId}/members/resolve?ids=${existingIds.join(',')}`)
+            fetch(`/api/v1/guild/${_gId}/members/resolve?ids=${existingIds.join(',')}`)
                 .then(r => r.json())
                 .then(map => {
                     for (const id of existingIds) {
@@ -4112,7 +4161,9 @@ async function ecoAdminAction(action) {
             if (q.length < 2) { dropdown.style.display = 'none'; return; }
             _debounce = setTimeout(async () => {
                 try {
-                    const results = await fetch(`/api/guild/${_gId}/members/search?q=${encodeURIComponent(q)}`).then(r => r.json());
+                    const results = await fetch(`/api/v1/guild/${_gId}/members/search?q=${encodeURIComponent(q)}`)
+                        .then(r => r.json())
+                        .then(d => d.items);
                     if (!Array.isArray(results) || !results.length) { dropdown.style.display = 'none'; return; }
                     dropdown.innerHTML = results.map(u => {
                         const name = escHtml(u.displayName || u.username);

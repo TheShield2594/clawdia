@@ -3,12 +3,12 @@ const router = express.Router();
 const Case = require('../../../models/Case');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { isValidDiscordId, logAuditEvent } = require('../../lib/apiHelpers');
+const { readPage, pageEnvelope } = require('../../lib/apiPage');
 
 // One page of moderation cases, filterable by `?type=` and `?status=`.
 router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const { page, limit, skip } = readPage(req, { defaultLimit: 20, maxLimit: 50 });
     const type = req.query.type || null;
     const status = req.query.status || null;
 
@@ -18,22 +18,22 @@ router.get('/guild/:guildId/cases', checkAuth, checkGuildAccess, async (req, res
         if (status && ['open', 'closed', 'appealed', 'appeal_approved', 'appeal_denied'].includes(status)) query.status = status;
 
         const [cases, total] = await Promise.all([
-            Case.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+            Case.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
             Case.countDocuments(query)
         ]);
 
         const uniqueIds = [...new Set(cases.flatMap(c => [c.targetUserId, c.moderatorId].filter(Boolean)))];
         const userMap = await req.bot.resolveUsers(uniqueIds);
 
-        res.json({
-            cases: cases.map(c => ({
+        res.json(pageEnvelope({
+            items: cases.map(c => ({
                 ...c,
                 targetUserTag: userMap[c.targetUserId]?.tag || null,
                 targetAvatarUrl: userMap[c.targetUserId]?.avatarUrl || null,
                 moderatorTag: userMap[c.moderatorId]?.tag || null,
             })),
-            total, page, pages: Math.ceil(total / limit)
-        });
+            total, page, limit
+        }));
     } catch (error) {
         console.error('Cases list error:', error);
         res.status(500).json({ error: 'Internal server error' });

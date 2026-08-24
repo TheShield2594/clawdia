@@ -4,7 +4,7 @@
             <img
                 class="game-item-img"
                 id="gic-img-<%= item.id %>"
-                src="/api/item-image/activity/<%= guild.id %>/<%= item.id %>"
+                src="/api/v1/item-image/activity/<%= guild.id %>/<%= item.id %>"
                 alt=""
                 onerror="this.style.display='none';document.getElementById('gic-emoji-<%= item.id %>').style.display='flex'"
                 onload="document.getElementById('gic-emoji-<%= item.id %>').style.display='none'"

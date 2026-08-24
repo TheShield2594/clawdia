@@ -41,7 +41,12 @@ const END = '<!-- END GENERATED ENDPOINTS -->';
 // Where the whole router is mounted in server.js. Paths inside the sub-routers
 // are absolute below this and are rendered with it prefixed, because that is
 // what a caller types.
-const MOUNT = '/api';
+//
+// The same router is also still mounted at the unversioned `/api` (#582), but
+// only one of the two belongs in a reference: `/api` is a compatibility alias
+// kept for bundles and scripts written before the version existed, and
+// documenting both would read as a choice a caller has to make.
+const MOUNT = '/api/v1';
 
 const SUMMARY_MAX = 200;
 

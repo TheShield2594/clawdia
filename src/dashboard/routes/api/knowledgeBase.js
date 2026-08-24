@@ -2,13 +2,23 @@ const express = require('express');
 const router = express.Router();
 const KnowledgeBase = require('../../../models/KnowledgeBase');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
+const { readPage, pageEnvelope } = require('../../lib/apiPage');
 
-// The guild's 100 most recent knowledge base entries, newest first.
+// One page of the guild's knowledge base entries, newest first.
+//
+// The hard `.limit(100)` this replaces (#583) had no cursor beside it, so a
+// guild's hundred-and-first entry was not merely off the first page — it was
+// unreachable through the API, and unremovable through the dashboard that lists
+// it. Paged the same way cases and the leveling leaderboard are.
 router.get('/guild/:guildId/knowledge-base', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
+    const { page, limit, skip } = readPage(req, { defaultLimit: 25, maxLimit: 100 });
     try {
-        const entries = await KnowledgeBase.find({ guildId }).sort({ createdAt: -1 }).limit(100);
-        res.json(entries);
+        const [items, total] = await Promise.all([
+            KnowledgeBase.find({ guildId }).sort({ createdAt: -1 }).skip(skip).limit(limit),
+            KnowledgeBase.countDocuments({ guildId }),
+        ]);
+        res.json(pageEnvelope({ items, total, page, limit }));
     } catch (error) {
         console.error('Knowledge base list error:', error);
         res.status(500).json({ error: 'Internal server error' });
