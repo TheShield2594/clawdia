@@ -3,7 +3,7 @@ const User  = require('../models/User');
 const SeasonRecord = require('../models/SeasonRecord');
 const { createWarVictoryBanner, createSeasonRecapCard } = require('../utils/cardGenerator');
 const { PET_DEFINITIONS, heartBar } = require('./petService');
-const { ensurePricingFields, nextPrice, decayDemand, pushHistory, trendBucket } = require('../utils/dynamicPricing');
+const { ensurePricingFields, nextPrice, decayDemand, trendBucket, HISTORY_CAP } = require('../utils/dynamicPricing');
 const { softResetElo, tierFor, makeSeasonId } = require('../utils/duelElo');
 const { topByNetWorth } = require('../utils/netWorth');
 const { grantInventoryItem } = require('../utils/inventoryGrant');
@@ -648,10 +648,22 @@ async function announceHourlyWinners(client) {
     }
 }
 
-// ─── Dynamic shop pricing recalculation (issue #354) ─────────────────────────
+// ─── Dynamic shop pricing recalculation (issue #354) ────────────────────────
+//
+// Shop items carry their icon inline, as an `imageData` Buffer on the subdocument
+// (see the `shop` array in models/Guild.js). That makes the whole-document
+// read-mutate-`save()` shape this job used to have proportional to the size of a
+// guild's uploaded artwork rather than to the handful of numbers it changes:
+// every fifteen minutes it pulled every icon of every dynamic-pricing guild into
+// the process, and `markModified('shop')` then wrote all of them back untouched.
+//
+// So the shop is read under a projection that names only the pricing fields, and
+// the new prices go back as a `bulkWrite` of per-item `$set`s. The Buffers are
+// never read and never rewritten.
 async function recalcShopPrices(client) {
     const { EmbedBuilder } = require('discord.js');
-    const guilds = await Guild.find({ 'dynamicPricing.enabled': true });
+    // Only the lease window is needed here; the claim below re-reads the guild.
+    const guilds = await Guild.find({ 'dynamicPricing.enabled': true }, 'guildId dynamicPricing.recalcMinutes').lean();
 
     for (const guildSummary of guilds) {
         try {
@@ -663,6 +675,10 @@ async function recalcShopPrices(client) {
             // succeeds when lastRecalcAt is null or older than the lease window,
             // ensuring concurrent workers (multi-instance deployments) don't
             // both run the recalc for the same guild.
+            //
+            // `priceHistory` is deliberately absent from the projection: the write
+            // below appends to it with `$push`/`$slice` rather than replacing it,
+            // so there is no reason to carry thirty entries per item back and forth.
             const guildDoc = await Guild.findOneAndUpdate(
                 {
                     guildId: guildSummary.guildId,
@@ -673,27 +689,57 @@ async function recalcShopPrices(client) {
                     ],
                 },
                 { $set: { 'dynamicPricing.lastRecalcAt': now } },
-                { new: true }
-            );
+                {
+                    new: true,
+                    projection: 'guildId dynamicPricing economy.announcementChannelId economy.currency '
+                        + 'shop._id shop.name shop.price shop.basePrice shop.currentPrice shop.demandScore',
+                }
+            ).lean();
             if (!guildDoc) continue; // another worker already claimed this window
 
-            ensurePricingFields(guildDoc.shop);
+            const shop = Array.isArray(guildDoc.shop) ? guildDoc.shop : [];
+            ensurePricingFields(shop);
 
             const band       = guildDoc.dynamicPricing.priceBand ?? 0.5;
             const volatility = guildDoc.dynamicPricing.volatility ?? 'medium';
             const changedMovers = [];
+            const writes = [];
 
-            for (const item of guildDoc.shop) {
+            for (const item of shop) {
                 const prev = item.currentPrice ?? item.basePrice ?? item.price;
                 item.currentPrice = nextPrice(item, band, volatility);
                 item.demandScore  = decayDemand(item, volatility);
-                pushHistory(item, now);
+
+                // Matched by subdocument `_id` rather than by array index: an admin
+                // adding or removing a shop item between the read and the write
+                // shifts the indices, and an index-addressed `$set` would then land
+                // the new price on somebody else's item. A stale `_id` simply
+                // matches nothing.
+                writes.push({
+                    updateOne: {
+                        filter: { guildId: guildDoc.guildId, 'shop._id': item._id },
+                        update: {
+                            $set: {
+                                'shop.$.basePrice':    item.basePrice,
+                                'shop.$.currentPrice': item.currentPrice,
+                                'shop.$.demandScore':  item.demandScore,
+                            },
+                            $push: {
+                                'shop.$.priceHistory': {
+                                    $each: [{ at: now, price: item.currentPrice, demandScore: item.demandScore }],
+                                    $slice: -HISTORY_CAP,
+                                },
+                            },
+                        },
+                    },
+                });
+
                 if (Math.abs(item.currentPrice - prev) / Math.max(1, prev) > 0.05) {
                     changedMovers.push({ name: item.name, prev, next: item.currentPrice, item });
                 }
             }
-            guildDoc.markModified('shop');
-            await guildDoc.save();
+
+            if (writes.length) await Guild.bulkWrite(writes);
 
             const channelId = guildDoc.economy?.announcementChannelId;
             if (channelId && changedMovers.length) {

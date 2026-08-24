@@ -47,18 +47,9 @@ function decayDemand(item, volatility = 'medium') {
     return (item.demandScore ?? 0) * (1 - cfg.decay);
 }
 
-// Record a price-history entry and trim to cap.
-function pushHistory(item, at = new Date()) {
-    if (!Array.isArray(item.priceHistory)) item.priceHistory = [];
-    item.priceHistory.push({
-        at,
-        price: item.currentPrice ?? item.basePrice ?? item.price,
-        demandScore: item.demandScore ?? 0,
-    });
-    if (item.priceHistory.length > HISTORY_CAP) {
-        item.priceHistory.splice(0, item.priceHistory.length - HISTORY_CAP);
-    }
-}
+// Price history is appended by the recalc job's `$push`/`$slice: -HISTORY_CAP`
+// write rather than by rebuilding the array in JS, so the cap is enforced by the
+// database. HISTORY_CAP is exported for that write and for readers of the chart.
 
 // Convenience: % change between currentPrice and basePrice for /market trends display.
 function trendBucket(item) {
@@ -80,6 +71,5 @@ module.exports = {
     ensurePricingFields,
     nextPrice,
     decayDemand,
-    pushHistory,
     trendBucket,
 };

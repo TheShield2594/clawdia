@@ -41,9 +41,18 @@ function makeUsers(n) {
     }));
 }
 
-// User.find(...).sort(...).limit(...) resolves to the rows.
+// User.find(...).select(...).sort(...).limit(...).lean() resolves to the rows.
+// `select` is recorded: #586 is that these rows used to arrive as full user
+// documents, pets and inventories included, to print ten names.
+const seen = {};
 function mockRows(rows) {
-    User.find.mockReturnValue({ sort: () => ({ limit: async () => rows }) });
+    const chain = {
+        select(fields) { seen.select = fields; return chain; },
+        sort() { return chain; },
+        limit() { return chain; },
+        lean: async () => rows,
+    };
+    User.find.mockReturnValue(chain);
 }
 
 /**
@@ -79,7 +88,7 @@ function makeInteraction(fetch) {
 beforeEach(() => {
     jest.clearAllMocks();
     // No caller row, so the "you are here" tail is skipped.
-    User.findOne.mockResolvedValue(null);
+    User.findOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
     User.countDocuments.mockResolvedValue(0);
 });
 
@@ -92,6 +101,15 @@ describe('leaderboard row rendering', () => {
 
         expect(trace.calls).toBe(10);
         expect(trace.peakConcurrency).toBe(10);
+    });
+
+    it('reads only the fields the rows print', async () => {
+        mockRows(makeUsers(10));
+        const { fetch } = makeTracingFetch();
+
+        await leaderboard.execute(makeInteraction(fetch));
+
+        expect(seen.select).toBe('userId level xp');
     });
 
     it('still renders every row in rank order', async () => {

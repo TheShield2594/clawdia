@@ -3,6 +3,23 @@ const User = require('../../models/User');
 const Guild = require('../../models/Guild');
 const { netWorthOf, topByNetWorth, netWorthRank } = require('../../utils/netWorth');
 
+// A leaderboard page prints ten names and one number each. Hydrating whole user
+// documents to do it dragged the pet, inventory, achievement and quest arrays
+// along for the ride — hundreds of subdocuments per row, discarded unread. Each
+// board therefore names the fields its own rows actually render, and reads them
+// as plain objects.
+const ROW_FIELDS = {
+    levels:       'userId level xp',
+    streaks:      'userId streak.current streak.longest streak.freezes streak.revivalToken',
+    duels:        'userId duelWins duelLosses',
+    achievements: 'userId achievementsCount',
+};
+
+// The "You are here" line is computed for whichever board is showing, so the
+// caller's row is read once with the union of what those branches read. `_id`
+// comes back regardless and is what netWorthRank ties-breaks on.
+const CALLER_FIELDS = 'userId level xp balance bank duelWins duelLosses achievementsCount';
+
 module.exports = {
     cooldown: 10,
     data: new SlashCommandBuilder()
@@ -32,7 +49,11 @@ module.exports = {
                 const sortField = type === 'streaks'
                     ? { 'streak.current': -1 }
                     : { 'streak.longest': -1 };
-                users = await User.find({ guildId: interaction.guild.id, ...(type === 'streaks' ? { 'streak.current': { $gt: 0 } } : {}) }).sort(sortField).limit(10);
+                users = await User.find({ guildId: interaction.guild.id, ...(type === 'streaks' ? { 'streak.current': { $gt: 0 } } : {}) })
+                    .select(ROW_FIELDS.streaks)
+                    .sort(sortField)
+                    .limit(10)
+                    .lean();
                 title = type === 'streaks'
                     ? '🔥 Daily Streak Leaderboard'
                     : '🏆 All-Time Streak Records';
@@ -43,17 +64,23 @@ module.exports = {
                 users = await User.find({
                     guildId: interaction.guild.id,
                     $or: [{ duelWins: { $gt: 0 } }, { duelLosses: { $gt: 0 } }],
-                }).sort({ duelWins: -1 }).limit(10);
+                })
+                    .select(ROW_FIELDS.duels)
+                    .sort({ duelWins: -1 })
+                    .limit(10)
+                    .lean();
                 title = '⚔️ Duel Leaderboard';
                 descriptionHeader = 'Top 10 Duelists by Win Count';
             } else if (type === 'achievements') {
-                const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
+                const guildSettings = await Guild.findOne({ guildId: interaction.guild.id }).select('achievements.enabled').lean();
                 if (!guildSettings?.achievements?.enabled) {
                     return interaction.reply({ content: 'Achievements are not enabled on this server.', flags: MessageFlags.Ephemeral });
                 }
                 users = await User.find({ guildId: interaction.guild.id, achievementsCount: { $gt: 0 } })
+                    .select(ROW_FIELDS.achievements)
                     .sort({ achievementsCount: -1 })
-                    .limit(10);
+                    .limit(10)
+                    .lean();
                 title = '🏅 Achievement Leaderboard';
                 descriptionHeader = 'Top 10 by Total Achievements Earned';
             } else if (type === 'economy') {
@@ -63,7 +90,11 @@ module.exports = {
                 title = '🏆 Leaderboard';
                 descriptionHeader = 'Top 10 by Net Worth';
             } else {
-                users = await User.find({ guildId: interaction.guild.id }).sort({ level: -1, xp: -1 }).limit(10);
+                users = await User.find({ guildId: interaction.guild.id })
+                    .select(ROW_FIELDS.levels)
+                    .sort({ level: -1, xp: -1 })
+                    .limit(10)
+                    .lean();
                 title = '🏆 Leaderboard';
                 descriptionHeader = 'Top 10 by Level';
             }
@@ -80,7 +111,9 @@ module.exports = {
             // Find caller's rank for streak leaderboards
             let callerRankLine = '';
             if (type === 'streaks' || type === 'streaks_longest') {
-                const callerUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+                const callerUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id })
+                    .select(ROW_FIELDS.streaks)
+                    .lean();
                 if (callerUser) {
                     const callerVal = type === 'streaks'
                         ? (callerUser.streak?.current ?? 0)
@@ -152,7 +185,9 @@ module.exports = {
 
             // "You are here" self-rank for types that didn't already compute it above
             if (!callerRankLine && !['streaks', 'streaks_longest'].includes(type)) {
-                const callerUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
+                const callerUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id })
+                    .select(CALLER_FIELDS)
+                    .lean();
                 if (callerUser) {
                     let callerRank, callerDisplay;
                     const div = '━━━━━━━━━━━━━━━━━━━━━━━━━━━';

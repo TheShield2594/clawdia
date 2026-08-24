@@ -116,6 +116,12 @@ async function persistSentLinks(guild, profile, newlySentLinks) {
     await guild.save();
 }
 
+// Scheduling a guild's digests needs its id and its profiles, and nothing else.
+// Guild documents also carry embedded image Buffers, so a projection is the
+// difference between reading a few hundred bytes per guild and reading whatever
+// artwork that guild's admins have uploaded.
+const DAILY_NEWS_FIELDS = 'guildId dailyNewsProfiles dailyNews';
+
 function getDailyNewsProfiles(guild) {
     if (Array.isArray(guild.dailyNewsProfiles) && guild.dailyNewsProfiles.length > 0) {
         return guild.dailyNewsProfiles;
@@ -381,7 +387,7 @@ function scheduleProfileJob(client, guildId, profile) {
 }
 
 function scheduleDailyNews(client) {
-    Guild.find({}, 'guildId dailyNewsProfiles dailyNews').lean().then(guilds => {
+    Guild.find({}, DAILY_NEWS_FIELDS).lean().then(guilds => {
         for (const guild of guilds) {
             const profiles = getDailyNewsProfiles(guild)
                 .filter(profile => profile.enabled && Array.isArray(profile.feeds) && profile.feeds.length > 0);
@@ -402,7 +408,10 @@ function rescheduleDailyNews(client, guildId) {
         }
     }
 
-    Guild.findOne({ guildId }).then(guild => {
+    // Same three fields the startup sweep reads. Without the projection this
+    // pulled the guild's shop-item and activity-item image Buffers into memory
+    // on every dashboard save that touched a daily-news setting.
+    Guild.findOne({ guildId }, DAILY_NEWS_FIELDS).lean().then(guild => {
         if (!guild) return;
 
         const profiles = getDailyNewsProfiles(guild)

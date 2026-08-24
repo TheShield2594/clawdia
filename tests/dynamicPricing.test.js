@@ -1,4 +1,4 @@
-const { ensurePricingFields, nextPrice, decayDemand, pushHistory, trendBucket, HISTORY_CAP } = require('../src/utils/dynamicPricing');
+const { ensurePricingFields, nextPrice, decayDemand, trendBucket } = require('../src/utils/dynamicPricing');
 
 describe('dynamicPricing', () => {
     test('ensurePricingFields fills in missing fields once', () => {
@@ -36,14 +36,6 @@ describe('dynamicPricing', () => {
         expect(decayDemand({ demandScore: 100 }, 'medium')).toBeLessThan(100);
         expect(decayDemand({ demandScore: 100 }, 'medium')).toBeGreaterThan(0);
         expect(decayDemand({ demandScore: -100 }, 'medium')).toBeGreaterThan(-100);
-    });
-
-    test('pushHistory trims to cap', () => {
-        const item = { basePrice: 100, currentPrice: 100, demandScore: 0 };
-        for (let i = 0; i < HISTORY_CAP + 10; i++) pushHistory(item, new Date(i));
-        expect(item.priceHistory.length).toBe(HISTORY_CAP);
-        // Oldest dropped first
-        expect(item.priceHistory[0].at.getTime()).toBe(10);
     });
 
     test('trendBucket classifies movement', () => {
