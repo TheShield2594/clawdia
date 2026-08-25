@@ -15,43 +15,48 @@ npm run images:coverage                             # rewrite, keeping every tic
 npm run images:coverage -- --tick fish:koi fish:eel # mark ids done
 npm run images:coverage -- --tick 'fish:*=cozy fishing pack'
 npm run images:coverage -- --untick 'mine:*'
+npm run images:coverage -- --from-db                # mark what a server actually holds
 ```
 
 Adding an item to the game data adds an unticked line here; `npm test` fails
-until it does, so nothing new goes quietly missing. What the file cannot tell
-you is whether a given server has the image *uploaded* — that lives in each
-guild's own database, and its dashboard item cards show it.
+until it does, so nothing new goes quietly missing.
 
-**38 of 340 done.**
+A tick means the art exists and is named for that id. `uploaded` in the note is
+the separate question of whether a server holds it, and only `--from-db` writes
+that — it reads `MONGODB_URI`, marks the ids stored there and clears the marker
+from images since deleted. It never unticks: art that was removed from one
+server is still art.
 
-| Section | Group | Done | Total |
-|---|---|---:|---:|
-| 🏹 Hunting | Weapons | 0 | 12 |
-| 🏹 Hunting | Weapon Upgrades | 0 | 3 |
-| 🏹 Hunting | Ammo Packs | 0 | 4 |
-| 🏹 Hunting | Consumables | 0 | 8 |
-| 🏹 Hunting | Zones | 0 | 5 |
-| 🏹 Hunting | Animals | 0 | 62 |
-| 🎣 Fishing | Rods | 0 | 5 |
-| 🎣 Fishing | Rod Upgrades | 0 | 3 |
-| 🎣 Fishing | Bait Packs | 0 | 4 |
-| 🎣 Fishing | Consumables | 0 | 8 |
-| 🎣 Fishing | Locations | 0 | 5 |
-| 🎣 Fishing | Fish | 38 | 59 |
-| 🎣 Fishing | Junk | 0 | 5 |
-| 🎣 Fishing | Treasure | 0 | 4 |
-| ⛏️ Mining | Pickaxes | 0 | 5 |
-| ⛏️ Mining | Pickaxe Upgrades | 0 | 3 |
-| ⛏️ Mining | Blast Packs | 0 | 4 |
-| ⛏️ Mining | Consumables | 0 | 9 |
-| ⛏️ Mining | Depths | 0 | 5 |
-| ⛏️ Mining | Ores | 0 | 23 |
-| 🧪 Materials | Hunt Materials | 0 | 26 |
-| 🧪 Materials | Fish Materials | 0 | 10 |
-| 🧪 Materials | Mine Materials | 0 | 22 |
-| 🧪 Materials | Explore Materials | 0 | 11 |
-| 🛒 Shop | Default Shop Items | 0 | 35 |
-| **All** | | **38** | **340** |
+**38 of 340 have art.**
+
+| Section | Group | Art | Uploaded | Total |
+|---|---|---:|---:|---:|
+| 🏹 Hunting | Weapons | 0 | 0 | 12 |
+| 🏹 Hunting | Weapon Upgrades | 0 | 0 | 3 |
+| 🏹 Hunting | Ammo Packs | 0 | 0 | 4 |
+| 🏹 Hunting | Consumables | 0 | 0 | 8 |
+| 🏹 Hunting | Zones | 0 | 0 | 5 |
+| 🏹 Hunting | Animals | 0 | 0 | 62 |
+| 🎣 Fishing | Rods | 0 | 0 | 5 |
+| 🎣 Fishing | Rod Upgrades | 0 | 0 | 3 |
+| 🎣 Fishing | Bait Packs | 0 | 0 | 4 |
+| 🎣 Fishing | Consumables | 0 | 0 | 8 |
+| 🎣 Fishing | Locations | 0 | 0 | 5 |
+| 🎣 Fishing | Fish | 38 | 0 | 59 |
+| 🎣 Fishing | Junk | 0 | 0 | 5 |
+| 🎣 Fishing | Treasure | 0 | 0 | 4 |
+| ⛏️ Mining | Pickaxes | 0 | 0 | 5 |
+| ⛏️ Mining | Pickaxe Upgrades | 0 | 0 | 3 |
+| ⛏️ Mining | Blast Packs | 0 | 0 | 4 |
+| ⛏️ Mining | Consumables | 0 | 0 | 9 |
+| ⛏️ Mining | Depths | 0 | 0 | 5 |
+| ⛏️ Mining | Ores | 0 | 0 | 23 |
+| 🧪 Materials | Hunt Materials | 0 | 0 | 26 |
+| 🧪 Materials | Fish Materials | 0 | 0 | 10 |
+| 🧪 Materials | Mine Materials | 0 | 0 | 22 |
+| 🧪 Materials | Explore Materials | 0 | 0 | 11 |
+| 🛒 Shop | Default Shop Items | 0 | 0 | 35 |
+| **All** | | **38** | **0** | **340** |
 
 ## 🏹 Hunting
 

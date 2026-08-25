@@ -132,7 +132,8 @@ shop entry with the id the code stores it under, which is the list item art is
 named from. [docs/ITEM_IMAGE_COVERAGE.md](docs/ITEM_IMAGE_COVERAGE.md) is that
 list as a checklist of what has art and what does not — its ids are generated
 and its ticks are hand-kept, so `npm run images:coverage` adds new items without
-touching the ones already marked done. [docs/EXTENDING.md](docs/EXTENDING.md) is
+touching the ones already marked done, and `-- --from-db` marks the ones a
+running instance actually holds an image for. [docs/EXTENDING.md](docs/EXTENDING.md) is
 the guide to adding a command, a route or a model in the first place.
 
 `npm run format` takes explicit paths on purpose. Prettier's settings match the

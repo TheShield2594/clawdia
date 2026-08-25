@@ -9,19 +9,31 @@
 //   npm run images:coverage -- --tick fish:koi   mark ids done (accepts `*` wildcards)
 //   npm run images:coverage -- --tick 'fish:*=cozy fishing pack'
 //   npm run images:coverage -- --untick 'mine:*'
+//   npm run images:coverage -- --from-db            mark what a database actually holds
+//   npm run images:coverage -- --from-db --guild 123456789012345678
 //
 // ── Why a file rather than a query ──────────────────────────────────────────
 //
-// The images themselves live in MongoDB, one row per guild per item, so the
-// repository cannot know what has been uploaded — and the person drawing 300
-// icons across a fortnight of sessions needs to know what is left without
-// standing up a database to ask. So this is a checklist: the *ids* are
+// The images themselves live in MongoDB, one row per guild per item, so a
+// checkout on its own cannot know what has been uploaded — and the person
+// drawing 300 icons across a fortnight of sessions needs to know what is left
+// without standing up a database to ask. So this is a checklist: the *ids* are
 // generated from the catalog and cannot drift, and the *ticks* are written by
 // whoever did the work.
 //
-// A tick means the art exists and is named for that id. Whether it has been
-// uploaded to a particular server is a question only that server's dashboard
-// can answer — its item cards show the image when one is stored.
+// ── The two facts a line carries ────────────────────────────────────────────
+//
+// A tick means the art exists and is named for that id. That is the fact a
+// person knows and a database does not: art sitting in a folder, drawn but not
+// yet uploaded, is still progress worth recording.
+//
+// `uploaded` in the note is the other fact, and only `--from-db` writes it — it
+// connects to MONGODB_URI and marks the ids that server actually holds an image
+// for, adding the marker where it is missing and *removing* it where the image
+// has since been deleted. It never unticks: an id whose image was deleted from
+// one server still has art, and the checklist would be lying to say otherwise.
+// The provenance note beside it ("cozy fishing pack") is left alone, because
+// where a sprite came from is not something a database knows.
 //
 // ── Keeping the ticks ───────────────────────────────────────────────────────
 //
@@ -126,6 +138,26 @@ function readState(doc) {
 
 const currentDoc = () => (fs.existsSync(DOC_PATH) ? fs.readFileSync(DOC_PATH, 'utf8') : '');
 
+// ── The `uploaded` marker ───────────────────────────────────────────────────
+//
+// A note is a ` · `-separated list, so the marker is one entry in it rather
+// than a second field to parse: `Koi · cozy fishing pack · uploaded`.
+
+const UPLOADED = 'uploaded';
+
+const noteParts = note => (note ? note.split('·').map(part => part.trim()).filter(Boolean) : []);
+
+const isUploaded = note => noteParts(note).includes(UPLOADED);
+
+/** The note with the marker present, keeping it last so provenance reads first. */
+function withUploaded(note) {
+    const parts = noteParts(note).filter(part => part !== UPLOADED);
+    return [...parts, UPLOADED].join(' · ');
+}
+
+/** The note with the marker gone, and everything a person wrote still there. */
+const withoutUploaded = note => noteParts(note).filter(part => part !== UPLOADED).join(' · ');
+
 // ── Writing ─────────────────────────────────────────────────────────────────
 
 function renderGroup({ group, items }, state) {
@@ -143,14 +175,17 @@ function buildDoc(state = readState(currentDoc())) {
     const total = groups.reduce((n, g) => n + g.items.length, 0);
     const done = groups.reduce((n, g) => n + g.items.filter(i => state.get(i.id)?.done).length, 0);
 
+    const uploaded = groups.reduce((n, g) => n + g.items.filter(i => isUploaded(state.get(i.id)?.note)).length, 0);
+
     const summary = [
-        '| Section | Group | Done | Total |',
-        '|---|---|---:|---:|',
+        '| Section | Group | Art | Uploaded | Total |',
+        '|---|---|---:|---:|---:|',
         ...groups.map(g => {
             const groupDone = g.items.filter(i => state.get(i.id)?.done).length;
-            return `| ${g.section} | ${g.group} | ${groupDone} | ${g.items.length} |`;
+            const groupUp = g.items.filter(i => isUploaded(state.get(i.id)?.note)).length;
+            return `| ${g.section} | ${g.group} | ${groupDone} | ${groupUp} | ${g.items.length} |`;
         }),
-        `| **All** | | **${done}** | **${total}** |`,
+        `| **All** | | **${done}** | **${uploaded}** | **${total}** |`,
     ].join('\n');
 
     const body = [];
@@ -180,14 +215,19 @@ npm run images:coverage                             # rewrite, keeping every tic
 npm run images:coverage -- --tick fish:koi fish:eel # mark ids done
 npm run images:coverage -- --tick 'fish:*=cozy fishing pack'
 npm run images:coverage -- --untick 'mine:*'
+npm run images:coverage -- --from-db                # mark what a server actually holds
 \`\`\`
 
 Adding an item to the game data adds an unticked line here; \`npm test\` fails
-until it does, so nothing new goes quietly missing. What the file cannot tell
-you is whether a given server has the image *uploaded* — that lives in each
-guild's own database, and its dashboard item cards show it.
+until it does, so nothing new goes quietly missing.
 
-**${done} of ${total} done.**
+A tick means the art exists and is named for that id. \`uploaded\` in the note is
+the separate question of whether a server holds it, and only \`--from-db\` writes
+that — it reads \`MONGODB_URI\`, marks the ids stored there and clears the marker
+from images since deleted. It never unticks: art that was removed from one
+server is still art.
+
+**${done} of ${total} have art${uploaded ? `, ${uploaded} uploaded` : ''}.**
 
 ${summary}
 
@@ -230,6 +270,105 @@ function applyTicks(state, patterns, done) {
     return changed;
 }
 
+// ── What a database actually holds ──────────────────────────────────────────
+
+/**
+ * Applies a set of stored ids to `state`, in place.
+ *
+ * Pure, and separate from the query that produces the set, because everything
+ * interesting here is in the merge rather than the read: a stored image ticks
+ * the box and adds the marker, a missing one takes the marker away and leaves
+ * the tick and the provenance note alone.
+ *
+ * @returns {{marked: number, unmarked: number, ticked: number}}
+ */
+function applyUploaded(state, uploadedIds) {
+    const stored = uploadedIds instanceof Set ? uploadedIds : new Set(uploadedIds);
+    const counts = { marked: 0, unmarked: 0, ticked: 0 };
+
+    for (const id of catalogue().flatMap(group => group.items.map(item => item.id))) {
+        const before = state.get(id) ?? { done: false, note: '' };
+
+        if (stored.has(id)) {
+            if (!before.done) counts.ticked++;
+            if (!isUploaded(before.note)) counts.marked++;
+            state.set(id, { done: true, note: withUploaded(before.note) });
+        } else if (isUploaded(before.note)) {
+            counts.unmarked++;
+            state.set(id, { done: before.done, note: withoutUploaded(before.note) });
+        }
+    }
+    return counts;
+}
+
+/**
+ * The ids a database holds an image for.
+ *
+ * Two collections answer this, because two of them store images: `ItemImage`
+ * for the activity items, and each guild's own `shop` array for shop items.
+ * The shop half runs as an aggregation that projects out nothing but the ids —
+ * a `find` would pull every image body over the wire, which at 512 KB apiece
+ * is a download rather than a query.
+ *
+ * `guildId` narrows both to one server. Without it, an image on any server
+ * counts, plus the shared pre-#561 rows (`guildId: null`) that every server
+ * still falls back to.
+ *
+ * @returns {Promise<{ids: Set<string>, unknown: string[]}>} stored ids, and the
+ *   stored ids that name nothing in the catalog — rows nothing reads any more.
+ */
+async function readUploadedIds({ guildId } = {}) {
+    const mongoose = require('mongoose');
+    const ItemImage = require('../src/models/ItemImage');
+    const Guild = require('../src/models/Guild');
+
+    if (!process.env.MONGODB_URI) {
+        throw new Error('MONGODB_URI is not set (put it in .env or the environment).');
+    }
+
+    // Ten seconds rather than the driver's default thirty: this is a person at
+    // a terminal asking a question about a checklist, and a URI pointing at
+    // nothing should say so while they are still watching.
+    await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10_000 });
+    try {
+        const activityFilter = { imageData: { $ne: null } };
+        if (guildId) activityFilter.guildId = { $in: [guildId, null] };
+        const activity = await ItemImage.find(activityFilter, { itemId: 1, _id: 0 }).lean();
+
+        const shop = await Guild.aggregate([
+            ...(guildId ? [{ $match: { guildId } }] : []),
+            {
+                $project: {
+                    _id: 0,
+                    itemIds: {
+                        $map: {
+                            input: {
+                                $filter: {
+                                    input: { $ifNull: ['$shop', []] },
+                                    as: 'item',
+                                    cond: { $ne: ['$$item.imageData', null] },
+                                },
+                            },
+                            as: 'item',
+                            in: '$$item.itemId',
+                        },
+                    },
+                },
+            },
+        ]);
+
+        const stored = new Set([
+            ...activity.map(doc => doc.itemId),
+            ...shop.flatMap(doc => doc.itemIds ?? []).filter(Boolean),
+        ]);
+
+        const known = new Set(catalogue().flatMap(group => group.items.map(item => item.id)));
+        return { ids: stored, unknown: [...stored].filter(id => !known.has(id)) };
+    } finally {
+        await mongoose.disconnect();
+    }
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 /** Everything after `--tick`, up to the next flag. */
@@ -241,7 +380,7 @@ function argsFor(flag, argv) {
     return end === -1 ? rest : rest.slice(0, end);
 }
 
-function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2)) {
     const state = readState(currentDoc());
 
     if (argv.includes('--check')) {
@@ -255,8 +394,35 @@ function main(argv = process.argv.slice(2)) {
         return;
     }
 
+    const changes = [];
+
+    if (argv.includes('--from-db')) {
+        // Loaded here rather than at the top of the file: every other mode is a
+        // read of two data files, and a missing .env should not stop one.
+        require('dotenv').config();
+        require('../src/config/fileSecrets').loadFileSecrets();
+
+        const [guildId] = argsFor('--guild', argv);
+        const { ids, unknown } = await readUploadedIds({ guildId });
+        const counts = applyUploaded(state, ids);
+
+        console.log(`Read ${ids.size} stored image${ids.size === 1 ? '' : 's'}`
+            + `${guildId ? ` for guild ${guildId}` : ' across every guild'}.`);
+        if (counts.ticked) changes.push(`${counts.ticked} newly ticked`);
+        if (counts.marked) changes.push(`${counts.marked} marked uploaded`);
+        if (counts.unmarked) changes.push(`${counts.unmarked} no longer uploaded`);
+
+        // Rows under ids the game no longer names cannot be reached by any
+        // command, and nothing else in the system is going to mention them.
+        if (unknown.length) {
+            console.warn(`${unknown.length} stored image${unknown.length === 1 ? '' : 's'} named nothing in the catalog: ${unknown.join(', ')}`);
+        }
+    }
+
     const ticked = applyTicks(state, argsFor('--tick', argv), true);
     const unticked = applyTicks(state, argsFor('--untick', argv), false);
+    if (ticked) changes.push(`${ticked} ticked`);
+    if (unticked) changes.push(`${unticked} unticked`);
 
     const { next } = buildDoc(state);
     fs.mkdirSync(path.dirname(DOC_PATH), { recursive: true });
@@ -264,10 +430,29 @@ function main(argv = process.argv.slice(2)) {
 
     const done = (next.match(/^- \[x\]/gm) || []).length;
     const total = (next.match(/^- \[[ x]\]/gm) || []).length;
-    const moved = [ticked && `${ticked} ticked`, unticked && `${unticked} unticked`].filter(Boolean).join(', ');
-    console.log(`Wrote docs/ITEM_IMAGE_COVERAGE.md — ${done}/${total} done${moved ? ` (${moved})` : ''}.`);
+    console.log(`Wrote docs/ITEM_IMAGE_COVERAGE.md — ${done}/${total} with art`
+        + `${changes.length ? ` (${changes.join(', ')})` : ''}.`);
 }
 
-if (require.main === module) main();
+if (require.main === module) {
+    main().catch(err => {
+        console.error(err.message || err);
+        process.exitCode = 1;
+    });
+}
 
-module.exports = { buildDoc, readState, applyTicks, catalogue, matcher, DOC_PATH, BANNER };
+module.exports = {
+    main,
+    buildDoc,
+    readState,
+    applyTicks,
+    applyUploaded,
+    readUploadedIds,
+    catalogue,
+    matcher,
+    isUploaded,
+    withUploaded,
+    withoutUploaded,
+    DOC_PATH,
+    BANNER,
+};
