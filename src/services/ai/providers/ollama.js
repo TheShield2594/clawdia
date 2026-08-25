@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
-const { toolkitFor, MAX_TOOL_ROUNDS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // The endpoint the *operator* runs, from the environment or the shipped default.
 // A guild's `ai.ollamaBaseUrl` is a dashboard setting, so it is attacker input
@@ -103,20 +103,29 @@ function argsOf(call) {
     return {};
 }
 
-/** Append the model's tool calls and their results, ready for the next round. */
+/**
+ * Append the model's tool calls and their results, ready for the next round.
+ *
+ * The calls run concurrently and the results are appended in the order they
+ * were asked for — older Ollama builds ignore `tool_name` and match a result to
+ * its call by position, so that order is load-bearing.
+ */
 async function runToolCalls({ toolkit, messages, calls, content }) {
     messages.push({ role: 'assistant', content: content || '', tool_calls: calls });
 
-    for (const call of calls) {
-        const name = call?.function?.name || '';
+    const results = await mapWithLimit(calls, MAX_PARALLEL_TOOL_CALLS, async call => {
         const args = argsOf(call);
-        const result = args === null
-            ? `Those arguments were not valid JSON, so the tool was not run: ${call.function.arguments}`
-            : await toolkit.call(name, args);
+        if (args === null) {
+            return `Those arguments were not valid JSON, so the tool was not run: ${call.function.arguments}`;
+        }
+        return toolkit.call(call?.function?.name || '', args);
+    });
+
+    calls.forEach((call, index) => {
         // tool_name is what current Ollama builds use to match a result to its
         // call; older ones ignore the field and match by order.
-        messages.push({ role: 'tool', tool_name: name, content: result });
-    }
+        messages.push({ role: 'tool', tool_name: call?.function?.name || '', content: results[index] });
+    });
 }
 
 function requestBody({ model, messages, temperature, maxTokens, stream, tools }) {
@@ -162,8 +171,8 @@ async function* streamRound({ url, agents, body, out }) {
     }
 }
 
-async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers });
+async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent });
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt });
 
@@ -195,8 +204,8 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers });
+async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent });
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt });
 

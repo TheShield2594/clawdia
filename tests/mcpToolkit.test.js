@@ -288,3 +288,142 @@ describe('toolkitFor', () => {
         expect(await toolkitFor({ mcpServers: [GITHUB] })).toBeNull();
     });
 });
+
+describe('parallel discovery', () => {
+    test('dials every server at once rather than one after another', async () => {
+        // Serially this was a handshake per server before the model saw a
+        // token, and one slow server held up every other server's tools.
+        let inFlight = 0;
+        let peak = 0;
+        mockListTools.mockImplementation(async () => {
+            peak = Math.max(peak, ++inFlight);
+            await new Promise(resolve => setTimeout(resolve, 5));
+            inFlight--;
+            return [{ name: 'ask' }];
+        });
+
+        await prepareMcpToolkit([
+            { ...GITHUB, name: 'a', url: 'https://a.example.com/mcp' },
+            { ...GITHUB, name: 'b', url: 'https://b.example.com/mcp' },
+            { ...GITHUB, name: 'c', url: 'https://c.example.com/mcp' }
+        ]);
+
+        expect(peak).toBe(3);
+    });
+
+    test('names tools in the configured order however the servers answer', async () => {
+        // Otherwise a server that happens to be slow this minute renames
+        // another server's tools between one message and the next, and the
+        // model is handed a function list that moved under it.
+        mockListTools
+            .mockReturnValueOnce(new Promise(resolve => setTimeout(() => resolve([{ name: 'ask' }]), 10)))
+            .mockResolvedValueOnce([{ name: 'ask' }]);
+
+        const toolkit = await prepareMcpToolkit([
+            { ...GITHUB, name: 'slow', url: 'https://slow.example.com/mcp' },
+            { ...GITHUB, name: 'fast', url: 'https://fast.example.com/mcp' }
+        ]);
+
+        expect(toolkit.definitions.map(d => d.name)).toEqual(['slow__ask', 'fast__ask']);
+        expect(toolkit.servers).toEqual(['slow', 'fast']);
+    });
+
+    test('one server failing does not lose the ones that answered', async () => {
+        mockListTools
+            .mockRejectedValueOnce(new Error('HTTP 500'))
+            .mockResolvedValueOnce([{ name: 'ask' }]);
+
+        const toolkit = await prepareMcpToolkit([
+            { ...GITHUB, name: 'broken', url: 'https://broken.example.com/mcp' },
+            { ...GITHUB, name: 'wiki', url: 'https://wiki.example.com/mcp' }
+        ]);
+
+        expect(toolkit.definitions.map(d => d.name)).toEqual(['wiki__ask']);
+    });
+});
+
+describe('tool events', () => {
+    function listener() {
+        const seen = [];
+        return { seen, onToolEvent: event => seen.push(event) };
+    }
+
+    test('reports a call starting and finishing, with what it was', async () => {
+        const { seen, onToolEvent } = listener();
+        const toolkit = await prepareMcpToolkit([GITHUB], { onToolEvent });
+        await toolkit.call('github__search_repositories', { q: 'clawdia' });
+
+        expect(seen).toHaveLength(2);
+        expect(seen[0]).toMatchObject({ type: 'start', server: 'github', tool: 'search_repositories' });
+        expect(seen[1]).toMatchObject({ type: 'end', server: 'github', tool: 'search_repositories', ok: true });
+        expect(seen[1].id).toBe(seen[0].id);
+        expect(typeof seen[1].durationMs).toBe('number');
+    });
+
+    test('gives concurrent calls to one tool ids that tell them apart', async () => {
+        const { seen, onToolEvent } = listener();
+        const toolkit = await prepareMcpToolkit([GITHUB], { onToolEvent });
+        await Promise.all([
+            toolkit.call('github__search_repositories', { q: 'a' }),
+            toolkit.call('github__search_repositories', { q: 'b' })
+        ]);
+
+        const ids = seen.filter(e => e.type === 'start').map(e => e.id);
+        expect(new Set(ids).size).toBe(2);
+    });
+
+    test('marks a call the transport could not make as failed', async () => {
+        mockCallTool.mockRejectedValue(new McpError('socket hang up'));
+        const { seen, onToolEvent } = listener();
+        const toolkit = await prepareMcpToolkit([GITHUB], { onToolEvent });
+        await toolkit.call('github__search_repositories', {});
+
+        expect(seen.at(-1)).toMatchObject({ type: 'end', ok: false, error: 'socket hang up' });
+    });
+
+    test('a tool that answers with an error is still a call that failed', async () => {
+        mockCallTool.mockResolvedValue({ content: [{ type: 'text', text: 'no such repo' }], isError: true });
+        const { seen, onToolEvent } = listener();
+        const toolkit = await prepareMcpToolkit([GITHUB], { onToolEvent });
+        await toolkit.call('github__search_repositories', {});
+
+        expect(seen.at(-1)).toMatchObject({ type: 'end', ok: false });
+    });
+
+    test('says nothing at all for a name the model invented', async () => {
+        const { seen, onToolEvent } = listener();
+        const toolkit = await prepareMcpToolkit([GITHUB], { onToolEvent });
+        await toolkit.call('github__not_a_tool', {});
+
+        expect(seen).toHaveLength(0);
+    });
+
+    test('reports a server that could not be reached', async () => {
+        mockListTools
+            .mockRejectedValueOnce(new Error('HTTP 401'))
+            .mockResolvedValueOnce([{ name: 'ask' }]);
+
+        const { seen, onToolEvent } = listener();
+        await prepareMcpToolkit([
+            { ...GITHUB, name: 'broken', url: 'https://broken.example.com/mcp' },
+            { ...GITHUB, name: 'wiki', url: 'https://wiki.example.com/mcp' }
+        ], { onToolEvent });
+
+        expect(seen).toEqual([{ type: 'unavailable', server: 'broken', error: 'HTTP 401' }]);
+    });
+
+    test('a listener that throws does not cost the caller the tool result', async () => {
+        const onToolEvent = jest.fn(() => { throw new Error('transport bug'); });
+        const toolkit = await prepareMcpToolkit([GITHUB], { onToolEvent });
+
+        await expect(toolkit.call('github__search_repositories', {})).resolves.toBe('ok');
+    });
+
+    test('toolkitFor passes the listener through for the providers', async () => {
+        const { seen, onToolEvent } = listener();
+        const toolkit = await toolkitFor({ mcpServers: [GITHUB], onToolEvent });
+        await toolkit.call('github__search_repositories', {});
+
+        expect(seen.map(e => e.type)).toEqual(['start', 'end']);
+    });
+});

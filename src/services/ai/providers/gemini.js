@@ -1,5 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
-const { toolkitFor, MAX_TOOL_ROUNDS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // Google's current SDK. It replaces `@google/generative-ai`, which Google
 // retired in favour of this one — that package still installs but no longer
@@ -127,21 +127,22 @@ function addUsage(totals, round) {
  * Run the calls Gemini asked for and build the message that answers them.
  *
  * Function responses go back as parts of the next message, which is what makes
- * the loop here look like an ordinary conversation turn.
+ * the loop here look like an ordinary conversation turn. The calls themselves
+ * run concurrently — Gemini asked for all of them before seeing any answer, so
+ * nothing in the round depends on the one before it — and the parts stay in the
+ * order they were asked for.
  */
 async function runToolCalls(toolkit, calls) {
-    const parts = [];
-    for (const call of calls) {
-        const result = await toolkit.call(call.name, call.args || {});
-        parts.push({
-            functionResponse: {
-                ...(call.id ? { id: call.id } : {}),
-                name: call.name,
-                response: { result }
-            }
-        });
-    }
-    return parts;
+    const results = await mapWithLimit(calls, MAX_PARALLEL_TOOL_CALLS, call =>
+        toolkit.call(call.name, call.args || {}));
+
+    return calls.map((call, index) => ({
+        functionResponse: {
+            ...(call.id ? { id: call.id } : {}),
+            name: call.name,
+            response: { result: results[index] }
+        }
+    }));
 }
 
 /**

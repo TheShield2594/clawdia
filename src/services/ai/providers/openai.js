@@ -1,5 +1,5 @@
 const OpenAI = require('openai');
-const { toolkitFor, MAX_TOOL_ROUNDS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // USD per 1M tokens (input, output). Prefix-matched; unknown models report
 // null cost via ai/usage.js.
@@ -78,6 +78,12 @@ function toolCallsOf(message) {
 /**
  * Append the model's tool calls and their results to the conversation.
  *
+ * The calls in one round are independent of each other — the model asked for
+ * all of them before seeing any answer — so they run concurrently and the round
+ * costs the slowest of them rather than the sum. The results still go back in
+ * the order they were asked for, because that is the order the assistant
+ * message above lists them in.
+ *
  * Arguments that do not parse are handed back as the error rather than dropped:
  * a model that emitted truncated JSON can see what it sent and try again, and
  * the alternative is a turn that silently loses a tool call.
@@ -93,24 +99,23 @@ async function runToolCalls({ toolkit, messages, calls, content }) {
         }))
     });
 
-    for (const call of calls) {
+    const results = await mapWithLimit(calls, MAX_PARALLEL_TOOL_CALLS, async call => {
         let args;
         try {
             args = call.args ? JSON.parse(call.args) : {};
         } catch {
-            messages.push({
-                role: 'tool',
-                tool_call_id: call.id,
-                content: `Those arguments were not valid JSON, so the tool was not run: ${call.args}`
-            });
-            continue;
+            return `Those arguments were not valid JSON, so the tool was not run: ${call.args}`;
         }
-        messages.push({ role: 'tool', tool_call_id: call.id, content: await toolkit.call(call.name, args) });
-    }
+        return toolkit.call(call.name, args);
+    });
+
+    calls.forEach((call, index) => {
+        messages.push({ role: 'tool', tool_call_id: call.id, content: results[index] });
+    });
 }
 
-async function* stream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers });
+async function* stream({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent });
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt });
 
@@ -161,8 +166,8 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, temperatu
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, useMcp = true, mcpServers }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers });
+async function complete({ apiKey, model, systemPrompt, history, prompt, temperature, maxTokens, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent });
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
     const messages = buildMessages({ systemPrompt, history, prompt });
 

@@ -161,6 +161,37 @@ describe('openai', () => {
         expect(second.at(-1)).toEqual({ role: 'tool', tool_call_id: 'call_1', content: 'clawdia, 3 open PRs' });
     });
 
+    test('runs a round\'s calls at the same time and answers them in order', async () => {
+        // Serially, a round costs the sum of its calls; the model asked for
+        // all of them before seeing any answer, so nothing in the round
+        // depends on the one before it.
+        mockCreate
+            .mockResolvedValueOnce(iterate([
+                openAiChunk({ toolCall: { index: 0, id: 'call_1', function: { name: 'github__search_repositories', arguments: '{"q":"a"}' } } }),
+                openAiChunk({ toolCall: { index: 1, id: 'call_2', function: { name: 'github__search_repositories', arguments: '{"q":"b"}' } } })
+            ]))
+            .mockResolvedValueOnce(ANSWER_STREAM());
+
+        let inFlight = 0;
+        let peak = 0;
+        mockCall.mockImplementation(async (_name, args) => {
+            peak = Math.max(peak, ++inFlight);
+            // The first call is the slow one, so a result order that still
+            // matches the call order is ordering and not luck.
+            await new Promise(resolve => setTimeout(resolve, args.q === 'a' ? 10 : 1));
+            inFlight--;
+            return `result for ${args.q}`;
+        });
+
+        await collect(openai.stream(REQ));
+
+        expect(peak).toBe(2);
+        expect(mockCreate.mock.calls[1][0].messages.slice(-2)).toEqual([
+            { role: 'tool', tool_call_id: 'call_1', content: 'result for a' },
+            { role: 'tool', tool_call_id: 'call_2', content: 'result for b' }
+        ]);
+    });
+
     test('bills every round of a tool-calling turn, not just the last', async () => {
         mockCreate
             .mockResolvedValueOnce(TOOL_CALL_STREAM())
@@ -270,6 +301,37 @@ describe('ollama', () => {
         });
     });
 
+    test('runs a round\'s calls at the same time, keeping the results in order', async () => {
+        // Older Ollama builds ignore tool_name and match a result to its call
+        // by position, so the order the results are appended in is load-bearing.
+        axios.post
+            .mockResolvedValueOnce(ndjson([
+                { message: { tool_calls: [
+                    { function: { name: 'github__search_repositories', arguments: { q: 'a' } } },
+                    { function: { name: 'github__search_repositories', arguments: { q: 'b' } } }
+                ] } },
+                { done: true }
+            ]))
+            .mockResolvedValueOnce(OLLAMA_ANSWER());
+
+        let inFlight = 0;
+        let peak = 0;
+        mockCall.mockImplementation(async (_name, args) => {
+            peak = Math.max(peak, ++inFlight);
+            await new Promise(resolve => setTimeout(resolve, args.q === 'a' ? 10 : 1));
+            inFlight--;
+            return `result for ${args.q}`;
+        });
+
+        await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
+
+        expect(peak).toBe(2);
+        expect(axios.post.mock.calls[1][1].messages.slice(-2)).toEqual([
+            { role: 'tool', tool_name: 'github__search_repositories', content: 'result for a' },
+            { role: 'tool', tool_name: 'github__search_repositories', content: 'result for b' }
+        ]);
+    });
+
     test('accepts arguments sent as JSON text as well as an object', async () => {
         axios.post
             .mockResolvedValueOnce(ndjson([
@@ -349,6 +411,33 @@ describe('gemini', () => {
             message: [{ functionResponse: { name: 'github__search_repositories', response: { result: 'clawdia, 3 open PRs' } } }]
         });
         expect(result).toEqual({ text: 'Three open PRs.', usage: { inputTokens: 400, outputTokens: 30 } });
+    });
+
+    test('runs a round\'s calls at the same time, in the order Gemini asked', async () => {
+        mockSendMessage
+            .mockResolvedValueOnce({
+                text: '',
+                functionCalls: [
+                    { name: 'github__search_repositories', args: { q: 'a' } },
+                    { name: 'github__search_repositories', args: { q: 'b' } }
+                ]
+            })
+            .mockResolvedValueOnce({ text: 'Three open PRs.' });
+
+        let inFlight = 0;
+        let peak = 0;
+        mockCall.mockImplementation(async (_name, args) => {
+            peak = Math.max(peak, ++inFlight);
+            await new Promise(resolve => setTimeout(resolve, args.q === 'a' ? 10 : 1));
+            inFlight--;
+            return `result for ${args.q}`;
+        });
+
+        await gemini.complete(REQ);
+
+        expect(peak).toBe(2);
+        expect(mockSendMessage.mock.calls[1][0].message.map(part => part.functionResponse.response.result))
+            .toEqual(['result for a', 'result for b']);
     });
 
     test('collects function calls off the streamed chunks', async () => {

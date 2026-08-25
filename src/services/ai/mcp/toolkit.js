@@ -47,9 +47,59 @@ const MAX_TOOL_ROUNDS = 4;
 // letters, digits, underscores and hyphens.
 const MAX_NAME_LENGTH = 64;
 
+// A model routinely asks for several tools in one round. Running them one after
+// another makes the round cost the sum of the calls instead of the slowest one,
+// which on a three-call round is the difference between a reply that lands in
+// two seconds and one that lands in six. The cap is here so a model that asks
+// for a dozen at once cannot open a dozen sockets against somebody's server.
+const MAX_PARALLEL_TOOL_CALLS = 6;
+
 // One entry per (url, token): the live client, the tool list and whatever the
 // last failure was.
 const entries = new Map();
+
+/**
+ * `items.map(fn)` run concurrently, at most `limit` at a time, results in order.
+ *
+ * Both fan-outs in this module are independent network waits that used to be
+ * spent one after another — the servers being listed, and the calls in one
+ * round — so both go through here. `fn` is expected not to throw; the two
+ * callers each catch their own failures and return them as values, because a
+ * rejection would abandon the results of everything else in flight.
+ */
+async function mapWithLimit(items, limit, fn) {
+    const results = new Array(items.length);
+    let next = 0;
+
+    const worker = async () => {
+        for (let i = next++; i < items.length; i = next++) {
+            results[i] = await fn(items[i], i);
+        }
+    };
+
+    const workers = Math.min(Math.max(1, limit), items.length);
+    await Promise.all(Array.from({ length: workers }, worker));
+    return results;
+}
+
+/**
+ * Wrap the caller's tool-event listener so it cannot take the turn down.
+ *
+ * Tool activity is reported to whoever asked for the toolkit rather than logged
+ * and forgotten: the Discord transport turns these events into the line that
+ * tells a user why their reply is taking eight seconds. A listener that throws
+ * is a bug in that transport, not a reason to lose a tool result.
+ */
+function notifier(onToolEvent) {
+    if (typeof onToolEvent !== 'function') return () => {};
+    return event => {
+        try {
+            onToolEvent(event);
+        } catch (err) {
+            console.warn(`[MCP] tool event listener failed: ${err.message}`);
+        }
+    };
+}
 
 function keyFor(connection) {
     return `${connection.url} ${connection.authorizationToken || ''}`;
@@ -205,28 +255,42 @@ function renderResult({ content, structuredContent, isError }) {
  * reply: the rest of the answer is still worth sending.
  *
  * @param {Array} guildServers the guild's stored mcpServers documents
+ * @param {object} [options]
+ * @param {Function} [options.onToolEvent] called with {type,...} as tools run
  * @returns {Promise<null|{definitions: Array, servers: string[], call: Function}>}
  */
-async function prepareMcpToolkit(guildServers = []) {
+async function prepareMcpToolkit(guildServers = [], { onToolEvent } = {}) {
     const servers = resolveMcpServers(guildServers);
     if (!servers.length) return null;
 
     sweepIdleSessions(Date.now());
+    const emit = notifier(onToolEvent);
+
+    // Every server is dialled at once. One after another, this was a full
+    // handshake per server before the model had seen a single token — a guild
+    // with five servers paid five round trips on every cold cache, and a server
+    // sitting on the connect timeout held up the four that were fine.
+    const listings = await mapWithLimit(servers, servers.length, async server => {
+        const entry = entryFor(server);
+        try {
+            return { server, entry, tools: await listTools(entry, server) };
+        } catch (err) {
+            console.warn(`[MCP] "${server.name}" is unavailable: ${err.message}`);
+            emit({ type: 'unavailable', server: server.name, error: err.message });
+            return { server, entry, tools: null };
+        }
+    });
 
     const definitions = [];
     const index = new Map();
     const used = new Set();
     const reached = [];
 
-    for (const server of servers) {
-        const entry = entryFor(server);
-        let tools;
-        try {
-            tools = await listTools(entry, server);
-        } catch (err) {
-            console.warn(`[MCP] "${server.name}" is unavailable: ${err.message}`);
-            continue;
-        }
+    // Assembled in the configured order rather than the order the servers
+    // answered in, so a server that happens to be slow this minute cannot
+    // renumber another server's tools between one message and the next.
+    for (const { server, entry, tools } of listings) {
+        if (!tools) continue;
         reached.push(server.name);
 
         for (const tool of tools) {
@@ -251,6 +315,8 @@ async function prepareMcpToolkit(guildServers = []) {
 
     if (!definitions.length) return null;
 
+    let callId = 0;
+
     /**
      * Run one call the model asked for and return what to tell it.
      *
@@ -262,12 +328,28 @@ async function prepareMcpToolkit(guildServers = []) {
         const target = index.get(name);
         if (!target) return `No tool named "${name}" is available.`;
 
+        // The same tool can be in flight twice in one round, so what the
+        // listener matches a completion to is this id, not the tool's name.
+        const id = ++callId;
+        const started = Date.now();
+        const { name: server } = target.server;
+        emit({ type: 'start', id, server, tool: target.toolName, name });
+
+        const finish = (ok, error) => emit({
+            type: 'end', id, server, tool: target.toolName, name,
+            durationMs: Date.now() - started, ok, ...(error ? { error } : {})
+        });
+
         try {
             const result = await withSession(target.entry, target.server, client =>
                 client.callTool(target.toolName, args));
+            // A tool that answers "no such repository" ran fine; it is the
+            // model's problem, not something to flag to the channel.
+            finish(!result.isError);
             return renderResult(result);
         } catch (err) {
-            console.warn(`[MCP] "${target.server.name}" tool "${target.toolName}" failed: ${err.message}`);
+            console.warn(`[MCP] "${server}" tool "${target.toolName}" failed: ${err.message}`);
+            finish(false, err.message);
             return `The tool could not be run: ${err.message}`;
         }
     }
@@ -281,10 +363,10 @@ async function prepareMcpToolkit(guildServers = []) {
  * `useMcp` is the caller's switch — commands that parse the reply as JSON pass
  * it false — and is checked here so no provider has to remember to.
  */
-async function toolkitFor({ useMcp = true, mcpServers } = {}) {
+async function toolkitFor({ useMcp = true, mcpServers, onToolEvent } = {}) {
     if (useMcp === false) return null;
     try {
-        return await prepareMcpToolkit(mcpServers);
+        return await prepareMcpToolkit(mcpServers, { onToolEvent });
     } catch (err) {
         // Discovery is best-effort in every direction: an unreadable config or
         // a bad stored record must not cost the user their answer.
@@ -305,6 +387,10 @@ module.exports = {
     toolkitFor,
     renderResult,
     resetMcpCache,
+    // Shared by the three providers that run the tool loop themselves, so a
+    // round's calls are fanned out the same way whichever one is running it.
+    mapWithLimit,
+    MAX_PARALLEL_TOOL_CALLS,
     MAX_TOOL_ROUNDS,
     MAX_TOOLS,
     MAX_TOOL_RESULT_CHARS,
