@@ -67,8 +67,34 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `--ci` so a missing snapshot fails here instead of being written into
+      # the runner's filesystem and thrown away; `--coverage` because that is
+      # what applies the coverageThreshold ratchet in jest.config.js. Without
+      # it the thresholds exist but nothing ever checks them, which is the
+      # state this replaced (#635).
       - name: Run tests
-        run: npm test
+        run: npm test -- --ci --coverage
+
+      # The four numbers, on the run's summary page rather than buried in the
+      # log. `always()` because the interesting case is the run where the
+      # ratchet just failed and you want to see by how much.
+      - name: Report coverage
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            {
+              echo '### Coverage'
+              echo
+              echo '| Metric | Covered | Total | % |'
+              echo '|---|---:|---:|---:|'
+              node -e '
+                const t = require("./coverage/coverage-summary.json").total;
+                for (const m of ["statements", "branches", "functions", "lines"]) {
+                  console.log(`| ${m} | ${t[m].covered} | ${t[m].total} | ${t[m].pct}% |`);
+                }
+              '
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # A step in this job rather than a job of its own: it needs the same
       # `npm ci`, and a second job would pay for that install again to save a
