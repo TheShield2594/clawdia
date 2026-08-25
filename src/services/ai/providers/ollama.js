@@ -171,6 +171,25 @@ async function* streamRound({ url, agents, body, out }) {
     }
 }
 
+/**
+ * The same pieces, with a blank line in front of the first one.
+ *
+ * A round's text has to be separated from the round before it, and the round
+ * before it is only known to have produced any once it is over — so the
+ * separator goes on the front of the next one, and only if that one says
+ * anything at all.
+ */
+async function* separated(pieces) {
+    let first = true;
+    for await (const piece of pieces) {
+        if (first) {
+            yield '\n\n';
+            first = false;
+        }
+        yield piece;
+    }
+}
+
 async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool });
     const { url, agents } = resolveEndpoint(baseUrl);
@@ -178,6 +197,9 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
+    // A round that calls tools often says something first, and the answer
+    // arrives in the round after it — two pieces of prose, not one sentence.
+    let wroteText = false;
 
     for (let round = 0; ; round++) {
         // Withholding the tools on the final round leaves the model nothing to
@@ -190,7 +212,9 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
         });
 
         const out = { content: '', calls: [], usage: null };
-        yield* streamRound({ url, agents, body, out });
+        if (wroteText) yield* separated(streamRound({ url, agents, body, out }));
+        else yield* streamRound({ url, agents, body, out });
+        if (out.content) wroteText = true;
 
         if (out.usage) {
             sawUsage = true;
@@ -211,6 +235,7 @@ async function complete({ baseUrl, model, systemPrompt, history, prompt, tempera
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
+    const parts = [];
 
     for (let round = 0; ; round++) {
         const offerTools = Boolean(toolkit) && round < MAX_TOOL_ROUNDS;
@@ -228,11 +253,14 @@ async function complete({ baseUrl, model, systemPrompt, history, prompt, tempera
 
         const message = response.data?.message;
         const content = message?.content || '';
+        if (content) parts.push(content);
         const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
 
         // The round that stops calling tools is the answer — or the last round,
-        // where there were none to call. Text alongside a call is a preamble.
-        if (!calls.length || !offerTools) return { text: content, usage: sawUsage ? totals : null };
+        // where there were none to call. Text alongside a call is a preamble,
+        // and it is kept rather than dropped so a guild with streaming off
+        // reads the same reply a guild with it on watched arrive.
+        if (!calls.length || !offerTools) return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
         await runToolCalls({ toolkit, messages, calls, content });
     }
 }

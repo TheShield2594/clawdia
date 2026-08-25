@@ -532,3 +532,88 @@ describe('gemini schema conversion', () => {
         expect(toGeminiSchema(undefined)).toBeUndefined();
     });
 });
+
+// A round that calls tools usually says something first, and the answer arrives
+// in the round after it. Concatenated, that reads as one sentence colliding
+// with another; and the unstreamed paths used to drop the preamble outright, so
+// turning streaming off changed what the reply said.
+
+describe('a preamble and the answer after it', () => {
+    const preambleThenAnswer = () => iterate([
+        openAiChunk({ content: 'Let me look.' }),
+        openAiChunk({ toolCall: { index: 0, id: 'call_1', function: { name: 'github__search_repositories', arguments: '{}' } } })
+    ]);
+
+    test('openai keeps them apart while streaming', async () => {
+        mockCreate
+            .mockResolvedValueOnce(preambleThenAnswer())
+            .mockResolvedValueOnce(iterate([openAiChunk({ content: 'Three open PRs.' })]));
+
+        expect((await collect(openai.stream(REQ))).join('')).toBe('Let me look.\n\nThree open PRs.');
+    });
+
+    test('openai keeps the preamble when not streaming, too', async () => {
+        mockCreate
+            .mockResolvedValueOnce({
+                choices: [{ message: {
+                    content: 'Let me look.',
+                    tool_calls: [{ id: 'call_1', function: { name: 'github__search_repositories', arguments: '{}' } }]
+                } }]
+            })
+            .mockResolvedValueOnce({ choices: [{ message: { content: 'Three open PRs.' } }] });
+
+        expect((await openai.complete(REQ)).text).toBe('Let me look.\n\nThree open PRs.');
+    });
+
+    test('openai says nothing extra when a round was only a tool call', async () => {
+        mockCreate
+            .mockResolvedValueOnce(TOOL_CALL_STREAM())
+            .mockResolvedValueOnce(ANSWER_STREAM());
+
+        expect((await collect(openai.stream(REQ))).join('')).toBe('Three open PRs.');
+    });
+
+    test('ollama keeps them apart while streaming', async () => {
+        axios.post
+            .mockResolvedValueOnce(ndjson([
+                { message: { content: 'Let me look.' } },
+                { message: { tool_calls: [{ function: { name: 'github__search_repositories', arguments: { q: 'x' } } }] } },
+                { done: true }
+            ]))
+            .mockResolvedValueOnce(OLLAMA_ANSWER());
+
+        const pieces = await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
+        expect(pieces.join('')).toBe('Let me look.\n\nThree open PRs.');
+    });
+
+    test('ollama adds nothing when the round before said nothing', async () => {
+        axios.post
+            .mockResolvedValueOnce(OLLAMA_TOOL_CALL())
+            .mockResolvedValueOnce(OLLAMA_ANSWER());
+
+        const pieces = await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
+        expect(pieces.join('')).toBe('Three open PRs.');
+    });
+
+    test('gemini keeps them apart while streaming', async () => {
+        mockSendMessageStream
+            .mockResolvedValueOnce(iterate([
+                { text: 'Let me look.' },
+                { functionCalls: [{ name: 'github__search_repositories', args: { q: 'x' } }] }
+            ]))
+            .mockResolvedValueOnce(iterate([{ text: 'Three open PRs.' }]));
+
+        expect((await collect(gemini.stream(REQ))).join('')).toBe('Let me look.\n\nThree open PRs.');
+    });
+
+    test('gemini keeps the preamble when not streaming, too', async () => {
+        mockSendMessage
+            .mockResolvedValueOnce({
+                text: 'Let me look.',
+                functionCalls: [{ name: 'github__search_repositories', args: { q: 'x' } }]
+            })
+            .mockResolvedValueOnce({ text: 'Three open PRs.' });
+
+        expect((await gemini.complete(REQ)).text).toBe('Let me look.\n\nThree open PRs.');
+    });
+});

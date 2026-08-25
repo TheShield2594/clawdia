@@ -168,9 +168,13 @@ async function* stream(req) {
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
+    // A round that calls tools often says something first, and the answer
+    // arrives in the round after it — two pieces of prose, not one sentence.
+    let wroteText = false;
 
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
         const result = await chat.sendMessageStream({ message });
+        let roundText = false;
 
         // Usage now rides on the chunks rather than on a separate response
         // object awaited after the stream. Each chunk that carries it carries
@@ -181,7 +185,11 @@ async function* stream(req) {
             if (chunk.usageMetadata) lastUsage = chunk.usageMetadata;
             calls.push(...callsOf(chunk));
             const text = chunk.text;
-            if (text) yield text;
+            if (!text) continue;
+            if (!roundText && wroteText) yield '\n\n';
+            roundText = true;
+            wroteText = true;
+            yield text;
         }
         if (lastUsage) {
             sawUsage = true;
@@ -207,7 +215,7 @@ async function complete(req) {
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
-    let text = '';
+    const parts = [];
 
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
         const response = await chat.sendMessage({ message });
@@ -217,8 +225,10 @@ async function complete(req) {
         }
 
         // `.text` is undefined when the model returned no text part at all — a
-        // safety block, or a response that was only tool calls.
-        text = response.text ?? '';
+        // safety block, or a response that was only tool calls. A preamble is
+        // kept rather than replaced, so a guild with streaming off reads the
+        // same reply a guild with it on watched arrive.
+        if (response.text) parts.push(response.text);
 
         const calls = callsOf(response);
         if (!calls.length) break;
@@ -226,7 +236,7 @@ async function complete(req) {
         if (round + 1 === MAX_TOOL_ROUNDS) chat = withoutTools(req, chat);
     }
 
-    return { text, usage: sawUsage ? totals : null };
+    return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
 }
 
 module.exports = {

@@ -11,17 +11,14 @@ const {
     guildServersAllowed,
     getMcpServers,
     resolveMcpServers,
-    isToolEnabled,
-    needsConfirmation,
-    toolAnnotations,
     requiresApproval,
     CONFIRM_MODES,
     DEFAULT_CONFIRM_MODE,
     MCP_ROUTES,
     DEFAULT_MCP_ROUTE
 } = require('../../../config/mcpServers');
-const { McpHttpClient } = require('../../../services/ai/mcp/client');
 const { getToolUsage } = require('../../../services/ai/mcp/usage');
+const { inspectServer } = require('../../../services/ai/mcp/inspect');
 const { providers, mcpMode } = require('../../../services/ai/providers');
 
 const MAX_URL_LENGTH = 2048;
@@ -376,7 +373,6 @@ router.post('/guild/:guildId/mcp-servers/:name/test', checkAuth, checkGuildAcces
     const { guildId } = req.params;
     const name = String(req.params.name || '').trim();
 
-    let client = null;
     try {
         const guildSettings = await Guild.findOne({ guildId }).lean();
         const stored = (guildSettings?.ai?.mcpServers || []).find(s => s.name === name);
@@ -388,47 +384,33 @@ router.post('/guild/:guildId/mcp-servers/:name/test', checkAuth, checkGuildAcces
         const resolved = resolveMcpServers([{ ...stored, enabled: true }]).find(s => s.name === name);
         if (!resolved) return res.status(400).json({ error: 'Stored server is not valid — re-save it' });
 
-        client = new McpHttpClient({
-            url: resolved.connection.url,
-            authorizationToken: resolved.connection.authorizationToken,
-            label: name
-        });
-        const tools = await client.listTools();
         const mode = guildSettings?.ai?.mcpConfirm || DEFAULT_CONFIRM_MODE;
-        const live = tools.filter(tool => isToolEnabled(resolved.toolset, tool.name));
-        const confirming = live.filter(tool => needsConfirmation(mode, resolved.toolset, tool));
+        // The same inspection `/ai mcp test` runs in Discord, so an admin who
+        // tests here and then checks from a channel is told the same thing.
+        // It reports a failed connection rather than throwing: a failed test is
+        // the expected outcome of a test, and what the server said is the
+        // useful part of it.
+        const report = await inspectServer(resolved, { confirmMode: mode });
 
-        const serverName = client.serverInfo?.name;
         res.json({
-            success: true,
-            message: `Connected${serverName ? ` to ${serverName}` : ''} — ${tools.length} tool${tools.length === 1 ? '' : 's'} offered, ` +
-                `${live.length} enabled by your filters` +
-                (confirming.length ? `, ${confirming.length} needing approval.` : '.'),
-            toolCount: tools.length,
-            enabledCount: live.length,
-            confirmCount: confirming.length,
+            success: report.success,
+            message: report.message,
+            toolCount: report.toolCount,
+            enabledCount: report.enabledCount,
+            confirmCount: report.confirmCount,
             confirmMode: mode,
             // Named so an admin filling in the allow/block lists can copy them
             // instead of guessing at what the server calls things.
-            tools: tools.slice(0, MAX_TOOL_NAMES).map(tool => tool.name),
+            tools: report.tools.map(tool => tool.name),
             // The same tools with what each one says about itself and what the
             // guild's policy makes of it. Alongside `tools` rather than
             // replacing it, so anything already reading the plain name list
             // keeps working.
-            toolDetail: tools.slice(0, MAX_TOOL_NAMES).map(tool => ({
-                name: tool.name,
-                enabled: isToolEnabled(resolved.toolset, tool.name),
-                confirm: needsConfirmation(mode, resolved.toolset, tool),
-                annotations: toolAnnotations(tool)
-            }))
+            toolDetail: report.tools
         });
     } catch (error) {
-        // A failed test is an expected outcome, not a server fault: report what
-        // the server said and let the admin fix the URL or token.
-        if (!error?.status) console.error('MCP server test error:', error?.message || error);
+        console.error('MCP server test error:', error?.message || error);
         res.json({ success: false, message: error?.message || 'Unknown error' });
-    } finally {
-        if (client) client.close().catch(() => {});
     }
 });
 

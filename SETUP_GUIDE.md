@@ -271,6 +271,13 @@ malformed config disables the connector, it never stops the bot from starting.
   tool line in replies and the activity rollup do not apply on it. `auto` takes
   the connector unless approvals are on, `connector` and `client` force either.
   Every other provider has only ever had the client route.
+- `/ai mcp` gives the same answers in Discord, for admins with Manage Server:
+  `servers`, `tools <server>`, `test <server>` and `activity`. All of them
+  answer privately, and `test` runs the same handshake the dashboard's button
+  does — no provider key, no tokens spent.
+- A tool result carrying a PNG, JPEG, GIF, WebP, MP3, WAV, OGG or PDF is posted
+  to the channel as a file, up to four per reply. Anything else non-text is
+  reported to the model as omitted, the way it always was.
 - On the client route the bot opens the connection, so the URL must be a public
   https address — one that resolves into private or reserved space is refused
   at the socket, the same guard the Ollama base URL uses.

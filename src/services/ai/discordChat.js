@@ -320,6 +320,15 @@ async function handleAIChat(message, aiSettings) {
             await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
         }
 
+        // Anything a tool produced that the channel can show and the model
+        // could not use — a chart, a screenshot. Its own message, after the
+        // text, so a failed send costs the pictures and not the answer.
+        if (activity.attachments.length) {
+            await message.channel.send({ files: activity.attachments }).catch(err =>
+                console.error('[MCP] tool attachments send failed:', err?.message || err)
+            );
+        }
+
         // After the reply, never before it: the ledger is for the dashboard, and
         // nothing about it is worth adding to the wait the user is already in.
         if (activity.used) {

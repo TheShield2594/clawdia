@@ -2,7 +2,7 @@
 
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
 const { rejectOtherUser } = require('../../../utils/collectorOwner');
-const { toolLabel } = require('./activity');
+const { toolLabel } = require('../../../utils/toolLabel');
 
 /**
  * Asking a person before a tool call that writes something.

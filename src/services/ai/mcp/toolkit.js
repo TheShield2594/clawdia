@@ -7,7 +7,7 @@ const {
     needsConfirmation,
     DEFAULT_CONFIRM_MODE
 } = require('../../../config/mcpServers');
-const { McpHttpClient, McpError } = require('./client');
+const { McpHttpClient, McpError, MAX_RESPONSE_BYTES } = require('./client');
 
 /**
  * The provider-neutral half of MCP support.
@@ -44,6 +44,36 @@ const MAX_TOOLS = 64;
 // A tool result goes back to the model as a message, and a model with a 1k
 // max_tokens reply budget cannot use a 200KB directory listing anyway.
 const MAX_TOOL_RESULT_CHARS = 6000;
+
+/**
+ * Media a tool result may carry into the channel, by content type.
+ *
+ * A tool that renders a chart, grabs a screenshot or reads a PDF page has an
+ * answer that is not text, and base64'ing it into the conversation is not an
+ * option — one screenshot would fill the context window on its own, and no
+ * provider here is guaranteed to accept an image inside a tool result. Discord
+ * can show it, so the bytes go there and the model is told one arrived.
+ *
+ * An allow list rather than "anything with a mimeType" on purpose: this is a
+ * third party's server handing bytes to a bot that can post files to a channel,
+ * and the set of things worth showing is small and known. Anything else is
+ * reported as omitted, the way every non-text block was before.
+ */
+const ATTACHABLE_TYPES = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/wav': 'wav',
+    'audio/ogg': 'ogg',
+    'application/pdf': 'pdf'
+};
+
+// Per result. A tool answering with a dozen images is not answering a question
+// anyone asked, and the transport caps the turn again on the way out.
+const MAX_ATTACHMENTS_PER_RESULT = 4;
 
 // How many times a model may call tools and be asked again before it has to
 // answer. Each round is a full request, so this bounds both latency and spend.
@@ -105,6 +135,14 @@ function notifier(onToolEvent) {
             console.warn(`[MCP] tool event listener failed: ${err.message}`);
         }
     };
+}
+
+// A tool name is the far side's choice and this becomes a file name in a
+// Discord message, so it is reduced to something that cannot be read as a path
+// or an extension. The call id keeps two calls to one tool apart.
+function fileNameFor(toolName, id) {
+    const clean = String(toolName || '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    return `${clean || 'tool'}-${id}`;
 }
 
 function keyFor(connection) {
@@ -220,20 +258,70 @@ function schemaOf(tool) {
 }
 
 /**
- * MCP content blocks as the one string a chat model can be handed back.
+ * One content block as a file, or null when it is not one worth showing.
  *
- * Images and audio are dropped with a marker rather than base64'd into the
- * conversation: no provider here is guaranteed to accept them mid-tool-result,
- * and one screenshot would blow the context window on its own.
+ * The size ceiling is really the client's — a response larger than
+ * MAX_RESPONSE_BYTES never gets this far — but it is checked again here because
+ * the decode happens here and a buffer is what gets held until the reply lands.
  */
-function renderResult({ content, structuredContent, isError }) {
+function asAttachment(block, prefix, index) {
+    const source = block.type === 'image' || block.type === 'audio'
+        ? block
+        : (block.type === 'resource' ? block.resource : null);
+
+    const data = source?.blob ?? source?.data;
+    if (typeof data !== 'string' || !data) return null;
+
+    const extension = ATTACHABLE_TYPES[String(source.mimeType || '').toLowerCase()];
+    if (!extension) return null;
+
+    let buffer;
+    try {
+        buffer = Buffer.from(data, 'base64');
+    } catch {
+        return null;
+    }
+    if (!buffer.length || buffer.length > MAX_RESPONSE_BYTES) return null;
+
+    return { buffer, name: `${prefix}-${index + 1}.${extension}`, mimeType: source.mimeType };
+}
+
+/**
+ * MCP content blocks as the string a chat model can be handed back, plus
+ * anything the channel can show that the model cannot use.
+ *
+ * The text always says what happened to a non-text block — attached under a
+ * name, or omitted — so the model can refer to it ("the chart above") rather
+ * than answering as though the tool returned nothing.
+ */
+function renderResult({ content, structuredContent, isError }, { namePrefix = 'result' } = {}) {
     const parts = [];
+    const attachments = [];
+
     for (const block of content) {
         if (!block || typeof block !== 'object') continue;
-        if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text);
-        else if (block.type === 'resource' && typeof block.resource?.text === 'string') parts.push(block.resource.text);
-        else if (block.type) parts.push(`[${block.type} content omitted]`);
+        if (block.type === 'text' && typeof block.text === 'string') {
+            parts.push(block.text);
+            continue;
+        }
+        if (block.type === 'resource' && typeof block.resource?.text === 'string') {
+            parts.push(block.resource.text);
+            continue;
+        }
+        if (!block.type) continue;
+
+        const file = attachments.length < MAX_ATTACHMENTS_PER_RESULT
+            ? asAttachment(block, namePrefix, attachments.length)
+            : null;
+
+        if (file) {
+            attachments.push(file);
+            parts.push(`[${block.type} sent to the channel as ${file.name}]`);
+        } else {
+            parts.push(`[${block.type} content omitted]`);
+        }
     }
+
     if (!parts.length && structuredContent != null) {
         try {
             parts.push(JSON.stringify(structuredContent));
@@ -249,7 +337,11 @@ function renderResult({ content, structuredContent, isError }) {
     if (text.length > MAX_TOOL_RESULT_CHARS) {
         text = `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n[truncated: the tool returned more than ${MAX_TOOL_RESULT_CHARS} characters]`;
     }
-    return isError ? `The tool reported an error: ${text}` : text;
+
+    return {
+        text: isError ? `The tool reported an error: ${text}` : text,
+        attachments
+    };
 }
 
 /**
@@ -410,10 +502,14 @@ async function prepareMcpToolkit(guildServers = [], {
         try {
             const result = await withSession(target.entry, target.server, client =>
                 client.callTool(target.toolName, args));
+            // The file name is the tool's, so a reply carrying two charts from
+            // two tools says which came from where.
+            const { text, attachments } = renderResult(result, { namePrefix: fileNameFor(target.toolName, id) });
+            for (const file of attachments) emit({ ...describe, type: 'attachment', ...file });
             // A tool that answers "no such repository" ran fine; it is the
             // model's problem, not something to flag to the channel.
             finish(!result.isError);
-            return renderResult(result);
+            return text;
         } catch (err) {
             console.warn(`[MCP] "${server}" tool "${target.toolName}" failed: ${err.message}`);
             finish(false, { error: err.message });
@@ -461,5 +557,7 @@ module.exports = {
     MAX_TOOL_ROUNDS,
     MAX_TOOLS,
     MAX_TOOL_RESULT_CHARS,
+    MAX_ATTACHMENTS_PER_RESULT,
+    ATTACHABLE_TYPES,
     TOOL_LIST_TTL_MS
 };

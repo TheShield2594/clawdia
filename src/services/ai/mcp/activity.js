@@ -1,5 +1,7 @@
 'use strict';
 
+const { toolLabel: label } = require('../../../utils/toolLabel');
+
 // What a user sees while the bot is calling MCP tools.
 //
 // A tool round is dead air. The model has stopped producing text, the bot is
@@ -21,31 +23,23 @@ const MAX_LIVE_ENTRIES = 2;
 // which is both shorter and more useful than eight truncated tool names.
 const MAX_FOOTER_ENTRIES = 4;
 
+// Files one reply may carry into the channel. Discord takes ten per message;
+// four is what a reply can carry without becoming an image dump, and the
+// toolkit has already capped each individual result.
+const MAX_ATTACHMENTS = 4;
+
+// And a ceiling on what is held in memory until the reply lands. Discord's own
+// limit for an unboosted server is 10MB per message.
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
 // How much of a 2000-character Discord message the status line may claim. The
 // transport keeps this much free while tools are running so the status can be
 // appended without eating the text above it.
 const STATUS_RESERVE = 220;
 
-const MAX_LABEL_LENGTH = 40;
-
 // Discord's own limit, repeated here rather than imported from the transport:
 // this module is what decides whether the status fits, so it needs the number.
 const DISCORD_MAX_LEN = 2000;
-
-/**
- * A tool or server name as something safe to put in a Discord message.
- *
- * Server names are validated on the way into the config, but tool names come
- * from the far side and are whatever that server decided to call things. Here
- * they are display text in a message the bot sends to a channel, so they are
- * reduced to characters that cannot open markup, ping a role, or run to three
- * lines — a server that names a tool `@everyone` gets to be called `everyone`.
- */
-function label(text) {
-    const clean = String(text || '').replace(/[^A-Za-z0-9._\- ]+/g, '').trim();
-    if (!clean) return 'tool';
-    return clean.length > MAX_LABEL_LENGTH ? `${clean.slice(0, MAX_LABEL_LENGTH - 1)}…` : clean;
-}
 
 function seconds(ms) {
     if (!Number.isFinite(ms) || ms < 0) return '';
@@ -68,6 +62,8 @@ function createToolActivity() {
     let active = new Map();
     let done = [];
     let unreachable = [];
+    let files = [];
+    let fileBytes = 0;
     let used = false;
 
     function onEvent(event) {
@@ -105,6 +101,18 @@ function createToolActivity() {
                 used = true;
                 if (!unreachable.includes(event.server)) unreachable.push(event.server);
                 break;
+            // A chart, a screenshot, a rendered page: something the channel can
+            // show and the model cannot use. Dropped past the cap rather than
+            // queued — a reply that arrives is worth more than every file in it.
+            case 'attachment': {
+                if (!Buffer.isBuffer(event.buffer) || !event.buffer.length) break;
+                if (files.length >= MAX_ATTACHMENTS) break;
+                if (fileBytes + event.buffer.length > MAX_ATTACHMENT_BYTES) break;
+                used = true;
+                fileBytes += event.buffer.length;
+                files.push({ attachment: event.buffer, name: event.name });
+                break;
+            }
         }
     }
 
@@ -112,6 +120,8 @@ function createToolActivity() {
         active = new Map();
         done = [];
         unreachable = [];
+        files = [];
+        fileBytes = 0;
         used = false;
     }
 
@@ -203,8 +213,10 @@ function createToolActivity() {
         // it only reserves room for a status line once there is one to show.
         get used() { return used; },
         get calls() { return [...done]; },
-        get unreachableServers() { return [...unreachable]; }
+        get unreachableServers() { return [...unreachable]; },
+        // In the shape discord.js takes, so the transport hands them straight on.
+        get attachments() { return [...files]; }
     };
 }
 
-module.exports = { createToolActivity, STATUS_RESERVE, toolLabel: label };
+module.exports = { createToolActivity, STATUS_RESERVE, MAX_ATTACHMENTS };

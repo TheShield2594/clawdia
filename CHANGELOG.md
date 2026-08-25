@@ -115,6 +115,28 @@ change, and a script reading them needs updating. See
   provider uses runs against the same servers. `connector` and `client` are
   there to override that either way, and the panel says which one automatic
   currently resolves to rather than leaving an admin to work it out.
+- **`/ai mcp` answers from the channel what the dashboard answers from a
+  browser.** `servers` lists the connections and what the approval setting and
+  the Claude route would actually do to them, `tools` and `test` run the same
+  handshake the dashboard's Test button runs, and `activity` shows the same
+  seven-day rollup. All four need Manage Server and answer privately. It is a
+  subcommand group on `/ai` rather than four commands of its own, because
+  Discord registers at most a hundred and the count is pinned.
+- **A tool that answers with a picture gets to show it.** Every non-text block
+  became `[image content omitted]` — the one thing a Discord bot is better
+  placed to do than any other MCP client, thrown away. A chart, a screenshot or
+  a PDF page now arrives in the channel as a file, and the model is told one
+  did, so it can refer to it rather than answering as though the tool returned
+  nothing. Only a small known set of media types is accepted, and only within
+  a size and count a reply can carry: this is a third party's server handing
+  bytes to a bot that can post files, so anything else is reported as omitted
+  exactly as before.
+- **A preamble no longer runs into the answer after it.** A round that calls
+  tools usually says something first, and the answer arrives in the round after
+  it — two pieces of prose that were being concatenated into one sentence
+  colliding with another. They are separated now, and the non-streaming paths
+  keep the preamble rather than dropping it, so turning streaming off no longer
+  changes what the reply says.
 - **Fishing tournaments are indexed on what they are looked up by** (#585). The
   collection was indexed on `guildId` alone while every query in
   `tournamentService` pairs the guild with a status — the read before each

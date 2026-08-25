@@ -361,6 +361,11 @@ on Claude it is not by default — Anthropic's connector opens the connections o
 their side. Turning approvals on switches Claude to the bot's own MCP client
 automatically, and the route is settable either way if you would rather choose.
 
+`/ai mcp` answers the same questions from a channel — which connections exist,
+what tools they offer, whether one still works, and what they have been doing.
+It needs Manage Server and replies privately. A tool that answers with an image
+or a PDF has it posted to the channel rather than dropped.
+
 **From the dashboard** (AI → 🔌 Connections): pick a service or paste any https
 MCP endpoint, add a token, and optionally list the tools the model may or may
 not call. GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe come as
