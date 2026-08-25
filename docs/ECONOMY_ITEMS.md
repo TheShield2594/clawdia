@@ -7,16 +7,21 @@ are what item art is matched by — `getItemImageAttachment` looks an image up b
 the id the command asked for — so an icon filed under anything else is an icon
 nothing renders.
 
-**Naming image files.** Use the item id verbatim, replacing the `:` in an
-activity id with `_` (`hunt:wooden_rifle` → `hunt_wooden_rifle.png`). That is
-the same substitution `itemImageHelper` makes when it hands the image to
-Discord.
+**Reading the ids.** A hunt, fish or mine item is prefixed with its activity and
+a material with `material:` — that prefix is part of the id the image system
+stores and looks the item up by. The part after the colon is what the game data
+calls the thing, and is what a recipe or an inventory names it by.
+
+**Naming image files.** Use the item id verbatim, replacing the `:` with `_`
+(`hunt:wooden_rifle` → `hunt_wooden_rifle.png`). That is the same substitution
+`itemImageHelper` makes when it hands the image to Discord.
 
 **What can carry an image today.** The dashboard's upload route accepts the
-83 activity ids listed in [the index at the end](#uploadable-ids),
-plus every item in a guild's shop, keyed by its plain `itemId`. The other
-sections are named in the game data and rendered in text; art for them needs the
-renderer taught to ask for it first.
+305 ids listed in [the index at the end](#uploadable-ids) — the
+gear, consumables, zones, catches and materials of the three activities — plus
+every item in a guild's shop, keyed by its plain `itemId`. The other sections
+(relics, pets, seasonal event items, daily drops) are named in the game data and
+rendered as text; art for them needs the renderer taught to ask for it first.
 
 ## 🏹 Hunting
 
@@ -81,68 +86,68 @@ renderer taught to ask for it first.
 
 | Item ID | Name | Emoji |
 |---|---|---|
-| `rabbit` | Rabbit | 🐇 |
-| `squirrel` | Squirrel | 🐿️ |
-| `dove` | Dove | 🕊️ |
-| `quail` | Quail | 🐦 |
-| `duck` | Duck | 🦆 |
-| `pheasant` | Pheasant | 🦚 |
-| `raccoon` | Raccoon | 🦝 |
-| `chipmunk` | Chipmunk | 🐿️ |
-| `crow` | Crow | 🐦 |
-| `frog` | Frog | 🐸 |
-| `opossum` | Opossum | 🐀 |
-| `woodpecker` | Woodpecker | 🐦 |
-| `deer` | Deer | 🦌 |
-| `wild_boar` | Wild Boar | 🐗 |
-| `turkey` | Turkey | 🦃 |
-| `badger` | Badger | 🦡 |
-| `beaver` | Beaver | 🦫 |
-| `coyote` | Coyote | 🐕 |
-| `jackrabbit` | Jackrabbit | 🐇 |
-| `vulture` | Vulture | 🦅 |
-| `roadrunner` | Roadrunner | 🐦 |
-| `scorpion` | Scorpion | 🦂 |
-| `desert_fox` | Desert Fox | 🦊 |
-| `crane` | Crane | 🦢 |
-| `wild_hog` | Wild Hog | 🐗 |
-| `giant_salamander` | Giant Salamander | 🦎 |
-| `wolf` | Wolf | 🐺 |
-| `elk` | Elk | 🫎 |
-| `lynx` | Lynx | 🐈 |
-| `bald_eagle` | Bald Eagle | 🦅 |
-| `mountain_goat` | Mountain Goat | 🐐 |
-| `rattlesnake` | Rattlesnake | 🐍 |
-| `hyena` | Hyena | 🐕 |
-| `caribou` | Caribou | 🦌 |
-| `arctic_fox` | Arctic Fox | 🦊 |
-| `snowy_owl` | Snowy Owl | 🦉 |
-| `giant_frog` | Giant Frog | 🐸 |
-| `cottonmouth` | Cottonmouth | 🐍 |
-| `ancient_ram` | Ancient Ram | 🐏 |
-| `ruin_stalker` | Ruin Stalker | 🗿 |
-| `black_bear` | Black Bear | 🐻 |
-| `moose` | Moose | 🫎 |
-| `mountain_lion` | Mountain Lion | 🦁 |
-| `wolverine` | Wolverine | 🦡 |
-| `musk_ox` | Musk Ox | 🐃 |
-| `woolly_mammoth` | Woolly Mammoth | 🦣 |
-| `polar_bear` | Polar Bear | 🐻‍❄️ |
-| `saber_cat` | Saber Cat | 🐯 |
-| `alligator` | Alligator | 🐊 |
-| `panther` | Panther | 🐆 |
-| `dire_wolf` | Dire Wolf | 🐺 |
-| `alpha_bear` | Alpha Bear | 🐻 |
-| `snow_leopard` | Snow Leopard | 🐆 |
-| `giant_elk` | Giant Elk | 🦌 |
-| `golden_fox` | Golden Fox | 🦊 |
-| `white_wolf` | White Wolf | 🐺 |
-| `obsidian_stag` | Obsidian Stag | 🦌 |
-| `storm_hawk` | Storm Hawk | 🦅 |
-| `fire_lynx` | Fire Lynx | 🐈 |
-| `dire_bear` | Dire Bear | 🐻 |
-| `thunderbird` | Thunderbird | ⚡ |
-| `ghost_stag` | Ghost Stag | 👻 |
+| `hunt:rabbit` | Rabbit | 🐇 |
+| `hunt:squirrel` | Squirrel | 🐿️ |
+| `hunt:dove` | Dove | 🕊️ |
+| `hunt:quail` | Quail | 🐦 |
+| `hunt:duck` | Duck | 🦆 |
+| `hunt:pheasant` | Pheasant | 🦚 |
+| `hunt:raccoon` | Raccoon | 🦝 |
+| `hunt:chipmunk` | Chipmunk | 🐿️ |
+| `hunt:crow` | Crow | 🐦 |
+| `hunt:frog` | Frog | 🐸 |
+| `hunt:opossum` | Opossum | 🐀 |
+| `hunt:woodpecker` | Woodpecker | 🐦 |
+| `hunt:deer` | Deer | 🦌 |
+| `hunt:wild_boar` | Wild Boar | 🐗 |
+| `hunt:turkey` | Turkey | 🦃 |
+| `hunt:badger` | Badger | 🦡 |
+| `hunt:beaver` | Beaver | 🦫 |
+| `hunt:coyote` | Coyote | 🐕 |
+| `hunt:jackrabbit` | Jackrabbit | 🐇 |
+| `hunt:vulture` | Vulture | 🦅 |
+| `hunt:roadrunner` | Roadrunner | 🐦 |
+| `hunt:scorpion` | Scorpion | 🦂 |
+| `hunt:desert_fox` | Desert Fox | 🦊 |
+| `hunt:crane` | Crane | 🦢 |
+| `hunt:wild_hog` | Wild Hog | 🐗 |
+| `hunt:giant_salamander` | Giant Salamander | 🦎 |
+| `hunt:wolf` | Wolf | 🐺 |
+| `hunt:elk` | Elk | 🫎 |
+| `hunt:lynx` | Lynx | 🐈 |
+| `hunt:bald_eagle` | Bald Eagle | 🦅 |
+| `hunt:mountain_goat` | Mountain Goat | 🐐 |
+| `hunt:rattlesnake` | Rattlesnake | 🐍 |
+| `hunt:hyena` | Hyena | 🐕 |
+| `hunt:caribou` | Caribou | 🦌 |
+| `hunt:arctic_fox` | Arctic Fox | 🦊 |
+| `hunt:snowy_owl` | Snowy Owl | 🦉 |
+| `hunt:giant_frog` | Giant Frog | 🐸 |
+| `hunt:cottonmouth` | Cottonmouth | 🐍 |
+| `hunt:ancient_ram` | Ancient Ram | 🐏 |
+| `hunt:ruin_stalker` | Ruin Stalker | 🗿 |
+| `hunt:black_bear` | Black Bear | 🐻 |
+| `hunt:moose` | Moose | 🫎 |
+| `hunt:mountain_lion` | Mountain Lion | 🦁 |
+| `hunt:wolverine` | Wolverine | 🦡 |
+| `hunt:musk_ox` | Musk Ox | 🐃 |
+| `hunt:woolly_mammoth` | Woolly Mammoth | 🦣 |
+| `hunt:polar_bear` | Polar Bear | 🐻‍❄️ |
+| `hunt:saber_cat` | Saber Cat | 🐯 |
+| `hunt:alligator` | Alligator | 🐊 |
+| `hunt:panther` | Panther | 🐆 |
+| `hunt:dire_wolf` | Dire Wolf | 🐺 |
+| `hunt:alpha_bear` | Alpha Bear | 🐻 |
+| `hunt:snow_leopard` | Snow Leopard | 🐆 |
+| `hunt:giant_elk` | Giant Elk | 🦌 |
+| `hunt:golden_fox` | Golden Fox | 🦊 |
+| `hunt:white_wolf` | White Wolf | 🐺 |
+| `hunt:obsidian_stag` | Obsidian Stag | 🦌 |
+| `hunt:storm_hawk` | Storm Hawk | 🦅 |
+| `hunt:fire_lynx` | Fire Lynx | 🐈 |
+| `hunt:dire_bear` | Dire Bear | 🐻 |
+| `hunt:thunderbird` | Thunderbird | ⚡ |
+| `hunt:ghost_stag` | Ghost Stag | 👻 |
 
 ### Craft Recipes (25)
 
@@ -241,84 +246,84 @@ renderer taught to ask for it first.
 
 | Item ID | Name | Emoji |
 |---|---|---|
-| `minnow` | Minnow | 🐟 |
-| `perch` | Perch | 🐟 |
-| `catfish` | Catfish | 🐱 |
-| `bluegill` | Bluegill | 🔵 |
-| `carp` | Carp | 🐠 |
-| `tilapia` | Tilapia | 🐟 |
-| `mudfish` | Mudfish | 🟤 |
-| `herring` | Herring | 🐟 |
-| `bass` | Largemouth Bass | 🐟 |
-| `trout` | Rainbow Trout | 🎏 |
-| `pike` | Northern Pike | 🗡️ |
-| `flounder` | Flounder | 🫓 |
-| `snapper` | Red Snapper | 🔴 |
-| `mackerel` | Mackerel | 🐟 |
-| `salmon` | King Salmon | 🐡 |
-| `tuna` | Bluefin Tuna | 🐋 |
-| `swordfish` | Swordfish | ⚔️ |
-| `barracuda` | Barracuda | 🦷 |
-| `grouper` | Giant Grouper | 🐡 |
-| `marlin` | Blue Marlin | 🗡️ |
-| `giant_squid` | Giant Squid | 🦑 |
-| `oarfish` | Oarfish | 🐍 |
-| `hammerhead` | Hammerhead Shark | 🦈 |
-| `great_white` | Great White Shark | 🦈 |
-| `whale` | Blue Whale | 🐳 |
-| `kraken` | Kraken Tentacle | 🐙 |
-| `goldfish` | Goldfish | 🐠 |
-| `sunfish` | Sunfish | 🌞 |
-| `crappie` | Crappie | 🐟 |
-| `koi` | Koi | 🎏 |
-| `sturgeon` | Sturgeon | 🦴 |
-| `walleye` | Walleye | 👁️ |
-| `eel` | Eel | 〰️ |
-| `silver_trout` | Silver Trout | 🥈 |
-| `gar` | Alligator Gar | 🐊 |
-| `lake_sturgeon` | Lake Sturgeon | 🪨 |
-| `muskie` | Muskellunge | 🗡️ |
-| `whitefish` | Lake Whitefish | 🤍 |
-| `black_crappie` | Black Crappie | ⚫ |
-| `silver_carp` | Silver Carp | 🪙 |
-| `mahi_mahi` | Mahi-Mahi | 🌈 |
-| `stingray` | Stingray | 🔷 |
-| `anglerfish` | Anglerfish | 💡 |
-| `reef_shark` | Reef Shark | 🦈 |
-| `lionfish` | Lionfish | 🦁 |
-| `abyssal_eel` | Abyssal Eel | 🌑 |
-| `void_ray` | Void Ray | 🌌 |
-| `lanternfish` | Lanternfish | 🏮 |
-| `deep_horror` | Deep Horror | 👁️ |
-| `colossal_isopod` | Colossal Isopod | 🦞 |
-| `megalodon` | Megalodon | 🦷 |
-| `phoenix_koi` | Phoenix Koi | 🔥 |
-| `void_serpent` | Void Serpent | 🌀 |
-| `celestial_whale` | Celestial Whale | 🌠 |
-| `ancient_turtle` | Ancient Turtle | 🐢 |
-| `deep_kraken` | Deep Kraken | 🦑 |
-| `sea_dragon` | Sea Dragon | 🐲 |
-| `leviathan` | Leviathan | 🌊 |
-| `ghost_fish` | Ghost Fish | 👻 |
+| `fish:minnow` | Minnow | 🐟 |
+| `fish:perch` | Perch | 🐟 |
+| `fish:catfish` | Catfish | 🐱 |
+| `fish:bluegill` | Bluegill | 🔵 |
+| `fish:carp` | Carp | 🐠 |
+| `fish:tilapia` | Tilapia | 🐟 |
+| `fish:mudfish` | Mudfish | 🟤 |
+| `fish:herring` | Herring | 🐟 |
+| `fish:bass` | Largemouth Bass | 🐟 |
+| `fish:trout` | Rainbow Trout | 🎏 |
+| `fish:pike` | Northern Pike | 🗡️ |
+| `fish:flounder` | Flounder | 🫓 |
+| `fish:snapper` | Red Snapper | 🔴 |
+| `fish:mackerel` | Mackerel | 🐟 |
+| `fish:salmon` | King Salmon | 🐡 |
+| `fish:tuna` | Bluefin Tuna | 🐋 |
+| `fish:swordfish` | Swordfish | ⚔️ |
+| `fish:barracuda` | Barracuda | 🦷 |
+| `fish:grouper` | Giant Grouper | 🐡 |
+| `fish:marlin` | Blue Marlin | 🗡️ |
+| `fish:giant_squid` | Giant Squid | 🦑 |
+| `fish:oarfish` | Oarfish | 🐍 |
+| `fish:hammerhead` | Hammerhead Shark | 🦈 |
+| `fish:great_white` | Great White Shark | 🦈 |
+| `fish:whale` | Blue Whale | 🐳 |
+| `fish:kraken` | Kraken Tentacle | 🐙 |
+| `fish:goldfish` | Goldfish | 🐠 |
+| `fish:sunfish` | Sunfish | 🌞 |
+| `fish:crappie` | Crappie | 🐟 |
+| `fish:koi` | Koi | 🎏 |
+| `fish:sturgeon` | Sturgeon | 🦴 |
+| `fish:walleye` | Walleye | 👁️ |
+| `fish:eel` | Eel | 〰️ |
+| `fish:silver_trout` | Silver Trout | 🥈 |
+| `fish:gar` | Alligator Gar | 🐊 |
+| `fish:lake_sturgeon` | Lake Sturgeon | 🪨 |
+| `fish:muskie` | Muskellunge | 🗡️ |
+| `fish:whitefish` | Lake Whitefish | 🤍 |
+| `fish:black_crappie` | Black Crappie | ⚫ |
+| `fish:silver_carp` | Silver Carp | 🪙 |
+| `fish:mahi_mahi` | Mahi-Mahi | 🌈 |
+| `fish:stingray` | Stingray | 🔷 |
+| `fish:anglerfish` | Anglerfish | 💡 |
+| `fish:reef_shark` | Reef Shark | 🦈 |
+| `fish:lionfish` | Lionfish | 🦁 |
+| `fish:abyssal_eel` | Abyssal Eel | 🌑 |
+| `fish:void_ray` | Void Ray | 🌌 |
+| `fish:lanternfish` | Lanternfish | 🏮 |
+| `fish:deep_horror` | Deep Horror | 👁️ |
+| `fish:colossal_isopod` | Colossal Isopod | 🦞 |
+| `fish:megalodon` | Megalodon | 🦷 |
+| `fish:phoenix_koi` | Phoenix Koi | 🔥 |
+| `fish:void_serpent` | Void Serpent | 🌀 |
+| `fish:celestial_whale` | Celestial Whale | 🌠 |
+| `fish:ancient_turtle` | Ancient Turtle | 🐢 |
+| `fish:deep_kraken` | Deep Kraken | 🦑 |
+| `fish:sea_dragon` | Sea Dragon | 🐲 |
+| `fish:leviathan` | Leviathan | 🌊 |
+| `fish:ghost_fish` | Ghost Fish | 👻 |
 
 ### Junk (5)
 
 | Item ID | Name | Emoji |
 |---|---|---|
-| `old_boot` | Old Boot | 👢 |
-| `tin_can` | Tin Can | 🥫 |
-| `seaweed` | Seaweed | 🌿 |
-| `driftwood_junk` | Driftwood | 🪵 |
-| `soggy_scroll` | Soggy Scroll | 📜 |
+| `fish:old_boot` | Old Boot | 👢 |
+| `fish:tin_can` | Tin Can | 🥫 |
+| `fish:seaweed` | Seaweed | 🌿 |
+| `fish:driftwood_junk` | Driftwood | 🪵 |
+| `fish:soggy_scroll` | Soggy Scroll | 📜 |
 
 ### Treasure (4)
 
 | Item ID | Name | Emoji |
 |---|---|---|
-| `sunken_chest` | Sunken Chest | 📦 |
-| `ancient_coin` | Ancient Coin | 🪙 |
-| `pearl` | Pearl | 🫧 |
-| `coral_gem` | Coral Gem | 💎 |
+| `fish:sunken_chest` | Sunken Chest | 📦 |
+| `fish:ancient_coin` | Ancient Coin | 🪙 |
+| `fish:pearl` | Pearl | 🫧 |
+| `fish:coral_gem` | Coral Gem | 💎 |
 
 ### Craft Recipes (8)
 
@@ -390,29 +395,29 @@ renderer taught to ask for it first.
 
 | Item ID | Name | Emoji |
 |---|---|---|
-| `stone` | Stone | 🪨 |
-| `coal` | Coal | ⬛ |
-| `copper` | Copper Ore | 🟤 |
-| `tin` | Tin Ore | ⬜ |
-| `iron` | Iron Ore | ⚙️ |
-| `silver` | Silver Ore | 🩶 |
-| `lead` | Lead Ore | 🔵 |
-| `quartz` | Quartz Crystal | 🤍 |
-| `gold` | Gold Ore | 🟡 |
-| `sapphire` | Sapphire | 💙 |
-| `amethyst` | Amethyst | 💜 |
-| `topaz` | Topaz | 🟠 |
-| `emerald` | Emerald | 💚 |
-| `ruby` | Ruby | 🔴 |
-| `obsidian` | Obsidian | 🖤 |
-| `platinum` | Platinum Ore | 🌟 |
-| `diamond` | Diamond | 💎 |
-| `dark_crystal` | Dark Crystal | 🔮 |
-| `mythril` | Mythril Ore | 🔷 |
-| `zenith_shard` | Zenith Shard | ✨ |
-| `primordial_ore` | Primordial Ore | 🌋 |
-| `celestial_fragment` | Celestial Fragment | ⭐ |
-| `void_ore` | Void Ore | 🌀 |
+| `mine:stone` | Stone | 🪨 |
+| `mine:coal` | Coal | ⬛ |
+| `mine:copper` | Copper Ore | 🟤 |
+| `mine:tin` | Tin Ore | ⬜ |
+| `mine:iron` | Iron Ore | ⚙️ |
+| `mine:silver` | Silver Ore | 🩶 |
+| `mine:lead` | Lead Ore | 🔵 |
+| `mine:quartz` | Quartz Crystal | 🤍 |
+| `mine:gold` | Gold Ore | 🟡 |
+| `mine:sapphire` | Sapphire | 💙 |
+| `mine:amethyst` | Amethyst | 💜 |
+| `mine:topaz` | Topaz | 🟠 |
+| `mine:emerald` | Emerald | 💚 |
+| `mine:ruby` | Ruby | 🔴 |
+| `mine:obsidian` | Obsidian | 🖤 |
+| `mine:platinum` | Platinum Ore | 🌟 |
+| `mine:diamond` | Diamond | 💎 |
+| `mine:dark_crystal` | Dark Crystal | 🔮 |
+| `mine:mythril` | Mythril Ore | 🔷 |
+| `mine:zenith_shard` | Zenith Shard | ✨ |
+| `mine:primordial_ore` | Primordial Ore | 🌋 |
+| `mine:celestial_fragment` | Celestial Fragment | ⭐ |
+| `mine:void_ore` | Void Ore | 🌀 |
 
 ### Craft Recipes (11)
 
@@ -486,90 +491,90 @@ its rarity band.
 
 | Item ID | Name | Emoji |
 |---|---|---|
-| `rabbits_foot` | Rabbit's Foot — Common | 🐾 |
-| `acorn_cache` | Acorn Cache — Common | 🌰 |
-| `feather` | Feather — Common | 🪶 |
-| `down_feather` | Down Feather — Common | 🪶 |
-| `antler_fragment` | Antler Fragment — Uncommon | 🦌 |
-| `tusk_shard` | Tusk Shard — Uncommon | 🐗 |
-| `badger_pelt` | Badger Pelt — Uncommon | 🦡 |
-| `beaver_pelt` | Beaver Pelt — Uncommon | 🦫 |
-| `coyote_fang` | Coyote Fang — Rare | 🐺 |
-| `wolf_pelt` | Wolf Pelt — Rare | 🐺 |
-| `elk_antler` | Elk Antler — Rare | 🦌 |
-| `lynx_fang` | Lynx Fang — Rare | 🐱 |
-| `eagle_talon` | Eagle Talon — Epic | 🦅 |
-| `mountain_horn` | Mountain Horn — Epic | 🏔️ |
-| `bear_claw` | Bear Claw — Epic | 🐻 |
-| `moose_rack` | Moose Rack — Epic | 🫎 |
-| `lion_tooth` | Lion's Tooth — Legendary | 🦁 |
-| `wolverine_fur` | Wolverine Fur — Legendary | 🦡 |
-| `spirit_pelt` | Spirit Pelt — Legendary | 👻 |
-| `megaloceros_crown` | Megaloceros Crown — Legendary | ⚡ |
-| `golden_fur` | Golden Fur — Legendary | 🌟 |
-| `spirit_essence` | Spirit Essence — Legendary | 💎 |
-| `ancient_claw` | Ancient Claw — Legendary | 🔮 |
-| `thunderfeather` | Thunderfeather — Legendary | ⚡ |
-| `spectral_bone` | Spectral Bone — Legendary | 💀 |
-| `bandit_mask` | Bandit Mask — Legendary | 🎭 |
+| `material:rabbits_foot` | Rabbit's Foot — Common | 🐾 |
+| `material:acorn_cache` | Acorn Cache — Common | 🌰 |
+| `material:feather` | Feather — Common | 🪶 |
+| `material:down_feather` | Down Feather — Common | 🪶 |
+| `material:antler_fragment` | Antler Fragment — Uncommon | 🦌 |
+| `material:tusk_shard` | Tusk Shard — Uncommon | 🐗 |
+| `material:badger_pelt` | Badger Pelt — Uncommon | 🦡 |
+| `material:beaver_pelt` | Beaver Pelt — Uncommon | 🦫 |
+| `material:coyote_fang` | Coyote Fang — Rare | 🐺 |
+| `material:wolf_pelt` | Wolf Pelt — Rare | 🐺 |
+| `material:elk_antler` | Elk Antler — Rare | 🦌 |
+| `material:lynx_fang` | Lynx Fang — Rare | 🐱 |
+| `material:eagle_talon` | Eagle Talon — Epic | 🦅 |
+| `material:mountain_horn` | Mountain Horn — Epic | 🏔️ |
+| `material:bear_claw` | Bear Claw — Epic | 🐻 |
+| `material:moose_rack` | Moose Rack — Epic | 🫎 |
+| `material:lion_tooth` | Lion's Tooth — Legendary | 🦁 |
+| `material:wolverine_fur` | Wolverine Fur — Legendary | 🦡 |
+| `material:spirit_pelt` | Spirit Pelt — Legendary | 👻 |
+| `material:megaloceros_crown` | Megaloceros Crown — Legendary | ⚡ |
+| `material:golden_fur` | Golden Fur — Legendary | 🌟 |
+| `material:spirit_essence` | Spirit Essence — Legendary | 💎 |
+| `material:ancient_claw` | Ancient Claw — Legendary | 🔮 |
+| `material:thunderfeather` | Thunderfeather — Legendary | ⚡ |
+| `material:spectral_bone` | Spectral Bone — Legendary | 💀 |
+| `material:bandit_mask` | Bandit Mask — Legendary | 🎭 |
 
 ### Fish Materials (10)
 
 | Item ID | Name | Emoji |
 |---|---|---|
-| `fish_scale` | Fish Scale — Common | 🐟 |
-| `seaweed_bundle` | Seaweed Bundle — Common | 🌿 |
-| `driftwood` | Driftwood — Common | 🪵 |
-| `rare_scale` | Rare Scale — Uncommon | ✨ |
-| `old_coin` | Old Coin — Uncommon | 🪙 |
-| `pearl` | Pearl — Rare | 🫧 |
-| `coral_fragment` | Coral Fragment — Rare | 🪸 |
-| `shark_tooth` | Shark Tooth — Epic | 🦈 |
-| `tentacle_ink` | Tentacle Ink — Epic | 🦑 |
-| `mythic_scale` | Mythic Scale — Legendary | 💠 |
+| `material:fish_scale` | Fish Scale — Common | 🐟 |
+| `material:seaweed_bundle` | Seaweed Bundle — Common | 🌿 |
+| `material:driftwood` | Driftwood — Common | 🪵 |
+| `material:rare_scale` | Rare Scale — Uncommon | ✨ |
+| `material:old_coin` | Old Coin — Uncommon | 🪙 |
+| `material:pearl` | Pearl — Rare | 🫧 |
+| `material:coral_fragment` | Coral Fragment — Rare | 🪸 |
+| `material:shark_tooth` | Shark Tooth — Epic | 🦈 |
+| `material:tentacle_ink` | Tentacle Ink — Epic | 🦑 |
+| `material:mythic_scale` | Mythic Scale — Legendary | 💠 |
 
 ### Mine Materials (22)
 
 | Item ID | Name | Emoji |
 |---|---|---|
-| `rock_fragment` | Rock Fragment — Common | 🪨 |
-| `coal_dust` | Coal Dust — Common | 🖤 |
-| `copper_flake` | Copper Flake — Common | 🟤 |
-| `iron_filing` | Iron Filing — Uncommon | ⚙️ |
-| `silver_dust` | Silver Dust — Uncommon | 🔘 |
-| `lead_slug` | Lead Slug — Uncommon | 🔩 |
-| `quartz_shard` | Quartz Shard — Rare | 🔷 |
-| `gold_nugget` | Gold Nugget — Rare | 🌕 |
-| `raw_sapphire` | Raw Sapphire — Rare | 💙 |
-| `amethyst_chip` | Amethyst Chip — Rare | 💜 |
-| `topaz_shard` | Topaz Shard — Rare | 🟡 |
-| `raw_emerald` | Raw Emerald — Epic | 💚 |
-| `raw_ruby` | Raw Ruby — Epic | ❤️ |
-| `obsidian_chip` | Obsidian Chip — Epic | 🖤 |
-| `platinum_dust` | Platinum Dust — Epic | ⬜ |
-| `raw_diamond` | Raw Diamond — Epic | 💎 |
-| `crystal_sliver` | Crystal Sliver — Legendary | 🔮 |
-| `mythril_dust` | Mythril Dust — Legendary | 🌀 |
-| `zenith_essence` | Zenith Essence — Legendary | ⭐ |
-| `primordial_ash` | Primordial Ash — Legendary | 🌋 |
-| `stardust` | Stardust — Legendary | ✨ |
-| `void_essence` | Void Essence — Legendary | 🌑 |
+| `material:rock_fragment` | Rock Fragment — Common | 🪨 |
+| `material:coal_dust` | Coal Dust — Common | 🖤 |
+| `material:copper_flake` | Copper Flake — Common | 🟤 |
+| `material:iron_filing` | Iron Filing — Uncommon | ⚙️ |
+| `material:silver_dust` | Silver Dust — Uncommon | 🔘 |
+| `material:lead_slug` | Lead Slug — Uncommon | 🔩 |
+| `material:quartz_shard` | Quartz Shard — Rare | 🔷 |
+| `material:gold_nugget` | Gold Nugget — Rare | 🌕 |
+| `material:raw_sapphire` | Raw Sapphire — Rare | 💙 |
+| `material:amethyst_chip` | Amethyst Chip — Rare | 💜 |
+| `material:topaz_shard` | Topaz Shard — Rare | 🟡 |
+| `material:raw_emerald` | Raw Emerald — Epic | 💚 |
+| `material:raw_ruby` | Raw Ruby — Epic | ❤️ |
+| `material:obsidian_chip` | Obsidian Chip — Epic | 🖤 |
+| `material:platinum_dust` | Platinum Dust — Epic | ⬜ |
+| `material:raw_diamond` | Raw Diamond — Epic | 💎 |
+| `material:crystal_sliver` | Crystal Sliver — Legendary | 🔮 |
+| `material:mythril_dust` | Mythril Dust — Legendary | 🌀 |
+| `material:zenith_essence` | Zenith Essence — Legendary | ⭐ |
+| `material:primordial_ash` | Primordial Ash — Legendary | 🌋 |
+| `material:stardust` | Stardust — Legendary | ✨ |
+| `material:void_essence` | Void Essence — Legendary | 🌑 |
 
 ### Explore Materials (11)
 
 | Item ID | Name | Emoji |
 |---|---|---|
-| `survey_chalk` | Survey Chalk — Common | 🖍️ |
-| `pressed_fern` | Pressed Fern — Common | 🌿 |
-| `frayed_map_corner` | Frayed Map Corner — Common | 🗒️ |
-| `waypoint_flint` | Waypoint Flint — Uncommon | 🪨 |
-| `compass_shard` | Compass Shard — Uncommon | 🧭 |
-| `charted_vellum` | Charted Vellum — Rare | 📜 |
-| `surveyors_lens` | Surveyor's Lens — Rare | 🔎 |
-| `lantern_glass` | Lantern Glass — Epic | 🏮 |
-| `trailwardens_knot` | Trailwarden's Knot — Epic | 🪢 |
-| `wayfarers_seal` | Wayfarer's Seal — Legendary | 🕯️ |
-| `cartographers_ink` | Cartographer's Ink — Legendary | 🖋️ |
+| `material:survey_chalk` | Survey Chalk — Common | 🖍️ |
+| `material:pressed_fern` | Pressed Fern — Common | 🌿 |
+| `material:frayed_map_corner` | Frayed Map Corner — Common | 🗒️ |
+| `material:waypoint_flint` | Waypoint Flint — Uncommon | 🪨 |
+| `material:compass_shard` | Compass Shard — Uncommon | 🧭 |
+| `material:charted_vellum` | Charted Vellum — Rare | 📜 |
+| `material:surveyors_lens` | Surveyor's Lens — Rare | 🔎 |
+| `material:lantern_glass` | Lantern Glass — Epic | 🏮 |
+| `material:trailwardens_knot` | Trailwarden's Knot — Epic | 🪢 |
+| `material:wayfarers_seal` | Wayfarer's Seal — Legendary | 🕯️ |
+| `material:cartographers_ink` | Cartographer's Ink — Legendary | 🖋️ |
 
 ## 🔗 Cross-System
 
@@ -935,7 +940,7 @@ today.
 
 ## Uploadable IDs
 
-The exact set the upload route validates against — 83 ids, from
+The exact set the upload route validates against — 305 ids, from
 `ACTIVITY_ITEM_IDS` in src/data/activityItems.js.
 
 ```
@@ -981,6 +986,70 @@ hunt:arctic_tundra    Arctic Tundra
 hunt:murky_swamp    Murky Swamp
 hunt:legendary_peaks    Legendary Peaks
 
+# hunt — animals
+hunt:rabbit    Rabbit
+hunt:squirrel    Squirrel
+hunt:dove    Dove
+hunt:quail    Quail
+hunt:duck    Duck
+hunt:pheasant    Pheasant
+hunt:raccoon    Raccoon
+hunt:chipmunk    Chipmunk
+hunt:crow    Crow
+hunt:frog    Frog
+hunt:opossum    Opossum
+hunt:woodpecker    Woodpecker
+hunt:deer    Deer
+hunt:wild_boar    Wild Boar
+hunt:turkey    Turkey
+hunt:badger    Badger
+hunt:beaver    Beaver
+hunt:coyote    Coyote
+hunt:jackrabbit    Jackrabbit
+hunt:vulture    Vulture
+hunt:roadrunner    Roadrunner
+hunt:scorpion    Scorpion
+hunt:desert_fox    Desert Fox
+hunt:crane    Crane
+hunt:wild_hog    Wild Hog
+hunt:giant_salamander    Giant Salamander
+hunt:wolf    Wolf
+hunt:elk    Elk
+hunt:lynx    Lynx
+hunt:bald_eagle    Bald Eagle
+hunt:mountain_goat    Mountain Goat
+hunt:rattlesnake    Rattlesnake
+hunt:hyena    Hyena
+hunt:caribou    Caribou
+hunt:arctic_fox    Arctic Fox
+hunt:snowy_owl    Snowy Owl
+hunt:giant_frog    Giant Frog
+hunt:cottonmouth    Cottonmouth
+hunt:ancient_ram    Ancient Ram
+hunt:ruin_stalker    Ruin Stalker
+hunt:black_bear    Black Bear
+hunt:moose    Moose
+hunt:mountain_lion    Mountain Lion
+hunt:wolverine    Wolverine
+hunt:musk_ox    Musk Ox
+hunt:woolly_mammoth    Woolly Mammoth
+hunt:polar_bear    Polar Bear
+hunt:saber_cat    Saber Cat
+hunt:alligator    Alligator
+hunt:panther    Panther
+hunt:dire_wolf    Dire Wolf
+hunt:alpha_bear    Alpha Bear
+hunt:snow_leopard    Snow Leopard
+hunt:giant_elk    Giant Elk
+hunt:golden_fox    Golden Fox
+hunt:white_wolf    White Wolf
+hunt:obsidian_stag    Obsidian Stag
+hunt:storm_hawk    Storm Hawk
+hunt:fire_lynx    Fire Lynx
+hunt:dire_bear    Dire Bear
+hunt:thunderbird    Thunderbird
+hunt:ghost_stag    Ghost Stag
+
 # fish — rods
 fish:bamboo_rod    Bamboo Rod
 fish:fiberglass_rod    Fiberglass Rod
@@ -1015,6 +1084,80 @@ fish:river    Rushing River
 fish:lake    Misty Lake
 fish:ocean    Open Ocean
 fish:deep_sea    The Abyss
+
+# fish — fish
+fish:minnow    Minnow
+fish:perch    Perch
+fish:catfish    Catfish
+fish:bluegill    Bluegill
+fish:carp    Carp
+fish:tilapia    Tilapia
+fish:mudfish    Mudfish
+fish:herring    Herring
+fish:bass    Largemouth Bass
+fish:trout    Rainbow Trout
+fish:pike    Northern Pike
+fish:flounder    Flounder
+fish:snapper    Red Snapper
+fish:mackerel    Mackerel
+fish:salmon    King Salmon
+fish:tuna    Bluefin Tuna
+fish:swordfish    Swordfish
+fish:barracuda    Barracuda
+fish:grouper    Giant Grouper
+fish:marlin    Blue Marlin
+fish:giant_squid    Giant Squid
+fish:oarfish    Oarfish
+fish:hammerhead    Hammerhead Shark
+fish:great_white    Great White Shark
+fish:whale    Blue Whale
+fish:kraken    Kraken Tentacle
+fish:goldfish    Goldfish
+fish:sunfish    Sunfish
+fish:crappie    Crappie
+fish:koi    Koi
+fish:sturgeon    Sturgeon
+fish:walleye    Walleye
+fish:eel    Eel
+fish:silver_trout    Silver Trout
+fish:gar    Alligator Gar
+fish:lake_sturgeon    Lake Sturgeon
+fish:muskie    Muskellunge
+fish:whitefish    Lake Whitefish
+fish:black_crappie    Black Crappie
+fish:silver_carp    Silver Carp
+fish:mahi_mahi    Mahi-Mahi
+fish:stingray    Stingray
+fish:anglerfish    Anglerfish
+fish:reef_shark    Reef Shark
+fish:lionfish    Lionfish
+fish:abyssal_eel    Abyssal Eel
+fish:void_ray    Void Ray
+fish:lanternfish    Lanternfish
+fish:deep_horror    Deep Horror
+fish:colossal_isopod    Colossal Isopod
+fish:megalodon    Megalodon
+fish:phoenix_koi    Phoenix Koi
+fish:void_serpent    Void Serpent
+fish:celestial_whale    Celestial Whale
+fish:ancient_turtle    Ancient Turtle
+fish:deep_kraken    Deep Kraken
+fish:sea_dragon    Sea Dragon
+fish:leviathan    Leviathan
+fish:ghost_fish    Ghost Fish
+
+# fish — junk
+fish:old_boot    Old Boot
+fish:tin_can    Tin Can
+fish:seaweed    Seaweed
+fish:driftwood_junk    Driftwood
+fish:soggy_scroll    Soggy Scroll
+
+# fish — treasure
+fish:sunken_chest    Sunken Chest
+fish:ancient_coin    Ancient Coin
+fish:pearl    Pearl
+fish:coral_gem    Coral Gem
 
 # mine — pickaxes
 mine:wooden_pickaxe    Wooden Pickaxe
@@ -1051,4 +1194,106 @@ mine:coal_tunnels    Coal Tunnels
 mine:iron_mines    Iron Mines
 mine:crystal_caves    Crystal Caves
 mine:the_abyss    The Abyss
+
+# mine — ores
+mine:stone    Stone
+mine:coal    Coal
+mine:copper    Copper Ore
+mine:tin    Tin Ore
+mine:iron    Iron Ore
+mine:silver    Silver Ore
+mine:lead    Lead Ore
+mine:quartz    Quartz Crystal
+mine:gold    Gold Ore
+mine:sapphire    Sapphire
+mine:amethyst    Amethyst
+mine:topaz    Topaz
+mine:emerald    Emerald
+mine:ruby    Ruby
+mine:obsidian    Obsidian
+mine:platinum    Platinum Ore
+mine:diamond    Diamond
+mine:dark_crystal    Dark Crystal
+mine:mythril    Mythril Ore
+mine:zenith_shard    Zenith Shard
+mine:primordial_ore    Primordial Ore
+mine:celestial_fragment    Celestial Fragment
+mine:void_ore    Void Ore
+
+# material — hunt
+material:rabbits_foot    Rabbit's Foot
+material:acorn_cache    Acorn Cache
+material:feather    Feather
+material:down_feather    Down Feather
+material:antler_fragment    Antler Fragment
+material:tusk_shard    Tusk Shard
+material:badger_pelt    Badger Pelt
+material:beaver_pelt    Beaver Pelt
+material:coyote_fang    Coyote Fang
+material:wolf_pelt    Wolf Pelt
+material:elk_antler    Elk Antler
+material:lynx_fang    Lynx Fang
+material:eagle_talon    Eagle Talon
+material:mountain_horn    Mountain Horn
+material:bear_claw    Bear Claw
+material:moose_rack    Moose Rack
+material:lion_tooth    Lion's Tooth
+material:wolverine_fur    Wolverine Fur
+material:spirit_pelt    Spirit Pelt
+material:megaloceros_crown    Megaloceros Crown
+material:golden_fur    Golden Fur
+material:spirit_essence    Spirit Essence
+material:ancient_claw    Ancient Claw
+material:thunderfeather    Thunderfeather
+material:spectral_bone    Spectral Bone
+material:bandit_mask    Bandit Mask
+
+# material — fish
+material:fish_scale    Fish Scale
+material:seaweed_bundle    Seaweed Bundle
+material:driftwood    Driftwood
+material:rare_scale    Rare Scale
+material:old_coin    Old Coin
+material:pearl    Pearl
+material:coral_fragment    Coral Fragment
+material:shark_tooth    Shark Tooth
+material:tentacle_ink    Tentacle Ink
+material:mythic_scale    Mythic Scale
+
+# material — mine
+material:rock_fragment    Rock Fragment
+material:coal_dust    Coal Dust
+material:copper_flake    Copper Flake
+material:iron_filing    Iron Filing
+material:silver_dust    Silver Dust
+material:lead_slug    Lead Slug
+material:quartz_shard    Quartz Shard
+material:gold_nugget    Gold Nugget
+material:raw_sapphire    Raw Sapphire
+material:amethyst_chip    Amethyst Chip
+material:topaz_shard    Topaz Shard
+material:raw_emerald    Raw Emerald
+material:raw_ruby    Raw Ruby
+material:obsidian_chip    Obsidian Chip
+material:platinum_dust    Platinum Dust
+material:raw_diamond    Raw Diamond
+material:crystal_sliver    Crystal Sliver
+material:mythril_dust    Mythril Dust
+material:zenith_essence    Zenith Essence
+material:primordial_ash    Primordial Ash
+material:stardust    Stardust
+material:void_essence    Void Essence
+
+# material — explore
+material:survey_chalk    Survey Chalk
+material:pressed_fern    Pressed Fern
+material:frayed_map_corner    Frayed Map Corner
+material:waypoint_flint    Waypoint Flint
+material:compass_shard    Compass Shard
+material:charted_vellum    Charted Vellum
+material:surveyors_lens    Surveyor's Lens
+material:lantern_glass    Lantern Glass
+material:trailwardens_knot    Trailwarden's Knot
+material:wayfarers_seal    Wayfarer's Seal
+material:cartographers_ink    Cartographer's Ink
 ```

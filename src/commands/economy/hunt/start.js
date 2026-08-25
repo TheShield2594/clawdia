@@ -42,13 +42,18 @@ const { saveWithBalanceDelta } = require('../../../utils/balanceDelta');
 const { pickApproachProfile, runAimPhase } = require('./aim');
 const { buildBonusLines, buildHuntEmbed } = require('./embeds');
 const { ownedBy } = require('../../../utils/collectorOwner');
+const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 
 // ─── Staged loot reveal for rare+ drops ──────────────────────────────────────
 // tier: 'common'|'uncommon'|'rare'|'epic'|'legendary'|'event'|null
-async function stagedLootReveal(interaction, tier, finalEmbed) {
+// `files` carries the catch's image, and only the final edit may send it: an
+// attachment sent with the fog embed would be uploaded, then dropped by the
+// very next edit, so the reveal would pay for the upload three times over and
+// still show it once.
+async function stagedLootReveal(interaction, tier, finalEmbed, files = []) {
     const tierNum = TIER_NUM[tier] ?? 0;
     if (tierNum < 3) {
-        await interaction.editReply({ embeds: [finalEmbed] });
+        await interaction.editReply({ embeds: [finalEmbed], files });
         return;
     }
     const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -86,7 +91,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
             await wait(1500);
         }
     }
-    await interaction.editReply({ embeds: [finalEmbed] });
+    await interaction.editReply({ embeds: [finalEmbed], files });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -352,6 +357,9 @@ async function executeStart(interaction) {
 
         const timeBand = getTimeBand();
         const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
+        const catchFiles = result.animal?.id
+            ? await attachItemThumbnail(embed, `hunt:${result.animal.id}`, interaction.guild.id)
+            : [];
 
         if (payoutOwed > 0) {
             embed.addFields({
@@ -429,7 +437,7 @@ async function executeStart(interaction) {
         // Staged loot reveal for rare+ drops. A quick hunt skips the ceremony
         // here too — the fog-and-fanfare build-up is the same forced wait the
         // player opted out of, and the tier is still announced on the embed.
-        await stagedLootReveal(interaction, !quick && result.success ? result.tier : null, embed);
+        await stagedLootReveal(interaction, !quick && result.success ? result.tier : null, embed, catchFiles);
 
         if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;
@@ -500,7 +508,11 @@ async function executeStart(interaction) {
             const validIds = ['apex_match', 'apex_hold', 'apex_safe'];
             const idToKey  = { apex_match: 'match', apex_hold: 'hold', apex_safe: 'safe' };
 
-            await interaction.editReply({ embeds: [embed, buildApexPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
+            // Every send in the encounter re-attaches the animal's image, for the
+            // reason the fishing boss fight does: Discord keeps the attachments
+            // already on the message only while an edit says nothing at all about
+            // them, which is an invariant no future edit here has to honour.
+            await interaction.editReply({ embeds: [embed, buildApexPhaseEmbed(0, [])], components: [buildPhaseRow(0)], files: catchFiles });
 
             const runPhase = async (phaseIndex, prevResults, prevBtn) => {
                 const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
@@ -517,7 +529,7 @@ async function executeStart(interaction) {
                         choicesMade.push(chosen);
 
                         if (phaseIndex < phaseCount - 1) {
-                            await btn.update({ embeds: [embed, buildApexPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
+                            await btn.update({ embeds: [embed, buildApexPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)], files: catchFiles });
                             resolve({ btn, results });
                         } else {
                             resolve({ btn, results, done: true });
@@ -540,7 +552,7 @@ async function executeStart(interaction) {
                         .setTitle(`💨 ${apexType.emoji} The ${apexType.name} Escaped`)
                         .setDescription('You hesitated too long — it melted back into the wild. No bonus this time.')
                         .setTimestamp();
-                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
+                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [], files: catchFiles }).catch(() => {});
                     return;
                 }
             }
@@ -549,7 +561,7 @@ async function executeStart(interaction) {
             const freshUser = await User.findOne({ userId: interaction.user.id, guildId: interaction.guild.id });
             if (!freshUser) {
                 console.error(`[hunt apex] user document vanished mid-encounter — user=${interaction.user.id} guild=${interaction.guild.id}`);
-                return state.btn.update({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [] }).catch(() => {});
+                return state.btn.update({ content: 'Something went wrong resolving the encounter — your hunt rewards were already saved.', embeds: [embed], components: [], files: catchFiles }).catch(() => {});
             }
             await attachGrind(freshUser);
             ensureHuntData(freshUser);
@@ -653,7 +665,7 @@ async function executeStart(interaction) {
                 });
             }
 
-            await state.btn.update({ embeds: [embed, apexEmbed], components: [] }).catch(() => {});
+            await state.btn.update({ embeds: [embed, apexEmbed], components: [], files: catchFiles }).catch(() => {});
             return;
         }
     } catch (err) {

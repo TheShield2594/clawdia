@@ -10,7 +10,7 @@ jest.mock('../src/models/Guild', () => ({
 
 const ItemImage = require('../src/models/ItemImage');
 const Guild = require('../src/models/Guild');
-const { getItemImageAttachment } = require('../src/utils/itemImageHelper');
+const { getItemImageAttachment, attachItemThumbnail } = require('../src/utils/itemImageHelper');
 
 describe('getItemImageAttachment', () => {
     beforeEach(() => {
@@ -81,5 +81,54 @@ describe('getItemImageAttachment', () => {
         expect(ItemImage.findOne).toHaveBeenNthCalledWith(1, { guildId: 'g1', itemId: 'mine:stone_pickaxe' });
         expect(ItemImage.findOne).toHaveBeenNthCalledWith(2, { guildId: null, itemId: 'mine:stone_pickaxe' });
         expect(result.attachment.name).toBe('item-mine_stone_pickaxe.gif');
+    });
+});
+
+// The catch and material thumbnails (an animal on a hunt result, a fish on a
+// cast, the rarest material on an /inventory tab) all go through this, and all
+// of them are optional: a server that has uploaded nothing must get the embed
+// it got before, not a thumbnail pointing at a file the reply does not carry.
+describe('attachItemThumbnail', () => {
+    const fakeEmbed = () => {
+        const embed = { thumbnail: null };
+        embed.setThumbnail = url => { embed.thumbnail = url; return embed; };
+        return embed;
+    };
+
+    beforeEach(() => {
+        ItemImage.findOne.mockReset();
+        Guild.findOne.mockReset();
+    });
+
+    test('sets the thumbnail and hands back the file to send with it', async () => {
+        Guild.findOne.mockResolvedValue({ shop: [] });
+        ItemImage.findOne.mockResolvedValue({ imageData: Buffer.from('bytes'), imageType: 'image/png' });
+        const embed = fakeEmbed();
+
+        const files = await attachItemThumbnail(embed, 'fish:minnow', 'g1');
+
+        expect(embed.thumbnail).toBe('attachment://item-fish_minnow.png');
+        expect(files).toHaveLength(1);
+        expect(files[0].name).toBe('item-fish_minnow.png');
+    });
+
+    test('leaves the embed alone and sends nothing when the item has no image', async () => {
+        Guild.findOne.mockResolvedValue({ shop: [] });
+        ItemImage.findOne.mockResolvedValue(null);
+        const embed = fakeEmbed();
+
+        const files = await attachItemThumbnail(embed, 'material:fish_scale', 'g1');
+
+        expect(embed.thumbnail).toBeNull();
+        expect(files).toEqual([]);
+    });
+
+    // A dead database must cost the player a thumbnail, not their catch.
+    test('swallows a lookup failure rather than taking the result embed down', async () => {
+        Guild.findOne.mockRejectedValue(new Error('mongo is having a day'));
+        const embed = fakeEmbed();
+
+        await expect(attachItemThumbnail(embed, 'hunt:rabbit', 'g1')).resolves.toEqual([]);
+        expect(embed.thumbnail).toBeNull();
     });
 });

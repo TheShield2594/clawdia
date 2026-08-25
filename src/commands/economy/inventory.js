@@ -10,6 +10,7 @@ const { getRelicMeta } = require('../../data/exploreData');
 const { packFieldsCapped, EMBED_LIMITS } = require('../../utils/embedFields');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
+const { attachItemThumbnail } = require('../../utils/itemImageHelper');
 
 const TOTAL_MATERIALS = Object.keys(MATERIAL_RARITY).length;
 
@@ -53,6 +54,24 @@ function countOwned(mats) {
         if (quantityOf(piles, key, data) > 0) n++;
     }
     return n;
+}
+
+/**
+ * The rarest material the player holds from `source`, or null for an empty pile.
+ *
+ * Ties are broken by the order MATERIAL_RARITY declares, which runs roughly in
+ * the order the game hands them out — so two tier-5 materials resolve to the
+ * one the player would have met first, rather than to whichever key the
+ * quantity object happened to be written in.
+ */
+function rarestOwned(source, mats) {
+    let best = null;
+    for (const [key, data] of Object.entries(MATERIAL_RARITY)) {
+        if (data.source !== source) continue;
+        if ((mats[key] ?? 0) <= 0) continue;
+        if (!best || data.tier > best.data.tier) best = { key, data };
+    }
+    return best;
 }
 
 function buildMaterialsEmbed(source, mats, color, footer, target, avatarURL) {
@@ -296,10 +315,24 @@ module.exports = {
             explore: buildMaterialsEmbed('explore', mats.explore, color, footer, target, avatarURL),
         };
 
+        // Each materials tab is headed by the rarest material in it, when the
+        // server has uploaded an image for that material. The avatar stays the
+        // thumbnail everywhere else, and on any tab whose best material has no
+        // image — a tab that swaps between an icon and a face depending on what
+        // is uploaded reads as a bug, so the fallback is the one it started on.
+        const files = { items: [] };
+        for (const source of ['hunt', 'fish', 'mine', 'explore']) {
+            const best = rarestOwned(source, mats[source]);
+            files[source] = best
+                ? await attachItemThumbnail(embeds[source], `material:${best.key}`, interaction.guild.id)
+                : [];
+        }
+
         let activeTab = 'items';
         const message = await interaction.reply({
             embeds: [embeds[activeTab]],
             components: [buildTabRow(activeTab, interaction.id)],
+            files: files[activeTab],
             fetchReply: true
         });
 
@@ -315,9 +348,14 @@ module.exports = {
 
         collector.on('collect', async btn => {
             activeTab = btn.customId.split('_')[1];
+            // Every switch carries its tab's files, and an empty array is doing
+            // work: it clears the attachment the previous tab put on the message.
+            // Omitting it instead would leave that image attached under an embed
+            // that no longer refers to it, where Discord renders it in full.
             await btn.update({
                 embeds: [embeds[activeTab]],
-                components: [buildTabRow(activeTab, interaction.id)]
+                components: [buildTabRow(activeTab, interaction.id)],
+                files: files[activeTab]
             });
         });
 

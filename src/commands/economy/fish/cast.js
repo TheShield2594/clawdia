@@ -45,12 +45,17 @@ const { FISH_TIER_SCORE } = require('./shared');
 const { buildCastEmbed } = require('./embeds');
 const COLORS = require('../../../utils/embedColors');
 const { ownedBy } = require('../../../utils/collectorOwner');
+const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 
 // ─── Staged loot reveal for rare+ drops ──────────────────────────────────────
-async function stagedLootReveal(interaction, tier, finalEmbed) {
+// `files` carries the catch's image, and only the final edit may send it: an
+// attachment sent with the fog embed would be uploaded, then dropped by the
+// very next edit, so the reveal would pay for the upload three times over and
+// still show it once.
+async function stagedLootReveal(interaction, tier, finalEmbed, files = []) {
     const tierNum = TIER_NUM[tier] ?? 0;
     if (tierNum < 3) {
-        await interaction.editReply({ embeds: [finalEmbed] });
+        await interaction.editReply({ embeds: [finalEmbed], files });
         return;
     }
     const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -85,7 +90,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
             await wait(1500);
         }
     }
-    await interaction.editReply({ embeds: [finalEmbed] });
+    await interaction.editReply({ embeds: [finalEmbed], files });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -366,6 +371,16 @@ async function handleCast(interaction) {
         }
 
         const embed = buildCastEmbed(result, user, location, rod, currency, interaction.user);
+        // What was caught, whatever kind of thing it was — the embed's subject is
+        // the fish, the junk or the treasure, so that is what the thumbnail shows.
+        const caught = result.success
+            ? (result.catchType === 'junk' ? result.junkItem
+                : result.catchType === 'treasure' ? result.treasureItem
+                : result.fish)
+            : null;
+        const catchFiles = caught?.id
+            ? await attachItemThumbnail(embed, `fish:${caught.id}`, interaction.guild.id)
+            : [];
 
         if (payoutOwed > 0) {
             embed.addFields({
@@ -448,7 +463,12 @@ async function handleCast(interaction) {
             const idToKey  = { boss_match: 'match', boss_hold: 'hold', boss_safe: 'safe' };
 
             // Phase 1
-            await interaction.editReply({ embeds: [embed, buildBossPhaseEmbed(0, [])], components: [buildPhaseRow(0)] });
+            // Every send in the fight re-attaches the catch image. Discord keeps
+            // the existing attachments only while an edit says nothing about them,
+            // and an edit says something the moment it carries any file of its own
+            // — so relying on that would leave the thumbnail pointing at nothing
+            // the first time a phase gains an attachment of its own.
+            await interaction.editReply({ embeds: [embed, buildBossPhaseEmbed(0, [])], components: [buildPhaseRow(0)], files: catchFiles });
 
             const runPhase = async (phaseIndex, prevResults, prevBtn) => {
                 const fetchReply = prevBtn ? await prevBtn.fetchReply() : await interaction.fetchReply();
@@ -467,7 +487,7 @@ async function handleCast(interaction) {
 
                         if (phaseIndex < phaseCount - 1) {
                             // More phases ahead
-                            await btn.update({ embeds: [embed, buildBossPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)] });
+                            await btn.update({ embeds: [embed, buildBossPhaseEmbed(phaseIndex + 1, results)], components: [buildPhaseRow(phaseIndex + 1)], files: catchFiles });
                             resolve({ btn, results });
                         } else {
                             resolve({ btn, results, done: true });
@@ -491,7 +511,7 @@ async function handleCast(interaction) {
                         .setColor('#1C0A00')
                         .setTitle(`${bossType.emoji} ${bossType.name} Slipped Away`)
                         .setDescription(`⏱️ *You hesitated too long — the ${bossType.name} broke free before you could respond.*\n\nThe base catch above still counts; no bonus boss payout was earned.`);
-                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [] }).catch(() => {});
+                    interaction.editReply({ embeds: [embed, timeoutEmbed], components: [], files: catchFiles }).catch(() => {});
                     return;
                 }
             }
@@ -593,7 +613,7 @@ async function handleCast(interaction) {
                 });
             }
 
-            await state.btn.update({ embeds: [embed, bossResultEmbed], components: [] });
+            await state.btn.update({ embeds: [embed, bossResultEmbed], components: [], files: catchFiles });
             return;
         }
 
@@ -631,7 +651,7 @@ async function handleCast(interaction) {
         }
 
         // Staged loot reveal for rare+ drops
-        await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+        await stagedLootReveal(interaction, result.success ? result.tier : null, embed, catchFiles);
 
         if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;

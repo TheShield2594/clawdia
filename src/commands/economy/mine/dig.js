@@ -34,6 +34,7 @@ const { randomFrom, MINE_CAVE_LINES } = require('../../../utils/copyLines');
 const { PITY_COPY } = require('../../../utils/pityBonus');
 const { buildMineEmbed } = require('./embeds');
 const { ownedBy } = require('../../../utils/collectorOwner');
+const { attachItemThumbnail } = require('../../../utils/itemImageHelper');
 
 // Presentation timings for the pre-dig prompt and the vein read. The ladder itself
 // and the promotion rule live with the rest of the mine's rules, in mineData and
@@ -45,10 +46,14 @@ const VEIN_FLASH_MS     = 1_400;
 const VEIN_ANSWER_MS    = 10_000;
 
 // ─── Staged loot reveal for rare+ drops ──────────────────────────────────────
-async function stagedLootReveal(interaction, tier, finalEmbed) {
+// `files` carries the catch's image, and only the final edit may send it: an
+// attachment sent with the fog embed would be uploaded, then dropped by the
+// very next edit, so the reveal would pay for the upload three times over and
+// still show it once.
+async function stagedLootReveal(interaction, tier, finalEmbed, files = []) {
     const tierNum = TIER_NUM[tier] ?? 0;
     if (tierNum < 3) {
-        await interaction.editReply({ embeds: [finalEmbed] });
+        await interaction.editReply({ embeds: [finalEmbed], files });
         return;
     }
     const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -83,7 +88,7 @@ async function stagedLootReveal(interaction, tier, finalEmbed) {
             await wait(1500);
         }
     }
-    await interaction.editReply({ embeds: [finalEmbed] });
+    await interaction.editReply({ embeds: [finalEmbed], files });
 }
 
 // ─── DIG ──────────────────────────────────────────────────────────────────────
@@ -493,6 +498,9 @@ async function handleDig(interaction) {
         const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'mine').catch(() => null);
 
         const embed = buildMineEmbed(result, user, depth, pickaxe, currency, interaction.user);
+        const catchFiles = result.ore?.id
+            ? await attachItemThumbnail(embed, `mine:${result.ore.id}`, interaction.guild.id)
+            : [];
 
         if (payoutOwed > 0) {
             embed.addFields({
@@ -557,7 +565,7 @@ async function handleDig(interaction) {
         }
 
         // Staged loot reveal for rare+ drops
-        await stagedLootReveal(interaction, result.success ? result.tier : null, embed);
+        await stagedLootReveal(interaction, result.success ? result.tier : null, embed, catchFiles);
 
         if (result.success && ['epic', 'legendary', 'event'].includes(result.tier) && guildSettings?.economy?.announceRareDrops !== false) {
             const announceChannelId = guildSettings?.economy?.announcementChannelId;

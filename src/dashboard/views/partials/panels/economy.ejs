@@ -11,6 +11,7 @@
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-hunt">🏹 Hunting</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-fish">🎣 Fishing</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-mine">⛏️ Mining</button>
+                        <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-materials">🧪 Materials</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-heist">🎭 Heist</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-dynamic-pricing">📈 Dynamic Pricing</button>
                         <button class="ai-inner-tab eco-inner-tab" data-eco-tab="eco-tab-health">📊 Economy Health</button>
@@ -264,6 +265,7 @@
                             <button class="hunt-inner-tab" data-hunt-tab="hunt-upgrades">🔧 Upgrades</button>
                             <button class="hunt-inner-tab" data-hunt-tab="hunt-ammo">🔶 Ammo</button>
                             <button class="hunt-inner-tab" data-hunt-tab="hunt-consumables">🧪 Consumables</button>
+                            <button class="hunt-inner-tab" data-hunt-tab="hunt-animals">🦌 Animals</button>
                         </div>
                         <div id="hunt-weapons" class="ai-inner-panel active">
                             <p class="ai-inner-desc">Weapons used for hunting. Tier 1–12 progression.</p>
@@ -297,6 +299,14 @@
                                 <% }); %>
                             </div>
                         </div>
+                        <div id="hunt-animals" class="ai-inner-panel">
+                            <p class="ai-inner-desc">The quarry itself. An animal's image is the thumbnail on the hunt result embed when it is brought down.</p>
+                            <div class="game-items-grid">
+                                <% huntItems.animals.forEach(function(item){ %>
+                                <%- include('../game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Fishing item images -->
@@ -310,6 +320,7 @@
                             <button class="fish-inner-tab" data-fish-tab="fish-upgrades">🔩 Upgrades</button>
                             <button class="fish-inner-tab" data-fish-tab="fish-bait">🪱 Bait</button>
                             <button class="fish-inner-tab" data-fish-tab="fish-consumables">🧪 Consumables</button>
+                            <button class="fish-inner-tab" data-fish-tab="fish-catches">🐟 Catches</button>
                         </div>
                         <div id="fish-rods" class="ai-inner-panel active">
                             <p class="ai-inner-desc">Fishing rods used to catch fish. Tier 1–5 progression.</p>
@@ -343,6 +354,26 @@
                                 <% }); %>
                             </div>
                         </div>
+                        <div id="fish-catches" class="ai-inner-panel">
+                            <p class="ai-inner-desc">Everything a cast can pull up. A catch's image is the thumbnail on the result embed.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.fish.forEach(function(item){ %>
+                                <%- include('../game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                            <p class="ai-inner-desc">Junk — pulled up instead of a fish, worth little or nothing.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.junk.forEach(function(item){ %>
+                                <%- include('../game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                            <p class="ai-inner-desc">Treasure — the rare payout haul.</p>
+                            <div class="game-items-grid">
+                                <% fishItems.treasure.forEach(function(item){ %>
+                                <%- include('../game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Mining item images -->
@@ -356,6 +387,7 @@
                             <button class="mine-inner-tab" data-mine-tab="mine-upgrades">🔧 Upgrades</button>
                             <button class="mine-inner-tab" data-mine-tab="mine-blasts">💥 Blasts</button>
                             <button class="mine-inner-tab" data-mine-tab="mine-consumables">🧪 Consumables</button>
+                            <button class="mine-inner-tab" data-mine-tab="mine-ores">💎 Ores</button>
                         </div>
                         <div id="mine-pickaxes" class="ai-inner-panel active">
                             <p class="ai-inner-desc">Pickaxes used for mining. Tier 1–5 progression.</p>
@@ -389,6 +421,38 @@
                                 <% }); %>
                             </div>
                         </div>
+                        <div id="mine-ores" class="ai-inner-panel">
+                            <p class="ai-inner-desc">What a dig turns up. An ore's image is the thumbnail on the dig result embed.</p>
+                            <div class="game-items-grid">
+                                <% mineItems.ores.forEach(function(item){ %>
+                                <%- include('../game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Crafting material images -->
+                    <div id="eco-tab-materials" class="ai-inner-panel">
+                        <div class="panel-head">
+                            <h3>🧪 Crafting Material Images</h3>
+                            <p>Materials drop from hunting, fishing, mining and exploring, and are spent on <code>/craft</code> recipes — including recipes that cross systems, which is why they are one list rather than four. The rarest material a member holds is the thumbnail on their <code>/inventory</code> tab for that system.</p>
+                        </div>
+                        <div class="ai-inner-tabs">
+                            <button class="material-inner-tab active" data-material-tab="material-hunt">🏹 Hunt</button>
+                            <button class="material-inner-tab" data-material-tab="material-fish">🎣 Fish</button>
+                            <button class="material-inner-tab" data-material-tab="material-mine">⛏️ Mine</button>
+                            <button class="material-inner-tab" data-material-tab="material-explore">🧭 Explore</button>
+                        </div>
+                        <% ['hunt', 'fish', 'mine', 'explore'].forEach(function(source, i){ %>
+                        <div id="material-<%= source %>" class="ai-inner-panel<%= i === 0 ? ' active' : '' %>">
+                            <p class="ai-inner-desc">Materials dropped by <%= source %>, common first.</p>
+                            <div class="game-items-grid">
+                                <% materialItems[source].forEach(function(item){ %>
+                                <%- include('../game-item-card', { item: item }) %>
+                                <% }); %>
+                            </div>
+                        </div>
+                        <% }); %>
                     </div>
 
                     <!-- Heist configuration -->

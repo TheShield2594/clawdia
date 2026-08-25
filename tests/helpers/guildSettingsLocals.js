@@ -5,21 +5,24 @@ const DEFAULT_JOBS = require('../../src/data/defaultJobs');
 const DEFAULT_TIERS = require('../../src/data/defaultTiers');
 const { ACHIEVEMENTS } = require('../../src/data/achievements');
 const { ensureDefaultShopItems } = require('../../src/data/defaultShopItems');
-const { WEAPON_TIERS, AMMO_PACKS, CONSUMABLES: HUNT_CONSUMABLES, WEAPON_UPGRADES } = require('../../src/data/huntData');
-const { ROD_TIERS, BAIT_PACKS, CONSUMABLES: FISH_CONSUMABLES, ROD_UPGRADES } = require('../../src/data/fishData');
-const { PICKAXE_TIERS, BLAST_PACKS, CONSUMABLES: MINE_CONSUMABLES, PICKAXE_UPGRADES } = require('../../src/data/mineData');
+const { ACTIVITY_ITEMS } = require('../../src/data/activityItems');
 const { REGION_LIST } = require('../../src/data/exploreData');
 const { SEASONAL_EVENTS } = require('../../src/data/seasonalEvents');
 const { jsonForScript } = require('../../src/dashboard/lib/jsonForScript');
 const { asset } = require('../../src/dashboard/lib/assets');
 const { PANELS, DEFAULT_PANEL } = require('../../src/dashboard/lib/panels');
 
-const toItem = (ns, item, idField = 'id') => ({
-    id: `${ns}:${item[idField]}`,
-    label: item.name,
-    emoji: item.emoji || '📦',
-    hasImage: false,
-});
+// The same shape routes/dashboard.js hands the panel: the catalog, with a flag
+// per item saying whether this guild has uploaded an image. Read from the
+// catalog rather than rebuilt from the game data — a fixture that lists the
+// groups itself is a second catalog to keep in step, and it was already behind
+// by the zones, locations and depths when the catches arrived.
+const withImageFlags = groups => Object.fromEntries(
+    Object.entries(groups).map(([group, items]) => [
+        group,
+        items.map(item => ({ ...item, hasImage: false })),
+    ])
+);
 
 function guildSettingsLocals(overrides = {}) {
     const doc = new Guild({ guildId: '123456789012345678', name: 'Test Guild' });
@@ -41,24 +44,10 @@ function guildSettingsLocals(overrides = {}) {
             emoji: a.emoji, category: a.category,
             xpReward: a.xpReward, coinReward: a.coinReward,
         })),
-        huntItems: {
-            weapons: WEAPON_TIERS.map(w => toItem('hunt', w, 'slug')),
-            upgrades: Object.values(WEAPON_UPGRADES).map(u => toItem('hunt', u)),
-            ammo: AMMO_PACKS.map(a => toItem('hunt', a)),
-            consumables: Object.values(HUNT_CONSUMABLES).map(c => toItem('hunt', c)),
-        },
-        fishItems: {
-            rods: ROD_TIERS.map(r => toItem('fish', r, 'slug')),
-            upgrades: Object.values(ROD_UPGRADES).map(u => toItem('fish', u)),
-            bait: BAIT_PACKS.map(b => toItem('fish', b)),
-            consumables: Object.values(FISH_CONSUMABLES).map(c => toItem('fish', c)),
-        },
-        mineItems: {
-            pickaxes: PICKAXE_TIERS.map(p => toItem('mine', p, 'slug')),
-            upgrades: Object.values(PICKAXE_UPGRADES).map(u => toItem('mine', u)),
-            blasts: BLAST_PACKS.map(b => toItem('mine', b)),
-            consumables: Object.values(MINE_CONSUMABLES).map(c => toItem('mine', c)),
-        },
+        huntItems: withImageFlags(ACTIVITY_ITEMS.hunt),
+        fishItems: withImageFlags(ACTIVITY_ITEMS.fish),
+        mineItems: withImageFlags(ACTIVITY_ITEMS.mine),
+        materialItems: withImageFlags(ACTIVITY_ITEMS.material),
         explorationRegions: REGION_LIST.map(r => ({
             id: r.id,
             emoji: r.emoji,

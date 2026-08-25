@@ -111,7 +111,7 @@ function huntSections() {
         section('Ammo Packs', rowsFrom(hunt.AMMO_PACKS, { namespace: 'hunt' })),
         section('Consumables', rowsOf(hunt.CONSUMABLES, { namespace: 'hunt' })),
         section('Zones', rowsFrom(hunt.ZONE_LIST, { namespace: 'hunt' })),
-        section('Animals', rowsOf(hunt.ANIMALS)),
+        section('Animals', rowsOf(hunt.ANIMALS, { namespace: 'hunt' })),
         section('Craft Recipes', rowsOf(hunt.CRAFT_RECIPES)),
         section('Field Trophies', rowsByKey(hunt.FIELD_TROPHIES)),
     ].join('\n');
@@ -124,9 +124,9 @@ function fishSections() {
         section('Bait Packs', rowsFrom(fish.BAIT_PACKS, { namespace: 'fish' })),
         section('Consumables', rowsOf(fish.CONSUMABLES, { namespace: 'fish' })),
         section('Locations', rowsFrom(fish.LOCATION_LIST, { namespace: 'fish' })),
-        section('Fish', rowsOf(fish.FISH)),
-        section('Junk', rowsFrom(fish.JUNK_ITEMS)),
-        section('Treasure', rowsFrom(fish.TREASURE_ITEMS)),
+        section('Fish', rowsOf(fish.FISH, { namespace: 'fish' })),
+        section('Junk', rowsFrom(fish.JUNK_ITEMS, { namespace: 'fish' })),
+        section('Treasure', rowsFrom(fish.TREASURE_ITEMS, { namespace: 'fish' })),
         section('Craft Recipes', rowsOf(fish.FISH_CRAFT_RECIPES)),
     ].join('\n');
 }
@@ -138,7 +138,7 @@ function mineSections() {
         section('Blast Packs', rowsFrom(mine.BLAST_PACKS, { namespace: 'mine' })),
         section('Consumables', rowsOf(mine.CONSUMABLES, { namespace: 'mine' })),
         section('Depths', rowsFrom(mine.DEPTH_LIST, { namespace: 'mine' })),
-        section('Ores', rowsOf(mine.ORES)),
+        section('Ores', rowsOf(mine.ORES, { namespace: 'mine' })),
         section('Craft Recipes', rowsOf(mine.CRAFT_RECIPES)),
     ].join('\n');
 }
@@ -165,7 +165,10 @@ function materialSections() {
         Object.entries(MATERIAL_RARITY)
             .filter(([, meta]) => meta.source === source)
             .map(([id, meta]) => ({
-                id,
+                // Materials answer to `material:`, not to the system that drops
+                // them: a hunt trophy is an ingredient in a fishing recipe, and
+                // the game keys them all in one flat space for exactly that.
+                id: `material:${id}`,
                 name: `${meta.label} — ${TIER_LABELS[meta.tier] || `Tier ${meta.tier}`}`,
                 emoji: meta.emoji || '',
             }));
@@ -275,16 +278,21 @@ are what item art is matched by — \`getItemImageAttachment\` looks an image up
 the id the command asked for — so an icon filed under anything else is an icon
 nothing renders.
 
-**Naming image files.** Use the item id verbatim, replacing the \`:\` in an
-activity id with \`_\` (\`hunt:wooden_rifle\` → \`hunt_wooden_rifle.png\`). That is
-the same substitution \`itemImageHelper\` makes when it hands the image to
-Discord.
+**Reading the ids.** A hunt, fish or mine item is prefixed with its activity and
+a material with \`material:\` — that prefix is part of the id the image system
+stores and looks the item up by. The part after the colon is what the game data
+calls the thing, and is what a recipe or an inventory names it by.
+
+**Naming image files.** Use the item id verbatim, replacing the \`:\` with \`_\`
+(\`hunt:wooden_rifle\` → \`hunt_wooden_rifle.png\`). That is the same substitution
+\`itemImageHelper\` makes when it hands the image to Discord.
 
 **What can carry an image today.** The dashboard's upload route accepts the
-${activityCount} activity ids listed in [the index at the end](#uploadable-ids),
-plus every item in a guild's shop, keyed by its plain \`itemId\`. The other
-sections are named in the game data and rendered in text; art for them needs the
-renderer taught to ask for it first.
+${activityCount} ids listed in [the index at the end](#uploadable-ids) — the
+gear, consumables, zones, catches and materials of the three activities — plus
+every item in a guild's shop, keyed by its plain \`itemId\`. The other sections
+(relics, pets, seasonal event items, daily drops) are named in the game data and
+rendered as text; art for them needs the renderer taught to ask for it first.
 
 ## 🏹 Hunting
 

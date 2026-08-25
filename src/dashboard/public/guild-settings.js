@@ -226,13 +226,14 @@ const switchModTab = makeGameTabSwitcher('mod-inner-tab', '#moderation .ai-inner
 const switchHuntTab = makeGameTabSwitcher('hunt-inner-tab', '#eco-tab-hunt .ai-inner-panel', 'hunt-tab');
 const switchFishTab = makeGameTabSwitcher('fish-inner-tab', '#eco-tab-fish .ai-inner-panel', 'fish-tab');
 const switchMineTab = makeGameTabSwitcher('mine-inner-tab', '#eco-tab-mine .ai-inner-panel', 'mine-tab');
+const switchMaterialTab = makeGameTabSwitcher('material-inner-tab', '#eco-tab-materials .ai-inner-panel', 'material-tab');
 
 // Every inner tab sits inside a panel that may not exist yet, so they are wired
 // by delegation rather than bound to the elements at load.
 document.addEventListener('click', e => {
     const tab = e.target.closest && e.target.closest(
         '.ai-inner-tab[data-ai-tab], .rss-inner-tab, .eco-inner-tab, .mod-inner-tab, ' +
-        '.hunt-inner-tab, .fish-inner-tab, .mine-inner-tab');
+        '.hunt-inner-tab, .fish-inner-tab, .mine-inner-tab, .material-inner-tab');
     if (!tab) return;
     // The economy, moderation and RSS tabs also carry the shared `ai-inner-tab`
     // class for styling, so the specific ones have to be matched first.
@@ -252,6 +253,8 @@ document.addEventListener('click', e => {
         switchFishTab(tab.dataset.fishTab);
     } else if (cls.contains('mine-inner-tab')) {
         switchMineTab(tab.dataset.mineTab);
+    } else if (cls.contains('material-inner-tab')) {
+        switchMaterialTab(tab.dataset.materialTab);
     } else if (cls.contains('ai-inner-tab')) {
         switchAiInnerTab(tab.dataset.aiTab);
     }

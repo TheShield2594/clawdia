@@ -46,4 +46,24 @@ async function getItemImageAttachment(itemId, guildId = null) {
     return { attachment, url: `attachment://${filename}` };
 }
 
-module.exports = { getItemImageAttachment };
+/**
+ * Sets `embed`'s thumbnail to the image stored for `itemId`, and returns the
+ * files to send with it — `[]` when the guild has uploaded nothing for that id.
+ *
+ * Every caller was writing the same four lines: fetch, swallow the error, set
+ * the thumbnail, remember the attachment for the reply payload. Forgetting the
+ * last of those is the interesting mistake — the embed points at
+ * `attachment://item-fish_minnow.png`, the payload carries no such file, and
+ * Discord renders the embed with an empty thumbnail box rather than failing.
+ * Returning the files and the thumbnail together makes that pair hard to split.
+ *
+ * @returns {Promise<Array>} files for the reply payload, empty when there is no image
+ */
+async function attachItemThumbnail(embed, itemId, guildId) {
+    const image = await getItemImageAttachment(itemId, guildId).catch(() => null);
+    if (!image) return [];
+    embed.setThumbnail(image.url);
+    return [image.attachment];
+}
+
+module.exports = { getItemImageAttachment, attachItemThumbnail };

@@ -175,6 +175,9 @@ async function buildGuildSettingsLocals(req) {
     const huntItems = withImageFlags(ACTIVITY_ITEMS.hunt);
     const fishItems = withImageFlags(ACTIVITY_ITEMS.fish);
     const mineItems = withImageFlags(ACTIVITY_ITEMS.mine);
+    // Materials are grouped by the system that drops them rather than owned by
+    // one, so they get their own tab instead of a fourth section inside each.
+    const materialItems = withImageFlags(ACTIVITY_ITEMS.material);
 
     // Canonical exploration region catalog for the dashboard panel —
     // derived from exploreData so the template never drifts from the game data.
@@ -201,6 +204,7 @@ async function buildGuildSettingsLocals(req) {
             huntItems,
             fishItems,
             mineItems,
+            materialItems,
             explorationRegions
         }
     };

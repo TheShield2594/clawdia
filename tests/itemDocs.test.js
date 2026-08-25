@@ -84,13 +84,14 @@ describe('the ids it prints', () => {
     });
 
     // Three shapes exist in the data: a plain key (`padlock`, and the camelCase
-    // field-trophy flags), the `hunt:wooden_rifle` activity ids, and the relic
-    // ids, which are display names ("Whisperwood Charm"). Anything else is a
-    // field read off the wrong key.
+    // field-trophy flags), the namespaced ids the image system stores an item
+    // under — `hunt:wooden_rifle`, `material:fish_scale` — and the relic ids,
+    // which are display names ("Whisperwood Charm"). Anything else is a field
+    // read off the wrong key.
     test('are a plain key, a namespaced id, or a relic name', () => {
         for (const id of ids) {
             const shape = /^[a-zA-Z0-9_]+$/.test(id)
-                || /^(hunt|fish|mine):[a-z0-9_]+$/.test(id)
+                || /^(hunt|fish|mine|material):[a-z0-9_]+$/.test(id)
                 || /^[A-Z][A-Za-z'’()\- ]+$/.test(id);
             expect([id, shape]).toEqual([id, true]);
         }
