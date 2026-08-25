@@ -241,7 +241,14 @@ malformed config disables the connector, it never stops the bot from starting.
 - A tool call is capped at four rounds per message, after which the model is
   asked once more with no tools so it has to answer.
 - A server that is unreachable is skipped with an `[MCP]` warning rather than
-  failing the reply.
+  failing the reply, and named in the reply's footer — the model answering
+  without it is otherwise indistinguishable from the model not knowing.
+- Replies show their tool use: a line naming the tool while it runs, and a
+  summary on the finished message. Nothing about it reaches the conversation
+  history, so it costs no tokens on the next message.
+- Servers are all dialled at once when a turn starts, and the calls in one round
+  run concurrently, up to six at a time. A round costs its slowest call rather
+  than the sum, but a server on the far side sees several requests together.
 - On the client route the bot opens the connection, so the URL must be a public
   https address — one that resolves into private or reserved space is refused
   at the socket, the same guard the Ollama base URL uses.

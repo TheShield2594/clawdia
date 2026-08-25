@@ -63,6 +63,20 @@ change, and a script reading them needs updating. See
   address neither of them publishes — and its **Test** button connects to the
   server itself: no AI provider key, no tokens spent, and it reports the tool
   names, which is what the allow and deny lists want filling in from.
+- **A reply that calls MCP tools says so, and gets there faster.** A tool round
+  produces no text, so the message sat on an ellipsis for as long as somebody
+  else's HTTP request took, and the finished answer never said a tool had run
+  at all — which made a slow reply look like a stuck bot and a reply from an
+  unreachable server look like a confidently wrong model. The streamed message
+  now carries a line naming the tool in flight, and the finished reply keeps a
+  summary of what ran, how long each call took, what failed, and which servers
+  could not be reached. Two waits were also being spent one after another and
+  are now spent at once: the servers are all dialled together at the start of a
+  turn instead of one handshake after another before the model sees a token,
+  and the calls the model asks for in a single round run concurrently, so a
+  round costs its slowest call rather than the sum of them. Names coming back
+  from a server are stripped to plain text before they go in a message, so
+  nothing a server calls a tool can open markup or ping a role.
 - **Fishing tournaments are indexed on what they are looked up by** (#585). The
   collection was indexed on `guildId` alone while every query in
   `tournamentService` pairs the guild with a status — the read before each

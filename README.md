@@ -345,6 +345,11 @@ tools, offers them to the model as functions, runs the calls and feeds the
 results back. On that second route the model itself has to support tool calling,
 which every current OpenAI and Gemini model does and some Ollama models do not.
 
+While a tool is running the reply names it, and the finished message keeps a
+short summary of what ran, how long it took and anything that failed or could
+not be reached — so a slow answer is legible and a server that is down is
+visible rather than silently making the model wrong.
+
 **From the dashboard** (AI → 🔌 Connections): pick a service or paste any https
 MCP endpoint, add a token, and optionally list the tools the model may or may
 not call. GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe come as

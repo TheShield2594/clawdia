@@ -6,6 +6,7 @@ const { retrieveKnowledge, buildKnowledgeContext } = require('./knowledge');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
 const { buildActionsAddendum, extractAction, executeAction } = require('./actions');
+const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
 
 // Discord transport for the AI chat loop: rate limiting, prompt assembly,
 // message streaming/chunking, and post-processing. Everything provider-shaped
@@ -15,6 +16,10 @@ const DISCORD_MAX_LEN = 2000;
 const STREAM_EDIT_INTERVAL_MS = 800;
 // Discord typing indicator expires after 10s — refresh every 8s during long generations
 const TYPING_REFRESH_INTERVAL_MS = 8000;
+// A tool round yields no text, so the edit loop below is parked on the provider
+// for the whole of it. The tool status needs its own clock or it would only
+// ever appear after the tool it is announcing had already finished.
+const STATUS_REFRESH_INTERVAL_MS = 1200;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -37,6 +42,24 @@ async function withRetry(fn, { retries = 2, baseDelayMs = 800 } = {}) {
         }
     }
     throw lastErr;
+}
+
+/**
+ * Leave the tool summary on the finished reply.
+ *
+ * Appended to the last message rather than sent as its own, so a reply that
+ * used a tool stays one message in the channel instead of two. It becomes a
+ * separate message only when there is no room for it, or nothing to append it
+ * to — a turn that called tools and then produced no text at all.
+ */
+async function attachToolFooter(msg, text, footer, channel) {
+    if (!footer) return;
+    const body = (text || '').trimEnd();
+    if (msg && body.length + footer.length + 1 <= DISCORD_MAX_LEN) {
+        const edited = await msg.edit(body ? `${body}\n${footer}` : footer).then(() => true).catch(() => false);
+        if (edited) return;
+    }
+    await channel.send(footer).catch(() => {});
 }
 
 function chunkText(text, size = DISCORD_MAX_LEN) {
@@ -131,10 +154,14 @@ async function handleAIChat(message, aiSettings) {
             : rawHistory;
 
         const usageOut = {};
+        // Collects what the MCP tools did across every round of this turn, so
+        // the reply can say what the bot is waiting on while it waits, and what
+        // it used once it is done.
+        const activity = createToolActivity();
         const callArgs = {
             provider, model, apiKey, baseUrl, systemPrompt, history,
             prompt: content, temperature, maxTokens, mcpServers,
-            guildId: message.guild.id, usageOut,
+            guildId: message.guild.id, usageOut, onToolEvent: activity.onEvent,
             // Who the request is for, so the limit is enforced where the spend
             // happens rather than only in the peek above.
             rateLimit, userId: message.author.id, channelId: message.channel.id
@@ -149,6 +176,37 @@ async function handleAIChat(message, aiSettings) {
             let currentBuf = '';
             const sentMessages = [placeholder]; // all Discord messages emitted during streaming
 
+            // What was last written to currentMsg. Two things repaint it now —
+            // a text delta and the status clock — and neither should spend an
+            // edit on text Discord already has.
+            let painted = null;
+            let painting = false;
+
+            /**
+             * Write the text so far, plus any live tool status, to the message.
+             *
+             * Serialised through `painting` because those two callers can
+             * collide: Discord applies whichever edit *lands* last, not
+             * whichever was issued last, so two in flight can leave the older
+             * text on screen.
+             */
+            const paint = async () => {
+                if (painting) return;
+                const text = activity.decorate(currentBuf) || '…';
+                if (text === painted) return;
+                painting = true;
+                painted = text;
+                try {
+                    await currentMsg.edit(text);
+                } catch {
+                    // Let the next paint try again rather than believing this landed.
+                    painted = null;
+                } finally {
+                    painting = false;
+                }
+            };
+
+            const statusInterval = setInterval(() => { paint(); }, STATUS_REFRESH_INTERVAL_MS);
             // Keep the typing indicator alive for long generations
             const typingInterval = setInterval(() => message.channel.sendTyping().catch(() => {}), TYPING_REFRESH_INTERVAL_MS);
 
@@ -156,29 +214,48 @@ async function handleAIChat(message, aiSettings) {
                 await withRetry(async () => {
                     fullResponse = '';
                     currentBuf = '';
+                    // A retried attempt runs the tools again from the start, so
+                    // the record of them starts again too rather than reporting
+                    // the first attempt's calls twice.
+                    activity.reset();
                     for await (const piece of streamCompletion(callArgs)) {
                         fullResponse += piece;
                         currentBuf += piece;
-                        if (currentBuf.length >= DISCORD_MAX_LEN - 50) {
+                        // Once there is a status line to show, room is kept for
+                        // it, so appending it cannot push the message past
+                        // Discord's limit and clip the text above it.
+                        const flushAt = DISCORD_MAX_LEN - 50 - (activity.used ? STATUS_RESERVE : 0);
+                        if (currentBuf.length >= flushAt) {
                             await currentMsg.edit(currentBuf.slice(0, DISCORD_MAX_LEN));
                             const overflow = currentBuf.slice(DISCORD_MAX_LEN);
                             currentMsg = await message.channel.send(overflow || '…');
                             sentMessages.push(currentMsg);
                             currentBuf = overflow;
+                            painted = null;
                             lastEdit = Date.now();
                             continue;
                         }
                         const now = Date.now();
                         if (now - lastEdit >= STREAM_EDIT_INTERVAL_MS) {
-                            await currentMsg.edit(currentBuf || '…').catch(() => {});
+                            await paint();
                             lastEdit = now;
                         }
                     }
-                    if (currentBuf) await currentMsg.edit(currentBuf).catch(() => {});
+                    if (currentBuf) {
+                        // The status line is gone by here — nothing is running —
+                        // so the message settles on the text alone.
+                        painted = currentBuf;
+                        await currentMsg.edit(currentBuf).catch(() => { painted = null; });
+                    }
                 });
             } finally {
+                clearInterval(statusInterval);
                 clearInterval(typingInterval);
             }
+
+            // Where the tool summary goes, unless the reconcile below moves it.
+            let tailMsg = currentMsg;
+            let tailText = currentBuf;
 
             // Post-process: reconcile sentMessages against the canonical cleanText chunks
             if (aiSettings.actionsEnabled) {
@@ -196,11 +273,22 @@ async function handleAIChat(message, aiSettings) {
                         }
                     }
                     fullResponse = cleanText;
+                    // currentMsg may be one of the messages just deleted — the
+                    // one that held nothing but the ACTION block — so the footer
+                    // follows the reconcile rather than the stream.
+                    const kept = Math.min(canonicalChunks.length, sentMessages.length);
+                    tailMsg = kept ? sentMessages[kept - 1] : null;
+                    tailText = kept ? canonicalChunks[kept - 1] : '';
                     await executeAction(action, message);
                 }
             }
+
+            await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
         } else {
-            let response = await withRetry(() => getCompletion(callArgs));
+            let response = await withRetry(() => {
+                activity.reset();
+                return getCompletion(callArgs);
+            });
             response = response || '(empty response)';
 
             if (aiSettings.actionsEnabled) {
@@ -212,13 +300,18 @@ async function handleAIChat(message, aiSettings) {
             }
 
             fullResponse = response;
+            let tailMsg = null;
+            let tailText = '';
             if (fullResponse.trim()) {
                 const chunks = chunkText(fullResponse);
-                await message.reply(chunks[0]);
+                tailMsg = await message.reply(chunks[0]);
+                tailText = chunks[0];
                 for (let i = 1; i < chunks.length; i++) {
-                    await message.channel.send(chunks[i]);
+                    tailMsg = await message.channel.send(chunks[i]);
+                    tailText = chunks[i];
                 }
             }
+            await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
         }
 
         if (fullResponse.trim()) {
