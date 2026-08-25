@@ -73,6 +73,13 @@ function createToolActivity() {
     function onEvent(event) {
         if (!event || typeof event !== 'object') return;
         switch (event.type) {
+            // A call held at the approval prompt is the one wait a user can do
+            // something about, so it is worth its own wording rather than
+            // looking like a tool that is being slow.
+            case 'confirm':
+                used = true;
+                active.set(event.id, { server: event.server, tool: event.tool, awaiting: true });
+                break;
             case 'start':
                 used = true;
                 active.set(event.id, { server: event.server, tool: event.tool });
@@ -85,7 +92,12 @@ function createToolActivity() {
                     server: event.server ?? call?.server,
                     tool: event.tool ?? call?.tool,
                     durationMs: event.durationMs,
-                    ok: event.ok !== false
+                    ok: event.ok !== false,
+                    declined: event.declined === true,
+                    // Kept for the ledger, never for the footer: "what exactly
+                    // did the server say" is a question for the dashboard, not
+                    // for the channel the reply landed in.
+                    error: typeof event.error === 'string' ? event.error : null
                 });
                 break;
             }
@@ -106,10 +118,24 @@ function createToolActivity() {
     /** The line shown while calls are in flight, or '' when none are. */
     function render() {
         if (!active.size) return '';
-        const names = [...active.values()]
+        const calls = [...active.values()];
+        // A prompt on screen is what the whole reply is now blocked on, so it
+        // takes the line rather than queueing behind whatever else is running.
+        const waiting = calls.filter(call => call.awaiting);
+        if (waiting.length) {
+            const names = waiting.slice(0, MAX_LIVE_ENTRIES)
+                .map(call => `${label(call.server)} · ${label(call.tool)}`);
+            const more = waiting.length - names.length;
+            return clamp(
+                `-# ⏸️ waiting for approval: ${names.join(', ')}${more > 0 ? ` +${more} more` : ''}`,
+                STATUS_RESERVE
+            );
+        }
+
+        const names = calls
             .slice(0, MAX_LIVE_ENTRIES)
             .map(call => `${label(call.server)} · ${label(call.tool)}`);
-        const more = active.size - names.length;
+        const more = calls.length - names.length;
         return clamp(`-# 🔧 ${names.join(', ')}${more > 0 ? ` +${more} more` : ''}…`, STATUS_RESERVE);
     }
 
@@ -126,10 +152,22 @@ function createToolActivity() {
 
         const parts = [];
         if (done.length > MAX_FOOTER_ENTRIES) {
-            const failed = done.filter(call => !call.ok).length;
-            parts.push(`${done.length} tool calls${failed ? `, ${failed} failed` : ''}`);
+            const declined = done.filter(call => call.declined).length;
+            const failed = done.filter(call => !call.ok && !call.declined).length;
+            parts.push([
+                `${done.length} tool calls`,
+                failed ? `${failed} failed` : '',
+                declined ? `${declined} not approved` : ''
+            ].filter(Boolean).join(', '));
         } else {
             for (const call of done) {
+                // A call nobody approved did not fail — it was answered, and
+                // saying so is the difference between a broken server and a
+                // moderator who said no.
+                if (call.declined) {
+                    parts.push(`⛔ ${label(call.server)}·${label(call.tool)} not approved`);
+                    continue;
+                }
                 const time = seconds(call.durationMs);
                 parts.push(`${call.ok ? '' : '⚠️ '}${label(call.server)}·${label(call.tool)}${time ? ` ${time}` : ''}`);
             }
@@ -164,8 +202,9 @@ function createToolActivity() {
         // Whether any tool event has been seen this turn. The transport asks so
         // it only reserves room for a status line once there is one to show.
         get used() { return used; },
-        get calls() { return [...done]; }
+        get calls() { return [...done]; },
+        get unreachableServers() { return [...unreachable]; }
     };
 }
 
-module.exports = { createToolActivity, STATUS_RESERVE };
+module.exports = { createToolActivity, STATUS_RESERVE, toolLabel: label };

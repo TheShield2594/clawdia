@@ -33,6 +33,11 @@ jest.mock('../src/services/ai/mcp/client', () => ({
     }
 }));
 
+const mockGetToolUsage = jest.fn(async () => []);
+jest.mock('../src/services/ai/mcp/usage', () => ({
+    getToolUsage: (...args) => mockGetToolUsage(...args)
+}));
+
 const Guild = require('../src/models/Guild');
 const { logAuditEvent } = require('../src/dashboard/lib/apiHelpers');
 const mcpRouter = require('../src/dashboard/routes/api/mcpServers');
@@ -273,5 +278,131 @@ describe('POST /guild/:id/mcp-servers/:name/test', () => {
         mockListTools.mockRejectedValue(new Error('nope'));
         await api('POST', '/guild/g1/mcp-servers/github/test');
         expect(mockClose).toHaveBeenCalled();
+    });
+});
+
+describe('the approval policy', () => {
+    const stored = {
+        name: 'github',
+        url: 'https://api.githubcopilot.com/mcp/',
+        enabled: true,
+        authorizationToken: 'ghp_good',
+        allowedTools: [],
+        blockedTools: [],
+        confirmTools: []
+    };
+
+    test('a per-connection approval list round-trips through a save', async () => {
+        doc = makeDoc([{ ...stored }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const { status, body } = await api('PUT', '/guild/g1/mcp-servers/github', {
+            url: stored.url,
+            confirmTools: ['create_issue', 'create_issue', 'send_email']
+        });
+
+        expect(status).toBe(200);
+        // Duplicates collapse, the way the allow and block lists already do.
+        expect(doc.ai.mcpServers[0].confirmTools).toEqual(['create_issue', 'send_email']);
+        expect(body.servers[0].confirmTools).toEqual(['create_issue', 'send_email']);
+    });
+
+    test('is refused when it is not a list of names', async () => {
+        doc = makeDoc([{ ...stored }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const { status, body } = await api('PUT', '/guild/g1/mcp-servers/github', {
+            url: stored.url,
+            confirmTools: 'create_issue'
+        });
+
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/confirmTools/);
+    });
+
+    test('the list endpoint reports the guild mode and what the modes are', async () => {
+        doc = makeDoc([{ ...stored }]);
+        doc.ai.mcpConfirm = 'writes';
+        Guild.findOne.mockReturnValue({ lean: async () => doc });
+
+        const { body } = await api('GET', '/guild/g1/mcp-servers');
+
+        expect(body.confirmMode).toBe('writes');
+        expect(body.confirmModes).toEqual(['off', 'destructive', 'writes', 'always']);
+    });
+
+    test('a guild that never set one reports the default, not undefined', async () => {
+        doc = makeDoc([{ ...stored }]);
+        Guild.findOne.mockReturnValue({ lean: async () => doc });
+
+        expect((await api('GET', '/guild/g1/mcp-servers')).body.confirmMode).toBe('off');
+    });
+
+    test('Test says how many of the live tools would need approving', async () => {
+        doc = makeDoc([{ ...stored, blockedTools: ['delete_file'] }]);
+        doc.ai.mcpConfirm = 'destructive';
+        Guild.findOne.mockReturnValue({ lean: async () => doc });
+        mockListTools.mockResolvedValue([
+            { name: 'search', annotations: { readOnlyHint: true } },
+            { name: 'create_issue', annotations: { readOnlyHint: false } },
+            { name: 'delete_file', annotations: { readOnlyHint: false } }
+        ]);
+
+        const { body } = await api('POST', '/guild/g1/mcp-servers/github/test');
+
+        expect(body.enabledCount).toBe(2);
+        // delete_file is blocked, so it is not one of the two that would ask.
+        expect(body.confirmCount).toBe(1);
+        expect(body.message).toMatch(/1 needing approval/);
+        expect(body.toolDetail).toEqual([
+            { name: 'search', enabled: true, confirm: false, annotations: { readOnlyHint: true } },
+            { name: 'create_issue', enabled: true, confirm: true, annotations: { readOnlyHint: false } },
+            { name: 'delete_file', enabled: false, confirm: true, annotations: { readOnlyHint: false } }
+        ]);
+    });
+
+    test('Test still lists the plain tool names it always did', async () => {
+        doc = makeDoc([{ ...stored }]);
+        Guild.findOne.mockReturnValue({ lean: async () => doc });
+        mockListTools.mockResolvedValue([{ name: 'search' }]);
+
+        expect((await api('POST', '/guild/g1/mcp-servers/github/test')).body.tools).toEqual(['search']);
+    });
+});
+
+describe('the activity endpoint', () => {
+    test('answers the ledger for the default window', async () => {
+        mockGetToolUsage.mockResolvedValue([{ server: 'github', calls: 3 }]);
+
+        const { status, body } = await api('GET', '/guild/g1/mcp-servers/usage');
+
+        expect(status).toBe(200);
+        expect(mockGetToolUsage).toHaveBeenCalledWith('g1', 7);
+        expect(body).toEqual({ days: 7, servers: [{ server: 'github', calls: 3 }] });
+    });
+
+    test('takes a window from the query string', async () => {
+        await api('GET', '/guild/g1/mcp-servers/usage?days=30');
+        expect(mockGetToolUsage).toHaveBeenCalledWith('g1', 30);
+    });
+
+    test('clamps a window somebody typed by hand', async () => {
+        await api('GET', '/guild/g1/mcp-servers/usage?days=9999');
+        expect(mockGetToolUsage).toHaveBeenCalledWith('g1', 90);
+
+        await api('GET', '/guild/g1/mcp-servers/usage?days=0');
+        expect(mockGetToolUsage).toHaveBeenLastCalledWith('g1', 1);
+    });
+
+    test('falls back to the default for a window that is not a number', async () => {
+        await api('GET', '/guild/g1/mcp-servers/usage?days=lots');
+        expect(mockGetToolUsage).toHaveBeenCalledWith('g1', 7);
+    });
+
+    test('is not mistaken for a connection named "usage"', async () => {
+        // GET /mcp-servers/usage sits beside DELETE /mcp-servers/:name, so this
+        // is the route ordering staying honest.
+        mockGetToolUsage.mockResolvedValue([]);
+        expect((await api('GET', '/guild/g1/mcp-servers/usage')).status).toBe(200);
     });
 });

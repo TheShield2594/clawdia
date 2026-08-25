@@ -427,3 +427,129 @@ describe('tool events', () => {
         expect(seen.map(e => e.type)).toEqual(['start', 'end']);
     });
 });
+
+describe('confirmation', () => {
+    const WRITE_TOOLS = [
+        { name: 'search', annotations: { readOnlyHint: true } },
+        { name: 'create_issue', annotations: { readOnlyHint: false } }
+    ];
+
+    beforeEach(() => {
+        mockListTools.mockResolvedValue(WRITE_TOOLS);
+    });
+
+    test('carries what each tool says about itself onto the definition', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB], { confirmMode: 'destructive' });
+
+        expect(toolkit.definitions[0]).toMatchObject({
+            toolName: 'search',
+            annotations: { readOnlyHint: true },
+            confirm: false
+        });
+        expect(toolkit.definitions[1]).toMatchObject({
+            toolName: 'create_issue',
+            annotations: { readOnlyHint: false },
+            confirm: true
+        });
+    });
+
+    test('runs a read without asking anybody', async () => {
+        const confirmTool = jest.fn();
+        const toolkit = await prepareMcpToolkit([GITHUB], { confirmMode: 'destructive', confirmTool });
+
+        await toolkit.call('github__search', { q: 'x' });
+        expect(confirmTool).not.toHaveBeenCalled();
+        expect(mockCallTool).toHaveBeenCalled();
+    });
+
+    test('asks before a write, and runs it when the answer is yes', async () => {
+        const confirmTool = jest.fn(async () => ({ approved: true }));
+        const toolkit = await prepareMcpToolkit([GITHUB], { confirmMode: 'destructive', confirmTool });
+
+        const result = await toolkit.call('github__create_issue', { title: 'bug' });
+
+        expect(confirmTool).toHaveBeenCalledWith(expect.objectContaining({
+            server: 'github',
+            tool: 'create_issue',
+            args: { title: 'bug' },
+            annotations: { readOnlyHint: false }
+        }));
+        expect(mockCallTool).toHaveBeenCalledWith('create_issue', { title: 'bug' });
+        expect(result).toBe('ok');
+    });
+
+    test('does not run the tool when the answer is no', async () => {
+        const confirmTool = jest.fn(async () => ({ approved: false }));
+        const toolkit = await prepareMcpToolkit([GITHUB], { confirmMode: 'destructive', confirmTool });
+
+        const result = await toolkit.call('github__create_issue', {});
+
+        expect(mockCallTool).not.toHaveBeenCalled();
+        // The model has to be able to carry on and explain itself, so a refusal
+        // is text it can read rather than an exception that loses the reply.
+        expect(result).toMatch(/declined/i);
+    });
+
+    test('says so differently when nobody answered at all', async () => {
+        const confirmTool = jest.fn(async () => ({ approved: false, timedOut: true }));
+        const toolkit = await prepareMcpToolkit([GITHUB], { confirmMode: 'destructive', confirmTool });
+
+        expect(await toolkit.call('github__create_issue', {})).toMatch(/in time/i);
+        expect(mockCallTool).not.toHaveBeenCalled();
+    });
+
+    test('refuses rather than running when there is nobody to ask', async () => {
+        // A caller with no way to post buttons cannot obtain a confirmation,
+        // and a confirmation that cannot be obtained is not one.
+        const toolkit = await prepareMcpToolkit([GITHUB], { confirmMode: 'destructive' });
+
+        expect(await toolkit.call('github__create_issue', {})).toMatch(/needs a person to approve/i);
+        expect(mockCallTool).not.toHaveBeenCalled();
+    });
+
+    test('treats a prompt that threw as a refusal, not as consent', async () => {
+        const confirmTool = jest.fn(async () => { throw new Error('channel gone'); });
+        const toolkit = await prepareMcpToolkit([GITHUB], { confirmMode: 'destructive', confirmTool });
+
+        expect(await toolkit.call('github__create_issue', {})).toMatch(/declined/i);
+        expect(mockCallTool).not.toHaveBeenCalled();
+    });
+
+    test('announces the wait and reports the refusal as declined, not failed', async () => {
+        const seen = [];
+        const toolkit = await prepareMcpToolkit([GITHUB], {
+            confirmMode: 'destructive',
+            confirmTool: async () => ({ approved: false }),
+            onToolEvent: event => seen.push(event)
+        });
+
+        await toolkit.call('github__create_issue', {});
+
+        expect(seen.map(e => e.type)).toEqual(['confirm', 'end']);
+        expect(seen[1]).toMatchObject({ ok: false, declined: true });
+        // Never started, so the channel is never told a tool is running.
+        expect(seen.some(e => e.type === 'start')).toBe(false);
+    });
+
+    test('a call that was approved reports start, then end', async () => {
+        const seen = [];
+        const toolkit = await prepareMcpToolkit([GITHUB], {
+            confirmMode: 'destructive',
+            confirmTool: async () => ({ approved: true }),
+            onToolEvent: event => seen.push(event)
+        });
+
+        await toolkit.call('github__create_issue', {});
+        expect(seen.map(e => e.type)).toEqual(['confirm', 'start', 'end']);
+        expect(seen[2]).toMatchObject({ ok: true });
+        expect(seen[2]).not.toHaveProperty('declined');
+    });
+
+    test('toolkitFor passes the guild mode and the prompt through', async () => {
+        const confirmTool = jest.fn(async () => ({ approved: true }));
+        const toolkit = await toolkitFor({ mcpServers: [GITHUB], mcpConfirm: 'always', confirmTool });
+
+        await toolkit.call('github__search', {});
+        expect(confirmTool).toHaveBeenCalled();
+    });
+});

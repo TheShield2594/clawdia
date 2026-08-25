@@ -249,6 +249,22 @@ malformed config disables the connector, it never stops the bot from starting.
 - Servers are all dialled at once when a turn starts, and the calls in one round
   run concurrently, up to six at a time. A round costs its slowest call rather
   than the sum, but a server on the far side sees several requests together.
+- **Approval** (Connections → Approval) decides which tool calls stop and wait
+  for someone to click **Run it** in the channel. `off` is the default and runs
+  everything straight away. `destructive` and `writes` both read the annotations
+  a server publishes about its own tools; they differ over a tool that publishes
+  none, which `destructive` lets through and `writes` asks about. `always` asks
+  about every call, reads included. A prompt can be answered by whoever asked or
+  by anyone with Manage Server, and expires unanswered after a minute — which
+  means the tool does not run.
+- Tool annotations come from the server, so the two middle modes are worth what
+  that server is honest about. *Never these tools* and the per-connection
+  *Always ask before these tools* list ask the server nothing; use those where
+  the answer has to be a guarantee.
+- **Activity** (Connections → Activity) is a seven-day rollup per server and
+  tool: calls, failures, refusals, average latency and the last error. Turns
+  where a server could not be reached are counted separately, so a dead
+  connection does not read as an unused one.
 - On the client route the bot opens the connection, so the URL must be a public
   https address — one that resolves into private or reserved space is refused
   at the socket, the same guard the Ollama base URL uses.

@@ -328,6 +328,11 @@ const guildSchema = new Schema({
                 // blockedTools is switched off even if also allowed.
                 allowedTools:       [{ type: String }],
                 blockedTools:       [{ type: String }],
+                // Tools that need a person to approve them before they run,
+                // whatever ai.mcpConfirm is set to. The block list is for tools
+                // nobody may call; this is for the ones that are fine with a
+                // moderator watching and not otherwise.
+                confirmTools:       [{ type: String }],
                 addedBy:            { type: String, default: null },
                 createdAt:          { type: Date, default: Date.now }
             }],
@@ -335,6 +340,16 @@ const guildSchema = new Schema({
                 validator: distinctMcpServerNames,
                 message: 'mcpServers contains duplicate name values.'
             }
+        },
+        // Which MCP tool calls wait for a person to click Approve in the
+        // channel. 'destructive' and 'writes' both read the tool annotations
+        // the server publishes, and differ over a tool that publishes none:
+        // 'destructive' believes it, 'writes' asks anyway. See
+        // CONFIRM_MODES in src/config/mcpServers.js.
+        mcpConfirm: {
+            type: String,
+            enum: ['off', 'destructive', 'writes', 'always'],
+            default: 'off'
         },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
         actionsEnabled: { type: Boolean, default: false },

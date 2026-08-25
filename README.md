@@ -350,6 +350,12 @@ short summary of what ran, how long it took and anything that failed or could
 not be reached — so a slow answer is legible and a server that is down is
 visible rather than silently making the model wrong.
 
+Tools that write something can be made to wait: the Approval setting posts
+**Run it** / **Cancel** in the channel for a tool call and does not run it until
+the person who asked, or anyone who can manage the server, says so. The
+Connections tab also keeps a seven-day rollup of what each connection has been
+doing — calls, failures, refusals, latency and the last error.
+
 **From the dashboard** (AI → 🔌 Connections): pick a service or paste any https
 MCP endpoint, add a token, and optionally list the tools the model may or may
 not call. GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe come as

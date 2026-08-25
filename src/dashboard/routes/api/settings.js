@@ -4,6 +4,7 @@ const Guild = require('../../../models/Guild');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
+const { CONFIRM_MODES } = require('../../../config/mcpServers');
 
 // Top-level Guild schema keys that the dashboard is allowed to update.
 // This whitelist prevents prototype pollution (__proto__, constructor, etc.)
@@ -261,15 +262,39 @@ function validateDynamicPricingUpdate(updates) {
 // private address. Empty and null mean "use the operator's endpoint" and are
 // left alone. Where a *hostname* actually resolves to is settled when the
 // request is made: DNS at save time proves nothing about DNS an hour later.
+// `ai.mcpConfirm` decides which MCP tool calls stop and wait for a person, so a
+// value the enum does not know would be a policy nobody chose. Mongoose would
+// reject it on save; catching it here is what turns that into a message the
+// form can show against the field.
+function validateMcpConfirm(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || !CONFIRM_MODES.includes(value)) {
+        return `ai.mcpConfirm must be one of: ${CONFIRM_MODES.join(', ')}`;
+    }
+    return null;
+}
+
 function validateAiUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
+        const isWholeAi = key === 'ai' && value && typeof value === 'object';
+
         let baseUrl;
         if (key === 'ai.ollamaBaseUrl') baseUrl = value;
-        else if (key === 'ai' && value && typeof value === 'object') baseUrl = value.ollamaBaseUrl;
-        else continue;
+        else if (isWholeAi) baseUrl = value.ollamaBaseUrl;
 
-        const error = validateOllamaBaseUrl(baseUrl);
-        if (error) return error;
+        if (baseUrl !== undefined) {
+            const error = validateOllamaBaseUrl(baseUrl);
+            if (error) return error;
+        }
+
+        let confirm;
+        if (key === 'ai.mcpConfirm') confirm = value;
+        else if (isWholeAi) confirm = value.mcpConfirm;
+
+        if (confirm !== undefined) {
+            const error = validateMcpConfirm(confirm);
+            if (error) return error;
+        }
     }
     return null;
 }

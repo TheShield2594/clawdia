@@ -25,6 +25,11 @@ jest.mock('../src/services/ai/history', () => ({
     clearHistory: jest.fn(async () => {})
 }));
 
+const mockRecordToolCalls = jest.fn(async () => {});
+jest.mock('../src/services/ai/mcp/usage', () => ({
+    recordToolCalls: (...args) => mockRecordToolCalls(...args)
+}));
+
 jest.mock('../src/services/ai/providers', () => ({
     providers: new Map([['mock', { name: 'mock', label: 'Mock' }]]),
     mcpMode: () => 'client'
@@ -219,5 +224,48 @@ describe('without streaming', () => {
         await handleAIChat(message, { ...SETTINGS, streaming: false });
 
         expect(sent[0].content).toBe('Three open PRs.\n-# 🔧 github·search_repositories 1.2s');
+    });
+});
+
+
+describe('the usage ledger', () => {
+    test('records what the turn\'s tools did, after the reply is sent', async () => {
+        mockStream.mockImplementation(async function* (args) {
+            start(args);
+            end(args);
+            yield 'Three open PRs.';
+        });
+
+        const { message } = fakeMessage();
+        await handleAIChat(message, SETTINGS);
+
+        expect(mockRecordToolCalls).toHaveBeenCalledWith(
+            'g1',
+            [expect.objectContaining({ server: 'github', tool: 'search_repositories', ok: true })],
+            []
+        );
+    });
+
+    test('records a server that could not be reached', async () => {
+        mockStream.mockImplementation(async function* (args) {
+            args.onToolEvent({ type: 'unavailable', server: 'github', error: 'HTTP 401' });
+            yield 'I could not check.';
+        });
+
+        const { message } = fakeMessage();
+        await handleAIChat(message, SETTINGS);
+
+        expect(mockRecordToolCalls).toHaveBeenCalledWith('g1', [], ['github']);
+    });
+
+    test('writes nothing at all for a turn that used no tools', async () => {
+        mockStream.mockImplementation(async function* () {
+            yield 'Three open PRs.';
+        });
+
+        const { message } = fakeMessage();
+        await handleAIChat(message, SETTINGS);
+
+        expect(mockRecordToolCalls).not.toHaveBeenCalled();
     });
 });

@@ -17,7 +17,8 @@ describe('validateServerInput', () => {
             url: 'https://api.githubcopilot.com/mcp/',
             enabled: true,
             allowedTools: [],
-            blockedTools: []
+            blockedTools: [],
+            confirmTools: []
         });
     });
 

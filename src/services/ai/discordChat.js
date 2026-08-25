@@ -7,6 +7,8 @@ const { loadHistory, appendHistory, clearHistory } = require('./history');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
 const { buildActionsAddendum, extractAction, executeAction } = require('./actions');
 const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
+const { createToolConfirmer } = require('./mcp/approval');
+const { recordToolCalls } = require('./mcp/usage');
 
 // Discord transport for the AI chat loop: rate limiting, prompt assembly,
 // message streaming/chunking, and post-processing. Everything provider-shaped
@@ -78,7 +80,7 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
 }
 
 async function handleAIChat(message, aiSettings) {
-    const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(aiSettings);
+    const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers, mcpConfirm, rateLimit } = resolveProviderConfig(aiSettings);
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
 
@@ -162,6 +164,10 @@ async function handleAIChat(message, aiSettings) {
             provider, model, apiKey, baseUrl, systemPrompt, history,
             prompt: content, temperature, maxTokens, mcpServers,
             guildId: message.guild.id, usageOut, onToolEvent: activity.onEvent,
+            // The guild's policy, and the buttons that answer it. The toolkit
+            // holds the call until this resolves, so a tool that writes
+            // something does not run until somebody in the channel says so.
+            mcpConfirm, confirmTool: createToolConfirmer(message),
             // Who the request is for, so the limit is enforced where the spend
             // happens rather than only in the peek above.
             rateLimit, userId: message.author.id, channelId: message.channel.id
@@ -312,6 +318,12 @@ async function handleAIChat(message, aiSettings) {
                 }
             }
             await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
+        }
+
+        // After the reply, never before it: the ledger is for the dashboard, and
+        // nothing about it is worth adding to the wait the user is already in.
+        if (activity.used) {
+            await recordToolCalls(message.guild.id, activity.calls, activity.unreachableServers);
         }
 
         if (fullResponse.trim()) {

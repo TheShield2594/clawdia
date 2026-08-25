@@ -585,6 +585,12 @@ body {
     line-height: 1.5;
 }
 .mcp-note code { font-size: 0.82rem; }
+/* Sub-sections inside the Connections tab: a heading that needs air above it,
+   a heading's quiet qualifier, and the activity list's loading bar. */
+.mcp-section-head { margin-top: 1.25rem; }
+.mcp-section-note { font-weight: 400; font-size: 0.82rem; color: var(--text-mute); }
+.mcp-section-actions { margin-bottom: 1.25rem; }
+.mcp-usage-skeleton { width: 60%; }
 .mcp-note-warn {
     background: var(--warn-bg, #fffbe6);
     border-color: var(--warn-border, #ffe58f);

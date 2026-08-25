@@ -1,6 +1,12 @@
 'use strict';
 
-const { resolveMcpServers, isToolEnabled } = require('../../../config/mcpServers');
+const {
+    resolveMcpServers,
+    isToolEnabled,
+    toolAnnotations,
+    needsConfirmation,
+    DEFAULT_CONFIRM_MODE
+} = require('../../../config/mcpServers');
 const { McpHttpClient, McpError } = require('./client');
 
 /**
@@ -257,9 +263,16 @@ function renderResult({ content, structuredContent, isError }) {
  * @param {Array} guildServers the guild's stored mcpServers documents
  * @param {object} [options]
  * @param {Function} [options.onToolEvent] called with {type,...} as tools run
+ * @param {string} [options.confirmMode] which tools need a person's approval
+ * @param {Function} [options.confirmTool] asks for that approval; a toolkit
+ *        built without one refuses every call that would need it
  * @returns {Promise<null|{definitions: Array, servers: string[], call: Function}>}
  */
-async function prepareMcpToolkit(guildServers = [], { onToolEvent } = {}) {
+async function prepareMcpToolkit(guildServers = [], {
+    onToolEvent,
+    confirmMode = DEFAULT_CONFIRM_MODE,
+    confirmTool
+} = {}) {
     const servers = resolveMcpServers(guildServers);
     if (!servers.length) return null;
 
@@ -300,20 +313,64 @@ async function prepareMcpToolkit(guildServers = [], { onToolEvent } = {}) {
                 break;
             }
             const name = qualifyName(server.name, tool.name, used);
+            const annotations = toolAnnotations(tool);
+            const confirm = needsConfirmation(confirmMode, server.toolset, tool);
             used.add(name);
-            index.set(name, { server, entry, toolName: tool.name });
+            index.set(name, { server, entry, toolName: tool.name, annotations, confirm });
             definitions.push({
                 name,
                 serverName: server.name,
                 toolName: tool.name,
                 description: (tool.description || `${tool.name} on ${server.name}`).slice(0, 1024),
-                inputSchema: schemaOf(tool)
+                inputSchema: schemaOf(tool),
+                // What the server says this tool does, and what the guild's
+                // policy makes of that. Providers ignore both — they matter to
+                // the transport, which is where a person can be asked.
+                annotations,
+                confirm
             });
         }
         if (definitions.length >= MAX_TOOLS) break;
     }
 
     if (!definitions.length) return null;
+
+    /**
+     * Put one call to a person and turn their answer into something the model
+     * can read.
+     *
+     * Every outcome is a refusal the model can work around rather than an
+     * exception, including the two that are not really answers: a caller that
+     * cannot ask anybody (a command parsing the reply as JSON, say) and an
+     * approver who never clicked. Both land on "not approved", because a
+     * confirmation that cannot be obtained is not a confirmation.
+     */
+    async function askApproval(describe, target, args) {
+        if (typeof confirmTool !== 'function') {
+            console.warn(`[MCP] "${describe.server}" tool "${describe.tool}" needs confirmation, but this request cannot ask anyone`);
+            return {
+                approved: false,
+                message: 'This tool needs a person to approve it, and this conversation cannot ask for that. Tell the user to run it from a channel where the bot can post the approval buttons.'
+            };
+        }
+
+        let decision;
+        try {
+            decision = await confirmTool({ ...describe, args, annotations: target.annotations });
+        } catch (err) {
+            // A transport that fell over mid-prompt has not approved anything.
+            console.warn(`[MCP] approval for "${describe.tool}" failed: ${err.message}`);
+            decision = null;
+        }
+
+        if (decision?.approved) return { approved: true };
+        return {
+            approved: false,
+            message: decision?.timedOut
+                ? 'Nobody approved this tool call in time, so it was not run. Say so, and offer to try again.'
+                : 'The user declined to run this tool. Do not try it again — carry on without it, or ask what they would like instead.'
+        };
+    }
 
     let callId = 0;
 
@@ -333,12 +390,22 @@ async function prepareMcpToolkit(guildServers = [], { onToolEvent } = {}) {
         const id = ++callId;
         const started = Date.now();
         const { name: server } = target.server;
-        emit({ type: 'start', id, server, tool: target.toolName, name });
+        const describe = { id, server, tool: target.toolName, name };
 
-        const finish = (ok, error) => emit({
-            type: 'end', id, server, tool: target.toolName, name,
-            durationMs: Date.now() - started, ok, ...(error ? { error } : {})
+        const finish = (ok, extra) => emit({
+            ...describe, type: 'end', durationMs: Date.now() - started, ok, ...extra
         });
+
+        if (target.confirm) {
+            emit({ ...describe, type: 'confirm', annotations: target.annotations });
+            const decision = await askApproval(describe, target, args);
+            if (!decision.approved) {
+                finish(false, { declined: true });
+                return decision.message;
+            }
+        }
+
+        emit({ ...describe, type: 'start' });
 
         try {
             const result = await withSession(target.entry, target.server, client =>
@@ -349,7 +416,7 @@ async function prepareMcpToolkit(guildServers = [], { onToolEvent } = {}) {
             return renderResult(result);
         } catch (err) {
             console.warn(`[MCP] "${server}" tool "${target.toolName}" failed: ${err.message}`);
-            finish(false, err.message);
+            finish(false, { error: err.message });
             return `The tool could not be run: ${err.message}`;
         }
     }
@@ -363,10 +430,10 @@ async function prepareMcpToolkit(guildServers = [], { onToolEvent } = {}) {
  * `useMcp` is the caller's switch — commands that parse the reply as JSON pass
  * it false — and is checked here so no provider has to remember to.
  */
-async function toolkitFor({ useMcp = true, mcpServers, onToolEvent } = {}) {
+async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool } = {}) {
     if (useMcp === false) return null;
     try {
-        return await prepareMcpToolkit(mcpServers, { onToolEvent });
+        return await prepareMcpToolkit(mcpServers, { onToolEvent, confirmMode: mcpConfirm, confirmTool });
     } catch (err) {
         // Discovery is best-effort in every direction: an unreadable config or
         // a bad stored record must not cost the user their answer.

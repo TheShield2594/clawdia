@@ -77,6 +77,30 @@ change, and a script reading them needs updating. See
   round costs its slowest call rather than the sum of them. Names coming back
   from a server are stripped to plain text before they go in a message, so
   nothing a server calls a tool can open markup or ping a role.
+- **A tool that writes something can be made to wait for a person.** The block
+  list covers tools nobody should ever call; there was nothing for the ones a
+  guild wants available but not unattended — filing an issue, sending a mail,
+  moving a calendar event. Connections gained an approval setting, and a tool it
+  applies to posts **Run it** / **Cancel** in the channel and does not run until
+  the person who asked, or anyone who can manage the server, clicks. Nobody
+  answering within a minute is the same answer as Cancel, and either way the
+  model is told in words it can carry on from rather than left with a tool
+  result that never arrived. The two middle modes read the annotations a server
+  publishes about its own tools, so they are worth exactly what the server is
+  honest about — they differ over a tool that annotates nothing, which
+  `destructive` believes and `writes` asks about anyway. The per-connection
+  *Always ask before these tools* list asks the server nothing and is the one to
+  use when the answer has to be a guarantee. The default is off, so a guild that
+  sets nothing behaves as it did.
+- **The Connections tab says what the connections have been doing.** The Test
+  button answers "does this work right now", which is the half that was never
+  the problem: a server that passed its test and has been timing out on every
+  turn since looked identical from the dashboard. Tool calls are now kept as a
+  daily per-server, per-tool rollup — calls, failures, refusals, average latency
+  and the last error a server gave — and shown under the connection list, with
+  turns where a server could not be reached counted separately from turns where
+  nobody used it. Test also reports what each tool says about itself and how
+  many of them the guild's approval setting would stop.
 - **Fishing tournaments are indexed on what they are looked up by** (#585). The
   collection was indexed on `guildId` alone while every query in
   `tournamentService` pairs the guild with a status — the read before each

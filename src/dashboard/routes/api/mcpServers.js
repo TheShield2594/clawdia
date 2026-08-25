@@ -11,13 +11,22 @@ const {
     guildServersAllowed,
     getMcpServers,
     resolveMcpServers,
-    isToolEnabled
+    isToolEnabled,
+    needsConfirmation,
+    toolAnnotations,
+    CONFIRM_MODES,
+    DEFAULT_CONFIRM_MODE
 } = require('../../../config/mcpServers');
 const { McpHttpClient } = require('../../../services/ai/mcp/client');
+const { getToolUsage } = require('../../../services/ai/mcp/usage');
 const { providers, mcpMode } = require('../../../services/ai/providers');
 
 const MAX_URL_LENGTH = 2048;
 const MAX_TOOL_NAME_LENGTH = 128;
+
+// A week is what makes "is this connection healthy" answerable without the
+// panel having to offer a date picker for a question nobody asks that way.
+const DEFAULT_USAGE_DAYS = 7;
 
 // Services offered in the dashboard as prefill, so an admin does not have to
 // hunt for an endpoint or work out what kind of credential it wants.
@@ -134,6 +143,7 @@ function publicServer(server) {
         hasToken: Boolean(server.authorizationToken),
         allowedTools: server.allowedTools || [],
         blockedTools: server.blockedTools || [],
+        confirmTools: server.confirmTools || [],
         addedBy: server.addedBy || null,
         createdAt: server.createdAt || null
     };
@@ -185,6 +195,8 @@ function validateServerInput(body, name) {
     if (allowed.error) return { error: allowed.error };
     const blocked = validateToolNames(body.blockedTools, 'blockedTools');
     if (blocked.error) return { error: blocked.error };
+    const confirm = validateToolNames(body.confirmTools, 'confirmTools');
+    if (confirm.error) return { error: confirm.error };
 
     if (body.authorizationToken !== undefined && body.authorizationToken !== null) {
         if (typeof body.authorizationToken !== 'string') return { error: 'authorizationToken must be a string' };
@@ -197,7 +209,8 @@ function validateServerInput(body, name) {
             url: rawUrl,
             enabled: body.enabled !== false,
             allowedTools: allowed.value,
-            blockedTools: blocked.value
+            blockedTools: blocked.value,
+            confirmTools: confirm.value
         }
     };
 }
@@ -222,6 +235,10 @@ router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (re
             maxServers: MAX_GUILD_SERVERS,
             provider,
             providerLabel: providers.get(provider)?.label || provider,
+            // The guild's approval policy, so the panel can say what each
+            // connection's tools will actually do without a second request.
+            confirmMode: guildSettings?.ai?.mcpConfirm || DEFAULT_CONFIRM_MODE,
+            confirmModes: CONFIRM_MODES,
             // 'native' (the provider's own API takes the servers), 'client'
             // (the bot lists and calls the tools itself) or false. The panel
             // only has to warn when it is false.
@@ -274,6 +291,7 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             existing.enabled = validated.value.enabled;
             existing.allowedTools = validated.value.allowedTools;
             existing.blockedTools = validated.value.blockedTools;
+            existing.confirmTools = validated.value.confirmTools;
             if (token !== undefined) existing.authorizationToken = token;
         } else {
             servers.push({
@@ -352,18 +370,33 @@ router.post('/guild/:guildId/mcp-servers/:name/test', checkAuth, checkGuildAcces
             label: name
         });
         const tools = await client.listTools();
-        const enabled = tools.filter(tool => isToolEnabled(resolved.toolset, tool.name)).length;
+        const mode = guildSettings?.ai?.mcpConfirm || DEFAULT_CONFIRM_MODE;
+        const live = tools.filter(tool => isToolEnabled(resolved.toolset, tool.name));
+        const confirming = live.filter(tool => needsConfirmation(mode, resolved.toolset, tool));
 
         const serverName = client.serverInfo?.name;
         res.json({
             success: true,
             message: `Connected${serverName ? ` to ${serverName}` : ''} — ${tools.length} tool${tools.length === 1 ? '' : 's'} offered, ` +
-                `${enabled} enabled by your filters.`,
+                `${live.length} enabled by your filters` +
+                (confirming.length ? `, ${confirming.length} needing approval.` : '.'),
             toolCount: tools.length,
-            enabledCount: enabled,
+            enabledCount: live.length,
+            confirmCount: confirming.length,
+            confirmMode: mode,
             // Named so an admin filling in the allow/block lists can copy them
             // instead of guessing at what the server calls things.
-            tools: tools.slice(0, MAX_TOOL_NAMES).map(tool => tool.name)
+            tools: tools.slice(0, MAX_TOOL_NAMES).map(tool => tool.name),
+            // The same tools with what each one says about itself and what the
+            // guild's policy makes of it. Alongside `tools` rather than
+            // replacing it, so anything already reading the plain name list
+            // keeps working.
+            toolDetail: tools.slice(0, MAX_TOOL_NAMES).map(tool => ({
+                name: tool.name,
+                enabled: isToolEnabled(resolved.toolset, tool.name),
+                confirm: needsConfirmation(mode, resolved.toolset, tool),
+                annotations: toolAnnotations(tool)
+            }))
         });
     } catch (error) {
         // A failed test is an expected outcome, not a server fault: report what
@@ -372,6 +405,27 @@ router.post('/guild/:guildId/mcp-servers/:name/test', checkAuth, checkGuildAcces
         res.json({ success: false, message: error?.message || 'Unknown error' });
     } finally {
         if (client) client.close().catch(() => {});
+    }
+});
+
+// What the guild's MCP connections have actually been doing.
+//
+// The Test button answers "does this work right now"; this answers the two
+// questions it cannot — is anything using this connection, and has it been
+// failing when nobody was looking. A server that went down last Tuesday shows
+// up here as a run of unreachable turns rather than as a console warning on a
+// host the admin cannot read.
+router.get('/guild/:guildId/mcp-servers/usage', checkAuth, checkGuildAccess, async (req, res) => {
+    const { guildId } = req.params;
+
+    const requested = Number.parseInt(req.query.days, 10);
+    const days = Number.isFinite(requested) ? Math.min(90, Math.max(1, requested)) : DEFAULT_USAGE_DAYS;
+
+    try {
+        res.json({ days, servers: await getToolUsage(guildId, days) });
+    } catch (error) {
+        console.error('MCP usage error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 

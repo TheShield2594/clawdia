@@ -1,3 +1,4 @@
+const { DEFAULT_CONFIRM_MODE } = require('../../config/mcpServers');
 const { providers, getProvider, DEFAULT_MODELS } = require('./providers');
 const { recordUsage } = require('./usage');
 const { enforceRateLimit } = require('./rateLimit');
@@ -18,6 +19,10 @@ function resolveProviderConfig(aiSettings) {
     // Carried through so every caller that spreads this config keeps the
     // guild's MCP servers attached without having to know they exist.
     const mcpServers = Array.isArray(aiSettings.mcpServers) ? aiSettings.mcpServers : [];
+    // Which of those servers' tools need a person to approve them. Rides along
+    // for the same reason: a transport that can ask should not have to know the
+    // setting exists, only how to answer when the toolkit asks it to.
+    const mcpConfirm = aiSettings.mcpConfirm || DEFAULT_CONFIRM_MODE;
 
     // Same idea for the guild's AI limits: they ride along with the config so
     // getCompletion/streamCompletion can enforce them centrally, instead of
@@ -37,6 +42,7 @@ function resolveProviderConfig(aiSettings) {
         apiKey: auth.apiKey ?? null,
         baseUrl: auth.baseUrl ?? null,
         mcpServers,
+        mcpConfirm,
         rateLimit
     };
 }

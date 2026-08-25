@@ -304,6 +304,26 @@
 
                         <div id="mcp-global-list"></div>
 
+                        <div class="panel-head mcp-section-head"><h3>Approval</h3></div>
+                        <div class="field">
+                            <label class="field-label" for="mcp-confirm">Ask before a tool runs</label>
+                            <select id="mcp-confirm">
+                                <option value="off">Never — run every tool straight away</option>
+                                <option value="destructive">Tools the server calls destructive</option>
+                                <option value="writes">Anything not marked read-only</option>
+                                <option value="always">Every tool call, including reads</option>
+                            </select>
+                            <small>A tool that needs approval posts <strong>Run it</strong> / <strong>Cancel</strong> buttons in the channel, answerable by whoever asked or anyone who can manage this server. Nobody answers within a minute and it does not run. The two middle options read what each server says about its own tools, so they are only as good as the server is honest — the <em>Never these tools</em> list and the per-connection approval list below do not ask the server anything.</small>
+                        </div>
+                        <div class="actions-row mcp-section-actions">
+                            <button class="btn btn-primary" data-action="mcp-save-confirm">Save approval setting</button>
+                        </div>
+
+                        <div class="panel-head mcp-section-head"><h3>Activity <span class="mcp-section-note">(last 7 days)</span></h3></div>
+                        <div id="mcp-usage">
+                            <div class="skel-bar mcp-usage-skeleton"></div>
+                        </div>
+
                         <div class="panel-head" style="margin-top:1.25rem"><h3 id="mcp-form-title">Add a connection</h3></div>
                         <div class="field">
                             <label class="field-label" for="mcp-preset">Service</label>
@@ -340,6 +360,11 @@
                                 <input type="text" id="mcp-blocked" placeholder="delete_file">
                                 <small>Comma-separated. Wins over the allow list. Worth filling in for anything destructive.</small>
                             </div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="mcp-confirm-tools">Always ask before these tools <span class="mcp-section-note">(optional)</span></label>
+                            <input type="text" id="mcp-confirm-tools" placeholder="create_issue, send_email">
+                            <small>Comma-separated. These wait for someone to click <strong>Run it</strong> whatever the approval setting above says — the list to use when a tool has to be available but never unattended.</small>
                         </div>
                         <label class="toggle">
                             <span class="toggle-text"><strong>Enabled</strong><span>Offer this server's tools to the model</span></span>
