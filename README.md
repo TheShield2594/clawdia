@@ -114,6 +114,7 @@ npm run lint:fix               # …and apply what it can fix
 npm run format -- <paths>      # Prettier, on the files you name
 npm run docs:commands          # Regenerate README's command list from the code
 npm run docs:api               # Regenerate API_REFERENCE's endpoint tables from the routers
+npm run docs:items             # Regenerate docs/ECONOMY_ITEMS.md from the economy data
 ```
 
 CI runs the tests and the lint, and the Docker image is only published when
@@ -124,8 +125,11 @@ set the bot loads — the same catalog `/help` renders. A test compares the two,
 so adding or renaming a command turns `npm test` red until the block is
 regenerated. `npm run docs:api` does the same for the endpoint tables in
 [API_REFERENCE.md](API_REFERENCE.md), reading them off the routers in
-`src/dashboard/routes/api/`; [docs/EXTENDING.md](docs/EXTENDING.md) is the guide
-to adding a command, a route or a model in the first place.
+`src/dashboard/routes/api/`, and `npm run docs:items` for
+[docs/ECONOMY_ITEMS.md](docs/ECONOMY_ITEMS.md) — every item, catch, material and
+shop entry with the id the code stores it under, which is the list item art is
+named from. [docs/EXTENDING.md](docs/EXTENDING.md) is the guide to adding a
+command, a route or a model in the first place.
 
 `npm run format` takes explicit paths on purpose. Prettier's settings match the
 style the tree is already written in, but it has never been applied wholesale —
