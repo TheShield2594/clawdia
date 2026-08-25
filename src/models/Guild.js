@@ -351,6 +351,18 @@ const guildSchema = new Schema({
             enum: ['off', 'destructive', 'writes', 'always'],
             default: 'off'
         },
+        // How a guild on Claude reaches its MCP servers: Anthropic's connector
+        // opens the connections on their side and the bot never sees the calls,
+        // so approvals, the tool line in the reply and the activity ledger do
+        // not apply on that route. 'auto' takes the connector unless the guild
+        // has asked for something only the client route can do. See MCP_ROUTES
+        // in src/config/mcpServers.js. Ignored by every other provider, which
+        // has only ever had the one route.
+        mcpRoute: {
+            type: String,
+            enum: ['auto', 'connector', 'client'],
+            default: 'auto'
+        },
         // Allow the AI to execute in-channel actions (polls, reminders, mod suggestions)
         actionsEnabled: { type: Boolean, default: false },
         dailyDigest: {

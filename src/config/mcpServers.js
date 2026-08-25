@@ -41,6 +41,27 @@ const MAX_TOKEN_LENGTH = 4096;
 const CONFIRM_MODES = ['off', 'destructive', 'writes', 'always'];
 const DEFAULT_CONFIRM_MODE = 'off';
 
+/**
+ * How a guild on Claude reaches its MCP servers.
+ *
+ * Anthropic is the one provider whose API takes the server list itself and
+ * opens the connections on their side, which is cheaper — no tool loop runs
+ * here at all — and blind: the bot never sees the calls, so nothing it does
+ * with them applies. That is approval prompts, the tool line in the reply, the
+ * per-tool activity ledger and the result caps, all of which exist because the
+ * bot is the one making the call.
+ *
+ *   auto       the connector, unless something needs the bot to see the calls
+ *   connector  always Anthropic's, whatever that costs in features
+ *   client     always the bot's own MCP client, the way every other provider
+ *              already works
+ *
+ * `auto` is the default because the alternative is a guild turning on approvals
+ * and losing them by changing a dropdown on a different tab.
+ */
+const MCP_ROUTES = ['auto', 'connector', 'client'];
+const DEFAULT_MCP_ROUTE = 'auto';
+
 let cache = null;
 
 function configPath() {
@@ -386,6 +407,21 @@ function resolveMcpServers(guildServers = []) {
 }
 
 /**
+ * Whether this guild's policy would stop any tool call to ask a person.
+ *
+ * What `auto` turns on the client path for. A mode of anything but off could
+ * catch a tool, and a named tool catches itself whatever the mode is — neither
+ * can be settled without listing the servers' tools, so this deliberately
+ * over-answers: "might ask", not "will ask". Being on the client path when
+ * nothing ends up needing approval costs a tool loop; being on the connector
+ * when something did would mean the tool ran anyway.
+ */
+function requiresApproval(mode, guildServers = []) {
+    if (typeof mode === 'string' && mode !== 'off' && CONFIRM_MODES.includes(mode)) return true;
+    return resolveMcpServers(guildServers).some(server => server.toolset?.confirm_tools?.length);
+}
+
+/**
  * Request fragment for the Anthropic Messages API, or null when no servers
  * apply. `tools` is merged with (not substituted for) any tools the caller
  * already has — every server in mcp_servers must be referenced by exactly one
@@ -409,7 +445,10 @@ module.exports = {
     NAME_PATTERN,
     CONFIRM_MODES,
     DEFAULT_CONFIRM_MODE,
+    MCP_ROUTES,
+    DEFAULT_MCP_ROUTE,
     guildServersAllowed,
+    requiresApproval,
     isToolEnabled,
     toolAnnotations,
     needsConfirmation,

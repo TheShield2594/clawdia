@@ -591,6 +591,9 @@ body {
 .mcp-section-note { font-weight: 400; font-size: 0.82rem; color: var(--text-mute); }
 .mcp-section-actions { margin-bottom: 1.25rem; }
 .mcp-usage-skeleton { width: 60%; }
+/* The route controls only mean anything on Claude, so the panel shows them
+   when the provider is Anthropic and hides them otherwise. */
+.mcp-hidden { display: none; }
 .mcp-note-warn {
     background: var(--warn-bg, #fffbe6);
     border-color: var(--warn-border, #ffe58f);

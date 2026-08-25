@@ -101,6 +101,20 @@ change, and a script reading them needs updating. See
   turns where a server could not be reached counted separately from turns where
   nobody used it. Test also reports what each tool says about itself and how
   many of them the guild's approval setting would stop.
+- **Claude can use the bot's MCP client instead of Anthropic's connector.**
+  Anthropic is the one provider whose API takes the server list itself and opens
+  the connections on their side. That is cheaper — no tool loop runs in the bot
+  at all — and it is blind: the bot never sees the calls, so everything the bot
+  does with a call is missing. Approval prompts, the tool line in the reply, the
+  activity ledger and the result caps all exist because the bot is the one
+  making the call, and on the connector none of them can. A guild that turned
+  approvals on and then picked Claude in the Chat tab would have lost them
+  without being told. Connections gained a route setting, defaulting to
+  automatic: Anthropic's connector, unless the guild has asked for something
+  only the client route can do, in which case the same tool loop every other
+  provider uses runs against the same servers. `connector` and `client` are
+  there to override that either way, and the panel says which one automatic
+  currently resolves to rather than leaving an admin to work it out.
 - **Fishing tournaments are indexed on what they are looked up by** (#585). The
   collection was indexed on `guildId` alone while every query in
   `tournamentService` pairs the guild with a status — the read before each

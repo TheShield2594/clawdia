@@ -993,7 +993,8 @@ async function saveSettings(section) {
             // Lives on the Connections tab but belongs to the same ai document,
             // so it saves with everything else rather than needing its own
             // endpoint. Absent when the tab has not been opened this session.
-            ...(document.getElementById('mcp-confirm') ? { 'ai.mcpConfirm': document.getElementById('mcp-confirm').value } : {})
+            ...(document.getElementById('mcp-confirm') ? { 'ai.mcpConfirm': document.getElementById('mcp-confirm').value } : {}),
+            ...(document.getElementById('mcp-route') ? { 'ai.mcpRoute': document.getElementById('mcp-route').value } : {})
         };
     } else if (section === 'tempvoice') {
         data = {
@@ -2818,6 +2819,9 @@ var _mcpEditing = null;
 // reaches MCP servers, so the note below the heading can answer for whatever is
 // selected in the Chat tab right now, not only for what was saved.
 var _mcpProviderSupport = {};
+// Which route a Claude request would take right now. 'auto' is a question, not
+// an answer, so the panel is told both.
+var _mcpEffectiveRoute = null;
 
 function mcpEl(id) { return document.getElementById(id); }
 
@@ -2835,6 +2839,8 @@ async function loadMcpServers(force) {
         _mcpMaxServers = data.maxServers || 10;
         _mcpProviderSupport = data.providerSupport || {};
         if (mcpEl('mcp-confirm') && data.confirmMode) mcpEl('mcp-confirm').value = data.confirmMode;
+        if (mcpEl('mcp-route') && data.mcpRoute) mcpEl('mcp-route').value = data.mcpRoute;
+        _mcpEffectiveRoute = data.effectiveRoute || null;
         renderMcpPresets();
         renderMcpServers(data.provider);
         loadMcpUsage();
@@ -2919,8 +2925,32 @@ function renderMcpProviderNote(provider) {
     }
 }
 
+// The route only means anything on Claude: every other provider has always had
+// exactly one way to reach a server.
+function renderMcpRoute(provider) {
+    const selected = provider || (mcpEl('ai-provider') ? mcpEl('ai-provider').value : null);
+    const applies = selected === 'anthropic';
+
+    ['mcp-route-head', 'mcp-route-field'].forEach(function(id) {
+        const el = mcpEl(id);
+        if (el) el.classList.toggle('mcp-hidden', !applies);
+    });
+
+    const hint = mcpEl('mcp-route-hint');
+    const select = mcpEl('mcp-route');
+    if (!applies || !hint || !select) return;
+
+    const base = hint.dataset.base || hint.textContent;
+    hint.dataset.base = base;
+    hint.textContent = select.value === 'auto' && _mcpEffectiveRoute
+        ? base + ' Right now automatic resolves to ' +
+            (_mcpEffectiveRoute === 'client' ? "Clawdia's own client." : "Anthropic's connector.")
+        : base;
+}
+
 function renderMcpServers(provider) {
     renderMcpProviderNote(provider);
+    renderMcpRoute(provider);
     const disabledWarn = mcpEl('mcp-disabled-warning');
     if (disabledWarn) disabledWarn.style.display = _mcpEditable ? 'none' : '';
     updateMcpFormState();

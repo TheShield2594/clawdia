@@ -13,8 +13,11 @@ const { validateAiUpdate } = require('../src/dashboard/routes/api/settings');
 const {
     needsConfirmation,
     toolAnnotations,
+    requiresApproval,
     CONFIRM_MODES,
     DEFAULT_CONFIRM_MODE,
+    MCP_ROUTES,
+    DEFAULT_MCP_ROUTE,
     resolveMcpServers,
     buildAnthropicMcpParams
 } = require('../src/config/mcpServers');
@@ -196,5 +199,58 @@ describe('what the settings endpoint accepts', () => {
         // break if the second check had replaced the first.
         expect(validateAiUpdate({ ai: { mcpConfirm: 'off', ollamaBaseUrl: 'file:///etc/passwd' } }))
             .toMatch(/ollamaBaseUrl/);
+    });
+});
+
+describe('whether anything might stop to ask', () => {
+    // What the `auto` route reads to decide that a Claude request has to go
+    // through the bot's own client rather than Anthropic's connector.
+    const plain = { name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true };
+    const withList = { ...plain, confirmTools: ['create_issue'] };
+
+    test('no, for a guild that set nothing', () => {
+        expect(requiresApproval(undefined, [plain])).toBe(false);
+        expect(requiresApproval('off', [plain])).toBe(false);
+    });
+
+    test('yes, for any mode that is not off', () => {
+        for (const mode of CONFIRM_MODES.filter(m => m !== 'off')) {
+            expect(requiresApproval(mode, [plain])).toBe(true);
+        }
+    });
+
+    test('yes, when a connection names tools even with the mode off', () => {
+        expect(requiresApproval('off', [withList])).toBe(true);
+    });
+
+    test('no, for a mode nobody recognises', () => {
+        expect(requiresApproval('paranoid', [plain])).toBe(false);
+    });
+
+    test('over-answers rather than under-answers', () => {
+        // It cannot know whether a tool will actually be caught without listing
+        // the servers, and the two ways of being wrong are not equal: a needless
+        // tool loop costs a round trip, a missed one runs the tool anyway.
+        expect(requiresApproval('destructive', [])).toBe(true);
+    });
+});
+
+describe('the route the dashboard offers', () => {
+    test('defaults to auto, which is one of the modes', () => {
+        expect(DEFAULT_MCP_ROUTE).toBe('auto');
+        expect(MCP_ROUTES).toContain(DEFAULT_MCP_ROUTE);
+    });
+
+    test('is accepted by the settings endpoint, and nothing else is', () => {
+        for (const route of MCP_ROUTES) {
+            expect(validateAiUpdate({ 'ai.mcpRoute': route })).toBeNull();
+        }
+        expect(validateAiUpdate({ 'ai.mcpRoute': 'proxy' })).toMatch(/ai\.mcpRoute must be one of/);
+        expect(validateAiUpdate({ ai: { mcpRoute: 3 } })).toMatch(/ai\.mcpRoute/);
+    });
+
+    test('and a patch setting both it and the mode still checks both', () => {
+        expect(validateAiUpdate({ ai: { mcpRoute: 'client', mcpConfirm: 'nope' } })).toMatch(/mcpConfirm/);
+        expect(validateAiUpdate({ ai: { mcpRoute: 'nope', mcpConfirm: 'writes' } })).toMatch(/mcpRoute/);
     });
 });

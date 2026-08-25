@@ -14,8 +14,11 @@ const {
     isToolEnabled,
     needsConfirmation,
     toolAnnotations,
+    requiresApproval,
     CONFIRM_MODES,
-    DEFAULT_CONFIRM_MODE
+    DEFAULT_CONFIRM_MODE,
+    MCP_ROUTES,
+    DEFAULT_MCP_ROUTE
 } = require('../../../config/mcpServers');
 const { McpHttpClient } = require('../../../services/ai/mcp/client');
 const { getToolUsage } = require('../../../services/ai/mcp/usage');
@@ -215,6 +218,20 @@ function validateServerInput(body, name) {
     };
 }
 
+/**
+ * Which route a Claude request would actually take right now.
+ *
+ * `auto` is the default and reads as a question rather than an answer, so the
+ * panel is told the answer as well as the setting.
+ */
+function effectiveMcpRoute(guildSettings) {
+    const route = guildSettings?.ai?.mcpRoute || DEFAULT_MCP_ROUTE;
+    if (route !== 'auto') return route;
+    return requiresApproval(guildSettings?.ai?.mcpConfirm, guildSettings?.ai?.mcpServers || [])
+        ? 'client'
+        : 'connector';
+}
+
 // The guild's MCP servers, the operator's global ones, the presets, and whether editing is allowed at all.
 router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId } = req.params;
@@ -239,6 +256,13 @@ router.get('/guild/:guildId/mcp-servers', checkAuth, checkGuildAccess, async (re
             // connection's tools will actually do without a second request.
             confirmMode: guildSettings?.ai?.mcpConfirm || DEFAULT_CONFIRM_MODE,
             confirmModes: CONFIRM_MODES,
+            // Only Anthropic has two ways to reach a server, so this is the
+            // setting and what it currently resolves to — the panel says which
+            // route is actually in effect rather than making an admin work out
+            // what "auto" means for their own configuration.
+            mcpRoute: guildSettings?.ai?.mcpRoute || DEFAULT_MCP_ROUTE,
+            mcpRoutes: MCP_ROUTES,
+            effectiveRoute: effectiveMcpRoute(guildSettings),
             // 'native' (the provider's own API takes the servers), 'client'
             // (the bot lists and calls the tools itself) or false. The panel
             // only has to warn when it is false.

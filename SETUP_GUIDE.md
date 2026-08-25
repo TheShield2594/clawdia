@@ -265,6 +265,12 @@ malformed config disables the connector, it never stops the bot from starting.
   tool: calls, failures, refusals, average latency and the last error. Turns
   where a server could not be reached are counted separately, so a dead
   connection does not read as an unused one.
+- **How Claude connects** (Connections → How Claude connects) only appears on
+  Anthropic, the one provider with two routes. Their connector opens the
+  connections on their side and the bot never sees the calls, so approvals, the
+  tool line in replies and the activity rollup do not apply on it. `auto` takes
+  the connector unless approvals are on, `connector` and `client` force either.
+  Every other provider has only ever had the client route.
 - On the client route the bot opens the connection, so the URL must be a public
   https address — one that resolves into private or reserved space is refused
   at the socket, the same guard the Ollama base URL uses.

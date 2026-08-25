@@ -406,3 +406,46 @@ describe('the activity endpoint', () => {
         expect((await api('GET', '/guild/g1/mcp-servers/usage')).status).toBe(200);
     });
 });
+
+describe('the route the panel is told about', () => {
+    const stored = {
+        name: 'github',
+        url: 'https://api.githubcopilot.com/mcp/',
+        enabled: true,
+        allowedTools: [],
+        blockedTools: [],
+        confirmTools: []
+    };
+
+    const listWith = async ai => {
+        doc = makeDoc([{ ...stored }]);
+        Object.assign(doc.ai, ai);
+        Guild.findOne.mockReturnValue({ lean: async () => doc });
+        return (await api('GET', '/guild/g1/mcp-servers')).body;
+    };
+
+    test('reports the setting and what the modes are', async () => {
+        const body = await listWith({ mcpRoute: 'client' });
+        expect(body.mcpRoute).toBe('client');
+        expect(body.mcpRoutes).toEqual(['auto', 'connector', 'client']);
+    });
+
+    test('defaults to auto rather than to undefined', async () => {
+        expect((await listWith({})).mcpRoute).toBe('auto');
+    });
+
+    test('says what auto currently resolves to, since auto is a question', async () => {
+        expect((await listWith({})).effectiveRoute).toBe('connector');
+        expect((await listWith({ mcpConfirm: 'writes' })).effectiveRoute).toBe('client');
+    });
+
+    test('resolves auto to the client when a connection names tools to confirm', async () => {
+        doc = makeDoc([{ ...stored, confirmTools: ['create_issue'] }]);
+        Guild.findOne.mockReturnValue({ lean: async () => doc });
+        expect((await api('GET', '/guild/g1/mcp-servers')).body.effectiveRoute).toBe('client');
+    });
+
+    test('an explicit choice is reported as itself, not re-derived', async () => {
+        expect((await listWith({ mcpRoute: 'connector', mcpConfirm: 'always' })).effectiveRoute).toBe('connector');
+    });
+});

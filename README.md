@@ -356,6 +356,11 @@ the person who asked, or anyone who can manage the server, says so. The
 Connections tab also keeps a seven-day rollup of what each connection has been
 doing — calls, failures, refusals, latency and the last error.
 
+Approvals and that rollup both need the bot to be the one making the call, which
+on Claude it is not by default — Anthropic's connector opens the connections on
+their side. Turning approvals on switches Claude to the bot's own MCP client
+automatically, and the route is settable either way if you would rather choose.
+
 **From the dashboard** (AI → 🔌 Connections): pick a service or paste any https
 MCP endpoint, add a token, and optionally list the tools the model may or may
 not call. GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe come as

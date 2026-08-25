@@ -4,7 +4,7 @@ const Guild = require('../../../models/Guild');
 const { checkAuth, checkGuildAccess, checkWriteRateLimit } = require('../../lib/middleware');
 const { sanitizeMongoValue, logAuditEvent } = require('../../lib/apiHelpers');
 const { validateBaseUrl: validateOllamaBaseUrl } = require('../../../services/ai/providers/ollama');
-const { CONFIRM_MODES } = require('../../../config/mcpServers');
+const { CONFIRM_MODES, MCP_ROUTES } = require('../../../config/mcpServers');
 
 // Top-level Guild schema keys that the dashboard is allowed to update.
 // This whitelist prevents prototype pollution (__proto__, constructor, etc.)
@@ -274,6 +274,16 @@ function validateMcpConfirm(value) {
     return null;
 }
 
+// Same reasoning as mcpConfirm: an unknown route would be a way of reaching MCP
+// servers that does not exist, and the enum would refuse it on save anyway.
+function validateMcpRoute(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string' || !MCP_ROUTES.includes(value)) {
+        return `ai.mcpRoute must be one of: ${MCP_ROUTES.join(', ')}`;
+    }
+    return null;
+}
+
 function validateAiUpdate(updates) {
     for (const [key, value] of Object.entries(updates)) {
         const isWholeAi = key === 'ai' && value && typeof value === 'object';
@@ -293,6 +303,15 @@ function validateAiUpdate(updates) {
 
         if (confirm !== undefined) {
             const error = validateMcpConfirm(confirm);
+            if (error) return error;
+        }
+
+        let route;
+        if (key === 'ai.mcpRoute') route = value;
+        else if (isWholeAi) route = value.mcpRoute;
+
+        if (route !== undefined) {
+            const error = validateMcpRoute(route);
             if (error) return error;
         }
     }

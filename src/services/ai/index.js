@@ -1,4 +1,4 @@
-const { DEFAULT_CONFIRM_MODE } = require('../../config/mcpServers');
+const { DEFAULT_CONFIRM_MODE, DEFAULT_MCP_ROUTE } = require('../../config/mcpServers');
 const { providers, getProvider, DEFAULT_MODELS } = require('./providers');
 const { recordUsage } = require('./usage');
 const { enforceRateLimit } = require('./rateLimit');
@@ -23,6 +23,9 @@ function resolveProviderConfig(aiSettings) {
     // for the same reason: a transport that can ask should not have to know the
     // setting exists, only how to answer when the toolkit asks it to.
     const mcpConfirm = aiSettings.mcpConfirm || DEFAULT_CONFIRM_MODE;
+    // Only Anthropic reads this — it is the one provider with two ways to reach
+    // a server — but it rides along with the rest so no caller has to know that.
+    const mcpRoute = aiSettings.mcpRoute || DEFAULT_MCP_ROUTE;
 
     // Same idea for the guild's AI limits: they ride along with the config so
     // getCompletion/streamCompletion can enforce them centrally, instead of
@@ -43,6 +46,7 @@ function resolveProviderConfig(aiSettings) {
         baseUrl: auth.baseUrl ?? null,
         mcpServers,
         mcpConfirm,
+        mcpRoute,
         rateLimit
     };
 }
