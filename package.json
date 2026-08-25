@@ -13,6 +13,7 @@
     "docs:api": "node scripts/docs-api.js",
     "docs:panels": "node scripts/docs-panels.js",
     "docs:items": "node scripts/docs-items.js",
+    "images:coverage": "node scripts/item-image-coverage.js",
     "favicon": "node scripts/make-favicon.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

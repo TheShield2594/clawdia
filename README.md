@@ -115,6 +115,7 @@ npm run format -- <paths>      # Prettier, on the files you name
 npm run docs:commands          # Regenerate README's command list from the code
 npm run docs:api               # Regenerate API_REFERENCE's endpoint tables from the routers
 npm run docs:items             # Regenerate docs/ECONOMY_ITEMS.md from the economy data
+npm run images:coverage        # Refresh docs/ITEM_IMAGE_COVERAGE.md, keeping its ticks
 ```
 
 CI runs the tests and the lint, and the Docker image is only published when
@@ -128,8 +129,11 @@ regenerated. `npm run docs:api` does the same for the endpoint tables in
 `src/dashboard/routes/api/`, and `npm run docs:items` for
 [docs/ECONOMY_ITEMS.md](docs/ECONOMY_ITEMS.md) — every item, catch, material and
 shop entry with the id the code stores it under, which is the list item art is
-named from. [docs/EXTENDING.md](docs/EXTENDING.md) is the guide to adding a
-command, a route or a model in the first place.
+named from. [docs/ITEM_IMAGE_COVERAGE.md](docs/ITEM_IMAGE_COVERAGE.md) is that
+list as a checklist of what has art and what does not — its ids are generated
+and its ticks are hand-kept, so `npm run images:coverage` adds new items without
+touching the ones already marked done. [docs/EXTENDING.md](docs/EXTENDING.md) is
+the guide to adding a command, a route or a model in the first place.
 
 `npm run format` takes explicit paths on purpose. Prettier's settings match the
 style the tree is already written in, but it has never been applied wholesale —
