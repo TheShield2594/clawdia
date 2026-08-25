@@ -27,7 +27,7 @@ that — it reads `MONGODB_URI`, marks the ids stored there and clears the marke
 from images since deleted. It never unticks: art that was removed from one
 server is still art.
 
-**38 of 340 have art.**
+**76 of 340 have art.**
 
 | Section | Group | Art | Uploaded | Total |
 |---|---|---:|---:|---:|
@@ -36,7 +36,7 @@ server is still art.
 | 🏹 Hunting | Ammo Packs | 0 | 0 | 4 |
 | 🏹 Hunting | Consumables | 0 | 0 | 8 |
 | 🏹 Hunting | Zones | 0 | 0 | 5 |
-| 🏹 Hunting | Animals | 0 | 0 | 62 |
+| 🏹 Hunting | Animals | 38 | 0 | 62 |
 | 🎣 Fishing | Rods | 0 | 0 | 5 |
 | 🎣 Fishing | Rod Upgrades | 0 | 0 | 3 |
 | 🎣 Fishing | Bait Packs | 0 | 0 | 4 |
@@ -56,7 +56,7 @@ server is still art.
 | 🧪 Materials | Mine Materials | 0 | 0 | 22 |
 | 🧪 Materials | Explore Materials | 0 | 0 | 11 |
 | 🛒 Shop | Default Shop Items | 0 | 0 | 35 |
-| **All** | | **38** | **0** | **340** |
+| **All** | | **76** | **0** | **340** |
 
 ## 🏹 Hunting
 
@@ -112,70 +112,70 @@ server is still art.
 - [ ] `hunt:legendary_peaks` — Legendary Peaks
 
 
-### Animals — 0/62
+### Animals — 38/62
 
-- [ ] `hunt:rabbit` — Rabbit
+- [x] `hunt:rabbit` — Rabbit · time fantasy animals, near match
 - [ ] `hunt:squirrel` — Squirrel
 - [ ] `hunt:dove` — Dove
-- [ ] `hunt:quail` — Quail
-- [ ] `hunt:duck` — Duck
-- [ ] `hunt:pheasant` — Pheasant
-- [ ] `hunt:raccoon` — Raccoon
+- [x] `hunt:quail` — Quail · time fantasy animals, near match
+- [x] `hunt:duck` — Duck · time fantasy animals, near match
+- [x] `hunt:pheasant` — Pheasant · time fantasy animals, near match
+- [x] `hunt:raccoon` — Raccoon · time fantasy animals, near match
 - [ ] `hunt:chipmunk` — Chipmunk
-- [ ] `hunt:crow` — Crow
+- [x] `hunt:crow` — Crow · time fantasy animals, near match
 - [ ] `hunt:frog` — Frog
-- [ ] `hunt:opossum` — Opossum
+- [x] `hunt:opossum` — Opossum · time fantasy animals, near match
 - [ ] `hunt:woodpecker` — Woodpecker
-- [ ] `hunt:deer` — Deer
-- [ ] `hunt:wild_boar` — Wild Boar
-- [ ] `hunt:turkey` — Turkey
-- [ ] `hunt:badger` — Badger
+- [x] `hunt:deer` — Deer · time fantasy animals, near match
+- [x] `hunt:wild_boar` — Wild Boar · time fantasy animals, near match
+- [x] `hunt:turkey` — Turkey · time fantasy animals, near match
+- [x] `hunt:badger` — Badger · time fantasy animals, near match
 - [ ] `hunt:beaver` — Beaver
-- [ ] `hunt:coyote` — Coyote
-- [ ] `hunt:jackrabbit` — Jackrabbit
+- [x] `hunt:coyote` — Coyote · time fantasy animals, near match
+- [x] `hunt:jackrabbit` — Jackrabbit · time fantasy animals, near match
 - [ ] `hunt:vulture` — Vulture
 - [ ] `hunt:roadrunner` — Roadrunner
 - [ ] `hunt:scorpion` — Scorpion
-- [ ] `hunt:desert_fox` — Desert Fox
-- [ ] `hunt:crane` — Crane
-- [ ] `hunt:wild_hog` — Wild Hog
+- [x] `hunt:desert_fox` — Desert Fox · time fantasy animals, near match
+- [x] `hunt:crane` — Crane · time fantasy animals, near match
+- [x] `hunt:wild_hog` — Wild Hog · time fantasy animals, near match
 - [ ] `hunt:giant_salamander` — Giant Salamander
-- [ ] `hunt:wolf` — Wolf
-- [ ] `hunt:elk` — Elk
-- [ ] `hunt:lynx` — Lynx
-- [ ] `hunt:bald_eagle` — Bald Eagle
-- [ ] `hunt:mountain_goat` — Mountain Goat
+- [x] `hunt:wolf` — Wolf · time fantasy animals, near match
+- [x] `hunt:elk` — Elk · time fantasy animals, near match
+- [x] `hunt:lynx` — Lynx · time fantasy animals, near match
+- [x] `hunt:bald_eagle` — Bald Eagle · time fantasy animals, near match
+- [x] `hunt:mountain_goat` — Mountain Goat · time fantasy animals, near match
 - [ ] `hunt:rattlesnake` — Rattlesnake
 - [ ] `hunt:hyena` — Hyena
-- [ ] `hunt:caribou` — Caribou
+- [x] `hunt:caribou` — Caribou · time fantasy animals, near match
 - [ ] `hunt:arctic_fox` — Arctic Fox
-- [ ] `hunt:snowy_owl` — Snowy Owl
+- [x] `hunt:snowy_owl` — Snowy Owl · time fantasy animals, near match
 - [ ] `hunt:giant_frog` — Giant Frog
 - [ ] `hunt:cottonmouth` — Cottonmouth
-- [ ] `hunt:ancient_ram` — Ancient Ram
+- [x] `hunt:ancient_ram` — Ancient Ram · time fantasy animals, near match
 - [ ] `hunt:ruin_stalker` — Ruin Stalker
-- [ ] `hunt:black_bear` — Black Bear
-- [ ] `hunt:moose` — Moose
-- [ ] `hunt:mountain_lion` — Mountain Lion
+- [x] `hunt:black_bear` — Black Bear · time fantasy animals, near match
+- [x] `hunt:moose` — Moose · time fantasy animals, near match
+- [x] `hunt:mountain_lion` — Mountain Lion · time fantasy animals, near match
 - [ ] `hunt:wolverine` — Wolverine
-- [ ] `hunt:musk_ox` — Musk Ox
+- [x] `hunt:musk_ox` — Musk Ox · time fantasy animals, near match
 - [ ] `hunt:woolly_mammoth` — Woolly Mammoth
-- [ ] `hunt:polar_bear` — Polar Bear
+- [x] `hunt:polar_bear` — Polar Bear · time fantasy animals, near match
 - [ ] `hunt:saber_cat` — Saber Cat
 - [ ] `hunt:alligator` — Alligator
 - [ ] `hunt:panther` — Panther
-- [ ] `hunt:dire_wolf` — Dire Wolf
-- [ ] `hunt:alpha_bear` — Alpha Bear
-- [ ] `hunt:snow_leopard` — Snow Leopard
-- [ ] `hunt:giant_elk` — Giant Elk
+- [x] `hunt:dire_wolf` — Dire Wolf · time fantasy animals, near match
+- [x] `hunt:alpha_bear` — Alpha Bear · time fantasy animals, near match
+- [x] `hunt:snow_leopard` — Snow Leopard · time fantasy animals, near match
+- [x] `hunt:giant_elk` — Giant Elk · time fantasy animals, near match
 - [ ] `hunt:golden_fox` — Golden Fox
 - [ ] `hunt:white_wolf` — White Wolf
-- [ ] `hunt:obsidian_stag` — Obsidian Stag
-- [ ] `hunt:storm_hawk` — Storm Hawk
-- [ ] `hunt:fire_lynx` — Fire Lynx
-- [ ] `hunt:dire_bear` — Dire Bear
+- [x] `hunt:obsidian_stag` — Obsidian Stag · time fantasy animals, near match
+- [x] `hunt:storm_hawk` — Storm Hawk · time fantasy animals, near match
+- [x] `hunt:fire_lynx` — Fire Lynx · time fantasy animals, near match
+- [x] `hunt:dire_bear` — Dire Bear · time fantasy animals, near match
 - [ ] `hunt:thunderbird` — Thunderbird
-- [ ] `hunt:ghost_stag` — Ghost Stag
+- [x] `hunt:ghost_stag` — Ghost Stag · time fantasy animals, near match
 
 
 ## 🎣 Fishing

@@ -23,6 +23,9 @@ const mockMongoose = { connect: jest.fn(), disconnect: jest.fn() };
 const mockItemImage = { find: jest.fn() };
 const mockGuild = { aggregate: jest.fn() };
 
+// dotenv and the secret loader are the CLI's own startup, not the behaviour
+// under test — mocked so the suite does not depend on a .env being present.
+jest.mock('dotenv', () => ({ config: () => ({}) }), { virtual: true });
 jest.mock('mongoose', () => mockMongoose, { virtual: true });
 jest.mock('../src/models/ItemImage', () => mockItemImage, { virtual: true });
 jest.mock('../src/models/Guild', () => mockGuild, { virtual: true });
