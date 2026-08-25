@@ -32,18 +32,20 @@ module.exports = {
     // for the step summary below and for anything reading coverage later.
     coverageReporters: ['text-summary', 'json-summary', 'lcov'],
 
-    // Measured at the commit that added this file: statements 33.20,
-    // branches 22.29, functions 35.83, lines 34.26 — over 368 files, of which
-    // 15 have no executed line at all. Floored to the whole percent below each,
-    // which leaves about 70 statements, 70 branches and 75 lines of slack: more
-    // than an unrelated refactor moves, less than a deleted test suite.
+    // Measured by CI over the full suite — 181 suites, 3,139 tests — at the
+    // commit that added this file: statements 33.36, branches 22.34, functions
+    // 36.09, lines 34.42.
     //
-    // That measurement excluded tests/integration/, whose two suites need a
-    // mongod that mongodb-memory-server downloads at run time — CI has it and
-    // the machine this was measured on did not. They cover src/models and
-    // src/migrations, which are already at 70% and 45% without them, so the
-    // number CI sees is under a point higher. These floors are the conservative
-    // end of that, which is the right end for a floor.
+    // Each floor is the whole percent below its measurement, which is not the
+    // arbitrary rounding it looks like: because the four denominators differ by
+    // most of an order of magnitude, one percent of each works out at a comparable
+    // amount of actual code — 122 statements, 79 branches, 54 functions and 125
+    // lines of slack. That is more than an unrelated refactor moves and less
+    // than a deleted test suite, which is the window a ratchet wants.
+    //
+    // It is also why these are not rounded up to the nearest percent instead:
+    // statements, branches and lines are all under a third of a point clear of
+    // the next whole number, so a floor there would fail the run that set it.
     coverageThreshold: {
         global: {
             statements: 33,
