@@ -45,18 +45,18 @@ const { resolveExpiredWars } = require('../src/services/schedulerService');
 
 const HOUR = 3600_000;
 
-/** Collects everything the job posts, keyed by the guild it was posted to. */
+/**
+ * A client that resolves guilds, channels and members. Tests that care what was
+ * announced install `capture(client)` over it; the rest only need the fetches
+ * to succeed so the job runs to completion.
+ */
 function fakeClient() {
-    const posts = [];
-    const channel = { isTextBased: () => true, send: jest.fn(async () => {}) };
     return {
-        posts,
-        channel,
         client: {
             guilds: {
                 fetch: jest.fn(async guildId => ({
                     id: guildId,
-                    channels: { fetch: async channelId => { channel.lastFor = [guildId, channelId]; return channel; } },
+                    channels: { fetch: async () => ({ isTextBased: () => true, send: jest.fn(async () => {}) }) },
                     members:  { fetch: async userId => ({ user: { username: `name-${userId}` } }) },
                 })),
             },
@@ -180,6 +180,7 @@ describe('resolveExpiredWars', () => {
         expect(activeEffects.expiresAt.getTime() - Date.now()).toBeGreaterThan(23 * HOUR);
         expect(activeEffects.expiresAt.getTime() - Date.now()).toBeLessThan(25 * HOUR);
         expect(badges.expiresAt.getTime() - Date.now()).toBeGreaterThan(29 * 24 * HOUR);
+        expect(badges.expiresAt.getTime() - Date.now()).toBeLessThan(31 * 24 * HOUR);
     });
 
     test('pays the opponent when the opponent is the one that won', async () => {

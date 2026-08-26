@@ -53,9 +53,15 @@ run `docker/metadata-action` derives these tags from `v4.2.1`:
 - `ghcr.io/theshield2594/clawdia:latest` (default branch only)
 - `ghcr.io/theshield2594/clawdia:sha-<40-char commit sha>`
 
-The last one is published for **every** build, tagged or not, and is the only
-one that never moves. `latest`, `main` and `4.2` all get repointed by the next
-push, so none of them can name the build that was running before a bad deploy.
+The last one is published for **every** build, tagged or not. `latest`, `main`
+and `4.2` all get repointed by the next push, so none of them can name the build
+that was running before a bad deploy.
+
+`sha-<commit>` is stable but not immutable: re-running the workflow on the same
+commit rebuilds and repoints it, and the rebuild can differ, because a lockfile
+does not pin the base image or the apt packages under it. For a rollback target
+that cannot move at all, use the **digest** — the publish job writes it to the
+run's summary page, along with the exact `CLAWDIA_IMAGE_TAG` value to paste.
 
 ## Pinning the deploy
 
@@ -68,18 +74,28 @@ image: ghcr.io/theshield2594/clawdia:${CLAWDIA_IMAGE_TAG:-latest}
 Set it in the stack's environment — Portainer > Stacks > Environment variables,
 or the `.env` beside the file — to a released version or a commit sha:
 
-```
+```dotenv
 CLAWDIA_IMAGE_TAG=4.2.1
 ```
 
 Unset, it falls back to `latest`. That is fine for a first deploy and is why it
 is the default, but it leaves nothing to roll back to the next time.
 
+To pin to a digest instead of a tag, keep a tag in front of it and append the
+digest — Docker accepts `name:tag@sha256:…` and resolves by the digest, so this
+needs no change to the stack file:
+
+```dotenv
+CLAWDIA_IMAGE_TAG=latest@sha256:3f8a…
+```
+
 ## Rolling back
 
-1. Find the tag the previous deploy was on. If it was pinned, it is the previous
-   value of `CLAWDIA_IMAGE_TAG`; otherwise take the commit sha of the build from
-   the Actions run and use `sha-<full sha>`.
+1. Find the reference the previous deploy was on. If it was pinned, it is the
+   previous value of `CLAWDIA_IMAGE_TAG`. Otherwise open that build's Actions
+   run: its summary page carries the digest and the `CLAWDIA_IMAGE_TAG` line to
+   paste. Falling back to `sha-<full sha>` also works, with the caveat above
+   that a re-run of the workflow will have rebuilt it.
 2. Check the CHANGELOG: the target version's migration high-water mark must not
    be behind one that has already run against the database. The mark is recorded
    per release for exactly this check.

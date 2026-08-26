@@ -38,6 +38,16 @@ describe('image tagging', () => {
         expect(tagBlock).toMatch(/^\s*type=sha,format=long$/m);
     });
 
+    test('the build records its digest, which is the reference that cannot move', () => {
+        // Every tag above can be repointed by a later build — sha-<commit>
+        // included, by a re-run of this same workflow on the same commit. The
+        // digest is the only one that always names one specific build, and it
+        // is only reachable at rollback time if the run wrote it down.
+        expect(ci).toMatch(/id: build\b/);
+        expect(ci).toContain('steps.build.outputs.digest');
+        expect(ci).toMatch(/GITHUB_STEP_SUMMARY/);
+    });
+
     test('the moving tags are still published alongside it', () => {
         // The sha tag is the rollback target, not a replacement: `latest` is
         // what a first deploy pulls, and semver is what a release is announced
@@ -58,11 +68,22 @@ describe('production stack', () => {
     });
 
     test('resolves to a tag CI actually publishes', () => {
-        const substitute = tag => image.replace(/\$\{CLAWDIA_IMAGE_TAG:-(\w+)\}/, (_, dflt) => tag ?? dflt);
+        // Models Compose's `:-`, which falls back on unset *and* on empty —
+        // unlike `:-`'s cousin `-`, which would leave a trailing bare colon and
+        // an image reference that does not parse.
+        const substitute = tag =>
+            image.replace(/\$\{CLAWDIA_IMAGE_TAG:-(\w+)\}/, (_, dflt) => (tag == null || tag === '' ? dflt : tag));
 
         expect(substitute(null)).toBe('ghcr.io/theshield2594/clawdia:latest');
+        // An operator who clears the variable rather than deleting it.
+        expect(substitute('')).toBe('ghcr.io/theshield2594/clawdia:latest');
         expect(substitute('sha-' + 'a'.repeat(40)))
             .toBe(`ghcr.io/theshield2594/clawdia:sha-${'a'.repeat(40)}`);
+        // A digest pin needs no change to the stack file: Docker accepts
+        // `name:tag@sha256:…` and resolves by the digest. This is what the
+        // publish job's summary tells an operator to paste.
+        expect(substitute(`latest@sha256:${'b'.repeat(64)}`))
+            .toBe(`ghcr.io/theshield2594/clawdia:latest@sha256:${'b'.repeat(64)}`);
     });
 
     test('says how to pin it, beside the line that needs pinning', () => {

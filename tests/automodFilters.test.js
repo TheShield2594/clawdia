@@ -143,12 +143,10 @@ const FILTERS = [
     },
 ];
 
-const message = spec => (typeof spec === 'string' ? makeMessage(spec) : makeMessage(spec));
-
 describe.each(FILTERS)('$name filter', ({ setting, trips, under, warning, weight, reason }) => {
     test('deletes a message that trips it and warns the author', async () => {
         getGuildSettings.mockResolvedValue(makeModerationSettings(setting));
-        const msg = message(trips);
+        const msg = makeMessage(trips);
 
         await run(msg);
 
@@ -159,7 +157,7 @@ describe.each(FILTERS)('$name filter', ({ setting, trips, under, warning, weight
 
     test('leaves a message that sits just under the threshold alone', async () => {
         getGuildSettings.mockResolvedValue(makeModerationSettings(setting));
-        const msg = message(under);
+        const msg = makeMessage(under);
 
         await run(msg);
 
@@ -170,7 +168,7 @@ describe.each(FILTERS)('$name filter', ({ setting, trips, under, warning, weight
 
     test('exempts a member with ManageMessages', async () => {
         getGuildSettings.mockResolvedValue(makeModerationSettings(setting));
-        const msg = message(typeof trips === 'string' ? { content: trips, isModerator: true } : { ...trips, isModerator: true });
+        const msg = makeMessage(trips, { isModerator: true });
 
         await run(msg);
 
@@ -179,7 +177,7 @@ describe.each(FILTERS)('$name filter', ({ setting, trips, under, warning, weight
 
     test('exempts a member holding an immunity role', async () => {
         getGuildSettings.mockResolvedValue(makeModerationSettings({ ...setting, immunityRoleIds: ['trusted'] }));
-        const msg = message(typeof trips === 'string' ? { content: trips, roleIds: ['trusted'] } : { ...trips, roleIds: ['trusted'] });
+        const msg = makeMessage(trips, { roleIds: ['trusted'] });
 
         await run(msg);
 
@@ -188,7 +186,7 @@ describe.each(FILTERS)('$name filter', ({ setting, trips, under, warning, weight
 
     test('does nothing when the filter itself is off', async () => {
         getGuildSettings.mockResolvedValue(makeModerationSettings({}));
-        const msg = message(trips);
+        const msg = makeMessage(trips);
 
         await run(msg);
 
@@ -200,7 +198,7 @@ describe.each(FILTERS)('$name filter', ({ setting, trips, under, warning, weight
         const doc = calmUser();
         User.findOne.mockResolvedValue(doc);
 
-        await run(message(trips));
+        await run(makeMessage(trips));
 
         // Weights are what make an invite or a slur count for more than a
         // stray link; a filter that files everything at 1 flattens the ladder.

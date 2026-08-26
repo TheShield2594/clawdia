@@ -37,9 +37,13 @@ function makeChannel(id = 'chan1') {
  *   bannable/kickable/moderatable — what the bot is permitted to do to the member
  */
 function makeMessage(contentOrOverrides = 'hello there', overrides = {}) {
-    const opts = typeof contentOrOverrides === 'string'
-        ? { content: contentOrOverrides, ...overrides }
+    // Both forms merge `overrides` last, so `makeMessage(spec, { isModerator: true })`
+    // means the same thing whether `spec` is a string or an object. The object
+    // form used to drop the second argument entirely, which reads as working.
+    const base = typeof contentOrOverrides === 'string'
+        ? { content: contentOrOverrides }
         : { content: 'hello there', ...contentOrOverrides };
+    const opts = { ...base, ...overrides };
 
     const {
         content, isModerator = false, roleIds = [],

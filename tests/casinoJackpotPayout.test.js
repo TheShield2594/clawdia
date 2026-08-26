@@ -103,19 +103,18 @@ describe('processJackpotBet — the bet that does not win', () => {
     });
 
     test('the trigger chance climbs with the bets since the last drop', async () => {
-        const rolls = [];
-        jest.spyOn(Math, 'random').mockImplementation(() => { rolls.push(null); return 0.9999; });
+        // One roll, held between the two rates: above what a freshly reset pool
+        // (betsCount 0) drops at, below what a pool cold for 100 bets does. The
+        // same roll therefore has to lose the first and win the second, which is
+        // the climb itself rather than a restatement of the formula.
+        const between = (BASE_TRIGGER_RATE + (BASE_TRIGGER_RATE + 100 * TRIGGER_INCREMENT)) / 2;
+        jest.spyOn(Math, 'random').mockReturnValue(between);
 
-        for (const betsCount of [0, 100]) {
-            Guild.findOne.mockResolvedValue({ guildId: 'g1', casinoJackpot: jackpot({ betsCount }) });
-            await processJackpotBet(bet());
-        }
+        Guild.findOne.mockResolvedValue({ guildId: 'g1', casinoJackpot: jackpot({ betsCount: 0 }) });
+        expect(await processJackpotBet(bet())).toMatchObject({ triggered: false });
 
-        // Not directly observable, so assert the rate the job would compare
-        // against: a pool that has gone cold for 100 bets is 11× likelier to
-        // drop than a freshly reset one.
-        expect(BASE_TRIGGER_RATE + 100 * TRIGGER_INCREMENT).toBeCloseTo(11 * BASE_TRIGGER_RATE, 10);
-        expect(rolls).toHaveLength(2);
+        Guild.findOne.mockResolvedValue({ guildId: 'g1', casinoJackpot: jackpot({ betsCount: 100 }) });
+        expect(await processJackpotBet(bet())).toMatchObject({ triggered: true });
     });
 });
 

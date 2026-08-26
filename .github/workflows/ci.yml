@@ -153,11 +153,16 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             # `main` and `latest` both move: they name whatever built last, so
-            # neither can name the build that was running before this one. This
-            # is the immutable one (#637) — sha-<full commit> is published for
-            # every build and never repointed, so a deploy that goes bad has a
-            # known-good reference to roll back to. portainer-stack.yml takes
-            # the tag from CLAWDIA_IMAGE_TAG for exactly that.
+            # neither can name the build that was running before this one.
+            # sha-<full commit> is published for every build and is the rollback
+            # target portainer-stack.yml's CLAWDIA_IMAGE_TAG takes (#637).
+            #
+            # It is stable, not immutable: re-running this workflow on the same
+            # commit rebuilds and repoints it, and the rebuild can differ because
+            # dependency resolution is not pinned to the lockfile alone. The
+            # digest published alongside it is the reference that cannot move —
+            # see the summary step after the build, and docs/RELEASING.md for
+            # pinning to one.
             type=sha,format=long
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -168,6 +173,7 @@ jobs:
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -176,3 +182,20 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The digest, on the run's summary page. Every tag above can be repointed
+      # by a later build — including sha-<commit>, by a re-run of this very
+      # workflow — so the digest is the only reference that always names *this*
+      # build. Recording it here is what makes it available at rollback time,
+      # when the run that produced it is weeks old and nobody wants to go
+      # spelunking in the registry API for it.
+      - name: Record image digest
+        run: |
+          {
+            echo '### Image'
+            echo
+            echo '| | |'
+            echo '|---|---|'
+            echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| rollback to this build | \`CLAWDIA_IMAGE_TAG=latest@${{ steps.build.outputs.digest }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
