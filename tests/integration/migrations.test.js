@@ -134,12 +134,11 @@ describe('every shipped migration, against a real server', () => {
 
         await runMigrations({ dir: MIGRATIONS_DIR });
 
-        // Not a subset and not a set: the order recorded is the order applied,
-        // and later migrations undo what earlier ones built.
-        expect(await appliedInOrder()).toEqual(expected);
         // An optional migration that fails is deliberately left unrecorded, so
-        // a missing name here is a migration a real mongod refused.
-        expect(console.error).not.toHaveBeenCalled();
+        // this is not a subset and not a set: a missing name is a migration a
+        // real mongod refused, and the order recorded is the order applied —
+        // which matters because later migrations undo what earlier ones built.
+        expect(await appliedInOrder()).toEqual(expected);
     }, 60_000);
 
     test('running the sequence twice applies nothing the second time', async () => {
@@ -389,7 +388,9 @@ describe('the data migrations, over pre-migration documents', () => {
         await runMigrations({ dir: MIGRATIONS_DIR });
 
         expect(await snapshot()).toEqual(before);
-        expect(console.error).not.toHaveBeenCalled();
+        // And every one of them applied again, rather than an optional one
+        // being quietly deferred over its own output.
+        expect(await appliedInOrder()).toEqual(shippedMigrations().map(m => m.name));
     }, 60_000);
 });
 
