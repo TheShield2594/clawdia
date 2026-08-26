@@ -1,5 +1,19 @@
 'use strict';
 
+/**
+ * A drift check over the migration sources, not a substitute for running them.
+ *
+ * `indexNamesIn` below is a regex over the file text, which #629 rightly called
+ * out as a "migration test" that executes no migration. It stays because the
+ * question it answers is a textual one — do 009's drop list and 002/003's
+ * create lists still name the same indexes — and a mismatch there is a silent
+ * no-op rather than a failure any execution would surface.
+ *
+ * What it is no longer standing in for lives in tests/integration/migrations.test.js:
+ * every shipped migration applied in order against a real mongod, over real
+ * documents, twice.
+ */
+
 const fs   = require('fs');
 const path = require('path');
 
