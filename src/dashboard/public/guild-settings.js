@@ -989,7 +989,20 @@ async function saveSettings(section) {
             'ai.rateLimitPerUser': parseInt(document.getElementById('ai-rate-limit').value, 10),
             'ai.rateLimitPerChannel': parseInt(document.getElementById('ai-rate-channel').value, 10),
             'ai.rateLimitWindowMin': parseInt(document.getElementById('ai-rate-window').value, 10),
-            'ai.actionsEnabled': document.getElementById('ai-actions-enabled').checked
+            'ai.actionsEnabled': document.getElementById('ai-actions-enabled').checked,
+            // These live on the Connections tab but belong to the same ai
+            // document, so they save with everything else rather than needing
+            // their own endpoint.
+            //
+            // Only once that tab has actually loaded, though. The controls are
+            // in the markup from the start and default to the first option, so
+            // sending them unhydrated would take a guild that had approvals on
+            // `writes` and quietly put them back to `off` — because somebody
+            // changed the temperature on the Chat tab and pressed Save.
+            ...(_mcpHydrated ? {
+                'ai.mcpConfirm': mcpEl('mcp-confirm').value,
+                'ai.mcpRoute': mcpEl('mcp-route').value
+            } : {})
         };
     } else if (section === 'tempvoice') {
         data = {
@@ -1923,6 +1936,9 @@ document.addEventListener('click', function(e) {
     else if (d.action === 'summary-delete') deleteSummaryJob(d.jobId);
     else if (d.action === 'persona-remove') removePersona(d.channelId);
     else if (d.action === 'mcp-test')       testMcpServer(d.serverName, el.closest('.list-item') && el.closest('.list-item').querySelector('.mcp-test-result'));
+    // The approval mode lives on this tab but is part of the ai document, so
+    // it saves through the same section as everything else on the Chat tab.
+    else if (d.action === 'mcp-save-confirm') saveSettings('ai');
     else if (d.action === 'mcp-edit')       editMcpServer(d.serverName);
     else if (d.action === 'mcp-remove')     removeMcpServer(d.serverName);
     else if (d.action === 'autorole-remove') removeAutoRole(d.roleId);
@@ -2811,6 +2827,13 @@ var _mcpEditing = null;
 // reaches MCP servers, so the note below the heading can answer for whatever is
 // selected in the Chat tab right now, not only for what was saved.
 var _mcpProviderSupport = {};
+// Which route a Claude request would take right now. 'auto' is a question, not
+// an answer, so the panel is told both.
+var _mcpEffectiveRoute = null;
+// Whether loadMcpServers() has put the guild's stored values into the approval
+// and route controls. Until it has, they hold their markup defaults and must
+// not be saved over what is stored.
+var _mcpHydrated = false;
 
 function mcpEl(id) { return document.getElementById(id); }
 
@@ -2827,8 +2850,15 @@ async function loadMcpServers(force) {
         _mcpEditable = data.editable !== false;
         _mcpMaxServers = data.maxServers || 10;
         _mcpProviderSupport = data.providerSupport || {};
+        if (mcpEl('mcp-confirm') && data.confirmMode) mcpEl('mcp-confirm').value = data.confirmMode;
+        if (mcpEl('mcp-route') && data.mcpRoute) mcpEl('mcp-route').value = data.mcpRoute;
+        _mcpEffectiveRoute = data.effectiveRoute || null;
+        // Set only on the success path: a load that failed leaves the controls
+        // showing defaults that are not the guild's.
+        _mcpHydrated = Boolean(mcpEl('mcp-confirm') && mcpEl('mcp-route'));
         renderMcpPresets();
         renderMcpServers(data.provider);
+        loadMcpUsage();
     } catch (e) {
         console.error(e);
         const list = mcpEl('mcp-list');
@@ -2910,8 +2940,32 @@ function renderMcpProviderNote(provider) {
     }
 }
 
+// The route only means anything on Claude: every other provider has always had
+// exactly one way to reach a server.
+function renderMcpRoute(provider) {
+    const selected = provider || (mcpEl('ai-provider') ? mcpEl('ai-provider').value : null);
+    const applies = selected === 'anthropic';
+
+    ['mcp-route-head', 'mcp-route-field'].forEach(function(id) {
+        const el = mcpEl(id);
+        if (el) el.classList.toggle('mcp-hidden', !applies);
+    });
+
+    const hint = mcpEl('mcp-route-hint');
+    const select = mcpEl('mcp-route');
+    if (!applies || !hint || !select) return;
+
+    const base = hint.dataset.base || hint.textContent;
+    hint.dataset.base = base;
+    hint.textContent = select.value === 'auto' && _mcpEffectiveRoute
+        ? base + ' Right now automatic resolves to ' +
+            (_mcpEffectiveRoute === 'client' ? "Clawdia's own client." : "Anthropic's connector.")
+        : base;
+}
+
 function renderMcpServers(provider) {
     renderMcpProviderNote(provider);
+    renderMcpRoute(provider);
     const disabledWarn = mcpEl('mcp-disabled-warning');
     if (disabledWarn) disabledWarn.style.display = _mcpEditable ? 'none' : '';
     updateMcpFormState();
@@ -2927,6 +2981,7 @@ function renderMcpServers(provider) {
             bits.push(srv.hasToken ? '🔑 token stored' : 'no token');
             if (srv.allowedTools.length) bits.push('only ' + srv.allowedTools.length + ' tool(s)');
             if (srv.blockedTools.length) bits.push(srv.blockedTools.length + ' blocked');
+            if ((srv.confirmTools || []).length) bits.push(srv.confirmTools.length + ' need approval');
             const div = document.createElement('div');
             div.className = 'list-item';
             div.innerHTML =
@@ -2986,7 +3041,7 @@ function splitToolNames(value) {
 
 function resetMcpForm() {
     _mcpEditing = null;
-    ['mcp-name', 'mcp-url', 'mcp-token', 'mcp-allowed', 'mcp-blocked'].forEach(function(id) {
+    ['mcp-name', 'mcp-url', 'mcp-token', 'mcp-allowed', 'mcp-blocked', 'mcp-confirm-tools'].forEach(function(id) {
         if (mcpEl(id)) mcpEl(id).value = '';
     });
     mcpEl('mcp-preset').value = '';
@@ -3011,6 +3066,7 @@ function editMcpServer(name) {
     mcpEl('mcp-token').placeholder = srv.hasToken ? '•••••••••• (leave empty to keep)' : 'Bearer token, if the server needs one';
     mcpEl('mcp-allowed').value = srv.allowedTools.join(', ');
     mcpEl('mcp-blocked').value = srv.blockedTools.join(', ');
+    mcpEl('mcp-confirm-tools').value = (srv.confirmTools || []).join(', ');
     mcpEl('mcp-enabled').checked = srv.enabled;
     mcpEl('mcp-form-title').textContent = 'Edit ' + srv.name;
     mcpEl('mcp-save-btn').textContent = 'Save changes';
@@ -3029,7 +3085,8 @@ async function saveMcpServer() {
         url: url,
         enabled: mcpEl('mcp-enabled').checked,
         allowedTools: splitToolNames(mcpEl('mcp-allowed').value),
-        blockedTools: splitToolNames(mcpEl('mcp-blocked').value)
+        blockedTools: splitToolNames(mcpEl('mcp-blocked').value),
+        confirmTools: splitToolNames(mcpEl('mcp-confirm-tools').value)
     };
     // Only send the token when one was typed — an absent field means
     // "keep whatever is stored", which is how editing without
@@ -3104,6 +3161,94 @@ async function testMcpServer(name, out) {
         console.error(e);
         if (out) { out.className = 'mcp-test-result bad'; out.textContent = '✗ Request failed'; }
     }
+}
+
+// ── MCP activity ────────────────────────────────────────────────────
+//
+// What the connections have actually been doing, which is the half the Test
+// button cannot answer: a server that worked when it was tested and has been
+// timing out every turn since looks identical from the form.
+
+function mcpSeconds(ms) {
+    if (!ms) return '';
+    return ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : Math.round(ms) + 'ms';
+}
+
+// Tool and server names come from the far side, so every one of them is set as
+// text on its own node. Nothing here is concatenated into markup.
+function mcpUsageLine(parent, text, muted) {
+    const el = document.createElement('div');
+    el.textContent = text;
+    el.style.cssText = 'font-size:.8rem;' + (muted ? 'color:var(--text-mute);' : '');
+    parent.appendChild(el);
+    return el;
+}
+
+function mcpCountsFor(row) {
+    const bits = [row.calls + (row.calls === 1 ? ' call' : ' calls')];
+    if (row.failures) bits.push(row.failures + ' failed');
+    if (row.declined) bits.push(row.declined + ' not approved');
+    if (row.avgMs) bits.push('avg ' + mcpSeconds(row.avgMs));
+    return bits.join(' · ');
+}
+
+async function loadMcpUsage() {
+    const box = mcpEl('mcp-usage');
+    if (!box) return;
+
+    try {
+        const resp = await fetch('/api/v1/guild/' + BOOT.guildId + '/mcp-servers/usage');
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'failed');
+        renderMcpUsage(data.servers || []);
+    } catch (e) {
+        console.error(e);
+        box.textContent = 'Could not load activity.';
+        box.style.cssText = 'font-size:.82rem;color:var(--text-mute);';
+    }
+}
+
+function renderMcpUsage(servers) {
+    const box = mcpEl('mcp-usage');
+    if (!box) return;
+    box.textContent = '';
+    box.style.cssText = '';
+
+    if (!servers.length) {
+        box.innerHTML = '<div class="empty-state" style="padding:1.25rem 1.5rem;"><p>No tool calls in the last 7 days.</p></div>';
+        return;
+    }
+
+    servers.forEach(function(srv) {
+        const item = document.createElement('div');
+        item.className = 'list-item';
+        item.style.cssText = 'display:block;';
+
+        const head = document.createElement('strong');
+        head.textContent = srv.server;
+        item.appendChild(head);
+
+        mcpUsageLine(item, mcpCountsFor(srv), true);
+
+        // A connection that could not be reached made no calls, so it needs
+        // saying separately or a dead server reads as an unused one.
+        if (srv.unreachable) {
+            mcpUsageLine(item, '⚠️ unreachable on ' + srv.unreachable + ' ' + (srv.unreachable === 1 ? 'turn' : 'turns'));
+        }
+
+        srv.tools.slice(0, 8).forEach(function(tool) {
+            mcpUsageLine(item, '· ' + tool.tool + ' — ' + mcpCountsFor(tool), true);
+        });
+        if (srv.tools.length > 8) {
+            mcpUsageLine(item, '· and ' + (srv.tools.length - 8) + ' more', true);
+        }
+
+        if (srv.lastError) {
+            mcpUsageLine(item, '⚠️ last error: ' + srv.lastError, true);
+        }
+
+        box.appendChild(item);
+    });
 }
 
 // ── Prompt editor: char counter + full-screen modal ─────────────────

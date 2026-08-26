@@ -63,6 +63,111 @@ change, and a script reading them needs updating. See
   address neither of them publishes — and its **Test** button connects to the
   server itself: no AI provider key, no tokens spent, and it reports the tool
   names, which is what the allow and deny lists want filling in from.
+- **A reply that calls MCP tools says so, and gets there faster.** A tool round
+  produces no text, so the message sat on an ellipsis for as long as somebody
+  else's HTTP request took, and the finished answer never said a tool had run
+  at all — which made a slow reply look like a stuck bot and a reply from an
+  unreachable server look like a confidently wrong model. The streamed message
+  now carries a line naming the tool in flight, and the finished reply keeps a
+  summary of what ran, how long each call took, what failed, and which servers
+  could not be reached. Two waits were also being spent one after another and
+  are now spent at once: the servers are all dialled together at the start of a
+  turn instead of one handshake after another before the model sees a token,
+  and the calls the model asks for in a single round run concurrently, so a
+  round costs its slowest call rather than the sum of them. Names coming back
+  from a server are stripped to plain text before they go in a message, so
+  nothing a server calls a tool can open markup or ping a role.
+- **A tool that writes something can be made to wait for a person.** The block
+  list covers tools nobody should ever call; there was nothing for the ones a
+  guild wants available but not unattended — filing an issue, sending a mail,
+  moving a calendar event. Connections gained an approval setting, and a tool it
+  applies to posts **Run it** / **Cancel** in the channel and does not run until
+  the person who asked, or anyone who can manage the server, clicks. Nobody
+  answering within a minute is the same answer as Cancel, and either way the
+  model is told in words it can carry on from rather than left with a tool
+  result that never arrived. The two middle modes read the annotations a server
+  publishes about its own tools, so they are worth exactly what the server is
+  honest about — they differ over a tool that annotates nothing, which
+  `destructive` believes and `writes` asks about anyway. The per-connection
+  *Always ask before these tools* list asks the server nothing and is the one to
+  use when the answer has to be a guarantee. The default is off, so a guild that
+  sets nothing behaves as it did.
+- **The Connections tab says what the connections have been doing.** The Test
+  button answers "does this work right now", which is the half that was never
+  the problem: a server that passed its test and has been timing out on every
+  turn since looked identical from the dashboard. Tool calls are now kept as a
+  daily per-server, per-tool rollup — calls, failures, refusals, average latency
+  and the last error a server gave — and shown under the connection list, with
+  turns where a server could not be reached counted separately from turns where
+  nobody used it. Test also reports what each tool says about itself and how
+  many of them the guild's approval setting would stop.
+- **Claude can use the bot's MCP client instead of Anthropic's connector.**
+  Anthropic is the one provider whose API takes the server list itself and opens
+  the connections on their side. That is cheaper — no tool loop runs in the bot
+  at all — and it is blind: the bot never sees the calls, so everything the bot
+  does with a call is missing. Approval prompts, the tool line in the reply, the
+  activity ledger and the result caps all exist because the bot is the one
+  making the call, and on the connector none of them can. A guild that turned
+  approvals on and then picked Claude in the Chat tab would have lost them
+  without being told. Connections gained a route setting, defaulting to
+  automatic: Anthropic's connector, unless the guild has asked for something
+  only the client route can do, in which case the same tool loop every other
+  provider uses runs against the same servers. `connector` and `client` are
+  there to override that either way, and the panel says which one automatic
+  currently resolves to rather than leaving an admin to work it out.
+- **`/ai mcp` answers from the channel what the dashboard answers from a
+  browser.** `servers` lists the connections and what the approval setting and
+  the Claude route would actually do to them, `tools` and `test` run the same
+  handshake the dashboard's Test button runs, and `activity` shows the same
+  seven-day rollup. All four need Manage Server and answer privately. It is a
+  subcommand group on `/ai` rather than four commands of its own, because
+  Discord registers at most a hundred and the count is pinned.
+- **A tool that answers with a picture gets to show it.** Every non-text block
+  became `[image content omitted]` — the one thing a Discord bot is better
+  placed to do than any other MCP client, thrown away. A chart, a screenshot or
+  a PDF page now arrives in the channel as a file, and the model is told one
+  did, so it can refer to it rather than answering as though the tool returned
+  nothing. Only a small known set of media types is accepted, and only within
+  a size and count a reply can carry: this is a third party's server handing
+  bytes to a bot that can post files, so anything else is reported as omitted
+  exactly as before.
+- **A preamble no longer runs into the answer after it.** A round that calls
+  tools usually says something first, and the answer arrives in the round after
+  it — two pieces of prose that were being concatenated into one sentence
+  colliding with another. They are separated now, and the non-streaming paths
+  keep the preamble rather than dropping it, so turning streaming off no longer
+  changes what the reply says.
+- **A guild running MCP with actions off was being told nothing about where
+  tool results come from.** The rule — text arriving from a connected server is
+  reference data, never an instruction — lived inside the in-channel actions
+  addendum, so it only reached the model when a guild had actions switched on.
+  That is the wrong half: a model with actions off can still be talked into
+  calling another tool. It is its own addendum now, attached whenever there is a
+  server to reach, and it picks up the ACTION sentence only where there is an
+  action to be talked into. Every tool result is also labelled with the server
+  and tool it came from, so the rule has something to point at and the model has
+  the words to say "the github server returned…" rather than asserting it.
+- **A turn's tools cannot cost unbounded time or context.** Every limit in the
+  toolkit bounded one call and none of them composed: four rounds of six calls,
+  each returning six thousand characters inside a forty-five second timeout, is
+  a hundred and forty thousand characters and several minutes of a Discord
+  message sitting on an ellipsis. There is a ceiling on the whole turn's tool
+  output now — past it a call still runs, since the model may want the side
+  effect, but what comes back says the output did not fit — and a wall-clock
+  budget after which no further call is dialled and no approval prompt is put in
+  front of anyone for a call that will not happen either way.
+- **A rate-limited server gets waited out rather than reported as broken.** The
+  shared servers rate-limit without a key, and a 429 saying "try again in two
+  seconds" was becoming a failed tool call. It is retried once now, and only
+  when the server said how long and the wait is short enough for a reply to sit
+  through — a server asking for a minute is telling us to come back later.
+- **A dropped stream no longer re-runs the tools it already ran.** The retry
+  that covers a provider dropping mid-reply re-enters the whole turn, and a turn
+  that had already filed an issue would file a second one — and put a second
+  approval prompt in front of whoever approved the first. Harmless while MCP was
+  read-mostly; not harmless now that a tool can write. A turn that has touched a
+  tool is no longer retried, and the user is told what failed instead. A turn
+  that has not, or that only met an unreachable server, still gets its retry.
 - **Fishing tournaments are indexed on what they are looked up by** (#585). The
   collection was indexed on `guildId` alone while every query in
   `tournamentService` pairs the guild with a status — the read before each

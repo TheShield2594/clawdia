@@ -345,6 +345,27 @@ tools, offers them to the model as functions, runs the calls and feeds the
 results back. On that second route the model itself has to support tool calling,
 which every current OpenAI and Gemini model does and some Ollama models do not.
 
+While a tool is running the reply names it, and the finished message keeps a
+short summary of what ran, how long it took and anything that failed or could
+not be reached — so a slow answer is legible and a server that is down is
+visible rather than silently making the model wrong.
+
+Tools that write something can be made to wait: the Approval setting posts
+**Run it** / **Cancel** in the channel for a tool call and does not run it until
+the person who asked, or anyone who can manage the server, says so. The
+Connections tab also keeps a seven-day rollup of what each connection has been
+doing — calls, failures, refusals, latency and the last error.
+
+Approvals and that rollup both need the bot to be the one making the call, which
+on Claude it is not by default — Anthropic's connector opens the connections on
+their side. Turning approvals on switches Claude to the bot's own MCP client
+automatically, and the route is settable either way if you would rather choose.
+
+`/ai mcp` answers the same questions from a channel — which connections exist,
+what tools they offer, whether one still works, and what they have been doing.
+It needs Manage Server and replies privately. A tool that answers with an image
+or a PDF has it posted to the channel rather than dropped.
+
 **From the dashboard** (AI → 🔌 Connections): pick a service or paste any https
 MCP endpoint, add a token, and optionally list the tools the model may or may
 not call. GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe come as

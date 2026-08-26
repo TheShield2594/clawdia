@@ -20,6 +20,48 @@ const MAX_GUILD_SERVERS = 10;
 const MAX_TOOL_NAMES = 50;
 const MAX_TOKEN_LENGTH = 4096;
 
+/**
+ * When a tool call has to be approved by a person before it runs.
+ *
+ * A blocked tool is a tool nobody can call; this is the setting for the ones a
+ * guild wants available but not unattended — filing an issue, sending a mail,
+ * moving a calendar event. The modes differ in what they do about the fact that
+ * a tool's own description of itself is optional and comes from the server:
+ *
+ *   off          nothing is confirmed (the default — what the bot did before)
+ *   destructive  only tools the server itself marked as writing destructively
+ *   writes       everything the server did not explicitly mark read-only, which
+ *                is the mode that also catches a server annotating nothing
+ *   always       every call, including reads
+ *
+ * `confirm_tools` names tools that are confirmed whatever the mode says, and is
+ * the only part of this that does not depend on a server being honest about
+ * itself. An admin who needs a guarantee uses that, or the block list.
+ */
+const CONFIRM_MODES = ['off', 'destructive', 'writes', 'always'];
+const DEFAULT_CONFIRM_MODE = 'off';
+
+/**
+ * How a guild on Claude reaches its MCP servers.
+ *
+ * Anthropic is the one provider whose API takes the server list itself and
+ * opens the connections on their side, which is cheaper — no tool loop runs
+ * here at all — and blind: the bot never sees the calls, so nothing it does
+ * with them applies. That is approval prompts, the tool line in the reply, the
+ * per-tool activity ledger and the result caps, all of which exist because the
+ * bot is the one making the call.
+ *
+ *   auto       the connector, unless something needs the bot to see the calls
+ *   connector  always Anthropic's, whatever that costs in features
+ *   client     always the bot's own MCP client, the way every other provider
+ *              already works
+ *
+ * `auto` is the default because the alternative is a guild turning on approvals
+ * and losing them by changing a dropdown on a different tab.
+ */
+const MCP_ROUTES = ['auto', 'connector', 'client'];
+const DEFAULT_MCP_ROUTE = 'auto';
+
 let cache = null;
 
 function configPath() {
@@ -120,7 +162,63 @@ function buildToolset(name, raw, label, warnings) {
 
     if (effectiveDefault) toolset.default_config = effectiveDefault;
     if (Object.keys(merged).length) toolset.configs = merged;
+
+    // Carried on the toolset because the toolset is where a server's tool
+    // policy lives, but it is the bot's own concern rather than the API's —
+    // stripped again before the Anthropic request is built.
+    const confirm = toolNameList(raw.confirm_tools ?? raw.confirmTools);
+    if (confirm.length) toolset.confirm_tools = confirm;
     return toolset;
+}
+
+// The toolset as the Messages API will accept it. `confirm_tools` is ours and
+// the API rejects a field it does not know, so it comes off here rather than
+// never going on — every other reader wants it.
+function apiToolset(toolset) {
+    const { confirm_tools: _ours, ...rest } = toolset;
+    return rest;
+}
+
+/**
+ * A tool's self-description, reduced to the four hints the spec defines.
+ *
+ * Everything here is optional and none of it is trustworthy — it is the server
+ * describing its own tools, so it is a UX signal, not a security boundary. The
+ * guarantees a guild can actually rely on are the block list and
+ * `confirm_tools`, neither of which asks the server anything.
+ */
+function toolAnnotations(tool) {
+    const raw = tool?.annotations;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+
+    const out = {};
+    if (typeof raw.title === 'string' && raw.title.trim()) out.title = raw.title.trim().slice(0, 128);
+    for (const hint of ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']) {
+        if (typeof raw[hint] === 'boolean') out[hint] = raw[hint];
+    }
+    return out;
+}
+
+/**
+ * Whether running this tool should wait for a person to say yes.
+ *
+ * `destructive` reads the hints the way the spec defines them: `destructiveHint`
+ * only means anything once a tool has said it is not read-only, and it defaults
+ * to true there, so a server that says `readOnlyHint: false` and nothing else is
+ * treated as destructive. A tool that annotates nothing has said nothing, and
+ * this mode believes it — `writes` is the mode for a guild that would rather be
+ * asked about a tool that never said what it does.
+ */
+function needsConfirmation(mode, toolset, tool) {
+    const name = typeof tool === 'string' ? tool : tool?.name;
+    if (name && toolset?.confirm_tools?.includes(name)) return true;
+    if (!CONFIRM_MODES.includes(mode) || mode === 'off') return false;
+    if (mode === 'always') return true;
+
+    const { readOnlyHint, destructiveHint } = toolAnnotations(tool);
+    if (readOnlyHint === true) return false;
+    if (mode === 'writes') return true;
+    return readOnlyHint === false && destructiveHint !== false;
 }
 
 /**
@@ -309,6 +407,21 @@ function resolveMcpServers(guildServers = []) {
 }
 
 /**
+ * Whether this guild's policy would stop any tool call to ask a person.
+ *
+ * What `auto` turns on the client path for. A mode of anything but off could
+ * catch a tool, and a named tool catches itself whatever the mode is — neither
+ * can be settled without listing the servers' tools, so this deliberately
+ * over-answers: "might ask", not "will ask". Being on the client path when
+ * nothing ends up needing approval costs a tool loop; being on the connector
+ * when something did would mean the tool ran anyway.
+ */
+function requiresApproval(mode, guildServers = []) {
+    if (typeof mode === 'string' && mode !== 'off' && CONFIRM_MODES.includes(mode)) return true;
+    return resolveMcpServers(guildServers).some(server => server.toolset?.confirm_tools?.length);
+}
+
+/**
  * Request fragment for the Anthropic Messages API, or null when no servers
  * apply. `tools` is merged with (not substituted for) any tools the caller
  * already has — every server in mcp_servers must be referenced by exactly one
@@ -319,7 +432,7 @@ function buildAnthropicMcpParams(guildServers = []) {
     if (!servers.length) return null;
     return {
         mcp_servers: servers.map(s => s.server),
-        tools: servers.map(s => s.toolset)
+        tools: servers.map(s => apiToolset(s.toolset))
     };
 }
 
@@ -330,8 +443,15 @@ module.exports = {
     MAX_TOOL_NAMES,
     MAX_TOKEN_LENGTH,
     NAME_PATTERN,
+    CONFIRM_MODES,
+    DEFAULT_CONFIRM_MODE,
+    MCP_ROUTES,
+    DEFAULT_MCP_ROUTE,
     guildServersAllowed,
+    requiresApproval,
     isToolEnabled,
+    toolAnnotations,
+    needsConfirmation,
     loadMcpServers,
     getMcpServers,
     resolveMcpServers,

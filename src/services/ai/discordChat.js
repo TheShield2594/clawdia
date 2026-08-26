@@ -6,6 +6,10 @@ const { retrieveKnowledge, buildKnowledgeContext } = require('./knowledge');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
 const { buildActionsAddendum, extractAction, executeAction } = require('./actions');
+const { buildMcpAddendum } = require('./mcp/prompt');
+const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
+const { createToolConfirmer } = require('./mcp/approval');
+const { recordToolCalls } = require('./mcp/usage');
 
 // Discord transport for the AI chat loop: rate limiting, prompt assembly,
 // message streaming/chunking, and post-processing. Everything provider-shaped
@@ -15,10 +19,27 @@ const DISCORD_MAX_LEN = 2000;
 const STREAM_EDIT_INTERVAL_MS = 800;
 // Discord typing indicator expires after 10s — refresh every 8s during long generations
 const TYPING_REFRESH_INTERVAL_MS = 8000;
+// A tool round yields no text, so the edit loop below is parked on the provider
+// for the whole of it. The tool status needs its own clock or it would only
+// ever appear after the tool it is announcing had already finished.
+const STATUS_REFRESH_INTERVAL_MS = 1200;
+// How long a flush waits for a repaint already in flight, and how often it
+// looks. One Discord edit is a fraction of this; the ceiling is only here so a
+// request that never returns cannot hold the reply open.
+const PAINT_LOCK_WAIT_MS = 2000;
+const PAINT_LOCK_TICK_MS = 25;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function withRetry(fn, { retries = 2, baseDelayMs = 800 } = {}) {
+/**
+ * Run `fn`, retrying it for the failures that a second attempt can fix.
+ *
+ * `canRetry` is asked after each failure and before each retry, for the
+ * failures a second attempt should not be made for even though the error looks
+ * transient — see the call sites, where it is what stops a turn re-running
+ * tools it has already run.
+ */
+async function withRetry(fn, { retries = 2, baseDelayMs = 800, canRetry = () => true } = {}) {
     let lastErr;
     for (let i = 0; i <= retries; i++) {
         try {
@@ -32,11 +53,29 @@ async function withRetry(fn, { retries = 2, baseDelayMs = 800 } = {}) {
             // would otherwise read as a transient network failure.
             if (err?.rateLimited) throw err;
             const retryable = !status || status === 408 || status === 429 || status >= 500;
-            if (!retryable || i === retries) throw err;
+            if (!retryable || i === retries || !canRetry()) throw err;
             await sleep(baseDelayMs * Math.pow(2, i));
         }
     }
     throw lastErr;
+}
+
+/**
+ * Leave the tool summary on the finished reply.
+ *
+ * Appended to the last message rather than sent as its own, so a reply that
+ * used a tool stays one message in the channel instead of two. It becomes a
+ * separate message only when there is no room for it, or nothing to append it
+ * to — a turn that called tools and then produced no text at all.
+ */
+async function attachToolFooter(msg, text, footer, channel) {
+    if (!footer) return;
+    const body = (text || '').trimEnd();
+    if (msg && body.length + footer.length + 1 <= DISCORD_MAX_LEN) {
+        const edited = await msg.edit(body ? `${body}\n${footer}` : footer).then(() => true).catch(() => false);
+        if (edited) return;
+    }
+    await channel.send(footer).catch(() => {});
 }
 
 function chunkText(text, size = DISCORD_MAX_LEN) {
@@ -55,7 +94,7 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
 }
 
 async function handleAIChat(message, aiSettings) {
-    const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers, rateLimit } = resolveProviderConfig(aiSettings);
+    const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers, mcpConfirm, mcpRoute, rateLimit } = resolveProviderConfig(aiSettings);
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
 
@@ -105,13 +144,21 @@ async function handleAIChat(message, aiSettings) {
     if (kbEntries.length) {
         systemPrompt += buildKnowledgeContext(kbEntries);
     }
+    // Every provider can reach MCP servers now — Anthropic through its own
+    // connector, the rest through the bot's MCP client — so this only asks
+    // whether the provider supports them at all and whether any resolve after
+    // the config file and the guild's list are merged.
+    const mcpActive = Boolean(mcpMode(provider)) && resolveMcpServers(mcpServers).length > 0;
+
+    // Deliberately not inside the actions branch. This rule used to ride on it,
+    // which meant a guild running MCP with actions off was told nothing at all
+    // about where tool results come from — and that guild still has a model
+    // that can be talked into calling another tool.
+    if (mcpActive) {
+        systemPrompt += buildMcpAddendum({ actionsEnabled: Boolean(aiSettings.actionsEnabled) });
+    }
     if (aiSettings.actionsEnabled) {
-        // Every provider can reach MCP servers now — Anthropic through its own
-        // connector, the rest through the bot's MCP client — so this only asks
-        // whether the provider supports them at all and whether any resolve
-        // after the config file and the guild's list are merged.
-        const mcpActive = Boolean(mcpMode(provider)) && resolveMcpServers(mcpServers).length > 0;
-        systemPrompt += buildActionsAddendum(userDoc?.timezone, { mcpActive });
+        systemPrompt += buildActionsAddendum(userDoc?.timezone);
     }
 
     try {
@@ -131,10 +178,18 @@ async function handleAIChat(message, aiSettings) {
             : rawHistory;
 
         const usageOut = {};
+        // Collects what the MCP tools did across every round of this turn, so
+        // the reply can say what the bot is waiting on while it waits, and what
+        // it used once it is done.
+        const activity = createToolActivity();
         const callArgs = {
             provider, model, apiKey, baseUrl, systemPrompt, history,
             prompt: content, temperature, maxTokens, mcpServers,
-            guildId: message.guild.id, usageOut,
+            guildId: message.guild.id, usageOut, onToolEvent: activity.onEvent,
+            // The guild's policy, and the buttons that answer it. The toolkit
+            // holds the call until this resolves, so a tool that writes
+            // something does not run until somebody in the channel says so.
+            mcpConfirm, mcpRoute, confirmTool: createToolConfirmer(message),
             // Who the request is for, so the limit is enforced where the spend
             // happens rather than only in the peek above.
             rateLimit, userId: message.author.id, channelId: message.channel.id
@@ -149,36 +204,131 @@ async function handleAIChat(message, aiSettings) {
             let currentBuf = '';
             const sentMessages = [placeholder]; // all Discord messages emitted during streaming
 
+            // What was last written to currentMsg. Two things repaint it now —
+            // a text delta and the status clock — and neither should spend an
+            // edit on text Discord already has.
+            let painted = null;
+            let painting = false;
+
+            /**
+             * Write the text so far, plus any live tool status, to the message.
+             *
+             * Serialised through `painting` because those two callers can
+             * collide: Discord applies whichever edit *lands* last, not
+             * whichever was issued last, so two in flight can leave the older
+             * text on screen.
+             */
+            const paint = async () => {
+                if (painting) return;
+                const text = activity.decorate(currentBuf) || '…';
+                if (text === painted) return;
+                painting = true;
+                painted = text;
+                try {
+                    await currentMsg.edit(text);
+                } catch {
+                    // Let the next paint try again rather than believing this landed.
+                    painted = null;
+                } finally {
+                    painting = false;
+                }
+            };
+
+            /**
+             * Wait for a repaint already in flight to land.
+             *
+             * `paint` skips when the flag is set, which keeps the clock out of
+             * a flush — but not the other way round: a flush starting while
+             * paint is mid-edit would still write to the same message
+             * concurrently, and Discord applies whichever edit *lands* last.
+             * Bounded, because the worst case of giving up is the race this
+             * exists to narrow, and the worst case of waiting forever is a
+             * reply that never finishes.
+             */
+            const untilPaintIdle = async () => {
+                for (let waited = 0; painting && waited < PAINT_LOCK_WAIT_MS; waited += PAINT_LOCK_TICK_MS) {
+                    await sleep(PAINT_LOCK_TICK_MS);
+                }
+            };
+
+            const statusInterval = setInterval(() => { paint(); }, STATUS_REFRESH_INTERVAL_MS);
             // Keep the typing indicator alive for long generations
             const typingInterval = setInterval(() => message.channel.sendTyping().catch(() => {}), TYPING_REFRESH_INTERVAL_MS);
 
             try {
+                // The retry below is for a provider that dropped the stream, and
+                // it re-enters the whole turn — which means re-running every
+                // tool the failed attempt already ran. That was fine when MCP
+                // was read-mostly and is not now: a turn that filed an issue,
+                // then lost the stream to a 500, would file a second one and
+                // ask somebody to approve it again. So a turn that has touched
+                // a tool does not get retried; the user gets the error instead,
+                // which is the smaller loss.
                 await withRetry(async () => {
                     fullResponse = '';
                     currentBuf = '';
+                    // Nothing has run yet on this attempt — and if a previous
+                    // one got as far as a tool, canRetry below stopped us
+                    // getting here at all.
+                    activity.reset();
                     for await (const piece of streamCompletion(callArgs)) {
                         fullResponse += piece;
                         currentBuf += piece;
-                        if (currentBuf.length >= DISCORD_MAX_LEN - 50) {
-                            await currentMsg.edit(currentBuf.slice(0, DISCORD_MAX_LEN));
-                            const overflow = currentBuf.slice(DISCORD_MAX_LEN);
-                            currentMsg = await message.channel.send(overflow || '…');
-                            sentMessages.push(currentMsg);
-                            currentBuf = overflow;
+                        // Once there is a status line to show, room is kept for
+                        // it, so appending it cannot push the message past
+                        // Discord's limit and clip the text above it.
+                        const flushAt = DISCORD_MAX_LEN - 50 - (activity.used ? STATUS_RESERVE : 0);
+                        if (currentBuf.length >= flushAt) {
+                            // Held across the whole sequence, not just the
+                            // edit: `currentMsg` is reassigned in the middle of
+                            // it, and a repaint landing on either side of that
+                            // writes the wrong text to one of the two messages.
+                            await untilPaintIdle();
+                            painting = true;
+                            try {
+                                await currentMsg.edit(currentBuf.slice(0, DISCORD_MAX_LEN));
+                                const overflow = currentBuf.slice(DISCORD_MAX_LEN);
+                                currentMsg = await message.channel.send(overflow || '…');
+                                sentMessages.push(currentMsg);
+                                currentBuf = overflow;
+                                painted = null;
+                            } finally {
+                                painting = false;
+                            }
                             lastEdit = Date.now();
                             continue;
                         }
                         const now = Date.now();
                         if (now - lastEdit >= STREAM_EDIT_INTERVAL_MS) {
-                            await currentMsg.edit(currentBuf || '…').catch(() => {});
+                            await paint();
                             lastEdit = now;
                         }
                     }
-                    if (currentBuf) await currentMsg.edit(currentBuf).catch(() => {});
-                });
+                    if (currentBuf) {
+                        // The status line is gone by here — nothing is running —
+                        // so the message settles on the text alone. Still takes
+                        // the flag: the clock is not stopped until the `finally`
+                        // below, so a repaint can still be in flight.
+                        await untilPaintIdle();
+                        painting = true;
+                        painted = currentBuf;
+                        try {
+                            await currentMsg.edit(currentBuf);
+                        } catch {
+                            painted = null;
+                        } finally {
+                            painting = false;
+                        }
+                    }
+                }, { canRetry: () => !activity.ranTools });
             } finally {
+                clearInterval(statusInterval);
                 clearInterval(typingInterval);
             }
+
+            // Where the tool summary goes, unless the reconcile below moves it.
+            let tailMsg = currentMsg;
+            let tailText = currentBuf;
 
             // Post-process: reconcile sentMessages against the canonical cleanText chunks
             if (aiSettings.actionsEnabled) {
@@ -196,11 +346,22 @@ async function handleAIChat(message, aiSettings) {
                         }
                     }
                     fullResponse = cleanText;
+                    // currentMsg may be one of the messages just deleted — the
+                    // one that held nothing but the ACTION block — so the footer
+                    // follows the reconcile rather than the stream.
+                    const kept = Math.min(canonicalChunks.length, sentMessages.length);
+                    tailMsg = kept ? sentMessages[kept - 1] : null;
+                    tailText = kept ? canonicalChunks[kept - 1] : '';
                     await executeAction(action, message);
                 }
             }
+
+            await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
         } else {
-            let response = await withRetry(() => getCompletion(callArgs));
+            let response = await withRetry(() => {
+                activity.reset();
+                return getCompletion(callArgs);
+            }, { canRetry: () => !activity.ranTools });
             response = response || '(empty response)';
 
             if (aiSettings.actionsEnabled) {
@@ -212,13 +373,33 @@ async function handleAIChat(message, aiSettings) {
             }
 
             fullResponse = response;
+            let tailMsg = null;
+            let tailText = '';
             if (fullResponse.trim()) {
                 const chunks = chunkText(fullResponse);
-                await message.reply(chunks[0]);
+                tailMsg = await message.reply(chunks[0]);
+                tailText = chunks[0];
                 for (let i = 1; i < chunks.length; i++) {
-                    await message.channel.send(chunks[i]);
+                    tailMsg = await message.channel.send(chunks[i]);
+                    tailText = chunks[i];
                 }
             }
+            await attachToolFooter(tailMsg, tailText, activity.footer(), message.channel);
+        }
+
+        // Anything a tool produced that the channel can show and the model
+        // could not use — a chart, a screenshot. Its own message, after the
+        // text, so a failed send costs the pictures and not the answer.
+        if (activity.attachments.length) {
+            await message.channel.send({ files: activity.attachments }).catch(err =>
+                console.error('[MCP] tool attachments send failed:', err?.message || err)
+            );
+        }
+
+        // After the reply, never before it: the ledger is for the dashboard, and
+        // nothing about it is worth adding to the wait the user is already in.
+        if (activity.used) {
+            await recordToolCalls(message.guild.id, activity.calls, activity.unreachableServers);
         }
 
         if (fullResponse.trim()) {

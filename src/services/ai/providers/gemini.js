@@ -1,5 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
-const { toolkitFor, MAX_TOOL_ROUNDS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // Google's current SDK. It replaces `@google/generative-ai`, which Google
 // retired in favour of this one — that package still installs but no longer
@@ -127,21 +127,22 @@ function addUsage(totals, round) {
  * Run the calls Gemini asked for and build the message that answers them.
  *
  * Function responses go back as parts of the next message, which is what makes
- * the loop here look like an ordinary conversation turn.
+ * the loop here look like an ordinary conversation turn. The calls themselves
+ * run concurrently — Gemini asked for all of them before seeing any answer, so
+ * nothing in the round depends on the one before it — and the parts stay in the
+ * order they were asked for.
  */
 async function runToolCalls(toolkit, calls) {
-    const parts = [];
-    for (const call of calls) {
-        const result = await toolkit.call(call.name, call.args || {});
-        parts.push({
-            functionResponse: {
-                ...(call.id ? { id: call.id } : {}),
-                name: call.name,
-                response: { result }
-            }
-        });
-    }
-    return parts;
+    const results = await mapWithLimit(calls, MAX_PARALLEL_TOOL_CALLS, call =>
+        toolkit.call(call.name, call.args || {}));
+
+    return calls.map((call, index) => ({
+        functionResponse: {
+            ...(call.id ? { id: call.id } : {}),
+            name: call.name,
+            response: { result: results[index] }
+        }
+    }));
 }
 
 /**
@@ -167,9 +168,13 @@ async function* stream(req) {
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
+    // A round that calls tools often says something first, and the answer
+    // arrives in the round after it — two pieces of prose, not one sentence.
+    let wroteText = false;
 
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
         const result = await chat.sendMessageStream({ message });
+        let roundText = false;
 
         // Usage now rides on the chunks rather than on a separate response
         // object awaited after the stream. Each chunk that carries it carries
@@ -180,7 +185,11 @@ async function* stream(req) {
             if (chunk.usageMetadata) lastUsage = chunk.usageMetadata;
             calls.push(...callsOf(chunk));
             const text = chunk.text;
-            if (text) yield text;
+            if (!text) continue;
+            if (!roundText && wroteText) yield '\n\n';
+            roundText = true;
+            wroteText = true;
+            yield text;
         }
         if (lastUsage) {
             sawUsage = true;
@@ -206,7 +215,7 @@ async function complete(req) {
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
-    let text = '';
+    const parts = [];
 
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
         const response = await chat.sendMessage({ message });
@@ -216,8 +225,10 @@ async function complete(req) {
         }
 
         // `.text` is undefined when the model returned no text part at all — a
-        // safety block, or a response that was only tool calls.
-        text = response.text ?? '';
+        // safety block, or a response that was only tool calls. A preamble is
+        // kept rather than replaced, so a guild with streaming off reads the
+        // same reply a guild with it on watched arrive.
+        if (response.text) parts.push(response.text);
 
         const calls = callsOf(response);
         if (!calls.length) break;
@@ -225,7 +236,7 @@ async function complete(req) {
         if (round + 1 === MAX_TOOL_ROUNDS) chat = withoutTools(req, chat);
     }
 
-    return { text, usage: sawUsage ? totals : null };
+    return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
 }
 
 module.exports = {

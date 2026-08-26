@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
-const { toolkitFor, MAX_TOOL_ROUNDS } = require('../mcp/toolkit');
+const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // The endpoint the *operator* runs, from the environment or the shipped default.
 // A guild's `ai.ollamaBaseUrl` is a dashboard setting, so it is attacker input
@@ -103,20 +103,29 @@ function argsOf(call) {
     return {};
 }
 
-/** Append the model's tool calls and their results, ready for the next round. */
+/**
+ * Append the model's tool calls and their results, ready for the next round.
+ *
+ * The calls run concurrently and the results are appended in the order they
+ * were asked for — older Ollama builds ignore `tool_name` and match a result to
+ * its call by position, so that order is load-bearing.
+ */
 async function runToolCalls({ toolkit, messages, calls, content }) {
     messages.push({ role: 'assistant', content: content || '', tool_calls: calls });
 
-    for (const call of calls) {
-        const name = call?.function?.name || '';
+    const results = await mapWithLimit(calls, MAX_PARALLEL_TOOL_CALLS, async call => {
         const args = argsOf(call);
-        const result = args === null
-            ? `Those arguments were not valid JSON, so the tool was not run: ${call.function.arguments}`
-            : await toolkit.call(name, args);
+        if (args === null) {
+            return `Those arguments were not valid JSON, so the tool was not run: ${call.function.arguments}`;
+        }
+        return toolkit.call(call?.function?.name || '', args);
+    });
+
+    calls.forEach((call, index) => {
         // tool_name is what current Ollama builds use to match a result to its
         // call; older ones ignore the field and match by order.
-        messages.push({ role: 'tool', tool_name: name, content: result });
-    }
+        messages.push({ role: 'tool', tool_name: call?.function?.name || '', content: results[index] });
+    });
 }
 
 function requestBody({ model, messages, temperature, maxTokens, stream, tools }) {
@@ -162,13 +171,35 @@ async function* streamRound({ url, agents, body, out }) {
     }
 }
 
-async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers });
+/**
+ * The same pieces, with a blank line in front of the first one.
+ *
+ * A round's text has to be separated from the round before it, and the round
+ * before it is only known to have produced any once it is over — so the
+ * separator goes on the front of the next one, and only if that one says
+ * anything at all.
+ */
+async function* separated(pieces) {
+    let first = true;
+    for await (const piece of pieces) {
+        if (first) {
+            yield '\n\n';
+            first = false;
+        }
+        yield piece;
+    }
+}
+
+async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool });
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
+    // A round that calls tools often says something first, and the answer
+    // arrives in the round after it — two pieces of prose, not one sentence.
+    let wroteText = false;
 
     for (let round = 0; ; round++) {
         // Withholding the tools on the final round leaves the model nothing to
@@ -181,7 +212,9 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
         });
 
         const out = { content: '', calls: [], usage: null };
-        yield* streamRound({ url, agents, body, out });
+        if (wroteText) yield* separated(streamRound({ url, agents, body, out }));
+        else yield* streamRound({ url, agents, body, out });
+        if (out.content) wroteText = true;
 
         if (out.usage) {
             sawUsage = true;
@@ -195,13 +228,14 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers });
+async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool });
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
+    const parts = [];
 
     for (let round = 0; ; round++) {
         const offerTools = Boolean(toolkit) && round < MAX_TOOL_ROUNDS;
@@ -219,11 +253,14 @@ async function complete({ baseUrl, model, systemPrompt, history, prompt, tempera
 
         const message = response.data?.message;
         const content = message?.content || '';
+        if (content) parts.push(content);
         const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
 
         // The round that stops calling tools is the answer — or the last round,
-        // where there were none to call. Text alongside a call is a preamble.
-        if (!calls.length || !offerTools) return { text: content, usage: sawUsage ? totals : null };
+        // where there were none to call. Text alongside a call is a preamble,
+        // and it is kept rather than dropped so a guild with streaming off
+        // reads the same reply a guild with it on watched arrive.
+        if (!calls.length || !offerTools) return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };
         await runToolCalls({ toolkit, messages, calls, content });
     }
 }

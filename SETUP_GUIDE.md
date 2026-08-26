@@ -241,7 +241,58 @@ malformed config disables the connector, it never stops the bot from starting.
 - A tool call is capped at four rounds per message, after which the model is
   asked once more with no tools so it has to answer.
 - A server that is unreachable is skipped with an `[MCP]` warning rather than
-  failing the reply.
+  failing the reply, and named in the reply's footer — the model answering
+  without it is otherwise indistinguishable from the model not knowing.
+- Replies show their tool use: a line naming the tool while it runs, and a
+  summary on the finished message. Nothing about it reaches the conversation
+  history, so it costs no tokens on the next message.
+- Servers are all dialled at once when a turn starts, and the calls in one round
+  run concurrently, up to six at a time. A round costs its slowest call rather
+  than the sum, but a server on the far side sees several requests together.
+- **Approval** (Connections → Approval) decides which tool calls stop and wait
+  for someone to click **Run it** in the channel. `off` is the default and runs
+  everything straight away. `destructive` and `writes` both read the annotations
+  a server publishes about its own tools; they differ over a tool that publishes
+  none, which `destructive` lets through and `writes` asks about. `always` asks
+  about every call, reads included. A prompt can be answered by whoever asked or
+  by anyone with Manage Server, and expires unanswered after a minute — which
+  means the tool does not run.
+- Tool annotations come from the server, so the two middle modes are worth what
+  that server is honest about. *Never these tools* and the per-connection
+  *Always ask before these tools* list ask the server nothing; use those where
+  the answer has to be a guarantee.
+- **Activity** (Connections → Activity) is a seven-day rollup per server and
+  tool: calls, failures, refusals, average latency and the last error. Turns
+  where a server could not be reached are counted separately, so a dead
+  connection does not read as an unused one.
+- **How Claude connects** (Connections → How Claude connects) only appears on
+  Anthropic, the one provider with two routes. Their connector opens the
+  connections on their side and the bot never sees the calls, so approvals, the
+  tool line in replies and the activity rollup do not apply on it. `auto` takes
+  the connector unless approvals are on, `connector` and `client` force either.
+  Every other provider has only ever had the client route.
+- `/ai mcp` gives the same answers in Discord, for admins with Manage Server:
+  `servers`, `tools <server>`, `test <server>` and `activity`. All of them
+  answer privately, and `test` runs the same handshake the dashboard's button
+  does — no provider key, no tokens spent.
+- A tool result carrying a PNG, JPEG, GIF, WebP, MP3, WAV, OGG or PDF is posted
+  to the channel as a file, up to four per reply. Anything else non-text is
+  reported to the model as omitted, the way it always was.
+- Tool results are labelled with the server and tool they came from, and the
+  system prompt tells the model they are reference data rather than
+  instructions. That is not the defence — the block list, the approval prompt
+  and the per-tool filters are, and they hold whatever the model believes — but
+  it is added whenever a server is configured, not only when in-channel actions
+  are on.
+- One turn's tools are capped at 24,000 characters of output in total and 90
+  seconds of wall clock. The two ceilings do different things. Past the output
+  one a call still runs — the model may want the side effect — but what comes
+  back says the output did not fit rather than carrying it. Past the clock no
+  further call is dialled at all, and no approval prompt is put in front of
+  anyone for a call that will not happen either way. Both are refusals worded so
+  the model can answer around them rather than leaving a reply open.
+- A 429 carrying a short `Retry-After` is waited out once. A 429 without one, or
+  asking for longer than a reply can wait, is reported as a failure.
 - On the client route the bot opens the connection, so the URL must be a public
   https address — one that resolves into private or reserved space is refused
   at the socket, the same guard the Ollama base URL uses.
