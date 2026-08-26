@@ -161,6 +161,13 @@ change, and a script reading them needs updating. See
   seconds" was becoming a failed tool call. It is retried once now, and only
   when the server said how long and the wait is short enough for a reply to sit
   through — a server asking for a minute is telling us to come back later.
+- **A dropped stream no longer re-runs the tools it already ran.** The retry
+  that covers a provider dropping mid-reply re-enters the whole turn, and a turn
+  that had already filed an issue would file a second one — and put a second
+  approval prompt in front of whoever approved the first. Harmless while MCP was
+  read-mostly; not harmless now that a tool can write. A turn that has touched a
+  tool is no longer retried, and the user is told what failed instead. A turn
+  that has not, or that only met an unreachable server, still gets its retry.
 - **Fishing tournaments are indexed on what they are looked up by** (#585). The
   collection was indexed on `guildId` alone while every query in
   `tournamentService` pairs the guild with a status — the read before each

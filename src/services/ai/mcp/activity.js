@@ -65,6 +65,10 @@ function createToolActivity() {
     let files = [];
     let fileBytes = 0;
     let used = false;
+    // Separate from `used`, which a server merely being unreachable also sets.
+    // This one means a tool call was actually put in motion — which is what
+    // makes re-running the turn something with consequences.
+    let attempted = false;
 
     function onEvent(event) {
         if (!event || typeof event !== 'object') return;
@@ -74,10 +78,12 @@ function createToolActivity() {
             // looking like a tool that is being slow.
             case 'confirm':
                 used = true;
+                attempted = true;
                 active.set(event.id, { server: event.server, tool: event.tool, awaiting: true });
                 break;
             case 'start':
                 used = true;
+                attempted = true;
                 active.set(event.id, { server: event.server, tool: event.tool });
                 break;
             case 'end': {
@@ -123,6 +129,7 @@ function createToolActivity() {
         files = [];
         fileBytes = 0;
         used = false;
+        attempted = false;
     }
 
     /** The line shown while calls are in flight, or '' when none are. */
@@ -212,6 +219,10 @@ function createToolActivity() {
         // Whether any tool event has been seen this turn. The transport asks so
         // it only reserves room for a status line once there is one to show.
         get used() { return used; },
+        // Whether any tool call was put in motion this turn. The transport asks
+        // before retrying a failed stream: re-running the turn would re-run the
+        // calls, and a tool that wrote something cannot be un-written.
+        get ranTools() { return attempted; },
         get calls() { return [...done]; },
         get unreachableServers() { return [...unreachable]; },
         // In the shape discord.js takes, so the transport hands them straight on.

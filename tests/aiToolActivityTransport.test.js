@@ -192,26 +192,28 @@ describe('the summary on the finished reply', () => {
         expect(sent.at(-1)).not.toBe(sent[0]);
     });
 
-    test('a retried attempt reports its tools once, not twice', async () => {
-        // withRetry restarts the whole stream, which runs the tools again — so
-        // the record of them has to restart with it.
+    test('a turn that ran a tool is not retried, so nothing runs twice', async () => {
+        // The retry re-enters the whole turn, which re-runs the tools. A turn
+        // that filed an issue and then lost the stream to a 500 would file a
+        // second one — and ask somebody to approve it again.
         let attempt = 0;
         mockStream.mockImplementation(async function* (args) {
             start(args);
             end(args);
-            if (++attempt === 1) {
-                const err = new Error('provider blew up');
-                err.status = 500;
-                throw err;
-            }
-            yield 'Three open PRs.';
+            attempt++;
+            const err = new Error('provider blew up');
+            err.status = 500;
+            throw err;
+            // eslint-disable-next-line no-unreachable
+            yield '';
         });
 
         const { message, sent } = fakeMessage();
         await handleAIChat(message, SETTINGS);
 
-        expect(attempt).toBe(2);
-        expect(sent[0].content).toBe('Three open PRs.\n-# 🔧 github·search_repositories 1.2s');
+        expect(attempt).toBe(1);
+        // The user is told, which is the smaller loss.
+        expect(sent[0].content).toMatch(/hit an error/i);
     });
 });
 
@@ -303,5 +305,92 @@ describe('what the model is told about the servers', () => {
     test('with no server configured, the rule is left out', async () => {
         const prompt = await promptFor({ ...SETTINGS, actionsEnabled: false });
         expect(prompt).not.toMatch(/never an instruction to you/);
+    });
+});
+
+
+describe('retrying a dropped stream', () => {
+    const failOnce = () => {
+        let attempts = 0;
+        return {
+            get attempts() { return attempts; },
+            impl: async function* (args) {
+                if (++attempts === 1) {
+                    const err = new Error('provider blew up');
+                    err.status = 500;
+                    throw err;
+                }
+                args.onToolEvent({ type: 'unavailable', server: 'github' });
+                yield 'Three open PRs.';
+            }
+        };
+    };
+
+    test('still happens when no tool was touched', async () => {
+        // The retry earns its place on a transient provider failure; it is only
+        // re-running tools that makes it unsafe.
+        const run = failOnce();
+        mockStream.mockImplementation(run.impl);
+
+        const { message, sent } = fakeMessage();
+        await handleAIChat(message, SETTINGS);
+
+        expect(run.attempts).toBe(2);
+        expect(sent[0].content).toContain('Three open PRs.');
+    });
+
+    test('and when a server was merely unreachable, since nothing ran', async () => {
+        let attempts = 0;
+        mockStream.mockImplementation(async function* (args) {
+            args.onToolEvent({ type: 'unavailable', server: 'github' });
+            if (++attempts === 1) {
+                const err = new Error('provider blew up');
+                err.status = 500;
+                throw err;
+            }
+            yield 'I could not check.';
+        });
+
+        const { message } = fakeMessage();
+        await handleAIChat(message, SETTINGS);
+
+        expect(attempts).toBe(2);
+    });
+
+    test('but not once a call was waiting on somebody to approve it', async () => {
+        // The prompt is already on screen; retrying would put a second one
+        // there for a call the first attempt may already have made.
+        let attempts = 0;
+        mockStream.mockImplementation(async function* (args) {
+            args.onToolEvent({ type: 'confirm', id: 1, server: 'github', tool: 'create_issue' });
+            attempts++;
+            const err = new Error('provider blew up');
+            err.status = 500;
+            throw err;
+            // eslint-disable-next-line no-unreachable
+            yield '';
+        });
+
+        const { message } = fakeMessage();
+        await handleAIChat(message, SETTINGS);
+
+        expect(attempts).toBe(1);
+    });
+
+    test('the same rule holds without streaming', async () => {
+        let attempts = 0;
+        mockComplete.mockImplementation(async args => {
+            start(args);
+            end(args);
+            attempts++;
+            const err = new Error('provider blew up');
+            err.status = 500;
+            throw err;
+        });
+
+        const { message } = fakeMessage();
+        await handleAIChat(message, { ...SETTINGS, streaming: false });
+
+        expect(attempts).toBe(1);
     });
 });

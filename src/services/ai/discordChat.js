@@ -26,7 +26,15 @@ const STATUS_REFRESH_INTERVAL_MS = 1200;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function withRetry(fn, { retries = 2, baseDelayMs = 800 } = {}) {
+/**
+ * Run `fn`, retrying it for the failures that a second attempt can fix.
+ *
+ * `canRetry` is asked after each failure and before each retry, for the
+ * failures a second attempt should not be made for even though the error looks
+ * transient — see the call sites, where it is what stops a turn re-running
+ * tools it has already run.
+ */
+async function withRetry(fn, { retries = 2, baseDelayMs = 800, canRetry = () => true } = {}) {
     let lastErr;
     for (let i = 0; i <= retries; i++) {
         try {
@@ -40,7 +48,7 @@ async function withRetry(fn, { retries = 2, baseDelayMs = 800 } = {}) {
             // would otherwise read as a transient network failure.
             if (err?.rateLimited) throw err;
             const retryable = !status || status === 408 || status === 429 || status >= 500;
-            if (!retryable || i === retries) throw err;
+            if (!retryable || i === retries || !canRetry()) throw err;
             await sleep(baseDelayMs * Math.pow(2, i));
         }
     }
@@ -226,12 +234,20 @@ async function handleAIChat(message, aiSettings) {
             const typingInterval = setInterval(() => message.channel.sendTyping().catch(() => {}), TYPING_REFRESH_INTERVAL_MS);
 
             try {
+                // The retry below is for a provider that dropped the stream, and
+                // it re-enters the whole turn — which means re-running every
+                // tool the failed attempt already ran. That was fine when MCP
+                // was read-mostly and is not now: a turn that filed an issue,
+                // then lost the stream to a 500, would file a second one and
+                // ask somebody to approve it again. So a turn that has touched
+                // a tool does not get retried; the user gets the error instead,
+                // which is the smaller loss.
                 await withRetry(async () => {
                     fullResponse = '';
                     currentBuf = '';
-                    // A retried attempt runs the tools again from the start, so
-                    // the record of them starts again too rather than reporting
-                    // the first attempt's calls twice.
+                    // Nothing has run yet on this attempt — and if a previous
+                    // one got as far as a tool, canRetry below stopped us
+                    // getting here at all.
                     activity.reset();
                     for await (const piece of streamCompletion(callArgs)) {
                         fullResponse += piece;
@@ -262,7 +278,7 @@ async function handleAIChat(message, aiSettings) {
                         painted = currentBuf;
                         await currentMsg.edit(currentBuf).catch(() => { painted = null; });
                     }
-                });
+                }, { canRetry: () => !activity.ranTools });
             } finally {
                 clearInterval(statusInterval);
                 clearInterval(typingInterval);
@@ -303,7 +319,7 @@ async function handleAIChat(message, aiSettings) {
             let response = await withRetry(() => {
                 activity.reset();
                 return getCompletion(callArgs);
-            });
+            }, { canRetry: () => !activity.ranTools });
             response = response || '(empty response)';
 
             if (aiSettings.actionsEnabled) {
