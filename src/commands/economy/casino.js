@@ -97,7 +97,8 @@ module.exports = {
                     `${hot ? '🔥 **The jackpot is HOT!** Every bet brings this closer to dropping.\n\n' : ''}` +
                     `**Current Pool:** ${display}\n\n` +
                     `Every casino bet contributes **${Math.round((guildSettings?.casinoJackpot?.contributionRate ?? 0.005) * 100 * 10) / 10}%** to this pool.\n` +
-                    `Trigger chance grows with every bet — someone will win it soon.`
+                    `Trigger chance grows with every bet — someone will win it soon.\n` +
+                    `🃏 Or take it outright: **Triple Wild** on \`/casino slots\` wins the whole pool.`
                 )
                 .addFields(
                     lastWinner ? { name: '🏆 Last Winner', value: `**${lastWinner}** — ${lastWon?.toLocaleString() ?? '?'} coins`, inline: true } : { name: '​', value: '​', inline: false }

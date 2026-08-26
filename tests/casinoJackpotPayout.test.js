@@ -195,7 +195,16 @@ describe('processJackpotBet — the winning bet', () => {
         const restore = Guild.updateOne.mock.calls.find(([, u]) => u.$inc);
         // A `$inc` delta back to what was claimed, not a `$set`: bets that
         // landed while the credit was failing keep their contributions.
-        expect(restore[1]).toEqual({ $inc: { 'casinoJackpot.pool': 240_050 } });
+        expect(restore[1].$inc).toEqual({ 'casinoJackpot.pool': 240_050 });
+        // The winner fields are cleared in the same write. events/ready.js pays out
+        // any guild still carrying a lastWinnerId and a lastWonAmount, and the coins
+        // are back in the pool now — leaving them set credits this win a second time
+        // on the next restart, out of a pot other players are still feeding.
+        expect(restore[1].$set).toEqual({
+            'casinoJackpot.lastWinnerId':   null,
+            'casinoJackpot.lastWinnerName': null,
+            'casinoJackpot.lastWonAmount':  null,
+        });
         // And no win is reported, so nothing downstream announces a payout
         // nobody received.
         expect(result).toEqual({ triggered: false, newPool: 250_050 });

@@ -45,6 +45,10 @@ jest.mock('../src/models/ActiveLock', () => require('./helpers/fakeActiveLock'))
 jest.mock('../src/services/casinoJackpotService', () => ({
     processJackpotBet: jest.fn().mockResolvedValue({ triggered: false }),
     getJackpotDisplay: jest.fn().mockResolvedValue({ pool: 0, hot: false, display: '0' }),
+    // Slots destructures these two at require time — it plays for the shared
+    // progressive pool rather than a jackpot of its own.
+    claimJackpot: jest.fn().mockResolvedValue({ credited: false, wonAmount: 0, newPool: 0 }),
+    DEFAULT_SEED: 10_000,
 }));
 jest.mock('../src/services/seasonMissionService', () => ({
     advanceMissions: jest.fn().mockResolvedValue([]),

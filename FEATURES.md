@@ -256,6 +256,8 @@ third of the code. The sections below cover it in full.
 /casino <game>       - Casino games: blackjack, crash, cupgame, higherlower, keno, poker, roulette, slots
 /casino roulette     - Bet on Red/Black, Odd/Even, Low/High, dozens, columns, or a straight number
 /casino jackpot      - View the current progressive jackpot pool
+                       Fed 0.5% of every casino bet. Drops on a random trigger that grows
+                       with each bet, or outright to a Triple Wild on /casino slots.
 /quiz                - Answer trivia for rewards
 /boost               - Activate economy boosts
 ```
