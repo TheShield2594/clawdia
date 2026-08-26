@@ -285,8 +285,12 @@ malformed config disables the connector, it never stops the bot from starting.
   it is added whenever a server is configured, not only when in-channel actions
   are on.
 - One turn's tools are capped at 24,000 characters of output in total and 90
-  seconds of wall clock. Past either, calls are refused in words the model can
-  answer around rather than leaving a reply open indefinitely.
+  seconds of wall clock. The two ceilings do different things. Past the output
+  one a call still runs — the model may want the side effect — but what comes
+  back says the output did not fit rather than carrying it. Past the clock no
+  further call is dialled at all, and no approval prompt is put in front of
+  anyone for a call that will not happen either way. Both are refusals worded so
+  the model can answer around them rather than leaving a reply open.
 - A 429 carrying a short `Retry-After` is waited out once. A 429 without one, or
   asking for longer than a reply can wait, is reported as a failure.
 - On the client route the bot opens the connection, so the URL must be a public

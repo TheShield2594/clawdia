@@ -255,6 +255,21 @@ describe('names from the far side', () => {
         expect(text).not.toContain('<@&1>');
     });
 
+    test('nor the error text on the one reply that is not an embed', async () => {
+        // `test` reports a failure as message content rather than an embed, and
+        // content is the path that can carry a mention.
+        mockInspectServer.mockResolvedValue({
+            success: false, message: 'refused for @everyone <@&1234>',
+            toolCount: 0, enabledCount: 0, confirmCount: 0, tools: []
+        });
+        const i = interaction({ sub: 'test', server: 'github' });
+        await command.execute(i);
+
+        expect(i.replies[0].content).not.toContain('@everyone');
+        expect(i.replies[0].content).not.toContain('<@&1234>');
+        expect(i.replies[0].allowedMentions).toEqual({ parse: [] });
+    });
+
     test('nor can the text of whatever error it returned', async () => {
         mockInspectServer.mockResolvedValue({
             success: false, message: 'refused by @everyone',
@@ -274,6 +289,17 @@ describe('autocomplete', () => {
 
         expect(i.respond).toHaveBeenCalledWith([{ name: 'github', value: 'github' }]);
         expect(mockInspectServer).not.toHaveBeenCalled();
+    });
+
+    test('tells a member who may not read the connections nothing at all', async () => {
+        // `/ai` carries no default member permission, because `memories` is for
+        // everyone — so the gate execute() applies has to be applied here too,
+        // or the names leak to anyone who starts typing.
+        const i = interaction({ sub: 'tools', focused: '', manageGuild: false });
+        await command.autocomplete(i);
+
+        expect(i.respond).toHaveBeenCalledWith([]);
+        expect(Guild.findOne).not.toHaveBeenCalled();
     });
 
     test('filters by what has been typed so far', async () => {

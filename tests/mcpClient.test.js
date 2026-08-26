@@ -339,23 +339,30 @@ describe('a server that is rate-limiting us', () => {
     // before it dials again, which is the part a mock catches and a live server
     // would only show as a leak.
     function rateLimited(retryAfter) {
+        const data = Readable.from(['slow down']);
+        jest.spyOn(data, 'destroy');
         return {
             status: 429,
             headers: { 'content-type': 'text/plain', ...(retryAfter ? { 'retry-after': retryAfter } : {}) },
-            data: Readable.from(['slow down'])
+            data
         };
     }
 
     describe('waiting it out', () => {
         test('retries once when the wait is short enough', async () => {
+            const refused = rateLimited('0');
             axios.post
-                .mockResolvedValueOnce(rateLimited('0'))
+                .mockResolvedValueOnce(refused)
                 .mockResolvedValueOnce(jsonResponse({ jsonrpc: '2.0', id: 1, result: INIT_RESULT }))
                 .mockResolvedValueOnce(acceptedResponse())
                 .mockResolvedValueOnce(jsonResponse({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'search' }] } }));
 
             const client = new McpHttpClient({ url: URL });
             await expect(client.listTools()).resolves.toEqual([{ name: 'search' }]);
+            // The refused response's body is a stream the client has to let go
+            // of before it dials again; a live server would only show that as a
+            // socket nobody closed.
+            expect(refused.data.destroy).toHaveBeenCalled();
         });
 
         test('gives up rather than looping when the retry is refused too', async () => {

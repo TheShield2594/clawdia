@@ -990,11 +990,19 @@ async function saveSettings(section) {
             'ai.rateLimitPerChannel': parseInt(document.getElementById('ai-rate-channel').value, 10),
             'ai.rateLimitWindowMin': parseInt(document.getElementById('ai-rate-window').value, 10),
             'ai.actionsEnabled': document.getElementById('ai-actions-enabled').checked,
-            // Lives on the Connections tab but belongs to the same ai document,
-            // so it saves with everything else rather than needing its own
-            // endpoint. Absent when the tab has not been opened this session.
-            ...(document.getElementById('mcp-confirm') ? { 'ai.mcpConfirm': document.getElementById('mcp-confirm').value } : {}),
-            ...(document.getElementById('mcp-route') ? { 'ai.mcpRoute': document.getElementById('mcp-route').value } : {})
+            // These live on the Connections tab but belong to the same ai
+            // document, so they save with everything else rather than needing
+            // their own endpoint.
+            //
+            // Only once that tab has actually loaded, though. The controls are
+            // in the markup from the start and default to the first option, so
+            // sending them unhydrated would take a guild that had approvals on
+            // `writes` and quietly put them back to `off` — because somebody
+            // changed the temperature on the Chat tab and pressed Save.
+            ...(_mcpHydrated ? {
+                'ai.mcpConfirm': mcpEl('mcp-confirm').value,
+                'ai.mcpRoute': mcpEl('mcp-route').value
+            } : {})
         };
     } else if (section === 'tempvoice') {
         data = {
@@ -2822,6 +2830,10 @@ var _mcpProviderSupport = {};
 // Which route a Claude request would take right now. 'auto' is a question, not
 // an answer, so the panel is told both.
 var _mcpEffectiveRoute = null;
+// Whether loadMcpServers() has put the guild's stored values into the approval
+// and route controls. Until it has, they hold their markup defaults and must
+// not be saved over what is stored.
+var _mcpHydrated = false;
 
 function mcpEl(id) { return document.getElementById(id); }
 
@@ -2841,6 +2853,9 @@ async function loadMcpServers(force) {
         if (mcpEl('mcp-confirm') && data.confirmMode) mcpEl('mcp-confirm').value = data.confirmMode;
         if (mcpEl('mcp-route') && data.mcpRoute) mcpEl('mcp-route').value = data.mcpRoute;
         _mcpEffectiveRoute = data.effectiveRoute || null;
+        // Set only on the success path: a load that failed leaves the controls
+        // showing defaults that are not the guild's.
+        _mcpHydrated = Boolean(mcpEl('mcp-confirm') && mcpEl('mcp-route'));
         renderMcpPresets();
         renderMcpServers(data.provider);
         loadMcpUsage();

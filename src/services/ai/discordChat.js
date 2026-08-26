@@ -23,6 +23,11 @@ const TYPING_REFRESH_INTERVAL_MS = 8000;
 // for the whole of it. The tool status needs its own clock or it would only
 // ever appear after the tool it is announcing had already finished.
 const STATUS_REFRESH_INTERVAL_MS = 1200;
+// How long a flush waits for a repaint already in flight, and how often it
+// looks. One Discord edit is a fraction of this; the ceiling is only here so a
+// request that never returns cannot hold the reply open.
+const PAINT_LOCK_WAIT_MS = 2000;
+const PAINT_LOCK_TICK_MS = 25;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -229,6 +234,23 @@ async function handleAIChat(message, aiSettings) {
                 }
             };
 
+            /**
+             * Wait for a repaint already in flight to land.
+             *
+             * `paint` skips when the flag is set, which keeps the clock out of
+             * a flush — but not the other way round: a flush starting while
+             * paint is mid-edit would still write to the same message
+             * concurrently, and Discord applies whichever edit *lands* last.
+             * Bounded, because the worst case of giving up is the race this
+             * exists to narrow, and the worst case of waiting forever is a
+             * reply that never finishes.
+             */
+            const untilPaintIdle = async () => {
+                for (let waited = 0; painting && waited < PAINT_LOCK_WAIT_MS; waited += PAINT_LOCK_TICK_MS) {
+                    await sleep(PAINT_LOCK_TICK_MS);
+                }
+            };
+
             const statusInterval = setInterval(() => { paint(); }, STATUS_REFRESH_INTERVAL_MS);
             // Keep the typing indicator alive for long generations
             const typingInterval = setInterval(() => message.channel.sendTyping().catch(() => {}), TYPING_REFRESH_INTERVAL_MS);
@@ -257,12 +279,22 @@ async function handleAIChat(message, aiSettings) {
                         // Discord's limit and clip the text above it.
                         const flushAt = DISCORD_MAX_LEN - 50 - (activity.used ? STATUS_RESERVE : 0);
                         if (currentBuf.length >= flushAt) {
-                            await currentMsg.edit(currentBuf.slice(0, DISCORD_MAX_LEN));
-                            const overflow = currentBuf.slice(DISCORD_MAX_LEN);
-                            currentMsg = await message.channel.send(overflow || '…');
-                            sentMessages.push(currentMsg);
-                            currentBuf = overflow;
-                            painted = null;
+                            // Held across the whole sequence, not just the
+                            // edit: `currentMsg` is reassigned in the middle of
+                            // it, and a repaint landing on either side of that
+                            // writes the wrong text to one of the two messages.
+                            await untilPaintIdle();
+                            painting = true;
+                            try {
+                                await currentMsg.edit(currentBuf.slice(0, DISCORD_MAX_LEN));
+                                const overflow = currentBuf.slice(DISCORD_MAX_LEN);
+                                currentMsg = await message.channel.send(overflow || '…');
+                                sentMessages.push(currentMsg);
+                                currentBuf = overflow;
+                                painted = null;
+                            } finally {
+                                painting = false;
+                            }
                             lastEdit = Date.now();
                             continue;
                         }
@@ -274,9 +306,19 @@ async function handleAIChat(message, aiSettings) {
                     }
                     if (currentBuf) {
                         // The status line is gone by here — nothing is running —
-                        // so the message settles on the text alone.
+                        // so the message settles on the text alone. Still takes
+                        // the flag: the clock is not stopped until the `finally`
+                        // below, so a repaint can still be in flight.
+                        await untilPaintIdle();
+                        painting = true;
                         painted = currentBuf;
-                        await currentMsg.edit(currentBuf).catch(() => { painted = null; });
+                        try {
+                            await currentMsg.edit(currentBuf);
+                        } catch {
+                            painted = null;
+                        } finally {
+                            painting = false;
+                        }
                     }
                 }, { canRetry: () => !activity.ranTools });
             } finally {

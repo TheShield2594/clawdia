@@ -12,6 +12,7 @@ const { providers, mcpMode } = require('../../services/ai/providers');
 const { inspectServer } = require('../../services/ai/mcp/inspect');
 const { getToolUsage } = require('../../services/ai/mcp/usage');
 const { serversEmbed, toolsEmbed, activityEmbed } = require('../../views/mcpView');
+const { toolLabel } = require('../../utils/toolLabel');
 
 const MEMORY_CAP = 10;
 
@@ -68,6 +69,14 @@ module.exports = {
     // Answers with what is stored rather than dialling anything: an
     // autocomplete has three seconds and a handshake does not fit in them.
     async autocomplete(interaction) {
+        // The same gate execute() applies. `/ai` carries no default member
+        // permission — `memories` is for everyone — so without this a member
+        // who may not read the connections could still learn what they are
+        // called by starting to type.
+        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+            return interaction.respond([]).catch(() => {});
+        }
+
         const typed = (interaction.options.getFocused() || '').toLowerCase();
         const names = (await guildMcpServers(interaction.guild.id)).map(server => server.name);
 
@@ -194,7 +203,12 @@ async function handleMcp(interaction) {
 
     // `test` is asking whether the connection works; `tools` is asking what it
     // offers. Same handshake, so the difference is only how much is shown.
+    //
+    // The failure goes in `content` rather than an embed, which is the one path
+    // here that can carry a mention — and the text is whatever the far side put
+    // in its error body. So it gets the same treatment every other server-chosen
+    // string gets, plus allowedMentions to settle it whatever the string says.
     return interaction.editReply(sub === 'test' && !report.success
-        ? { content: `❌ ${report.message}` }
+        ? { content: `❌ ${toolLabel(report.message, 300)}`, allowedMentions: { parse: [] } }
         : { embeds: [toolsEmbed(name, report)] });
 }
