@@ -24,10 +24,12 @@ jest.mock('discord.js', () => {
 jest.mock('../src/models/Guild', () => ({ find: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn(), updateOne: jest.fn() }));
 jest.mock('../src/models/User',  () => ({ find: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn(), aggregate: jest.fn(), updateOne: jest.fn(), updateMany: jest.fn(), bulkWrite: jest.fn() }));
 jest.mock('../src/models/HourlyWinner', () => ({ find: jest.fn(), findOneAndUpdate: jest.fn(), updateMany: jest.fn() }));
+jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn() }));
 
 const Guild        = require('../src/models/Guild');
 const User         = require('../src/models/User');
 const HourlyWinner = require('../src/models/HourlyWinner');
+const { recordOwedPayout } = require('../src/utils/owedPayout');
 const { getPreviousHourKey } = require('../src/utils/hourlyWinner');
 const { announceHourlyWinners } = require('../src/services/schedulerService');
 
@@ -62,6 +64,7 @@ beforeEach(() => {
     HourlyWinner.find.mockReturnValue({ lean: async () => [winner()] });
     HourlyWinner.findOneAndUpdate.mockImplementation(async filter => ({ _id: filter._id, rewarded: true }));
     User.findOneAndUpdate.mockResolvedValue({});
+    recordOwedPayout.mockResolvedValue(true);
     Guild.findOne.mockReturnValue({ lean: async () => ({ guildId: 'g1', economy: { announcementChannelId: 'c1' } }) });
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -127,17 +130,65 @@ describe('announceHourlyWinners', () => {
         expect(sent).toEqual([]);
     });
 
-    test('a failed credit does not stop the other winners being paid', async () => {
+    // #804. The claim is spent — the winner is `rewarded: true` — so no later
+    // tick will find them again. The failure has to be both recorded per winner
+    // (so someone can pay it) and raised (so the run is not reported healthy).
+    test('a failed credit does not stop the other winners being paid, and is written down as owed', async () => {
         HourlyWinner.find.mockReturnValue({ lean: async () => [winner(), winner({ _id: 'w2', userId: 'u2', category: 'mine' })] });
         User.findOneAndUpdate.mockImplementation(async filter => {
             if (filter.userId === 'u1') throw new Error('mongo down');
             return {};
         });
 
-        await expect(announceHourlyWinners(fakeClient())).resolves.toBeUndefined();
+        await expect(announceHourlyWinners(fakeClient())).rejects.toThrow('1 of 2 hourly reward(s) could not be credited');
 
         expect(User.findOneAndUpdate).toHaveBeenCalledTimes(2);
+        expect(recordOwedPayout).toHaveBeenCalledTimes(1);
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'schedulerService',
+            jobName: 'announceHourlyWinners',
+            guildId: 'g1',
+            payload: expect.objectContaining({
+                kind: 'coins', userId: 'u1', guildId: 'g1', amount: REWARD, category: 'fish',
+            }),
+        }));
         expect(errorLog).toHaveBeenCalled();
+    });
+
+    // The quiet one. `findOneAndUpdate` with no `upsert` resolves to `null`
+    // rather than throwing when the user has no document in that guild, so the
+    // old `.catch` never fired: the winner was marked rewarded, paid nothing,
+    // and still named in the announcement as "rewarded +500 coins".
+    test('a winner with no user document is owed, not silently skipped', async () => {
+        User.findOneAndUpdate.mockResolvedValue(null);
+
+        await expect(announceHourlyWinners(fakeClient())).rejects.toThrow('1 of 1 hourly reward(s) could not be credited');
+
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            payload: expect.objectContaining({ kind: 'coins', userId: 'u1', amount: REWARD }),
+        }));
+        expect(sent).toEqual([]);
+    });
+
+    test('an unpaid winner is left out of the announcement the paid ones still get', async () => {
+        HourlyWinner.find.mockReturnValue({ lean: async () => [winner(), winner({ _id: 'w2', userId: 'u2', username: 'Grace', category: 'mine', details: '90 ore' })] });
+        User.findOneAndUpdate.mockImplementation(async filter => (filter.userId === 'u1' ? null : {}));
+
+        await expect(announceHourlyWinners(fakeClient())).rejects.toThrow(/1 of 2/);
+
+        expect(sent).toHaveLength(1);
+        const description = sent[0].payload.embeds[0].description;
+        expect(description).toContain('<@u2> (Grace)');
+        expect(description).not.toContain('<@u1>');
+    });
+
+    // The owed-queue write fails for the same reason the credit did, often
+    // enough. Neither the rest of the hour nor the raised failure depends on it.
+    test('a failed owed-queue write still leaves the sweep failing', async () => {
+        recordOwedPayout.mockResolvedValue(false);
+        User.findOneAndUpdate.mockResolvedValue(null);
+
+        await expect(announceHourlyWinners(fakeClient())).rejects.toThrow(/1 of 1/);
     });
 
     test('groups the hour into one announcement per guild', async () => {
