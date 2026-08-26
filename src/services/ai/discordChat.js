@@ -6,6 +6,7 @@ const { retrieveKnowledge, buildKnowledgeContext } = require('./knowledge');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
 const { buildActionsAddendum, extractAction, executeAction } = require('./actions');
+const { buildMcpAddendum } = require('./mcp/prompt');
 const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
 const { createToolConfirmer } = require('./mcp/approval');
 const { recordToolCalls } = require('./mcp/usage');
@@ -130,13 +131,21 @@ async function handleAIChat(message, aiSettings) {
     if (kbEntries.length) {
         systemPrompt += buildKnowledgeContext(kbEntries);
     }
+    // Every provider can reach MCP servers now — Anthropic through its own
+    // connector, the rest through the bot's MCP client — so this only asks
+    // whether the provider supports them at all and whether any resolve after
+    // the config file and the guild's list are merged.
+    const mcpActive = Boolean(mcpMode(provider)) && resolveMcpServers(mcpServers).length > 0;
+
+    // Deliberately not inside the actions branch. This rule used to ride on it,
+    // which meant a guild running MCP with actions off was told nothing at all
+    // about where tool results come from — and that guild still has a model
+    // that can be talked into calling another tool.
+    if (mcpActive) {
+        systemPrompt += buildMcpAddendum({ actionsEnabled: Boolean(aiSettings.actionsEnabled) });
+    }
     if (aiSettings.actionsEnabled) {
-        // Every provider can reach MCP servers now — Anthropic through its own
-        // connector, the rest through the bot's MCP client — so this only asks
-        // whether the provider supports them at all and whether any resolve
-        // after the config file and the guild's list are merged.
-        const mcpActive = Boolean(mcpMode(provider)) && resolveMcpServers(mcpServers).length > 0;
-        systemPrompt += buildActionsAddendum(userDoc?.timezone, { mcpActive });
+        systemPrompt += buildActionsAddendum(userDoc?.timezone);
     }
 
     try {

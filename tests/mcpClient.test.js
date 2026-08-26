@@ -331,3 +331,90 @@ describe('close', () => {
         await expect(client.close()).resolves.toBeUndefined();
     });
 });
+
+describe('a server that is rate-limiting us', () => {
+    const { retryAfterMs, MAX_RETRY_AFTER_MS } = require('../src/services/ai/mcp/client');
+
+    // 429 with a Retry-After. The stream is a body the client has to let go of
+    // before it dials again, which is the part a mock catches and a live server
+    // would only show as a leak.
+    function rateLimited(retryAfter) {
+        return {
+            status: 429,
+            headers: { 'content-type': 'text/plain', ...(retryAfter ? { 'retry-after': retryAfter } : {}) },
+            data: Readable.from(['slow down'])
+        };
+    }
+
+    describe('waiting it out', () => {
+        test('retries once when the wait is short enough', async () => {
+            axios.post
+                .mockResolvedValueOnce(rateLimited('0'))
+                .mockResolvedValueOnce(jsonResponse({ jsonrpc: '2.0', id: 1, result: INIT_RESULT }))
+                .mockResolvedValueOnce(acceptedResponse())
+                .mockResolvedValueOnce(jsonResponse({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'search' }] } }));
+
+            const client = new McpHttpClient({ url: URL });
+            await expect(client.listTools()).resolves.toEqual([{ name: 'search' }]);
+        });
+
+        test('gives up rather than looping when the retry is refused too', async () => {
+            // Once, not until it works: a server that means it will keep
+            // meaning it, and the reply is waiting.
+            axios.post
+                .mockResolvedValueOnce(rateLimited('0'))
+                .mockResolvedValueOnce(rateLimited('0'));
+
+            const client = new McpHttpClient({ url: URL });
+            await expect(client.listTools()).rejects.toThrow(/rate-limiting/);
+            expect(axios.post).toHaveBeenCalledTimes(2);
+        });
+
+        test('reports a 429 that never said how long', async () => {
+            axios.post.mockResolvedValueOnce(rateLimited(null));
+
+            const client = new McpHttpClient({ url: URL });
+            await expect(client.listTools()).rejects.toThrow(/rate-limiting this connection/);
+            expect(axios.post).toHaveBeenCalledTimes(1);
+        });
+
+        test('reports a 429 asking for longer than a reply can wait', async () => {
+            axios.post.mockResolvedValueOnce(rateLimited('600'));
+
+            const client = new McpHttpClient({ url: URL });
+            await expect(client.listTools()).rejects.toThrow(/HTTP 429/);
+            expect(axios.post).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('reading how long it asked for', () => {
+        test('a count of seconds', () => {
+            expect(retryAfterMs('2')).toBe(2000);
+            expect(retryAfterMs('0')).toBe(0);
+        });
+
+        test('an HTTP date, which is the other form in the wild', () => {
+            const soon = new Date(Date.now() + 2000).toUTCString();
+            expect(retryAfterMs(soon)).toBeGreaterThan(0);
+            expect(retryAfterMs(soon)).toBeLessThanOrEqual(MAX_RETRY_AFTER_MS);
+        });
+
+        test('nothing, for a wait the reply cannot sit through', () => {
+            // A server asking for a minute is telling us to come back later,
+            // not to hold a Discord message open.
+            expect(retryAfterMs('60')).toBeNull();
+            expect(retryAfterMs(new Date(Date.now() + 120000).toUTCString())).toBeNull();
+        });
+
+        test('nothing, for a header that is missing or nonsense', () => {
+            expect(retryAfterMs(undefined)).toBeNull();
+            expect(retryAfterMs(null)).toBeNull();
+            expect(retryAfterMs('')).toBeNull();
+            expect(retryAfterMs('soon')).toBeNull();
+        });
+
+        test('nothing, for a date already in the past', () => {
+            expect(retryAfterMs(new Date(Date.now() - 5000).toUTCString())).toBeNull();
+        });
+    });
+});

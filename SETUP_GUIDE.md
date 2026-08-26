@@ -278,6 +278,17 @@ malformed config disables the connector, it never stops the bot from starting.
 - A tool result carrying a PNG, JPEG, GIF, WebP, MP3, WAV, OGG or PDF is posted
   to the channel as a file, up to four per reply. Anything else non-text is
   reported to the model as omitted, the way it always was.
+- Tool results are labelled with the server and tool they came from, and the
+  system prompt tells the model they are reference data rather than
+  instructions. That is not the defence — the block list, the approval prompt
+  and the per-tool filters are, and they hold whatever the model believes — but
+  it is added whenever a server is configured, not only when in-channel actions
+  are on.
+- One turn's tools are capped at 24,000 characters of output in total and 90
+  seconds of wall clock. Past either, calls are refused in words the model can
+  answer around rather than leaving a reply open indefinitely.
+- A 429 carrying a short `Retry-After` is waited out once. A 429 without one, or
+  asking for longer than a reply can wait, is reported as a failure.
 - On the client route the bot opens the connection, so the URL must be a public
   https address — one that resolves into private or reserved space is refused
   at the socket, the same guard the Ollama base URL uses.

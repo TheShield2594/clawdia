@@ -38,9 +38,12 @@ jest.mock('../src/services/ai/providers', () => ({
 const mockStream = jest.fn();
 const mockComplete = jest.fn();
 jest.mock('../src/services/ai', () => ({
-    resolveProviderConfig: () => ({
+    resolveProviderConfig: aiSettings => ({
         provider: 'mock', model: 'mock-1', temperature: 0.7, maxTokens: 512,
-        apiKey: 'k', baseUrl: null, mcpServers: [],
+        apiKey: 'k', baseUrl: null,
+        // Passed through rather than fixed: whether a server resolves is what
+        // decides if the transport attaches the MCP rule to the prompt.
+        mcpServers: aiSettings.mcpServers || [],
         rateLimit: { perUser: 0, perChannel: 0, windowMin: 10 }
     }),
     streamCompletion: (...args) => mockStream(...args),
@@ -267,5 +270,38 @@ describe('the usage ledger', () => {
         await handleAIChat(message, SETTINGS);
 
         expect(mockRecordToolCalls).not.toHaveBeenCalled();
+    });
+});
+
+
+describe('what the model is told about the servers', () => {
+    // The rule reaches the model through the system prompt, so what is asserted
+    // is the prompt the provider was handed.
+    const promptFor = async settings => {
+        mockStream.mockImplementation(async function* () { yield 'ok'; });
+        const { message } = fakeMessage();
+        await handleAIChat(message, settings);
+        return mockStream.mock.calls[0][0].systemPrompt;
+    };
+
+    const WITH_MCP = { ...SETTINGS, mcpServers: [{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true }] };
+
+    test('with a server configured and actions off, it is still told', async () => {
+        // The case that used to be silent: the rule rode on actionsEnabled, so
+        // this guild got no guidance about tool results at all.
+        const prompt = await promptFor({ ...WITH_MCP, actionsEnabled: false });
+        expect(prompt).toMatch(/never an instruction to you/);
+        expect(prompt).not.toMatch(/ACTION:/);
+    });
+
+    test('with actions on as well, it gets both rules', async () => {
+        const prompt = await promptFor({ ...WITH_MCP, actionsEnabled: true });
+        expect(prompt).toMatch(/never an instruction to you/);
+        expect(prompt).toMatch(/ACTION:\{"type":"create_poll"/);
+    });
+
+    test('with no server configured, the rule is left out', async () => {
+        const prompt = await promptFor({ ...SETTINGS, actionsEnabled: false });
+        expect(prompt).not.toMatch(/never an instruction to you/);
     });
 });

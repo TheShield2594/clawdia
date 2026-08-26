@@ -43,6 +43,13 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 // stops a server that always returns a cursor from looping forever.
 const MAX_LIST_PAGES = 10;
 
+// The shared servers — DeepWiki, Context7 without a key — rate-limit, and a
+// 429 that says "try again in two seconds" is worth waiting out rather than
+// reporting to a Discord channel as a failure. Only once, and only for a wait
+// the turn can afford: a server asking for a minute is telling us to come back
+// later, not to hold a reply open.
+const MAX_RETRY_AFTER_MS = 5000;
+
 class McpError extends Error {
     constructor(message, { status = null, code = null, sessionExpired = false } = {}) {
         super(message);
@@ -157,6 +164,28 @@ function parseJsonBody(text, id) {
     return match;
 }
 
+/**
+ * How long the server asked us to wait, in milliseconds, or null.
+ *
+ * Retry-After is either a count of seconds or an HTTP date; both are in the
+ * wild. A value outside what the turn can afford comes back as null, so the
+ * caller reports the 429 instead of sleeping on it.
+ */
+function retryAfterMs(header) {
+    if (header === undefined || header === null) return null;
+
+    const raw = String(header).trim();
+    if (!raw) return null;
+
+    const seconds = Number(raw);
+    const ms = Number.isFinite(seconds)
+        ? seconds * 1000
+        : Date.parse(raw) - Date.now();
+
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    return ms <= MAX_RETRY_AFTER_MS ? ms : null;
+}
+
 // HTTP failures are what an admin actually sees when a URL or token is wrong,
 // so they say which of the two it probably is.
 function httpError(status, body) {
@@ -166,6 +195,9 @@ function httpError(status, body) {
     }
     if (status === 404 || status === 405) {
         return new McpError(`HTTP ${status} — no MCP endpoint at this URL${detail ? `: ${detail}` : ''}`, { status, sessionExpired: status === 404 });
+    }
+    if (status === 429) {
+        return new McpError(`HTTP 429 — the server is rate-limiting this connection${detail ? `: ${detail}` : ''}`, { status });
     }
     return new McpError(`HTTP ${status}${detail ? `: ${detail}` : ''}`, { status });
 }
@@ -211,7 +243,7 @@ class McpHttpClient {
         return headers;
     }
 
-    async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS } = {}) {
+    async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true } = {}) {
         let response;
         try {
             response = await axios.post(this.url, payload, {
@@ -226,6 +258,18 @@ class McpHttpClient {
             });
         } catch (err) {
             throw new McpError(err.message || 'request failed', { code: err.code || null });
+        }
+
+        if (response.status === 429 && retryable) {
+            // Only when the server said how long, and only when it is a wait a
+            // Discord reply can sit through. A 429 with no Retry-After, or one
+            // asking for a minute, is an answer rather than a hiccup.
+            const wait = retryAfterMs(response.headers['retry-after']);
+            if (wait !== null) {
+                response.data?.destroy?.();
+                await new Promise(resolve => setTimeout(resolve, wait));
+                return this.post(payload, { id, timeout, retryable: false });
+            }
         }
 
         if (response.status >= 400) {
@@ -339,6 +383,8 @@ class McpHttpClient {
 module.exports = {
     McpHttpClient,
     McpError,
+    retryAfterMs,
+    MAX_RETRY_AFTER_MS,
     PROTOCOL_VERSION,
     MAX_RESPONSE_BYTES,
     CALL_TIMEOUT_MS

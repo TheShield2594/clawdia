@@ -16,6 +16,7 @@ const { handleAIChat } = require('./ai/discordChat');
 const { clearHistory } = require('./ai/history');
 const { retrieveKnowledge } = require('./ai/knowledge');
 const { buildActionsAddendum } = require('./ai/actions');
+const { buildMcpAddendum } = require('./ai/mcp/prompt');
 const { checkRateLimit, checkChannelRateLimit, peekRateLimit, peekChannelRateLimit, AiRateLimitError } = require('./ai/rateLimit');
 const { recordUsage, getUsageStats, estimateCost } = require('./ai/usage');
 
@@ -27,6 +28,7 @@ module.exports = {
     resolveProviderConfig,
     retrieveKnowledge,
     buildActionsAddendum,
+    buildMcpAddendum,
     checkRateLimit,
     checkChannelRateLimit,
     peekRateLimit,

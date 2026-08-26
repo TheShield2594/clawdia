@@ -137,6 +137,30 @@ change, and a script reading them needs updating. See
   colliding with another. They are separated now, and the non-streaming paths
   keep the preamble rather than dropping it, so turning streaming off no longer
   changes what the reply says.
+- **A guild running MCP with actions off was being told nothing about where
+  tool results come from.** The rule — text arriving from a connected server is
+  reference data, never an instruction — lived inside the in-channel actions
+  addendum, so it only reached the model when a guild had actions switched on.
+  That is the wrong half: a model with actions off can still be talked into
+  calling another tool. It is its own addendum now, attached whenever there is a
+  server to reach, and it picks up the ACTION sentence only where there is an
+  action to be talked into. Every tool result is also labelled with the server
+  and tool it came from, so the rule has something to point at and the model has
+  the words to say "the github server returned…" rather than asserting it.
+- **A turn's tools cannot cost unbounded time or context.** Every limit in the
+  toolkit bounded one call and none of them composed: four rounds of six calls,
+  each returning six thousand characters inside a forty-five second timeout, is
+  a hundred and forty thousand characters and several minutes of a Discord
+  message sitting on an ellipsis. There is a ceiling on the whole turn's tool
+  output now — past it a call still runs, since the model may want the side
+  effect, but what comes back says the output did not fit — and a wall-clock
+  budget after which no further call is dialled and no approval prompt is put in
+  front of anyone for a call that will not happen either way.
+- **A rate-limited server gets waited out rather than reported as broken.** The
+  shared servers rate-limit without a key, and a 429 saying "try again in two
+  seconds" was becoming a failed tool call. It is retried once now, and only
+  when the server said how long and the wait is short enough for a reply to sit
+  through — a server asking for a minute is telling us to come back later.
 - **Fishing tournaments are indexed on what they are looked up by** (#585). The
   collection was indexed on `guildId` alone while every query in
   `tournamentService` pairs the guild with a status — the read before each
