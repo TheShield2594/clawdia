@@ -597,9 +597,14 @@ async function applyAutoModAction(message, guildSettings, reason, scoreWeight = 
         await user.save();
 
         const score = user.behaviorScore;
-        const banAt = mod.behaviorScoreBanAt || 30;
-        const kickAt = mod.behaviorScoreKickAt || 20;
-        const muteAt = mod.behaviorScoreMuteAt || 10;
+        // `??`, not `||`. Each of these is documented as "0 = disabled" beside
+        // its dashboard field, the schema allows `min: 0`, and the guards below
+        // test `> 0` for exactly that reason — but `||` reads 0 as absent and
+        // hands back the default, so an operator who turned auto-ban off got it
+        // silently re-armed at 30 and the `> 0` guards were unreachable (#783).
+        const banAt = mod.behaviorScoreBanAt ?? 30;
+        const kickAt = mod.behaviorScoreKickAt ?? 20;
+        const muteAt = mod.behaviorScoreMuteAt ?? 10;
 
         if (banAt > 0 && score >= banAt && member.bannable) {
             await member.ban({ reason: `[AutoMod] Behavior score ${Math.round(score)} reached ban threshold` });

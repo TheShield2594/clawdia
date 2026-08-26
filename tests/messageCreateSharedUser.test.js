@@ -66,6 +66,8 @@ const { saveWithBalanceDelta } = require('../src/utils/balanceDelta');
 const { ensureQuests } = require('../src/services/questService');
 const { checkRivalry } = require('../src/services/rivalryService');
 const messageCreate = require('../src/events/messageCreate');
+// #783 lifted these out so the auto-moderation tests drive the same fake message.
+const { makeMessage, makeSettings } = require('./helpers/messageCreateMessage');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -99,42 +101,6 @@ function makeUserDoc(overrides = {}) {
             return true;
         },
     });
-}
-
-function makeSettings(overrides = {}) {
-    return {
-        ai: { enabled: false },
-        leveling: { enabled: true, rewardsEnabled: true, xpRate: 1, noXpChannelIds: [], noXpRoleIds: [] },
-        moderation: { enabled: false },
-        suggestions: { enabled: false },
-        bibleVerse: { autoRespond: false },
-        ...overrides,
-    };
-}
-
-function makeMessage(content = 'hello there') {
-    const channel = {
-        id: 'chan1',
-        send: jest.fn().mockResolvedValue({ delete: jest.fn().mockResolvedValue(undefined) }),
-    };
-    return {
-        id: 'msg1',
-        url: 'https://discord.com/channels/guild1/chan1/msg1',
-        content,
-        author: { id: 'author1', bot: false, toString: () => '<@author1>' },
-        attachments: new Map(),
-        mentions: { has: () => false },
-        member: {
-            id: 'author1',
-            permissions: { has: () => false },
-            roles: { cache: { some: () => false } },
-            bannable: false, kickable: false, moderatable: false,
-        },
-        guild: { id: 'guild1', name: 'Guild One' },
-        channel,
-        client: { user: { id: 'bot1' } },
-        delete: jest.fn().mockResolvedValue(undefined),
-    };
 }
 
 const run = (message) => messageCreate.execute(message, { user: { id: 'bot1' } });

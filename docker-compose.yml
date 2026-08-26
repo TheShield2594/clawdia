@@ -29,7 +29,7 @@ services:
     # Tag the local build with the same name portainer-stack.yml pulls, so
     # `docker compose build` produces the image the production stack expects
     # and `docker compose push` publishes it.
-    image: ghcr.io/theshield2594/clawdia:latest
+    image: ghcr.io/theshield2594/clawdia:${CLAWDIA_IMAGE_TAG:-latest}
     container_name: clawdia
     restart: unless-stopped
     env_file:
