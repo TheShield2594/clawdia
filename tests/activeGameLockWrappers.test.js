@@ -38,6 +38,10 @@ jest.mock('../src/models/Guild', () => ({
 jest.mock('../src/services/casinoJackpotService', () => ({
     processJackpotBet: jest.fn().mockResolvedValue(undefined),
     getJackpotDisplay: jest.fn().mockResolvedValue({ pool: 0, hot: false, display: '0' }),
+    // Slots destructures these two at require time — it plays for the shared
+    // progressive pool rather than a jackpot of its own.
+    claimJackpot: jest.fn().mockResolvedValue({ credited: false, wonAmount: 0, newPool: 0 }),
+    DEFAULT_SEED: 10_000,
 }));
 
 // One casino game stands in for all eight: the wrapper does not care which game

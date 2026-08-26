@@ -199,10 +199,21 @@ const guildSchema = new Schema({
     },
 
     slots: {
-        jackpotPool:       { type: Number,  default: 5000 },
-        lastJackpotWinner: { type: String,  default: null },
-        lastJackpotAmount: { type: Number,  default: null },
-        lastJackpotAt:     { type: Date,    default: null },
+        // Retired. Slots used to run a second jackpot pool of its own alongside
+        // casinoJackpot below, so `/casino jackpot` and the slots embed showed two
+        // different totals under the same "Jackpot Pool" label. Triple Wild now
+        // claims the shared progressive pool, and the winner is recorded in
+        // casinoJackpot.lastWinner*.
+        //
+        // These stay declared, without defaults, so that migration
+        // 017_merge_slots_jackpot_pool can still see them on documents written before
+        // the merge. A guild created after it never gets the fields at all. Do not
+        // read or write them.
+        jackpotPool:       { type: Number },
+        lastJackpotWinner: { type: String },
+        lastJackpotAmount: { type: Number },
+        lastJackpotAt:     { type: Date },
+
         announceJackpot:   { type: Boolean, default: true },
         jackpotPingHere:   { type: Boolean, default: false },
         jackpotChannelId:  { type: String,  default: null },

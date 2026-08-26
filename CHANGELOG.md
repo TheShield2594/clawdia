@@ -14,6 +14,39 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.3.1] - 2026-08-26
+
+Migrations through `017_merge_slots_jackpot_pool`.
+
+The casino ran two progressive jackpot pools at once and called them the same
+thing. `/casino jackpot` reported `casinoJackpot.pool` — seeded at 10,000, fed
+0.5% of every casino bet, dropped on a random per-bet trigger that grows as bets
+accumulate. `/casino slots` reported `slots.jackpotPool` under the label
+"🏆 Jackpot Pool" — seeded at 5,000, fed a flat 10 per spin, won on Triple Wild.
+A single spin paid into both, and each embed showed its own total, so a player
+who checked the jackpot and then spun was told two different figures for what
+reads as one prize.
+
+Slots now plays for the shared pool like every other game: it reads that pool
+for its embeds, and a Triple Wild claims it outright — a second and rarer
+trigger (about 1 in 16,600 spins) for the same pot, reseeding it at 10,000
+rather than 5,000. Migration `017_merge_slots_jackpot_pool` folds each guild's
+retired slots pool into the progressive one. Only the balance above the old
+5,000 seed carries over; Mongoose stamped that default onto every Guild document
+it ever created, so carrying the whole figure would mint coins into servers that
+never spun a reel. The migration is irreversible — the per-guild split is unset,
+not recorded — though a rollback to a pre-merge image still runs, since that
+build's schema carries its own default.
+
+Two payout bugs went with it. The slots jackpot broadcast announced the pool as
+it stood *before* the spin while crediting the amount claimed atomically at the
+moment of the win, so two concurrent winners were each told the wrong number;
+it now announces what was actually paid. And a coin booster multiplied a jackpot
+win, minting the difference — the pool is a fixed pot of other players' coins,
+not a multiple of the bet, so it is now exempt. Separately, a jackpot credit that
+fails and rolls the pool back clears the winner fields, which the restart
+reconciler in `events/ready.js` otherwise pays out a second time.
+
 ## [4.3.0] - 2026-08-24
 
 Migrations through `016_fishing_tournament_status_index`.

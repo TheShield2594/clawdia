@@ -11,6 +11,7 @@ const { confirmBet } = require('../../utils/confirmBet');
 const { hasEffect, getCoinMultiplier, getLuckyStreakBonus, getServerCoinMultiplier, luckySaveEligible } = require('../../services/effectsService');
 const Guild = require('../../models/Guild');
 const { randomFrom, SLOTS_LOSE_LINES, SLOTS_WIN_LINES } = require('../../utils/copyLines');
+const { claimJackpot, DEFAULT_SEED: JACKPOT_SEED } = require('../../services/casinoJackpotService');
 const COLORS = require('../../utils/embedColors');
 const { ownedBy } = require('../../utils/collectorOwner');
 
@@ -33,8 +34,13 @@ const WIN_ANNOUNCE_MULT  = 50;
 
 const TOTAL_WEIGHT      = SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
 const SPIN_POOL         = SYMBOLS.filter(s => s.type === 'regular' || s.type === 'wild');
-const JACKPOT_SEED      = 5000;
-const JACKPOT_CONTRIB   = 10;
+// The jackpot slots plays for is the shared progressive pool
+// (services/casinoJackpotService) — the same one `/casino jackpot` reports and
+// every casino bet feeds at 0.5%. Slots keeps no pool of its own; a Triple Wild is
+// simply a second, rarer way to claim this one. FREE_SPIN_JACKPOT_MULT is what a
+// Triple Wild pays when it cannot claim the pool: on a free spin (which staked
+// nothing) or if the pool credit failed and was rolled back.
+const FREE_SPIN_JACKPOT_MULT = 25;
 
 function spinReel() {
     let r = Math.random() * TOTAL_WEIGHT;
@@ -108,7 +114,7 @@ function spinEmbed(display, bet, stage, interaction, jackpotPool) {
         .addFields(
             { name: '💰 Bet',            value: `**${bet.toLocaleString()}** coins`,          inline: true },
             { name: '🎲 Status',         value: `Reel ${stage}/3 locked`,                     inline: true },
-            { name: '🏆 Current Jackpot', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true },
+            { name: '🏆 Progressive Jackpot', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true },
         );
 }
 
@@ -148,7 +154,7 @@ function resultEmbed(reels, result, bet, balance, interaction, jackpotPool) {
         )
         .addFields(
             { name: '💰 Balance',      value: `**${balance.toLocaleString()}** coins`,      inline: true },
-            { name: '🏆 Jackpot Pool', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true },
+            { name: '🏆 Progressive Jackpot', value: `**${jackpotPool.toLocaleString()}** coins`, inline: true },
         )
         .setFooter({ text: '🃏 Wild substitutes for any symbol  •  ⚡ Boost multiplies your win' })
         .setTimestamp();
@@ -187,7 +193,7 @@ function paytableEmbed() {
             { name: '💎 Diamond',  value: '**15×** your bet',  inline: true },
             { name: '🌟 Star',     value: '**25×** your bet',  inline: true },
             { name: '​', value: '​', inline: false },
-            { name: '🃏🃏🃏 Triple Wild', value: '🏆 **JACKPOT — wins the pool** (seeds at 5,000)', inline: true },
+            { name: '🃏🃏🃏 Triple Wild', value: '🏆 **JACKPOT — wins the whole progressive pool** (`/casino jackpot`)', inline: true },
             { name: '⚡⚡⚡ Triple Boost', value: '**4× bet**', inline: true },
             { name: 'Two of a Kind', value: 'Half of the 3-of-a-kind payout', inline: false },
             { name: '🌸🌸 Two Scatters', value: '**3 free spins** (no bet deducted)', inline: true },
@@ -238,12 +244,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 { $setOnInsert: { ...userFilter, balance: 0 } },
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             ),
-            // Ensure slots.jackpotPool exists on the document before we try to match it
-            Guild.findOneAndUpdate(
-                { ...guildFilter, 'slots.jackpotPool': { $exists: false } },
-                { $set: { 'slots.jackpotPool': JACKPOT_SEED } },
-                { new: false }
-            ).then(() => Guild.findOne(guildFilter)),
+            Guild.findOne(guildFilter),
         ]);
 
         const luckyActive      = hasEffect(userDoc, 'lucky_charm');
@@ -263,8 +264,10 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
             });
         }
 
-        // Read current jackpot pool snapshot (after guaranteed initialization above)
-        const jackpotPool = guildSettings?.slots?.jackpotPool ?? JACKPOT_SEED;
+        // Snapshot of the shared progressive pool, for the reels-spinning embeds. The
+        // pool moves under us while they animate (every casino bet in the guild feeds
+        // it), so the result embed reports a fresh figure rather than this one.
+        const jackpotPool = guildSettings?.casinoJackpot?.pool ?? JACKPOT_SEED;
 
         // ── Hot Reel mechanic: after 3 consecutive losses, lock reel 1 ────────
         const lossStreak = userDoc.casinoStats?.slotsLossStreak ?? 0;
@@ -291,34 +294,36 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
             result = { ...result, outcome: 'push', payout: bet };
         }
 
-        // ── Jackpot / pool update (bet already charged) ────────────────────
+        // ── Jackpot claim (bet already charged) ────────────────────────────
+        //
+        // A losing spin needs no pool write of its own: placeWager above already
+        // reported the wager, and that is what feeds the progressive pool its 0.5%.
+        // Slots writing a second contribution here is exactly how it ended up with a
+        // pool of its own.
         let finalJackpotPool = jackpotPool;
         let jackpotWon = false;
 
         if (result.outcome === 'jackpot') {
-            // Atomically swap the pool for the seed and pay out whatever was in it.
-            // findOneAndUpdate returns the pre-update document, so two concurrent
-            // winners settle cleanly: the first takes the accumulated pool, the
-            // second takes the fresh seed — nothing is minted, nobody gets zero.
-            const claimed = await Guild.findOneAndUpdate(
-                guildFilter,
-                {
-                    $set: {
-                        'slots.jackpotPool':       JACKPOT_SEED,
-                        'slots.lastJackpotWinner': interaction.user.id,
-                        'slots.lastJackpotAt':     new Date(),
-                    }
-                },
-                { new: false }
-            );
-            const claimedAmount = claimed?.slots?.jackpotPool ?? JACKPOT_SEED;
-            Guild.updateOne(guildFilter, { $set: { 'slots.lastJackpotAmount': claimedAmount } }).catch(() => {});
-            result = { ...result, payout: claimedAmount };
-            finalJackpotPool = JACKPOT_SEED;
-            jackpotWon = true;
-        } else {
-            await Guild.updateOne(guildFilter, { $inc: { 'slots.jackpotPool': JACKPOT_CONTRIB } });
-            finalJackpotPool = jackpotPool + JACKPOT_CONTRIB;
+            const claim = await claimJackpot({
+                guildId:  interaction.guild.id,
+                userId:   interaction.user.id,
+                username: interaction.user.username,
+                note:     'Progressive jackpot win — slots Triple Wild',
+            });
+            finalJackpotPool = claim.newPool;
+            if (claim.credited) {
+                // The service has already moved the coins and logged the payout, so
+                // the spin's own credit below must skip this amount. It is carried on
+                // result.payout for the embeds' arithmetic only.
+                jackpotWon = true;
+                result = { ...result, payout: claim.wonAmount };
+            } else {
+                // The credit failed and the pool was rolled back. Pay the flat
+                // mega-win through the normal payout path instead — a Triple Wild is
+                // never a dead spin.
+                console.error(`[Slots] jackpot credit failed for ${interaction.user.id} — paying the ${FREE_SPIN_JACKPOT_MULT}x fallback`);
+                result = { ...result, payout: bet * FREE_SPIN_JACKPOT_MULT };
+            }
         }
 
         // ── Handle scatter free spins ───────────────────────────────────────────
@@ -334,16 +339,19 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
         const newStreak = isWin || hotReelTriggered ? 0 : lossStreak + 1;
         await User.updateOne(userFilter, { $set: { 'casinoStats.slotsLossStreak': newStreak } }).catch(() => {});
 
-        // Apply coin booster to payout (net profit portion only)
+        // Apply coin booster to payout (net profit portion only). A claimed jackpot
+        // is exempt: the pool is a fixed pot of coins other players paid in, not a
+        // multiple of this bet, and running a booster over it mints the difference.
         let adjustedPayout = result.payout;
-        if (result.payout > 0 && totalCoinMult > 1.0) {
+        if (result.payout > 0 && totalCoinMult > 1.0 && !jackpotWon) {
             adjustedPayout = bet + Math.round((result.payout - bet) * totalCoinMult);
         }
 
-        // Credit the payout (bet already debited above)
+        // Credit the payout (bet already debited above). casinoJackpotService credits
+        // a claimed jackpot itself — including it here would pay the pool out twice.
         let user = await User.findOneAndUpdate(
             userFilter,
-            { $inc: { balance: adjustedPayout } },
+            { $inc: { balance: jackpotWon ? 0 : adjustedPayout } },
             { new: true }
         );
 
@@ -365,7 +373,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 : interaction.channel;
             await targetChannel?.send({
                 content: pingHere ? '@here' : undefined,
-                embeds: [jackpotBroadcastEmbed(interaction, jackpotPool, JACKPOT_SEED)],
+                embeds: [jackpotBroadcastEmbed(interaction, result.payout, finalJackpotPool)],
             }).catch(err => console.error(`[Slots] jackpot broadcast failed — channel:${targetChannel?.id} interaction:${interaction.id}`, err));
         }
 
@@ -378,7 +386,7 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
                 const freeResult = evaluate(freeReels, bet);
                 // Triple wilds in a free spin pay a flat mega-win — the progressive
                 // pool is only claimable on paid spins (evaluate leaves payout at 0).
-                if (freeResult.outcome === 'jackpot') freeResult.payout = bet * 25;
+                if (freeResult.outcome === 'jackpot') freeResult.payout = bet * FREE_SPIN_JACKPOT_MULT;
                 const freePayout = Math.round(freeResult.payout * freeSpinMult);
                 freeTotalPayout += freePayout;
                 freeResults.push({ reels: freeReels, payout: freePayout, outcome: freeResult.outcome });
@@ -434,6 +442,16 @@ async function playSlots(interaction, bet, releaseLock, onWager) {
             new ButtonBuilder().setCustomId(replayId).setLabel('🎰 Spin Again').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(paytableId).setLabel('📊 Paytable').setStyle(ButtonStyle.Secondary),
         );
+
+        // Refresh the pool for the result embed rather than reusing the pre-spin
+        // snapshot. This spin's own 0.5% contribution is fired and forgotten from
+        // placeWager, and the reels animated for ~2.4 seconds on top of that, so the
+        // snapshot is stale by the time anyone reads it — and this is the figure a
+        // player checks against `/casino jackpot`.
+        if (!jackpotWon) {
+            const fresh = await Guild.findOne(guildFilter, 'casinoJackpot').lean().catch(() => null);
+            finalJackpotPool = fresh?.casinoJackpot?.pool ?? finalJackpotPool;
+        }
 
         const finalEmbed = resultEmbed(reels, { ...result, payout: adjustedPayout }, bet, user?.balance ?? 0, interaction, finalJackpotPool);
         if (hotReelTriggered) {
