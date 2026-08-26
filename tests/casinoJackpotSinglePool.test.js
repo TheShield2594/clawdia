@@ -188,6 +188,19 @@ describe('a Triple Wild claims the shared pool', () => {
         );
     }, 20_000);
 
+    test('a guild with no document has no pool to win', async () => {
+        // awardPool's claim matches nothing here, falls back to the seed and would
+        // credit a five-figure pot nobody ever paid into. A spin can reach this: it
+        // reads the guild without upserting one, and tolerates not finding it.
+        Guild.findOne.mockImplementation(() => guildQuery(null));
+
+        const spin = makeInteraction({ bet: BET });
+        await slots.execute(spin, { releaseLock: jest.fn(), onWager: jest.fn() });
+
+        expect(Guild.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(totalCredited()).toBe(BET * 25);
+    }, 20_000);
+
     test('a rolled-back claim clears the winner fields the restart reconciler pays from', async () => {
         User.findOneAndUpdate.mockImplementation((_filter, update) =>
             Promise.resolve(update?.$setOnInsert ? walletDoc() : null));

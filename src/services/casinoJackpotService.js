@@ -166,8 +166,14 @@ async function processJackpotBet({ guildId, userId, username, bet, interaction }
  * Returns { credited, wonAmount, newPool }.
  */
 async function claimJackpot({ guildId, userId, username, note = 'Progressive jackpot win' }) {
-    const guild      = await Guild.findOne({ guildId }, 'casinoJackpot').lean();
-    const seedAmount = guild?.casinoJackpot?.seedAmount ?? DEFAULT_SEED;
+    const guild = await Guild.findOne({ guildId }, 'casinoJackpot').lean();
+    // No document means no pool: awardPool's claim would match nothing, fall back to
+    // the seed and credit a five-figure pot that no player ever paid into. The same
+    // guard processJackpotBet opens with, and it leaves every call into awardPool
+    // made against a guild that exists. The caller treats this as a failed credit.
+    if (!guild) return { credited: false, wonAmount: 0, newPool: DEFAULT_SEED };
+
+    const seedAmount = guild.casinoJackpot?.seedAmount ?? DEFAULT_SEED;
     return awardPool({ guildId, userId, username, seedAmount, note });
 }
 
