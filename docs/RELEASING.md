@@ -46,22 +46,46 @@ working.
 
 `.github/workflows/ci.yml` runs on `push: tags: v*`, and the publish job is
 behind `needs: test`, so a tag whose tests fail publishes nothing. On a green
-run `docker/metadata-action` derives three tags from `v4.2.1`:
+run `docker/metadata-action` derives these tags from `v4.2.1`:
 
 - `ghcr.io/theshield2594/clawdia:4.2.1`
 - `ghcr.io/theshield2594/clawdia:4.2`
 - `ghcr.io/theshield2594/clawdia:latest` (default branch only)
+- `ghcr.io/theshield2594/clawdia:sha-<40-char commit sha>`
+
+The last one is published for **every** build, tagged or not, and is the only
+one that never moves. `latest`, `main` and `4.2` all get repointed by the next
+push, so none of them can name the build that was running before a bad deploy.
 
 ## Pinning the deploy
 
-`portainer-stack.yml` deploys `:latest`, which is why a bad build reaches
-production and cannot be backed out of. With versioned tags published, pin it:
+`portainer-stack.yml` reads its tag from `CLAWDIA_IMAGE_TAG`:
 
 ```yaml
-image: ghcr.io/theshield2594/clawdia:4.2.1
+image: ghcr.io/theshield2594/clawdia:${CLAWDIA_IMAGE_TAG:-latest}
 ```
 
-Rolling back is then editing that line to the previous version and redeploying
-— provided the CHANGELOG says that version's migration high-water mark is not
-behind one that has already run against the database. That check is why the
-mark is recorded per release.
+Set it in the stack's environment — Portainer > Stacks > Environment variables,
+or the `.env` beside the file — to a released version or a commit sha:
+
+```
+CLAWDIA_IMAGE_TAG=4.2.1
+```
+
+Unset, it falls back to `latest`. That is fine for a first deploy and is why it
+is the default, but it leaves nothing to roll back to the next time.
+
+## Rolling back
+
+1. Find the tag the previous deploy was on. If it was pinned, it is the previous
+   value of `CLAWDIA_IMAGE_TAG`; otherwise take the commit sha of the build from
+   the Actions run and use `sha-<full sha>`.
+2. Check the CHANGELOG: the target version's migration high-water mark must not
+   be behind one that has already run against the database. The mark is recorded
+   per release for exactly this check.
+3. Set `CLAWDIA_IMAGE_TAG` to that tag and redeploy the stack.
+
+The schema does not roll back with the image. Migrations here are forward-only
+and destructive, so a rollback across a migration boundary — step 2 failing —
+also needs the pre-migration dump the runner writes to `/app/backups` before an
+irreversible migration. Restore that dump first, then redeploy the old image.

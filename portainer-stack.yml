@@ -63,7 +63,24 @@ services:
           memory: 1g
 
   bot:
-    image: ghcr.io/theshield2594/clawdia:latest
+    # Not a bare `:latest` (#637). `latest` moves with every push to main, so it
+    # cannot name the build that was running before a bad deploy — pulling it
+    # again just fetches the same broken image. CI publishes an immutable
+    # sha-<full commit> tag for every build, so pin this to one and bump it
+    # deliberately:
+    #
+    #     CLAWDIA_IMAGE_TAG=sha-<40-char commit sha>
+    #
+    # in the stack's environment (Portainer > Stacks > Environment variables, or
+    # the .env beside this file). To roll back, set it to the previous deploy's
+    # sha and redeploy. Unset it and you are back on `latest` — which is fine
+    # for a first deploy and is why that is still the default, but leaves you
+    # with no rollback target the next time.
+    #
+    # The schema does not roll back with the image: migrations here are
+    # forward-only and destructive, so an image rollback across a migration
+    # boundary also needs the pre-migration dump from /app/backups.
+    image: ghcr.io/theshield2594/clawdia:${CLAWDIA_IMAGE_TAG:-latest}
     container_name: clawdia
     restart: unless-stopped
     environment:
