@@ -144,6 +144,7 @@ function publicServer(server) {
         allowedTools: server.allowedTools || [],
         blockedTools: server.blockedTools || [],
         confirmTools: server.confirmTools || [],
+        resources: server.resources === true,
         addedBy: server.addedBy || null,
         createdAt: server.createdAt || null
     };
@@ -210,7 +211,10 @@ function validateServerInput(body, name) {
             enabled: body.enabled !== false,
             allowedTools: allowed.value,
             blockedTools: blocked.value,
-            confirmTools: confirm.value
+            confirmTools: confirm.value,
+            // Reading a server's documents into the system prompt is a separate
+            // decision from calling its tools, so it is a separate switch.
+            resources: body.resources === true
         }
     };
 }
@@ -313,6 +317,7 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             existing.allowedTools = validated.value.allowedTools;
             existing.blockedTools = validated.value.blockedTools;
             existing.confirmTools = validated.value.confirmTools;
+            existing.resources = validated.value.resources;
             if (token !== undefined) existing.authorizationToken = token;
         } else {
             servers.push({
@@ -328,6 +333,7 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             name,
             url: validated.value.url,
             enabled: validated.value.enabled,
+            resources: validated.value.resources,
             tokenChanged: token !== undefined
         });
 
@@ -396,6 +402,13 @@ router.post('/guild/:guildId/mcp-servers/:name/test', checkAuth, checkGuildAcces
             success: report.success,
             message: report.message,
             toolCount: report.toolCount,
+            // The other two halves of the protocol: documents the connection
+            // can answer questions from, and prompt templates `/ai mcp prompt`
+            // can run. Both are counted whether or not the guild switched
+            // resources on, because "this server has 40 documents" is what
+            // makes that switch mean something.
+            resourceCount: report.resourceCount,
+            promptCount: report.promptCount,
             enabledCount: report.enabledCount,
             confirmCount: report.confirmCount,
             confirmMode: mode,

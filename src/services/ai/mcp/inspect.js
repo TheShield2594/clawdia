@@ -16,6 +16,14 @@ const { isToolEnabled, needsConfirmation, toolAnnotations } = require('../../../
 // list stops being something a person reads.
 const MAX_TOOLS_REPORTED = 50;
 
+/** The tail of the connected message: what else this server has, if anything. */
+function extras(resourceCount, promptCount) {
+    const bits = [];
+    if (resourceCount) bits.push(`${resourceCount} resource${resourceCount === 1 ? '' : 's'}`);
+    if (promptCount) bits.push(`${promptCount} prompt${promptCount === 1 ? '' : 's'}`);
+    return bits.length ? `. It also publishes ${bits.join(' and ')}.` : '.';
+}
+
 /**
  * Connect to one resolved server and report what it offers.
  *
@@ -38,6 +46,15 @@ async function inspectServer(server, { confirmMode } = {}) {
         });
 
         const tools = await client.listTools();
+        // The other two halves of the protocol, asked for only when the server
+        // said in its handshake that it has them. An admin filling in the
+        // Connections panel wants to know a server publishes documents or
+        // prompt templates as much as they want the tool list — those are the
+        // two switches under it.
+        const [resources, prompts] = await Promise.all([
+            client.listResources().catch(() => []),
+            client.listPrompts().catch(() => [])
+        ]);
         const described = tools.slice(0, MAX_TOOLS_REPORTED).map(tool => ({
             name: tool.name,
             enabled: isToolEnabled(server.toolset, tool.name),
@@ -53,9 +70,12 @@ async function inspectServer(server, { confirmMode } = {}) {
             success: true,
             message: `Connected${serverName ? ` to ${serverName}` : ''} — ${tools.length} tool${tools.length === 1 ? '' : 's'} offered, ` +
                 `${enabled.length} enabled by your filters` +
-                (confirming.length ? `, ${confirming.length} needing approval.` : '.'),
+                (confirming.length ? `, ${confirming.length} needing approval` : '') +
+                extras(resources.length, prompts.length),
             serverName: serverName || null,
             toolCount: tools.length,
+            resourceCount: resources.length,
+            promptCount: prompts.length,
             enabledCount: enabled.length,
             confirmCount: confirming.length,
             tools: described
@@ -66,6 +86,8 @@ async function inspectServer(server, { confirmMode } = {}) {
             success: false,
             message: error?.message || 'Unknown error',
             toolCount: 0,
+            resourceCount: 0,
+            promptCount: 0,
             enabledCount: 0,
             confirmCount: 0,
             tools: []

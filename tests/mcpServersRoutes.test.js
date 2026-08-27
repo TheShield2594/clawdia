@@ -28,6 +28,8 @@ jest.mock('../src/services/ai/mcp/client', () => ({
             mockConstructed.push(options);
             this.serverInfo = { name: 'GitHub MCP Server' };
             this.listTools = mockListTools;
+            this.listResources = async () => [];
+            this.listPrompts = async () => [];
             this.close = mockClose;
         }
     }
@@ -278,6 +280,44 @@ describe('POST /guild/:id/mcp-servers/:name/test', () => {
         mockListTools.mockRejectedValue(new Error('nope'));
         await api('POST', '/guild/g1/mcp-servers/github/test');
         expect(mockClose).toHaveBeenCalled();
+    });
+});
+
+// A connection's documents are a separate switch from its tools, and one that
+// puts third-party text in the system prompt of every message — so it has to
+// survive a save exactly as it was set, and be off when nobody set it.
+describe('using a connection\'s documents as knowledge', () => {
+    const stored = {
+        name: 'github',
+        url: 'https://api.githubcopilot.com/mcp/',
+        enabled: true,
+        authorizationToken: 'ghp_good',
+        allowedTools: [],
+        blockedTools: [],
+        confirmTools: []
+    };
+
+    test('round-trips through a save', async () => {
+        doc = makeDoc([{ ...stored }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const { status, body } = await api('PUT', '/guild/g1/mcp-servers/github', {
+            url: stored.url,
+            resources: true
+        });
+
+        expect(status).toBe(200);
+        expect(doc.ai.mcpServers[0].resources).toBe(true);
+        expect(body.servers[0].resources).toBe(true);
+    });
+
+    test('is off when the panel does not send it', async () => {
+        doc = makeDoc([{ ...stored, resources: true }]);
+        Guild.findOne.mockResolvedValue(doc);
+
+        const { body } = await api('PUT', '/guild/g1/mcp-servers/github', { url: stored.url });
+        expect(doc.ai.mcpServers[0].resources).toBe(false);
+        expect(body.servers[0].resources).toBe(false);
     });
 });
 

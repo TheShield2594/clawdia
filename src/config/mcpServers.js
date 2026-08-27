@@ -288,10 +288,19 @@ function normalizeServer(raw, { label, source, expandEnv, warnings }) {
     const server = { type: 'url', url, name };
     if (token) server.authorization_token = token;
 
+    // Off unless the guild says otherwise. A server's resources are documents
+    // somebody else wrote, and switching this on puts them in the system prompt
+    // of every message in the guild — that is a decision, not a default, and it
+    // is the reason resources are opt-in per connection while tools are not:
+    // a tool runs when the model asks for it, a resource is read before the
+    // model has said anything.
+    const resources = raw.resources === true || raw.use_resources === true;
+
     return {
         name,
         source,
         server,
+        resources,
         // What src/services/ai/mcp/ connects to when the guild is not on
         // Anthropic. Same url and same token — only the side that opens the
         // socket differs.

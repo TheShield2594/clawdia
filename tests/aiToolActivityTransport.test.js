@@ -25,6 +25,11 @@ jest.mock('../src/services/ai/history', () => ({
     clearHistory: jest.fn(async () => {})
 }));
 
+const mockRetrieveMcpKnowledge = jest.fn(async () => null);
+jest.mock('../src/services/ai/mcp/resources', () => ({
+    retrieveMcpKnowledge: (...args) => mockRetrieveMcpKnowledge(...args)
+}));
+
 const mockRecordToolCalls = jest.fn(async () => {});
 jest.mock('../src/services/ai/mcp/usage', () => ({
     recordToolCalls: (...args) => mockRecordToolCalls(...args)
@@ -92,6 +97,7 @@ const edits = msg => msg.edit.mock.calls.map(call => call[0]);
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockRetrieveMcpKnowledge.mockResolvedValue(null);
 });
 
 describe('while a tool is running', () => {
@@ -305,6 +311,29 @@ describe('what the model is told about the servers', () => {
     test('with no server configured, the rule is left out', async () => {
         const prompt = await promptFor({ ...SETTINGS, actionsEnabled: false });
         expect(prompt).not.toMatch(/never an instruction to you/);
+    });
+
+    // The second knowledge base: documents a server publishes, read as the
+    // question is asked rather than pasted into the dashboard a month ago.
+    test('a server\'s documents reach the model as reference material', async () => {
+        mockRetrieveMcpKnowledge.mockResolvedValue({
+            text: '\n\n---\nReference only\n> **Onboarding** — from the "wiki" server (wiki://onboarding)\n> Ask a lead.',
+            sources: [{ server: 'wiki', uri: 'wiki://onboarding', name: 'Onboarding' }]
+        });
+
+        const prompt = await promptFor(WITH_MCP);
+        expect(mockRetrieveMcpKnowledge).toHaveBeenCalledWith(WITH_MCP.mcpServers, 'what changed in the repo?');
+        expect(prompt).toContain('Ask a lead.');
+    });
+
+    test('a documents server that falls over costs the reply nothing', async () => {
+        mockRetrieveMcpKnowledge.mockRejectedValue(new Error('connect ETIMEDOUT'));
+
+        mockStream.mockImplementation(async function* () { yield 'Answered anyway.'; });
+        const { message, sent } = fakeMessage();
+        await handleAIChat(message, WITH_MCP);
+
+        expect(sent[0].content).toBe('Answered anyway.');
     });
 });
 
