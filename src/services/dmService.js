@@ -163,6 +163,8 @@ async function beginSession(interaction) {
         const story = await getCompletion({
             provider, model, apiKey, baseUrl, mcpServers, rateLimit,
             guildId: guild.id, userId: interaction.user.id, channelId: interaction.channelId,
+            // A narrator has no business making tool calls mid-story.
+            mcp: false,
             systemPrompt, history: [], prompt: openingPrompt, temperature: 0.9, maxTokens: 600
         });
 
@@ -240,6 +242,8 @@ async function takeAction(interaction) {
         const narrative = await getCompletion({
             provider, model, apiKey, baseUrl, mcpServers, rateLimit,
             guildId: guild.id, userId: user.id, channelId: interaction.channelId,
+            // A narrator has no business making tool calls mid-story.
+            mcp: false,
             systemPrompt, history, prompt, temperature: 0.9, maxTokens: 500
         });
 
@@ -446,6 +450,8 @@ async function handleDmButton(interaction, _client) {
         const recap = await getCompletion({
             provider, model, apiKey, baseUrl, mcpServers, rateLimit,
             guildId: session.guildId, userId: interaction.user.id, channelId: interaction.channelId,
+            // A narrator has no business making tool calls mid-story.
+            mcp: false,
             systemPrompt: 'You are a dramatic fantasy narrator. Summarize the story concisely.',
             history: [],
             prompt: `Summarize the following campaign story so far as a dramatic narrator in 3-5 sentences:\n\n${logSnippet}`,

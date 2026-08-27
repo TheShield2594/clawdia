@@ -402,6 +402,35 @@ describe('server-sent event responses', () => {
         await expect(new McpHttpClient({ url: URL }).initialize())
             .rejects.toThrow(/closed the stream/);
     });
+
+    test('a stream that never answers is cut off at the deadline (#816)', async () => {
+        // 200 with event-stream headers, then silence: axios's own timeout only
+        // covers the headers, so this is the shape that used to hang forever.
+        const hanging = new Readable({ read() {} });
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return { status: 200, headers: { 'content-type': 'text/event-stream' }, data: hanging };
+        });
+
+        const client = new McpHttpClient({ url: URL });
+        await expect(client.callTool('search', {}, { timeout: 50 }))
+            .rejects.toThrow(/no answer before the deadline/);
+        // The socket is released, not left open behind the settled promise.
+        expect(hanging.destroyed).toBe(true);
+    });
+
+    test('an error body that never arrives is cut off at the deadline too', async () => {
+        const hanging = new Readable({ read() {} });
+        axios.post.mockImplementation(async () => ({
+            status: 500, headers: { 'content-type': 'text/plain' }, data: hanging
+        }));
+
+        const client = new McpHttpClient({ url: URL });
+        await expect(client.post({ jsonrpc: '2.0', id: 1, method: 'x' }, { id: 1, timeout: 50 }))
+            .rejects.toThrow(/no answer before the deadline/);
+        expect(hanging.destroyed).toBe(true);
+    });
 });
 
 describe('tools/list', () => {

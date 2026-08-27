@@ -174,6 +174,11 @@ async function generateNewspaper(client, guildDoc, preloadedGuild, requester) {
                     : '';
                 narrativeText = await getCompletion({
                     provider, model, apiKey, baseUrl, mcpServers, rateLimit,
+                    // A scheduled run has no userId, and the tool budget is
+                    // keyed on one — leaving MCP on would be the only
+                    // unbounded tool path in the codebase. The stats are all
+                    // in the prompt; there is nothing to look up anyway.
+                    mcp: false,
                     userId: requester?.userId,
                     channelId: requester?.channelId,
                     temperature: 0.85,

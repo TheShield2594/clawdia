@@ -42,6 +42,13 @@ const STALE_TTL_MS = 30 * 60 * 1000;
 // queue.
 const MAX_PARALLEL_PER_SERVER = 3;
 
+// How long a caller may wait for one of those slots. The calls holding them
+// are bounded — client.js enforces its deadline on the body as well as the
+// headers now (#816) — so a wait this long means the queue is deep enough that
+// the turn behind it is already lost, and refusing the call beats holding the
+// reply open on a slot that may never come.
+const SLOT_WAIT_TIMEOUT_MS = 60 * 1000;
+
 // Sessions cost the server memory. An idle one is closed rather than held open
 // for a guild that used a tool once this afternoon.
 const SESSION_IDLE_MS = 10 * 60 * 1000;
@@ -172,7 +179,19 @@ async function withSession(entry, server, fn) {
  */
 async function withServerLimit(entry, fn) {
     if (entry.inFlight >= MAX_PARALLEL_PER_SERVER) {
-        await new Promise(resolve => entry.waiters.push(resolve));
+        await new Promise((resolve, reject) => {
+            const waiter = { resolve, timer: null };
+            waiter.timer = setTimeout(() => {
+                const index = entry.waiters.indexOf(waiter);
+                // Already gone means a finishing call handed this waiter its
+                // slot in the same tick; the resolution wins over the timeout.
+                if (index < 0) return;
+                entry.waiters.splice(index, 1);
+                reject(new McpError('timed out waiting for a free connection slot on this server'));
+            }, SLOT_WAIT_TIMEOUT_MS);
+            waiter.timer.unref?.();
+            entry.waiters.push(waiter);
+        });
     } else {
         entry.inFlight++;
     }
@@ -180,8 +199,12 @@ async function withServerLimit(entry, fn) {
         return await fn();
     } finally {
         const next = entry.waiters.shift();
-        if (next) next();
-        else entry.inFlight--;
+        if (next) {
+            clearTimeout(next.timer);
+            next.resolve();
+        } else {
+            entry.inFlight--;
+        }
     }
 }
 
@@ -308,5 +331,6 @@ module.exports = {
     STALE_TTL_MS,
     FAILURE_TTL_MS,
     SESSION_IDLE_MS,
-    MAX_PARALLEL_PER_SERVER
+    MAX_PARALLEL_PER_SERVER,
+    SLOT_WAIT_TIMEOUT_MS
 };
