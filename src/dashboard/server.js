@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const compression = require('compression');
 const session = require('express-session');
-const MongoStore = require('connect-mongo');
+const { createSessionStore } = require('./lib/sessionStore');
 const passport = require('passport');
 const { Strategy: DiscordStrategy, DiscordScope } = require('./lib/discordStrategy');
 const path = require('path');
@@ -251,7 +251,7 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     // bounds how long a stale snapshot can survive when Discord cannot be
     // reached to take that second opinion.
     app.use(session({
-        store: sessionStore ?? MongoStore.create({ mongoUrl: process.env.MONGODB_URI, collectionName: 'sessions' }),
+        store: sessionStore ?? createSessionStore(),
         secret: process.env.SESSION_SECRET,
         resave: false,
         rolling: true,
