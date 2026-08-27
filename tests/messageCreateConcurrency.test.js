@@ -61,6 +61,7 @@ const User  = require('../src/models/User');
 const { getGuildSettings } = require('../src/utils/guildSettingsCache');
 const { saveWithBalanceDelta } = require('../src/utils/balanceDelta');
 const messageCreate = require('../src/events/messageCreate');
+const { useFixedClock } = require('./helpers/fixedClock');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -144,6 +145,14 @@ beforeEach(() => {
 });
 
 describe('two messages from the same user', () => {
+    // The daily counter resets when the stored `lastDailyReset` is not today's
+    // UTC date (messageCreate.js:291-296), and the fixture below stamps it with
+    // its own `new Date()`. Unpinned, a run that crosses midnight UTC between
+    // the fixture and the handler's read triggers the reset, and the counter
+    // this suite asserts on comes back 1 instead of 2 — a lost-update failure
+    // reported for a clock, once a year, at midnight (#632).
+    useFixedClock();
+
     test('the second flow does not read the document until the first has written it', async () => {
         const order = [];
 

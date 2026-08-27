@@ -10,6 +10,22 @@ jest.mock('../src/models/User', () => ({ find: jest.fn() }));
 const { checkBirthdays } = require('../src/services/birthdayService');
 const Guild = require('../src/models/Guild');
 const User = require('../src/models/User');
+const { useFixedClock, setClock, advanceClock, HOUR } = require('./helpers/fixedClock');
+
+// Every assertion in this file depends on what the clock says: birthdayService
+// derives the month, the day, the UTC hour it queries guilds by, and the year it
+// stamps into `lastCelebratedYear` from a single `new Date()` (#632).
+//
+// This used to be seven copies of `jest.spyOn(global, 'Date').mockImplementation(...)`
+// with the matching `mockRestore()` as the last statement of each test body.
+// That worked, narrowly: it replaced the constructor but not `Date.now()`, so
+// the first line of service code to ask for a timestamp that way would have
+// gotten `undefined` off a mock function that carries no statics — and a test
+// that failed an assertion never reached its `mockRestore()`, leaving the global
+// `Date` replaced for every test after it in the file. `setSystemTime` moves the
+// whole clock, statics included, and the helper's `afterEach` puts it back
+// however the test ends.
+const WISHING_HOUR = '2026-05-15T09:00:00Z'; // the hour makeGuildSettings() wishes at
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -72,12 +88,10 @@ function makeClient(channel) {
 // ---------------------------------------------------------------------------
 
 describe('birthday message age substitution', () => {
+    useFixedClock(WISHING_HOUR);
     afterEach(() => jest.clearAllMocks());
 
     test('shows numeric age when birth year is provided', async () => {
-        const now = new Date('2026-05-15T09:00:00Z');
-        jest.spyOn(global, 'Date').mockImplementation((arg) => arg !== undefined ? new (jest.requireActual('Date'))(arg) : now);
-
         const channel = makeChannel();
         const client = makeClient(channel);
         Guild.find.mockResolvedValue([makeGuildSettings()]);
@@ -88,14 +102,9 @@ describe('birthday message age substitution', () => {
         expect(channel.send).toHaveBeenCalledWith(
             expect.objectContaining({ content: expect.stringContaining('36') })
         );
-
-        global.Date.mockRestore();
     });
 
     test('shows ? when no birth year is provided', async () => {
-        const now = new Date('2026-05-15T09:00:00Z');
-        jest.spyOn(global, 'Date').mockImplementation((arg) => arg !== undefined ? new (jest.requireActual('Date'))(arg) : now);
-
         const channel = makeChannel();
         const client = makeClient(channel);
         Guild.find.mockResolvedValue([makeGuildSettings()]);
@@ -106,8 +115,6 @@ describe('birthday message age substitution', () => {
         expect(channel.send).toHaveBeenCalledWith(
             expect.objectContaining({ content: expect.stringContaining('?') })
         );
-
-        global.Date.mockRestore();
     });
 });
 
@@ -116,12 +123,10 @@ describe('birthday message age substitution', () => {
 // ---------------------------------------------------------------------------
 
 describe('birthday permission check', () => {
+    useFixedClock(WISHING_HOUR);
     afterEach(() => jest.clearAllMocks());
 
     test('does not send when bot lacks SendMessages permission', async () => {
-        const now = new Date('2026-05-15T09:00:00Z');
-        jest.spyOn(global, 'Date').mockImplementation((arg) => arg !== undefined ? new (jest.requireActual('Date'))(arg) : now);
-
         const channel = makeChannel(false); // no permission
         const client = makeClient(channel);
         Guild.find.mockResolvedValue([makeGuildSettings()]);
@@ -130,14 +135,30 @@ describe('birthday permission check', () => {
         await checkBirthdays(client);
 
         expect(channel.send).not.toHaveBeenCalled();
+    });
 
-        global.Date.mockRestore();
+    test('the guild query follows the clock across the wishing hour', async () => {
+        // `wishingHourUtc` is matched against `now.getUTCHours()`, so which
+        // guilds are even considered turns over on the hour. Pinned at 09:00
+        // the query asks for hour 9; an hour later it must ask for 10, not for
+        // whatever hour the suite started in.
+        const client = makeClient(makeChannel());
+        Guild.find.mockResolvedValue([]);
+        User.find.mockResolvedValue([]);
+
+        await checkBirthdays(client);
+        expect(Guild.find).toHaveBeenLastCalledWith(
+            expect.objectContaining({ 'birthdays.wishingHourUtc': 9 })
+        );
+
+        advanceClock(HOUR);
+        await checkBirthdays(client);
+        expect(Guild.find).toHaveBeenLastCalledWith(
+            expect.objectContaining({ 'birthdays.wishingHourUtc': 10 })
+        );
     });
 
     test('sends when bot has SendMessages permission', async () => {
-        const now = new Date('2026-05-15T09:00:00Z');
-        jest.spyOn(global, 'Date').mockImplementation((arg) => arg !== undefined ? new (jest.requireActual('Date'))(arg) : now);
-
         const channel = makeChannel(true);
         const client = makeClient(channel);
         Guild.find.mockResolvedValue([makeGuildSettings()]);
@@ -146,8 +167,6 @@ describe('birthday permission check', () => {
         await checkBirthdays(client);
 
         expect(channel.send).toHaveBeenCalledTimes(1);
-
-        global.Date.mockRestore();
     });
 });
 
@@ -156,12 +175,12 @@ describe('birthday permission check', () => {
 // ---------------------------------------------------------------------------
 
 describe('leap day birthday handling', () => {
+    useFixedClock(WISHING_HOUR); // each test sets its own February
     afterEach(() => jest.clearAllMocks());
 
     test('celebrates Feb 29 birthdays on Feb 28 of non-leap years', async () => {
         // 2025 is not a leap year; Feb 28 should also include Feb 29 users
-        const now = new Date('2025-02-28T09:00:00Z');
-        jest.spyOn(global, 'Date').mockImplementation((arg) => arg !== undefined ? new (jest.requireActual('Date'))(arg) : now);
+        setClock('2025-02-28T09:00:00Z');
 
         const channel = makeChannel();
         const client = makeClient(channel);
@@ -171,14 +190,11 @@ describe('leap day birthday handling', () => {
         await checkBirthdays(client);
 
         expect(channel.send).toHaveBeenCalledTimes(1);
-
-        global.Date.mockRestore();
     });
 
     test('does not double-celebrate Feb 29 on actual leap years', async () => {
         // 2028 is a leap year; Feb 29 should only fire on Feb 29
-        const now = new Date('2028-02-28T09:00:00Z');
-        jest.spyOn(global, 'Date').mockImplementation((arg) => arg !== undefined ? new (jest.requireActual('Date'))(arg) : now);
+        setClock('2028-02-28T09:00:00Z');
 
         const channel = makeChannel();
         const client = makeClient(channel);
@@ -189,8 +205,6 @@ describe('leap day birthday handling', () => {
         await checkBirthdays(client);
 
         expect(channel.send).not.toHaveBeenCalled();
-
-        global.Date.mockRestore();
     });
 });
 
@@ -199,12 +213,10 @@ describe('leap day birthday handling', () => {
 // ---------------------------------------------------------------------------
 
 describe('lastCelebratedYear tracking', () => {
+    useFixedClock(WISHING_HOUR);
     afterEach(() => jest.clearAllMocks());
 
     test('sets lastCelebratedYear to current year after celebrating', async () => {
-        const now = new Date('2026-05-15T09:00:00Z');
-        jest.spyOn(global, 'Date').mockImplementation((arg) => arg !== undefined ? new (jest.requireActual('Date'))(arg) : now);
-
         const channel = makeChannel();
         const client = makeClient(channel);
         Guild.find.mockResolvedValue([makeGuildSettings()]);
@@ -215,7 +227,5 @@ describe('lastCelebratedYear tracking', () => {
 
         expect(u.birthday.lastCelebratedYear).toBe(2026);
         expect(u.save).toHaveBeenCalled();
-
-        global.Date.mockRestore();
     });
 });

@@ -15,6 +15,7 @@ const {
 } = require('../src/services/fishService');
 const { addEffect, consumeEffect, refundEffectCharge, getEffect, EFFECT_CONFIGS } = require('../src/services/effectsService');
 const { LOCATIONS, LIMITS, ROD_TIERS } = require('../src/data/fishData');
+const { useFixedClock, advanceClock, DAY, WEEK } = require('./helpers/fixedClock');
 
 const pond = LOCATIONS.pond;
 
@@ -296,7 +297,14 @@ describe('refundEffectCharge', () => {
 // ─── Weekly record ───────────────────────────────────────────────────────────
 
 describe('weeklyRecord', () => {
-    const DAY = 24 * 3_600_000;
+    // fishService stamps and compares `weekStart` with its own `new Date()` /
+    // `Date.now()` (fishService.js:779-790), so a fixture built from the real
+    // clock races the service's read of it across any day boundary the run
+    // happens to straddle (#632). Pinned to the last Sunday in March, half an
+    // hour before midnight UTC: the fixtures below reach back into the previous
+    // month and forward through a DST change without any of it depending on
+    // when CI runs.
+    useFixedClock();
 
     test('a stale week is cleared so a lighter fish can take the record', () => {
         const user = makeUser({
@@ -328,6 +336,41 @@ describe('weeklyRecord', () => {
 
         expect(user.fishing.weeklyRecord.fish).toBe('Ancient Leviathan');
         expect(user.fishing.weeklyRecord.weight).toBe(9999);
+    });
+
+    test('a record set just under a week ago still stands', () => {
+        const user = makeUser({
+            weeklyRecord: {
+                fish: 'Ancient Leviathan', weight: 9999,
+                userId: 'u1', username: 'angler',
+                weekStart: new Date(Date.now() - (WEEK - 1)),
+            },
+        });
+
+        castUntil(user, isWeighedFish);
+
+        expect(user.fishing.weeklyRecord.weight).toBe(9999);
+    });
+
+    test('a week expires on elapsed time, not on the calendar turning over', () => {
+        // The record is set now; the clock then crosses midnight UTC, a month
+        // end and the EU spring-forward. None of those is seven days, so the
+        // week has not expired and a lighter fish must not take the record.
+        const user = makeUser();
+        const first = castUntil(user, isWeighedFish);
+        expect(first).not.toBeNull();
+        user.fishing.weeklyRecord.weight = 9999;
+
+        advanceClock(2 * DAY);
+        castUntil(user, isWeighedFish);
+        expect(user.fishing.weeklyRecord.weight).toBe(9999);
+
+        // Past seven days from the original stamp, the week is stale and the
+        // next weighed fish takes it.
+        advanceClock(6 * DAY);
+        const later = castUntil(user, isWeighedFish);
+        expect(later).not.toBeNull();
+        expect(user.fishing.weeklyRecord.weight).toBe(later.weightLbs);
     });
 
     test('a new record records who set it', () => {
