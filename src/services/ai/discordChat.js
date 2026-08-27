@@ -113,14 +113,24 @@ async function attachToolFooter(msg, text, footer, channel) {
     await send(channel, footer).catch(() => {});
 }
 
+// Where to cut `text` for a piece of at most `size`: the last newline in
+// range, else the last space, else a hard cut. One preference order for every
+// split — the streamed overflow below uses it too, so it no longer slices
+// mid-word or mid-code-fence at exactly the limit (#825).
+function splitIndex(text, size) {
+    if (text.length <= size) return text.length;
+    let cut = text.lastIndexOf('\n', size);
+    if (cut < size * 0.5) cut = text.lastIndexOf(' ', size);
+    if (cut < size * 0.5) cut = size;
+    return cut;
+}
+
 function chunkText(text, size = DISCORD_MAX_LEN) {
     if (text.length <= size) return [text];
     const chunks = [];
     let remaining = text;
     while (remaining.length > size) {
-        let cut = remaining.lastIndexOf('\n', size);
-        if (cut < size * 0.5) cut = remaining.lastIndexOf(' ', size);
-        if (cut < size * 0.5) cut = size;
+        const cut = splitIndex(remaining, size);
         chunks.push(remaining.slice(0, cut));
         remaining = remaining.slice(cut).trimStart();
     }
@@ -320,6 +330,25 @@ async function handleAIChat(message, aiSettings) {
                     // one got as far as a tool, canRetry below stopped us
                     // getting here at all.
                     activity.reset();
+                    // A previous attempt may have overflowed into extra
+                    // messages. This attempt paints from the placeholder
+                    // alone — left in place, attempt 2 would write into the
+                    // *last* split message while the earlier ones kept
+                    // attempt 1's text, a chimera of two responses (#825).
+                    if (sentMessages.length > 1) {
+                        await untilPaintIdle();
+                        painting = true;
+                        try {
+                            for (const extra of sentMessages.splice(1)) {
+                                await extra.delete().catch(() => {});
+                            }
+                            currentMsg = placeholder;
+                            await edit(placeholder, '…').catch(() => {});
+                        } finally {
+                            painted = null;
+                            painting = false;
+                        }
+                    }
                     for await (const piece of streamCompletion(callArgs)) {
                         fullResponse += piece;
                         currentBuf += piece;
@@ -335,8 +364,9 @@ async function handleAIChat(message, aiSettings) {
                             await untilPaintIdle();
                             painting = true;
                             try {
-                                await edit(currentMsg, currentBuf.slice(0, DISCORD_MAX_LEN));
-                                const overflow = currentBuf.slice(DISCORD_MAX_LEN);
+                                const cut = splitIndex(currentBuf, DISCORD_MAX_LEN);
+                                await edit(currentMsg, currentBuf.slice(0, cut));
+                                const overflow = currentBuf.slice(cut).trimStart();
                                 currentMsg = await send(message.channel, overflow || '…');
                                 sentMessages.push(currentMsg);
                                 currentBuf = overflow;
