@@ -52,8 +52,14 @@
 Use this URL (replace CLIENT_ID with yours):
 
 ```
-https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=8&scope=bot%20applications.commands
+https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=1101957033174&scope=bot%20applications.commands
 ```
+
+The `permissions` value is the minimum set the bot's features need — the list in
+FEATURES.md under "Bot Permissions Required", computed from
+`src/config/invitePermissions.js`. It deliberately does **not** include
+Administrator: if a feature misbehaves, grant the specific missing permission
+(the bot logs which one) rather than falling back to Administrator.
 
 ## AI Integration
 
@@ -672,6 +678,65 @@ section covers the setup, and the optional `autoheal` service that restarts an
 ### MongoDB Connection
 
 The bot automatically creates the database and collections. No manual setup needed.
+
+### Enabling MongoDB authentication
+
+Strongly recommended. MongoDB sits on an internal-only Docker network with no
+published ports, but without authentication that isolation is the *only*
+control: any container joined to `db-network` has full, credential-less access
+to the database.
+
+**Fresh deployment (empty `mongodb_data` volume):** set all four variables
+before the first `docker compose up` (in `.env`, or in the Portainer stack's
+environment variables):
+
+```bash
+MONGODB_ROOT_USERNAME=root
+MONGODB_ROOT_PASSWORD=$(openssl rand -hex 24)   # MongoDB's admin user
+MONGODB_APP_USERNAME=clawdia
+MONGODB_APP_PASSWORD=$(openssl rand -hex 24)    # the user the bot connects as
+```
+
+and point `MONGODB_URI` at the app user:
+
+```bash
+MONGODB_URI=mongodb://clawdia:<app-password>@mongodb:27017/ultrabot?authSource=ultrabot
+```
+
+The root variables make the mongo image create its admin user and start with
+`--auth`; the app variables make `scripts/mongo-init.js` create a dedicated
+user with `readWrite` on `ultrabot` and nothing else, which is what the bot,
+the migrations and the nightly `mongodump` need. (On a Portainer stack the
+init script has to be copied to the Docker host first — see the comment on the
+`mongodb` service in `portainer-stack.yml`.) The `backup` service reads the
+same `MONGODB_URI`, so it needs no separate configuration.
+
+**Existing deployment (volume already has data):** the mongo image only runs
+initialization against an empty volume, so create the users by hand — no wipe,
+no dump-and-restore, one restart:
+
+```bash
+# 1. Create the users while auth is still off:
+docker exec -it clawdia-mongodb mongosh --eval '
+  db.getSiblingDB("admin").createUser({
+    user: "root", pwd: "<root-password>", roles: ["root"] });
+  db.getSiblingDB("ultrabot").createUser({
+    user: "clawdia", pwd: "<app-password>",
+    roles: [{ role: "readWrite", db: "ultrabot" }] });
+'
+
+# 2. Set the four variables (plus the credentialed MONGODB_URI) in .env or the
+#    stack environment, exactly as in the fresh-deployment section above.
+
+# 3. Recreate the stack so mongod comes back with --auth and the bot and
+#    backup services pick up the new URI:
+docker compose up -d --force-recreate
+```
+
+If a password is ever lost, the recovery path is the reverse: unset the
+variables, `--force-recreate`, and mongod is back to no-auth so the users can
+be recreated. That works because auth here is driven by the environment, which
+is also why the variables must not be quietly removed once set.
 
 ### Automated Backups
 

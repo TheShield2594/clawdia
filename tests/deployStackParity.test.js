@@ -148,6 +148,26 @@ describe('the two files agree where they must', () => {
         }
     });
 
+    it('wires MongoDB authentication the same way in both (#648)', () => {
+        // Opt-in, not forced: the `:-` empty default is what lets an existing
+        // deployment keep starting with auth off until it migrates. Dropping
+        // it — or renaming a variable in one file only — would either break
+        // every running deploy or split the two deploy paths.
+        for (const [name, doc] of stacks) {
+            const env = doc.services.mongodb.environment;
+            expect([name, env.MONGO_INITDB_ROOT_USERNAME]).toEqual([name, '${MONGODB_ROOT_USERNAME:-}']);
+            expect([name, env.MONGO_INITDB_ROOT_PASSWORD]).toEqual([name, '${MONGODB_ROOT_PASSWORD:-}']);
+            // Read by scripts/mongo-init.js to create the low-privilege user
+            // the bot connects as.
+            expect([name, env.MONGODB_APP_USERNAME]).toEqual([name, '${MONGODB_APP_USERNAME:-}']);
+            expect([name, env.MONGODB_APP_PASSWORD]).toEqual([name, '${MONGODB_APP_PASSWORD:-}']);
+        }
+        // Only compose can mount the init script from the checkout; the
+        // Portainer stack documents a host-path mount instead (no checkout).
+        const composeMounts = compose.services.mongodb.volumes.map(String);
+        expect(composeMounts).toContain('./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro');
+    });
+
     it('gives the two services the same MONGODB_URI default', () => {
         const defaultOf = text => /\$\{MONGODB_URI:-([^}]+)\}/.exec(String(text))?.[1];
         const botDefault = defaultOf(JSON.stringify(stack.services.bot.environment));

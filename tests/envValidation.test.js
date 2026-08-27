@@ -29,7 +29,8 @@ function goodEnv(overrides = {}) {
         DISCORD_TOKEN: 'token',
         CLIENT_ID: '123',
         CLIENT_SECRET: 'secret',
-        MONGODB_URI: 'mongodb://mongodb:27017/ultrabot',
+        // Credentialed: a production URI without credentials is a warning (#648).
+        MONGODB_URI: 'mongodb://clawdia:pass@mongodb:27017/ultrabot?authSource=ultrabot',
         SESSION_SECRET: 'x'.repeat(SESSION_SECRET_MIN_LENGTH),
         DASHBOARD_URL: 'https://bot.example.com',
         NODE_ENV: 'production',
@@ -170,6 +171,26 @@ describe('the values that are read as numbers', () => {
 
     test('mongodb+srv is accepted', () => {
         expect(errorsFor(goodEnv({ MONGODB_URI: 'mongodb+srv://cluster/db' }))).toEqual([]);
+    });
+
+    // #648: auth is opt-in so existing deployments keep booting, which is why
+    // this must stay a warning — an error here takes down every deploy that
+    // has not migrated yet.
+    test('a credential-less MONGODB_URI in production is a warning, not an error', () => {
+        const { errors, warnings } = collectEnvProblems(goodEnv({
+            MONGODB_URI: 'mongodb://mongodb:27017/ultrabot',
+        }));
+        expect(errors).toEqual([]);
+        expect(warnings.join('\n')).toMatch(/no credentials/);
+    });
+
+    test('a credential-less MONGODB_URI in development warns about nothing', () => {
+        const { warnings } = collectEnvProblems(goodEnv({
+            MONGODB_URI: 'mongodb://localhost:27017/ultrabot',
+            NODE_ENV: 'development',
+            DASHBOARD_URL: 'http://localhost:3000',
+        }));
+        expect(warnings.join('\n')).not.toMatch(/no credentials/);
     });
 });
 

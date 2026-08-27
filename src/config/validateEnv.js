@@ -145,6 +145,17 @@ function collectEnvProblems(env = process.env) {
             'MONGODB_URI must start with mongodb:// or mongodb+srv:// ' +
             `(got "${env.MONGODB_URI.split(':')[0]}:...")`
         );
+    } else if (env.NODE_ENV === 'production' && env.MONGODB_URI && !env.MONGODB_URI.includes('@')) {
+        // #648: MongoDB auth is opt-in so that existing deployments keep
+        // booting, but a production deploy running credential-less should hear
+        // about it — the internal Docker network is then the only thing
+        // between any co-located container and the full database. A warning,
+        // not an error: failing the boot would take down every deployment that
+        // has not migrated yet.
+        warnings.push(
+            'MONGODB_URI has no credentials. Enable MongoDB authentication — ' +
+            'see "Enabling MongoDB authentication" in SETUP_GUIDE.md.'
+        );
     }
 
     if (env.DASHBOARD_PORT !== undefined && env.DASHBOARD_PORT !== '') {

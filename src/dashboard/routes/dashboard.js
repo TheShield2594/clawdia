@@ -37,12 +37,14 @@ function getManageableGuilds(req) {
         }));
 }
 
+const { INVITE_PERMISSIONS_BITFIELD } = require('../../config/invitePermissions');
+
 function buildInviteUrl(guildId) {
     const clientId = process.env.CLIENT_ID;
     if (!clientId) return null;
     const query = [
         `client_id=${encodeURIComponent(clientId)}`,
-        `permissions=8`,
+        `permissions=${INVITE_PERMISSIONS_BITFIELD}`,
         `scope=${encodeURIComponent('bot applications.commands')}`,
         `guild_id=${encodeURIComponent(guildId)}`,
         `disable_guild_select=true`

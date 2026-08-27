@@ -193,6 +193,20 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Attestations, attached to the image in the registry (#652).
+          # `sbom` is an SPDX inventory of what the image contains, which is
+          # what turns "does any published build ship the vulnerable version?"
+          # into a registry query instead of a re-scan of every tag. `provenance`
+          # is a SLSA statement of what built it — this repo, this commit, this
+          # workflow — which is what lets a deploy verify the image came out of
+          # CI rather than from someone's laptop with push access.
+          #
+          # mode=max records the full build definition, including build
+          # arguments. Nothing secret goes through build args here (the
+          # Dockerfile takes none), which is the condition for max being safe;
+          # if one is ever added, drop this back to mode=min before it lands.
+          provenance: mode=max
+          sbom: true
 
       # The digest, on the run's summary page. Every tag above can be repointed
       # by a later build — including sha-<commit>, by a re-run of this very
