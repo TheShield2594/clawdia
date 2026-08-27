@@ -32,13 +32,27 @@ function walk(dir) {
 // Browser-side scripts are served to the page, not required by node.
 const BROWSER_SCRIPTS = /^dashboard\/public\//;
 
+// A file that is gone by the time it is read is not a source file. Jest runs
+// suites in parallel workers, and tests/apiDocs.test.js writes a throwaway
+// router into src/dashboard/routes/api/ and deletes it again — so this walk can
+// list a name that no longer exists a moment later, and the whole suite failed
+// to load on the timing rather than on anything in src/.
+const readOrSkip = full => {
+    try {
+        return fs.readFileSync(full, 'utf8');
+    } catch (err) {
+        if (err.code === 'ENOENT') return null;
+        throw err;
+    }
+};
+
 const sourceFiles = walk(SRC)
     .map(full => ({
         full,
         rel: path.relative(SRC, full).split(path.sep).join('/'),
-        text: fs.readFileSync(full, 'utf8'),
+        text: readOrSkip(full),
     }))
-    .filter(f => !BROWSER_SCRIPTS.test(f.rel));
+    .filter(f => f.text !== null && !BROWSER_SCRIPTS.test(f.rel));
 
 describe('every relative require in src resolves', () => {
     test('no module requires a path that is not there', () => {

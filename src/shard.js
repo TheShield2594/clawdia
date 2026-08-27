@@ -31,12 +31,12 @@ require('./config/fileSecrets').loadFileSecrets();
 const path = require('path');
 const { ShardingManager } = require('discord.js');
 
-const REQUIRED_ENV = ['DISCORD_TOKEN', 'CLIENT_ID', 'MONGODB_URI', 'SESSION_SECRET', 'CLIENT_SECRET'];
-const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
-if (missingEnv.length) {
-    console.error(`[SHARD] Missing required environment variables: ${missingEnv.join(', ')}`);
-    process.exit(1);
-}
+// The same rules the children apply, applied once here first (#639). A shard
+// manager that spawns N processes to watch each of them exit on the same missing
+// variable is N times the log for one fact, and `respawn: true` means it does it
+// again. Shard 0 also runs the dashboard, so its DASHBOARD_URL rules belong to
+// this process too.
+require('./config/validateEnv').assertEnv({ label: 'SHARD' });
 
 function resolveShardCount() {
     const pinned = Number(process.env.SHARD_COUNT);

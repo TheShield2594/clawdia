@@ -75,6 +75,17 @@ jobs:
       - name: Run tests
         run: npm test -- --ci --coverage
 
+      # The global ratchet is one number over the whole of src, so it cannot
+      # see *where* the coverage is: src/services/ai is at 80% and
+      # src/commands/economy at 20%, and deleting every AI test would cost
+      # about four points of a 37% total and stay green. This applies a floor
+      # per directory, and fails on a file that stops being executed at all
+      # (#625). `always()` so it still runs when the global threshold failed —
+      # the two answers together say what actually moved.
+      - name: Check per-subsystem coverage floors
+        if: always()
+        run: npm run coverage:check
+
       # The four numbers, on the run's summary page rather than buried in the
       # log. `always()` because the interesting case is the run where the
       # ratchet just failed and you want to see by how much.

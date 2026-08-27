@@ -18,7 +18,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write",
     "test": "jest --forceExit",
-    "test:coverage": "jest --forceExit --coverage"
+    "test:coverage": "jest --forceExit --coverage",
+    "coverage:check": "node scripts/check-coverage.js"
   },
   "keywords": [
     "discord",
