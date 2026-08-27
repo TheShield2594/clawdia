@@ -695,8 +695,8 @@ after the last assertion has already passed.
 ### How the suite is laid out
 
 - One file per subject, named after it: `tests/huntRepair.test.js`,
-  `tests/rollPayout.test.js`. There is no `jest.config.js` — the defaults apply,
-  so anything matching `*.test.js` is collected.
+  `tests/rollPayout.test.js`. `jest.config.js` sets only coverage options, so
+  the defaults still apply to collection: anything matching `*.test.js` runs.
 - Shared fixtures live in `tests/helpers/`. They are not test files and are not
   collected; require them from a test the way you would any module.
 - `tests/integration/` holds the suites that run against a real MongoDB rather
@@ -789,6 +789,36 @@ Two things to know before writing one:
 caches it per machine. If that host is unreachable the suite fails rather than
 skipping — a green run has to mean the tests ran — and the failure names the two
 ways out, `MONGOMS_SYSTEM_BINARY` and `MONGOMS_DOWNLOAD_URL`.
+
+### Coverage, and the two ratchets on it
+
+`npm run test:coverage` measures; CI runs the same thing with `--ci`. Two
+separate guards then apply, and they answer different questions.
+
+**The global floor** lives in `jest.config.js` as `coverageThreshold.global`. It
+is measured over all of `src/` — not Jest's default, which counts a file only
+once some test requires it and so reports a percentage of the code that is
+already tested. Raise the floors when coverage rises; nothing may lower them.
+
+**The per-subsystem floors** live in `coverage-floors.json` and are applied by
+`npm run coverage:check`. One number over the whole tree cannot say *where* the
+coverage is: `src/services/ai/mcp` is at 94% and `src/commands/economy` at 18%,
+so deleting every MCP test would cost about four points of a 37% total and the
+global ratchet would stay green. A floor per directory is what notices. The same
+file records the fourteen files with no executed line at all — that list may
+shrink and must not grow, and an entry that has since been covered is an error
+too, since a stale one is standing permission to un-cover the file.
+
+Both are ratchets, not targets. When coverage genuinely rises:
+
+```bash
+npm run test:coverage
+npm run coverage:check -- --update   # never lowers a floor
+```
+
+`--update` will not write a number below one already recorded, so it cannot be
+used to make a failure go away — a directory that dropped has to be fixed or
+explained.
 
 ### Logging
 
