@@ -199,8 +199,10 @@
         "src/events/webhooksUpdate.js",
         "src/index.js",
         "src/models/AuditLog.js",
-        "src/models/MigrationRecord.js",
         "src/services/summaryService.js",
         "src/shard.js"
+    ],
+    "coveredOnlyByIntegration": [
+        "src/models/MigrationRecord.js"
     ]
 }

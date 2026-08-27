@@ -805,9 +805,19 @@ already tested. Raise the floors when coverage rises; nothing may lower them.
 coverage is: `src/services/ai/mcp` is at 94% and `src/commands/economy` at 18%,
 so deleting every MCP test would cost about four points of a 37% total and the
 global ratchet would stay green. A floor per directory is what notices. The same
-file records the fourteen files with no executed line at all — that list may
-shrink and must not grow, and an entry that has since been covered is an error
-too, since a stale one is standing permission to un-cover the file.
+file records the files with no executed line at all — that list may shrink and
+must not grow, and an entry that has since been covered is an error too, since a
+stale one is standing permission to un-cover the file.
+
+`coveredOnlyByIntegration` is the second list in that file, and it is there
+because the check runs against whichever suites the run included. `tests/integration/`
+needs a real mongod, so a contributor whose machine cannot fetch one runs
+without it while CI runs with it — and a file only those suites reach reads as
+zero-coverage in the first run and covered in the second. Listing it separately
+is what makes both runs agree. `src/models/MigrationRecord.js` is the current
+example. For the same reason the directory floors are recorded from the
+integration-excluded run, matching what `jest.config.js` does, so the number CI
+sees is that or better: `src/migrations` measures 45.8% locally and 81.8% in CI.
 
 Both are ratchets, not targets. When coverage genuinely rises:
 

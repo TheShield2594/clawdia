@@ -211,6 +211,111 @@ describe('the files with no executed line', () => {
     });
 });
 
+// The check runs against whichever suites the run included, and that is not one
+// fixed set: tests/integration/ needs a real mongod, so a contributor whose
+// machine cannot fetch one runs without it while CI runs with it. A file only
+// those suites reach is zero-coverage in the first run and covered in the
+// second, and neither reading is wrong — which is what sent CI red the first
+// time this landed, on src/models/MigrationRecord.js.
+describe('files only the integration suites reach', () => {
+    const floors = JSON.parse(read('coverage-floors.json'));
+    const { check, METRICS } = require('../scripts/check-coverage.js');
+
+    const file = (covered, total) => Object.fromEntries(
+        METRICS.map(m => [m, { covered, total }]),
+    );
+
+    const dirs = { src: { statements: 0, branches: 0, functions: 0, lines: 0 } };
+
+    test('the recorded entries are real files, and are not on the other list', () => {
+        for (const name of floors.coveredOnlyByIntegration) {
+            expect([name, fs.existsSync(path.join(root, name))]).toEqual([name, true]);
+            expect(floors.neverExecuted).not.toContain(name);
+        }
+    });
+
+    test('one reading zero passes — that is the run without integration', () => {
+        const files = new Map([['src/only.js', file(0, 10)]]);
+        const { failures } = check(files, {
+            directories: dirs, neverExecuted: [], coveredOnlyByIntegration: ['src/only.js'],
+        });
+        expect(failures).toEqual([]);
+    });
+
+    test('the same one reading covered passes too — that is CI', () => {
+        const files = new Map([['src/only.js', file(10, 10)]]);
+        const { failures } = check(files, {
+            directories: dirs, neverExecuted: [], coveredOnlyByIntegration: ['src/only.js'],
+        });
+        expect(failures).toEqual([]);
+    });
+
+    // Without this the list is a place to hide a file that no longer exists.
+    test('an entry that was not measured at all fails', () => {
+        const files = new Map([['src/other.js', file(10, 10)]]);
+        const { failures } = check(files, {
+            directories: dirs, neverExecuted: [], coveredOnlyByIntegration: ['src/gone.js'],
+        });
+        expect(failures.join('\n')).toMatch(/src\/gone.js is listed as integration-covered/);
+    });
+
+    // The failure CI actually hit: an integration-covered file left on the
+    // never-executed list fails in CI and passes locally, which is the worst of
+    // both. The message has to say where it belongs.
+    test('a never-executed entry that CI covers is told where to go', () => {
+        const files = new Map([['src/only.js', file(10, 10)]]);
+        const { failures } = check(files, {
+            directories: dirs, neverExecuted: ['src/only.js'], coveredOnlyByIntegration: [],
+        });
+        expect(failures.join('\n')).toMatch(/move it to coveredOnlyByIntegration/);
+    });
+
+    test('the list is optional — a floors file without one still checks', () => {
+        const files = new Map([['src/a.js', file(0, 10)]]);
+        const { failures } = check(files, { directories: dirs, neverExecuted: ['src/a.js'] });
+        expect(failures).toEqual([]);
+    });
+});
+
+describe('re-recording the floors', () => {
+    const { update, METRICS } = require('../scripts/check-coverage.js');
+
+    const file = (covered, total) => Object.fromEntries(
+        METRICS.map(m => [m, { covered, total }]),
+    );
+
+    // An integration-only file reads as zero in an integration-excluded run, so
+    // re-recording from one would quietly move it onto `neverExecuted` and put
+    // the CI failure straight back.
+    test('an integration-only entry survives an update run that sees it as zero', () => {
+        const written = [];
+        const spy = jest.spyOn(fs, 'writeFileSync').mockImplementation((_p, body) => written.push(body));
+
+        const files = new Map([['src/only.js', file(0, 10)], ['src/b.js', file(5, 10)]]);
+        const next = update(files, {
+            directories: { src: { statements: 0, branches: 0, functions: 0, lines: 0 } },
+            neverExecuted: [],
+            coveredOnlyByIntegration: ['src/only.js'],
+        });
+
+        expect(next.coveredOnlyByIntegration).toEqual(['src/only.js']);
+        expect(next.neverExecuted).not.toContain('src/only.js');
+        expect(written).toHaveLength(1);
+        spy.mockRestore();
+    });
+
+    test('a floor is never lowered by an update', () => {
+        const spy = jest.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+        const files = new Map([['src/a.js', file(1, 100)]]);
+        const next = update(files, {
+            directories: { src: { statements: 40, branches: 40, functions: 40, lines: 40 } },
+            neverExecuted: [],
+        });
+        expect(next.directories.src.statements).toBe(40);
+        spy.mockRestore();
+    });
+});
+
 describe('the per-subsystem ratchet is wired up', () => {
     test('CI checks the floors as well as the global thresholds', () => {
         const testJob = ci.slice(ci.indexOf('\n  test:'), ci.indexOf('\n  publish:'));

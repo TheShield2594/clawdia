@@ -20,10 +20,24 @@
  *      measured when it was recorded, which is enough slack for a refactor and
  *      nowhere near enough for a deleted suite.
  *
- *   2. A list of the files with no executed statement at all. Fourteen of them
- *      exist; the point is that the list may shrink and must not grow. A file
- *      on it that has since been covered is also an error — a stale entry is
- *      permission to un-cover it again.
+ *   2. A list of the files with no executed statement at all; the point is that
+ *      the list may shrink and must not grow. A file on it that has since been
+ *      covered is also an error — a stale entry is permission to un-cover it
+ *      again.
+ *
+ *      `coveredOnlyByIntegration` is the second list, and it exists because
+ *      this runs against whichever suites the run included. tests/integration/
+ *      needs a real mongod, so a contributor whose machine cannot fetch one
+ *      runs without it while CI runs with it — and a file only those suites
+ *      reach is zero-coverage in the first run and covered in the second.
+ *      Listing it separately makes both runs agree instead of one of them
+ *      being wrong.
+ *
+ * One consequence worth naming: the directory floors are recorded from the
+ * integration-excluded run, the same baseline jest.config.js uses, so the
+ * number CI sees is that or better — `src/migrations` measures 45.8% here and
+ * 81.8% in CI. That keeps a local run honest, and it does mean the floor for a
+ * directory the integration suites cover is looser than CI's own measurement.
  *
  * The numbers live in coverage-floors.json rather than here, so raising them is
  * a reviewable diff rather than an edit buried in a script. `--update` rewrites
@@ -117,7 +131,16 @@ function update(files, floors) {
             Math.max(floors.directories[dir]?.[m] ?? 0, Math.max(0, Math.floor(pcts[m]) - SLACK)),
         ]));
     }
-    const next = { ...floors, directories, neverExecuted: zeroCoverageFiles(files) };
+    // An integration-only file reads as zero in an integration-excluded run, so
+    // re-recording from one would move it onto `neverExecuted` and lose the
+    // distinction. Keep it where it is.
+    const integrationOnly = new Set(floors.coveredOnlyByIntegration ?? []);
+    const next = {
+        ...floors,
+        directories,
+        neverExecuted: zeroCoverageFiles(files).filter(file => !integrationOnly.has(file)),
+        coveredOnlyByIntegration: [...integrationOnly].sort(),
+    };
     fs.writeFileSync(FLOORS_PATH, `${JSON.stringify(next, null, 4)}\n`);
     return next;
 }
@@ -149,18 +172,37 @@ function check(files, floors) {
         }
     }
 
+    // Two lists, because the run this is checking may or may not have included
+    // tests/integration/. Those suites need a real mongod, so a contributor
+    // whose machine cannot fetch one runs without them — and CI does run them.
+    // A file covered only by an integration suite therefore reads as
+    // zero-coverage in one run and covered in the other, and neither is wrong.
+    const integrationOnly = new Set(floors.coveredOnlyByIntegration ?? []);
     const recorded = new Set(floors.neverExecuted);
     const zero = zeroCoverageFiles(files);
 
     for (const file of zero) {
-        if (!recorded.has(file)) {
+        if (!recorded.has(file) && !integrationOnly.has(file)) {
             failures.push(`${file} has no executed line and is not on the recorded list`);
         }
     }
-    // A file that is covered now but still listed is permission to un-cover it.
+    // A file that is covered now but still listed as never executed is standing
+    // permission to un-cover it. Not applied to the integration-only list: being
+    // covered is exactly what that list predicts of a run that included them.
     for (const file of floors.neverExecuted) {
         if (files.has(file) && !zero.includes(file)) {
-            failures.push(`${file} is covered now — drop it from coverage-floors.json`);
+            failures.push(
+                `${file} is covered now — move it to coveredOnlyByIntegration ` +
+                'if only tests/integration/ reaches it, or drop it'
+            );
+        }
+    }
+    // The integration list has to stay honest in the other direction: an entry
+    // that no longer exists is noise, and one that is covered by the ordinary
+    // suite belongs nowhere on either list.
+    for (const file of integrationOnly) {
+        if (!files.has(file)) {
+            failures.push(`${file} is listed as integration-covered but was not measured — drop it`);
         }
     }
 
