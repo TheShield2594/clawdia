@@ -16,9 +16,11 @@ jest.mock('../src/models/Guild', () => ({ find: jest.fn(), findOne: jest.fn(), f
 jest.mock('../src/models/User',  () => ({ find: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn(), aggregate: jest.fn(), updateOne: jest.fn(), updateMany: jest.fn(), bulkWrite: jest.fn() }));
 jest.mock('../src/models/MarketListing', () => ({ find: jest.fn(), findOneAndDelete: jest.fn() }));
 jest.mock('../src/utils/inventoryGrant', () => ({ grantInventoryItem: jest.fn() }));
+jest.mock('../src/utils/owedPayout', () => ({ recordOwedPayout: jest.fn() }));
 
 const MarketListing = require('../src/models/MarketListing');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
+const { recordOwedPayout } = require('../src/utils/owedPayout');
 const { returnExpiredMarketListings } = require('../src/services/schedulerService');
 
 function listing(over = {}) {
@@ -42,6 +44,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     MarketListing.findOneAndDelete.mockImplementation(async filter => ({ _id: filter._id }));
     grantInventoryItem.mockResolvedValue({});
+    recordOwedPayout.mockResolvedValue(true);
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
     infoLog  = jest.spyOn(console, 'log').mockImplementation(() => {});
 });
@@ -92,18 +95,47 @@ describe('returnExpiredMarketListings', () => {
         expect(grantInventoryItem).not.toHaveBeenCalled();
     });
 
-    test('a credit that fails after the claim is logged loudly, not retried', async () => {
+    // #804. The claim is spent — the listing is deleted — so the next tick will
+    // never find this return again. A log is not a record; the owed queue is.
+    test('a credit that fails after the claim is written down as owed', async () => {
         stubFind([listing()]);
         grantInventoryItem.mockRejectedValue(new Error('mongo down'));
 
-        await expect(returnExpiredMarketListings()).resolves.toBeUndefined();
+        await expect(returnExpiredMarketListings()).rejects.toThrow(/1 of 1/);
 
-        // The listing is gone, so nothing will find this again — the log is the
-        // only record that the items are owed, and it has to say so.
+        expect(recordOwedPayout).toHaveBeenCalledWith(expect.objectContaining({
+            service: 'schedulerService',
+            jobName: 'returnExpiredMarketListings',
+            guildId: 'g1',
+            payload: {
+                kind: 'items', userId: 'u1', guildId: 'g1',
+                itemId: 'sword', quantity: 2, listingId: 'l1',
+            },
+        }));
+
         const message = errorLog.mock.calls[0].join(' ');
         expect(message).toContain('2x sword');
         expect(message).toContain('u1');
-        expect(message).toContain('by hand');
+        expect(message).toContain('recorded for replay');
+    });
+
+    // The queue write fails for the same reason the credit did, often enough.
+    // It must not take the rest of the sweep with it, and the job must still
+    // fail so the run itself is on /health.
+    test('a failed owed-queue write does not stop the sweep or hide the failure', async () => {
+        stubFind([listing({ _id: 'bad' }), listing({ _id: 'good', sellerId: 'u2' })]);
+        grantInventoryItem.mockImplementation(async sellerId => {
+            if (sellerId === 'u1') throw new Error('mongo down');
+            return {};
+        });
+        recordOwedPayout.mockResolvedValue(false);
+
+        await expect(returnExpiredMarketListings()).rejects.toThrow(
+            '1 of 2 expired listing(s) could not be returned (1 were) — none could be ' +
+            'recorded as owed; they must be paid by hand, see the log above',
+        );
+
+        expect(grantInventoryItem).toHaveBeenCalledTimes(2);
     });
 
     test('one listing that fails does not strand the rest of the batch', async () => {
@@ -113,23 +145,26 @@ describe('returnExpiredMarketListings', () => {
             return {};
         });
 
-        await returnExpiredMarketListings();
+        // The throw comes last, after every listing has had its turn.
+        await expect(returnExpiredMarketListings()).rejects.toThrow('1 of 2 expired listing(s) could not be returned (1 were)');
 
         expect(grantInventoryItem).toHaveBeenCalledTimes(2);
         expect(infoLog.mock.calls.flat().join(' ')).toContain('1 expired listing(s)');
     });
 
-    test('a claim that throws is caught, so the batch continues', async () => {
+    test('a claim that throws is counted, but the batch continues', async () => {
         stubFind([listing({ _id: 'bad' }), listing({ _id: 'good' })]);
         MarketListing.findOneAndDelete.mockImplementation(async filter => {
             if (filter._id === 'bad') throw new Error('mongo down');
             return { _id: filter._id };
         });
 
-        await expect(returnExpiredMarketListings()).resolves.toBeUndefined();
+        await expect(returnExpiredMarketListings()).rejects.toThrow(/1 of 2/);
 
         expect(grantInventoryItem).toHaveBeenCalledTimes(1);
-        expect(errorLog).toHaveBeenCalled();
+        // Nothing was claimed for the failing listing, so the next tick finds
+        // it again — there is nothing owed to write down.
+        expect(recordOwedPayout).not.toHaveBeenCalled();
     });
 
     test('an empty sweep says nothing', async () => {

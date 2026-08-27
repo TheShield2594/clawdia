@@ -7,6 +7,7 @@ const { ensurePricingFields, nextPrice, decayDemand, demandDecayFactor, trendBuc
 const { softResetElo, tierFor, makeSeasonId } = require('../utils/duelElo');
 const { topByNetWorth } = require('../utils/netWorth');
 const { grantInventoryItem } = require('../utils/inventoryGrant');
+const { recordOwedPayout } = require('../utils/owedPayout');
 const COLORS = require('../utils/embedColors');
 
 const WAR_BOOSTER_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -569,6 +570,23 @@ async function selectPetOfTheWeek(client) {
     }
 }
 
+// What a sweep says about the payouts it could not deliver.
+//
+// The distinction matters to whoever reads the failure: a payout recorded as
+// owed is one command away from being paid, and one that could not even be
+// recorded is not — the claim is still spent, so nothing will find it again and
+// the log line is all that is left of it. Reporting both as "recorded as owed"
+// would send an operator to `payouts:replay` for a record that is not there.
+function owedSummary(failed, unrecorded) {
+    const recorded = failed - unrecorded;
+    if (!unrecorded) return 'recorded as owed, replay with `npm run payouts:replay`';
+    if (!recorded) return 'none could be recorded as owed; they must be paid by hand, see the log above';
+    return (
+        `${recorded} recorded as owed (replay with \`npm run payouts:replay\`); ` +
+        `${unrecorded} could not be recorded and must be paid by hand, see the log above`
+    );
+}
+
 // ── Hourly Micro-Competition Announcements ────────────────────────────────────
 
 const HOURLY_CATEGORY_LABELS = {
@@ -603,18 +621,73 @@ async function announceHourlyWinners(client) {
     }
     if (!actualWinners.length) return;
 
-    // Grant coin rewards first, decoupled from announcement availability
+    // Grant coin rewards first, decoupled from announcement availability.
+    //
+    // The claim above is one-way: this winner is `rewarded: true` now, so the
+    // next tick will not find them again whatever happens here. That makes a
+    // failed credit unrepeatable rather than merely unreported, so it is
+    // written down as owed (#804) and counted, and the sweep fails at the end.
+    //
+    // A `null` return counts as a failure too. `findOneAndUpdate` without
+    // `upsert` resolves to `null` when the user has no document in that guild —
+    // it does not throw, so the old `.catch` never fired and a winner whose
+    // record had been pruned was silently not paid while the announcement went
+    // on naming them as rewarded.
     const rewardAmount = 500;
+    const paidWinners = [];
+    let failedCredits = 0;
+    let unrecordedCredits = 0;
+
     for (const winner of actualWinners) {
-        await User.findOneAndUpdate(
-            { userId: winner.userId, guildId: winner.guildId },
-            { $inc: { balance: rewardAmount } }
-        ).catch(err => console.error(`[scheduler] reward credit failed for ${winner.userId}:`, err.message));
+        let credited = null;
+        let creditErr = null;
+        try {
+            credited = await User.findOneAndUpdate(
+                { userId: winner.userId, guildId: winner.guildId },
+                { $inc: { balance: rewardAmount } }
+            );
+        } catch (err) {
+            creditErr = err;
+        }
+
+        if (credited) {
+            paidWinners.push(winner);
+            continue;
+        }
+
+        failedCredits += 1;
+        const reason = creditErr?.message ?? `no user document for ${winner.userId} in ${winner.guildId}`;
+        const recorded = await recordOwedPayout({
+            service: 'schedulerService',
+            jobName: 'announceHourlyWinners',
+            guildId: winner.guildId,
+            payload: {
+                kind:     'coins',
+                userId:   winner.userId,
+                guildId:  winner.guildId,
+                amount:   rewardAmount,
+                hour:     prevHour,
+                category: winner.category,
+            },
+            error: creditErr ?? new Error(reason),
+        });
+        if (!recorded) unrecordedCredits += 1;
+
+        // Logged after the record write, not before it: this line is the only
+        // trace of an unrecorded payout, so it has to say which of the two
+        // happened rather than assume the queue write it has not made yet.
+        console.error(
+            `[scheduler] hourly reward credit failed for ${winner.userId} in ${winner.guildId} ` +
+            `(${winner.category}, ${rewardAmount} coins) — ` +
+            `${recorded ? 'recorded as owed' : 'NOT recorded, must be paid by hand'}:`, reason,
+        );
     }
 
-    // Announce per guild (best-effort — reward already granted above)
+    // Announce per guild (best-effort — reward already granted above).
+    // Only winners actually paid: the embed says "rewarded +500 coins", and a
+    // winner whose credit is sitting in the owed queue has not been.
     const byGuild = new Map();
-    for (const w of actualWinners) {
+    for (const w of paidWinners) {
         if (!byGuild.has(w.guildId)) byGuild.set(w.guildId, []);
         byGuild.get(w.guildId).push(w);
     }
@@ -646,6 +719,19 @@ async function announceHourlyWinners(client) {
         } catch (err) {
             console.error(`[scheduler] announceHourlyWinners failed for guild ${guildId}:`, err.message);
         }
+    }
+
+    // Last, so the winners who *were* paid are still announced. The per-winner
+    // catch above is what stops one bad credit stranding the rest of the hour;
+    // on its own it also meant an hour in which every credit failed returned
+    // normally and runJob recorded a healthy run. Throwing here is what puts it
+    // on /health and files the run-level dead-letter entry — the owed records
+    // above are what make it recoverable.
+    if (failedCredits) {
+        throw new Error(
+            `${failedCredits} of ${actualWinners.length} hourly reward(s) could not be credited — ` +
+            owedSummary(failedCredits, unrecordedCredits)
+        );
     }
 }
 
@@ -1058,6 +1144,8 @@ async function returnExpiredMarketListings() {
     const MarketListing = require('../models/MarketListing');
     const now = new Date();
     let processed = 0;
+    let failed = 0;
+    let unrecordedReturns = 0;
 
     // Process in batches of 50 to avoid large memory spikes
     const expired = await MarketListing.find({ expiresAt: { $lte: now } }).limit(50).lean();
@@ -1082,21 +1170,59 @@ async function returnExpiredMarketListings() {
             try {
                 await grantInventoryItem(listing.sellerId, listing.guildId, listing.itemId, listing.quantity, { upsert: true });
             } catch (creditErr) {
+                // The listing is already deleted, so nothing will find this
+                // again — which is why the credit is written down as owed
+                // rather than left to a retry that will never come (#804).
+                failed++;
+                const recorded = await recordOwedPayout({
+                    service: 'schedulerService',
+                    jobName: 'returnExpiredMarketListings',
+                    guildId: listing.guildId,
+                    payload: {
+                        kind:      'items',
+                        userId:    listing.sellerId,
+                        guildId:   listing.guildId,
+                        itemId:    listing.itemId,
+                        quantity:  listing.quantity,
+                        listingId: String(listing._id),
+                    },
+                    error: creditErr,
+                });
+                if (!recorded) unrecordedReturns += 1;
+
+                // After the record write, for the same reason as the hourly
+                // credit above.
                 console.error(
                     `[scheduler] listing ${listing._id} was claimed but crediting ` +
                     `${listing.quantity}x ${listing.itemId} to ${listing.sellerId} failed — ` +
-                    'items owed and must be returned by hand:', creditErr.message,
+                    `${recorded ? 'items owed, recorded for replay' : 'items owed and NOT recorded, must be returned by hand'}:`,
+                    creditErr.message,
                 );
                 continue;
             }
             processed++;
         } catch (err) {
+            // A failure before the claim — the listing is untouched, so the
+            // next tick finds it again. Counted all the same: a sweep that
+            // returned nothing must not report a healthy run.
+            failed++;
             console.error(`[scheduler] returnExpiredMarketListings failed for listing ${listing._id}:`, err.message);
         }
     }
 
     if (processed > 0) {
         console.log(`[scheduler] returnExpiredMarketListings: returned items from ${processed} expired listing(s).`);
+    }
+
+    // Same reasoning as announceHourlyWinners: the per-listing catches keep one
+    // bad listing from stranding the batch, and would otherwise also keep the
+    // whole batch failing off /health and out of the dead-letter queue.
+    if (failed) {
+        throw new Error(
+            `${failed} of ${expired.length} expired listing(s) could not be returned` +
+            (processed ? ` (${processed} were)` : '') +
+            (unrecordedReturns ? ` — ${owedSummary(failed, unrecordedReturns)}` : '')
+        );
     }
 }
 

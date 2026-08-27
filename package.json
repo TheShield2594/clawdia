@@ -9,6 +9,7 @@
     "dev": "nodemon src/index.js",
     "deploy": "node src/deploy-commands.js",
     "migrate:rollback": "node scripts/rollback-migration.js",
+    "payouts:replay": "node scripts/replay-owed-payouts.js",
     "docs:commands": "node scripts/docs-commands.js",
     "docs:api": "node scripts/docs-api.js",
     "docs:panels": "node scripts/docs-panels.js",
