@@ -66,7 +66,14 @@ module.exports = {
                 const bypassEscalation = bypassRequested && canBypass;
 
                 const guildSettings = await Guild.findOne({ guildId: interaction.guild.id });
-                const matchedStep = !bypassEscalation
+                // Only ever read by the bypass branches below, to say what the
+                // bypass suppressed — when escalation is going to run,
+                // applyEscalation looks the step up itself. The condition used
+                // to be `!bypassEscalation`, which computed it in exactly the
+                // case nothing reads it and left it null in the case that does:
+                // "would have triggered MUTE at 3 warnings" was unreachable,
+                // and every honoured bypass claimed there was no step anyway.
+                const matchedStep = bypassEscalation
                     ? findStepForCount(guildSettings?.moderation?.escalation?.ladder, warningCount)
                     : null;
 
