@@ -74,45 +74,85 @@ async function runJob(service, jobName, fn, { guildId = null, scope = null, payl
     return true;
 }
 
+// How long an in-flight retry's claim on a dead-letter record is honoured.
+//
+// A lease rather than a flag, because `status: 'retrying'` cannot distinguish a
+// replay that is running from one whose process died holding the record. Reading
+// it as "running" strands the record forever; reading it as "dead" runs the
+// handler a second time, which for an owed payout is a second credit. The
+// timestamp is what tells them apart.
+//
+// Five minutes is far longer than any handler here takes — a replayed payout is
+// a single write — so a live claim is never mistaken for a dead one in practice,
+// and a genuinely dead one is recoverable within the window.
+const RETRY_LEASE_MS = 5 * 60 * 1000;
+
+/**
+ * Filter fragment matching dead-letter records that are free to claim: retriable
+ * status, and no lease or an expired one.
+ *
+ * Exported so a caller listing work to retry selects on the same terms the claim
+ * in `retryJob` enforces. Listing records it will then be refused only produces
+ * noise an operator has to learn to ignore.
+ *
+ * `{ claimedAt: null }` also matches documents with no `claimedAt` at all, which
+ * is every record written before the field existed.
+ */
+function claimableFilter(now = new Date()) {
+    return {
+        status: { $in: ['pending', 'retrying'] },
+        $or: [
+            { claimedAt: null },
+            { claimedAt: { $lte: new Date(now.getTime() - RETRY_LEASE_MS) } },
+        ],
+    };
+}
+
 /**
  * Retry a pending FailedJob by its _id.
  * Runs the supplied handler with the stored payload and updates the DLQ record.
  *
- * The attempt is *claimed* rather than merely marked. Reading the record,
- * deciding it is retriable and then saving `retrying` is a check-then-act with a
- * window in it: two operators running the replay script at once both read a
- * pending record, both pass the guard, and both call the handler — which for an
- * owed payout is a second `$inc` or a second inventory grant. Since the handler
- * is what moves the money, that window has to be closed before it runs, not
- * after.
+ * The record is claimed by the same update that marks it retrying — one
+ * conditional write, before the handler runs. Reading the record, deciding it is
+ * retriable and then saving `retrying` would be a check-then-act, and the window
+ * is wide enough for two operators running the replay script to both reach the
+ * handler: a second `$inc`, or a second inventory grant.
  *
- * The claim is a compare-and-set on `attempts`, which only ever increases: both
- * runs read the same value, both try to advance it, and the loser's filter no
- * longer matches. No extra field, and no lease to expire.
+ * A compare-and-set on `attempts` is not enough on its own. It stops two runs
+ * that read the same pre-claim state, but not a run that reads *after* the
+ * other's claim has landed — that one sees the incremented value and matches on
+ * it. Only a lease with a clock can tell an in-flight replay from an abandoned
+ * one, which is what `claimedAt` is.
  *
- * A record left `retrying` by a run that died is still claimable — its
- * `attempts` is whatever that run left behind, so the next CAS against it
- * succeeds. Excluding `retrying` outright would close the race by stranding
- * those forever instead.
+ * The lease is released whichever way the handler ends, so a record that goes
+ * back to `pending` is immediately available rather than waiting out its window.
  *
  * @param {string}   failedJobId  - FailedJob._id
  * @param {Function} handler      - async fn(payload) to call
  * @param {string}   resolvedBy   - userId or label for audit trail
  */
 async function retryJob(failedJobId, handler, resolvedBy = 'system') {
-    const found = await FailedJob.findById(failedJobId);
-    if (!found) throw new Error('FailedJob not found');
-    if (found.status === 'resolved') throw new Error('Job already resolved');
-    if (found.status === 'exhausted') throw new Error('Job exhausted');
+    const now = new Date();
 
     const record = await FailedJob.findOneAndUpdate(
-        { _id: failedJobId, status: { $in: ['pending', 'retrying'] }, attempts: found.attempts },
-        { $inc: { attempts: 1 }, $set: { status: 'retrying', lastAttemptAt: new Date() } },
+        { _id: failedJobId, ...claimableFilter(now) },
+        {
+            $inc: { attempts: 1 },
+            $set: { status: 'retrying', claimedAt: now, claimedBy: resolvedBy, lastAttemptAt: now },
+        },
         { new: true },
     );
-    // Someone else advanced this record between the read above and the claim:
-    // another replay run has it, or resolved it. Either way it is not ours.
-    if (!record) throw new Error('Job is already being retried by another run');
+
+    // Nothing was claimed. Read the record back to say which of the several
+    // reasons it was — the caller is an operator who needs to know whether to
+    // wait, look elsewhere, or stop.
+    if (!record) {
+        const existing = await FailedJob.findById(failedJobId);
+        if (!existing) throw new Error('FailedJob not found');
+        if (existing.status === 'resolved') throw new Error('Job already resolved');
+        if (existing.status === 'exhausted') throw new Error('Job exhausted');
+        throw new Error('Job is already being retried by another run');
+    }
 
     try {
         await handler(record.payload);
@@ -125,8 +165,10 @@ async function retryJob(failedJobId, handler, resolvedBy = 'system') {
         record.status = record.attempts >= record.maxAttempts ? 'exhausted' : 'pending';
     }
 
+    record.claimedAt = null;
+    record.claimedBy = null;
     await record.save();
     return record;
 }
 
-module.exports = { runJob, retryJob };
+module.exports = { runJob, retryJob, claimableFilter, RETRY_LEASE_MS };

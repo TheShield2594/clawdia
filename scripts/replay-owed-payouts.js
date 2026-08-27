@@ -31,20 +31,8 @@ require('../src/config/fileSecrets').loadFileSecrets();
 
 const mongoose = require('mongoose');
 const FailedJob = require('../src/models/FailedJob');
-const { retryJob } = require('../src/utils/jobRunner');
+const { retryJob, claimableFilter } = require('../src/utils/jobRunner');
 const { replayOwedPayout, describeOwedPayout, OWED_SUFFIX } = require('../src/utils/owedPayout');
-
-// Pending and retrying only. 'exhausted' has spent its attempts and wants a
-// human; 'resolved' has been paid, and paying it twice is the failure this
-// whole mechanism exists to avoid.
-//
-// 'retrying' is in the set on purpose. It describes both a replay in flight and
-// one whose process died holding the record, and dropping it would strand the
-// second kind forever. Telling them apart is not this listing's job: retryJob
-// claims each record with a compare-and-set before it calls the handler, so a
-// record another run is actively replaying is refused there rather than here,
-// and only the abandoned ones get through.
-const REPLAYABLE = ['pending', 'retrying'];
 
 async function main() {
     const pay = process.argv.slice(2).includes('--pay');
@@ -56,9 +44,14 @@ async function main() {
 
     await mongoose.connect(process.env.MONGODB_URI);
     try {
+        // claimableFilter is retryJob's own claim condition: pending or
+        // retrying, and not under a live lease. Selecting on anything looser
+        // would list records the replay below is about to refuse — 'exhausted'
+        // has spent its attempts and wants a human, 'resolved' has been paid,
+        // and a record another run is replaying right now is that run's.
         const owed = await FailedJob.find({
             jobName: { $regex: `\\${OWED_SUFFIX}$` },
-            status: { $in: REPLAYABLE },
+            ...claimableFilter(),
         }).sort({ createdAt: 1 });
 
         if (owed.length === 0) {

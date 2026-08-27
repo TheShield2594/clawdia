@@ -657,10 +657,6 @@ async function announceHourlyWinners(client) {
 
         failedCredits += 1;
         const reason = creditErr?.message ?? `no user document for ${winner.userId} in ${winner.guildId}`;
-        console.error(
-            `[scheduler] hourly reward credit failed for ${winner.userId} in ${winner.guildId} ` +
-            `(${winner.category}, ${rewardAmount} coins) — recorded as owed:`, reason,
-        );
         const recorded = await recordOwedPayout({
             service: 'schedulerService',
             jobName: 'announceHourlyWinners',
@@ -676,6 +672,15 @@ async function announceHourlyWinners(client) {
             error: creditErr ?? new Error(reason),
         });
         if (!recorded) unrecordedCredits += 1;
+
+        // Logged after the record write, not before it: this line is the only
+        // trace of an unrecorded payout, so it has to say which of the two
+        // happened rather than assume the queue write it has not made yet.
+        console.error(
+            `[scheduler] hourly reward credit failed for ${winner.userId} in ${winner.guildId} ` +
+            `(${winner.category}, ${rewardAmount} coins) — ` +
+            `${recorded ? 'recorded as owed' : 'NOT recorded, must be paid by hand'}:`, reason,
+        );
     }
 
     // Announce per guild (best-effort — reward already granted above).
@@ -1169,11 +1174,6 @@ async function returnExpiredMarketListings() {
                 // again — which is why the credit is written down as owed
                 // rather than left to a retry that will never come (#804).
                 failed++;
-                console.error(
-                    `[scheduler] listing ${listing._id} was claimed but crediting ` +
-                    `${listing.quantity}x ${listing.itemId} to ${listing.sellerId} failed — ` +
-                    'items owed, recorded for replay:', creditErr.message,
-                );
                 const recorded = await recordOwedPayout({
                     service: 'schedulerService',
                     jobName: 'returnExpiredMarketListings',
@@ -1189,6 +1189,15 @@ async function returnExpiredMarketListings() {
                     error: creditErr,
                 });
                 if (!recorded) unrecordedReturns += 1;
+
+                // After the record write, for the same reason as the hourly
+                // credit above.
+                console.error(
+                    `[scheduler] listing ${listing._id} was claimed but crediting ` +
+                    `${listing.quantity}x ${listing.itemId} to ${listing.sellerId} failed — ` +
+                    `${recorded ? 'items owed, recorded for replay' : 'items owed and NOT recorded, must be returned by hand'}:`,
+                    creditErr.message,
+                );
                 continue;
             }
             processed++;
