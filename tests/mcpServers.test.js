@@ -13,6 +13,7 @@ const {
     loadMcpServers,
     getMcpServers,
     resolveMcpServers,
+    usesOAuth,
     buildAnthropicMcpParams
 } = require('../src/config/mcpServers');
 
@@ -343,6 +344,93 @@ describe('resolveMcpServers', () => {
         } finally {
             delete process.env.MCP_ALLOW_GUILD_SERVERS;
         }
+    });
+});
+
+/**
+ * #796. An OAuth grant's *identity* travels on the connection, never its
+ * tokens: the MCP client asks the store for a live access token at the moment
+ * it makes a request, because one that was fetched at discovery may have
+ * expired by the time the request goes out.
+ */
+describe('an OAuth connection', () => {
+    const grant = {
+        guildId: 'g1',
+        issuer: 'https://auth.example.com',
+        clientId: 'cid',
+        accessToken: 'enc:at',
+        refreshToken: 'enc:rt',
+    };
+
+    beforeEach(() => {
+        writeConfig({ servers: [] });
+        load();
+    });
+
+    test('carries the identity of the grant and none of its secrets', () => {
+        const [resolved] = resolveMcpServers([
+            { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant },
+        ]);
+
+        expect(resolved.connection.oauth).toEqual({ guildId: 'g1', server: 'linear' });
+        expect(JSON.stringify(resolved)).not.toContain('enc:at');
+        expect(JSON.stringify(resolved)).not.toContain('enc:rt');
+    });
+
+    test('is not one until the flow has actually finished', () => {
+        const [resolved] = resolveMcpServers([
+            { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: { guildId: 'g1', clientId: 'cid' } },
+        ]);
+        expect(resolved.connection.oauth).toBeNull();
+    });
+
+    test('a plain token connection has no grant at all', () => {
+        const [resolved] = resolveMcpServers([
+            { name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: 'ghp_x' },
+        ]);
+        expect(resolved.connection.oauth).toBeNull();
+    });
+
+    // `${ENV_VAR}` expansion is how the config file holds secrets and it is
+    // read-only: a refresh token rotates, and a process cannot write a new one
+    // back into its own environment. So OAuth is dashboard-only, and a config
+    // file claiming a grant does not get one.
+    test('is never taken from the operator config file', () => {
+        writeConfig({ servers: [{ name: 'docs', url: 'https://docs.example.com/sse', oauth: grant }] });
+        load();
+
+        expect(resolveMcpServers([])[0].connection.oauth).toBeNull();
+    });
+
+    // `clientToolkit` routes these to the bot's own client, but it answers null
+    // when the toolkit could not be built — the server is down, the grant was
+    // revoked — and the caller then falls through to the connector params. What
+    // would travel is a server with no credential at all, since finishing the
+    // flow clears the static token. Filtering here is what makes that
+    // fall-through safe wherever it happens.
+    test('is never handed to Anthropic\'s connector', () => {
+        const params = buildAnthropicMcpParams([
+            { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant },
+            { name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: 'ghp_x' },
+        ]);
+
+        expect(params.mcp_servers.map(s => s.name)).toEqual(['github']);
+        expect(params.tools.map(t => t.mcp_server_name)).toEqual(['github']);
+    });
+
+    test('and a guild with nothing but OAuth connections sends the connector nothing', () => {
+        expect(buildAnthropicMcpParams([
+            { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant },
+        ])).toBeNull();
+    });
+
+    test('forces the Anthropic client route, which the connector cannot refresh for', () => {
+        const withGrant = [{ name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant }];
+        const withToken = [{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: 'x' }];
+
+        expect(usesOAuth(withGrant)).toBe(true);
+        expect(usesOAuth(withToken)).toBe(false);
+        expect(usesOAuth([])).toBe(false);
     });
 });
 

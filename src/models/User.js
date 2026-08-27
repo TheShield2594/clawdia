@@ -51,6 +51,27 @@ const userSchema = new Schema({
     // (checked across the codebase by tests/balanceDebitGuard.test.js) and the
     // clamp-inside-the-update in src/utils/balanceDebit.js.
     balance: { type: Number, default: 0, min: 0 },
+
+    // Payout keys, for the credits that can be replayed (#807).
+    //
+    // A payout that is written down as owed when its credit appears to fail is
+    // at-least-once: the write may have committed and only lost its response,
+    // so replaying it later can pay twice. There is no transaction to make the
+    // credit and a separate guard one write, so the guard lives here, on the
+    // document being credited, and the credit's own filter checks it —
+    // `'paidPayouts.key': { $ne: key }` — which makes an already-applied payout
+    // match nothing and move no coins. src/utils/payoutKey.js owns the shape.
+    //
+    // Entries age out after `RETENTION_DAYS` there, which is a correctness
+    // bound and not housekeeping: past it, a replay double-pays again. `_id: false`
+    // because these are records, not subdocuments anything addresses.
+    paidPayouts: {
+        type: [new Schema({
+            key: { type: String, required: true },
+            at:  { type: Date, required: true },
+        }, { _id: false })],
+        default: undefined,
+    },
     bank: { type: Number, default: 0, min: 0 },
     lastDaily: { type: Date, default: null },
     lastWork: { type: Date, default: null },

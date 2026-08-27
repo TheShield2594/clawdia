@@ -358,6 +358,54 @@ const guildSchema = new Schema({
                 // resource is read before the model has said anything and lands
                 // in the system prompt of every message.
                 resources:          { type: Boolean, default: false },
+                // An OAuth grant, for the servers that accept nothing else
+                // (#796). Present instead of `authorizationToken`, not
+                // alongside it: a connection authorizes one way or the other,
+                // and the client prefers this when it is here.
+                //
+                // The two tokens and the client secret are encrypted at rest
+                // through src/config/secretBox.js, the same as the provider API
+                // keys — a refresh token is a long-lived credential for
+                // somebody's mailbox or issue tracker, which is a good deal
+                // more than the static tokens this field sits next to. None of
+                // the three is ever rendered back to the dashboard.
+                oauth: {
+                    type: new Schema({
+                        // The guild this grant belongs to, stored on the grant
+                        // rather than threaded through six layers of provider
+                        // config. It is what lets the MCP client ask the token
+                        // store for a fresh access token without anything in
+                        // between having to know guilds exist.
+                        guildId:               { type: String, required: true },
+                        issuer:                { type: String, required: true },
+                        authorizationEndpoint: { type: String, required: true },
+                        tokenEndpoint:         { type: String, required: true },
+                        // RFC 8707's canonical resource identifier, echoed on
+                        // every token request so the grant stays bound to this
+                        // server rather than being usable against another.
+                        resource:              { type: String, default: null },
+                        clientId:              { type: String, required: true },
+                        // The same `set: encryptSecret` the provider keys above
+                        // use. `sealGrant` in src/services/ai/mcp/oauthStore.js
+                        // already encrypts on the store's own path, and this is
+                        // deliberately belt and braces: `encryptSecret` returns
+                        // an already-sealed value untouched, so the two compose,
+                        // and any future write that reaches the schema directly
+                        // rather than through the store is covered by default
+                        // rather than by somebody remembering.
+                        clientSecret:          { type: String, default: null, set: encryptSecret },
+                        accessToken:           { type: String, default: null, set: encryptSecret },
+                        refreshToken:          { type: String, default: null, set: encryptSecret },
+                        // Null when the server issued a token with no
+                        // `expires_in`, which means "until it stops working" —
+                        // the 401 retry is what covers that case.
+                        expiresAt:             { type: Date, default: null },
+                        scope:                 { type: String, default: null },
+                        connectedBy:           { type: String, default: null },
+                        connectedAt:           { type: Date, default: null }
+                    }, { _id: false }),
+                    default: null
+                },
                 addedBy:            { type: String, default: null },
                 createdAt:          { type: Date, default: Date.now }
             }],

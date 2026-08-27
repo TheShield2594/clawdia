@@ -74,8 +74,20 @@ async function mapWithLimit(items, limit, fn) {
     return results;
 }
 
+// An OAuth connection's credential is not in the connection — it is a grant in
+// the database that rotates — so the identity of the grant goes in the key
+// instead (#796). Two guilds pointed at the same URL under different logins are
+// two connections; the same guild's grant refreshing its access token is still
+// one, which is the point of not keying on the token itself.
+// Both halves are namespaced so neither can be spelled as the other: a static
+// token that happened to read `oauth:g1/linear` would otherwise share a pooled
+// connection, and therefore a session and a tool cache, with that guild's
+// actual grant.
 function keyFor(connection) {
-    return `${connection.url} ${connection.authorizationToken || ''}`;
+    if (connection.oauth) {
+        return `${connection.url} oauth:${connection.oauth.guildId}/${connection.oauth.server}`;
+    }
+    return `${connection.url} token:${connection.authorizationToken || ''}`;
 }
 
 function closeQuietly(client) {
@@ -103,14 +115,32 @@ function entryFor(server) {
     return entry;
 }
 
+/**
+ * The client for one resolved server, wired to whichever credential it has.
+ *
+ * Shared with src/services/ai/mcp/inspect.js rather than written twice: the
+ * dashboard's Test button has to dial exactly what a chat request would, and a
+ * second copy of this wiring is how it stops doing that — the OAuth callback in
+ * particular is easy to add in one place and forget in the other, which shows
+ * up as a connection that works in a channel and 401s in the panel.
+ */
+function mcpClientFor(server) {
+    const grant = server.connection.oauth;
+    return new McpHttpClient({
+        url: server.connection.url,
+        authorizationToken: server.connection.authorizationToken,
+        label: server.name,
+        // Required lazily: the store reaches the Guild model, and this module is
+        // loaded by the config layer the model's own schema sits under. A static
+        // token connection never touches it.
+        getAccessToken: grant
+            ? ({ force }) => require('./oauthStore').accessTokenFor(grant.guildId, grant.server, { force })
+            : null
+    });
+}
+
 function clientFor(entry, server) {
-    if (!entry.client) {
-        entry.client = new McpHttpClient({
-            url: server.connection.url,
-            authorizationToken: server.connection.authorizationToken,
-            label: server.name
-        });
-    }
+    if (!entry.client) entry.client = mcpClientFor(server);
     return entry.client;
 }
 
@@ -265,6 +295,7 @@ function resetMcpCache() {
 module.exports = {
     entryFor,
     clientFor,
+    mcpClientFor,
     withSession,
     withServerLimit,
     cachedList,

@@ -2,6 +2,7 @@
 
 const axios = require('axios');
 const { guardedAgents, assertPublicHttpUrl } = require('../../../utils/outboundGuard');
+const { isOAuthChallenge } = require('./oauth');
 const { version: CLAWDIA_VERSION } = require('../../../../package.json');
 
 /**
@@ -253,10 +254,24 @@ function progressReader(token, onProgress) {
 
 // HTTP failures are what an admin actually sees when a URL or token is wrong,
 // so they say which of the two it probably is.
-function httpError(status, body) {
+//
+// `challenge` is the server's `WWW-Authenticate` header, carried on the error
+// rather than logged: a 401 on a server that wants OAuth is not a bad token, it
+// is the first step of the flow (#796), and the dashboard's Connect button
+// reads the `resource_metadata` out of it to find the authorization server.
+function httpError(status, body, challenge = null) {
     const detail = body.trim().slice(0, 300);
     if (status === 401 || status === 403) {
-        return new McpError(`HTTP ${status} — the server rejected the authorization token${detail ? `: ${detail}` : ''}`, { status });
+        const wantsOAuth = status === 401 && isOAuthChallenge(challenge);
+        const err = new McpError(
+            wantsOAuth
+                ? `HTTP 401 — this server wants an OAuth login rather than a token${detail ? `: ${detail}` : ''}`
+                : `HTTP ${status} — the server rejected the authorization token${detail ? `: ${detail}` : ''}`,
+            { status },
+        );
+        err.wwwAuthenticate = challenge;
+        err.needsOAuth = wantsOAuth;
+        return err;
     }
     if (status === 404 || status === 405) {
         return new McpError(`HTTP ${status} — no MCP endpoint at this URL${detail ? `: ${detail}` : ''}`, { status, sessionExpired: status === 404 });
@@ -273,8 +288,14 @@ class McpHttpClient {
      * @param {string} options.url    the server's MCP endpoint
      * @param {string|null} [options.authorizationToken]
      * @param {string} [options.label] name used in error messages
+     * @param {Function|null} [options.getAccessToken] `({force}) => token|null`
+     *        for an OAuth connection (#796). Asked before every request rather
+     *        than once at construction, because an access token expires while a
+     *        pooled client is sitting idle and the store is what knows when to
+     *        refresh. `force` is the 401 path: the server rejected a token this
+     *        believed was live, so refresh and try once more.
      */
-    constructor({ url, authorizationToken = null, label = 'MCP server' }) {
+    constructor({ url, authorizationToken = null, label = 'MCP server', getAccessToken = null }) {
         // Throws for anything that is not a plain http(s) URL, and for a literal
         // private address — the one destination that is knowable before DNS.
         this.url = assertPublicHttpUrl(url, `${label} URL`).toString();
@@ -282,6 +303,7 @@ class McpHttpClient {
         this.token = typeof authorizationToken === 'string' && authorizationToken.trim()
             ? authorizationToken.trim()
             : null;
+        this.getAccessToken = typeof getAccessToken === 'function' ? getAccessToken : null;
         this.sessionId = null;
         this.protocolVersion = null;
         this.serverInfo = null;
@@ -312,7 +334,32 @@ class McpHttpClient {
         return headers;
     }
 
-    async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, onNotification = null } = {}) {
+    /**
+     * Puts the current OAuth access token on `this.token`, refreshing it if the
+     * store says it is due — or, with `force`, whether or not it says so.
+     *
+     * A connection with no OAuth grant is left exactly as it was, so the static
+     * token path is untouched. A store that cannot produce a token is not an
+     * error either: the request goes out unauthenticated and fails with the
+     * server's own message, which is more useful than one invented here.
+     */
+    async authorize({ force = false } = {}) {
+        if (!this.getAccessToken) return false;
+        let token;
+        try {
+            token = await this.getAccessToken({ force });
+        } catch (err) {
+            console.warn(`[MCP] could not get an access token for "${this.label}": ${err.message}`);
+            return false;
+        }
+        const changed = Boolean(token) && token !== this.token;
+        if (token) this.token = token;
+        return changed;
+    }
+
+    async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, authRetried = false, onNotification = null } = {}) {
+        await this.authorize();
+
         let response;
         try {
             response = await axios.post(this.url, payload, {
@@ -337,12 +384,28 @@ class McpHttpClient {
             if (wait !== null) {
                 response.data?.destroy?.();
                 await new Promise(resolve => setTimeout(resolve, wait));
-                return this.post(payload, { id, timeout, retryable: false, onNotification });
+                return this.post(payload, { id, timeout, retryable: false, authRetried, onNotification });
             }
         }
 
         if (response.status >= 400) {
-            throw httpError(response.status, await collectText(response.data));
+            // Read before anything decides what to do with it: the body is the
+            // server's own explanation and the stream can only be consumed once.
+            const body = await collectText(response.data);
+            const challenge = response.headers['www-authenticate'] ?? null;
+
+            // A 401 on an OAuth connection is the ordinary end of an access
+            // token's life — one that expired early, a scope that changed, a
+            // server that rotated its keys — so it is worth one forced refresh
+            // and one retry before it becomes an error somebody has to read.
+            // Only once, and only when the refresh actually produced a different
+            // token: retrying with the same credential is the same request again.
+            if (response.status === 401 && this.getAccessToken && !authRetried
+                && await this.authorize({ force: true })) {
+                return this.post(payload, { id, timeout, retryable, authRetried: true, onNotification });
+            }
+
+            throw httpError(response.status, body, challenge);
         }
 
         const sessionId = response.headers['mcp-session-id'];

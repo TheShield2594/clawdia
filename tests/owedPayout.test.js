@@ -8,17 +8,19 @@
  */
 
 jest.mock('../src/models/FailedJob', () => ({ create: jest.fn() }));
-jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn() }));
+jest.mock('../src/models/User', () => ({ findOneAndUpdate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../src/utils/inventoryGrant', () => ({ grantInventoryItem: jest.fn() }));
 
 const FailedJob = require('../src/models/FailedJob');
 const User = require('../src/models/User');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
 const {
-    recordOwedPayout, replayOwedPayout, describeOwedPayout, isOwedPayout, OWED_SUFFIX,
+    recordOwedPayout, replayOwedPayout, describeOwedPayout, payoutKeyForPayload, isOwedPayout, OWED_SUFFIX,
 } = require('../src/utils/owedPayout');
 
 let errorLog;
+let warnLog;
+let infoLog;
 
 beforeEach(() => {
     jest.clearAllMocks();
@@ -26,9 +28,15 @@ beforeEach(() => {
     User.findOneAndUpdate.mockResolvedValue({});
     grantInventoryItem.mockResolvedValue({});
     errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+    warnLog  = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    infoLog  = jest.spyOn(console, 'log').mockImplementation(() => {});
 });
 
-afterEach(() => errorLog.mockRestore());
+afterEach(() => {
+    errorLog.mockRestore();
+    warnLog.mockRestore();
+    infoLog.mockRestore();
+});
 
 describe('recordOwedPayout', () => {
     test('files a dead-letter entry carrying everything the credit needs', async () => {
@@ -143,6 +151,109 @@ describe('replayOwedPayout', () => {
         ['nothing',         undefined],
     ])('refuses %s', async (_label, payload) => {
         await expect(replayOwedPayout(payload)).rejects.toThrow('unknown owed payout kind');
+    });
+});
+
+// #807. The replay is where a duplicate payment actually happens: the credit
+// that recorded this may have committed and only lost its response. So the
+// replay's own credit carries the key, and the two ways it can match nothing —
+// already paid, no document — have to stay distinguishable, because one is done
+// and the other is still owed.
+describe('replayOwedPayout with a payout key', () => {
+    const hourly = {
+        kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500,
+        hour: '2026-08-27T01', category: 'fish', payoutKey: 'hourly:2026-08-27T01:fish',
+    };
+    const listing = {
+        kind: 'items', userId: 'u1', guildId: 'g1', itemId: 'sword', quantity: 2,
+        listingId: 'l1', payoutKey: 'listing:l1',
+    };
+
+    /** `User.findOne(...).lean()` resolving to `doc`, for the classification read. */
+    function stubRead(doc) {
+        User.findOne.mockReturnValue({ lean: async () => doc });
+    }
+
+    beforeEach(() => {
+        User.findOne = jest.fn();
+        stubRead(null);
+    });
+
+    test('guards the credit with the key the original attempt used', async () => {
+        await replayOwedPayout(hourly);
+
+        const [filter, update] = User.findOneAndUpdate.mock.calls[0];
+        expect(filter['paidPayouts.key']).toEqual({ $ne: 'hourly:2026-08-27T01:fish' });
+        expect(update[0].$set.balance).toEqual({ $add: [{ $ifNull: ['$balance', 0] }, 500] });
+    });
+
+    test('a payout already applied moves no coins and is not still owed', async () => {
+        User.findOneAndUpdate.mockResolvedValue(null);
+        stubRead({ paidPayouts: [{ key: 'hourly:2026-08-27T01:fish' }] });
+
+        // retryJob reads a return as "paid" and marks the record resolved, which
+        // is right: the winner has the coins.
+        await expect(replayOwedPayout(hourly)).resolves.toBeUndefined();
+    });
+
+    // The other half of the same `null`. Reporting this as paid is exactly the
+    // silence #804 closed, so it has to keep throwing.
+    test('a payout against a missing user document is still owed', async () => {
+        User.findOneAndUpdate.mockResolvedValue(null);
+        stubRead(null);
+
+        await expect(replayOwedPayout(hourly)).rejects.toThrow('no user document for u1 in g1');
+    });
+
+    test('a document without the key is retried rather than declared paid', async () => {
+        User.findOneAndUpdate.mockResolvedValue(null);
+        stubRead({ paidPayouts: [] });
+
+        await expect(replayOwedPayout(hourly)).rejects.toThrow('matched nothing');
+    });
+
+    test('an item return already applied grants nothing', async () => {
+        grantInventoryItem.mockResolvedValue(null);
+        stubRead({ paidPayouts: [{ key: 'listing:l1' }] });
+
+        await expect(replayOwedPayout(listing)).resolves.toBeUndefined();
+        expect(grantInventoryItem).toHaveBeenCalledTimes(1);
+    });
+
+    test('an item return still owed guards its grant and its insert', async () => {
+        await replayOwedPayout(listing);
+
+        const [, , , , options] = grantInventoryItem.mock.calls[0];
+        expect(options.guard).toEqual({ 'paidPayouts.key': { $ne: 'listing:l1' } });
+    });
+
+    // Records written before the key existed already carry everything the key is
+    // made of, so they replay guarded too rather than staying at-least-once
+    // forever.
+    test('derives the key for a record written before payoutKey was stored', () => {
+        expect(payoutKeyForPayload({ kind: 'coins', hour: '2026-08-27T01', category: 'fish' }))
+            .toBe('hourly:2026-08-27T01:fish');
+        expect(payoutKeyForPayload({ kind: 'items', listingId: 'l1' }))
+            .toBe('listing:l1');
+    });
+
+    test('an explicit key wins over anything derivable', () => {
+        expect(payoutKeyForPayload({ kind: 'coins', hour: 'h', category: 'c', payoutKey: 'x' }))
+            .toBe('x');
+    });
+
+    // A payload with nothing to key on replays exactly as it did before, and
+    // says out loud that it is at-least-once rather than pretending otherwise.
+    test('a payload with no key at all falls back to the unguarded credit', async () => {
+        expect(payoutKeyForPayload({ kind: 'coins', userId: 'u1' })).toBeNull();
+
+        await replayOwedPayout({ kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500 });
+
+        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
+            { userId: 'u1', guildId: 'g1' },
+            { $inc: { balance: 500 } },
+        );
+        expect(warnLog).toHaveBeenCalledWith(expect.stringContaining('at-least-once'));
     });
 });
 

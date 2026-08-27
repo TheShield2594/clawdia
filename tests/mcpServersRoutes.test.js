@@ -121,6 +121,135 @@ describe('GET /guild/:id/mcp-servers', () => {
     });
 });
 
+/**
+ * #796. A grant is bound to the resource it was issued for and to one way of
+ * authorizing, so two edits invalidate it — moving the connection somewhere
+ * else, and giving it a static token instead. Leaving one in place after either
+ * would mean a credential naming a server this connection no longer points at.
+ */
+describe('an edit that invalidates an OAuth login', () => {
+    const grant = {
+        guildId: 'g1', issuer: 'https://auth.example.com', clientId: 'cid',
+        clientSecret: 'enc:shh', accessToken: 'enc:at', refreshToken: 'enc:rt',
+        scope: 'read', connectedBy: 'admin-1', connectedAt: new Date(),
+    };
+
+    function withGrant() {
+        return makeDoc([{
+            name: 'linear', url: 'https://mcp.example.com/mcp', enabled: true,
+            authorizationToken: null, allowedTools: [], blockedTools: [], oauth: grant,
+        }]);
+    }
+
+    test('lists the login without any part of it that is secret', async () => {
+        doc = withGrant();
+
+        const { body } = await api('GET', '/guild/g1/mcp-servers');
+
+        expect(body.servers[0].oauth).toMatchObject({
+            issuer: 'https://auth.example.com', scope: 'read', renewable: true,
+        });
+        expect(JSON.stringify(body)).not.toContain('enc:at');
+        expect(JSON.stringify(body)).not.toContain('enc:rt');
+        expect(JSON.stringify(body)).not.toContain('enc:shh');
+    });
+
+    // A grant with no refresh token stops working when the access token expires
+    // and has to be reconnected by hand, which is worth saying beforehand.
+    test('says when a login cannot renew itself', async () => {
+        doc = makeDoc([{
+            name: 'linear', url: 'https://mcp.example.com/mcp', enabled: true,
+            allowedTools: [], blockedTools: [], oauth: { ...grant, refreshToken: null },
+        }]);
+
+        const { body } = await api('GET', '/guild/g1/mcp-servers');
+
+        expect(body.servers[0].oauth.renewable).toBe(false);
+    });
+
+    // The pool is keyed by credential, so a warm-up without the grant fills a
+    // different entry than a chat request will use — a 401 nobody asked for,
+    // and a cache still cold.
+    test('warms the connection with its login, not unauthenticated', async () => {
+        doc = withGrant();
+
+        await api('PUT', '/guild/g1/mcp-servers/linear', { url: 'https://mcp.example.com/mcp' });
+
+        expect(mockPrewarm).toHaveBeenCalledWith([expect.objectContaining({ name: 'linear', oauth: grant })]);
+    });
+
+    test('and without one once the login has just been cleared', async () => {
+        doc = withGrant();
+
+        await api('PUT', '/guild/g1/mcp-servers/linear', { url: 'https://other.example.com/mcp' });
+
+        expect(mockPrewarm).toHaveBeenCalledWith([expect.objectContaining({ oauth: null })]);
+    });
+
+    test('drops the login when the connection is pointed somewhere else', async () => {
+        doc = withGrant();
+
+        const { body } = await api('PUT', '/guild/g1/mcp-servers/linear', {
+            url: 'https://other.example.com/mcp',
+        });
+
+        expect(doc.ai.mcpServers[0].oauth).toBeNull();
+        expect(body.notice).toMatch(/url changed/);
+    });
+
+    test('drops it when a static token is set instead', async () => {
+        doc = withGrant();
+
+        const { body } = await api('PUT', '/guild/g1/mcp-servers/linear', {
+            url: 'https://mcp.example.com/mcp',
+            authorizationToken: 'ghp_now_a_token',
+        });
+
+        expect(doc.ai.mcpServers[0].oauth).toBeNull();
+        expect(body.notice).toMatch(/a token was set/);
+    });
+
+    // Editing the tool lists, the enabled switch or the documents toggle leaves
+    // the login exactly where it was — re-saving a connection must not sign it
+    // out.
+    test('keeps it through an edit that changes neither', async () => {
+        doc = withGrant();
+
+        const { body } = await api('PUT', '/guild/g1/mcp-servers/linear', {
+            url: 'https://mcp.example.com/mcp',
+            blockedTools: ['delete_issue'],
+        });
+
+        expect(doc.ai.mcpServers[0].oauth).toBe(grant);
+        expect(body.notice).toBeUndefined();
+    });
+
+    test('and through one that leaves the token field empty', async () => {
+        doc = withGrant();
+
+        await api('PUT', '/guild/g1/mcp-servers/linear', {
+            url: 'https://mcp.example.com/mcp',
+            authorizationToken: '',
+        });
+
+        expect(doc.ai.mcpServers[0].oauth).toBe(grant);
+    });
+
+});
+
+describe('the preset list', () => {
+    test('offers the ones that take a login rather than a token', async () => {
+        doc = makeDoc([]);
+
+        const { body } = await api('GET', '/guild/g1/mcp-servers');
+        const oauthPresets = body.presets.filter(p => p.oauth).map(p => p.id);
+
+        expect(oauthPresets).toEqual(expect.arrayContaining(['linear', 'notion', 'sentry']));
+        // Every preset either takes a token or takes a login, never both.
+        expect(body.presets.filter(p => p.oauth && p.requiresToken)).toEqual([]);
+    });
+});
+
 describe('a saved server is dialled before it is needed', () => {
     // An admin who saves a connection is about to go and try it, and discovery
     // is the same handshake and list whenever it happens — so it happens here,
@@ -289,7 +418,8 @@ describe('POST /guild/:id/mcp-servers/:name/test', () => {
         expect(mockConstructed).toEqual([{
             url: 'https://api.githubcopilot.com/mcp/',
             authorizationToken: 'ghp_good',
-            label: 'github'
+            label: 'github',
+            getAccessToken: null
         }]);
         expect(body.toolCount).toBe(3);
         // delete_file is blocked, so it is offered by the server but not enabled.

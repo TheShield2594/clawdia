@@ -486,6 +486,122 @@ describe('gemini', () => {
     });
 });
 
+/**
+ * #795. A tool loaded mid-turn has to be declared in the *next* request, and
+ * only in it: the model can only call what was declared, so a provider that
+ * computed its tool list once before the loop would leave the model able to see
+ * a tool in the catalogue and never call it. This is the half of the deferred
+ * loading that lives outside the toolkit, one provider at a time.
+ */
+describe('a tool loaded mid-turn', () => {
+    const LOADED = {
+        name: 'github__create_issue',
+        serverName: 'github',
+        toolName: 'create_issue',
+        description: 'Open an issue',
+        inputSchema: { type: 'object', properties: { title: { type: 'string' } } }
+    };
+
+    /**
+     * A toolkit whose definitions grow when the load tool is called — which is
+     * what the real one does, mutating the array in place.
+     */
+    function loadingToolkit() {
+        const definitions = [{
+            name: 'load_tools',
+            serverName: null,
+            toolName: 'load_tools',
+            description: 'Load tools',
+            inputSchema: { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } } }
+        }];
+        const call = jest.fn(async name => {
+            if (name === 'load_tools') {
+                definitions.push(LOADED);
+                return 'Loaded: github__create_issue.';
+            }
+            return 'ok';
+        });
+        return { definitions, servers: ['github'], deferred: ['github__create_issue'], call };
+    }
+
+    const names = tools => (tools || []).map(t => t.function?.name ?? t.name);
+
+    beforeEach(() => {
+        mockToolkitFor.mockResolvedValue(loadingToolkit());
+    });
+
+    test('openai declares it on the round after the load', async () => {
+        mockCreate
+            .mockResolvedValueOnce(iterate([
+                openAiChunk({ toolCall: { index: 0, id: 'c1', function: { name: 'load_tools', arguments: '{"names":["github__create_issue"]}' } } })
+            ]))
+            .mockResolvedValueOnce(ANSWER_STREAM());
+
+        await collect(openai.stream(REQ));
+
+        expect(names(mockCreate.mock.calls[0][0].tools)).toEqual(['load_tools']);
+        expect(names(mockCreate.mock.calls[1][0].tools)).toEqual(['load_tools', 'github__create_issue']);
+    });
+
+    test('openai unstreamed does the same', async () => {
+        mockCreate
+            .mockResolvedValueOnce({ choices: [{ message: { content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'load_tools', arguments: '{"names":["github__create_issue"]}' } }] } }] })
+            .mockResolvedValueOnce({ choices: [{ message: { content: 'Done.' } }] });
+
+        await openai.complete(REQ);
+
+        expect(names(mockCreate.mock.calls[1][0].tools)).toContain('github__create_issue');
+    });
+
+    test('ollama declares it on the round after the load', async () => {
+        axios.post
+            .mockResolvedValueOnce(ndjson([
+                { message: { role: 'assistant', content: '', tool_calls: [{ function: { name: 'load_tools', arguments: { names: ['github__create_issue'] } } }] } },
+                { done: true }
+            ]))
+            .mockResolvedValueOnce(OLLAMA_ANSWER());
+
+        await collect(ollama.stream({ ...REQ, baseUrl: 'http://localhost:11434' }));
+
+        expect(axios.post.mock.calls[0][1].tools).toHaveLength(1);
+        expect(axios.post.mock.calls[1][1].tools).toHaveLength(2);
+    });
+
+    // Anthropic's half of this lives in tests/mcpAnthropicRoute.test.js,
+    // alongside the rest of its client-side loop.
+
+    // Gemini takes its declarations in the config the chat was created with, so
+    // they cannot change mid-conversation. The chat is rebuilt from its own
+    // history instead — the same manoeuvre the last round already used to drop
+    // the tools entirely.
+    test('gemini rebuilds the chat so the new tool is declared', async () => {
+        mockSendMessage
+            .mockResolvedValueOnce({ text: '', functionCalls: [{ name: 'load_tools', args: { names: ['github__create_issue'] } }] })
+            .mockResolvedValueOnce({ text: 'Done.' });
+
+        await gemini.complete(REQ);
+
+        expect(mockChatsCreate).toHaveBeenCalledTimes(2);
+        const [first, second] = mockChatsCreate.mock.calls.map(c => c[0]);
+        expect(first.config.tools[0].functionDeclarations.map(d => d.name)).toEqual(['load_tools']);
+        expect(second.config.tools[0].functionDeclarations.map(d => d.name))
+            .toEqual(['load_tools', 'github__create_issue']);
+        // Rebuilt from the chat's own history, so the function-call turn these
+        // responses answer is still there.
+        expect(second.history).toEqual([{ role: 'user', parts: [{ text: 'earlier' }] }]);
+    });
+
+    test('gemini does not rebuild the chat when nothing was loaded', async () => {
+        mockSendMessage
+            .mockResolvedValueOnce({ text: '', functionCalls: [{ name: 'github__search_repositories', args: { q: 'x' } }] })
+            .mockResolvedValueOnce({ text: 'Done.' });
+
+        await gemini.complete(REQ);
+
+        expect(mockChatsCreate).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('gemini schema conversion', () => {
     const { toGeminiSchema } = gemini;
 

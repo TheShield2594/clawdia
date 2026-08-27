@@ -8,7 +8,11 @@
       "blocked_tools": [
         "delete_file",
         "delete_repository"
-      ]
+      ],
+      "configs": {
+        "search_repositories": { "enabled": true, "defer_loading": false },
+        "get_file_contents": { "enabled": true, "defer_loading": false }
+      }
     },
     {
       "name": "read-only-calendar",

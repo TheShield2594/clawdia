@@ -92,23 +92,97 @@ async function applyBalanceDelta(Model, filter, user, delta) {
  * the dashboard. So the credit is retried, and if it still will not land it is
  * written down as owed rather than lost.
  *
+ * `context.payoutKey` makes the credit exactly-once (#807). Without one this
+ * path is at-least-once, and knowingly so: the record it writes below is filed
+ * against a credit whose write may have committed and merely lost its response,
+ * so replaying it can pay twice. With one, the key travels in the owed payload
+ * and the replay's own credit is guarded by it, so a second application moves no
+ * coins. It is caller-supplied because only the caller knows what makes this
+ * credit the same credit — a quest id, a mission id, the interaction id — and a
+ * key invented here would be different on every attempt and guard nothing.
+ *
+ * Credits only. A negative delta is a charge, goes through the clamped debit,
+ * and is not replayable in the first place; a key on one would be inert.
+ *
  * Returns `{ credited, balance }`. A false `credited` means the caller must not
  * present the flow as fully successful — the amount is recorded, not paid.
  */
 async function commitBalanceDelta(Model, filter, user, delta, context = {}) {
     if (!delta) return { credited: true, balance: user.balance ?? 0 };
 
+    const payoutKey = delta > 0 ? (context.payoutKey || null) : null;
+
     let lastError = null;
     for (let attempt = 1; attempt <= CREDIT_ATTEMPTS; attempt++) {
         try {
-            return { credited: true, balance: await applyBalanceDelta(Model, filter, user, delta) };
+            if (!payoutKey) {
+                return { credited: true, balance: await applyBalanceDelta(Model, filter, user, delta) };
+            }
+
+            const { creditCoinsOnce } = require('./payoutKey');
+            const { status, doc } = await creditCoinsOnce(filter, delta, payoutKey, {
+                Model, projection: { balance: 1 },
+            });
+
+            // 'duplicate' is a success: an earlier attempt landed and only its
+            // response was lost. 'missing' is not — there is no document to
+            // credit, and unlike the unkeyed path above (which cannot tell)
+            // this one knows, so it records the payout rather than reporting a
+            // credit that never happened.
+            if (status === 'paid' || status === 'duplicate') {
+                // A duplicate comes back with no document — the guarded update
+                // matched nothing — so the balance in hand is the one the flow
+                // read *before* the credit landed, and reporting it would show
+                // the player a total that is short by the amount they were just
+                // paid. Read the settled figure instead; this is the rare path,
+                // and being wrong on it is the whole reason the caller asked.
+                const settled = doc ?? await Model.findOne(filter, { balance: 1 }).lean();
+                if (settled) {
+                    user.balance = settled.balance;
+                    user.unmarkModified('balance');
+                }
+                return { credited: true, balance: user.balance ?? 0 };
+            }
+
+            lastError = new Error(
+                status === 'missing'
+                    ? `no user document to credit (${JSON.stringify(filter)})`
+                    : `credit matched nothing but ${payoutKey} is absent`,
+            );
+            // A missing document will still be missing on the next attempt, so
+            // there is nothing to retry — go straight to recording it as owed.
+            if (status === 'missing') break;
         } catch (err) {
             lastError = err;
-            if (attempt < CREDIT_ATTEMPTS) await delay(attempt * 250);
         }
+        if (attempt < CREDIT_ATTEMPTS) await delay(attempt * 250);
     }
 
     console.error(`[${context.service ?? 'balance'}] credit of ${delta} failed after ${CREDIT_ATTEMPTS} attempts:`, lastError?.message);
+
+    // With a key the credit is replayable, so it is filed the way every other
+    // replayable payout is — suffixed job name, a `replayOwedPayout` payload,
+    // and the key itself — which is also what puts it in front of
+    // `npm run payouts:replay`. The keyless record below predates that and is
+    // left as it was: it carries no `kind`, so the replay script would not know
+    // how to pay it even if it could see it.
+    if (payoutKey) {
+        const { recordOwedPayout } = require('./owedPayout');
+        await recordOwedPayout({
+            service:  context.service ?? 'balanceDelta',
+            jobName:  context.jobName ?? 'applyBalanceDelta',
+            guildId:  context.guildId ?? filter.guildId ?? null,
+            payload:  {
+                kind:      'coins',
+                userId:    filter.userId,
+                guildId:   filter.guildId,
+                amount:    delta,
+                payoutKey,
+            },
+            error: lastError,
+        });
+        return { credited: false, balance: user.balance ?? 0 };
+    }
 
     await FailedJob.create({
         service:      context.service ?? 'balanceDelta',
@@ -132,6 +206,9 @@ async function commitBalanceDelta(Model, filter, user, delta, context = {}) {
  * first mutation, not after. The save runs first for the same reason as in
  * `commitBalanceDelta`, and its failure propagates: nothing has been credited at
  * that point, so the caller's existing error handling is still correct.
+ *
+ * `context` is passed through to `commitBalanceDelta`, `payoutKey` included, so
+ * a caller that can name this credit gets the exactly-once guarantee here too.
  *
  * Returns `{ credited, balance }` from the credit, or `{ credited: true }` with
  * the untouched balance when the flow moved no coins at all.

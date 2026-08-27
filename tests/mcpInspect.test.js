@@ -114,7 +114,8 @@ describe('a connection that answers', () => {
         expect(mockConstructed).toEqual([{
             url: 'https://api.githubcopilot.com/mcp/',
             authorizationToken: 'ghp_x',
-            label: 'github'
+            label: 'github',
+            getAccessToken: null
         }]);
     });
 

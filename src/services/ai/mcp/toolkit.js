@@ -3,6 +3,7 @@
 const {
     resolveMcpServers,
     isToolEnabled,
+    isToolDeferred,
     toolAnnotations,
     needsConfirmation,
     DEFAULT_CONFIRM_MODE
@@ -36,10 +37,42 @@ const {
  * never.
  */
 
-// Every enabled tool's schema is sent with every request, so this is the real
+// Every declared tool's schema is sent with every request, so this is the real
 // token-cost ceiling on the feature — the per-guild server cap only bounds how
 // many places those tools come from.
 const MAX_TOOLS = 64;
+
+/**
+ * How many tools ship their schemas without being asked (#795).
+ *
+ * A name, a description and a full JSON Schema per tool, on *every* message, is
+ * the dominant cost of this feature on a bot whose default reply budget is 1024
+ * tokens — and a guild that connects GitHub's server alone is offering around
+ * ninety tools it will use two of. Past this many, the rest are catalogued as a
+ * name and one line each and their schemas are withheld until the model asks
+ * for them by name, which is roughly a tenth of the tokens per tool.
+ *
+ * A count rather than an operator setting, because the setting already exists
+ * and nobody uses it: `defer_loading` is config-file only, per tool, and a
+ * guild is not going to write eighty entries to describe "the ones I rarely
+ * need". An explicit `defer_loading` still wins in both directions — see
+ * `deferralOf` — so the count is a default, not a policy.
+ *
+ * Twenty-four is chosen so a guild with one ordinary server pays nothing at all
+ * for the machinery: below this, every tool is declared and no meta-tool is
+ * offered, and the feature is invisible.
+ */
+const DEFERRED_AFTER = 24;
+
+// The meta-tool the model calls to ask for a withheld schema. Not qualified by
+// a server name, because it belongs to the bot rather than to any server — and
+// a qualified name always contains a double underscore, so it cannot collide.
+const LOAD_TOOL_NAME = 'load_tools';
+
+// One catalogue line per deferred tool. Enough to tell `create_issue` from
+// `create_issue_comment`, and short enough that forty of them cost less than
+// two schemas would.
+const CATALOG_SUMMARY_CHARS = 90;
 
 // A tool result goes back to the model as a message, and a model with a 1k
 // max_tokens reply budget cannot use a 200KB directory listing anyway.
@@ -149,6 +182,75 @@ function qualifyName(serverName, toolName, used) {
         candidate = base.slice(0, MAX_NAME_LENGTH - suffix.length) + suffix;
     }
     return candidate;
+}
+
+/**
+ * Whether this tool's schema is withheld until the model asks (#795).
+ *
+ * The operator's answer first, in both directions: `defer_loading: false` keeps
+ * a tool declared however many others there are, which is how a guild says "the
+ * one I actually use", and `defer_loading: true` withholds one on a server with
+ * three tools. Only when nobody has said anything does the count decide — and
+ * the count is of tools *already declared*, so it fills the eager budget in
+ * configured server order rather than by whichever server answered first.
+ */
+function deferralOf(toolset, toolName, declaredSoFar) {
+    const explicit = isToolDeferred(toolset, toolName);
+    if (typeof explicit === 'boolean') return explicit;
+    return declaredSoFar >= DEFERRED_AFTER;
+}
+
+/** A tool's description reduced to one catalogue line. */
+function summarize(tool, serverName) {
+    const text = String(tool.description || `${tool.name} on ${serverName}`)
+        .replace(/\s+/g, ' ')
+        .trim();
+    return text.length > CATALOG_SUMMARY_CHARS
+        ? `${text.slice(0, CATALOG_SUMMARY_CHARS - 1).trimEnd()}…`
+        : text;
+}
+
+/**
+ * The definition for the meta-tool that loads the rest.
+ *
+ * The catalogue lives in the `names` parameter rather than in the tool's own
+ * description, for two reasons. Tool descriptions are truncated to 1024
+ * characters on the way out — forty catalogue lines do not fit — and an `enum`
+ * of the available names is both the most compact encoding of the list and the
+ * one thing that stops a model asking for a tool that does not exist.
+ *
+ * The alternative shape was a `list_tools` call that returns the catalogue.
+ * That is cheaper per message — nothing but the meta-tool travels — but it
+ * costs a whole extra round trip before the model can even choose, and a round
+ * trip re-sends the entire conversation. A catalogue line is about a tenth of a
+ * schema; the round trip is the whole context again. The line wins.
+ */
+function loadToolDefinition(deferred) {
+    const lines = deferred.map(entry => `- ${entry.name}: ${entry.summary}`).join('\n');
+    return {
+        name: LOAD_TOOL_NAME,
+        serverName: null,
+        toolName: LOAD_TOOL_NAME,
+        description:
+            'Load the full definitions of tools that are available but not yet loaded. '
+            + 'Call this with the names you need, then call those tools on your next turn — '
+            + 'they cannot be called in the same turn they are loaded in.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                names: {
+                    type: 'array',
+                    items: { type: 'string', enum: deferred.map(entry => entry.name) },
+                    description: `The tools to load. Available:\n${lines}`
+                }
+            },
+            required: ['names']
+        },
+        // It talks to nobody and does nothing but change what the next request
+        // declares, so there is no hint to carry and nothing to approve.
+        annotations: { readOnlyHint: true },
+        confirm: false
+    };
 }
 
 // Tools arrive with a JSON Schema, or with nothing when they take no arguments.
@@ -316,10 +418,21 @@ async function prepareMcpToolkit(guildServers = [], {
         }
     });
 
+    // `definitions` is what the provider declares to the model, and it is
+    // mutated in place when a deferred tool is loaded — which is why every
+    // provider has to rebuild its tool parameters *inside* the round loop
+    // rather than once before it. A tool loaded in round two is declared in
+    // round three; a provider that captured the list up front would never
+    // declare it at all, and the model would keep asking for a tool it can see
+    // in the catalogue and never call.
     const definitions = [];
+    const deferred = [];
     const index = new Map();
     const used = new Set();
     const reached = [];
+    let counted = 0;
+
+    used.add(LOAD_TOOL_NAME);
 
     // Assembled in the configured order rather than the order the servers
     // answered in, so a server that happens to be slow this minute cannot
@@ -330,10 +443,14 @@ async function prepareMcpToolkit(guildServers = [], {
 
         for (const tool of tools) {
             if (!isToolEnabled(server.toolset, tool.name)) continue;
-            if (definitions.length >= MAX_TOOLS) {
+            // Counted against the total the guild may offer, declared or not: a
+            // catalogue line is cheap but it is not free, and the model still
+            // has to read it.
+            if (counted >= MAX_TOOLS) {
                 console.warn(`[MCP] more than ${MAX_TOOLS} tools are enabled — the rest are not being offered to the model`);
                 break;
             }
+            counted += 1;
             const name = qualifyName(server.name, tool.name, used);
             const annotations = toolAnnotations(tool);
             const confirm = needsConfirmation(confirmMode, server.toolset, tool);
@@ -348,7 +465,7 @@ async function prepareMcpToolkit(guildServers = [], {
                 // is which half of a dual-format result the model is handed.
                 structured: Boolean(tool.outputSchema && typeof tool.outputSchema === 'object')
             });
-            definitions.push({
+            const definition = {
                 name,
                 serverName: server.name,
                 toolName: tool.name,
@@ -359,12 +476,87 @@ async function prepareMcpToolkit(guildServers = [], {
                 // the transport, which is where a person can be asked.
                 annotations,
                 confirm
-            });
+            };
+
+            if (deferralOf(server.toolset, tool.name, definitions.length)) {
+                deferred.push({ name, summary: summarize(tool, server.name), definition });
+            } else {
+                definitions.push(definition);
+            }
         }
-        if (definitions.length >= MAX_TOOLS) break;
+        if (counted >= MAX_TOOLS) break;
     }
 
-    if (!definitions.length) return null;
+    if (!definitions.length && !deferred.length) return null;
+
+    // A guild whose every tool is deferred — everything explicitly marked, or a
+    // `default_config.defer_loading` — would otherwise send the model a
+    // catalogue and nothing to call. The meta-tool is the one thing declared,
+    // which is exactly the intended shape, so nothing needs undoing here; but a
+    // *reachable* server offering only the meta-tool and no catalogue at all is
+    // not a toolkit, and that is the case ruled out above.
+    const byCatalogName = new Map(deferred.map(entry => [entry.name, entry]));
+    const loaded = new Set();
+
+    if (deferred.length) definitions.push(loadToolDefinition(deferred));
+
+    /**
+     * Declare the named tools from here on, and say what happened.
+     *
+     * Everything is answered in words rather than by throwing: a name the model
+     * invented, a name it already loaded, an empty list. The model gets one
+     * message it can act on, and the round is not lost to an exception over a
+     * typo.
+     */
+    function loadTools(rawNames) {
+        const names = (Array.isArray(rawNames) ? rawNames : [rawNames])
+            .filter(name => typeof name === 'string' && name.trim())
+            .map(name => name.trim());
+
+        if (!names.length) {
+            return 'No tool names were given. Call this again with the names of the tools you want, '
+                + `chosen from the list in the ${LOAD_TOOL_NAME} description.`;
+        }
+
+        const added = [];
+        const already = [];
+        const unknown = [];
+
+        for (const name of names) {
+            const entry = byCatalogName.get(name);
+            if (!entry) {
+                // Already-declared tools land here too, and the message says so
+                // rather than reporting them as nonexistent — a model that asks
+                // to load something it can already see needs to be told to just
+                // call it.
+                (index.has(name) ? already : unknown).push(name);
+                continue;
+            }
+            if (loaded.has(name)) {
+                already.push(name);
+                continue;
+            }
+            loaded.add(name);
+            definitions.push(entry.definition);
+            added.push(name);
+        }
+
+        const parts = [];
+        if (added.length) {
+            parts.push(
+                `Loaded: ${added.join(', ')}. These are available from your next turn onwards — `
+                + 'finish this turn, then call them.',
+            );
+        }
+        if (already.length) parts.push(`Already available, call directly: ${already.join(', ')}.`);
+        if (unknown.length) {
+            parts.push(
+                `No such tool: ${unknown.join(', ')}. `
+                + `The ones that can be loaded are listed in the ${LOAD_TOOL_NAME} description.`,
+            );
+        }
+        return parts.join(' ');
+    }
 
     /**
      * Put one call to a person and turn their answer into something the model
@@ -450,8 +642,24 @@ async function prepareMcpToolkit(guildServers = [], {
      * alternative is losing a reply that was otherwise fine.
      */
     async function call(name, args) {
+        // Handled before everything below it: the meta-tool talks to no server,
+        // so it has no round trip to time out, nobody to approve it and nothing
+        // to spend the user's tool allowance on. Charging a turn budget for
+        // "which tools exist" would make the saving cost the thing it saves.
+        if (name === LOAD_TOOL_NAME) {
+            emit({ id: ++callId, server: null, tool: LOAD_TOOL_NAME, name, type: 'load' });
+            return loadTools(args?.names);
+        }
+
         const target = index.get(name);
         if (!target) return `No tool named "${name}" is available.`;
+
+        // A deferred tool called before it was loaded. Running it anyway is
+        // worth more than a refusal: the model has named a real tool, and a
+        // wrong guess at the arguments comes back as the server's own error —
+        // which it can now fix, because the load below declares the schema from
+        // the next round on. Refusing would spend a whole round on bookkeeping.
+        if (byCatalogName.has(name) && !loaded.has(name)) loadTools([name]);
 
         // The same tool can be in flight twice in one round, so what the
         // listener matches a completion to is this id, not the tool's name.
@@ -539,7 +747,9 @@ async function prepareMcpToolkit(guildServers = [], {
         }
     }
 
-    return { definitions, servers: reached, call };
+    // `deferred` is reported so a transport can say "12 tools, 40 more on
+    // request" rather than counting the meta-tool as a tool.
+    return { definitions, servers: reached, deferred: deferred.map(entry => entry.name), call };
 }
 
 /**
@@ -616,6 +826,8 @@ module.exports = {
     MAX_PARALLEL_PER_SERVER,
     MAX_TOOL_ROUNDS,
     MAX_TOOLS,
+    DEFERRED_AFTER,
+    LOAD_TOOL_NAME,
     MAX_TOOL_RESULT_CHARS,
     MAX_TOOL_RESULT_CHARS_PER_TURN,
     TURN_BUDGET_MS,

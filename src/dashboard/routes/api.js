@@ -28,6 +28,7 @@ router.use(require('./api/summaryJobs'));
 router.use(require('./api/dailyDigest'));
 router.use(require('./api/ai'));
 router.use(require('./api/mcpServers'));
+router.use(require('./api/mcpOAuth'));
 router.use(require('./api/members'));
 router.use(require('./api/achievements'));
 router.use(require('./api/itemImages'));

@@ -33,9 +33,20 @@ const DEFAULT_USAGE_DAYS = 7;
 // hunt for an endpoint or work out what kind of credential it wants.
 //
 // These are a starting point, not a whitelist: every field is editable, and a
-// server that moves is fixed by typing the new address. Services that only
-// accept an OAuth authorization-code flow are deliberately absent, because the
-// dashboard has one credential field and it holds a token, not a login.
+// server that moves is fixed by typing the new address.
+//
+// `oauth: true` marks a service that takes no static token at all: it answers
+// the first request with a 401 naming its authorization server, and the admin
+// finishes the connection by clicking Connect and logging in (#796). Those
+// presets used to be absent entirely, because the dashboard had one credential
+// field and it held a token rather than a login.
+//
+// Atlassian is not among them, despite being one of the services that made the
+// case for the flow: the endpoint it publishes speaks the older HTTP+SSE
+// transport, which src/services/ai/mcp/client.js does not implement — it is a
+// Streamable HTTP client, and a bare POST to an SSE endpoint cannot complete
+// the handshake. A preset that cannot connect is worse than no preset; it wants
+// the transport, not another entry in this list.
 //
 // A preset with an empty `url` is a service with no single hosted endpoint to
 // point at — the server is one you run or one a hosting provider spins up per
@@ -121,6 +132,39 @@ const PRESETS = [
         suggestedBlockedTools: []
     },
     {
+        id: 'linear',
+        label: 'Linear',
+        name: 'linear',
+        url: 'https://mcp.linear.app/mcp',
+        requiresToken: false,
+        oauth: true,
+        hint: 'Issues, projects and cycles for the Linear workspace you log in to.',
+        tokenHint: 'No token: click Connect and authorize the bot in Linear. The login is per workspace, and whoever authorizes it is the account the bot acts as.',
+        suggestedBlockedTools: []
+    },
+    {
+        id: 'notion',
+        label: 'Notion',
+        name: 'notion',
+        url: 'https://mcp.notion.com/mcp',
+        requiresToken: false,
+        oauth: true,
+        hint: 'Pages and databases in the Notion workspace you log in to.',
+        tokenHint: 'No token: click Connect and authorize the bot in Notion. Notion asks which pages to share during the login, so grant it the smallest set that is useful.',
+        suggestedBlockedTools: []
+    },
+    {
+        id: 'sentry',
+        label: 'Sentry',
+        name: 'sentry',
+        url: 'https://mcp.sentry.dev/mcp',
+        requiresToken: false,
+        oauth: true,
+        hint: 'Issues, events and releases for the Sentry organisation you log in to.',
+        tokenHint: 'No token: click Connect and authorize the bot in Sentry.',
+        suggestedBlockedTools: []
+    },
+    {
         id: 'stripe',
         label: 'Stripe',
         name: 'stripe',
@@ -142,6 +186,23 @@ function publicServer(server) {
         url: server.url,
         enabled: server.enabled !== false,
         hasToken: Boolean(server.authorizationToken),
+        // The grant, described rather than disclosed (#796). Not one of the
+        // three secrets goes out — only that there is a login, whose it is, and
+        // when it was made, which is what an admin needs to decide whether to
+        // reconnect it.
+        oauth: server.oauth?.clientId
+            ? {
+                issuer: server.oauth.issuer,
+                scope: server.oauth.scope || null,
+                connectedBy: server.oauth.connectedBy || null,
+                connectedAt: server.oauth.connectedAt || null,
+                // A grant with no refresh token stops working when the access
+                // token expires and has to be reconnected by hand, which is
+                // worth saying before it happens rather than after.
+                renewable: Boolean(server.oauth.refreshToken),
+                expiresAt: server.oauth.expiresAt || null
+            }
+            : null,
         allowedTools: server.allowedTools || [],
         blockedTools: server.blockedTools || [],
         confirmTools: server.confirmTools || [],
@@ -311,8 +372,21 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
         // An explicit empty string clears it.
         const tokenProvided = typeof req.body?.authorizationToken === 'string';
         const token = tokenProvided ? (req.body.authorizationToken.trim() || null) : undefined;
+        let oauthCleared = null;
 
         if (existing) {
+            // An OAuth grant is bound to the resource it was issued for and to
+            // one way of authorizing (#796), so two edits invalidate it: moving
+            // the connection somewhere else, and giving it a static token
+            // instead. Both drop it rather than leaving a credential in place
+            // that names a server this connection no longer points at.
+            const movedUrl = existing.url !== validated.value.url;
+            const replacedCredential = token !== undefined && token !== null;
+            if (existing.oauth && (movedUrl || replacedCredential)) {
+                existing.oauth = null;
+                oauthCleared = movedUrl ? 'url changed' : 'a token was set';
+            }
+
             existing.url = validated.value.url;
             existing.enabled = validated.value.enabled;
             existing.allowedTools = validated.value.allowedTools;
@@ -335,7 +409,8 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             url: validated.value.url,
             enabled: validated.value.enabled,
             resources: validated.value.resources,
-            tokenChanged: token !== undefined
+            tokenChanged: token !== undefined,
+            oauthCleared
         });
 
         // The saved server, dialled now rather than on whoever sends the next
@@ -345,11 +420,28 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
         // not awaited: the panel is waiting on this response, and a server that
         // is slow or down changes nothing about whether the save worked.
         if (validated.value.enabled) {
-            prewarmMcpServers([{ ...validated.value, authorizationToken: token ?? existing?.authorizationToken ?? null }])
-                .catch(err => console.warn(`[MCP] prewarm after save failed: ${err.message}`));
+            // The grant travels with it, or the warm-up dials unauthenticated
+            // and fills a different pool entry than the one a chat request will
+            // use — the connection is keyed by its credential (#796), so an
+            // OAuth server warmed without one is a 401 nobody asked for and a
+            // cache that is still cold. `existing.oauth` is read after the
+            // clearing above, so a save that just signed the connection out
+            // correctly warms it without one.
+            prewarmMcpServers([{
+                ...validated.value,
+                authorizationToken: token ?? existing?.authorizationToken ?? null,
+                oauth: existing?.oauth ?? null,
+            }]).catch(err => console.warn(`[MCP] prewarm after save failed: ${err.message}`));
         }
 
-        res.json({ success: true, servers: (guildSettings.ai.mcpServers || []).map(publicServer) });
+        res.json({
+            success: true,
+            servers: (guildSettings.ai.mcpServers || []).map(publicServer),
+            // Said out loud rather than left to be noticed: an admin who
+            // renamed a URL and found the connection unauthenticated an hour
+            // later has no way to work out why.
+            ...(oauthCleared ? { notice: `The OAuth login for "${name}" was removed because ${oauthCleared}. Reconnect it.` } : {})
+        });
     } catch (error) {
         if (error?.name === 'ValidationError') {
             return res.status(400).json({ error: error.message });
@@ -426,6 +518,10 @@ router.post('/guild/:guildId/mcp-servers/:name/test', checkAuth, checkGuildAcces
             confirmMode: mode,
             // Named so an admin filling in the allow/block lists can copy them
             // instead of guessing at what the server calls things.
+            // A 401 asking for an OAuth login, rather than a bad token (#796).
+            // The panel offers Connect on this instead of leaving an admin to
+            // read the difference out of an error message.
+            needsOAuth: report.needsOAuth === true,
             tools: report.tools.map(tool => tool.name),
             // The same tools with what each one says about itself and what the
             // guild's policy makes of it. Alongside `tools` rather than

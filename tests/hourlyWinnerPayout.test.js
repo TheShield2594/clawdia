@@ -73,10 +73,18 @@ afterEach(() => errorLog.mockRestore());
 
 describe('announceHourlyWinners', () => {
     test('reads the hour that just closed, not the one still running', async () => {
-        await announceHourlyWinners(fakeClient());
+        // Frozen for the same reason as the credit below: the hour is read once
+        // by the job and once by the expectation.
+        jest.useFakeTimers().setSystemTime(new Date('2026-08-27T04:30:00Z'));
+        try {
+            const hour = getPreviousHourKey();
+            await announceHourlyWinners(fakeClient());
 
-        const [filter] = HourlyWinner.find.mock.calls[0];
-        expect(filter).toEqual({ hour: getPreviousHourKey(), rewarded: false });
+            const [filter] = HourlyWinner.find.mock.calls[0];
+            expect(filter).toEqual({ hour, rewarded: false });
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     test('claims each winner before crediting, so a second run pays nothing', async () => {
@@ -103,13 +111,28 @@ describe('announceHourlyWinners', () => {
         expect(sent).toEqual([]);
     });
 
+    // The credit is a guarded pipeline update rather than a bare `$inc` (#807):
+    // the payout key is in the filter, so a replay of a credit whose response was
+    // lost matches nothing and moves no coins.
     test('credits the flat reward to the winner in their own guild', async () => {
-        await announceHourlyWinners(fakeClient());
+        // The clock is frozen because the key is built from the hour twice —
+        // once inside the job, once in the expectation — and a run that crosses
+        // the top of the hour between them would fail on nothing but timing.
+        jest.useFakeTimers().setSystemTime(new Date('2026-08-27T04:30:00Z'));
+        try {
+            const hour = getPreviousHourKey();
+            await announceHourlyWinners(fakeClient());
 
-        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
-            { userId: 'u1', guildId: 'g1' },
-            { $inc: { balance: REWARD } },
-        );
+            const [filter, update] = User.findOneAndUpdate.mock.calls[0];
+            expect(filter).toEqual({
+                userId: 'u1', guildId: 'g1',
+                'paidPayouts.key': { $ne: `hourly:${hour}:fish` },
+            });
+            expect(update[0].$set.balance).toEqual({ $add: [{ $ifNull: ['$balance', 0] }, REWARD] });
+            expect(JSON.stringify(update[0].$set.paidPayouts)).toContain(`hourly:${hour}:fish`);
+        } finally {
+            jest.useRealTimers();
+        }
     });
 
     test('an hour with no candidates does nothing at all', async () => {
@@ -246,7 +269,10 @@ describe('announceHourlyWinners', () => {
 
         await announceHourlyWinners(fakeClient());
 
-        expect(User.findOneAndUpdate).toHaveBeenCalledWith({ userId: 'u1', guildId: 'g1' }, { $inc: { balance: REWARD } });
+        const [filter, update] = User.findOneAndUpdate.mock.calls[0];
+        expect(filter.userId).toBe('u1');
+        expect(filter.guildId).toBe('g1');
+        expect(update[0].$set.balance).toEqual({ $add: [{ $ifNull: ['$balance', 0] }, REWARD] });
         expect(sent).toEqual([]);
     });
 

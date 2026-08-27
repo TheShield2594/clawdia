@@ -58,6 +58,10 @@ const DEFAULT_CONFIRM_MODE = 'off';
  *
  * `auto` is the default because the alternative is a guild turning on approvals
  * and losing them by changing a dropdown on a different tab.
+ *
+ * One case overrides even `connector`: a connection authorized with OAuth
+ * (#796) always takes the client route, because an access token expires within
+ * the hour and only the bot can refresh it. See `usesOAuth` below.
  */
 const MCP_ROUTES = ['auto', 'connector', 'client'];
 const DEFAULT_MCP_ROUTE = 'auto';
@@ -236,6 +240,26 @@ function isToolEnabled(toolset, toolName) {
     return typeof fallback === 'boolean' ? fallback : true;
 }
 
+/**
+ * Whether one tool's schema should be withheld until the model asks for it.
+ *
+ * Tri-state on purpose. `true`/`false` are the operator having said so in the
+ * config file, and both are honoured as written; `undefined` is "nobody said",
+ * which is the common case and which the toolkit answers with its own rule —
+ * see DEFERRED_AFTER in src/services/ai/mcp/toolkit.js. Collapsing the third
+ * state into `false` here would make a per-tool default the operator never
+ * chose override a policy they cannot express any other way.
+ *
+ * Anthropic's connector reads `defer_loading` off the toolset directly, so this
+ * is the same field, read the same way, for every other provider.
+ */
+function isToolDeferred(toolset, toolName) {
+    const specific = toolset?.configs?.[toolName];
+    if (specific && typeof specific.defer_loading === 'boolean') return specific.defer_loading;
+    const fallback = toolset?.default_config?.defer_loading;
+    return typeof fallback === 'boolean' ? fallback : undefined;
+}
+
 // One entry becomes three pieces: an mcp_servers connection definition for
 // Anthropic's server-side connector, the mcp_toolset that references it by name
 // (the API rejects either half on its own, so they are always built together),
@@ -285,6 +309,20 @@ function normalizeServer(raw, { label, source, expandEnv, warnings }) {
         return null;
     }
 
+    // A dashboard connection that has been through the OAuth flow (#796). The
+    // grant lives on the stored subdocument and is never read here — only its
+    // identity is, so the MCP client can ask the token store for a live access
+    // token at the moment it makes a request rather than being handed one that
+    // may have expired since discovery.
+    //
+    // Guild connections only. The operator config file holds its secrets as
+    // `${ENV_VAR}` references, which are read-only: a refresh token rotates,
+    // and a process cannot write a new one back into its own environment. A
+    // config-file server keeps the static token it always had.
+    const grant = source === 'guild' && raw.oauth?.guildId && (raw.oauth.accessToken || raw.oauth.refreshToken)
+        ? { guildId: raw.oauth.guildId, server: name }
+        : null;
+
     const server = { type: 'url', url, name };
     if (token) server.authorization_token = token;
 
@@ -304,7 +342,7 @@ function normalizeServer(raw, { label, source, expandEnv, warnings }) {
         // What src/services/ai/mcp/ connects to when the guild is not on
         // Anthropic. Same url and same token — only the side that opens the
         // socket differs.
-        connection: { url, authorizationToken: token || null },
+        connection: { url, authorizationToken: token || null, oauth: grant },
         toolset: buildToolset(name, raw, `${label} ("${name}")`, warnings)
     };
 }
@@ -416,6 +454,21 @@ function resolveMcpServers(guildServers = []) {
 }
 
 /**
+ * Whether any of these connections authorizes with OAuth.
+ *
+ * Anthropic's connector opens the connection on their side, which means it
+ * holds whatever static token it was given and cannot refresh anything. An
+ * OAuth access token lives for an hour; handing one to the connector would work
+ * until it did not, and then keep not working with no way for anyone to notice.
+ * So an OAuth connection takes the client route, where the bot makes the
+ * request and can refresh — the same reasoning as `requiresApproval`, which
+ * forces the client route for a guild that wants to be asked.
+ */
+function usesOAuth(guildServers = []) {
+    return resolveMcpServers(guildServers).some(server => Boolean(server.connection?.oauth));
+}
+
+/**
  * Whether this guild's policy would stop any tool call to ask a person.
  *
  * What `auto` turns on the client path for. A mode of anything but off could
@@ -437,7 +490,15 @@ function requiresApproval(mode, guildServers = []) {
  * toolset or the API rejects the request.
  */
 function buildAnthropicMcpParams(guildServers = []) {
-    const servers = resolveMcpServers(guildServers);
+    // An OAuth connection is filtered out rather than passed along (#796). The
+    // connector opens the socket on Anthropic's side and holds whatever static
+    // token it was handed — and `saveGrant` clears that token, so what would
+    // travel here is a server with no credential at all. `clientToolkit` routes
+    // these to the bot's own client, but it answers null when the toolkit could
+    // not be built (the server is down, the grant was revoked) and the caller
+    // then falls through to this. Dropping them here is what makes that
+    // fall-through safe wherever it happens.
+    const servers = resolveMcpServers(guildServers).filter(server => !server.connection?.oauth);
     if (!servers.length) return null;
     return {
         mcp_servers: servers.map(s => s.server),
@@ -459,10 +520,12 @@ module.exports = {
     guildServersAllowed,
     requiresApproval,
     isToolEnabled,
+    isToolDeferred,
     toolAnnotations,
     needsConfirmation,
     loadMcpServers,
     getMcpServers,
     resolveMcpServers,
+    usesOAuth,
     buildAnthropicMcpParams
 };

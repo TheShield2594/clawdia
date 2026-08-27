@@ -91,17 +91,24 @@ function inventoryAddExpr(itemId, quantity) {
  *                aggregation expressions, not update operators: use
  *                `{ $setUnion: [{ $ifNull: ['$path', []] }, [value]] }` where you
  *                would otherwise reach for `$addToSet`.
+ *   `guard`    — further *filter* clauses ANDed onto `{ userId, guildId }`, so a
+ *                condition and the credit it gates are evaluated in the same
+ *                write. The exactly-once payout key in src/utils/payoutKey.js is
+ *                the reason this exists: a guard checked by a separate read is
+ *                not a guard at all.
  *   `upsert`   — create the user document when it does not exist yet.
  *   `new`      — return the document after the update (default true).
  *   `Model`    — override the User model (tests).
  *
- * Returns the user document, or null when no document matched and `upsert` is off.
+ * Returns the user document, or null when no document matched and `upsert` is
+ * off — which, with a `guard`, means either "no such user" or "the guard
+ * rejected it", and the caller has to tell those apart.
  */
 async function grantInventoryItem(userId, guildId, itemId, quantity = 1, options = {}) {
-    const { extraSet = {}, upsert = false, new: returnNew = true, Model = DEFAULT_USER } = options;
+    const { extraSet = {}, guard = {}, upsert = false, new: returnNew = true, Model = DEFAULT_USER } = options;
 
     return Model.findOneAndUpdate(
-        { userId, guildId },
+        { userId, guildId, ...guard },
         [{ $set: { inventory: inventoryAddExpr(itemId, quantity), ...extraSet } }],
         { new: returnNew, upsert },
     );

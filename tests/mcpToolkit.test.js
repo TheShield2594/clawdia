@@ -85,7 +85,9 @@ describe('discovery', () => {
         expect(mockConstructed).toEqual([{
             url: 'https://api.githubcopilot.com/mcp/',
             authorizationToken: 'ghp_x',
-            label: 'github'
+            label: 'github',
+            // A static-token connection has no OAuth grant to fetch (#796).
+            getAccessToken: null
         }]);
     });
 

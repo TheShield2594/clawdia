@@ -237,6 +237,100 @@ describe('commitBalanceDelta', () => {
         await expect(commitBalanceDelta(failing(), {}, makeDoc(1_000), 250)).resolves.toMatchObject({ credited: false });
         create.mockRestore();
     });
+
+    /**
+     * #807. With a caller-supplied key the credit is guarded, which makes it
+     * exactly-once — and gives `findOneAndUpdate` returning null a second
+     * meaning the unkeyed path never had to tell apart.
+     */
+    describe('with a payout key', () => {
+        const FILTER = { userId: 'u1', guildId: 'g1' };
+        const KEY = { payoutKey: 'quest:42', service: 'quests', guildId: 'g1' };
+
+        /** A Model answering a guarded pipeline credit, then the settling read. */
+        function guarded({ matched, settledBalance, keyPresent = false }) {
+            return {
+                findOneAndUpdate: async () => (matched ? { balance: settledBalance } : null),
+                findOne: (_filter, projection) => ({
+                    lean: async () => (projection?.paidPayouts
+                        ? { paidPayouts: keyPresent ? [{ key: 'quest:42' }] : [] }
+                        : { balance: settledBalance }),
+                }),
+            };
+        }
+
+        test('puts the key in the credit\'s own filter', async () => {
+            const seen = [];
+            const Model = {
+                findOneAndUpdate: async filter => { seen.push(filter); return { balance: 1_250 }; },
+            };
+
+            await commitBalanceDelta(Model, FILTER, makeDoc(1_000), 250, KEY);
+
+            expect(seen[0]).toMatchObject({ ...FILTER, 'paidPayouts.key': { $ne: 'quest:42' } });
+        });
+
+        test('reports the settled balance when the credit lands', async () => {
+            await expect(
+                commitBalanceDelta(guarded({ matched: true, settledBalance: 1_250 }), FILTER, makeDoc(1_000), 250, KEY),
+            ).resolves.toEqual({ credited: true, balance: 1_250 });
+        });
+
+        // The guarded update matches nothing, so there is no document to read
+        // the balance off — and the one the flow is holding predates the credit
+        // that already landed. Reporting it would show the player a total short
+        // by exactly the amount they were just paid.
+        test('reports the settled balance for a payout that already landed', async () => {
+            const doc = makeDoc(1_000);
+
+            await expect(
+                commitBalanceDelta(
+                    guarded({ matched: false, settledBalance: 1_250, keyPresent: true }),
+                    FILTER, doc, 250, KEY,
+                ),
+            ).resolves.toEqual({ credited: true, balance: 1_250 });
+            expect(doc.modified.has('balance')).toBe(false);
+        });
+
+        // Unlike the unkeyed path, which cannot tell a missing document from a
+        // successful credit, this one knows — so it records the payout rather
+        // than reporting one that never happened.
+        test('records a credit with no document to land on', async () => {
+            const record = jest.spyOn(require('../src/utils/owedPayout'), 'recordOwedPayout')
+                .mockResolvedValue(true);
+
+            const Model = {
+                findOneAndUpdate: async () => null,
+                findOne: () => ({ lean: async () => null }),
+            };
+            const result = await commitBalanceDelta(Model, FILTER, makeDoc(1_000), 250, KEY);
+
+            expect(result.credited).toBe(false);
+            expect(record).toHaveBeenCalledWith(expect.objectContaining({
+                payload: { kind: 'coins', userId: 'u1', guildId: 'g1', amount: 250, payoutKey: 'quest:42' },
+            }));
+            record.mockRestore();
+        });
+
+        // A charge is not replayable, so a key on one would guard nothing —
+        // and the clamped debit it goes through has no key in it.
+        test('is ignored for a debit', async () => {
+            const seen = [];
+            // `debitUpTo`'s shape: a pipeline update returning the pre-image.
+            const Model = {
+                findOneAndUpdate: async (filter, update) => {
+                    seen.push({ filter, update });
+                    return { balance: 1_000 };
+                },
+            };
+
+            await commitBalanceDelta(Model, FILTER, makeDoc(1_000), -250, KEY);
+
+            expect(seen).toHaveLength(1);
+            expect(seen[0].filter).toEqual(FILTER);
+            expect(JSON.stringify(seen[0])).not.toContain('quest:42');
+        });
+    });
 });
 
 describe('saveWithBalanceDelta', () => {
