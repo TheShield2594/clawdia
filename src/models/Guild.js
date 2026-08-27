@@ -351,6 +351,13 @@ const guildSchema = new Schema({
                 // nobody may call; this is for the ones that are fine with a
                 // moderator watching and not otherwise.
                 confirmTools:       [{ type: String }],
+                // Whether this server's resources (resources/list, then
+                // resources/read) are searched for context when somebody talks
+                // to the AI, the way the knowledge base is. Off by default and
+                // per connection: a tool runs when the model asks for it, but a
+                // resource is read before the model has said anything and lands
+                // in the system prompt of every message.
+                resources:          { type: Boolean, default: false },
                 addedBy:            { type: String, default: null },
                 createdAt:          { type: Date, default: Date.now }
             }],

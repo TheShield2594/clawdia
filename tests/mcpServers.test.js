@@ -346,6 +346,35 @@ describe('resolveMcpServers', () => {
     });
 });
 
+// Reading a server's documents into the system prompt is a separate decision
+// from calling its tools, so it is a separate switch — and one that is off
+// until somebody turns it on, from either source.
+describe('the resources opt-in', () => {
+    beforeEach(() => {
+        writeConfig({ servers: [{ name: 'docs', url: 'https://docs.example.com/sse', resources: true }] });
+        load();
+    });
+
+    test('is off for a server that does not ask for it', () => {
+        const resolved = resolveMcpServers([{ name: 'github', url: 'https://api.githubcopilot.com/mcp/' }]);
+        expect(resolved.find(s => s.name === 'github').resources).toBe(false);
+    });
+
+    test('is on for a config-file server that does', () => {
+        expect(resolveMcpServers([]).find(s => s.name === 'docs').resources).toBe(true);
+    });
+
+    test('is on for a guild server that does', () => {
+        const resolved = resolveMcpServers([{ name: 'wiki', url: 'https://wiki.example.com/mcp', resources: true }]);
+        expect(resolved.find(s => s.name === 'wiki').resources).toBe(true);
+    });
+
+    test('takes nothing but true for an answer', () => {
+        const resolved = resolveMcpServers([{ name: 'wiki', url: 'https://wiki.example.com/mcp', resources: 'yes' }]);
+        expect(resolved.find(s => s.name === 'wiki').resources).toBe(false);
+    });
+});
+
 describe('beta flag', () => {
     test('is the current MCP connector version', () => {
         expect(MCP_BETA).toBe('mcp-client-2025-11-20');

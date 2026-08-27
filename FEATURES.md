@@ -53,6 +53,17 @@ Dashboard:
 - **Test** button — connects to the server and lists the tools it offers, with
   no AI provider key and no tokens spent
 - Tokens are write-only: stored on the bot, never returned to the browser
+- **Use its documents as knowledge** — off by default, per connection. Switched
+  on, the server's resources become a live knowledge base: the ones that match a
+  question are read as it is asked and put in the prompt beside the curated
+  entries
+
+Prompts:
+- A server's prompt templates are runnable from Discord — `/ai mcp prompts`
+  lists them with the arguments each takes, `/ai mcp prompt` fills one in and
+  answers with it
+- Open to any member, under the same per-user and per-channel AI limits a chat
+  message has; the template is treated as data, with mentions disarmed
 
 Config file:
 

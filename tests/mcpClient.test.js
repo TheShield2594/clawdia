@@ -211,6 +211,88 @@ describe('tools/list', () => {
     });
 });
 
+// The two families a tool loop does not need, and the reason the client asks
+// about them at all: a server's resources are a knowledge base kept by whoever
+// owns the documents, and its prompts are templates `/ai mcp prompt` can run.
+describe('resources and prompts', () => {
+    const WITH_ALL = {
+        ...INIT_RESULT,
+        capabilities: { tools: {}, resources: {}, prompts: {} }
+    };
+    const handshakeWith = capabilities => ({
+        initialize: { result: { ...INIT_RESULT, capabilities } },
+        'notifications/initialized': null
+    });
+
+    test('lists resources, following the cursor', async () => {
+        respondBy({
+            ...handshakeWith(WITH_ALL.capabilities),
+            'resources/list': payload => (payload.params.cursor
+                ? { result: { resources: [{ uri: 'wiki://b' }] } }
+                : { result: { resources: [{ uri: 'wiki://a' }], nextCursor: 'page-2' } })
+        });
+
+        const resources = await new McpHttpClient({ url: URL }).listResources();
+        expect(resources.map(r => r.uri)).toEqual(['wiki://a', 'wiki://b']);
+    });
+
+    test('drops a resource with no URI, which is nothing that can be read', async () => {
+        respondBy({
+            ...handshakeWith({ resources: {} }),
+            'resources/list': { result: { resources: [{ uri: 'wiki://a' }, { name: 'nameless' }] } }
+        });
+
+        expect(await new McpHttpClient({ url: URL }).listResources()).toEqual([{ uri: 'wiki://a' }]);
+    });
+
+    test('never asks a server for something its handshake did not claim', async () => {
+        respondBy(handshakeWith({ tools: {} }));
+
+        const client = new McpHttpClient({ url: URL });
+        expect(await client.listResources()).toEqual([]);
+        expect(await client.listPrompts()).toEqual([]);
+        expect(postsTo('resources/list')).toHaveLength(0);
+        expect(postsTo('prompts/list')).toHaveLength(0);
+    });
+
+    test('a server that claims a capability and then refuses it has answered "none"', async () => {
+        respondBy({
+            ...handshakeWith({ prompts: {} }),
+            'prompts/list': { error: { code: -32601, message: 'Method not found' } }
+        });
+
+        expect(await new McpHttpClient({ url: URL }).listPrompts()).toEqual([]);
+    });
+
+    test('reads one resource and hands back its contents', async () => {
+        respondBy({
+            ...handshakeWith({ resources: {} }),
+            'resources/read': { result: { contents: [{ uri: 'wiki://a', text: 'body' }] } }
+        });
+
+        const contents = await new McpHttpClient({ url: URL }).readResource('wiki://a');
+        expect(contents).toEqual([{ uri: 'wiki://a', text: 'body' }]);
+        expect(postsTo('resources/read')[0][1].params).toEqual({ uri: 'wiki://a' });
+    });
+
+    test('fills in a prompt, sending every argument as a string', async () => {
+        respondBy({
+            ...handshakeWith({ prompts: {} }),
+            'prompts/get': { result: { description: 'Review', messages: [{ role: 'user', content: { type: 'text', text: 'go' } }] } }
+        });
+
+        const prompt = await new McpHttpClient({ url: URL }).getPrompt('review', { pr: 42, skip: null });
+        expect(postsTo('prompts/get')[0][1].params).toEqual({ name: 'review', arguments: { pr: '42' } });
+        expect(prompt.messages).toHaveLength(1);
+    });
+
+    test('a prompt that comes back shapeless is empty rather than undefined', async () => {
+        respondBy({ ...handshakeWith({ prompts: {} }), 'prompts/get': { result: {} } });
+        expect(await new McpHttpClient({ url: URL }).getPrompt('review', {}))
+            .toEqual({ description: '', messages: [] });
+    });
+});
+
 describe('tools/call', () => {
     test('sends the name and arguments and returns the content', async () => {
         respondBy({

@@ -126,6 +126,51 @@ function toolsEmbed(serverName, report) {
     return embed;
 }
 
+/**
+ * Every prompt the guild's servers publish, and what each one wants.
+ *
+ * Names, titles, descriptions and argument names are all the far side's, so
+ * they go through toolLabel like everything else here — a prompt called
+ * `@everyone (urgent)` is a prompt called everyone urgent.
+ */
+function promptsEmbed(listings) {
+    const embed = new EmbedBuilder()
+        .setTitle('💬 MCP prompts')
+        .setColor(COLORS.INFO)
+        .setFooter({ text: 'Run one with /ai mcp prompt name:<prompt> arguments:name=value' });
+
+    const reachable = listings.filter(listing => !listing.error);
+    if (!reachable.some(listing => listing.prompts.length)) {
+        embed.setDescription(listings.length
+            ? 'None of this server\'s MCP connections publish prompts.'
+            : 'No MCP connections are configured. Add one in the dashboard, under AI → Connections.');
+    }
+
+    for (const listing of listings.slice(0, 5)) {
+        if (listing.error) {
+            embed.addFields({
+                name: toolLabel(listing.server),
+                value: `⚠️ unreachable: ${toolLabel(listing.error, 120)}`
+            });
+            continue;
+        }
+        if (!listing.prompts.length) continue;
+
+        const rows = listing.prompts.map(prompt => {
+            const args = prompt.arguments
+                .map(arg => `${toolLabel(arg.name)}${arg.required ? '' : '?'}`)
+                .join(', ');
+            const summary = prompt.description || prompt.title;
+            return `\`${toolLabel(prompt.name)}\`${args ? ` (${args})` : ''}`
+                + `${summary ? ` — ${toolLabel(summary, 80)}` : ''}`;
+        });
+
+        embed.addFields({ name: toolLabel(listing.server), value: lines(rows, 'None') });
+    }
+
+    return embed;
+}
+
 /** The rollup, the same numbers the dashboard's Activity list shows. */
 function activityEmbed(servers, days) {
     const embed = new EmbedBuilder()
@@ -163,4 +208,4 @@ function activityEmbed(servers, days) {
     return embed;
 }
 
-module.exports = { serversEmbed, toolsEmbed, activityEmbed, describeConfirm, describeRoute };
+module.exports = { serversEmbed, toolsEmbed, promptsEmbed, activityEmbed, describeConfirm, describeRoute };

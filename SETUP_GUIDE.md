@@ -160,6 +160,43 @@ never appears in the rendered page — the panel shows only that one exists. Edi
 a connection without retyping the token to keep it, or save an empty token field
 to clear it.
 
+#### Documents and prompts
+
+Tools are one third of what an MCP server can offer. The other two have homes
+here as well.
+
+**Resources** are the documents a server publishes — a wiki, a runbook, a
+project's own notes. Switch **Use its documents as knowledge** on for a
+connection and they become a second knowledge base: when somebody asks the AI
+something, the bot scores the server's resource list against the question, reads
+the closest few and puts them in the prompt alongside the entries an admin typed
+into AI → Knowledge Base. The difference is who keeps them up to date — these
+are read at the moment the question is asked, from wherever they actually live.
+
+It is off by default and set per connection, because a tool runs when the model
+asks for it while a resource is read before the model has said anything. The
+**Test** button says how many resources a connection publishes, which is what
+makes the switch worth flipping or not. Up to three documents are read per
+message, trimmed to 2,000 characters each and 6,000 in total, with the whole
+retrieval abandoned after eight seconds — a documentation server having a slow
+morning costs the answer nothing.
+
+**Prompts** are named templates the server owner wrote, each taking arguments:
+"review this pull request", "summarise this incident". `/ai mcp prompts` lists
+what the connections publish and what each one wants; `/ai mcp prompt` fills one
+in and answers with it. Both are open to any member — running a prompt is
+talking to the AI with somebody else's wording, and it spends the same per-user
+and per-channel limits a chat message does.
+
+```text
+/ai mcp prompt name:docs/review arguments:pr=412 focus="the migration"
+```
+
+The prompt name autocompletes as `server/prompt`, and a prompt that takes a
+single argument takes the whole `arguments` string as it, so
+`arguments:what broke last night` works without naming anything. Required
+arguments that are missing are named back rather than sent half-filled.
+
 #### The config file
 
 For servers that should apply to every Discord server the bot is in:
@@ -197,6 +234,7 @@ file lives outside the repo checkout.
 | `authorization_token` | No | OAuth bearer token, if the server needs one. |
 | `allowed_tools` | No | Allowlist of tool names. Empty means every tool. |
 | `blocked_tools` | No | Denylist of tool names. Wins over `allowed_tools`. |
+| `resources` | No | Set `true` to search this server's resources when somebody asks the AI something and put the relevant ones in the prompt. Off by default. |
 | `default_config` / `configs` | No | The API's raw toolset shape, if you need `defer_loading` or another setting the two lists above don't cover. |
 
 **Keeping tokens out of the file.** Any `url` or `authorization_token` written
@@ -274,7 +312,13 @@ malformed config disables the connector, it never stops the bot from starting.
 - `/ai mcp` gives the same answers in Discord, for admins with Manage Server:
   `servers`, `tools <server>`, `test <server>` and `activity`. All of them
   answer privately, and `test` runs the same handshake the dashboard's button
-  does — no provider key, no tokens spent.
+  does — no provider key, no tokens spent. `prompts` and `prompt` are the two
+  subcommands anybody may run: they use a connection rather than reading how it
+  is configured, which is what the AI does on every message anyway.
+- A prompt template is written on somebody else's server, so it is run as data:
+  the reply goes out with mentions disarmed and the system prompt says where the
+  wording came from. The model's answer is posted in the channel; everything
+  else under `/ai mcp` stays private.
 - A tool result carrying a PNG, JPEG, GIF, WebP, MP3, WAV, OGG or PDF is posted
   to the channel as a file, up to four per reply. Anything else non-text is
   reported to the model as omitted, the way it always was.

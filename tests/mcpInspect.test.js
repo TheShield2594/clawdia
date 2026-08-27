@@ -9,6 +9,8 @@
 // exception either caller would have to remember to catch.
 
 const mockListTools = jest.fn();
+const mockListResources = jest.fn(async () => []);
+const mockListPrompts = jest.fn(async () => []);
 const mockClose = jest.fn(async () => {});
 const mockConstructed = [];
 
@@ -18,6 +20,8 @@ jest.mock('../src/services/ai/mcp/client', () => ({
             mockConstructed.push(options);
             this.serverInfo = { name: 'GitHub MCP Server' };
             this.listTools = mockListTools;
+            this.listResources = mockListResources;
+            this.listPrompts = mockListPrompts;
             this.close = mockClose;
         }
     }
@@ -37,6 +41,8 @@ const resolve = over => resolveMcpServers([{
 beforeEach(() => {
     jest.clearAllMocks();
     mockConstructed.length = 0;
+    mockListResources.mockResolvedValue([]);
+    mockListPrompts.mockResolvedValue([]);
     mockListTools.mockResolvedValue([
         { name: 'search', annotations: { readOnlyHint: true } },
         { name: 'create_issue', annotations: { readOnlyHint: false } },

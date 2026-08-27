@@ -367,6 +367,17 @@ what tools they offer, whether one still works, and what they have been doing.
 It needs Manage Server and replies privately. A tool that answers with an image
 or a PDF has it posted to the channel rather than dropped.
 
+Tools are one third of MCP, and the other two thirds have homes here too. A
+connection can have **Use its documents as knowledge** switched on, which turns
+its resources into a second knowledge base: the bot scores them against whatever
+somebody just asked, reads the closest few and puts them in the prompt beside the
+entries an admin typed in — kept current by whoever owns the documents rather
+than by whoever remembered to paste them. And a server's **prompts** — named
+templates taking arguments, written by the people who run it — are runnable from
+Discord: `/ai mcp prompts` lists them, `/ai mcp prompt name:docs/review
+arguments:pr=412` fills one in and answers with it. Both of those are open to
+any member, under the same per-user limits a chat message has.
+
 **From the dashboard** (AI → 🔌 Connections): pick a service or paste any https
 MCP endpoint, add a token, and optionally list the tools the model may or may
 not call. GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe come as

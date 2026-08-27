@@ -7,6 +7,7 @@ const { loadHistory, appendHistory, clearHistory } = require('./history');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
 const { buildActionsAddendum, extractAction, executeAction } = require('./actions');
 const { buildMcpAddendum } = require('./mcp/prompt');
+const { retrieveMcpKnowledge } = require('./mcp/resources');
 const { createToolActivity, STATUS_RESERVE } = require('./mcp/activity');
 const { createToolConfirmer } = require('./mcp/approval');
 const { recordToolCalls } = require('./mcp/usage');
@@ -163,6 +164,20 @@ async function handleAIChat(message, aiSettings) {
 
     try {
         await message.channel.sendTyping();
+
+        // The other knowledge base: documents published by an MCP server the
+        // guild switched resources on for, fetched now rather than pasted into
+        // the dashboard a month ago. Behind sendTyping because it is a network
+        // round trip on the way to an answer somebody is waiting for, and
+        // best-effort because a docs server being down is a reason to answer
+        // without it rather than not to answer.
+        const mcpKnowledge = await retrieveMcpKnowledge(mcpServers, content)
+            .catch(err => {
+                console.warn(`[MCP] resource retrieval failed: ${err.message}`);
+                return null;
+            });
+        if (mcpKnowledge) systemPrompt += mcpKnowledge.text;
+
         const { messages: rawHistory } = await loadHistory(
             message.guild.id, message.channel.id, message.author.id, maxHistory
         );

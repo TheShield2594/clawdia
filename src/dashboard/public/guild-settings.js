@@ -2982,6 +2982,7 @@ function renderMcpServers(provider) {
             if (srv.allowedTools.length) bits.push('only ' + srv.allowedTools.length + ' tool(s)');
             if (srv.blockedTools.length) bits.push(srv.blockedTools.length + ' blocked');
             if ((srv.confirmTools || []).length) bits.push(srv.confirmTools.length + ' need approval');
+            if (srv.resources) bits.push('📚 documents in context');
             const div = document.createElement('div');
             div.className = 'list-item';
             div.innerHTML =
@@ -3046,6 +3047,7 @@ function resetMcpForm() {
     });
     mcpEl('mcp-preset').value = '';
     mcpEl('mcp-enabled').checked = true;
+    if (mcpEl('mcp-resources')) mcpEl('mcp-resources').checked = false;
     mcpEl('mcp-form-title').textContent = 'Add a connection';
     mcpEl('mcp-save-btn').textContent = 'Add connection';
     mcpEl('mcp-cancel-btn').style.display = 'none';
@@ -3068,6 +3070,7 @@ function editMcpServer(name) {
     mcpEl('mcp-blocked').value = srv.blockedTools.join(', ');
     mcpEl('mcp-confirm-tools').value = (srv.confirmTools || []).join(', ');
     mcpEl('mcp-enabled').checked = srv.enabled;
+    if (mcpEl('mcp-resources')) mcpEl('mcp-resources').checked = Boolean(srv.resources);
     mcpEl('mcp-form-title').textContent = 'Edit ' + srv.name;
     mcpEl('mcp-save-btn').textContent = 'Save changes';
     mcpEl('mcp-cancel-btn').style.display = '';
@@ -3086,7 +3089,8 @@ async function saveMcpServer() {
         enabled: mcpEl('mcp-enabled').checked,
         allowedTools: splitToolNames(mcpEl('mcp-allowed').value),
         blockedTools: splitToolNames(mcpEl('mcp-blocked').value),
-        confirmTools: splitToolNames(mcpEl('mcp-confirm-tools').value)
+        confirmTools: splitToolNames(mcpEl('mcp-confirm-tools').value),
+        resources: Boolean(mcpEl('mcp-resources') && mcpEl('mcp-resources').checked)
     };
     // Only send the token when one was typed — an absent field means
     // "keep whatever is stored", which is how editing without
@@ -3149,6 +3153,19 @@ async function testMcpServer(name, out) {
         out.textContent = (okay ? '✓ ' : '✗ ') + (data.message || data.error || (okay ? 'Connected' : 'Failed'));
         // Tool names come from the server, so they are set as text on their own
         // element rather than concatenated into any markup.
+        // Resources and prompts are the two halves of the protocol that are not
+        // tools: documents this connection can answer questions from, and
+        // templates `/ai mcp prompt` can run. Worth saying, because the
+        // documents switch below means nothing on a server that publishes none.
+        if (okay && (data.resourceCount || data.promptCount)) {
+            const extra = document.createElement('small');
+            extra.className = 'mcp-test-tools';
+            const parts = [];
+            if (data.resourceCount) parts.push(data.resourceCount + ' resource(s)');
+            if (data.promptCount) parts.push(data.promptCount + ' prompt(s)');
+            extra.textContent = 'Also publishes: ' + parts.join(' and ');
+            out.appendChild(extra);
+        }
         if (okay && Array.isArray(data.tools) && data.tools.length) {
             const names = document.createElement('small');
             names.className = 'mcp-test-tools';
