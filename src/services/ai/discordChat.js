@@ -33,6 +33,40 @@ const PAINT_LOCK_TICK_MS = 25;
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 /**
+ * Nothing this transport sends is allowed to ping anybody.
+ *
+ * Every message it posts is assembled from text the bot did not write: the
+ * model's own output, an MCP server's progress note, a tool result, the title
+ * of a knowledge entry. A model can be talked into typing `@everyone`, and a
+ * server can call a tool it — and either one arriving in Discord as a live
+ * mention is this bot pinging a server on a stranger's say-so.
+ *
+ * `utils/toolLabel.js` strips what it can from the names it handles, and says
+ * in as many words that it is belt rather than braces. This is the braces, and
+ * it belongs on the send: it is the one place that covers the model's text as
+ * well, which is the larger surface and was never covered at all.
+ *
+ * `repliedUser` keeps the single mention this transport actually means — a
+ * reply notifies the person who asked, the way it always has. Specifying
+ * `allowedMentions` at all turns that default off, so it is asked for back.
+ */
+const NO_MENTIONS = { parse: [] };
+const REPLY_MENTIONS = { parse: [], repliedUser: true };
+
+// Discord takes a bare string or a payload object. These take either and always
+// hand back a payload carrying the policy, so a call site cannot post without
+// one by writing the shorter form.
+function withMentionPolicy(content, allowedMentions) {
+    return typeof content === 'string'
+        ? { content, allowedMentions }
+        : { allowedMentions, ...content };
+}
+
+const reply = (message, content) => message.reply(withMentionPolicy(content, REPLY_MENTIONS));
+const send = (channel, content) => channel.send(withMentionPolicy(content, NO_MENTIONS));
+const edit = (msg, content) => msg.edit(withMentionPolicy(content, NO_MENTIONS));
+
+/**
  * Run `fn`, retrying it for the failures that a second attempt can fix.
  *
  * `canRetry` is asked after each failure and before each retry, for the
@@ -73,10 +107,10 @@ async function attachToolFooter(msg, text, footer, channel) {
     if (!footer) return;
     const body = (text || '').trimEnd();
     if (msg && body.length + footer.length + 1 <= DISCORD_MAX_LEN) {
-        const edited = await msg.edit(body ? `${body}\n${footer}` : footer).then(() => true).catch(() => false);
+        const edited = await edit(msg, body ? `${body}\n${footer}` : footer).then(() => true).catch(() => false);
         if (edited) return;
     }
-    await channel.send(footer).catch(() => {});
+    await send(channel, footer).catch(() => {});
 }
 
 function chunkText(text, size = DISCORD_MAX_LEN) {
@@ -100,18 +134,18 @@ async function handleAIChat(message, aiSettings) {
     const providerLabel = providerDef?.label || provider;
 
     if (provider !== 'ollama' && !apiKey) {
-        return message.reply(`${providerLabel} is not configured. Add an API key in the dashboard.`);
+        return reply(message, `${providerLabel} is not configured. Add an API key in the dashboard.`);
     }
 
     const modelError = providerDef?.validateModel?.(model);
     if (modelError) {
-        return message.reply(modelError);
+        return reply(message, modelError);
     }
 
     const content = message.content.trim();
     if (content.toLowerCase() === '!reset') {
         await clearHistory(message.guild.id, message.channel.id, message.author.id);
-        return message.reply('Conversation history cleared.');
+        return reply(message, 'Conversation history cleared.');
     }
 
     // A peek, not a consuming check: the slot is spent inside getCompletion /
@@ -120,11 +154,11 @@ async function handleAIChat(message, aiSettings) {
     // prompt assembly below, and to say so in the channel where the user asked.
     // The same key enforcement will consume, so the peek and the spend agree.
     if (!peekRateLimit(userRateLimitKey(message.guild.id, message.author.id), rateLimit.perUser, rateLimit.windowMin)) {
-        return message.reply(`Rate limit reached (${rateLimit.perUser} per ${rateLimit.windowMin}m). Please slow down.`);
+        return reply(message, `Rate limit reached (${rateLimit.perUser} per ${rateLimit.windowMin}m). Please slow down.`);
     }
 
     if (!peekChannelRateLimit(message.channel.id, rateLimit.perChannel, rateLimit.windowMin)) {
-        return message.reply(`This channel has reached the AI request limit. Please wait before sending more AI requests here.`);
+        return reply(message, `This channel has reached the AI request limit. Please wait before sending more AI requests here.`);
     }
 
     const maxHistory = aiSettings.maxHistory ?? 20;
@@ -213,7 +247,7 @@ async function handleAIChat(message, aiSettings) {
         let fullResponse = '';
 
         if (useStreaming) {
-            placeholder = await message.reply('…');
+            placeholder = await reply(message, '…');
             let lastEdit = 0;
             let currentMsg = placeholder;
             let currentBuf = '';
@@ -240,7 +274,7 @@ async function handleAIChat(message, aiSettings) {
                 painting = true;
                 painted = text;
                 try {
-                    await currentMsg.edit(text);
+                    await edit(currentMsg, text);
                 } catch {
                     // Let the next paint try again rather than believing this landed.
                     painted = null;
@@ -301,9 +335,9 @@ async function handleAIChat(message, aiSettings) {
                             await untilPaintIdle();
                             painting = true;
                             try {
-                                await currentMsg.edit(currentBuf.slice(0, DISCORD_MAX_LEN));
+                                await edit(currentMsg, currentBuf.slice(0, DISCORD_MAX_LEN));
                                 const overflow = currentBuf.slice(DISCORD_MAX_LEN);
-                                currentMsg = await message.channel.send(overflow || '…');
+                                currentMsg = await send(message.channel, overflow || '…');
                                 sentMessages.push(currentMsg);
                                 currentBuf = overflow;
                                 painted = null;
@@ -328,7 +362,7 @@ async function handleAIChat(message, aiSettings) {
                         painting = true;
                         painted = currentBuf;
                         try {
-                            await currentMsg.edit(currentBuf);
+                            await edit(currentMsg, currentBuf);
                         } catch {
                             painted = null;
                         } finally {
@@ -354,7 +388,7 @@ async function handleAIChat(message, aiSettings) {
                     const canonicalChunks = cleanText.trim() ? chunkText(cleanText) : [];
                     for (let i = 0; i < sentMessages.length; i++) {
                         if (i < canonicalChunks.length) {
-                            await sentMessages[i].edit(canonicalChunks[i]).catch(() => {});
+                            await edit(sentMessages[i], canonicalChunks[i]).catch(() => {});
                         } else {
                             // Extra messages that existed only to hold overflow or ACTION text
                             await sentMessages[i].delete().catch(() => {});
@@ -392,10 +426,10 @@ async function handleAIChat(message, aiSettings) {
             let tailText = '';
             if (fullResponse.trim()) {
                 const chunks = chunkText(fullResponse);
-                tailMsg = await message.reply(chunks[0]);
+                tailMsg = await reply(message, chunks[0]);
                 tailText = chunks[0];
                 for (let i = 1; i < chunks.length; i++) {
-                    tailMsg = await message.channel.send(chunks[i]);
+                    tailMsg = await send(message.channel, chunks[i]);
                     tailText = chunks[i];
                 }
             }
@@ -406,7 +440,7 @@ async function handleAIChat(message, aiSettings) {
         // could not use — a chart, a screenshot. Its own message, after the
         // text, so a failed send costs the pictures and not the answer.
         if (activity.attachments.length) {
-            await message.channel.send({ files: activity.attachments }).catch(err =>
+            await send(message.channel, { files: activity.attachments }).catch(err =>
                 console.error('[MCP] tool attachments send failed:', err?.message || err)
             );
         }
@@ -434,7 +468,7 @@ async function handleAIChat(message, aiSettings) {
                     body += part;
                 }
                 if (omitted) body += ` (+${omitted} more)`;
-                await message.channel.send(prefix + body).catch(err =>
+                await send(message.channel, prefix + body).catch(err =>
                     console.error('[AI] citations footer send failed:', err?.message || err)
                 );
             }
@@ -444,10 +478,10 @@ async function handleAIChat(message, aiSettings) {
         // failure replaces the "…" instead of leaving it dangling beside it.
         const report = async text => {
             if (placeholder) {
-                const edited = await placeholder.edit(text).then(() => true).catch(() => false);
+                const edited = await edit(placeholder, text).then(() => true).catch(() => false);
                 if (edited) return;
             }
-            await message.reply(text).catch(() => {});
+            await reply(message, text).catch(() => {});
         };
 
         // The peek above passed but somebody else took the last slot in between.

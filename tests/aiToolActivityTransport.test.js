@@ -60,12 +60,16 @@ const { handleAIChat } = require('../src/services/ai/discordChat');
 
 const SETTINGS = { provider: 'mock', streaming: true, actionsEnabled: false, maxHistory: 20 };
 
+// The transport posts payload objects now, never bare strings — that is what
+// carries the mention policy — so the fake reads the text back out of one.
+const textOf = payload => (typeof payload === 'string' ? payload : payload?.content ?? '');
+
 function fakeMessage(content = 'what changed in the repo?') {
     const sent = [];
-    const emit = text => {
+    const emit = payload => {
         const msg = {
-            content: typeof text === 'string' ? text : '',
-            edit: jest.fn(async next => { msg.content = next; return msg; }),
+            content: textOf(payload),
+            edit: jest.fn(async next => { msg.content = textOf(next); return msg; }),
             delete: jest.fn(async () => { msg.deleted = true; return msg; })
         };
         sent.push(msg);
@@ -78,10 +82,10 @@ function fakeMessage(content = 'what changed in the repo?') {
         guild: { id: 'g1' },
         channel: {
             id: 'c1',
-            send: jest.fn(async text => emit(text)),
+            send: jest.fn(async payload => emit(payload)),
             sendTyping: jest.fn(async () => {})
         },
-        reply: jest.fn(async text => emit(text))
+        reply: jest.fn(async payload => emit(payload))
     };
     return { message, sent };
 }
@@ -93,7 +97,7 @@ const end = args => args.onToolEvent({
 
 // Everything the message was edited to over the course of the reply, so a
 // transient state — the status line — can be asserted on as well as the last.
-const edits = msg => msg.edit.mock.calls.map(call => call[0]);
+const edits = msg => msg.edit.mock.calls.map(call => textOf(call[0]));
 
 beforeEach(() => {
     jest.clearAllMocks();
