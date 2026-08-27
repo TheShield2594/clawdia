@@ -75,6 +75,7 @@ const { computeRetention } = require('../src/dashboard/routes/api');
 const guildMemberAdd = require('../src/events/guildMemberAdd');
 const guildMemberRemove = require('../src/events/guildMemberRemove');
 const interactionCreate = require('../src/events/interactionCreate');
+const { useFixedClock, advanceClock, HOUR } = require('./helpers/fixedClock');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -123,7 +124,13 @@ function makeMember(overrides = {}) {
 // ---------------------------------------------------------------------------
 
 describe('trackMemberEvent (guildMemberAdd)', () => {
-    const TODAY = new Date().toISOString().slice(0, 10);
+    // `TODAY` is read once when this describe body runs; the handler reads its
+    // own `new Date().toISOString().slice(0, 10)` when the event arrives
+    // (guildMemberAdd.js:65). Unpinned those are two clock reads with the whole
+    // suite between them, and a run that crosses midnight UTC compares one day
+    // against the next (#632).
+    useFixedClock();
+    const TODAY = '2026-03-29';
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -159,6 +166,22 @@ describe('trackMemberEvent (guildMemberAdd)', () => {
         expect(secondCall[1].$push.memberEvents.$slice).toBe(-120);
     });
 
+    it('a join either side of midnight UTC is counted against its own day', async () => {
+        // The pinned clock sits half an hour before midnight, so one hour of
+        // elapsed time is a date change, a month rollover and — in the EU — a
+        // DST change. The day key must follow the clock rather than whatever
+        // the suite captured when it started.
+        mockGuildAnalytics.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+        await guildMemberAdd.execute(makeMember(), {});
+        advanceClock(HOUR);
+        await guildMemberAdd.execute(makeMember(), {});
+
+        const [before, after] = mockGuildAnalytics.updateOne.mock.calls;
+        expect(before[0]).toMatchObject({ 'memberEvents.date': '2026-03-29' });
+        expect(after[0]).toMatchObject({ 'memberEvents.date': '2026-03-30' });
+    });
+
     it('does not throw if guild not found', async () => {
         mockGuild.findOne.mockResolvedValue(null);
         const member = makeMember();
@@ -178,7 +201,9 @@ describe('trackMemberEvent (guildMemberAdd)', () => {
 // ---------------------------------------------------------------------------
 
 describe('trackMemberEvent (guildMemberRemove)', () => {
-    const TODAY = new Date().toISOString().slice(0, 10);
+    // Same clock race as the join side above (#632).
+    useFixedClock();
+    const TODAY = '2026-03-29';
 
     beforeEach(() => {
         jest.clearAllMocks();

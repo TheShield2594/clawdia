@@ -2,6 +2,7 @@
 
 const { TIER_COUNT, TIER_TABLE, loreForTier } = require('../src/data/seasonPass');
 const { awardSeasonXp } = require('../src/services/questService');
+const { useFixedClock, advanceClock, DAY, WEEK } = require('./helpers/fixedClock');
 
 describe('season pass tier table', () => {
     test('has 50 sequential tiers with both tracks labeled', () => {
@@ -48,6 +49,16 @@ describe('season pass tier table', () => {
 });
 
 describe('awardSeasonXp weekly cap', () => {
+    // The weekly window is `now - weekStart >= 7 days` against a `weekStart` the
+    // service stamps with `new Date()` (questService.js:280-283), so a fixture
+    // built from the real clock and the service's own read of it are two
+    // different instants (#632). Pinned, they are one. The instant is the last
+    // Sunday in March, half an hour before midnight UTC — the day the EU clocks
+    // go forward and the day before a month rollover, which is where a window
+    // that quietly counted local days rather than elapsed milliseconds would
+    // come apart.
+    useFixedClock();
+
     const guildSettings = (overrides = {}) => ({
         season: { enabled: true, seasonId: 's1', xpPerTier: 100, maxTiers: 50, weeklyXpCap: 1500, ...overrides },
     });
@@ -79,7 +90,36 @@ describe('awardSeasonXp weekly cap', () => {
     test('rolls the window over after 7 days', async () => {
         const user = freshUser();
         user.season.weekXp = 1500;
-        user.season.weekStart = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+        user.season.weekStart = new Date(Date.now() - 8 * DAY);
+        await awardSeasonXp(user, 100, guildSettings());
+        expect(user.season.xp).toBe(100);
+        expect(user.season.weekXp).toBe(100);
+    });
+
+    test('the window does not roll over a moment before seven days', async () => {
+        const user = freshUser();
+        user.season.weekXp = 1500;
+        user.season.weekStart = new Date(Date.now() - (WEEK - 1));
+        await awardSeasonXp(user, 100, guildSettings());
+        expect(user.season.xp).toBe(0);
+        expect(user.season.weekXp).toBe(1500);
+    });
+
+    test('crossing midnight, a month end and a DST change does not roll the window', async () => {
+        // Elapsed time is what the window measures, so a fixture stamped now and
+        // read again after the calendar has moved on — past midnight UTC, into
+        // April, and through the EU spring-forward — is still inside the same
+        // week. This is the assertion a wall-clock run could only make by
+        // accident, and only on one night of the year.
+        const user = freshUser();
+        user.season.weekXp = 1500;
+        advanceClock(2 * DAY);
+        await awardSeasonXp(user, 100, guildSettings());
+        expect(user.season.xp).toBe(0);
+        expect(user.season.weekXp).toBe(1500);
+
+        // ...and five days later it is a new week, DST notwithstanding.
+        advanceClock(5 * DAY);
         await awardSeasonXp(user, 100, guildSettings());
         expect(user.season.xp).toBe(100);
         expect(user.season.weekXp).toBe(100);
