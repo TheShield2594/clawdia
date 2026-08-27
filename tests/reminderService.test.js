@@ -79,19 +79,58 @@ describe('checkReminders delivery', () => {
         expect(reminder.completed).toBe(true);
     });
 
-    test('marks completed (does not throw) when both channel and DM delivery fail', async () => {
+    test('a failed delivery leaves the reminder due and counts the attempt (#817)', async () => {
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
         const reminder = makeReminder();
         Reminder.find.mockResolvedValue([reminder]);
         const client = makeClient({ channel: undefined, dmUser: undefined });
 
         await expect(checkReminders(client)).resolves.toBeUndefined();
-        expect(reminder.completed).toBe(true);
+
+        // Not lost: still open, still due, picked up again next tick.
+        expect(reminder.completed).toBe(false);
+        expect(reminder.deliveryAttempts).toBe(1);
         expect(reminder.save).toHaveBeenCalled();
+        consoleSpy.mockRestore();
+    });
+
+    test('a delivery that succeeds after failures resets the attempt counter', async () => {
+        const reminder = makeReminder({ deliveryAttempts: 3 });
+        Reminder.find.mockResolvedValue([reminder]);
+        const channel = { send: jest.fn().mockResolvedValue(undefined) };
+        const client = makeClient({ channel });
+
+        await checkReminders(client);
+
+        expect(reminder.completed).toBe(true);
+        expect(reminder.deliveryAttempts).toBe(0);
+    });
+
+    test('a destination that stays dead is given up on after the attempt cap', async () => {
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        const reminder = makeReminder({ deliveryAttempts: 4 });
+        Reminder.find.mockResolvedValue([reminder]);
+        const client = makeClient({ channel: undefined, dmUser: undefined });
+
+        await checkReminders(client);
+
+        // Fifth consecutive failure: completed so it stops retrying forever,
+        // and the loss is logged rather than silent.
+        expect(reminder.completed).toBe(true);
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Giving up on reminder'));
+        consoleSpy.mockRestore();
     });
 });
 
 describe('checkReminders recurrence', () => {
-    afterEach(() => jest.clearAllMocks());
+    // Rescheduling is measured against "now": missed occurrences are skipped,
+    // so these tests pin the clock just past each reminder's due time to see
+    // the ordinary single-interval advance.
+    beforeEach(() => jest.useFakeTimers().setSystemTime(new Date('2026-07-14T12:00:30Z')));
+    afterEach(() => {
+        jest.useRealTimers();
+        jest.clearAllMocks();
+    });
 
     test('one-time reminders are marked completed, not rescheduled', async () => {
         const reminder = makeReminder({ repeatInterval: null });
@@ -132,6 +171,7 @@ describe('checkReminders recurrence', () => {
     });
 
     test('daily reminders preserve local wall-clock time across a DST transition', async () => {
+        jest.setSystemTime(new Date('2026-03-07T14:00:30Z'));
         // 9am EST on 2026-03-07 — the day before America/New_York springs forward.
         const reminder = makeReminder({
             repeatInterval: 'daily',
@@ -159,6 +199,24 @@ describe('checkReminders recurrence', () => {
         await checkReminders(client);
 
         expect(reminder.remindAt.getTime()).toBe(originalTime + 24 * 60 * 60 * 1000);
+    });
+
+    test('a daily reminder several days behind skips to the next future occurrence (#817)', async () => {
+        // Three missed days of downtime: one delivery now, then straight to
+        // tomorrow — not three catch-up deliveries on consecutive ticks.
+        const reminder = makeReminder({
+            repeatInterval: 'daily',
+            remindAt: new Date('2026-07-11T12:00:00Z')
+        });
+        Reminder.find.mockResolvedValue([reminder]);
+        const channel = { send: jest.fn().mockResolvedValue(undefined) };
+        const client = makeClient({ channel });
+
+        await checkReminders(client);
+
+        expect(channel.send).toHaveBeenCalledTimes(1);
+        expect(reminder.completed).toBe(false);
+        expect(reminder.remindAt.toISOString()).toBe('2026-07-15T12:00:00.000Z');
     });
 });
 

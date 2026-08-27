@@ -8,6 +8,10 @@ const reminderSchema = new Schema({
     remindAt: { type: Date, required: true },
     createdAt: { type: Date, default: Date.now },
     completed: { type: Boolean, default: false },
+    // Consecutive failed deliveries (channel and DM both refused). Reset to 0
+    // on success; checkReminders gives up on the reminder once it reaches
+    // MAX_DELIVERY_ATTEMPTS so a dead destination doesn't retry forever.
+    deliveryAttempts: { type: Number, default: 0 },
     // Recurring cadence — null means one-time. When set, checkReminders reschedules
     // remindAt to the next occurrence instead of marking the reminder completed.
     repeatInterval: { type: String, enum: ['daily', 'weekly', null], default: null },

@@ -252,6 +252,42 @@ function progressReader(token, onProgress) {
     };
 }
 
+/**
+ * `read`, bounded by what is left of the call's deadline.
+ *
+ * axios's `timeout` only covers the wait for response *headers*. With
+ * `responseType: 'stream'` a server could return `200 text/event-stream` and
+ * then never answer the request id, which left the event-stream reader
+ * iterating forever — a Discord reply that never finishes, holding one of the
+ * per-server slots in connections.js the whole time (#816). The timer destroys
+ * the stream as well as rejecting, so the socket is released rather than left
+ * open behind a promise nobody is waiting on any more.
+ */
+async function readWithDeadline(read, stream, deadline) {
+    let timer;
+    try {
+        return await Promise.race([
+            read,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    // The read is about to lose the race; whatever destroying
+                    // the stream makes it throw has nowhere to go and must not
+                    // surface as an unhandled rejection.
+                    read.catch(() => {});
+                    stream?.destroy?.();
+                    reject(new McpError(
+                        'the server sent response headers but no answer before the deadline',
+                        { code: 'ETIMEDOUT' }
+                    ));
+                }, Math.max(1, deadline - Date.now()));
+                timer.unref?.();
+            })
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 // HTTP failures are what an admin actually sees when a URL or token is wrong,
 // so they say which of the two it probably is.
 //
@@ -360,6 +396,10 @@ class McpHttpClient {
     async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, authRetried = false, onNotification = null } = {}) {
         await this.authorize();
 
+        // One deadline for the whole exchange, headers and body alike. The
+        // axios timeout below only bounds the wait for headers; every body
+        // read after it gets whatever is left of the same budget.
+        const deadline = Date.now() + timeout;
         let response;
         try {
             response = await axios.post(this.url, payload, {
@@ -391,7 +431,7 @@ class McpHttpClient {
         if (response.status >= 400) {
             // Read before anything decides what to do with it: the body is the
             // server's own explanation and the stream can only be consumed once.
-            const body = await collectText(response.data);
+            const body = await readWithDeadline(collectText(response.data), response.data, deadline);
             const challenge = response.headers['www-authenticate'] ?? null;
 
             // A 401 on an OAuth connection is the ordinary end of an access
@@ -418,9 +458,10 @@ class McpHttpClient {
         }
 
         const contentType = String(response.headers['content-type'] || '');
-        return contentType.includes('text/event-stream')
+        const read = contentType.includes('text/event-stream')
             ? readEventStream(response.data, id, onNotification)
-            : parseJsonBody(await collectText(response.data), id);
+            : collectText(response.data).then(text => parseJsonBody(text, id));
+        return readWithDeadline(read, response.data, deadline);
     }
 
     /**

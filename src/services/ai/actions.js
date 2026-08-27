@@ -123,14 +123,33 @@ async function executeAction(action, message) {
                 if (!logId) break;
                 const logCh = message.guild.channels.cache.get(logId);
                 if (!logCh) break;
-                await logCh.send(
-                    `**[AI Mod Suggestion]** in <#${message.channel.id}>:\n${action.suggestion}`
-                );
+                // The suggestion is model-authored text, and the mod-log send
+                // is the one place it leaves this module without going through
+                // the transport's guarded helpers — so the NO_MENTIONS policy
+                // (discordChat.js) has to be restated here, or a user who talks
+                // the model into typing `@everyone` pings the mod-log channel.
+                await logCh.send({
+                    content: `**[AI Mod Suggestion]** in <#${message.channel.id}>:\n${action.suggestion}`,
+                    allowedMentions: { parse: [] }
+                });
                 break;
             }
         }
     } catch (err) {
         console.error('[AI Action] execution error:', err.message);
+        // The reply already told the user the action was taken, so a silent
+        // failure here leaves them believing a poll or reminder exists that
+        // does not. Best-effort: reporting the failure must not throw over
+        // the same broken channel that likely caused it.
+        const labels = {
+            create_poll: 'create the poll',
+            create_reminder: 'set the reminder',
+            suggest_mod_action: 'deliver the mod suggestion'
+        };
+        await message.channel.send({
+            content: `⚠️ I couldn't ${labels[action.type] || 'complete that action'} — something went wrong.`,
+            allowedMentions: { parse: [] }
+        }).catch(() => {});
     }
 }
 

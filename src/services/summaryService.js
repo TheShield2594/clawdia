@@ -66,6 +66,10 @@ async function runSummaryJob(job, client) {
     // Its cadence is the bound.
     const summary = await getCompletion({
         ...config,
+        // No user means no tool-call budget either, so MCP stays off: a
+        // summary is written from the transcript in the prompt, not from
+        // anything a tool could fetch.
+        mcp: false,
         systemPrompt: 'You are a helpful assistant that creates concise summaries of Discord channel activity.',
         history: [],
         prompt: `Summarize the key topics, decisions, and highlights from these Discord messages as bullet points:\n\n${transcript}`,
@@ -165,6 +169,8 @@ async function runDailyDigest(guildSettings, client) {
     // Its cadence is the bound.
     const summary = await getCompletion({
         ...config,
+        // Same as the channel digest above: no user, so no tool budget — MCP off.
+        mcp: false,
         systemPrompt: persona,
         history: [],
         prompt: `Summarize today's activity in this Discord server. Write in the same tone and voice as your persona. Focus on key topics, decisions, and highlights. Keep it concise and engaging:\n\n${transcript}`,

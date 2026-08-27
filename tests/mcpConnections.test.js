@@ -35,7 +35,8 @@ const {
     resetMcpCache,
     LIST_TTL_MS,
     STALE_TTL_MS,
-    MAX_PARALLEL_PER_SERVER
+    MAX_PARALLEL_PER_SERVER,
+    SLOT_WAIT_TIMEOUT_MS
 } = require('../src/services/ai/mcp/connections');
 
 const SERVER = {
@@ -320,5 +321,38 @@ describe('one server does not see the whole round at once', () => {
 
         expect(entry.inFlight).toBe(0);
         await expect(withServerLimit(entry, async () => 'ok')).resolves.toBe('ok');
+    });
+
+    test('a waiter does not wait for a slot forever (#816)', async () => {
+        jest.useFakeTimers();
+        try {
+            const entry = entryFor(SERVER);
+            const gates = [];
+            const busy = () => withServerLimit(entry, () => {
+                const gate = deferred();
+                gates.push(gate);
+                return gate.promise;
+            });
+
+            // Three calls hold every slot; a fourth queues behind them.
+            const held = [busy(), busy(), busy()];
+            const outcome = withServerLimit(entry, async () => 'ok').catch(err => err);
+            await Promise.resolve();
+
+            jest.advanceTimersByTime(SLOT_WAIT_TIMEOUT_MS + 1);
+            const err = await outcome;
+            expect(err).toBeInstanceOf(McpError);
+            expect(err.message).toMatch(/waiting for a free connection slot/);
+
+            // The held calls are untouched, the abandoned waiter is off the
+            // queue, and the slots come back once they finish.
+            expect(entry.waiters).toHaveLength(0);
+            gates.forEach(gate => gate.resolve('done'));
+            await expect(Promise.all(held)).resolves.toEqual(['done', 'done', 'done']);
+            expect(entry.inFlight).toBe(0);
+            await expect(withServerLimit(entry, async () => 'ok')).resolves.toBe('ok');
+        } finally {
+            jest.useRealTimers();
+        }
     });
 });
