@@ -4,6 +4,7 @@ const { providers, mcpMode, usesClientTools } = require('./providers');
 const { resolveProviderConfig, streamCompletion, getCompletion } = require('./index');
 const { retrieveKnowledge, buildKnowledgeContext } = require('./knowledge');
 const { loadHistory, appendHistory, clearHistory } = require('./history');
+const { createSummarizer, summaryContext } = require('./summarize');
 const { peekRateLimit, peekChannelRateLimit, userRateLimitKey } = require('./rateLimit');
 const { buildActionsAddendum, buildToolActionsAddendum, extractAction, executeAction } = require('./actions');
 const { buildBotTools, BOT_SERVER } = require('./botTools');
@@ -237,19 +238,25 @@ async function handleAIChat(message, aiSettings) {
             });
         if (mcpKnowledge) systemPrompt += mcpKnowledge.text;
 
-        const { messages: rawHistory } = await loadHistory(
+        const { messages: rawHistory, summary } = await loadHistory(
             message.guild.id, message.channel.id, message.author.id, maxHistory
         );
 
         // Prepend pinned memories as a user-context message so the model treats
         // them as reference information, not authoritative system instructions.
-        const history = pinnedMemories
-            ? [
-                { role: 'user', content: `[My saved context for this conversation]\n${pinnedMemories.map(m => `- ${m.content}`).join('\n')}` },
-                { role: 'assistant', content: 'Understood, I have noted your saved context.' },
-                ...rawHistory
-              ]
-            : rawHistory;
+        // The rolling summary of turns that have fallen out of the retention
+        // window (#833) rides in the same way, and after the memories: it is
+        // the older material of the two, so it reads in the order it happened.
+        const history = [
+            ...(pinnedMemories
+                ? [
+                    { role: 'user', content: `[My saved context for this conversation]\n${pinnedMemories.map(m => `- ${m.content}`).join('\n')}` },
+                    { role: 'assistant', content: 'Understood, I have noted your saved context.' }
+                  ]
+                : []),
+            ...summaryContext(summary),
+            ...rawHistory
+        ];
 
         const usageOut = {};
         // Collects what the MCP tools did across every round of this turn, so
@@ -526,9 +533,18 @@ async function handleAIChat(message, aiSettings) {
         }
 
         if (fullResponse.trim()) {
+            // The turns this trim drops are summarised rather than lost (#833).
+            // One cheap request per trim, attributed to the same user so it is
+            // bounded by the guild's own limits, and best-effort: the reply is
+            // already on screen, and a conversation without a summary is what
+            // this guild had yesterday.
             await appendHistory(
                 message.guild.id, message.channel.id, message.author.id,
-                content, fullResponse, maxHistory
+                content, fullResponse, maxHistory,
+                createSummarizer(
+                    { provider, model, apiKey, baseUrl, rateLimit },
+                    { guildId: message.guild.id, userId: message.author.id, channelId: message.channel.id }
+                )
             );
             if (kbEntries.length && !kbIsBackground) {
                 const prefix = '📚 Sources: ';

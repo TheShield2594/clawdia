@@ -9,6 +9,13 @@ const conversationSchema = new Schema({
         content: { type: String, required: true },
         createdAt: { type: Date, default: Date.now }
     }],
+    // What the turns that fell out of `messages` said (#833). Everything past
+    // the retention window used to be dropped on the floor: a conversation
+    // twenty messages long began each reply as though it had just started.
+    // Rewritten on each trim from the previous summary plus the turns being
+    // dropped, so it stays one paragraph however long the conversation runs.
+    summary: { type: String, default: null },
+    summarizedThrough: { type: Date, default: null },
     updatedAt: { type: Date, default: Date.now }
 });
 
