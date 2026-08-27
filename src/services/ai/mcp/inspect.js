@@ -1,7 +1,6 @@
 'use strict';
 
-const { McpHttpClient } = require('./client');
-const { entryFor, primeList } = require('./connections');
+const { entryFor, primeList, mcpClientFor } = require('./connections');
 const { isToolEnabled, needsConfirmation, toolAnnotations } = require('../../../config/mcpServers');
 
 // "Does this connection work, and what would it let the model do?"
@@ -54,18 +53,11 @@ function primeLists(server, lists) {
 async function inspectServer(server, { confirmMode } = {}) {
     let client = null;
     try {
-        const grant = server.connection.oauth;
-        client = new McpHttpClient({
-            url: server.connection.url,
-            authorizationToken: server.connection.authorizationToken,
-            label: server.name,
-            // So a test of an OAuth connection tests the credential the chat
-            // path would actually use, refreshed if it is due (#796) — rather
-            // than reporting a 401 an admin would then go looking for.
-            getAccessToken: grant
-                ? ({ force }) => require('./oauthStore').accessTokenFor(grant.guildId, grant.server, { force })
-                : null
-        });
+        // The same construction the chat path uses, so a test of an OAuth
+        // connection tests the credential a real request would carry — refreshed
+        // if it is due (#796) — rather than reporting a 401 an admin would then
+        // go looking for.
+        client = mcpClientFor(server);
 
         const tools = await client.listTools();
         // The other two halves of the protocol, asked for only when the server

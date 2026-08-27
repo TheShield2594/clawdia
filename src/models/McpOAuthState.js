@@ -1,6 +1,7 @@
 'use strict';
 
 const { Schema, model } = require('mongoose');
+const { encryptSecret } = require('../config/secretBox');
 
 /**
  * One OAuth authorization flow, in flight (#796).
@@ -17,10 +18,18 @@ const { Schema, model } = require('mongoose');
  * no further. It is 32 random bytes, so it is not guessable, and it is consumed
  * on first use so a replayed callback finds nothing either.
  *
- * The verifier is a secret for the length of one consent screen. It is not
- * encrypted at rest the way the tokens are: it is worthless without the
- * authorization code it pairs with, it lives for ten minutes, and it is deleted
- * the moment the code arrives.
+ * Two fields here are secrets, and both are encrypted at rest the way the grant
+ * they will become is. The client secret is the same value the finished grant
+ * stores sealed — a transient record is no reason to hold it in the clear, and
+ * an abandoned flow is exactly the record most likely to still be sitting there
+ * when somebody reads a backup. The PKCE verifier is worthless without the
+ * authorization code it pairs with and lives for ten minutes, so it earns less
+ * of an argument; it is sealed alongside because leaving one of the two in
+ * plaintext is the sort of asymmetry nobody remembers the reason for.
+ *
+ * `encryptSecret` is a no-op when the operator has configured no key, so this
+ * changes nothing for an install that has not opted in — see
+ * src/config/secretBox.js.
  */
 const mcpOAuthStateSchema = new Schema({
     // The `state` parameter. Named `_id` so the unique index is the one the
@@ -29,7 +38,7 @@ const mcpOAuthStateSchema = new Schema({
     guildId:   { type: String, required: true },
     // Which of the guild's MCP servers this flow is for.
     server:    { type: String, required: true },
-    verifier:  { type: String, required: true },
+    verifier:  { type: String, required: true, set: encryptSecret },
     // Where the browser will come back to. Stored rather than recomputed
     // because the token exchange has to send back the identical string, and a
     // dashboard reachable under two names would otherwise fail the comparison.
@@ -40,7 +49,7 @@ const mcpOAuthStateSchema = new Schema({
     // is advertising by the time the admin finishes reading the scope list.
     discovery: { type: Schema.Types.Mixed, required: true },
     clientId:  { type: String, required: true },
-    clientSecret: { type: String, default: null },
+    clientSecret: { type: String, default: null, set: encryptSecret },
     // Who started it, for the audit entry the callback writes.
     startedBy: { type: String, default: null },
     expiresAt: { type: Date, required: true },

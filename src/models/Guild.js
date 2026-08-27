@@ -385,9 +385,17 @@ const guildSchema = new Schema({
                         // server rather than being usable against another.
                         resource:              { type: String, default: null },
                         clientId:              { type: String, required: true },
-                        clientSecret:          { type: String, default: null },
-                        accessToken:           { type: String, default: null },
-                        refreshToken:          { type: String, default: null },
+                        // The same `set: encryptSecret` the provider keys above
+                        // use. `sealGrant` in src/services/ai/mcp/oauthStore.js
+                        // already encrypts on the store's own path, and this is
+                        // deliberately belt and braces: `encryptSecret` returns
+                        // an already-sealed value untouched, so the two compose,
+                        // and any future write that reaches the schema directly
+                        // rather than through the store is covered by default
+                        // rather than by somebody remembering.
+                        clientSecret:          { type: String, default: null, set: encryptSecret },
+                        accessToken:           { type: String, default: null, set: encryptSecret },
+                        refreshToken:          { type: String, default: null, set: encryptSecret },
                         // Null when the server issued a token with no
                         // `expires_in`, which means "until it stops working" —
                         // the 401 retry is what covers that case.

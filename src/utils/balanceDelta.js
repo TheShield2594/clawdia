@@ -130,8 +130,15 @@ async function commitBalanceDelta(Model, filter, user, delta, context = {}) {
             // this one knows, so it records the payout rather than reporting a
             // credit that never happened.
             if (status === 'paid' || status === 'duplicate') {
-                if (doc) {
-                    user.balance = doc.balance;
+                // A duplicate comes back with no document — the guarded update
+                // matched nothing — so the balance in hand is the one the flow
+                // read *before* the credit landed, and reporting it would show
+                // the player a total that is short by the amount they were just
+                // paid. Read the settled figure instead; this is the rare path,
+                // and being wrong on it is the whole reason the caller asked.
+                const settled = doc ?? await Model.findOne(filter, { balance: 1 }).lean();
+                if (settled) {
+                    user.balance = settled.balance;
                     user.unmarkModified('balance');
                 }
                 return { credited: true, balance: user.balance ?? 0 };

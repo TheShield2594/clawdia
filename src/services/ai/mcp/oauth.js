@@ -225,10 +225,23 @@ async function discover(mcpUrl, { resourceMetadata = null } = {}) {
         'authorization server metadata',
     );
 
-    // The issuer the document claims, which is what the endpoints below are
-    // checked against — not the URL it happened to be fetched from, since a
-    // redirect could have moved that.
+    // RFC 8414 §3.3: the `issuer` in the document must be identical to the
+    // issuer the well-known URI was built from. Without that check the origin
+    // checks below are self-referential — a document is free to claim any
+    // issuer it likes and then put its token endpoint on that same claimed
+    // origin, which passes every test and sends the client secret wherever the
+    // document said. Comparing it to where the document was actually looked for
+    // is what makes those checks mean something.
+    //
+    // An omitted `issuer` is not a mismatch. Plenty of servers that have not
+    // implemented RFC 9728 have not implemented that either, and the same
+    // leniency is already extended to a resource with no metadata at all.
     const claimed = checkedUrl(metadata.issuer || issuerUrl, 'authorization server issuer');
+    if (claimed !== issuerUrl) {
+        throw new OAuthError(
+            `the authorization server metadata claims to be ${claimed} but was published at ${issuerUrl} — refusing to use it`,
+        );
+    }
 
     return {
         issuer: claimed,
@@ -287,7 +300,10 @@ async function registerClient(registrationEndpoint, { redirectUri, clientName = 
     }
 
     if (response.status >= 400) {
-        const detail = typeof response.data === 'object'
+        // `typeof null === 'object'`, so the null check is load-bearing: a
+        // refusal with an empty body would otherwise throw a TypeError here and
+        // lose the status the admin needs. Same shape as `postToken` below.
+        const detail = response.data && typeof response.data === 'object'
             ? (response.data.error_description || response.data.error || '')
             : String(response.data || '').slice(0, 200);
         throw new OAuthError(

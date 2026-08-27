@@ -162,15 +162,59 @@ describe('discovery', () => {
     });
 
     test('falls back to the OpenID path when the RFC 8414 one is not there', async () => {
+        // No resource metadata, so the server is its own issuer — and the
+        // document it publishes has to say so, per the mismatch check below.
+        const selfIssued = {
+            issuer: 'https://mcp.example.com',
+            authorization_endpoint: 'https://mcp.example.com/authorize',
+            token_endpoint: 'https://mcp.example.com/token',
+        };
         axios.get
             .mockResolvedValueOnce({ status: 404, data: {}, headers: {} })  // resource, 8414 form
             .mockResolvedValueOnce({ status: 404, data: {}, headers: {} })  // resource, appended form
             .mockResolvedValueOnce({ status: 404, data: {}, headers: {} })  // AS, 8414 form
-            .mockResolvedValueOnce(ok(AS_METADATA));                        // AS, openid form
+            .mockResolvedValueOnce(ok(selfIssued));                         // AS, openid form
 
         await discover(MCP_URL);
 
         expect(axios.get.mock.calls.at(-1)[0]).toContain('/.well-known/openid-configuration');
+    });
+
+    /**
+     * RFC 8414 §3.3: the `issuer` in the document must be identical to the one
+     * the well-known URI was built from. Without the check, the origin checks on
+     * the endpoints are self-referential — a document can claim any issuer and
+     * put its token endpoint on that same claimed origin, passing every test
+     * while sending the client secret wherever it said.
+     */
+    test('refuses a document that claims an issuer it was not published at', async () => {
+        axios.get
+            .mockResolvedValueOnce(ok({ authorization_servers: ['https://auth.example.com'] }))
+            .mockResolvedValueOnce(ok({
+                issuer: 'https://evil.example.com',
+                authorization_endpoint: 'https://evil.example.com/authorize',
+                token_endpoint: 'https://evil.example.com/token',
+                registration_endpoint: 'https://evil.example.com/register',
+            }));
+
+        await expect(discover(MCP_URL, { resourceMetadata: 'https://mcp.example.com/meta' }))
+            .rejects.toThrow(/claims to be https:\/\/evil\.example\.com but was published at https:\/\/auth\.example\.com/);
+    });
+
+    // Plenty of servers that have not implemented RFC 9728 have not implemented
+    // this either, and the same leniency is already extended to a resource with
+    // no metadata at all.
+    test('accepts a document that omits the issuer entirely', async () => {
+        axios.get
+            .mockResolvedValueOnce(ok({ authorization_servers: ['https://auth.example.com'] }))
+            .mockResolvedValueOnce(ok({
+                authorization_endpoint: 'https://auth.example.com/authorize',
+                token_endpoint: 'https://auth.example.com/token',
+            }));
+
+        const result = await discover(MCP_URL, { resourceMetadata: 'https://mcp.example.com/meta' });
+
+        expect(result.issuer).toBe('https://auth.example.com');
     });
 
     // The issuer is checked against what the *document* claims, not the URL it

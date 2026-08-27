@@ -60,6 +60,7 @@ const {
     exchangeCode, resourceMetadataUrl, FLOW_TTL_MS, OAuthError,
 } = require('../../../services/ai/mcp/oauth');
 const { saveGrant, clearGrant, readGrant } = require('../../../services/ai/mcp/oauthStore');
+const { decryptSecret } = require('../../../config/secretBox');
 
 const CALLBACK_PATH = '/mcp/oauth/callback';
 
@@ -251,13 +252,19 @@ async function handleCallback(req, res) {
         });
     }
 
+    // Both were sealed by the schema's setters on the way in, and the read above
+    // is `.lean()`, which runs no getters — so they come back as stored and are
+    // opened here, once, for the one request that needs them in the clear.
+    const verifier = decryptSecret(flow.verifier);
+    const clientSecret = flow.clientSecret ? decryptSecret(flow.clientSecret) : null;
+
     try {
         const tokens = await exchangeCode(flow.discovery, {
             code,
             redirectUri: flow.redirectUri,
-            verifier: flow.verifier,
+            verifier,
             clientId: flow.clientId,
-            clientSecret: flow.clientSecret,
+            clientSecret,
         });
 
         const saved = await saveGrant(flow.guildId, flow.server, {
@@ -266,7 +273,7 @@ async function handleCallback(req, res) {
             tokenEndpoint:         flow.discovery.tokenEndpoint,
             resource:              flow.discovery.resource,
             clientId:              flow.clientId,
-            clientSecret:          flow.clientSecret,
+            clientSecret,
             accessToken:           tokens.accessToken,
             refreshToken:          tokens.refreshToken,
             expiresAt:             tokens.expiresAt,

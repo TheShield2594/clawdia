@@ -420,8 +420,18 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
         // not awaited: the panel is waiting on this response, and a server that
         // is slow or down changes nothing about whether the save worked.
         if (validated.value.enabled) {
-            prewarmMcpServers([{ ...validated.value, authorizationToken: token ?? existing?.authorizationToken ?? null }])
-                .catch(err => console.warn(`[MCP] prewarm after save failed: ${err.message}`));
+            // The grant travels with it, or the warm-up dials unauthenticated
+            // and fills a different pool entry than the one a chat request will
+            // use — the connection is keyed by its credential (#796), so an
+            // OAuth server warmed without one is a 401 nobody asked for and a
+            // cache that is still cold. `existing.oauth` is read after the
+            // clearing above, so a save that just signed the connection out
+            // correctly warms it without one.
+            prewarmMcpServers([{
+                ...validated.value,
+                authorizationToken: token ?? existing?.authorizationToken ?? null,
+                oauth: existing?.oauth ?? null,
+            }]).catch(err => console.warn(`[MCP] prewarm after save failed: ${err.message}`));
         }
 
         res.json({

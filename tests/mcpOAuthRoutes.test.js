@@ -99,6 +99,11 @@ function stubServer(stored) {
     }));
 }
 
+// `redirectUriFor` reads DASHBOARD_URL at call time, so these tests set it —
+// and put back whatever the process had, including nothing at all, rather than
+// leaving a value behind for whichever suite runs next in this worker.
+const originalDashboardUrl = process.env.DASHBOARD_URL;
+
 beforeAll(async () => {
     const app = express();
     app.use(express.json());
@@ -108,6 +113,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+    if (originalDashboardUrl === undefined) delete process.env.DASHBOARD_URL;
+    else process.env.DASHBOARD_URL = originalDashboardUrl;
     await new Promise(resolve => server.close(resolve));
 });
 
@@ -166,6 +173,46 @@ describe('starting a flow', () => {
         // never the verifier itself.
         expect(body.authorizationUrl).not.toContain(flow.verifier);
         expect(flow.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    });
+
+    /**
+     * The two secrets on a transient record. An abandoned flow is exactly the
+     * one most likely to still be sitting there when somebody reads a backup,
+     * and the client secret is the same value the finished grant stores sealed.
+     *
+     * Driven through the real model rather than the mock this file installs,
+     * with a key actually configured — without one `encryptSecret` is the
+     * identity function, so a test run against the default environment would
+     * pass whether or not the setters were there at all.
+     */
+    test('seals the verifier and the client secret before storing them', () => {
+        const secretBox = jest.requireActual('../src/config/secretBox');
+        const previousKey = process.env.SECRET_ENCRYPTION_KEY;
+        process.env.SECRET_ENCRYPTION_KEY = 'test-key-for-mcp-oauth-state';
+        secretBox._resetSecretBox();
+
+        try {
+            const RealModel = jest.requireActual('../src/models/McpOAuthState');
+            const flow = new RealModel({
+                _id: 'st', guildId: 'g1', server: 'linear',
+                verifier: 'the-verifier', redirectUri: 'https://dash.example.com/cb',
+                discovery: {}, clientId: 'cid', clientSecret: 'shh',
+                expiresAt: new Date(Date.now() + 60_000),
+            });
+
+            expect(flow.verifier).not.toBe('the-verifier');
+            expect(flow.clientSecret).not.toBe('shh');
+            expect(secretBox.isEncrypted(flow.verifier)).toBe(true);
+            expect(secretBox.isEncrypted(flow.clientSecret)).toBe(true);
+            // And the callback can get them back, which is the half that makes
+            // the flow still work.
+            expect(secretBox.decryptSecret(flow.verifier)).toBe('the-verifier');
+            expect(secretBox.decryptSecret(flow.clientSecret)).toBe('shh');
+        } finally {
+            if (previousKey === undefined) delete process.env.SECRET_ENCRYPTION_KEY;
+            else process.env.SECRET_ENCRYPTION_KEY = previousKey;
+            secretBox._resetSecretBox();
+        }
     });
 
     // A flow for a connection that already works would send an admin through a
@@ -275,15 +322,25 @@ describe('coming back from the consent screen', () => {
     });
 
     // The helper is mocked above, so nothing else here would notice the shim
-    // being wrong. This runs the real one against it.
+    // being wrong. This runs the real one against it — inside
+    // `isolateModules`, because `logAuditEvent` requires its model lazily and a
+    // `doMock` left in the registry would hand the stub to any later test that
+    // reached for it.
     test('and the record actually gets written', async () => {
-        const realHelper = jest.requireActual('../src/dashboard/lib/apiHelpers');
-        const created = [];
-        jest.doMock('../src/models/AuditLog', () => ({ create: async doc => { created.push(doc); } }));
-
         await api('GET', '/mcp/oauth/callback?state=st&code=abc');
         const [reqLike, guildId, action, details] = logAuditEvent.mock.calls[0];
-        await realHelper.logAuditEvent(reqLike, guildId, action, details);
+
+        const created = [];
+        await new Promise((resolve, reject) => {
+            jest.isolateModules(() => {
+                jest.doMock('../src/models/AuditLog', () => ({
+                    create: async doc => { created.push(doc); },
+                }));
+                const realHelper = jest.requireActual('../src/dashboard/lib/apiHelpers');
+                realHelper.logAuditEvent(reqLike, guildId, action, details).then(resolve, reject);
+            });
+        });
+        jest.dontMock('../src/models/AuditLog');
 
         expect(created).toHaveLength(1);
         expect(created[0]).toMatchObject({ guildId: 'g1', userId: 'admin-1', action: 'mcp_oauth_connect' });

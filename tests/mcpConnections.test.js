@@ -51,9 +51,62 @@ function deferred() {
 }
 
 beforeEach(() => {
+    // Reset before clearing, not after: `resetMcpCache` closes whatever clients
+    // the last test left pooled, and closing them after the clear leaves a
+    // `close()` on the counter that this test then reads as its own.
+    resetMcpCache();
     jest.clearAllMocks();
     constructed.length = 0;
-    resetMcpCache();
+});
+
+/**
+ * #796. A pooled entry holds a session and a tool cache, so what shares one is
+ * a question about which requests may see each other's state.
+ */
+describe('what shares a pooled connection', () => {
+    const oauthServer = (guildId, name = 'linear') => ({
+        name,
+        connection: {
+            url: 'https://mcp.example.com/mcp',
+            authorizationToken: null,
+            oauth: { guildId, server: name }
+        }
+    });
+
+    test('two guilds signed in to the same URL are two connections', () => {
+        expect(entryFor(oauthServer('g1'))).not.toBe(entryFor(oauthServer('g2')));
+    });
+
+    test('the same grant is one, whatever its access token is doing', () => {
+        // Keyed on the grant's identity rather than the token, precisely because
+        // the token rotates — keying on it would open a new session on every
+        // refresh and leak the old one.
+        expect(entryFor(oauthServer('g1'))).toBe(entryFor(oauthServer('g1')));
+    });
+
+    // Both halves of the key are namespaced so neither can be spelled as the
+    // other: a static token reading `oauth:g1/linear` must not share a session
+    // and a tool cache with that guild's actual grant.
+    test('a static token cannot be spelled as somebody else\'s grant', () => {
+        const impostor = {
+            name: 'linear',
+            connection: {
+                url: 'https://mcp.example.com/mcp',
+                authorizationToken: 'oauth:g1/linear'
+            }
+        };
+
+        expect(entryFor(impostor)).not.toBe(entryFor(oauthServer('g1')));
+    });
+
+    test('an OAuth connection gets a client that can fetch a token', () => {
+        const entry = entryFor(oauthServer('g1'));
+        expect(typeof clientFor(entry, oauthServer('g1')).options.getAccessToken).toBe('function');
+    });
+
+    test('and a static one does not', () => {
+        expect(clientFor(entryFor(SERVER), SERVER).options.getAccessToken).toBeNull();
+    });
 });
 
 describe('one failing list does not take the connection with it', () => {

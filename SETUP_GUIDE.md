@@ -185,9 +185,10 @@ A few things worth knowing:
   reports the URL to register by hand.
 
 Any other server that wants a login works the same way, as long as it speaks
-the Streamable HTTP transport. Atlassian is the notable absence: its published
-endpoint uses the older HTTP+SSE transport, which the bot's MCP client does not
-implement.
+the Streamable HTTP transport — the one the bot's MCP client implements, here
+and for token connections alike. Atlassian is the notable absence: its published
+endpoint uses the older HTTP+SSE transport, which is a separate protocol rather
+than a response format, and is not implemented.
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over
@@ -270,7 +271,7 @@ file lives outside the repo checkout.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Unique identifier, letters/digits/`_`/`-`. Appears in Claude's tool calls. |
-| `url` | Yes | The server's HTTPS endpoint (Streamable HTTP or SSE). Local stdio servers cannot be reached this way. |
+| `url` | Yes | The server's HTTPS endpoint, speaking the Streamable HTTP transport. Local stdio servers cannot be reached this way, and neither can the older HTTP+SSE transport — a Streamable HTTP server may still answer in SSE, which is a different thing. |
 | `enabled` | No | Set `false` to keep an entry in the file without connecting to it. |
 | `authorization_token` | No | OAuth bearer token, if the server needs one. |
 | `allowed_tools` | No | Allowlist of tool names. Empty means every tool. |

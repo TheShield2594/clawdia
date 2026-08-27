@@ -3239,7 +3239,13 @@ async function startMcpOAuth(name, out) {
             return;
         }
 
-        const opened = window.open(data.authorizationUrl, '_blank', 'noopener');
+        // `noopener` in the feature string makes window.open return null even
+        // when it succeeded, which would make every successful sign-in read as
+        // a blocked popup. The handle is what tells the two apart, so the
+        // opener is severed on the returned window instead — same protection,
+        // and the detection below keeps working.
+        const opened = window.open(data.authorizationUrl, '_blank');
+        if (opened) opened.opener = null;
         if (out) {
             out.className = 'mcp-test-result';
             out.textContent = opened
@@ -3263,7 +3269,12 @@ async function startMcpOAuth(name, out) {
 
 /** Forget a grant. The connection stays, unauthenticated, ready to reconnect. */
 async function disconnectMcpOAuth(name) {
-    if (!confirm('Sign out of "' + name + '"? The connection stays, but the bot will not be able to use it until you connect again.')) return;
+    const ok = await showConfirm({
+        title: 'Sign out of connection',
+        body: 'Sign out of "' + name + '"? The connection stays, but the bot will not be able to use it until you connect again.',
+        okText: 'Sign out'
+    });
+    if (!ok) return;
     const guildId = BOOT.guildId;
     try {
         const resp = await fetch(

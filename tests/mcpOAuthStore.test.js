@@ -47,6 +47,10 @@ function storedGrant(over = {}) {
         refreshToken: 'enc:rt1',
         expiresAt: new Date(Date.now() + HOUR),
         scope: 'read',
+        // Present so the refresh below can be shown not to drop them. They are
+        // the only record of who authorized the connection and when.
+        connectedBy: 'admin-1',
+        connectedAt: new Date('2026-08-01T00:00:00Z'),
         ...over,
     };
 }
@@ -217,6 +221,22 @@ describe('the rotation problem', () => {
         await accessTokenFor('g1', 'linear');
 
         expect(refreshTokens).toHaveBeenCalledTimes(2);
+    });
+
+    // `refreshGrant` spreads the opened grant into what it seals, so a field
+    // `openGrant` forgets to carry is a field every refresh silently rewrites —
+    // `connectedBy` to null, `connectedAt` to the moment of the renewal.
+    test('a refresh keeps who connected the grant, and when', async () => {
+        stubRead(storedGrant({ expiresAt: new Date(Date.now() - 1000) }));
+        refreshTokens.mockResolvedValue({ accessToken: 'at2', refreshToken: 'rt2', expiresAt: null, scope: null });
+
+        await accessTokenFor('g1', 'linear');
+
+        const [, update] = Guild.updateOne.mock.calls[0];
+        expect(update.$set['ai.mcpServers.$.oauth']).toMatchObject({
+            connectedBy: 'admin-1',
+            connectedAt: new Date('2026-08-01T00:00:00Z'),
+        });
     });
 
     // A server that does not rotate omits the refresh token. Writing that null

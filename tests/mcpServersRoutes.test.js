@@ -167,6 +167,25 @@ describe('an edit that invalidates an OAuth login', () => {
         expect(body.servers[0].oauth.renewable).toBe(false);
     });
 
+    // The pool is keyed by credential, so a warm-up without the grant fills a
+    // different entry than a chat request will use — a 401 nobody asked for,
+    // and a cache still cold.
+    test('warms the connection with its login, not unauthenticated', async () => {
+        doc = withGrant();
+
+        await api('PUT', '/guild/g1/mcp-servers/linear', { url: 'https://mcp.example.com/mcp' });
+
+        expect(mockPrewarm).toHaveBeenCalledWith([expect.objectContaining({ name: 'linear', oauth: grant })]);
+    });
+
+    test('and without one once the login has just been cleared', async () => {
+        doc = withGrant();
+
+        await api('PUT', '/guild/g1/mcp-servers/linear', { url: 'https://other.example.com/mcp' });
+
+        expect(mockPrewarm).toHaveBeenCalledWith([expect.objectContaining({ oauth: null })]);
+    });
+
     test('drops the login when the connection is pointed somewhere else', async () => {
         doc = withGrant();
 
@@ -216,7 +235,12 @@ describe('an edit that invalidates an OAuth login', () => {
         expect(doc.ai.mcpServers[0].oauth).toBe(grant);
     });
 
-    test('offers the presets that take a login rather than a token', async () => {
+});
+
+describe('the preset list', () => {
+    test('offers the ones that take a login rather than a token', async () => {
+        doc = makeDoc([]);
+
         const { body } = await api('GET', '/guild/g1/mcp-servers');
         const oauthPresets = body.presets.filter(p => p.oauth).map(p => p.id);
 

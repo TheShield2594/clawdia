@@ -59,6 +59,13 @@ function openGrant(stored) {
         refreshToken:          stored.refreshToken ? decryptSecret(stored.refreshToken) : null,
         expiresAt:             stored.expiresAt ?? null,
         scope:                 stored.scope ?? null,
+        // Carried through even though nothing here reads them: `refreshGrant`
+        // spreads this object into the one it hands `sealGrant`, so a field
+        // dropped here is a field a refresh quietly overwrites — who connected
+        // the grant would be lost, and when, reset to the moment of the first
+        // token renewal.
+        connectedBy:           stored.connectedBy ?? null,
+        connectedAt:           stored.connectedAt ?? null,
     };
 }
 
