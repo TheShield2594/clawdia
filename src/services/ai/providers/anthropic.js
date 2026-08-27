@@ -45,11 +45,19 @@ const PRICING = [
 // one Discord message generating forever.
 const MAX_PAUSE_TURN_CONTINUATIONS = 3;
 
+// The guild setting allows 0–2 (OpenAI's range), but Anthropic rejects
+// anything above 1: a temperature tuned for another provider must not turn
+// into an HTTP 400 on every message after switching to Claude.
+function clampTemperature(temperature) {
+    if (typeof temperature !== 'number' || Number.isNaN(temperature)) return undefined;
+    return Math.min(Math.max(temperature, 0), 1);
+}
+
 function baseRequest({ model, systemPrompt, temperature, maxTokens }) {
     return {
         model,
         max_tokens: maxTokens,
-        temperature,
+        temperature: clampTemperature(temperature),
         system: [
             { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
         ]

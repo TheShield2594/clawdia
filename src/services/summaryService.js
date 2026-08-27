@@ -8,6 +8,14 @@ const COLORS = require('../utils/embedColors');
 
 const MAX_TRANSCRIPT_CHARS = 6000;
 const DIGEST_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+// A run claims its daily slot for this long. 23h rather than 24 so a run that
+// fired late (catch-up after downtime) does not push the next day's past its
+// configured time for good.
+const REFIRE_GUARD_MS = 23 * 60 * 60 * 1000;
+// Only the last MAX_TRANSCRIPT_CHARS of transcript survive, so there is no
+// point paginating a busy channel arbitrarily deep into the 24h window — the
+// newest few hundred messages already overflow what the summary can read.
+const MAX_DIGEST_PAGES_PER_CHANNEL = 5;
 
 function localHourMinute(timezone) {
     try {
@@ -110,11 +118,12 @@ async function runDailyDigest(guildSettings, client) {
             || await guild.channels.fetch(channelId).catch(() => null);
         if (!channel || !channel.isTextBased()) continue;
 
-        // Paginate until all messages within the lookback window are collected.
+        // Paginate through the lookback window, newest first, bounded: one
+        // busy channel must not hold the whole scheduler tick (#824).
         const channelMessages = [];
         let before;
         let done = false;
-        while (!done) {
+        for (let page = 0; !done && page < MAX_DIGEST_PAGES_PER_CHANNEL; page++) {
             const fetchOpts = { limit: 100 };
             if (before) fetchOpts.before = before;
             const batch = await channel.messages.fetch(fetchOpts).catch(() => null);
@@ -180,45 +189,85 @@ async function runDailyDigest(guildSettings, client) {
     return true;
 }
 
+// Has the configured wall-clock time already passed today? Due-ness is a
+// window from that time to midnight, not the exact minute (#824): a tick lost
+// to the overlap guard, a slow digest, or downtime used to cost the whole
+// day's run, because the next tick no longer matched hour/minute equality.
+// The REFIRE_GUARD_MS check on lastRun is what stops the window re-firing.
+function timeHasPassed(nowHour, nowMinute, dueHour, dueMinute) {
+    return nowHour > dueHour || (nowHour === dueHour && nowMinute >= dueMinute);
+}
+
+async function runSchedulerTick(client) {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - REFIRE_GUARD_MS);
+    const utcHour = now.getUTCHours();
+    const utcMinute = now.getUTCMinutes();
+
+    const jobs = await SummaryJob.find({
+        enabled: true,
+        $or: [{ hour: { $lt: utcHour } }, { hour: utcHour, minute: { $lte: utcMinute } }]
+    });
+
+    for (const job of jobs) {
+        if (job.lastRun && now - job.lastRun < REFIRE_GUARD_MS) continue;
+
+        // Atomic claim before the run, mirroring the newspaper (#824): the slot
+        // is spent up front, so a run that fails half-way — or a concurrent
+        // worker — cannot fire again every minute for the rest of the day.
+        const claimed = await SummaryJob.findOneAndUpdate(
+            { _id: job._id, enabled: true, $or: [{ lastRun: null }, { lastRun: { $lte: cutoff } }] },
+            { $set: { lastRun: now } },
+            { new: true }
+        );
+        if (!claimed) continue;
+
+        await runJob('summaryService', 'runSummaryJob', () => runSummaryJob(claimed, client), {
+            guildId: claimed.guildId,
+            payload: { jobId: String(claimed._id), label: claimed.label },
+        });
+    }
+
+    // Check guild-level daily digests
+    const guildsWithDigest = await Guild.find({
+        'ai.enabled': true,
+        'ai.dailyDigest.enabled': true,
+        'ai.dailyDigest.channelId': { $ne: null }
+    }).lean(false);
+
+    for (const guildSettings of guildsWithDigest) {
+        const digest = guildSettings.ai.dailyDigest;
+        const { hour, minute } = localHourMinute(digest.timezone);
+        if (!timeHasPassed(hour, minute, digest.hour, digest.minute)) continue;
+        if (digest.lastRun && now - digest.lastRun < REFIRE_GUARD_MS) continue;
+
+        const claimed = await Guild.findOneAndUpdate(
+            {
+                guildId: guildSettings.guildId,
+                'ai.enabled': true,
+                'ai.dailyDigest.enabled': true,
+                $or: [
+                    { 'ai.dailyDigest.lastRun': null },
+                    { 'ai.dailyDigest.lastRun': { $lte: cutoff } }
+                ]
+            },
+            { $set: { 'ai.dailyDigest.lastRun': now } }
+        );
+        if (!claimed) continue;
+
+        await runJob('summaryService', 'runDailyDigest', () => runDailyDigest(guildSettings, client), {
+            guildId: guildSettings.guildId,
+        });
+    }
+}
+
 function startSummaryService(client) {
     // Check every minute whether any daily job is due
     cron.schedule('* * * * *', () =>
-        runJob('summaryService', 'scheduler', async () => {
-            const now = new Date();
-            const utcHour = now.getUTCHours();
-            const utcMinute = now.getUTCMinutes();
-            const jobs = await SummaryJob.find({ enabled: true, hour: utcHour, minute: utcMinute });
-
-            for (const job of jobs) {
-                // Skip if already ran within the last 23 hours
-                if (job.lastRun && now - job.lastRun < 23 * 60 * 60 * 1000) continue;
-
-                await runJob('summaryService', 'runSummaryJob', () => runSummaryJob(job, client), {
-                    guildId: job.guildId,
-                    payload: { jobId: String(job._id), label: job.label },
-                });
-            }
-
-            // Check guild-level daily digests
-            const guildsWithDigest = await Guild.find({
-                'ai.enabled': true,
-                'ai.dailyDigest.enabled': true,
-                'ai.dailyDigest.channelId': { $ne: null }
-            }).lean(false);
-
-            for (const guildSettings of guildsWithDigest) {
-                const digest = guildSettings.ai.dailyDigest;
-                const { hour, minute } = localHourMinute(digest.timezone);
-                if (hour !== digest.hour || minute !== digest.minute) continue;
-                if (digest.lastRun && now - digest.lastRun < 23 * 60 * 60 * 1000) continue;
-                await runJob('summaryService', 'runDailyDigest', () => runDailyDigest(guildSettings, client), {
-                    guildId: guildSettings.guildId,
-                });
-            }
-        })
+        runJob('summaryService', 'scheduler', () => runSchedulerTick(client))
     );
 
     console.log('[SummaryService] Started');
 }
 
-module.exports = { startSummaryService, runSummaryJob, runDailyDigest };
+module.exports = { startSummaryService, runSummaryJob, runDailyDigest, __test__: { runSchedulerTick, timeHasPassed, REFIRE_GUARD_MS } };

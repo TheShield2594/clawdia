@@ -309,10 +309,6 @@ function createBotGateway(client) {
             return require('../services/rssService').sendDailyNews(client, guildId, profileId);
         },
 
-        rescheduleDailyNews(guildId) {
-            return require('../services/rssService').rescheduleDailyNews(client, guildId);
-        },
-
         rescheduleBibleVerse(guildId) {
             return require('../services/dailyBibleService').rescheduleBibleVerse(client, guildId);
         },

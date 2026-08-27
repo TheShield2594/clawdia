@@ -18,8 +18,10 @@ async function appendHistory(guildId, channelId, userId, userText, assistantText
     }
     doc.messages.push({ role: 'user', content: userText });
     doc.messages.push({ role: 'assistant', content: assistantText });
-    if (doc.messages.length > max * 2) {
-        doc.messages = doc.messages.slice(-max * 2);
+    // Retain exactly what loadHistory reads: `max` messages. Keeping more
+    // would persist turns no request ever loads (#823).
+    if (doc.messages.length > max) {
+        doc.messages = doc.messages.slice(-max);
     }
     await doc.save();
 }

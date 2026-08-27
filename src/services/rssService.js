@@ -9,6 +9,11 @@ const COLORS = require('../utils/embedColors');
 
 const parser = new Parser();
 
+// A daily-news send claims its slot for this long. 23h rather than 24 so a
+// send that fired late (catch-up after downtime) does not push the next
+// day's past its configured time for good.
+const DAILY_NEWS_REFIRE_GUARD_MS = 23 * 60 * 60 * 1000;
+
 // Feed URLs are operator-supplied, so every poll is an outbound request to a
 // destination a guild admin chose. Route them through the SSRF-safe fetcher
 // (private/reserved IPs blocked, DNS pinned against rebinding, redirects and
@@ -18,7 +23,6 @@ const parser = new Parser();
 async function parseFeedUrl(url) {
     return parser.parseString(await safeFetchFeed(url));
 }
-const dailyNewsJobs = new Map();
 const runtimeTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // Consecutive failure counts per feed URL. Feeds are skipped after DEAD_FEED_THRESHOLD failures,
@@ -90,6 +94,7 @@ function createLegacyProfile(guild) {
         feeds: Array.isArray(legacy.feeds) ? legacy.feeds : [],
         title: legacy.title || '📰 Daily News Digest',
         maxItemsPerFeed: legacy.maxItemsPerFeed || 3,
+        lastSentAt: legacy.lastSentAt || null,
         sentLinks: Array.isArray(legacy.sentLinks) ? legacy.sentLinks : []
     };
 }
@@ -362,74 +367,108 @@ async function sendDailyNews(client, guildId, profileId = null) {
     }
 }
 
-function scheduleProfileJob(client, guildId, profile) {
-    const safeTime = /^([01]\d|2[0-3]):([0-5]\d)$/.test(profile.time || '') ? profile.time : '09:00';
-    const [hour, minute] = safeTime.split(':').map(Number);
-    const cronExpression = `${minute} ${hour} * * *`;
-    const jobKey = `${guildId}:${profile.profileId}`;
-
-    if (dailyNewsJobs.has(jobKey)) {
-        dailyNewsJobs.get(jobKey).stop();
-    }
-
+// The local wall-clock hour/minute in `timezone`, falling back to the
+// runtime's zone when it is missing or invalid — the same zone the old
+// in-memory cron jobs ran profiles without a timezone in.
+function localHourMinute(timezone, now) {
     try {
-        const job = cron.schedule(cronExpression, () =>
-            runJob('rssService', 'sendDailyNews', () => sendDailyNews(client, guildId, profile.profileId), {
-                guildId,
-                payload: { profileId: profile.profileId },
-            }),
-        profile.timezone ? { timezone: profile.timezone } : undefined);
-
-        dailyNewsJobs.set(jobKey, job);
-        console.log(`Scheduled daily news for guild ${guildId}, profile ${profile.profileId} at ${safeTime}${profile.timezone ? ` (${profile.timezone})` : ''}`);
-    } catch (error) {
-        console.error(`Failed to schedule daily news for guild ${guildId}, profile ${profile.profileId}:`, error.message);
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: timezone || runtimeTimezone,
+            hour: 'numeric',
+            minute: 'numeric',
+            hour12: false
+        }).formatToParts(now);
+        return {
+            hour: parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10),
+            minute: parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10)
+        };
+    } catch {
+        return { hour: now.getUTCHours(), minute: now.getUTCMinutes() };
     }
 }
 
-function scheduleDailyNews(client) {
-    Guild.find({}, DAILY_NEWS_FIELDS).lean().then(guilds => {
-        for (const guild of guilds) {
-            const profiles = getDailyNewsProfiles(guild)
-                .filter(profile => profile.enabled && Array.isArray(profile.feeds) && profile.feeds.length > 0);
-            for (const profile of profiles) {
-                scheduleProfileJob(client, guild.guildId, profile);
+// Due once the configured local time has passed today and the last send is
+// stale, not only on the exact minute (#824). The old per-profile node-cron
+// jobs lived in memory: a restart, or the process being down at hh:mm,
+// silently cost the day's digest. This is re-derived from the database every
+// tick, so it also picks up dashboard edits with no reschedule step.
+function dailyNewsDue(profile, now) {
+    const safeTime = /^([01]\d|2[0-3]):([0-5]\d)$/.test(profile.time || '') ? profile.time : '09:00';
+    const [dueHour, dueMinute] = safeTime.split(':').map(Number);
+    const { hour, minute } = localHourMinute(profile.timezone, now);
+    if (hour < dueHour || (hour === dueHour && minute < dueMinute)) return false;
+    if (profile.lastSentAt && now - new Date(profile.lastSentAt) < DAILY_NEWS_REFIRE_GUARD_MS) return false;
+    return true;
+}
+
+// Atomically claim the profile's daily slot before sending, so a failed send
+// cannot re-fire every minute for the rest of the day and a concurrent worker
+// cannot double-send. Returns false when someone else already claimed it.
+async function claimDailyNewsRun(guildId, profile, isLegacy, now) {
+    const cutoff = new Date(now.getTime() - DAILY_NEWS_REFIRE_GUARD_MS);
+    const filter = isLegacy
+        ? {
+            guildId,
+            'dailyNews.enabled': true,
+            $or: [{ 'dailyNews.lastSentAt': null }, { 'dailyNews.lastSentAt': { $lte: cutoff } }]
+        }
+        : {
+            guildId,
+            dailyNewsProfiles: {
+                $elemMatch: {
+                    profileId: profile.profileId,
+                    enabled: true,
+                    $or: [{ lastSentAt: null }, { lastSentAt: { $lte: cutoff } }]
+                }
             }
-        }
-    }).catch(error => {
-        console.error('Error scheduling daily news:', error);
-    });
+        };
+    const update = isLegacy
+        ? { $set: { 'dailyNews.lastSentAt': now } }
+        : { $set: { 'dailyNewsProfiles.$.lastSentAt': now } };
+
+    const res = await Guild.updateOne(filter, update);
+    return res.modifiedCount === 1;
 }
 
-function rescheduleDailyNews(client, guildId) {
-    for (const [key, job] of dailyNewsJobs.entries()) {
-        if (key.startsWith(`${guildId}:`)) {
-            job.stop();
-            dailyNewsJobs.delete(key);
-        }
-    }
+async function runDueDailyNews(client) {
+    const now = new Date();
+    const guilds = await Guild.find(
+        { $or: [{ 'dailyNewsProfiles.enabled': true }, { 'dailyNews.enabled': true }] },
+        DAILY_NEWS_FIELDS
+    ).lean();
 
-    // Same three fields the startup sweep reads. Without the projection this
-    // pulled the guild's shop-item and activity-item image Buffers into memory
-    // on every dashboard save that touched a daily-news setting.
-    Guild.findOne({ guildId }, DAILY_NEWS_FIELDS).lean().then(guild => {
-        if (!guild) return;
-
+    for (const guild of guilds) {
+        const isLegacy = !(Array.isArray(guild.dailyNewsProfiles) && guild.dailyNewsProfiles.length > 0);
         const profiles = getDailyNewsProfiles(guild)
             .filter(profile => profile.enabled && Array.isArray(profile.feeds) && profile.feeds.length > 0);
 
         for (const profile of profiles) {
-            scheduleProfileJob(client, guildId, profile);
+            if (!dailyNewsDue(profile, now)) continue;
+            if (!await claimDailyNewsRun(guild.guildId, profile, isLegacy, now)) continue;
+
+            await runJob('rssService', 'sendDailyNews', () => sendDailyNews(client, guild.guildId, profile.profileId), {
+                guildId: guild.guildId,
+                payload: { profileId: profile.profileId },
+            });
         }
-    }).catch(error => {
-        console.error('Error rescheduling daily news:', error);
-    });
+    }
+}
+
+function scheduleDailyNews(client) {
+    // A minute tick over persisted state, not one in-memory cron job per
+    // profile: survives restarts, catches up after downtime, and needs no
+    // reschedule hook when the dashboard changes a time.
+    cron.schedule('* * * * *', () =>
+        runJob('rssService', 'dailyNewsScheduler', () => runDueDailyNews(client))
+    );
+    console.log('[RSS] Daily news scheduler started');
 }
 
 module.exports = {
-    checkRssFeeds, scheduleDailyNews, rescheduleDailyNews, sendDailyNews,
+    checkRssFeeds, scheduleDailyNews, sendDailyNews,
     __test__: {
         feedFailCounts, feedLastFailTime, shouldSkipDeadFeed,
         DEAD_FEED_THRESHOLD, DEAD_FEED_COOLDOWN_MS, RSS_FETCH_CONCURRENCY,
+        dailyNewsDue, runDueDailyNews, DAILY_NEWS_REFIRE_GUARD_MS,
     },
 };

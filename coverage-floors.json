@@ -199,7 +199,6 @@
         "src/events/webhooksUpdate.js",
         "src/index.js",
         "src/models/AuditLog.js",
-        "src/services/summaryService.js",
         "src/shard.js"
     ],
     "coveredOnlyByIntegration": [

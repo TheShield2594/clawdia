@@ -58,7 +58,7 @@ jest.mock('../src/services/pollService', () => ({ handlePollVote: jest.fn() }));
 jest.mock('../src/models/Case', () => ({ find: jest.fn() }));
 jest.mock('../src/models/KnowledgeBase', () => ({}));
 jest.mock('../src/models/SummaryJob', () => ({}));
-jest.mock('../src/services/rssService', () => ({ rescheduleDailyNews: jest.fn(), sendDailyNews: jest.fn() }));
+jest.mock('../src/services/rssService', () => ({ sendDailyNews: jest.fn() }));
 jest.mock('../src/services/dailyBibleService', () => ({ rescheduleBibleVerse: jest.fn() }));
 jest.mock('rss-parser', () => jest.fn().mockImplementation(() => ({})));
 jest.mock('express', () => {
