@@ -109,6 +109,11 @@ async function clientToolkit(req) {
 
 // MCP tools as Anthropic tool definitions. The toolkit has already done
 // everything that is the same for every provider, so this is a rename.
+//
+// Called once per round, never hoisted out of the loop: the toolkit's
+// definitions grow when the model loads a deferred tool (#795), and a list
+// captured before the first request would never declare the tool it just asked
+// for — leaving the model able to see a tool in the catalogue and never call it.
 function toolParams(toolkit) {
     return toolkit.definitions.map(def => ({
         name: def.name,
@@ -159,7 +164,6 @@ async function* streamWithTools(client, req, toolkit) {
     const { model, systemPrompt, history, prompt, temperature, maxTokens, usageOut } = req;
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const messages = buildMessages(history, prompt);
-    const tools = toolParams(toolkit);
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -173,7 +177,7 @@ async function* streamWithTools(client, req, toolkit) {
         const response = await client.messages.stream({
             ...base,
             messages,
-            ...(offerTools ? { tools } : {})
+            ...(offerTools ? { tools: toolParams(toolkit) } : {})
         });
 
         let roundText = false;
@@ -203,7 +207,6 @@ async function completeWithTools(client, req, toolkit) {
     const { model, systemPrompt, history, prompt, temperature, maxTokens } = req;
     const base = baseRequest({ model, systemPrompt, temperature, maxTokens });
     const messages = buildMessages(history, prompt);
-    const tools = toolParams(toolkit);
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -214,7 +217,7 @@ async function completeWithTools(client, req, toolkit) {
         const response = await client.messages.create({
             ...base,
             messages,
-            ...(offerTools ? { tools } : {})
+            ...(offerTools ? { tools: toolParams(toolkit) } : {})
         });
 
         const text = textOf(response.content);

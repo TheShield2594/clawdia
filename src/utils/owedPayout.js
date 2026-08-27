@@ -24,6 +24,7 @@
  */
 
 const FailedJob = require('../models/FailedJob');
+const { creditCoinsOnce, grantItemOnce, hourlyPayoutKey, listingPayoutKey } = require('./payoutKey');
 
 // `jobName` on these records is the job that owed the payout, suffixed. runJob
 // files its own entry under the bare job name when the sweep throws, and the two
@@ -77,6 +78,30 @@ async function recordOwedPayout({ service, jobName, guildId = null, payload, err
 }
 
 /**
+ * The payout key for a stored payload (#807).
+ *
+ * `payoutKey` is written into the payload by everything that records one now, so
+ * the replay applies the same key the original credit tried to. The derivations
+ * below are for records written before the key existed: their payloads already
+ * carry `hour`/`category` and `listingId`, which is exactly what the key is made
+ * of, so those replay guarded too.
+ *
+ * `null` for anything with neither — a payload from a caller that never supplied
+ * a key. That replay stays at-least-once, which is what it was before, and
+ * `replayOwedPayout` says so in the log rather than pretending otherwise.
+ */
+function payoutKeyForPayload(payload) {
+    if (typeof payload?.payoutKey === 'string' && payload.payoutKey) return payload.payoutKey;
+    if (payload?.kind === 'coins' && payload.hour && payload.category) {
+        return hourlyPayoutKey(payload.hour, payload.category);
+    }
+    if (payload?.kind === 'items' && payload.listingId) {
+        return listingPayoutKey(payload.listingId);
+    }
+    return null;
+}
+
+/**
  * Pays one owed payout, from the payload `recordOwedPayout` stored.
  *
  * Written to be handed straight to `retryJob`, which treats a return as paid and
@@ -85,13 +110,27 @@ async function recordOwedPayout({ service, jobName, guildId = null, payload, err
  * `null` when no document matches, which is exactly the case that made the
  * hourly credit lose a winner in silence to begin with.
  *
+ * With a payout key in the filter (#807) that `null` gained a second meaning —
+ * "already applied" — and the two need opposite handling: 'missing' is still
+ * owed and must throw, 'duplicate' is done and must return, or the replay loops
+ * on a payout that has been paid. `classifyUnmatchedPayout` is what tells them
+ * apart; the silent-skip #804 closed does not come back under a new name.
+ *
  * Two kinds, one per claim site:
  *
- *   coins  { kind: 'coins', userId, guildId, amount }
- *   items  { kind: 'items', userId, guildId, itemId, quantity }
+ *   coins  { kind: 'coins', userId, guildId, amount,           payoutKey? }
+ *   items  { kind: 'items', userId, guildId, itemId, quantity, payoutKey? }
  */
 async function replayOwedPayout(payload) {
     const kind = payload?.kind;
+    const key  = payoutKeyForPayload(payload);
+
+    if (!key) {
+        console.warn(
+            `[owedPayout] replaying ${describeOwedPayout(payload)} without a payout key — ` +
+            'this credit is at-least-once and a second replay would pay it again',
+        );
+    }
 
     if (kind === 'coins') {
         const { userId, guildId, amount } = payload;
@@ -100,14 +139,27 @@ async function replayOwedPayout(payload) {
         }
 
         const User = require('../models/User');
-        const credited = await User.findOneAndUpdate(
-            { userId, guildId },
-            { $inc: { balance: amount } },
-        );
-        if (!credited) {
+        if (!key) {
+            const credited = await User.findOneAndUpdate(
+                { userId, guildId },
+                { $inc: { balance: amount } },
+            );
+            if (!credited) {
+                throw new Error(`no user document for ${userId} in ${guildId} — nothing to credit`);
+            }
+            return;
+        }
+
+        const { status } = await creditCoinsOnce({ userId, guildId }, amount, key);
+        if (status === 'paid') return;
+        if (status === 'duplicate') {
+            console.log(`[owedPayout] ${key} had already been applied — no coins moved`);
+            return;
+        }
+        if (status === 'missing') {
             throw new Error(`no user document for ${userId} in ${guildId} — nothing to credit`);
         }
-        return;
+        throw new Error(`credit for ${userId} in ${guildId} matched nothing but ${key} is absent — retry`);
     }
 
     if (kind === 'items') {
@@ -116,9 +168,21 @@ async function replayOwedPayout(payload) {
             throw new Error(`owed items payload is incomplete: ${JSON.stringify(payload)}`);
         }
 
-        const { grantInventoryItem } = require('./inventoryGrant');
-        await grantInventoryItem(userId, guildId, itemId, quantity, { upsert: true });
-        return;
+        if (!key) {
+            const { grantInventoryItem } = require('./inventoryGrant');
+            await grantInventoryItem(userId, guildId, itemId, quantity, { upsert: true });
+            return;
+        }
+
+        const { status } = await grantItemOnce(
+            { userId, guildId }, itemId, quantity, key, { upsert: true },
+        );
+        if (status === 'paid') return;
+        if (status === 'duplicate') {
+            console.log(`[owedPayout] ${key} had already been applied — no items granted`);
+            return;
+        }
+        throw new Error(`return for ${userId} in ${guildId} matched nothing (${status}) — retry`);
     }
 
     throw new Error(`unknown owed payout kind: ${JSON.stringify(kind)}`);
@@ -135,4 +199,4 @@ function describeOwedPayout(payload) {
     return JSON.stringify(payload);
 }
 
-module.exports = { recordOwedPayout, replayOwedPayout, describeOwedPayout, isOwedPayout, OWED_SUFFIX };
+module.exports = { recordOwedPayout, replayOwedPayout, describeOwedPayout, payoutKeyForPayload, isOwedPayout, OWED_SUFFIX };

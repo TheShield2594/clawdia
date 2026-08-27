@@ -6,8 +6,8 @@ const { PET_DEFINITIONS, heartBar } = require('./petService');
 const { ensurePricingFields, nextPrice, decayDemand, demandDecayFactor, trendBucket, HISTORY_CAP } = require('../utils/dynamicPricing');
 const { softResetElo, tierFor, makeSeasonId } = require('../utils/duelElo');
 const { topByNetWorth } = require('../utils/netWorth');
-const { grantInventoryItem } = require('../utils/inventoryGrant');
 const { recordOwedPayout } = require('../utils/owedPayout');
+const { creditCoinsOnce, grantItemOnce, hourlyPayoutKey, listingPayoutKey } = require('../utils/payoutKey');
 const COLORS = require('../utils/embedColors');
 
 const WAR_BOOSTER_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -633,41 +633,71 @@ async function announceHourlyWinners(client) {
     // it does not throw, so the old `.catch` never fired and a winner whose
     // record had been pruned was silently not paid while the announcement went
     // on naming them as rewarded.
+    //
+    // The credit carries a payout key (#807) so it is exactly-once rather than
+    // at-least-once: a `$inc` whose response is lost is written down as owed and
+    // paid a second time by the replay script, minting coins. The key is in the
+    // credit's own filter, so the replay simply matches nothing.
+    //
+    // Which is also why `null` now has two meanings and the classification
+    // matters — 'missing' is owed, 'duplicate' is done, and treating the second
+    // as the first is #804 returning under a new name.
     const rewardAmount = 500;
     const paidWinners = [];
     let failedCredits = 0;
     let unrecordedCredits = 0;
 
     for (const winner of actualWinners) {
-        let credited = null;
+        const payoutKey = hourlyPayoutKey(prevHour, winner.category);
+        let status = null;
         let creditErr = null;
         try {
-            credited = await User.findOneAndUpdate(
+            ({ status } = await creditCoinsOnce(
                 { userId: winner.userId, guildId: winner.guildId },
-                { $inc: { balance: rewardAmount } }
-            );
+                rewardAmount,
+                payoutKey,
+                { Model: User },
+            ));
         } catch (err) {
             creditErr = err;
         }
 
-        if (credited) {
+        if (status === 'paid') {
             paidWinners.push(winner);
             continue;
         }
 
+        // Already applied by an earlier attempt whose response was lost. The
+        // winner has their coins, so they are announced with everyone else and
+        // nothing is owed — the one outcome that is neither a success to credit
+        // nor a failure to record.
+        if (status === 'duplicate') {
+            paidWinners.push(winner);
+            console.warn(
+                `[scheduler] hourly reward for ${winner.userId} in ${winner.guildId} ` +
+                `(${winner.category}) was already applied under ${payoutKey} — not paid again`,
+            );
+            continue;
+        }
+
         failedCredits += 1;
-        const reason = creditErr?.message ?? `no user document for ${winner.userId} in ${winner.guildId}`;
+        const reason = creditErr?.message ?? (
+            status === 'missing'
+                ? `no user document for ${winner.userId} in ${winner.guildId}`
+                : `credit for ${winner.userId} in ${winner.guildId} matched nothing without the payout key present`
+        );
         const recorded = await recordOwedPayout({
             service: 'schedulerService',
             jobName: 'announceHourlyWinners',
             guildId: winner.guildId,
             payload: {
-                kind:     'coins',
-                userId:   winner.userId,
-                guildId:  winner.guildId,
-                amount:   rewardAmount,
-                hour:     prevHour,
-                category: winner.category,
+                kind:      'coins',
+                userId:    winner.userId,
+                guildId:   winner.guildId,
+                amount:    rewardAmount,
+                hour:      prevHour,
+                category:  winner.category,
+                payoutKey,
             },
             error: creditErr ?? new Error(reason),
         });
@@ -1167,13 +1197,47 @@ async function returnExpiredMarketListings() {
             // Return items to the seller in one atomic update — the match-then-push
             // it replaced could hand two expiring listings of the same item their
             // own slot each, stranding one of them.
+            //
+            // Keyed by the listing id (#807), so a return whose write committed
+            // without its response reaching here is not applied twice by the
+            // replay script. The listing is gone, so the id will never be reused.
+            const payoutKey = listingPayoutKey(listing._id);
+            let status = null;
+            let creditErr = null;
             try {
-                await grantInventoryItem(listing.sellerId, listing.guildId, listing.itemId, listing.quantity, { upsert: true });
-            } catch (creditErr) {
+                ({ status } = await grantItemOnce(
+                    { userId: listing.sellerId, guildId: listing.guildId },
+                    listing.itemId, listing.quantity, payoutKey,
+                    { upsert: true },
+                ));
+            } catch (err) {
+                creditErr = err;
+            }
+
+            // 'duplicate' means an earlier attempt already returned these items.
+            // Counted with the successes: the seller has them, and recording the
+            // return as owed would put it straight back on the replay queue.
+            if (status === 'paid' || status === 'duplicate') {
+                if (status === 'duplicate') {
+                    console.warn(
+                        `[scheduler] listing ${listing._id} was already returned under ${payoutKey} — not returned again`,
+                    );
+                }
+                processed++;
+                continue;
+            }
+
+            {
                 // The listing is already deleted, so nothing will find this
                 // again — which is why the credit is written down as owed
                 // rather than left to a retry that will never come (#804).
+                //
+                // `upsert` is on above, so 'missing' cannot come back from a
+                // seller who simply has no document; anything here is a real
+                // failure or a concurrent write that beat the guard.
                 failed++;
+                const reason = creditErr?.message ??
+                    `return for ${listing.sellerId} in ${listing.guildId} matched nothing (${status})`;
                 const recorded = await recordOwedPayout({
                     service: 'schedulerService',
                     jobName: 'returnExpiredMarketListings',
@@ -1185,8 +1249,9 @@ async function returnExpiredMarketListings() {
                         itemId:    listing.itemId,
                         quantity:  listing.quantity,
                         listingId: String(listing._id),
+                        payoutKey,
                     },
-                    error: creditErr,
+                    error: creditErr ?? new Error(reason),
                 });
                 if (!recorded) unrecordedReturns += 1;
 
@@ -1196,11 +1261,10 @@ async function returnExpiredMarketListings() {
                     `[scheduler] listing ${listing._id} was claimed but crediting ` +
                     `${listing.quantity}x ${listing.itemId} to ${listing.sellerId} failed — ` +
                     `${recorded ? 'items owed, recorded for replay' : 'items owed and NOT recorded, must be returned by hand'}:`,
-                    creditErr.message,
+                    reason,
                 );
                 continue;
             }
-            processed++;
         } catch (err) {
             // A failure before the claim — the listing is untouched, so the
             // next tick finds it again. Counted all the same: a sweep that

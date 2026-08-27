@@ -236,6 +236,26 @@ function isToolEnabled(toolset, toolName) {
     return typeof fallback === 'boolean' ? fallback : true;
 }
 
+/**
+ * Whether one tool's schema should be withheld until the model asks for it.
+ *
+ * Tri-state on purpose. `true`/`false` are the operator having said so in the
+ * config file, and both are honoured as written; `undefined` is "nobody said",
+ * which is the common case and which the toolkit answers with its own rule —
+ * see DEFERRED_AFTER in src/services/ai/mcp/toolkit.js. Collapsing the third
+ * state into `false` here would make a per-tool default the operator never
+ * chose override a policy they cannot express any other way.
+ *
+ * Anthropic's connector reads `defer_loading` off the toolset directly, so this
+ * is the same field, read the same way, for every other provider.
+ */
+function isToolDeferred(toolset, toolName) {
+    const specific = toolset?.configs?.[toolName];
+    if (specific && typeof specific.defer_loading === 'boolean') return specific.defer_loading;
+    const fallback = toolset?.default_config?.defer_loading;
+    return typeof fallback === 'boolean' ? fallback : undefined;
+}
+
 // One entry becomes three pieces: an mcp_servers connection definition for
 // Anthropic's server-side connector, the mcp_toolset that references it by name
 // (the API rejects either half on its own, so they are always built together),
@@ -459,6 +479,7 @@ module.exports = {
     guildServersAllowed,
     requiresApproval,
     isToolEnabled,
+    isToolDeferred,
     toolAnnotations,
     needsConfirmation,
     loadMcpServers,

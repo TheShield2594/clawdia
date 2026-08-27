@@ -81,7 +81,12 @@ describe('returnExpiredMarketListings', () => {
 
         await returnExpiredMarketListings();
 
-        expect(grantInventoryItem).toHaveBeenCalledWith('u1', 'g1', 'potion', 7, { upsert: true });
+        // Guarded by the listing's payout key (#807), so a return whose write
+        // committed without its response arriving is not applied twice.
+        const [userId, guildId, itemId, quantity, options] = grantInventoryItem.mock.calls[0];
+        expect([userId, guildId, itemId, quantity]).toEqual(['u1', 'g1', 'potion', 7]);
+        expect(options.guard).toEqual({ 'paidPayouts.key': { $ne: 'listing:l1' } });
+        expect(JSON.stringify(options.extraSet.paidPayouts)).toContain('listing:l1');
     });
 
     test('a listing another worker already claimed is not credited again', async () => {
@@ -110,6 +115,7 @@ describe('returnExpiredMarketListings', () => {
             payload: {
                 kind: 'items', userId: 'u1', guildId: 'g1',
                 itemId: 'sword', quantity: 2, listingId: 'l1',
+                payoutKey: 'listing:l1',
             },
         }));
 

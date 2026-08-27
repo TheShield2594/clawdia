@@ -147,15 +147,34 @@ async function runToolCalls(toolkit, calls) {
 }
 
 /**
- * The same conversation, continued with no tools declared.
+ * The same conversation, continued with a different set of tools declared.
+ *
+ * Gemini's chat object takes its function declarations in the config it is
+ * created with, so unlike every other provider here the declarations cannot
+ * change mid-conversation — the chat has to be rebuilt from its own history.
+ * That was already true for the last round, which goes out with no tools at
+ * all; it is now also true when the model loads a deferred tool (#795) and the
+ * next round has to declare something the first one did not.
  *
  * Falls back to the chat as it is if the SDK cannot hand back its history —
  * the round counter still ends the loop, and continuing is better than sending
  * function responses into a chat that never saw the call they answer.
  */
-function withoutTools(req, chat) {
+function rebuild(req, chat, toolkit = null) {
     if (typeof chat.getHistory !== 'function') return chat;
-    return startChat(req, { priorHistory: chat.getHistory() });
+    return startChat(req, { toolkit, priorHistory: chat.getHistory() });
+}
+
+const withoutTools = (req, chat) => rebuild(req, chat, null);
+
+/**
+ * How many tools the chat currently declares, which is what a rebuild is
+ * decided against. The toolkit grows this array in place as deferred tools are
+ * loaded, so comparing lengths across a round is enough — nothing ever removes
+ * one.
+ */
+function declaredCount(toolkit) {
+    return toolkit ? toolkit.definitions.length : 0;
 }
 
 function callsOf(source) {
@@ -165,6 +184,7 @@ function callsOf(source) {
 async function* stream(req) {
     const toolkit = await toolkitFor(req);
     let chat = startChat(req, { toolkit });
+    let declared = declaredCount(toolkit);
     let message = req.prompt;
 
     const totals = { inputTokens: 0, outputTokens: 0 };
@@ -203,7 +223,15 @@ async function* stream(req) {
         // tools declared: the model's only remaining move is to answer. The
         // conversation so far comes from the chat itself, since it holds the
         // function-call turn these responses answer.
-        if (round + 1 === MAX_TOOL_ROUNDS) chat = withoutTools(req, chat);
+        if (round + 1 === MAX_TOOL_ROUNDS) {
+            chat = withoutTools(req, chat);
+        } else if (declaredCount(toolkit) !== declared) {
+            // The round loaded a deferred tool, so the chat is rebuilt to
+            // declare it. Checked after the calls have run, because loading is
+            // itself one of the calls.
+            declared = declaredCount(toolkit);
+            chat = rebuild(req, chat, toolkit);
+        }
     }
 
     if (req.usageOut && sawUsage) req.usageOut.usage = totals;
@@ -212,6 +240,7 @@ async function* stream(req) {
 async function complete(req) {
     const toolkit = await toolkitFor(req);
     let chat = startChat(req, { toolkit });
+    let declared = declaredCount(toolkit);
     let message = req.prompt;
 
     const totals = { inputTokens: 0, outputTokens: 0 };
@@ -234,7 +263,12 @@ async function complete(req) {
         const calls = callsOf(response);
         if (!calls.length) break;
         message = await runToolCalls(toolkit, calls);
-        if (round + 1 === MAX_TOOL_ROUNDS) chat = withoutTools(req, chat);
+        if (round + 1 === MAX_TOOL_ROUNDS) {
+            chat = withoutTools(req, chat);
+        } else if (declaredCount(toolkit) !== declared) {
+            declared = declaredCount(toolkit);
+            chat = rebuild(req, chat, toolkit);
+        }
     }
 
     return { text: parts.join('\n\n'), usage: sawUsage ? totals : null };

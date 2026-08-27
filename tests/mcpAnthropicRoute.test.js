@@ -251,6 +251,70 @@ describe('the client-side tool loop', () => {
     });
 });
 
+/**
+ * #795. Anthropic computed its tool list once, before the loop. A tool the model
+ * loads mid-turn has to be declared in the round after it, so the list is now
+ * rebuilt per round — which is the only change this provider needed.
+ */
+describe('a tool loaded mid-turn', () => {
+    const CLIENT = { ...REQ, mcpRoute: 'client' };
+    const LOADED = {
+        name: 'github__create_issue',
+        serverName: 'github',
+        toolName: 'create_issue',
+        description: 'Open an issue',
+        inputSchema: { type: 'object', properties: { title: { type: 'string' } } },
+        annotations: {},
+        confirm: false
+    };
+    const loadUse = { type: 'tool_use', id: 'tu_load', name: 'load_tools', input: { names: ['github__create_issue'] } };
+
+    const names = tools => (tools || []).map(t => t.name);
+
+    beforeEach(() => {
+        // The real toolkit grows its definitions array in place when the load
+        // tool is called; this is that, and nothing else.
+        const definitions = [{
+            name: 'load_tools',
+            serverName: null,
+            toolName: 'load_tools',
+            description: 'Load tools',
+            inputSchema: { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } } },
+            annotations: { readOnlyHint: true },
+            confirm: false
+        }];
+        mockCall.mockImplementation(async name => {
+            if (name === 'load_tools') {
+                definitions.push(LOADED);
+                return 'Loaded: github__create_issue.';
+            }
+            return 'ok';
+        });
+        mockToolkitFor.mockResolvedValue({ definitions, servers: ['github'], deferred: ['github__create_issue'], call: mockCall });
+    });
+
+    test('is declared on the round after the load, streamed', async () => {
+        mockStream
+            .mockReturnValueOnce(streamed([], { content: [loadUse], usage: usage(100, 20) }))
+            .mockReturnValueOnce(streamed([textDelta('Done.')], { content: [{ type: 'text', text: 'Done.' }], usage: usage(300, 10) }));
+
+        await collect(anthropic.stream(CLIENT));
+
+        expect(names(mockStream.mock.calls[0][0].tools)).toEqual(['load_tools']);
+        expect(names(mockStream.mock.calls[1][0].tools)).toEqual(['load_tools', 'github__create_issue']);
+    });
+
+    test('and unstreamed', async () => {
+        mockCreate
+            .mockResolvedValueOnce({ content: [loadUse] })
+            .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Done.' }] });
+
+        await anthropic.complete(CLIENT);
+
+        expect(names(mockCreate.mock.calls[1][0].tools)).toEqual(['load_tools', 'github__create_issue']);
+    });
+});
+
 describe('the client-side tool loop, unstreamed', () => {
     const CLIENT = { ...REQ, mcpRoute: 'client' };
 

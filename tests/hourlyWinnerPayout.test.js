@@ -103,13 +103,20 @@ describe('announceHourlyWinners', () => {
         expect(sent).toEqual([]);
     });
 
+    // The credit is a guarded pipeline update rather than a bare `$inc` (#807):
+    // the payout key is in the filter, so a replay of a credit whose response was
+    // lost matches nothing and moves no coins.
     test('credits the flat reward to the winner in their own guild', async () => {
         await announceHourlyWinners(fakeClient());
 
-        expect(User.findOneAndUpdate).toHaveBeenCalledWith(
-            { userId: 'u1', guildId: 'g1' },
-            { $inc: { balance: REWARD } },
-        );
+        const [filter, update] = User.findOneAndUpdate.mock.calls[0];
+        expect(filter).toEqual({
+            userId: 'u1', guildId: 'g1',
+            'paidPayouts.key': { $ne: `hourly:${getPreviousHourKey()}:fish` },
+        });
+        expect(update[0].$set.balance).toEqual({ $add: [{ $ifNull: ['$balance', 0] }, REWARD] });
+        expect(JSON.stringify(update[0].$set.paidPayouts))
+            .toContain(`hourly:${getPreviousHourKey()}:fish`);
     });
 
     test('an hour with no candidates does nothing at all', async () => {
@@ -246,7 +253,10 @@ describe('announceHourlyWinners', () => {
 
         await announceHourlyWinners(fakeClient());
 
-        expect(User.findOneAndUpdate).toHaveBeenCalledWith({ userId: 'u1', guildId: 'g1' }, { $inc: { balance: REWARD } });
+        const [filter, update] = User.findOneAndUpdate.mock.calls[0];
+        expect(filter.userId).toBe('u1');
+        expect(filter.guildId).toBe('g1');
+        expect(update[0].$set.balance).toEqual({ $add: [{ $ifNull: ['$balance', 0] }, REWARD] });
         expect(sent).toEqual([]);
     });
 
