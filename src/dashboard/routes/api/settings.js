@@ -410,11 +410,8 @@ router.post('/guild/:guildId/settings', checkAuth, checkGuildAccess, checkWriteR
         // L1: Record what changed and who changed it.
         await logAuditEvent(req, guildId, 'settings_update', { keys: Object.keys(updates) });
 
-        const shouldRescheduleDailyNews = Object.keys(updates).some(key => key.startsWith('dailyNews.') || key === 'dailyNewsProfiles');
-        if (shouldRescheduleDailyNews) {
-            req.bot.rescheduleDailyNews(guildId);
-        }
-
+        // Daily-news schedule changes need no reschedule hook: the scheduler
+        // re-reads profile times from the database on every minute tick.
         const shouldRescheduleBible = Object.keys(updates).some(key => key.startsWith('bibleVerse.'));
         if (shouldRescheduleBible) {
             req.bot.rescheduleBibleVerse(guildId);

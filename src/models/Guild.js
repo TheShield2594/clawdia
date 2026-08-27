@@ -261,6 +261,11 @@ const guildSchema = new Schema({
         title: { type: String, default: '📰 Daily News Digest' },
         maxItemsPerFeed: { type: Number, default: 3 },
         timezone: { type: String, default: 'UTC' },
+        // When the scheduled daily send last claimed its slot. The scheduler
+        // scans for "configured time has passed and lastSentAt is stale"
+        // rather than firing on minute equality, so a restart or slow tick
+        // does not silently skip the day (#824).
+        lastSentAt: { type: Date, default: null },
         sentLinks: [{
             link: { type: String, required: true },
             sentAt: { type: Date, required: true }
@@ -278,6 +283,7 @@ const guildSchema = new Schema({
             feeds: [{ type: String }],
             title: { type: String, default: '📰 Daily News Digest' },
             maxItemsPerFeed: { type: Number, default: 3 },
+            lastSentAt: { type: Date, default: null },
             sentLinks: [{
                 link: { type: String, required: true },
                 sentAt: { type: Date, required: true }
