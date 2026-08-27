@@ -37,6 +37,13 @@ const { replayOwedPayout, describeOwedPayout, OWED_SUFFIX } = require('../src/ut
 // Pending and retrying only. 'exhausted' has spent its attempts and wants a
 // human; 'resolved' has been paid, and paying it twice is the failure this
 // whole mechanism exists to avoid.
+//
+// 'retrying' is in the set on purpose. It describes both a replay in flight and
+// one whose process died holding the record, and dropping it would strand the
+// second kind forever. Telling them apart is not this listing's job: retryJob
+// claims each record with a compare-and-set before it calls the handler, so a
+// record another run is actively replaying is refused there rather than here,
+// and only the abandoned ones get through.
 const REPLAYABLE = ['pending', 'retrying'];
 
 async function main() {

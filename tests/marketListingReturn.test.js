@@ -130,7 +130,10 @@ describe('returnExpiredMarketListings', () => {
         });
         recordOwedPayout.mockResolvedValue(false);
 
-        await expect(returnExpiredMarketListings()).rejects.toThrow(/1 of 2/);
+        await expect(returnExpiredMarketListings()).rejects.toThrow(
+            '1 of 2 expired listing(s) could not be returned (1 were) — none could be ' +
+            'recorded as owed; they must be paid by hand, see the log above',
+        );
 
         expect(grantInventoryItem).toHaveBeenCalledTimes(2);
     });

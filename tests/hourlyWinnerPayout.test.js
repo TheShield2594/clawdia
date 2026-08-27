@@ -191,6 +191,36 @@ describe('announceHourlyWinners', () => {
         await expect(announceHourlyWinners(fakeClient())).rejects.toThrow(/1 of 1/);
     });
 
+    // What the failure *says* has to match what an operator will find. A payout
+    // in the owed queue is one command away from being paid; one that could not
+    // be recorded is not there at all, and sending someone to payouts:replay for
+    // it wastes the only chance anyone has of noticing.
+    test('says a payout is replayable only when it was really recorded', async () => {
+        User.findOneAndUpdate.mockResolvedValue(null);
+
+        await expect(announceHourlyWinners(fakeClient())).rejects.toThrow(/recorded as owed, replay with/);
+    });
+
+    test('says so plainly when nothing could be recorded', async () => {
+        User.findOneAndUpdate.mockResolvedValue(null);
+        recordOwedPayout.mockResolvedValue(false);
+
+        await expect(announceHourlyWinners(fakeClient()))
+            .rejects.toThrow(/none could be recorded as owed; they must be paid by hand/);
+    });
+
+    test('separates the recorded from the unrecorded when the hour has both', async () => {
+        HourlyWinner.find.mockReturnValue({ lean: async () => [winner(), winner({ _id: 'w2', userId: 'u2', category: 'mine' })] });
+        User.findOneAndUpdate.mockResolvedValue(null);
+        recordOwedPayout.mockImplementation(async ({ payload }) => payload.userId !== 'u1');
+
+        await expect(announceHourlyWinners(fakeClient())).rejects.toThrow(
+            '2 of 2 hourly reward(s) could not be credited — 1 recorded as owed ' +
+            '(replay with `npm run payouts:replay`); 1 could not be recorded and ' +
+            'must be paid by hand, see the log above',
+        );
+    });
+
     test('groups the hour into one announcement per guild', async () => {
         HourlyWinner.find.mockReturnValue({ lean: async () => [
             winner(),

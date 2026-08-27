@@ -570,6 +570,23 @@ async function selectPetOfTheWeek(client) {
     }
 }
 
+// What a sweep says about the payouts it could not deliver.
+//
+// The distinction matters to whoever reads the failure: a payout recorded as
+// owed is one command away from being paid, and one that could not even be
+// recorded is not — the claim is still spent, so nothing will find it again and
+// the log line is all that is left of it. Reporting both as "recorded as owed"
+// would send an operator to `payouts:replay` for a record that is not there.
+function owedSummary(failed, unrecorded) {
+    const recorded = failed - unrecorded;
+    if (!unrecorded) return 'recorded as owed, replay with `npm run payouts:replay`';
+    if (!recorded) return 'none could be recorded as owed; they must be paid by hand, see the log above';
+    return (
+        `${recorded} recorded as owed (replay with \`npm run payouts:replay\`); ` +
+        `${unrecorded} could not be recorded and must be paid by hand, see the log above`
+    );
+}
+
 // ── Hourly Micro-Competition Announcements ────────────────────────────────────
 
 const HOURLY_CATEGORY_LABELS = {
@@ -619,6 +636,7 @@ async function announceHourlyWinners(client) {
     const rewardAmount = 500;
     const paidWinners = [];
     let failedCredits = 0;
+    let unrecordedCredits = 0;
 
     for (const winner of actualWinners) {
         let credited = null;
@@ -643,7 +661,7 @@ async function announceHourlyWinners(client) {
             `[scheduler] hourly reward credit failed for ${winner.userId} in ${winner.guildId} ` +
             `(${winner.category}, ${rewardAmount} coins) — recorded as owed:`, reason,
         );
-        await recordOwedPayout({
+        const recorded = await recordOwedPayout({
             service: 'schedulerService',
             jobName: 'announceHourlyWinners',
             guildId: winner.guildId,
@@ -657,6 +675,7 @@ async function announceHourlyWinners(client) {
             },
             error: creditErr ?? new Error(reason),
         });
+        if (!recorded) unrecordedCredits += 1;
     }
 
     // Announce per guild (best-effort — reward already granted above).
@@ -705,8 +724,8 @@ async function announceHourlyWinners(client) {
     // above are what make it recoverable.
     if (failedCredits) {
         throw new Error(
-            `${failedCredits} of ${actualWinners.length} hourly reward(s) could not be credited ` +
-            '— recorded as owed, replay with `npm run payouts:replay`'
+            `${failedCredits} of ${actualWinners.length} hourly reward(s) could not be credited — ` +
+            owedSummary(failedCredits, unrecordedCredits)
         );
     }
 }
@@ -1121,6 +1140,7 @@ async function returnExpiredMarketListings() {
     const now = new Date();
     let processed = 0;
     let failed = 0;
+    let unrecordedReturns = 0;
 
     // Process in batches of 50 to avoid large memory spikes
     const expired = await MarketListing.find({ expiresAt: { $lte: now } }).limit(50).lean();
@@ -1154,7 +1174,7 @@ async function returnExpiredMarketListings() {
                     `${listing.quantity}x ${listing.itemId} to ${listing.sellerId} failed — ` +
                     'items owed, recorded for replay:', creditErr.message,
                 );
-                await recordOwedPayout({
+                const recorded = await recordOwedPayout({
                     service: 'schedulerService',
                     jobName: 'returnExpiredMarketListings',
                     guildId: listing.guildId,
@@ -1168,6 +1188,7 @@ async function returnExpiredMarketListings() {
                     },
                     error: creditErr,
                 });
+                if (!recorded) unrecordedReturns += 1;
                 continue;
             }
             processed++;
@@ -1190,7 +1211,8 @@ async function returnExpiredMarketListings() {
     if (failed) {
         throw new Error(
             `${failed} of ${expired.length} expired listing(s) could not be returned` +
-            (processed ? ` (${processed} were)` : '')
+            (processed ? ` (${processed} were)` : '') +
+            (unrecordedReturns ? ` — ${owedSummary(failed, unrecordedReturns)}` : '')
         );
     }
 }

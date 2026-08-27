@@ -78,20 +78,41 @@ async function runJob(service, jobName, fn, { guildId = null, scope = null, payl
  * Retry a pending FailedJob by its _id.
  * Runs the supplied handler with the stored payload and updates the DLQ record.
  *
+ * The attempt is *claimed* rather than merely marked. Reading the record,
+ * deciding it is retriable and then saving `retrying` is a check-then-act with a
+ * window in it: two operators running the replay script at once both read a
+ * pending record, both pass the guard, and both call the handler — which for an
+ * owed payout is a second `$inc` or a second inventory grant. Since the handler
+ * is what moves the money, that window has to be closed before it runs, not
+ * after.
+ *
+ * The claim is a compare-and-set on `attempts`, which only ever increases: both
+ * runs read the same value, both try to advance it, and the loser's filter no
+ * longer matches. No extra field, and no lease to expire.
+ *
+ * A record left `retrying` by a run that died is still claimable — its
+ * `attempts` is whatever that run left behind, so the next CAS against it
+ * succeeds. Excluding `retrying` outright would close the race by stranding
+ * those forever instead.
+ *
  * @param {string}   failedJobId  - FailedJob._id
  * @param {Function} handler      - async fn(payload) to call
  * @param {string}   resolvedBy   - userId or label for audit trail
  */
 async function retryJob(failedJobId, handler, resolvedBy = 'system') {
-    const record = await FailedJob.findById(failedJobId);
-    if (!record) throw new Error('FailedJob not found');
-    if (record.status === 'resolved') throw new Error('Job already resolved');
-    if (record.status === 'exhausted') throw new Error('Job exhausted');
+    const found = await FailedJob.findById(failedJobId);
+    if (!found) throw new Error('FailedJob not found');
+    if (found.status === 'resolved') throw new Error('Job already resolved');
+    if (found.status === 'exhausted') throw new Error('Job exhausted');
 
-    record.attempts += 1;
-    record.lastAttemptAt = new Date();
-    record.status = 'retrying';
-    await record.save();
+    const record = await FailedJob.findOneAndUpdate(
+        { _id: failedJobId, status: { $in: ['pending', 'retrying'] }, attempts: found.attempts },
+        { $inc: { attempts: 1 }, $set: { status: 'retrying', lastAttemptAt: new Date() } },
+        { new: true },
+    );
+    // Someone else advanced this record between the read above and the claim:
+    // another replay run has it, or resolved it. Either way it is not ours.
+    if (!record) throw new Error('Job is already being retried by another run');
 
     try {
         await handler(record.payload);
