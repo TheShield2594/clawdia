@@ -259,12 +259,34 @@ describe('coming back from the consent screen', () => {
         expect(mockResetCache).toHaveBeenCalled();
     });
 
+    // The admin who started the flow, not whoever holds the session on return.
     test('records who connected what', async () => {
         await api('GET', '/mcp/oauth/callback?state=st&code=abc');
-        expect(logAuditEvent).toHaveBeenCalledWith(
-            expect.anything(), 'g1', 'mcp_oauth_connect',
-            expect.objectContaining({ name: 'linear', issuer: DISCOVERY.issuer },
-            ));
+
+        const [reqLike, guildId, action, details] = logAuditEvent.mock.calls[0];
+        expect([guildId, action]).toEqual(['g1', 'mcp_oauth_connect']);
+        expect(details).toMatchObject({ name: 'linear', issuer: DISCOVERY.issuer });
+        expect(reqLike.user).toEqual({ id: 'admin-1' });
+        // `logAuditEvent` reads `ip` and `get('user-agent')` off what it is
+        // handed. A plain `{ user }` throws inside its own try/catch, which
+        // loses the only record of who connected a grant — in silence.
+        expect(typeof reqLike.get).toBe('function');
+        expect(() => reqLike.get('user-agent')).not.toThrow();
+    });
+
+    // The helper is mocked above, so nothing else here would notice the shim
+    // being wrong. This runs the real one against it.
+    test('and the record actually gets written', async () => {
+        const realHelper = jest.requireActual('../src/dashboard/lib/apiHelpers');
+        const created = [];
+        jest.doMock('../src/models/AuditLog', () => ({ create: async doc => { created.push(doc); } }));
+
+        await api('GET', '/mcp/oauth/callback?state=st&code=abc');
+        const [reqLike, guildId, action, details] = logAuditEvent.mock.calls[0];
+        await realHelper.logAuditEvent(reqLike, guildId, action, details);
+
+        expect(created).toHaveLength(1);
+        expect(created[0]).toMatchObject({ guildId: 'g1', userId: 'admin-1', action: 'mcp_oauth_connect' });
     });
 
     // Read and delete in one operation, so a refreshed tab or a kept link finds

@@ -52,9 +52,9 @@ entry of the same name.
 Dashboard:
 - Presets for GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe, or
   any https MCP endpoint
-- Presets for Linear, Notion, Sentry and Atlassian, which take a login rather
-  than a token: **Connect** opens the service's own sign-in page, and the bot
-  registers itself, holds the grant and refreshes it as it expires
+- Presets for Linear, Notion and Sentry, which take a login rather than a
+  token: **Connect** opens the service's own sign-in page, and the bot registers
+  itself, holds the grant and refreshes it as it expires
 - Gmail and Spotify are prefilled apart from the address: neither publishes a
   hosted endpoint, so the server is one you run and the URL is yours to supply
 - Allow/deny lists per tool, so a destructive tool can be switched off by name

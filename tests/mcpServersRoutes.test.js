@@ -220,7 +220,9 @@ describe('an edit that invalidates an OAuth login', () => {
         const { body } = await api('GET', '/guild/g1/mcp-servers');
         const oauthPresets = body.presets.filter(p => p.oauth).map(p => p.id);
 
-        expect(oauthPresets).toEqual(expect.arrayContaining(['linear', 'notion', 'sentry', 'atlassian']));
+        expect(oauthPresets).toEqual(expect.arrayContaining(['linear', 'notion', 'sentry']));
+        // Every preset either takes a token or takes a login, never both.
+        expect(body.presets.filter(p => p.oauth && p.requiresToken)).toEqual([]);
     });
 });
 

@@ -490,7 +490,15 @@ function requiresApproval(mode, guildServers = []) {
  * toolset or the API rejects the request.
  */
 function buildAnthropicMcpParams(guildServers = []) {
-    const servers = resolveMcpServers(guildServers);
+    // An OAuth connection is filtered out rather than passed along (#796). The
+    // connector opens the socket on Anthropic's side and holds whatever static
+    // token it was handed — and `saveGrant` clears that token, so what would
+    // travel here is a server with no credential at all. `clientToolkit` routes
+    // these to the bot's own client, but it answers null when the toolkit could
+    // not be built (the server is down, the grant was revoked) and the caller
+    // then falls through to this. Dropping them here is what makes that
+    // fall-through safe wherever it happens.
+    const servers = resolveMcpServers(guildServers).filter(server => !server.connection?.oauth);
     if (!servers.length) return null;
     return {
         mcp_servers: servers.map(s => s.server),

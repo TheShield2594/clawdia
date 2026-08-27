@@ -289,8 +289,14 @@ async function handleCallback(req, res) {
         // the connection work on the next message rather than the next hour.
         resetMcpCache();
 
+        // The admin who *started* the flow, not whoever holds the session on
+        // return — those are the same person in every ordinary case, and the
+        // flow's own record is the better statement of intent when they are not.
+        // `ip` and `get` come from the real request because `logAuditEvent`
+        // reads both off it, and a plain `{ user }` would throw inside the
+        // helper's own try/catch and lose the record silently.
         await logAuditEvent(
-            { user: { id: flow.startedBy } },
+            { user: { id: flow.startedBy }, ip: req.ip, get: name => req.get(name) },
             flow.guildId,
             'mcp_oauth_connect',
             { name: flow.server, issuer: flow.discovery.issuer, scope: tokens.scope || null },

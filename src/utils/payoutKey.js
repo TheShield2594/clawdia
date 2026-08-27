@@ -182,8 +182,16 @@ async function creditCoinsOnce(filter, amount, key, options = {}) {
  * error, and an error that is indistinguishable from a genuine race unless the
  * classification is done first. So: guarded update, classify, and only actually
  * upsert when there is no document at all. The guard stays on the insert too,
- * so a document created in between still cannot be credited twice — that is the
- * duplicate-key path, and it is the one case where the error *is* the answer.
+ * so a document created in between still cannot be credited twice.
+ *
+ * A duplicate-key error from that insert is *not* read as "already paid". It
+ * means only that a document now exists — which is true both when this payout
+ * has already landed and when another writer simply created the user in
+ * between, and in the second case nothing has been granted. Two sweeps
+ * returning two expired listings to a seller with no document is exactly that
+ * race, and calling it a duplicate would drop the second return without even
+ * recording it as owed. So the guarded update is retried against the document
+ * that now exists, and only then is the answer classified.
  *
  * @returns {Promise<{status: 'paid'|'duplicate'|'missing'|'unknown', doc: ?object}>}
  */
@@ -197,21 +205,25 @@ async function grantItemOnce(filter, itemId, quantity, key, options = {}) {
         guard: payoutKeyGuard(key),
         Model,
     };
+    const grant = extra => grantInventoryItem(userId, guildId, itemId, quantity, { ...grantOptions, ...extra });
 
-    const granted = await grantInventoryItem(userId, guildId, itemId, quantity, grantOptions);
+    const granted = await grant();
     if (granted) return { status: 'paid', doc: granted };
 
     const status = await classifyUnmatchedPayout(Model, filter, key);
     if (status !== 'missing' || !upsert) return { status, doc: null };
 
     try {
-        const created = await grantInventoryItem(userId, guildId, itemId, quantity, {
-            ...grantOptions, upsert: true,
-        });
-        return { status: 'paid', doc: created };
+        return { status: 'paid', doc: await grant({ upsert: true }) };
     } catch (err) {
-        if (isDuplicateKeyError(err)) return { status: 'duplicate', doc: null };
-        throw err;
+        if (!isDuplicateKeyError(err)) throw err;
+
+        // Somebody created the document between the classification and the
+        // insert. Whether this payout was part of what they wrote is what the
+        // retry answers.
+        const retried = await grant();
+        if (retried) return { status: 'paid', doc: retried };
+        return { status: await classifyUnmatchedPayout(Model, filter, key), doc: null };
     }
 }
 

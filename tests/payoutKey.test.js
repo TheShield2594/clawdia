@@ -31,7 +31,11 @@ function stubRead(doc) {
 }
 
 beforeEach(() => {
-    jest.clearAllMocks();
+    // Reset, not clear: several cases below queue one-shot answers, and
+    // `clearAllMocks` leaves an unconsumed queue behind for the next test to
+    // pick up — which reads as a mock that has stopped working rather than as a
+    // leak from three tests ago.
+    jest.resetAllMocks();
     User.findOneAndUpdate.mockResolvedValue({ balance: 500 });
     grantInventoryItem.mockResolvedValue({});
     stubRead(null);
@@ -197,10 +201,48 @@ describe('grantItemOnce', () => {
         expect(grantInventoryItem.mock.calls[1][4].guard).toEqual({ 'paidPayouts.key': { $ne: 'k1' } });
     });
 
-    test('a document created in the meantime loses to the unique index, not to a second grant', async () => {
+    // A duplicate-key error from the insert says only that a document now
+    // exists. That is true both when this payout has already landed and when
+    // another writer simply created the user in between — and in the second
+    // case nothing has been granted, so the guarded update is retried rather
+    // than the race being reported as a duplicate.
+    test('a document created in the meantime is credited on a retry, not called a duplicate', async () => {
         const duplicate = Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
-        grantInventoryItem.mockResolvedValueOnce(null).mockRejectedValueOnce(duplicate);
+        grantInventoryItem
+            .mockResolvedValueOnce(null)          // guarded update: no document
+            .mockRejectedValueOnce(duplicate)     // insert: somebody made one first
+            .mockResolvedValueOnce({ retried: true });
         stubRead(null);
+
+        await expect(grantItemOnce({ userId: 'u1', guildId: 'g1' }, 'sword', 2, 'k1', { upsert: true }))
+            .resolves.toEqual({ status: 'paid', doc: { retried: true } });
+    });
+
+    // Two sweeps returning two expired listings to a seller with no document is
+    // exactly that race. Reporting the loser as a duplicate would drop its
+    // return without even recording it as owed.
+    test('the loser of that race is not silently dropped', async () => {
+        const duplicate = Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+        grantInventoryItem
+            .mockResolvedValueOnce(null)
+            .mockRejectedValueOnce(duplicate)
+            .mockResolvedValueOnce(null);
+        // The document the winner created carries the winner's key, not this one.
+        User.findOne.mockReturnValue({ lean: async () => ({ paidPayouts: [{ key: 'other' }] }) });
+
+        await expect(grantItemOnce({ userId: 'u1', guildId: 'g1' }, 'sword', 2, 'k1', { upsert: true }))
+            .resolves.toEqual({ status: 'unknown', doc: null });
+    });
+
+    test('but a document that really does carry the key is still a duplicate', async () => {
+        const duplicate = Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+        grantInventoryItem
+            .mockResolvedValueOnce(null)
+            .mockRejectedValueOnce(duplicate)
+            .mockResolvedValueOnce(null);
+        User.findOne
+            .mockReturnValueOnce({ lean: async () => null })
+            .mockReturnValueOnce({ lean: async () => ({ paidPayouts: [{ key: 'k1' }] }) });
 
         await expect(grantItemOnce({ userId: 'u1', guildId: 'g1' }, 'sword', 2, 'k1', { upsert: true }))
             .resolves.toEqual({ status: 'duplicate', doc: null });

@@ -135,7 +135,7 @@ can be defined centrally and pointed at one guild's own credentials.
 
 The Service dropdown prefills the services with a documented hosted endpoint —
 GitHub, Fastmail (`https://api.fastmail.com/mcp`), DeepWiki, Context7, Hugging
-Face and Stripe, plus the four below that take a login instead of a token.
+Face and Stripe, plus the three below that take a login instead of a token.
 
 **Gmail and Spotify** are in the list too, marked *your own endpoint*: neither
 Google nor Spotify publishes a hosted MCP endpoint, so the server is one you
@@ -149,9 +149,9 @@ server's https endpoint and token.
 
 #### Servers that want a login rather than a token
 
-Linear, Notion, Sentry and Atlassian issue no static token at all. They answer
-the first request with a 401 naming their authorization server, and the
-connection is finished by signing in.
+Linear, Notion and Sentry issue no static token at all. They answer the first
+request with a 401 naming their authorization server, and the connection is
+finished by signing in.
 
 1. Add the connection as above — pick the service, leave the token field empty,
    and click **Add connection**.
@@ -180,9 +180,14 @@ A few things worth knowing:
   was issued for one address and one way of authorizing; the dashboard says so
   when it happens.
 - **The redirect URL is `<DASHBOARD_URL>/api/mcp/oauth/callback`.** Nothing has
-  to be registered anywhere for the four presets above — the bot registers
+  to be registered anywhere for the three presets above — the bot registers
   itself with the service automatically. A server that does not support that
   reports the URL to register by hand.
+
+Any other server that wants a login works the same way, as long as it speaks
+the Streamable HTTP transport. Atlassian is the notable absence: its published
+endpoint uses the older HTTP+SSE transport, which the bot's MCP client does not
+implement.
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over

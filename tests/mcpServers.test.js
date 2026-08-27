@@ -402,6 +402,28 @@ describe('an OAuth connection', () => {
         expect(resolveMcpServers([])[0].connection.oauth).toBeNull();
     });
 
+    // `clientToolkit` routes these to the bot's own client, but it answers null
+    // when the toolkit could not be built — the server is down, the grant was
+    // revoked — and the caller then falls through to the connector params. What
+    // would travel is a server with no credential at all, since finishing the
+    // flow clears the static token. Filtering here is what makes that
+    // fall-through safe wherever it happens.
+    test('is never handed to Anthropic\'s connector', () => {
+        const params = buildAnthropicMcpParams([
+            { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant },
+            { name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: 'ghp_x' },
+        ]);
+
+        expect(params.mcp_servers.map(s => s.name)).toEqual(['github']);
+        expect(params.tools.map(t => t.mcp_server_name)).toEqual(['github']);
+    });
+
+    test('and a guild with nothing but OAuth connections sends the connector nothing', () => {
+        expect(buildAnthropicMcpParams([
+            { name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant },
+        ])).toBeNull();
+    });
+
     test('forces the Anthropic client route, which the connector cannot refresh for', () => {
         const withGrant = [{ name: 'linear', url: 'https://mcp.example.com/mcp', oauth: grant }];
         const withToken = [{ name: 'github', url: 'https://api.githubcopilot.com/mcp/', authorizationToken: 'x' }];
