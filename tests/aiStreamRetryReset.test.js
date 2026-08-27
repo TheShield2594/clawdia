@@ -75,7 +75,7 @@ function fakeMessage(content = 'tell me everything') {
         },
         reply: jest.fn(async payload => emit(payload))
     };
-    return { message, sent };
+    return { message, sent, emit };
 }
 
 beforeEach(() => jest.clearAllMocks());
@@ -108,6 +108,54 @@ test('a retry after an overflow split deletes the stale split messages', async (
     const visible = sent.filter(m => !m.deleted).map(m => m.content).join('');
     expect(visible).not.toContain('first attempt');
 }, 15000);
+
+test('a stale message that cannot be deleted is blanked instead of left showing attempt 1', async () => {
+    let attempts = 0;
+    mockStream.mockImplementation(async function* () {
+        if (++attempts === 1) {
+            yield 'first attempt line\n'.repeat(150);
+            const err = new Error('provider blew up');
+            err.status = 500;
+            throw err;
+        }
+        yield 'Second answer.';
+    });
+
+    const { message, sent, emit } = fakeMessage();
+    // Overflow messages (everything but the reply placeholder) refuse to die.
+    message.channel.send.mockImplementation(async payload => {
+        const msg = emit(payload);
+        msg.delete.mockRejectedValue(new Error('Missing Permissions'));
+        return msg;
+    });
+
+    await handleAIChat(message, SETTINGS);
+
+    expect(sent[0].content).toBe('Second answer.');
+    // The undeletable extras were blanked, so nothing shows attempt 1's text.
+    for (const extra of sent.slice(1).filter(m => !m.deleted)) {
+        expect(extra.content).not.toContain('first attempt');
+    }
+}, 15000);
+
+test('one huge streamed piece never produces a message over the limit', async () => {
+    // The newline sits early enough that a single cut would leave a
+    // 2,001-char remainder — which Discord rejects. Every message must
+    // come out within the limit.
+    const text = `${'a'.repeat(1000)}\n${'b'.repeat(2001)}`;
+    mockStream.mockImplementation(async function* () {
+        yield text;
+    });
+
+    const { message, sent } = fakeMessage();
+    await handleAIChat(message, SETTINGS);
+
+    for (const msg of sent) {
+        expect(msg.content.length).toBeLessThanOrEqual(2000);
+    }
+    // Nothing was lost in the splitting.
+    expect(sent.map(m => m.content).join('')).toContain('b'.repeat(2001));
+});
 
 test('an overflow split cuts at a newline, not mid-word at exactly the limit', async () => {
     const first = 'x'.repeat(1949);

@@ -115,8 +115,8 @@ async function attachToolFooter(msg, text, footer, channel) {
 
 // Where to cut `text` for a piece of at most `size`: the last newline in
 // range, else the last space, else a hard cut. One preference order for every
-// split — the streamed overflow below uses it too, so it no longer slices
-// mid-word or mid-code-fence at exactly the limit (#825).
+// split — the streamed overflow below goes through chunkText too, so it no
+// longer slices mid-word or mid-code-fence at exactly the limit (#825).
 function splitIndex(text, size) {
     if (text.length <= size) return text.length;
     let cut = text.lastIndexOf('\n', size);
@@ -339,8 +339,17 @@ async function handleAIChat(message, aiSettings) {
                         await untilPaintIdle();
                         painting = true;
                         try {
-                            for (const extra of sentMessages.splice(1)) {
-                                await extra.delete().catch(() => {});
+                            // Each extra message stays tracked until it is
+                            // actually gone: a failed delete falls back to
+                            // blanking it, and one that still shows attempt
+                            // 1's text fails this attempt — the error report
+                            // beats leaving the chimera on screen.
+                            while (sentMessages.length > 1) {
+                                const extra = sentMessages.at(-1);
+                                const gone = await extra.delete().then(() => true).catch(() => false)
+                                    || await edit(extra, '…').then(() => true).catch(() => false);
+                                if (!gone) throw new Error('could not clear a stale reply message before retrying');
+                                sentMessages.pop();
                             }
                             currentMsg = placeholder;
                             await edit(placeholder, '…').catch(() => {});
@@ -364,12 +373,21 @@ async function handleAIChat(message, aiSettings) {
                             await untilPaintIdle();
                             painting = true;
                             try {
-                                const cut = splitIndex(currentBuf, DISCORD_MAX_LEN);
-                                await edit(currentMsg, currentBuf.slice(0, cut));
-                                const overflow = currentBuf.slice(cut).trimStart();
-                                currentMsg = await send(message.channel, overflow || '…');
+                                // One yielded piece can be arbitrarily large,
+                                // so the buffer may hold more than two
+                                // messages' worth. Finalize every full chunk
+                                // and keep only the last as the live buffer —
+                                // each send stays within Discord's limit.
+                                const chunks = chunkText(currentBuf);
+                                await edit(currentMsg, chunks[0]);
+                                for (const middle of chunks.slice(1, -1)) {
+                                    currentMsg = await send(message.channel, middle);
+                                    sentMessages.push(currentMsg);
+                                }
+                                const tail = chunks.length > 1 ? chunks.at(-1) : '';
+                                currentMsg = await send(message.channel, tail || '…');
                                 sentMessages.push(currentMsg);
-                                currentBuf = overflow;
+                                currentBuf = tail;
                                 painted = null;
                             } finally {
                                 painting = false;
