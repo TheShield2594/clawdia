@@ -3,11 +3,36 @@ services:
     image: mongo:7
     container_name: clawdia-mongodb
     restart: unless-stopped
+    # Authentication (#648). The internal-only network keeps the outside world
+    # away from mongod, but on its own it is the *only* control: any container
+    # that joins db-network gets full, credential-less database access. Setting
+    # MONGODB_ROOT_USERNAME + MONGODB_ROOT_PASSWORD in .env closes that — the
+    # mongo image creates the root user and starts mongod with --auth — and
+    # MONGODB_APP_USERNAME + MONGODB_APP_PASSWORD makes scripts/mongo-init.js
+    # create the dedicated low-privilege user the bot should actually connect
+    # as (readWrite on ultrabot, nothing else). Then point MONGODB_URI at it:
+    #
+    #   MONGODB_URI=mongodb://appuser:apppass@mongodb:27017/ultrabot?authSource=ultrabot
+    #
+    # All four variables take effect ONLY on the first start against an empty
+    # mongodb_data volume; the image skips initialization when data exists. To
+    # enable auth on a deployment that already has data, see "Enabling MongoDB
+    # authentication" in SETUP_GUIDE.md — it is a few mongosh commands, not a
+    # wipe. Left unset, everything behaves exactly as before (no auth), so
+    # existing deployments keep starting; new ones should set all four.
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}
+      MONGODB_APP_USERNAME: ${MONGODB_APP_USERNAME:-}
+      MONGODB_APP_PASSWORD: ${MONGODB_APP_PASSWORD:-}
     volumes:
       - mongodb_data:/data/db
+      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     networks:
       - db-network   # internal-only: no external routing, no published ports
     healthcheck:
+      # `ping` is deliberately one of the commands mongod answers without
+      # authentication, so this probe keeps working with auth enabled.
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
       timeout: 10s

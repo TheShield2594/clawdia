@@ -41,11 +41,47 @@ services:
     image: mongo:7
     container_name: clawdia-mongodb
     restart: unless-stopped
+    # Authentication (#648). The internal-only network keeps the outside world
+    # away from mongod, but on its own it is the *only* control: any container
+    # that joins db-network gets full, credential-less database access. Set
+    # MONGODB_ROOT_USERNAME + MONGODB_ROOT_PASSWORD in the stack's environment
+    # variables and the mongo image creates the root user and starts mongod
+    # with --auth. Then point MONGODB_URI at credentials — with the dedicated
+    # app user below:
+    #
+    #   MONGODB_URI=mongodb://appuser:apppass@mongodb:27017/ultrabot?authSource=ultrabot
+    #
+    # (No need to touch the `:-` default on the bot's MONGODB_URI mapping for
+    # this — setting MONGODB_URI in the stack environment overrides it. Only
+    # the *_FILE form needs that mapping deleted, per the note at the top.)
+    #
+    # MONGODB_APP_USERNAME + MONGODB_APP_PASSWORD feed the init script that
+    # creates that low-privilege user (readWrite on ultrabot, nothing else) —
+    # but a Portainer stack has no repo checkout to mount it from, so copy
+    # scripts/mongo-init.js from the repo to the Docker host and uncomment the
+    # mount below. Without the script, MONGO_INITDB_ROOT_* still works: auth is
+    # on and MONGODB_URI can carry the root credentials with authSource=admin,
+    # which is still better than no auth, just not least-privilege.
+    #
+    # All of this takes effect ONLY on the first start against an empty
+    # mongodb_data volume; the image skips initialization when data exists. To
+    # enable auth on a deployment that already has data, see "Enabling MongoDB
+    # authentication" in SETUP_GUIDE.md — a few mongosh commands, not a wipe.
+    # Left unset, everything behaves exactly as before (no auth), so existing
+    # deployments keep starting; new ones should set all four.
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-}
+      MONGODB_APP_USERNAME: ${MONGODB_APP_USERNAME:-}
+      MONGODB_APP_PASSWORD: ${MONGODB_APP_PASSWORD:-}
     volumes:
       - mongodb_data:/data/db
+      # - /opt/clawdia/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     networks:
       - db-network   # internal-only: no external routing, no published ports
     healthcheck:
+      # `ping` is deliberately one of the commands mongod answers without
+      # authentication, so this probe keeps working with auth enabled.
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
       timeout: 10s
