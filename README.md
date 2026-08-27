@@ -352,11 +352,12 @@ how long it took and anything that failed or could not be reached, so a slow
 answer is legible and a server that is down is visible rather than silently
 making the model wrong.
 
-The per-user rate limit counts tool calls as well as messages, at eight calls
-per message allowed: one question that needs a lot of looking up does not eat
-the allowance for the next one, and a user cannot spend without bound by asking
-the same expensive question over and over. Past it the model is told the call
-was refused and answers from what it has.
+The per-user rate limit bounds tool calls as well as messages, in a window of
+its own: eight calls for every message the limit allows, shared across that
+window rather than reset per message. So one question that needs a lot of
+looking up does not eat the allowance for the next one, and a user cannot spend
+without bound by asking the same expensive question over and over. Past it the
+model is told the call was refused and answers from what it has.
 
 Tools that write something can be made to wait: the Approval setting posts
 **Run it** / **Cancel** in the channel for a tool call and does not run it until

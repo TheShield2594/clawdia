@@ -506,9 +506,14 @@ async function prepareMcpToolkit(guildServers = [], {
                 // behind three others until the budget ran out is one the reply
                 // can no longer wait for, and starting it now would only make
                 // the message later still.
-                if (Date.now() >= deadline) return null;
+                const remaining = deadline - Date.now();
+                if (remaining <= 0) return null;
+                // And what is left of the turn caps the call, so one that starts
+                // a second before the deadline cannot answer forty-four seconds
+                // after it. Below the call timeout this is the tighter of the
+                // two; above it, the call timeout still wins.
                 return withSession(target.entry, target.server, client =>
-                    client.callTool(target.toolName, args, { onProgress }));
+                    client.callTool(target.toolName, args, { onProgress, timeout: remaining }));
             });
 
             if (!result) {

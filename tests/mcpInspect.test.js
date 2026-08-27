@@ -71,6 +71,31 @@ describe('what a test leaves behind', () => {
         expect(never).not.toHaveBeenCalled();
     });
 
+    test('a list the server refused is reported empty but never cached', async () => {
+        // "Refused resources/list" and "has no resources" look the same in the
+        // report and are not the same thing at all. Caching the first as the
+        // second would have the chat path believe for five minutes that this
+        // server publishes no documents.
+        mockListResources.mockRejectedValue(new Error('HTTP 500'));
+        mockListPrompts.mockResolvedValue([{ name: 'summarize' }]);
+
+        const server = resolve();
+        const report = await inspectServer(server);
+
+        expect(report.success).toBe(true);
+        expect(report.resourceCount).toBe(0);
+
+        const entry = entryFor(server);
+        const list = jest.fn(async () => [{ uri: 'file:///readme.md' }]);
+        await expect(cachedList(entry, server, 'resources', list)).resolves.toHaveLength(1);
+        expect(list).toHaveBeenCalled();
+
+        // The list that did answer is still cached.
+        const never = jest.fn();
+        await expect(cachedList(entry, server, 'prompts', never)).resolves.toEqual([{ name: 'summarize' }]);
+        expect(never).not.toHaveBeenCalled();
+    });
+
     test('a failed test caches nothing — there was nothing to cache', async () => {
         mockListTools.mockRejectedValue(new Error('HTTP 401'));
 

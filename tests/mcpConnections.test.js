@@ -234,6 +234,31 @@ describe('one server does not see the whole round at once', () => {
         expect(peak).toBe(MAX_PARALLEL_PER_SERVER);
     });
 
+    test('a discovery refresh shares the same three slots as the tool calls', async () => {
+        // A list refresh is a request that server has to answer too, so three
+        // calls in flight plus a refresh behind them would be a fourth.
+        const entry = entryFor(SERVER);
+        const gates = [];
+        const busy = () => withServerLimit(entry, () => {
+            const gate = deferred();
+            gates.push(gate);
+            return gate.promise;
+        });
+
+        const held = [busy(), busy(), busy()];
+        const list = jest.fn(async () => [{ name: 'search' }]);
+        const refreshing = cachedList(entry, SERVER, 'tools', list);
+
+        await new Promise(resolve => setImmediate(resolve));
+        expect(list).not.toHaveBeenCalled();
+
+        gates.shift().resolve('ok');
+        await expect(refreshing).resolves.toEqual([{ name: 'search' }]);
+
+        while (gates.length) gates.shift().resolve('ok');
+        await Promise.all(held);
+    });
+
     test('a call that throws still releases its slot', async () => {
         const entry = entryFor(SERVER);
 

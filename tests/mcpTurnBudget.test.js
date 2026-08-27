@@ -180,6 +180,35 @@ describe('the turn time budget', () => {
         }
     });
 
+    test('a call that starts just before the deadline is capped by what is left', async () => {
+        // The boundary the queue makes reachable: a slot frees a moment before
+        // the deadline, and without this the call would run its full timeout
+        // and answer long after the reply gave up waiting.
+        const toolkit = await prepareMcpToolkit([GITHUB]);
+
+        const realNow = Date.now;
+        Date.now = () => realNow() + TURN_BUDGET_MS - 2000;
+        try {
+            await toolkit.call('github__search', {});
+        } finally {
+            Date.now = realNow;
+        }
+
+        const [, , options] = mockCallTool.mock.calls[0];
+        expect(options.timeout).toBeLessThanOrEqual(2000);
+        expect(options.timeout).toBeGreaterThan(0);
+    });
+
+    test('a call with the whole turn ahead of it is not capped below the call timeout', async () => {
+        const toolkit = await prepareMcpToolkit([GITHUB]);
+        await toolkit.call('github__search', {});
+
+        const [, , options] = mockCallTool.mock.calls[0];
+        // The client clamps this to its own CALL_TIMEOUT_MS; what matters here
+        // is that the toolkit is not the thing shortening it.
+        expect(options.timeout).toBeGreaterThan(TURN_BUDGET_MS - 5000);
+    });
+
     test('does not put an approval prompt in front of somebody either', async () => {
         // Asking a moderator to approve a call the turn will not make regardless
         // is worse than not asking.

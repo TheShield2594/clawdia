@@ -28,6 +28,8 @@ function extras(resourceCount, promptCount) {
 // The three lists this inspection fetched, handed to the shared connection pool
 // so the next caller finds them already there. Never fatal: a warm cache is a
 // convenience, and a test that reported a working server has done its job.
+// A null value is a list this connection did not actually get; primeList skips
+// it rather than caching an empty one.
 function primeLists(server, lists) {
     try {
         const entry = entryFor(server);
@@ -64,16 +66,30 @@ async function inspectServer(server, { confirmMode } = {}) {
         // Connections panel wants to know a server publishes documents or
         // prompt templates as much as they want the tool list — those are the
         // two switches under it.
-        const [resources, prompts] = await Promise.all([
-            client.listResources().catch(() => []),
-            client.listPrompts().catch(() => [])
+        const [resourcesRead, promptsRead] = await Promise.allSettled([
+            client.listResources(),
+            client.listPrompts()
         ]);
+        // A list the server refused is reported as empty — the connection works,
+        // which is what a test is asking about — but it is emphatically not the
+        // same as a server that has none, so it is not cached. Priming an empty
+        // list from a request that failed would have the chat path believe for
+        // five minutes that this server publishes no documents.
+        const answered = read => (read.status === 'fulfilled' ? read.value : null);
+
         // A test is a full discovery run whose answer was about to be thrown
         // away. The pool is keyed by (url, token), so what this connection just
         // learned is exactly what the guild's next message would have gone and
         // asked for — an admin who saves a server and then uses it in a channel
         // now pays for the handshake once rather than twice.
-        primeLists(server, { tools, resources, prompts });
+        primeLists(server, {
+            tools,
+            resources: answered(resourcesRead),
+            prompts: answered(promptsRead)
+        });
+
+        const resources = answered(resourcesRead) || [];
+        const prompts = answered(promptsRead) || [];
 
         const described = tools.slice(0, MAX_TOOLS_REPORTED).map(tool => ({
             name: tool.name,

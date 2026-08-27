@@ -98,6 +98,19 @@ describe('a call that says how far it has got', () => {
         expect(activity.render()).toBe('');
     });
 
+    test('a server does not get to put a mention or markup on the line', () => {
+        // Same rule as a tool name: this is text the far side chose, rendered
+        // as display text in a channel the bot posts to.
+        const activity = createToolActivity();
+        activity.onEvent(start(1, 'search'));
+        activity.onEvent(progress(1, { progress: 1, total: null, message: '@everyone **done**' }));
+
+        const line = activity.render();
+        expect(line).not.toContain('@');
+        expect(line).not.toContain('**');
+        expect(line).toContain('everyone');
+    });
+
     test('a long progress message is trimmed rather than taking the whole line', () => {
         const activity = createToolActivity();
         activity.onEvent(start(1, 'search'));

@@ -61,10 +61,16 @@ const MAX_PROGRESS_NOTE = 24;
  * one thing that answers "is this nearly done". One that only counts gets its
  * own words if it sent any, and its count if it did not — because "47" moving
  * is still the difference between a slow tool and a stuck one.
+ *
+ * The words go through `label` like every other string that arrives from a
+ * server and ends up in a message this bot posts. A progress note is no
+ * different from a tool name in that respect: it is text somebody else chose,
+ * rendered as display text in a channel, and a server that reports its progress
+ * as `@everyone` gets to say everyone.
  */
 function progressNote({ progress, total, message }) {
     if (typeof message === 'string' && message.trim()) {
-        return clamp(message.trim(), MAX_PROGRESS_NOTE);
+        return label(message, MAX_PROGRESS_NOTE);
     }
     if (total) return `${Math.min(100, Math.round((progress / total) * 100))}%`;
     return Number.isFinite(progress) ? String(Math.round(progress)) : '';

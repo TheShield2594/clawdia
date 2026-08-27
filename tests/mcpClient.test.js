@@ -10,7 +10,7 @@ jest.mock('axios');
 
 const { Readable } = require('stream');
 const axios = require('axios');
-const { McpHttpClient, McpError } = require('../src/services/ai/mcp/client');
+const { McpHttpClient, McpError, CALL_TIMEOUT_MS } = require('../src/services/ai/mcp/client');
 
 const URL = 'https://mcp.example.com/mcp';
 
@@ -254,6 +254,22 @@ describe('server-sent event responses', () => {
         expect(result.content).toEqual([{ type: 'text', text: 'still here' }]);
         expect(warn).toHaveBeenCalled();
         warn.mockRestore();
+    });
+
+    test('a caller\'s deadline can shorten a tool call but never lengthen it', async () => {
+        respondBy({ ...HANDSHAKE, 'tools/call': { result: { content: [] } } });
+        const client = new McpHttpClient({ url: URL });
+
+        await client.callTool('search', {}, { timeout: 3000 });
+        expect(postsTo('tools/call')[0][2].timeout).toBe(3000);
+
+        // A caller asking for longer than the call timeout does not get it.
+        await client.callTool('search', {}, { timeout: 10 * 60 * 1000 });
+        expect(postsTo('tools/call')[1][2].timeout).toBe(CALL_TIMEOUT_MS);
+
+        // And no deadline at all is the timeout it always was.
+        await client.callTool('search', {});
+        expect(postsTo('tools/call')[2][2].timeout).toBe(CALL_TIMEOUT_MS);
     });
 
     test('reports a stream that ends without answering', async () => {

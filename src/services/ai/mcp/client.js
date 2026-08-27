@@ -553,12 +553,20 @@ class McpHttpClient {
      * thrown: "that repository does not exist" is an answer the model should see
      * and work around, not a reason to abandon the reply.
      */
-    async callTool(name, args, { onProgress } = {}) {
+    async callTool(name, args, { onProgress, timeout } = {}) {
         await this.initialize();
+        // A caller with a deadline of its own can ask for less than the call
+        // timeout, never more: a tool that answers in forty seconds is still a
+        // tool the reply cannot wait for once the turn has ten left. The
+        // handshake above keeps its own connect timeout either way.
+        const limit = Number.isFinite(timeout)
+            ? Math.max(1, Math.min(CALL_TIMEOUT_MS, timeout))
+            : CALL_TIMEOUT_MS;
+
         const result = await this.request(
             'tools/call',
             { name, arguments: args && typeof args === 'object' ? args : {} },
-            { timeout: CALL_TIMEOUT_MS, onProgress }
+            { timeout: limit, onProgress }
         );
         return {
             content: Array.isArray(result.content) ? result.content : [],

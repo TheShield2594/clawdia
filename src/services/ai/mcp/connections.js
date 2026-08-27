@@ -178,10 +178,16 @@ function primeList(entry, kind, value) {
 // The refresh half of cachedList: one request, its result written back to the
 // slot. Errors are recorded and rethrown; whether anybody is waiting on the
 // rejection is the caller's business.
+//
+// Through the same per-server gate as everything else: a list refresh is a
+// request that server has to answer, so three tool calls in flight and a
+// refresh starting behind them would be a fourth. Safe to queue precisely
+// because nothing nests inside it — and the caller it delays is usually
+// nobody, since an expired list is served stale while this runs.
 function refreshList(entry, server, kind, fn) {
     const slot = slotFor(entry, kind);
 
-    slot.pending = withSession(entry, server, fn)
+    slot.pending = withServerLimit(entry, () => withSession(entry, server, fn))
         .then(value => {
             slot.value = value;
             slot.expires = Date.now() + LIST_TTL_MS;
