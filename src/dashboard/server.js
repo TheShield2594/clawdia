@@ -12,32 +12,18 @@ const { jsonForScript } = require('./lib/jsonForScript');
 const { asset } = require('./lib/assets');
 const { createBotGateway } = require('../bot/gateway');
 const { instanceStats } = require('./lib/instanceStats');
+// The DASHBOARD_URL and SESSION_SECRET rules used to be defined here, which is
+// after connectDatabase() and runMigrations() in the boot order — so a config
+// they rejected was rejected only once the database had been migrated (#639).
+// They live in config/validateEnv.js now and both entry points check them before
+// anything is connected. They are still applied at the two points below that
+// need their answers, because createApp() can be handed an environment directly
+// by a test, and because a rule enforced only at the edge is a rule that quietly
+// stops being enforced when a second caller appears.
+const { resolveDashboardUrl, checkSessionSecret } = require('../config/validateEnv');
 
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
-
-function resolveDashboardUrl() {
-    const raw = (process.env.DASHBOARD_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3000}`).trim();
-    let parsed;
-    try {
-        parsed = new URL(raw);
-    } catch {
-        throw new Error(`[DASHBOARD] DASHBOARD_URL is not a valid URL: "${raw}"`);
-    }
-    // M5: Enforce HTTPS in production unconditionally — localhost is not exempt
-    // because production deployments should never be reached via localhost.
-    const isProduction = process.env.NODE_ENV === 'production';
-    if (parsed.protocol !== 'https:') {
-        if (isProduction) {
-            throw new Error(`[DASHBOARD] DASHBOARD_URL must use HTTPS in production. Got: "${raw}". Set NODE_ENV=development for local testing.`);
-        }
-        console.warn(`[DASHBOARD] WARNING: DASHBOARD_URL "${raw}" is not HTTPS. Discord OAuth will reject non-HTTPS redirect URIs in production.`);
-    }
-    if (parsed.pathname && parsed.pathname !== '/' && parsed.pathname !== '') {
-        throw new Error(`[DASHBOARD] DASHBOARD_URL must be just a scheme + host (e.g. https://bot.example.com), with no path. Got: "${raw}"`);
-    }
-    return `${parsed.protocol}//${parsed.host}`;
-}
 
 // Options for the Discord OAuth2 strategy, split out from the passport.use()
 // call so the login CSRF defence below is assertable without booting the app.
@@ -196,13 +182,10 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
-    // M1: Validate SESSION_SECRET exists and meets minimum strength requirements.
-    if (!process.env.SESSION_SECRET) {
-        throw new Error('[DASHBOARD] SESSION_SECRET is not set. Add a strong random value to your .env file.');
-    }
-    if (process.env.SESSION_SECRET.length < 32) {
-        throw new Error('[DASHBOARD] SESSION_SECRET must be at least 32 characters. Generate one with: openssl rand -hex 32');
-    }
+    // M1: SESSION_SECRET has to exist and be long enough to be worth having.
+    // The rule itself is in config/validateEnv.js, where startup checks it too.
+    const [secretProblem] = checkSessionSecret(process.env);
+    if (secretProblem) throw new Error(`[DASHBOARD] ${secretProblem}`);
 
     // Trust the first hop from a reverse proxy (nginx, Caddy, etc.) so that
     // req.protocol reflects the original HTTPS scheme and the secure: true
