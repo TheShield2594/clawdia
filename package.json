@@ -1,6 +1,6 @@
 {
   "name": "clawdia",
-  "version": "4.3.1",
+  "version": "4.4.0",
   "description": "Clawdia — a chill, self-hosted Discord bot with a full-featured admin dashboard",
   "main": "src/index.js",
   "scripts": {
@@ -10,6 +10,7 @@
     "deploy": "node src/deploy-commands.js",
     "migrate:rollback": "node scripts/rollback-migration.js",
     "payouts:replay": "node scripts/replay-owed-payouts.js",
+    "secrets:encrypt": "node scripts/encrypt-guild-secrets.js",
     "docs:commands": "node scripts/docs-commands.js",
     "docs:api": "node scripts/docs-api.js",
     "docs:panels": "node scripts/docs-panels.js",

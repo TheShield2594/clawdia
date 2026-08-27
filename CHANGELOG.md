@@ -14,6 +14,53 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.4.0] - 2026-08-27
+
+Migrations through `018_encrypt_guild_ai_keys`.
+
+Welcome cards no longer stall the gateway on a join raid (#592). `canvas.toBuffer()`
+is the fully synchronous encode — roughly 10 ms for the 800×300 card, more once a
+real avatar is composited — and it ran on every `guildMemberAdd` with no
+concurrency cap and no rate limit, which made the heaviest load pattern the bot
+has also the one that blocks the event loop. The cards in `utils/cardGenerator.js`
+now use node-canvas's callback form, which encodes on libuv's thread pool, and
+welcome-card rendering goes through `utils/cardRenderQueue.js`: at most two
+renders at a time, at most eight waiting, and at most twenty cards per guild per
+minute. Past any of those the join gets the plain welcome embed the handler
+already had, so a raid costs an embed per member rather than a canvas encode.
+
+Per-guild AI provider keys can be encrypted at rest (#564). `ai.openaiKey` and
+its three siblings are live credentials stored as plain strings in MongoDB, and
+the `backup` service writes unencrypted `mongodump` archives into a host bind
+mount nightly and keeps a month of them — so reading them needed access to a
+directory, not to the database. Set the new **`SECRET_ENCRYPTION_KEY`**
+(`openssl rand -base64 32`) and they are stored AES-256-GCM sealed instead;
+`018_encrypt_guild_ai_keys` rewrites the keys already stored, and
+`npm run secrets:encrypt` runs the same sweep for an operator who sets the
+variable after that migration has run. It is opt-in: with the variable unset
+nothing changes, the migration is a logged no-op, and reads accept plaintext
+either way. **One rollback caveat**: an image from before this release reads a
+sealed key as though it were the credential. If you enable encryption and later
+roll back, run `npm run migrate:rollback -- 018_encrypt_guild_ai_keys` first
+(it needs the same key), or the affected servers fall back to the bot-wide
+`*_API_KEY` variables until they re-enter theirs.
+
+The two item-image reads are authenticated now (#565).
+`GET /api/v1/item-image/{shop,activity}/:guildId/:itemId` served any guild's
+uploaded artwork to anyone who could guess a guild id and an item id. They were
+public on the reasoning that a browser rendering an `<img>` cannot present a
+session, which is not true of these: every request comes from a dashboard page
+on the dashboard's own origin and carries the cookie, and Discord embeds these
+images as uploaded attachments rather than by URL. They now take the same
+`checkAuth` + `checkGuildAccess` as every other guild-scoped route, and answer
+`Cache-Control: private`.
+
+And logging out is a `POST` (#566). `GET /auth/logout` changed session state,
+so `<img src="…/auth/logout">` on any page an admin visited ended their session.
+The route is `POST` behind the existing origin check, and the dashboard's two
+Logout controls submit a form. Nuisance-level only — nothing was ever disclosed
+— but a bookmark or script hitting the old `GET` now gets a 404.
+
 ## [4.3.1] - 2026-08-26
 
 Migrations through `017_merge_slots_jackpot_pool`.

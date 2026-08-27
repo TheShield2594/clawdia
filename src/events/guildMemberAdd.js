@@ -2,6 +2,7 @@ const { getGuildSettings } = require('../utils/guildSettingsCache');
 const GuildAnalytics = require('../models/GuildAnalytics');
 const { EmbedBuilder, AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const { createWelcomeCard } = require('../utils/cardGenerator');
+const { renderQueued } = require('../utils/cardRenderQueue');
 const { handleMemberJoin: raidCheck } = require('../services/raidService');
 const { enforceJoinGate } = require('../services/antiNukeService');
 const COLORS = require('../utils/embedColors');
@@ -81,8 +82,20 @@ module.exports = {
                     } else {
                         const message = applyVariables(guildSettings.welcome.message, member);
 
+                        // The card is the expensive part of a join and the only
+                        // part that is optional, so it is the part that gives way
+                        // under load (#592). `renderQueued` answers null once this
+                        // guild is past its cards-per-minute budget or the render
+                        // queue is saturated — a raid then costs the plain embed
+                        // below rather than a canvas encode per member. A render
+                        // that fails outright degrades the same way.
+                        let card = null;
                         if (guildSettings.welcome.cardEnabled && canAttach) {
-                            const card = await createWelcomeCard(member);
+                            card = await renderQueued(member.guild.id, () => createWelcomeCard(member))
+                                .catch(err => { console.error('Welcome card render failed:', err); return null; });
+                        }
+
+                        if (card) {
                             const attachment = new AttachmentBuilder(card, { name: 'welcome.png' });
 
                             const embed = new EmbedBuilder()

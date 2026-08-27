@@ -98,6 +98,11 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      # Encrypts the per-server AI provider keys admins enter in the dashboard,
+      # so the nightly dumps in the backups volume hold ciphertext rather than
+      # live credentials (#564). Generate with `openssl rand -base64 32`, and
+      # keep it — the stored keys cannot be read back without it.
+      - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY}
       # Path to the MCP server list (Anthropic provider only). Needs the
       # volume below; leave unset to keep the MCP connector off.
       - MCP_SERVERS_CONFIG=${MCP_SERVERS_CONFIG:-}
@@ -129,6 +134,7 @@ services:
       # file. DELETE the `- MONGODB_URI=...` line above before uncommenting
       # this, or the secret is read and then ignored with a warning.
       # - MONGODB_URI_FILE=/run/secrets/mongodb_uri
+      # - SECRET_ENCRYPTION_KEY_FILE=/run/secrets/secret_encryption_key
       # - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
       # - GEMINI_API_KEY_FILE=/run/secrets/gemini_api_key
       # - ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key
@@ -141,6 +147,7 @@ services:
     #   - client_secret
     #   - session_secret
     #   - mongodb_uri
+    #   - secret_encryption_key
     #   - openai_api_key
     #   - gemini_api_key
     #   - anthropic_api_key
@@ -344,6 +351,8 @@ services:
 #   session_secret:
 #     external: true
 #   mongodb_uri:
+#     external: true
+#   secret_encryption_key:
 #     external: true
 #   openai_api_key:
 #     external: true

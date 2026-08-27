@@ -1,5 +1,8 @@
 const { createCanvas, loadImage } = require('canvas');
 const { ensureFontsRegistered } = require('./registerFonts');
+// Every card here is drawn off a gateway event rather than off a slash command,
+// so the encode must not be the synchronous one (#592). See canvasEncode.js.
+const { encodeCanvas } = require('./canvasEncode');
 
 ensureFontsRegistered();
 
@@ -77,7 +80,7 @@ async function createWelcomeCard(member) {
         console.error('Error loading avatar:', error);
     }
 
-    return canvas.toBuffer();
+    return encodeCanvas(canvas);
 }
 
 async function createRankCard(user, userData, rank, requiredXp, opts = {}) {
@@ -198,7 +201,7 @@ async function createRankCard(user, userData, rank, requiredXp, opts = {}) {
         ctx.textAlign    = 'left';
     }
 
-    return canvas.toBuffer();
+    return encodeCanvas(canvas);
 }
 
 const WAR_VICTORY_LINES = [
@@ -272,7 +275,7 @@ async function createWarVictoryBanner(winnerName, winnerScore, loserName, loserS
     ctx.fillStyle = '#98FB98';
     ctx.fillText('Spoils: 2× coin booster (24h) + 🎖️ War Victor badge (30d)', 150, 215);
 
-    return canvas.toBuffer();
+    return encodeCanvas(canvas);
 }
 
 async function createWealthTierBanner(username, tierLabel, tierColor) {
@@ -305,7 +308,7 @@ async function createWealthTierBanner(username, tierLabel, tierColor) {
     ctx.fillStyle = '#888888';
     ctx.fillText('has reached a legendary wealth milestone!', 140, 155);
 
-    return canvas.toBuffer();
+    return encodeCanvas(canvas);
 }
 
 // ── Pet sprite generator ──────────────────────────────────────────────────────
@@ -381,7 +384,7 @@ async function generatePetSprite(petId, size = 80, stage = 1) {
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'alphabetic';
 
-    return canvas.toBuffer('image/png');
+    return encodeCanvas(canvas);
 }
 
 // ── Minecraft-style achievement card ─────────────────────────────────────────
@@ -503,7 +506,7 @@ async function createAchievementCard(text, description, xpReward) {
         ctx.fillText(truncateText(ctx, description, maxTextW), textX, 62);
     }
 
-    return canvas.toBuffer('image/png');
+    return encodeCanvas(canvas);
 }
 
 // ── End-of-season recap card ──────────────────────────────────────────────────
@@ -585,7 +588,7 @@ async function createSeasonRecapCard(user, seasonName, leaderboardRank, totalPla
     ctx.font = 'italic 14px "DejaVu Sans"'; ctx.fillStyle = '#555588';
     ctx.fillText('New season coming soon — your next adventure awaits!', 30, H - 18);
 
-    return canvas.toBuffer('image/png');
+    return encodeCanvas(canvas);
 }
 
 module.exports = { createWelcomeCard, createRankCard, createWarVictoryBanner, createWealthTierBanner, generatePetSprite, createAchievementCard, createSeasonRecapCard };

@@ -196,7 +196,7 @@ describe('reads', () => {
         ItemImage.findOne.mockImplementation(async ({ guildId }) =>
             (guildId === null ? { imageData: Buffer.from('shared'), imageType: 'image/gif' } : null));
 
-        const res = await fetch(`${baseUrl}/api/item-image/activity/g9/${ITEM}`);
+        const res = await fetch(`${baseUrl}/api/item-image/activity/g1/${ITEM}`);
 
         expect(res.status).toBe(200);
         expect(res.headers.get('content-type')).toBe('image/gif');
@@ -205,5 +205,41 @@ describe('reads', () => {
 
     test('404 when there is no image anywhere', async () => {
         expect((await fetch(`${baseUrl}/api/item-image/activity/g1/${ITEM}`)).status).toBe(404);
+    });
+
+    // #565. These reads were public, which meant anyone who could guess a guild
+    // id and an item id could pull that guild's uploaded artwork. They carry the
+    // same two gates the writes above do now — and the reason they can is that
+    // every request for one comes from a dashboard page on the dashboard's own
+    // origin, so the session cookie is already on it.
+    test('an unauthenticated read is refused', async () => {
+        session.authenticated = false;
+        ItemImage.findOne.mockResolvedValue({ imageData: Buffer.from('own'), imageType: 'image/png' });
+
+        const res = await fetch(`${baseUrl}/api/item-image/activity/g1/${ITEM}`);
+
+        expect(res.status).toBe(401);
+        expect(ItemImage.findOne).not.toHaveBeenCalled();
+    });
+
+    // The IDOR shape, on the read side: a real admin, of a different guild.
+    test('an admin of one guild cannot read another guild\'s image', async () => {
+        ItemImage.findOne.mockResolvedValue({ imageData: Buffer.from('own'), imageType: 'image/png' });
+
+        const res = await fetch(`${baseUrl}/api/item-image/activity/g2/${ITEM}`);
+
+        expect(res.status).toBe(403);
+        expect(ItemImage.findOne).not.toHaveBeenCalled();
+    });
+
+    // An authenticated response must not land in a shared cache, where the next
+    // request for the same URL would be served it without any gate at all.
+    test('the response is marked private, not publicly cacheable', async () => {
+        ItemImage.findOne.mockResolvedValue({ imageData: Buffer.from('own'), imageType: 'image/png' });
+
+        const res = await fetch(`${baseUrl}/api/item-image/activity/g1/${ITEM}`);
+
+        expect(res.headers.get('cache-control')).toContain('private');
+        expect(res.headers.get('cache-control')).not.toContain('public');
     });
 });

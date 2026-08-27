@@ -1,4 +1,5 @@
 const { Schema, model } = require('mongoose');
+const { encryptSecret } = require('../config/secretBox');
 
 function distinctProfileIds(profiles) {
     if (!Array.isArray(profiles)) return true;
@@ -296,10 +297,16 @@ const guildSchema = new Schema({
             default: 'openai'
         },
         model: { type: String, default: null },
-        openaiKey: { type: String, default: null },
-        geminiKey: { type: String, default: null },
-        anthropicKey: { type: String, default: null },
-        openrouterKey: { type: String, default: null },
+        // Live provider credentials, encrypted at rest when the operator has
+        // configured SECRET_ENCRYPTION_KEY (#564). The setter is on the schema
+        // rather than at the dashboard route so it cannot be skipped by a write
+        // site added later; the matching read is decryptSecret() in each
+        // provider's resolveAuth, because these documents reach the AI path as
+        // plain objects via toObject(), which does not run getters.
+        openaiKey: { type: String, default: null, set: encryptSecret },
+        geminiKey: { type: String, default: null, set: encryptSecret },
+        anthropicKey: { type: String, default: null, set: encryptSecret },
+        openrouterKey: { type: String, default: null, set: encryptSecret },
         ollamaBaseUrl: { type: String, default: 'http://localhost:11434' },
         channelId: { type: String, default: null },
         systemPrompt: { type: String, default: 'You are a helpful Discord bot assistant.' },

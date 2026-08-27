@@ -40,13 +40,27 @@ function uploadImage(req, res, next) {
 }
 
 // Serves a guild shop item's image.
-router.get('/item-image/shop/:guildId/:itemId', async (req, res) => {
+//
+// Authenticated and guild-scoped like every other route here (#565). It was
+// public on the reasoning that a browser rendering an <img> cannot present a
+// session — which is not true of these images: every consumer is a dashboard
+// page on the dashboard's own origin (views/partials/game-item-card.ejs and
+// public/guild-settings.js), so the session cookie rides along with the image
+// request like any other same-origin subresource. Discord never fetches these
+// URLs at all; a shop or activity image reaches a message as an uploaded
+// attachment, built by utils/itemImageHelper.js straight from the database.
+//
+// So nothing needed them open, and open meant anyone who could guess a guild id
+// and an item id could read that guild's uploaded artwork.
+router.get('/item-image/shop/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     try {
         const guild = await require('../../../models/Guild').findOne({ guildId: req.params.guildId }, { shop: 1 });
         const item = guild?.shop?.find(i => i.itemId === req.params.itemId);
         if (!item?.imageData?.length) return res.status(404).end();
         res.set('Content-Type', item.imageType || 'image/png');
-        res.set('Cache-Control', 'public, max-age=86400');
+        // `private`: the response is scoped to a session now, so it may sit in
+        // the requesting browser's cache but not in a shared one.
+        res.set('Cache-Control', 'private, max-age=86400');
         res.send(item.imageData);
     } catch { res.status(500).end(); }
 });
@@ -113,7 +127,8 @@ function invalidItemId(itemId) {
 }
 
 // Serves a guild's activity item image, falling back to the shared pre-#561 one.
-router.get('/item-image/activity/:guildId/:itemId', async (req, res) => {
+// Gated for the same reason as the shop route above (#565).
+router.get('/item-image/activity/:guildId/:itemId', checkAuth, checkGuildAccess, async (req, res) => {
     const { guildId, itemId } = req.params;
     try {
         const img = await ItemImage.findOne({ guildId, itemId })
@@ -121,8 +136,9 @@ router.get('/item-image/activity/:guildId/:itemId', async (req, res) => {
         if (!img?.imageData?.length) return res.status(404).end();
         res.set('Content-Type', img.imageType || 'image/png');
         // Per guild, so the cache key must be too: this URL carries the guild id,
-        // and the response varies by nothing else.
-        res.set('Cache-Control', 'public, max-age=86400');
+        // and the response varies by nothing else. `private` because the route
+        // is authenticated (#565) — a shared cache must not hold it.
+        res.set('Cache-Control', 'private, max-age=86400');
         res.send(img.imageData);
     } catch { res.status(500).end(); }
 });
