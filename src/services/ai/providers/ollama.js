@@ -190,8 +190,8 @@ async function* separated(pieces) {
     }
 }
 
-async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool });
+async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget });
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt });
 
@@ -228,8 +228,8 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool }) {
-    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool });
+async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget }) {
+    const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget });
     const { url, agents } = resolveEndpoint(baseUrl);
     const messages = buildMessages({ systemPrompt, history, prompt });
 

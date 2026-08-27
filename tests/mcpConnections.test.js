@@ -29,8 +29,13 @@ const {
     entryFor,
     clientFor,
     withSession,
+    withServerLimit,
     cachedList,
-    resetMcpCache
+    primeList,
+    resetMcpCache,
+    LIST_TTL_MS,
+    STALE_TTL_MS,
+    MAX_PARALLEL_PER_SERVER
 } = require('../src/services/ai/mcp/connections');
 
 const SERVER = {
@@ -126,5 +131,116 @@ describe('caching', () => {
         await expect(cachedList(entry, SERVER, 'prompts', list)).rejects.toThrow('connect ETIMEDOUT');
         await expect(cachedList(entry, SERVER, 'prompts', list)).rejects.toThrow('connect ETIMEDOUT');
         expect(list).toHaveBeenCalledTimes(1);
+    });
+
+    test('a list somebody else fetched can be handed straight to the pool', async () => {
+        // The dashboard's Test button is a full discovery run whose answer was
+        // being thrown away.
+        const entry = entryFor(SERVER);
+        const list = jest.fn();
+
+        primeList(entry, 'tools', [{ name: 'search' }]);
+
+        await expect(cachedList(entry, SERVER, 'tools', list)).resolves.toEqual([{ name: 'search' }]);
+        expect(list).not.toHaveBeenCalled();
+    });
+});
+
+describe('an expired list is refreshed behind whoever asked for it', () => {
+    // Expiry is not "this list is wrong", it is "go and check". The message
+    // that happens to arrive five minutes and one second after the last one
+    // should not be the one that pays for the round trip.
+    const past = ms => jest.spyOn(Date, 'now').mockReturnValue(Date.now() + ms);
+
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    test('the caller that finds it expired gets the old list, and the new one lands behind', async () => {
+        const entry = entryFor(SERVER);
+        const list = jest.fn()
+            .mockResolvedValueOnce([{ name: 'old' }])
+            .mockResolvedValueOnce([{ name: 'new' }]);
+
+        await cachedList(entry, SERVER, 'tools', list);
+        past(LIST_TTL_MS + 1000);
+
+        // Served without waiting, even though the refresh has not answered.
+        await expect(cachedList(entry, SERVER, 'tools', list)).resolves.toEqual([{ name: 'old' }]);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(list).toHaveBeenCalledTimes(2);
+        await expect(cachedList(entry, SERVER, 'tools', list)).resolves.toEqual([{ name: 'new' }]);
+    });
+
+    test('a refresh that fails leaves the old list in place rather than nothing', async () => {
+        const entry = entryFor(SERVER);
+        const list = jest.fn()
+            .mockResolvedValueOnce([{ name: 'search' }])
+            .mockRejectedValue(new Error('connect ETIMEDOUT'));
+
+        await cachedList(entry, SERVER, 'tools', list);
+        past(LIST_TTL_MS + 1000);
+
+        await expect(cachedList(entry, SERVER, 'tools', list)).resolves.toEqual([{ name: 'search' }]);
+        await Promise.resolve();
+        await Promise.resolve();
+        // Still the old list, and the failed refresh is not retried on every
+        // message either — the failure window applies the same as ever.
+        await expect(cachedList(entry, SERVER, 'tools', list)).resolves.toEqual([{ name: 'search' }]);
+        expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    test('past the stale window the caller waits for a fresh list', async () => {
+        const entry = entryFor(SERVER);
+        const list = jest.fn()
+            .mockResolvedValueOnce([{ name: 'old' }])
+            .mockResolvedValueOnce([{ name: 'new' }]);
+
+        await cachedList(entry, SERVER, 'tools', list);
+        past(LIST_TTL_MS + STALE_TTL_MS + 1000);
+
+        await expect(cachedList(entry, SERVER, 'tools', list)).resolves.toEqual([{ name: 'new' }]);
+    });
+});
+
+describe('one server does not see the whole round at once', () => {
+    test(`at most ${MAX_PARALLEL_PER_SERVER} requests are in flight against one connection`, async () => {
+        const entry = entryFor(SERVER);
+        let running = 0;
+        let peak = 0;
+        const gates = [];
+
+        const calls = Array.from({ length: 6 }, () => withServerLimit(entry, () => {
+            running++;
+            peak = Math.max(peak, running);
+            const gate = deferred();
+            gates.push(gate);
+            return gate.promise.then(value => { running--; return value; });
+        }));
+
+        // Nothing past the cap has started, however many were asked for.
+        await Promise.resolve();
+        expect(peak).toBe(MAX_PARALLEL_PER_SERVER);
+
+        // Each one that finishes hands its slot to the next, which starts and
+        // takes a gate of its own — so they are released one at a time.
+        while (gates.length) {
+            gates.shift().resolve('ok');
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        await expect(Promise.all(calls)).resolves.toEqual(Array(6).fill('ok'));
+        expect(peak).toBe(MAX_PARALLEL_PER_SERVER);
+    });
+
+    test('a call that throws still releases its slot', async () => {
+        const entry = entryFor(SERVER);
+
+        await expect(withServerLimit(entry, async () => { throw new Error('HTTP 500'); }))
+            .rejects.toThrow('HTTP 500');
+
+        expect(entry.inFlight).toBe(0);
+        await expect(withServerLimit(entry, async () => 'ok')).resolves.toBe('ok');
     });
 });

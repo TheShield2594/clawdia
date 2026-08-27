@@ -1,6 +1,7 @@
 'use strict';
 
 const { McpHttpClient } = require('./client');
+const { entryFor, primeList } = require('./connections');
 const { isToolEnabled, needsConfirmation, toolAnnotations } = require('../../../config/mcpServers');
 
 // "Does this connection work, and what would it let the model do?"
@@ -22,6 +23,18 @@ function extras(resourceCount, promptCount) {
     if (resourceCount) bits.push(`${resourceCount} resource${resourceCount === 1 ? '' : 's'}`);
     if (promptCount) bits.push(`${promptCount} prompt${promptCount === 1 ? '' : 's'}`);
     return bits.length ? `. It also publishes ${bits.join(' and ')}.` : '.';
+}
+
+// The three lists this inspection fetched, handed to the shared connection pool
+// so the next caller finds them already there. Never fatal: a warm cache is a
+// convenience, and a test that reported a working server has done its job.
+function primeLists(server, lists) {
+    try {
+        const entry = entryFor(server);
+        for (const [kind, value] of Object.entries(lists)) primeList(entry, kind, value);
+    } catch (err) {
+        console.warn(`[MCP] could not cache "${server.name}" discovery: ${err.message}`);
+    }
 }
 
 /**
@@ -55,6 +68,13 @@ async function inspectServer(server, { confirmMode } = {}) {
             client.listResources().catch(() => []),
             client.listPrompts().catch(() => [])
         ]);
+        // A test is a full discovery run whose answer was about to be thrown
+        // away. The pool is keyed by (url, token), so what this connection just
+        // learned is exactly what the guild's next message would have gone and
+        // asked for — an admin who saves a server and then uses it in a channel
+        // now pays for the handshake once rather than twice.
+        primeLists(server, { tools, resources, prompts });
+
         const described = tools.slice(0, MAX_TOOLS_REPORTED).map(tool => ({
             name: tool.name,
             enabled: isToolEnabled(server.toolset, tool.name),

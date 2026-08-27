@@ -35,6 +35,14 @@ jest.mock('../src/services/ai/mcp/client', () => ({
     }
 }));
 
+// The pool warm-up a save kicks off. Mocked rather than exercised: what
+// matters at this layer is that the response does not wait on somebody else's
+// server, and that a save which cannot reach it still succeeds.
+const mockPrewarm = jest.fn(async () => 1);
+jest.mock('../src/services/ai/mcp/toolkit', () => ({
+    prewarmMcpServers: (...args) => mockPrewarm(...args)
+}));
+
 const mockGetToolUsage = jest.fn(async () => []);
 jest.mock('../src/services/ai/mcp/usage', () => ({
     getToolUsage: (...args) => mockGetToolUsage(...args)
@@ -82,6 +90,7 @@ afterAll(async () => {
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockPrewarm.mockResolvedValue(1);
     mockConstructed.length = 0;
     doc = makeDoc([]);
     // findOne().lean() is used by the read paths; the write path uses the doc.
@@ -109,6 +118,48 @@ describe('GET /guild/:id/mcp-servers', () => {
         expect(body.presets.map(p => p.id)).toContain('github');
         expect(body.provider).toBe('anthropic');
         expect(body.editable).toBe(true);
+    });
+});
+
+describe('a saved server is dialled before it is needed', () => {
+    // An admin who saves a connection is about to go and try it, and discovery
+    // is the same handshake and list whenever it happens — so it happens here,
+    // off the clock, rather than on the first Discord reply that needs it.
+    test('the save warms the connection it just stored', async () => {
+        await api('PUT', '/guild/g1/mcp-servers/github', {
+            url: 'https://api.githubcopilot.com/mcp/',
+            authorizationToken: 'ghp_secret'
+        });
+
+        expect(mockPrewarm).toHaveBeenCalledWith([expect.objectContaining({
+            name: 'github',
+            url: 'https://api.githubcopilot.com/mcp/',
+            authorizationToken: 'ghp_secret'
+        })]);
+    });
+
+    test('a server saved switched off is not dialled', async () => {
+        await api('PUT', '/guild/g1/mcp-servers/github', {
+            url: 'https://api.githubcopilot.com/mcp/',
+            enabled: false
+        });
+
+        expect(mockPrewarm).not.toHaveBeenCalled();
+    });
+
+    test('a server that cannot be reached still saves', async () => {
+        mockPrewarm.mockRejectedValueOnce(new Error('connect ETIMEDOUT'));
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const { status } = await api('PUT', '/guild/g1/mcp-servers/github', {
+            url: 'https://api.githubcopilot.com/mcp/'
+        });
+
+        expect(status).toBe(200);
+        expect(doc.save).toHaveBeenCalled();
+        await new Promise(resolve => setImmediate(resolve));
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('prewarm after save failed'));
+        warn.mockRestore();
     });
 });
 

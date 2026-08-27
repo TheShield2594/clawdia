@@ -28,6 +28,7 @@ jest.mock('../src/services/ai/mcp/client', () => ({
 }));
 
 const { inspectServer, MAX_TOOLS_REPORTED } = require('../src/services/ai/mcp/inspect');
+const { entryFor, cachedList, resetMcpCache } = require('../src/services/ai/mcp/connections');
 const { resolveMcpServers } = require('../src/config/mcpServers');
 
 const resolve = over => resolveMcpServers([{
@@ -40,6 +41,7 @@ const resolve = over => resolveMcpServers([{
 
 beforeEach(() => {
     jest.clearAllMocks();
+    resetMcpCache();
     mockConstructed.length = 0;
     mockListResources.mockResolvedValue([]);
     mockListPrompts.mockResolvedValue([]);
@@ -48,6 +50,37 @@ beforeEach(() => {
         { name: 'create_issue', annotations: { readOnlyHint: false } },
         { name: 'delete_file', annotations: { readOnlyHint: false } }
     ]);
+});
+
+describe('what a test leaves behind', () => {
+    test('the lists it fetched are handed to the pool the chat path reads', async () => {
+        // A test is a full discovery run — handshake, tools/list, and the two
+        // other lists — whose answer was being thrown away, so an admin who
+        // saved a server and then used it in a channel paid for it twice.
+        mockListResources.mockResolvedValue([{ uri: 'file:///readme.md' }]);
+        mockListPrompts.mockResolvedValue([{ name: 'summarize' }]);
+
+        const server = resolve();
+        await inspectServer(server);
+
+        const entry = entryFor(server);
+        const never = jest.fn();
+        await expect(cachedList(entry, server, 'tools', never)).resolves.toHaveLength(3);
+        await expect(cachedList(entry, server, 'resources', never)).resolves.toEqual([{ uri: 'file:///readme.md' }]);
+        await expect(cachedList(entry, server, 'prompts', never)).resolves.toEqual([{ name: 'summarize' }]);
+        expect(never).not.toHaveBeenCalled();
+    });
+
+    test('a failed test caches nothing — there was nothing to cache', async () => {
+        mockListTools.mockRejectedValue(new Error('HTTP 401'));
+
+        const server = resolve();
+        expect((await inspectServer(server)).success).toBe(false);
+
+        const list = jest.fn(async () => [{ name: 'search' }]);
+        await expect(cachedList(entryFor(server), server, 'tools', list)).resolves.toEqual([{ name: 'search' }]);
+        expect(list).toHaveBeenCalled();
+    });
 });
 
 describe('a connection that answers', () => {

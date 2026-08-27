@@ -56,6 +56,66 @@ describe('live status', () => {
     });
 });
 
+describe('a call that says how far it has got', () => {
+    // The status line already existed; what was missing was anything to put on
+    // it between "started" and "finished". A server that sends progress
+    // notifications is answering the one question a user watching an ellipsis
+    // has, and readEventStream used to drop them on the floor.
+    const progress = (id, fields) => ({ type: 'progress', id, server: 'github', tool: 'search', ...fields });
+
+    test('a server that knows how much work there is gets a percentage', () => {
+        const activity = createToolActivity();
+        activity.onEvent(start(1, 'search'));
+        activity.onEvent(progress(1, { progress: 4, total: 10, message: null }));
+
+        expect(activity.render()).toBe('-# 🔧 github · search 40%…');
+    });
+
+    test('the server\'s own words win over the numbers', () => {
+        const activity = createToolActivity();
+        activity.onEvent(start(1, 'search'));
+        activity.onEvent(progress(1, { progress: 4, total: 10, message: 'indexing repository' }));
+
+        expect(activity.render()).toBe('-# 🔧 github · search indexing repository…');
+    });
+
+    test('a bare count is still worth showing — a number that moves is not a stuck bot', () => {
+        const activity = createToolActivity();
+        activity.onEvent(start(1, 'search'));
+        activity.onEvent(progress(1, { progress: 47, total: null, message: null }));
+
+        expect(activity.render()).toBe('-# 🔧 github · search 47…');
+    });
+
+    test('only the latest update shows, and it goes when the call does', () => {
+        const activity = createToolActivity();
+        activity.onEvent(start(1, 'search'));
+        activity.onEvent(progress(1, { progress: 1, total: 10, message: null }));
+        activity.onEvent(progress(1, { progress: 9, total: 10, message: null }));
+        expect(activity.render()).toBe('-# 🔧 github · search 90%…');
+
+        activity.onEvent(end(1, 'search'));
+        expect(activity.render()).toBe('');
+    });
+
+    test('a long progress message is trimmed rather than taking the whole line', () => {
+        const activity = createToolActivity();
+        activity.onEvent(start(1, 'search'));
+        activity.onEvent(progress(1, { progress: 1, total: null, message: 'reading '.repeat(20) }));
+
+        expect(activity.render().length).toBeLessThanOrEqual(STATUS_RESERVE);
+    });
+
+    test('progress for a call that already finished changes nothing', () => {
+        const activity = createToolActivity();
+        activity.onEvent(start(1, 'search'));
+        activity.onEvent(end(1, 'search'));
+        activity.onEvent(progress(1, { progress: 5, total: 10, message: null }));
+
+        expect(activity.render()).toBe('');
+    });
+});
+
 describe('the summary footer', () => {
     test('is empty when no tool ran', () => {
         expect(createToolActivity().footer()).toBe('');

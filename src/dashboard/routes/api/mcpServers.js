@@ -19,6 +19,7 @@ const {
 } = require('../../../config/mcpServers');
 const { getToolUsage } = require('../../../services/ai/mcp/usage');
 const { inspectServer } = require('../../../services/ai/mcp/inspect');
+const { prewarmMcpServers } = require('../../../services/ai/mcp/toolkit');
 const { providers, mcpMode } = require('../../../services/ai/providers');
 
 const MAX_URL_LENGTH = 2048;
@@ -336,6 +337,17 @@ router.put('/guild/:guildId/mcp-servers/:name', checkAuth, checkGuildAccess, che
             resources: validated.value.resources,
             tokenChanged: token !== undefined
         });
+
+        // The saved server, dialled now rather than on whoever sends the next
+        // message in the guild. An admin who saves a connection is about to go
+        // and try it, and discovery is the same handshake and list either way —
+        // paid here, off the clock, instead of on a Discord reply. Deliberately
+        // not awaited: the panel is waiting on this response, and a server that
+        // is slow or down changes nothing about whether the save worked.
+        if (validated.value.enabled) {
+            prewarmMcpServers([{ ...validated.value, authorizationToken: token ?? existing?.authorizationToken ?? null }])
+                .catch(err => console.warn(`[MCP] prewarm after save failed: ${err.message}`));
+        }
 
         res.json({ success: true, servers: (guildSettings.ai.mcpServers || []).map(publicServer) });
     } catch (error) {

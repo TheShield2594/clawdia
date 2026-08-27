@@ -346,10 +346,17 @@ tools, offers them to the model as functions, runs the calls and feeds the
 results back. On that second route the model itself has to support tool calling,
 which every current OpenAI and Gemini model does and some Ollama models do not.
 
-While a tool is running the reply names it, and the finished message keeps a
-short summary of what ran, how long it took and anything that failed or could
-not be reached — so a slow answer is legible and a server that is down is
-visible rather than silently making the model wrong.
+While a tool is running the reply names it — with how far it has got, for a
+server that says — and the finished message keeps a short summary of what ran,
+how long it took and anything that failed or could not be reached, so a slow
+answer is legible and a server that is down is visible rather than silently
+making the model wrong.
+
+The per-user rate limit counts tool calls as well as messages, at eight calls
+per message allowed: one question that needs a lot of looking up does not eat
+the allowance for the next one, and a user cannot spend without bound by asking
+the same expensive question over and over. Past it the model is told the call
+was refused and answers from what it has.
 
 Tools that write something can be made to wait: the Approval setting posts
 **Run it** / **Cancel** in the channel for a tool call and does not run it until

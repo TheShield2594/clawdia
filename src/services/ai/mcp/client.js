@@ -113,26 +113,50 @@ function jsonRpcResult(message) {
  * Pull the JSON-RPC response with `id` out of an SSE stream.
  *
  * The transport lets a server answer one POST with a stream rather than a
- * single JSON body, and put progress notifications on it before the answer.
- * Anything that is not the response being waited for is skipped, and the stream
- * is dropped as soon as the answer arrives — the server is allowed to hold it
- * open afterwards, and waiting that out would stall the turn.
+ * single JSON body, and put notifications on it before the answer. Those are
+ * handed to `onNotification` — `notifications/progress` is a long tool call
+ * saying how far it has got, which is the one thing a user watching an
+ * ellipsis wants to know — and everything else is skipped. The stream is
+ * dropped as soon as the answer arrives: the server is allowed to hold it open
+ * afterwards, and waiting that out would stall the turn.
  */
-async function readEventStream(stream, id) {
+async function readEventStream(stream, id, onNotification = null) {
     let buffer = '';
     let data = [];
 
+    /**
+     * The event just completed, if it was the response being waited for.
+     *
+     * A notification is delivered on the way past and reported as "not it", so
+     * the loop keeps reading. A JSON-RPC notification is a message with a
+     * method and no id, which is also what tells it apart from a response to
+     * some other request on the same stream.
+     */
     const finish = () => {
         if (!data.length) return undefined;
         const text = data.join('\n');
         data = [];
         if (!text.trim()) return undefined;
+
+        let message;
         try {
-            const message = JSON.parse(text);
-            return message && message.id === id ? message : undefined;
+            message = JSON.parse(text);
         } catch {
             return undefined;
         }
+        if (!message || typeof message !== 'object') return undefined;
+        if (message.id === id) return message;
+
+        if (onNotification && message.id === undefined && typeof message.method === 'string') {
+            try {
+                onNotification(message);
+            } catch (err) {
+                // A listener that throws is a bug in whoever is watching, not a
+                // reason to lose the tool result still coming down this stream.
+                console.warn(`[MCP] notification listener failed: ${err.message}`);
+            }
+        }
+        return undefined;
     };
 
     for await (const chunk of readChunks(stream)) {
@@ -197,6 +221,36 @@ function retryAfterMs(header) {
     return ms <= MAX_RETRY_AFTER_MS ? ms : null;
 }
 
+/**
+ * A notification handler that reports one request's progress and ignores
+ * everything else.
+ *
+ * The token is echoed back by the server, and the spec allows it to be a string
+ * or a number, so the two are compared as text rather than trusting a server to
+ * send back the type it was given. `total` is optional — a server that knows it
+ * has 40 files to read says so, one that is simply working says only that it is
+ * still working — and so is the human-readable `message`.
+ */
+function progressReader(token, onProgress) {
+    return notification => {
+        if (notification.method !== 'notifications/progress') return;
+
+        const params = notification.params;
+        if (!params || typeof params !== 'object') return;
+        if (String(params.progressToken) !== String(token)) return;
+
+        const progress = Number(params.progress);
+        if (!Number.isFinite(progress)) return;
+        const total = Number(params.total);
+
+        onProgress({
+            progress,
+            total: Number.isFinite(total) && total > 0 ? total : null,
+            message: typeof params.message === 'string' ? params.message : null
+        });
+    };
+}
+
 // HTTP failures are what an admin actually sees when a URL or token is wrong,
 // so they say which of the two it probably is.
 function httpError(status, body) {
@@ -258,7 +312,7 @@ class McpHttpClient {
         return headers;
     }
 
-    async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true } = {}) {
+    async post(payload, { id = null, timeout = CONNECT_TIMEOUT_MS, retryable = true, onNotification = null } = {}) {
         let response;
         try {
             response = await axios.post(this.url, payload, {
@@ -283,7 +337,7 @@ class McpHttpClient {
             if (wait !== null) {
                 response.data?.destroy?.();
                 await new Promise(resolve => setTimeout(resolve, wait));
-                return this.post(payload, { id, timeout, retryable: false });
+                return this.post(payload, { id, timeout, retryable: false, onNotification });
             }
         }
 
@@ -302,13 +356,30 @@ class McpHttpClient {
 
         const contentType = String(response.headers['content-type'] || '');
         return contentType.includes('text/event-stream')
-            ? readEventStream(response.data, id)
+            ? readEventStream(response.data, id, onNotification)
             : parseJsonBody(await collectText(response.data), id);
     }
 
-    async request(method, params, { timeout } = {}) {
+    /**
+     * One JSON-RPC request.
+     *
+     * `onProgress` is opt-in per request because the token is what asks for the
+     * notifications: a server sends them only for a request that carried one,
+     * so a caller with nothing to show is not sent updates it would throw away.
+     * The request id doubles as the token — it is already unique per connection,
+     * which is what the spec asks of it.
+     */
+    async request(method, params, { timeout, onProgress } = {}) {
         const id = ++this.nextId;
-        const message = await this.post({ jsonrpc: '2.0', id, method, params }, { id, timeout });
+        const wantsProgress = typeof onProgress === 'function';
+        const body = wantsProgress
+            ? { ...(params && typeof params === 'object' ? params : {}), _meta: { progressToken: id } }
+            : params;
+
+        const message = await this.post(
+            { jsonrpc: '2.0', id, method, params: body },
+            { id, timeout, onNotification: wantsProgress ? progressReader(id, onProgress) : null }
+        );
         return jsonRpcResult(message);
     }
 
@@ -482,12 +553,12 @@ class McpHttpClient {
      * thrown: "that repository does not exist" is an answer the model should see
      * and work around, not a reason to abandon the reply.
      */
-    async callTool(name, args) {
+    async callTool(name, args, { onProgress } = {}) {
         await this.initialize();
         const result = await this.request(
             'tools/call',
             { name, arguments: args && typeof args === 'object' ? args : {} },
-            { timeout: CALL_TIMEOUT_MS }
+            { timeout: CALL_TIMEOUT_MS, onProgress }
         );
         return {
             content: Array.isArray(result.content) ? result.content : [],
@@ -521,6 +592,7 @@ module.exports = {
     McpHttpClient,
     McpError,
     retryAfterMs,
+    progressReader,
     MAX_RETRY_AFTER_MS,
     METHOD_NOT_FOUND,
     PROTOCOL_VERSION,
