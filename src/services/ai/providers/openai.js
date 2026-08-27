@@ -16,6 +16,23 @@ const PRICING = [
     { match: /^o1/i,            in: 15.00, out: 60.00 }
 ];
 
+// o-series reasoning models (o1, o3, o3-mini, …), bare or behind an
+// OpenRouter-style `openai/` prefix. `gpt-4o` does not match: the `o` must
+// start the model name or follow a slash.
+function isReasoningModel(model) {
+    return /(^|\/)o\d+(-|$)/i.test(model || '');
+}
+
+// The tuning knobs, in the shape this model accepts. Reasoning models take
+// max_completion_tokens and reject non-default temperature — sending the
+// chat-model parameters is a guaranteed 400 (#822).
+function tuningParams(model, temperature, maxTokens) {
+    if (isReasoningModel(model)) {
+        return maxTokens != null ? { max_completion_tokens: maxTokens } : {};
+    }
+    return { temperature, max_tokens: maxTokens };
+}
+
 function buildMessages({ systemPrompt, history, prompt }) {
     return [
         { role: 'system', content: systemPrompt },
@@ -137,8 +154,7 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, temperatu
         const response = await client.chat.completions.create({
             model,
             messages,
-            temperature,
-            max_tokens: maxTokens,
+            ...tuningParams(model, temperature, maxTokens),
             stream: true,
             stream_options: { include_usage: true },
             ...(offerTools ? { tools: toolParams(toolkit) } : {})
@@ -189,8 +205,7 @@ async function complete({ apiKey, model, systemPrompt, history, prompt, temperat
         const completion = await client.chat.completions.create({
             model,
             messages,
-            temperature,
-            max_tokens: maxTokens,
+            ...tuningParams(model, temperature, maxTokens),
             ...(offerTools ? { tools: toolParams(toolkit) } : {})
         });
 
