@@ -155,8 +155,15 @@ async function cachedList(entry, server, kind, fn) {
             slot.expires = 0;
             slot.error = err;
             slot.errorExpire = Date.now() + FAILURE_TTL_MS;
-            closeQuietly(entry.client);
-            entry.client = null;
+            // The client stays. One list refused is not a broken session, and
+            // dropping the shared client here would close a session another
+            // caller is mid-tool-call on — three callers share this one now.
+            // withSession already replaces a client whose session really did
+            // expire, which is the only case that needs a new one.
+            if (err instanceof McpError && err.sessionExpired) {
+                closeQuietly(entry.client);
+                entry.client = null;
+            }
             throw err;
         })
         .finally(() => { slot.pending = null; });

@@ -146,7 +146,13 @@ function promptsEmbed(listings) {
             : 'No MCP connections are configured. Add one in the dashboard, under AI → Connections.');
     }
 
-    for (const listing of listings.slice(0, 5)) {
+    // A guild can configure ten connections and most of them may publish no
+    // prompts at all. Taking the first five off the top would spend the fields
+    // on those and hide the one server somebody is looking for, so the ones
+    // with something to say are selected first, in configured order.
+    const worthShowing = listings.filter(listing => listing.error || listing.prompts.length);
+
+    for (const listing of worthShowing.slice(0, 5)) {
         if (listing.error) {
             embed.addFields({
                 name: toolLabel(listing.server),
@@ -154,8 +160,6 @@ function promptsEmbed(listings) {
             });
             continue;
         }
-        if (!listing.prompts.length) continue;
-
         const rows = listing.prompts.map(prompt => {
             const args = prompt.arguments
                 .map(arg => `${toolLabel(arg.name)}${arg.required ? '' : '?'}`)

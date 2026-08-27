@@ -212,7 +212,9 @@ describe('what the server sends back', () => {
 });
 
 describe('rendering one prompt', () => {
-    test('sends the arguments as strings and returns a conversation', async () => {
+    test('forwards the arguments untouched and returns a conversation', async () => {
+        // Untouched on purpose: turning them into the strings the wire format
+        // wants is the client's job, and tests/mcpClient covers it there.
         const rendered = await renderPrompt([SERVER], 'docs', 'review', { pr: 42 });
 
         expect(mockGetPrompt).toHaveBeenCalledWith('review', { pr: 42 });

@@ -286,6 +286,24 @@ describe('resources and prompts', () => {
         expect(prompt.messages).toHaveLength(1);
     });
 
+    test('two families asked for at once share one handshake', async () => {
+        respondBy({
+            ...handshakeWith({ resources: {}, prompts: {} }),
+            'resources/list': { result: { resources: [{ uri: 'wiki://a' }] } },
+            'prompts/list': { result: { prompts: [{ name: 'review' }] } }
+        });
+
+        // Nothing orders these two: `/ai mcp prompts` can land while a message
+        // is reading the same server's resources. Two handshakes would mean two
+        // sessions, and the second notifications/initialized landing against
+        // whichever session id came back last.
+        const client = new McpHttpClient({ url: URL });
+        await Promise.all([client.listResources(), client.listPrompts()]);
+
+        expect(postsTo('initialize')).toHaveLength(1);
+        expect(postsTo('notifications/initialized')).toHaveLength(1);
+    });
+
     test('a prompt that comes back shapeless is empty rather than undefined', async () => {
         respondBy({ ...handshakeWith({ prompts: {} }), 'prompts/get': { result: {} } });
         expect(await new McpHttpClient({ url: URL }).getPrompt('review', {}))

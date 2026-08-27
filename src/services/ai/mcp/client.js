@@ -233,6 +233,9 @@ class McpHttpClient {
         this.serverInfo = null;
         this.capabilities = {};
         this.initialized = false;
+        // The handshake in flight, so concurrent callers wait on one rather
+        // than each starting their own.
+        this.handshake = null;
         this.nextId = 0;
     }
 
@@ -313,10 +316,24 @@ class McpHttpClient {
         await this.post({ jsonrpc: '2.0', method, params: params ?? {} });
     }
 
-    /** Handshake: initialize, adopt whatever session and version come back, confirm. */
+    /**
+     * Handshake: initialize, adopt whatever session and version come back, confirm.
+     *
+     * Coalesced, because there are three families of request now and nothing
+     * orders them: a `/ai mcp prompts` landing while a message is reading the
+     * same server's resources would otherwise open two handshakes on one
+     * client, and the second `notifications/initialized` would arrive against
+     * whichever session id came back last.
+     */
     async initialize() {
         if (this.initialized) return this;
+        if (this.handshake) return this.handshake;
 
+        this.handshake = this.handshakeOnce().finally(() => { this.handshake = null; });
+        return this.handshake;
+    }
+
+    async handshakeOnce() {
         const result = await this.request('initialize', {
             protocolVersion: PROTOCOL_VERSION,
             // Empty on purpose: this client answers no server-initiated

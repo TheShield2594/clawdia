@@ -55,6 +55,11 @@ const RETRIEVAL_BUDGET_MS = 8000;
 // base. The scoring below reads every entry, so the list gets a ceiling.
 const MAX_RESOURCES_SCORED = 500;
 
+// A resource's title and its URI are both the far side's to choose, and both
+// go in the heading of its block. Long enough to identify a document, short
+// enough that three of them cannot crowd out the documents themselves.
+const MAX_HEADING_CHARS = 120;
+
 // Words this short match everything and rank nothing.
 const MIN_WORD_LENGTH = 3;
 
@@ -187,17 +192,26 @@ function buildResourceContext(documents) {
         const remaining = MAX_KNOWLEDGE_CHARS - spent;
         if (remaining <= 0) break;
 
-        let body = doc.text.length > MAX_RESOURCE_CHARS
+        const body = doc.text.length > MAX_RESOURCE_CHARS
             ? `${doc.text.slice(0, MAX_RESOURCE_CHARS)}\n[truncated]`
             : doc.text;
-        if (body.length > remaining) body = `${body.slice(0, remaining)}\n[truncated]`;
-        spent += body.length;
 
-        const title = doc.resource.title || doc.resource.name || doc.resource.uri;
-        blocks.push(
-            `> **${title}** — from the "${doc.server}" server (${doc.resource.uri})\n`
-            + body.split('\n').map(line => `> ${line}`).join('\n')
-        );
+        // The heading is the server's text too — a resource can be titled
+        // anything and addressed by a URI of any length — so it is capped, and
+        // then the whole block is measured against the budget rather than the
+        // body alone. Three documents titled in prose would otherwise add a
+        // few hundred unbudgeted characters between them.
+        const title = String(doc.resource.title || doc.resource.name || doc.resource.uri).slice(0, MAX_HEADING_CHARS);
+        const uri = String(doc.resource.uri).slice(0, MAX_HEADING_CHARS);
+
+        const block = `> **${title}** — from the "${doc.server}" server (${uri})\n`
+            + body.split('\n').map(line => `> ${line}`).join('\n');
+
+        const trimmed = block.length > remaining
+            ? `${block.slice(0, remaining)}\n[truncated]`
+            : block;
+        spent += trimmed.length;
+        blocks.push(trimmed);
     }
 
     if (!blocks.length) return '';
@@ -273,5 +287,6 @@ module.exports = {
     MAX_RESOURCES_READ,
     MAX_RESOURCE_CHARS,
     MAX_KNOWLEDGE_CHARS,
+    MAX_HEADING_CHARS,
     RETRIEVAL_BUDGET_MS
 };

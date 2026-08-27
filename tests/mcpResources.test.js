@@ -32,7 +32,8 @@ const {
     buildResourceContext,
     scoreResource,
     MAX_RESOURCE_CHARS,
-    MAX_KNOWLEDGE_CHARS
+    MAX_KNOWLEDGE_CHARS,
+    MAX_HEADING_CHARS
 } = require('../src/services/ai/mcp/resources');
 const { resetMcpCache } = require('../src/services/ai/mcp/connections');
 
@@ -156,6 +157,27 @@ describe('the block that reaches the model', () => {
             doc('y'.repeat(MAX_RESOURCE_CHARS), { uri: `wiki://${i}` }));
         const text = buildResourceContext(documents);
         expect(text.length).toBeLessThan(MAX_KNOWLEDGE_CHARS * 1.5);
+    });
+
+    test('a title and URI of any length are capped and counted', () => {
+        const text = buildResourceContext([
+            doc('Body.', { title: 'T'.repeat(400), uri: `wiki://${'u'.repeat(400)}` })
+        ]);
+
+        // Both are the far side's text, so neither can spend the budget the
+        // documents themselves are supposed to have.
+        expect(text).not.toContain('T'.repeat(MAX_HEADING_CHARS + 1));
+        expect(text).not.toContain('u'.repeat(MAX_HEADING_CHARS + 1));
+    });
+
+    test('the headings are inside the block budget, not on top of it', () => {
+        const documents = Array.from({ length: 6 }, (_, i) => doc('y'.repeat(MAX_RESOURCE_CHARS), {
+            uri: `wiki://${i}`,
+            title: 'A very long document title '.repeat(4)
+        }));
+
+        const body = buildResourceContext(documents).split('---\n')[1];
+        expect(body.length).toBeLessThanOrEqual(MAX_KNOWLEDGE_CHARS + 200);
     });
 
     test('nothing to say is said as nothing at all', () => {
