@@ -46,6 +46,7 @@ const NON_JOB_TIMERS = new Set([
     'events/messageCreate.js',          // in-memory reminder-cooldown sweep
     'dashboard/lib/middleware.js',      // in-memory HTTP rate-limit sweep
     'utils/imageRateLimit.js',          // in-memory rate-limit bucket sweep
+    'utils/cardRenderQueue.js',         // in-memory welcome-card budget sweep (#592)
     'utils/commandCooldowns.js',        // in-memory cooldown map sweep (#621)
     'services/pollService.js',          // one poll's expiry, re-armed in 24-day hops
     'games/casino/crash.js',            // per-lobby round tick

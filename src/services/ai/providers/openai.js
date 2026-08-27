@@ -1,4 +1,5 @@
 const OpenAI = require('openai');
+const { decryptSecret } = require('../../../config/secretBox');
 const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // USD per 1M tokens (input, output). Prefix-matched; unknown models report
@@ -223,7 +224,7 @@ module.exports = {
     // MCP works here through the bot's own client: the tools are discovered,
     // offered to the model as functions, and called from the loop above.
     mcp: 'client',
-    resolveAuth: aiSettings => ({ apiKey: aiSettings.openaiKey || process.env.OPENAI_API_KEY }),
+    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.openaiKey) || process.env.OPENAI_API_KEY }),
     stream,
     complete
 };

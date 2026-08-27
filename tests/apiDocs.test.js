@@ -80,14 +80,13 @@ describe('the endpoints it finds', () => {
     // :guildId route that forgets checkGuildAccess fails here, not in
     // production.
     test('gate every :guildId route on administering that guild', () => {
+        // No exemptions. The two item-image reads used to be listed here as
+        // deliberately public, on the reasoning that an <img> tag cannot
+        // present a session — which was not true of them: every request comes
+        // from a dashboard page on the dashboard's own origin and carries the
+        // cookie (#565).
         for (const route of routes.filter(r => r.path.includes(':guildId'))) {
             const label = `${route.method} ${route.path}`;
-            // The two image reads are deliberately public: they are served to
-            // <img> tags, and the guild id in the path is the only key.
-            if (route.method === 'GET' && route.path.startsWith('/api/v1/item-image/')) {
-                expect([label, route.requires]).toEqual([label, ['public']]);
-                continue;
-            }
             expect([label, route.requires.includes('guild admin')]).toEqual([label, true]);
         }
     });

@@ -30,6 +30,7 @@ const FILE_BACKED_SECRETS = [
     'CLIENT_SECRET',
     'SESSION_SECRET',
     'MONGODB_URI',        // carries the database credentials
+    'SECRET_ENCRYPTION_KEY', // opens every provider key stored in the database
     'OPENAI_API_KEY',
     'GEMINI_API_KEY',
     'ANTHROPIC_API_KEY',

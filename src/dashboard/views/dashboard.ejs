@@ -35,7 +35,9 @@
                     <div class="cw-dash-avatar-fallback" style="background:var(--ink-700);color:var(--cream-100);"><%= user.username.charAt(0).toUpperCase() %></div>
                 <% } %>
                 <span style="font-size:14px;color:var(--ink-700);font-weight:500;"><%= user.username %></span>
-                <a href="/auth/logout" class="cw-btn cw-btn-dark" style="padding:9px 16px;font-size:13.5px;">Logout</a>
+                <form method="post" action="/auth/logout" class="cw-logout-form">
+                    <button type="submit" class="cw-btn cw-btn-dark" style="padding:9px 16px;font-size:13.5px;">Logout</button>
+                </form>
             </div>
         </div>
     </nav>
@@ -59,7 +61,9 @@
                 <h3>No manageable servers found</h3>
                 <p>You need <strong>Manage Server</strong> permission (or be the owner) on at least one server. If you just got the role, log out and back in to refresh your Discord session.</p>
                 <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
-                    <a href="/auth/logout" class="cw-btn cw-btn-dark">Refresh login</a>
+                    <form method="post" action="/auth/logout" class="cw-logout-form">
+                        <button type="submit" class="cw-btn cw-btn-dark">Refresh login</button>
+                    </form>
                     <a href="/" class="cw-btn cw-btn-ghost">← Back home</a>
                 </div>
             </div>

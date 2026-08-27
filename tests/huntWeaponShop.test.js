@@ -71,7 +71,7 @@ jest.mock('../src/models/ItemImage', () => ({
 
 jest.mock('../src/utils/shopBrowse.js', () => ({}));
 jest.mock('canvas', () => ({
-    createCanvas: () => ({ getContext: () => ({}), toBuffer: () => Buffer.from('') }),
+    createCanvas: () => ({ getContext: () => ({}), toBuffer: cb => cb(null, Buffer.from('')) }),
     loadImage: jest.fn(),
     registerFont: jest.fn(),
 }));

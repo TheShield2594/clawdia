@@ -53,6 +53,8 @@ services:
     #   # The `backup` service reads MONGODB_URI too; uncomment the matching
     #   # lines on it so both sides come from the same secret.
     #   MONGODB_URI_FILE: /run/secrets/mongodb_uri
+    #   # Opens the per-guild AI provider keys stored in the database (#564).
+    #   SECRET_ENCRYPTION_KEY_FILE: /run/secrets/secret_encryption_key
     #   ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
     #   OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
     #   GEMINI_API_KEY_FILE: /run/secrets/gemini_api_key
@@ -62,6 +64,7 @@ services:
     #   - client_secret
     #   - session_secret
     #   - mongodb_uri
+    #   - secret_encryption_key
     #   - anthropic_api_key
     #   - openai_api_key
     #   - gemini_api_key
@@ -262,6 +265,8 @@ services:
 #     file: ./secrets/session_secret
 #   mongodb_uri:
 #     file: ./secrets/mongodb_uri
+#   secret_encryption_key:
+#     file: ./secrets/secret_encryption_key
 #   anthropic_api_key:
 #     file: ./secrets/anthropic_api_key
 #   openai_api_key:

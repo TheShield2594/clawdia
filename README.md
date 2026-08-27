@@ -148,6 +148,7 @@ the files a change already touches.
 - `DASHBOARD_PORT` - Web dashboard port (default: 3000)
 - `DASHBOARD_URL` - Public URL for the dashboard
 - `SESSION_SECRET` - Random string for session encryption
+- `SECRET_ENCRYPTION_KEY` - (Optional, recommended) Encrypts the per-server AI provider keys that admins enter in the dashboard, so database backups hold ciphertext rather than live credentials. Generate with `openssl rand -base64 32`; keep it, because the stored keys cannot be read back without it. See [SETUP_GUIDE.md](SETUP_GUIDE.md#encrypting-stored-provider-keys)
 - `OPENAI_API_KEY` - (Optional) OpenAI API key for AI features
 - `GEMINI_API_KEY` - (Optional) Google Gemini API key for AI features
 - `ANTHROPIC_API_KEY` - (Optional) Anthropic Claude API key for AI features

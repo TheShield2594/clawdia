@@ -373,6 +373,10 @@ DASHBOARD_PORT=3000
 DASHBOARD_URL=http://localhost:3000
 SESSION_SECRET=random_string_here_32_characters_min
 
+# Encrypts the per-server AI provider keys stored in MongoDB (Optional,
+# recommended). See "Encrypting stored provider keys" below.
+SECRET_ENCRYPTION_KEY=
+
 # AI (Optional - can also configure per-server in dashboard)
 OPENAI_API_KEY=sk-your_openai_key_here
 GEMINI_API_KEY=AIza_your_gemini_key_here
@@ -411,6 +415,52 @@ Use this command to generate a secure session secret:
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
+
+### Encrypting stored provider keys
+
+The AI panel lets each server's admins enter their own provider key, and those
+keys are stored in MongoDB rather than in the environment. That matters more
+than it sounds: the `backup` service dumps the database nightly into `./backups`
+in the clear and keeps a month of archives, so on a default install those
+archives contain live credentials that bill someone else's account. A directory
+that is only as protected as "it's on my server" is a weaker boundary than the
+database itself.
+
+Set `SECRET_ENCRYPTION_KEY` and those keys are stored AES-256-GCM encrypted
+instead, so the dumps hold ciphertext:
+
+```bash
+openssl rand -base64 32
+```
+
+```env
+SECRET_ENCRYPTION_KEY=the_generated_value
+```
+
+Keep it somewhere other than the backups it protects — a value stored next to
+the archive it encrypts protects nothing. It is also not recoverable: without
+it the stored per-guild keys cannot be read back. The bot does not break if it
+is lost or rotated (it falls back to the bot-wide `*_API_KEY` variables and logs
+a warning), but every affected server has to re-enter its key in the dashboard.
+
+Keys already saved before the variable was set are rewritten on the next boot,
+by migration `018_encrypt_guild_ai_keys`. If you set it *later* than that — the
+migration has already run and recorded itself — sweep them by hand:
+
+```bash
+npm run secrets:encrypt
+```
+
+That is idempotent, so running it again, or after a new server adds a key, does
+nothing. The bot-wide `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`
+/ `OPENROUTER_API_KEY` variables are unaffected either way — they are read from
+the environment and never stored in the database.
+
+Leaving `SECRET_ENCRYPTION_KEY` unset is a supportable choice, and on a
+single-machine install where you control the backup directory it may well be
+the right one. It is just worth making deliberately: the migration logs how many
+keys it is leaving in the clear so the decision shows up on the first boot after
+upgrading.
 
 ## Portainer Deployment
 
@@ -640,6 +690,10 @@ Both forms prompt for confirmation first. Verify the archive with
 
 - Never share your `.env` file or API keys
 - Use strong session secrets (32+ characters)
+- Set `SECRET_ENCRYPTION_KEY` if server admins enter their own AI provider keys
+  in the dashboard, so the nightly database dumps in `./backups` hold ciphertext
+  rather than live credentials. See
+  [Encrypting stored provider keys](#encrypting-stored-provider-keys)
 - Limit bot permissions to only what's needed
 - Regularly update dependencies
 - In Docker, deliver secrets as files rather than environment variables. Anyone

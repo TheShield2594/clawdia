@@ -1,4 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const { decryptSecret } = require('../../../config/secretBox');
 const {
     buildAnthropicMcpParams,
     requiresApproval,
@@ -328,7 +329,7 @@ module.exports = {
     // can also be asked to work like the others — see clientToolkit above — so
     // this is what it does by default, not the only thing it does.
     mcp: 'native',
-    resolveAuth: aiSettings => ({ apiKey: aiSettings.anthropicKey || process.env.ANTHROPIC_API_KEY }),
+    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.anthropicKey) || process.env.ANTHROPIC_API_KEY }),
     stream,
     complete
 };

@@ -22,7 +22,9 @@ jest.mock('canvas', () => {
         getContext: jest.fn(() => mockCtx),
         width: 800,
         height: 300,
-        toBuffer: jest.fn(() => Buffer.from('fake-image')),
+        // Mirrors node-canvas's async form, which is what the card generator
+        // uses now (#592): the buffer arrives via the callback, not the return.
+        toBuffer: jest.fn(cb => cb(null, Buffer.from('fake-image'))),
     };
     return {
         createCanvas: jest.fn(() => mockCanvas),

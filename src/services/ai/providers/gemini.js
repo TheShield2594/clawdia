@@ -1,4 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
+const { decryptSecret } = require('../../../config/secretBox');
 const { toolkitFor, mapWithLimit, MAX_TOOL_ROUNDS, MAX_PARALLEL_TOOL_CALLS } = require('../mcp/toolkit');
 
 // Google's current SDK. It replaces `@google/generative-ai`, which Google
@@ -246,7 +247,7 @@ module.exports = {
     pricing: PRICING,
     // MCP tools are declared as Gemini functions and called from the loop here.
     mcp: 'client',
-    resolveAuth: aiSettings => ({ apiKey: aiSettings.geminiKey || process.env.GEMINI_API_KEY }),
+    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.geminiKey) || process.env.GEMINI_API_KEY }),
     stream,
     complete,
     // Exported for the tests that pin what an MCP schema turns into.

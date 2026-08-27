@@ -1,4 +1,5 @@
 const openai = require('./openai');
+const { decryptSecret } = require('../../../config/secretBox');
 
 // OpenRouter is OpenAI-compatible: same wire protocol, different base URL and
 // attribution headers.
@@ -23,7 +24,7 @@ module.exports = {
     // offered as functions and called by the loop in openai.js. Whether the
     // *routed* model supports tool calling is up to the model.
     mcp: 'client',
-    resolveAuth: aiSettings => ({ apiKey: aiSettings.openrouterKey || process.env.OPENROUTER_API_KEY }),
+    resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.openrouterKey) || process.env.OPENROUTER_API_KEY }),
     // OpenRouter model ids are namespaced; a bare model name is a config error
     // that would otherwise surface as an opaque 400 from the API.
     validateModel: model => (model && !model.includes('/'))

@@ -1077,6 +1077,10 @@ textarea.auto-resize {
 .cw-btn:hover { transform: translateY(-1px); }
 .cw-btn:focus-visible { outline: 3px solid var(--claw-500); outline-offset: 3px; }
 .cw-btn-dark { background: var(--ink-950); color: var(--cream-50); }
+/* Logging out is a POST (#566), so the control is a form. `display: contents`
+   keeps its button as the direct flex item of whatever row it sits in, so the
+   markup change costs no layout change. */
+.cw-logout-form { display: contents; }
 .cw-btn-dark:hover { background: var(--ink-800); }
 .cw-btn-dark:focus-visible { outline-color: var(--ink-950); box-shadow: 0 0 0 3px var(--cream-50), 0 0 0 5px var(--ink-950); outline: none; }
 .cw-btn-claw { background: var(--claw-500); color: #fff; box-shadow: 0 4px 0 var(--claw-600), 0 12px 24px -10px rgba(217,119,66,.55); padding: 14px 22px; font-size: 15.5px; }

@@ -344,22 +344,37 @@ describe('every API route mounts its guards', () => {
 
     const label = r => `${r.file} ${r.method} ${r.routePath}`;
 
-    // The two routes that serve image bytes to <img> tags. A shop or activity
-    // image is decoration, not guild data, and a browser rendering one cannot be
-    // asked to present a session — so these are public by design, GET-only, and
-    // still counted by the router-wide read limiter. Listed here rather than
-    // skipped by pattern: adding a public route should mean editing this line and
-    // saying why, not slipping past a wildcard.
-    const PUBLIC_ROUTES = new Set([
-        'itemImages.js GET /item-image/shop/:guildId/:itemId',
-        'itemImages.js GET /item-image/activity/:guildId/:itemId',
-    ]);
+    // Empty, and meant to stay that way (#565).
+    //
+    // It used to hold the two item-image GETs, on the reasoning that a browser
+    // rendering an <img> cannot be asked to present a session. That was wrong
+    // about these particular images: every one of them is requested by a
+    // dashboard page from the dashboard's own origin, which sends the session
+    // cookie like any other subresource, and Discord embeds them as uploaded
+    // attachments rather than by URL. Public bought nothing and let anyone who
+    // could guess a guild id read that guild's artwork.
+    //
+    // The machinery stays because the argument will come back. Adding a public
+    // route should mean adding a line here and saying why, not slipping past a
+    // wildcard — and "a browser can't authenticate an <img>" is not the reason.
+    const PUBLIC_ROUTES = new Set([]);
 
     const guarded = routes.filter(r => !PUBLIC_ROUTES.has(label(r)));
 
     test('the public-route allowlist still describes routes that exist', () => {
         const all = new Set(routes.map(label));
         for (const entry of PUBLIC_ROUTES) expect(all).toContain(entry);
+    });
+
+    // #565. Named explicitly rather than left to the sweep below, so that
+    // re-opening them is a deliberate edit to a test that says why they closed.
+    test('the item-image reads are authenticated and guild-scoped', () => {
+        const reads = routes.filter(r => r.method === 'GET' && r.routePath.startsWith('/item-image/'));
+        expect(reads).toHaveLength(2);
+        for (const route of reads) {
+            expect(`${label(route)}: ${route.handlers.join(' | ')}`).toContain('checkAuth');
+            expect(`${label(route)}: ${route.handlers.join(' | ')}`).toContain('checkGuildAccess');
+        }
     });
 
     test('nothing on the allowlist is a write', () => {
