@@ -11,8 +11,14 @@
 // idempotent: keys already encrypted are left alone, so running it twice, or
 // after adding a new guild's key, costs nothing.
 //
-// Stop the bot first is not required — the sweep only rewrites values the
-// running bot reads through the same decryptSecret path either way.
+// The bot can stay running. Each key is rewritten with a compare-and-set on the
+// value this sweep read, so an admin saving a key from the dashboard mid-sweep
+// is not overwritten by the older one — that write went through the Guild schema
+// setter, which already encrypted it, and the sweep leaves it alone and says so.
+//
+// The exception is a rolling deploy with a process from before #564 still
+// writing: it stores plaintext and cannot read what this seals. Run the sweep
+// once that process is gone.
 
 require('dotenv').config();
 // Resolves any <NAME>_FILE variable into <NAME>, so SECRET_ENCRYPTION_KEY can
@@ -39,10 +45,17 @@ async function main() {
 
     await mongoose.connect(process.env.MONGODB_URI);
     try {
-        const { guilds, keys } = await encryptStoredGuildKeys();
+        const { guilds, keys, skipped } = await encryptStoredGuildKeys();
         console.log(keys
             ? `Encrypted ${keys} guild AI provider key(s) across ${guilds} guild(s).`
             : 'Nothing to do — every stored guild AI provider key is already encrypted.');
+        if (skipped) {
+            console.log(
+                `${skipped} key(s) were rewritten while the sweep was running and were left as found. ` +
+                'That is expected when a guild admin saves a key mid-sweep — the dashboard encrypts on ' +
+                'write, so nothing is left in the clear. Re-run this to confirm.'
+            );
+        }
     } finally {
         await mongoose.disconnect();
     }

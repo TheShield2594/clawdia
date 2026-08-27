@@ -10,7 +10,9 @@
 // those are the same against either. tests/integration/migrations.test.js runs
 // migration 018 itself against a server.
 
-const collection = { docs: [], updates: [] };
+const collection = { docs: [], updates: [], onBeforeUpdate: null };
+
+const fieldOf = path => path.replace('ai.', '');
 
 jest.mock('mongoose', () => ({
     connection: {
@@ -23,13 +25,23 @@ jest.mock('mongoose', () => ({
                         for (const doc of JSON.parse(JSON.stringify(collection.docs))) yield doc;
                     },
                 }),
+                // Honours the whole filter, not just `_id`. That is the point of
+                // the mock: the sweep's compare-and-set is only worth anything if
+                // a non-matching expected value actually declines the write.
                 updateOne: async (filter, update) => {
+                    collection.onBeforeUpdate?.(filter, update);
                     collection.updates.push({ filter, update });
+
                     const doc = collection.docs.find(d => d._id === filter._id);
+                    const matches = doc && Object.entries(filter)
+                        .filter(([key]) => key !== '_id')
+                        .every(([path, expected]) => doc.ai[fieldOf(path)] === expected);
+                    if (!matches) return { matchedCount: 0, modifiedCount: 0 };
+
                     for (const [path, value] of Object.entries(update.$set)) {
-                        doc.ai[path.replace('ai.', '')] = value;
+                        doc.ai[fieldOf(path)] = value;
                     }
-                    return { modifiedCount: 1 };
+                    return { matchedCount: 1, modifiedCount: 1 };
                 },
             }),
         },
@@ -61,6 +73,7 @@ afterAll(() => setKey(savedKey));
 beforeEach(() => {
     collection.docs = [];
     collection.updates = [];
+    collection.onBeforeUpdate = null;
     setKey(KEY);
     jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
@@ -73,7 +86,7 @@ describe('encryptStoredGuildKeys', () => {
             guild('g2', { geminiKey: 'AIza-three', openrouterKey: 'sk-or-four' }),
         ];
 
-        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 2, keys: 4 });
+        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 2, keys: 4, skipped: 0 });
 
         expect(decryptSecret(stored('g1', 'openaiKey'))).toBe('sk-one');
         expect(decryptSecret(stored('g1', 'anthropicKey'))).toBe('sk-ant-two');
@@ -87,7 +100,7 @@ describe('encryptStoredGuildKeys', () => {
         const afterFirst = stored('g1', 'openaiKey');
         collection.updates = [];
 
-        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 0, keys: 0 });
+        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 0, keys: 0, skipped: 0 });
 
         expect(collection.updates).toEqual([]);
         expect(stored('g1', 'openaiKey')).toBe(afterFirst);
@@ -97,7 +110,7 @@ describe('encryptStoredGuildKeys', () => {
         collection.docs = [guild('g1', { openaiKey: 'sk-plain', geminiKey: encryptSecret('sk-already') })];
         const untouched = stored('g1', 'geminiKey');
 
-        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 1, keys: 1 });
+        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 1, keys: 1, skipped: 0 });
 
         expect(collection.updates).toHaveLength(1);
         expect(Object.keys(collection.updates[0].update.$set)).toEqual(['ai.openaiKey']);
@@ -107,10 +120,45 @@ describe('encryptStoredGuildKeys', () => {
     test('leaves empty and absent keys alone rather than encrypting ""', async () => {
         collection.docs = [guild('g1', { openaiKey: '', geminiKey: null })];
 
-        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 0, keys: 0 });
+        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 0, keys: 0, skipped: 0 });
 
         expect(stored('g1', 'openaiKey')).toBe('');
         expect(stored('g1', 'geminiKey')).toBeNull();
+    });
+
+    // The race `npm run secrets:encrypt` is exposed to: it is documented as safe
+    // to run against a live bot, so an admin can save a key between the cursor
+    // read and the update. Filtering on `_id` alone would put the encrypted
+    // *old* key back, quietly reverting that server to a credential it stopped
+    // using.
+    test('does not overwrite a key saved while the sweep was running', async () => {
+        collection.docs = [guild('g1', { openaiKey: 'sk-old' })];
+        const savedMeanwhile = encryptSecret('sk-new-from-dashboard');
+        collection.onBeforeUpdate = () => {
+            collection.onBeforeUpdate = null; // once, just before the first write
+            collection.docs[0].ai.openaiKey = savedMeanwhile;
+        };
+
+        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 0, keys: 0, skipped: 1 });
+
+        expect(stored('g1', 'openaiKey')).toBe(savedMeanwhile);
+        expect(decryptSecret(stored('g1', 'openaiKey'))).toBe('sk-new-from-dashboard');
+    });
+
+    // One field changing underneath the sweep must not cost the other three,
+    // which is why the compare-and-set is per field rather than per document.
+    test('a key that changed does not block the others on the same guild', async () => {
+        collection.docs = [guild('g1', { openaiKey: 'sk-one', geminiKey: 'AIza-two', anthropicKey: 'sk-ant-three' })];
+        collection.onBeforeUpdate = () => {
+            collection.onBeforeUpdate = null;
+            collection.docs[0].ai.openaiKey = encryptSecret('sk-replaced');
+        };
+
+        await expect(encryptStoredGuildKeys()).resolves.toEqual({ guilds: 1, keys: 2, skipped: 1 });
+
+        expect(decryptSecret(stored('g1', 'openaiKey'))).toBe('sk-replaced');
+        expect(decryptSecret(stored('g1', 'geminiKey'))).toBe('AIza-two');
+        expect(decryptSecret(stored('g1', 'anthropicKey'))).toBe('sk-ant-three');
     });
 
     // Silently doing nothing would report as success and leave the operator
@@ -129,7 +177,7 @@ describe('decryptStoredGuildKeys', () => {
         collection.docs = [guild('g1', { openaiKey: 'sk-one', geminiKey: 'AIza-two' })];
         await encryptStoredGuildKeys();
 
-        await expect(decryptStoredGuildKeys()).resolves.toEqual({ keys: 2 });
+        await expect(decryptStoredGuildKeys()).resolves.toEqual({ keys: 2, skipped: 0 });
 
         expect(stored('g1', 'openaiKey')).toBe('sk-one');
         expect(stored('g1', 'geminiKey')).toBe('AIza-two');
@@ -145,6 +193,23 @@ describe('decryptStoredGuildKeys', () => {
 
         await expect(decryptStoredGuildKeys()).rejects.toThrow('Cannot decrypt ai.openaiKey');
         expect(stored('g1', 'openaiKey')).toBe(sealed);
+    });
+
+    // Same race, unwinding. Here the skipped count is what the caller acts on:
+    // a key left sealed is one a pre-#564 image cannot read, so the rollback is
+    // not finished and migration 018's down() throws on it.
+    test('does not unseal over a key saved while the rollback was running', async () => {
+        collection.docs = [guild('g1', { openaiKey: 'sk-one' })];
+        await encryptStoredGuildKeys();
+        const savedMeanwhile = encryptSecret('sk-new-from-dashboard');
+        collection.onBeforeUpdate = () => {
+            collection.onBeforeUpdate = null;
+            collection.docs[0].ai.openaiKey = savedMeanwhile;
+        };
+
+        await expect(decryptStoredGuildKeys()).resolves.toEqual({ keys: 0, skipped: 1 });
+
+        expect(stored('g1', 'openaiKey')).toBe(savedMeanwhile);
     });
 
     test('refuses with no encryption key at all', async () => {
