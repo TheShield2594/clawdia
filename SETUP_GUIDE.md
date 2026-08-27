@@ -52,8 +52,14 @@
 Use this URL (replace CLIENT_ID with yours):
 
 ```
-https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=8&scope=bot%20applications.commands
+https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=1101957033174&scope=bot%20applications.commands
 ```
+
+The `permissions` value is the minimum set the bot's features need — the list in
+FEATURES.md under "Bot Permissions Required", computed from
+`src/config/invitePermissions.js`. It deliberately does **not** include
+Administrator: if a feature misbehaves, grant the specific missing permission
+(the bot logs which one) rather than falling back to Administrator.
 
 ## AI Integration
 
