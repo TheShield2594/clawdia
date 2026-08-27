@@ -11,11 +11,13 @@ const { MAX_RESPONSE_BYTES } = require('./client');
 const {
     entryFor,
     withSession,
+    withServerLimit,
     cachedList,
     sweepIdleSessions,
     resetMcpCache,
     mapWithLimit,
-    LIST_TTL_MS
+    LIST_TTL_MS,
+    MAX_PARALLEL_PER_SERVER
 } = require('./connections');
 
 /**
@@ -187,6 +189,18 @@ function asAttachment(block, prefix, index) {
     return { buffer, name: `${prefix}-${index + 1}.${extension}`, mimeType: source.mimeType };
 }
 
+// structuredContent as the string to hand the model, or null when there is
+// nothing serialisable there.
+function asJson(structuredContent) {
+    if (structuredContent == null) return null;
+    try {
+        return JSON.stringify(structuredContent);
+    } catch {
+        // Circular or otherwise unserialisable — nothing to add.
+        return null;
+    }
+}
+
 /**
  * MCP content blocks as the string a chat model can be handed back, plus
  * anything the channel can show that the model cannot use.
@@ -194,19 +208,31 @@ function asAttachment(block, prefix, index) {
  * The text always says what happened to a non-text block — attached under a
  * name, or omitted — so the model can refer to it ("the chart above") rather
  * than answering as though the tool returned nothing.
+ *
+ * `structured` says the tool published an `outputSchema`, which is the server
+ * declaring that its answer *is* a shape rather than prose. The spec has such a
+ * tool serialise the same object into a text block for older clients, so what
+ * arrives is usually both — and the JSON is the half a model can be relied on
+ * to read the same way twice. Without a schema it stays what it always was: a
+ * fallback for a result that carried no text at all.
  */
-function renderResult({ content, structuredContent, isError }, { namePrefix = 'result' } = {}) {
+function renderResult({ content, structuredContent, isError }, { namePrefix = 'result', structured = false } = {}) {
     const parts = [];
     const attachments = [];
+    const json = structured ? asJson(structuredContent) : null;
+    if (json !== null) parts.push(json);
 
     for (const block of content) {
         if (!block || typeof block !== 'object') continue;
+        // Text blocks are dropped once the JSON is in hand: they are the same
+        // answer written out again, and sending both would spend the turn's
+        // output budget twice on one result.
         if (block.type === 'text' && typeof block.text === 'string') {
-            parts.push(block.text);
+            if (json === null) parts.push(block.text);
             continue;
         }
         if (block.type === 'resource' && typeof block.resource?.text === 'string') {
-            parts.push(block.resource.text);
+            if (json === null) parts.push(block.resource.text);
             continue;
         }
         if (!block.type) continue;
@@ -223,10 +249,9 @@ function renderResult({ content, structuredContent, isError }, { namePrefix = 'r
         }
     }
 
-    if (!parts.length && structuredContent != null) {
-        try {
-            parts.push(JSON.stringify(structuredContent));
-        } catch { /* circular or otherwise unserialisable — nothing to add */ }
+    if (!parts.length) {
+        const fallback = asJson(structuredContent);
+        if (fallback !== null) parts.push(fallback);
     }
 
     let text = parts.join('\n').trim();
@@ -259,12 +284,16 @@ function renderResult({ content, structuredContent, isError }, { namePrefix = 'r
  * @param {string} [options.confirmMode] which tools need a person's approval
  * @param {Function} [options.confirmTool] asks for that approval; a toolkit
  *        built without one refuses every call that would need it
+ * @param {Function} [options.toolBudget] spends one of the user's tool-call
+ *        allowance and reports whether there was one to spend; a toolkit built
+ *        without one is unbounded, which is what the unattributed callers are
  * @returns {Promise<null|{definitions: Array, servers: string[], call: Function}>}
  */
 async function prepareMcpToolkit(guildServers = [], {
     onToolEvent,
     confirmMode = DEFAULT_CONFIRM_MODE,
-    confirmTool
+    confirmTool,
+    toolBudget
 } = {}) {
     const servers = resolveMcpServers(guildServers);
     if (!servers.length) return null;
@@ -309,7 +338,16 @@ async function prepareMcpToolkit(guildServers = [], {
             const annotations = toolAnnotations(tool);
             const confirm = needsConfirmation(confirmMode, server.toolset, tool);
             used.add(name);
-            index.set(name, { server, entry, toolName: tool.name, annotations, confirm });
+            index.set(name, {
+                server,
+                entry,
+                toolName: tool.name,
+                annotations,
+                confirm,
+                // The server saying "my answer is this shape". What it changes
+                // is which half of a dual-format result the model is handed.
+                structured: Boolean(tool.outputSchema && typeof tool.outputSchema === 'object')
+            });
             definitions.push({
                 name,
                 serverName: server.name,
@@ -434,6 +472,14 @@ async function prepareMcpToolkit(guildServers = [], {
             return 'This turn has spent its time budget, so the tool was not run. Answer from what you have and offer to continue.';
         }
 
+        // And the same for the allowance this user has across turns, for the
+        // same reason: the limit is a refusal, so it is answered before anybody
+        // is asked to approve something that will not run either way.
+        if (typeof toolBudget === 'function' && !toolBudget()) {
+            finish(false, { error: 'rate limit' });
+            return 'This user has used up the tool calls they are allowed in this window, so the tool was not run. Answer from what you have, and say they can try again shortly.';
+        }
+
         if (target.confirm) {
             emit({ ...describe, type: 'confirm', annotations: target.annotations });
             const decision = await askApproval(describe, target, args);
@@ -445,12 +491,42 @@ async function prepareMcpToolkit(guildServers = [], {
 
         emit({ ...describe, type: 'start' });
 
+        // How far a long call has got, when the server bothers to say. The
+        // status line is already repainted on a clock, so this only has to
+        // leave the latest number where the next repaint will find it.
+        const onProgress = ({ progress, total, message }) =>
+            emit({ ...describe, type: 'progress', progress, total, message });
+
         try {
-            const result = await withSession(target.entry, target.server, client =>
-                client.callTool(target.toolName, args));
+            // Queued behind this server's other calls rather than the round's:
+            // six calls at one server is a burst that server sees as one client
+            // misbehaving, whatever else the round is doing elsewhere.
+            const result = await withServerLimit(target.entry, () => {
+                // The wait for a slot is part of the turn. A call that queued
+                // behind three others until the budget ran out is one the reply
+                // can no longer wait for, and starting it now would only make
+                // the message later still.
+                const remaining = deadline - Date.now();
+                if (remaining <= 0) return null;
+                // And what is left of the turn caps the call, so one that starts
+                // a second before the deadline cannot answer forty-four seconds
+                // after it. Below the call timeout this is the tighter of the
+                // two; above it, the call timeout still wins.
+                return withSession(target.entry, target.server, client =>
+                    client.callTool(target.toolName, args, { onProgress, timeout: remaining }));
+            });
+
+            if (!result) {
+                finish(false, { error: 'turn budget spent' });
+                return 'This turn has spent its time budget, so the tool was not run. Answer from what you have and offer to continue.';
+            }
+
             // The file name is the tool's, so a reply carrying two charts from
             // two tools says which came from where.
-            const { text, attachments } = renderResult(result, { namePrefix: fileNameFor(target.toolName, id) });
+            const { text, attachments } = renderResult(result, {
+                namePrefix: fileNameFor(target.toolName, id),
+                structured: target.structured
+            });
             for (const file of attachments) emit({ ...describe, type: 'attachment', ...file });
             // A tool that answers "no such repository" ran fine; it is the
             // model's problem, not something to flag to the channel.
@@ -467,15 +543,58 @@ async function prepareMcpToolkit(guildServers = [], {
 }
 
 /**
+ * Fill the tool-list cache for a set of servers, off anybody's turn.
+ *
+ * Discovery is a handshake and a list per server, and until it has run once the
+ * first message after a restart pays for it while the user watches an ellipsis.
+ * Nothing here is on a critical path — a server that is down is skipped and
+ * tried again the ordinary way — so every failure is swallowed rather than
+ * reported: this is a cache being filled, not a request being served.
+ *
+ * Connections are deduplicated by (url, token) before dialling. The
+ * config-file servers belong to every guild, so warming a hundred guilds is one
+ * connection to each server rather than a hundred.
+ *
+ * @returns {Promise<number>} how many connections now have a tool list
+ */
+async function prewarmMcpServers(guildServers = [], { concurrency = 4 } = {}) {
+    let servers;
+    try {
+        servers = resolveMcpServers(guildServers);
+    } catch (err) {
+        console.warn(`[MCP] prewarm could not resolve servers: ${err.message}`);
+        return 0;
+    }
+
+    const unique = new Map();
+    for (const server of servers) {
+        const key = `${server.connection.url} ${server.connection.authorizationToken || ''}`;
+        if (!unique.has(key)) unique.set(key, server);
+    }
+    if (!unique.size) return 0;
+
+    const warmed = await mapWithLimit([...unique.values()], concurrency, async server => {
+        try {
+            await listTools(entryFor(server), server);
+            return true;
+        } catch (err) {
+            console.warn(`[MCP] prewarm skipped "${server.name}": ${err.message}`);
+            return false;
+        }
+    });
+    return warmed.filter(Boolean).length;
+}
+
+/**
  * The toolkit for one provider request, or null when tools do not apply.
  *
  * `useMcp` is the caller's switch — commands that parse the reply as JSON pass
  * it false — and is checked here so no provider has to remember to.
  */
-async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool } = {}) {
+async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget } = {}) {
     if (useMcp === false) return null;
     try {
-        return await prepareMcpToolkit(mcpServers, { onToolEvent, confirmMode: mcpConfirm, confirmTool });
+        return await prepareMcpToolkit(mcpServers, { onToolEvent, confirmMode: mcpConfirm, confirmTool, toolBudget });
     } catch (err) {
         // Discovery is best-effort in every direction: an unreadable config or
         // a bad stored record must not cost the user their answer.
@@ -486,6 +605,7 @@ async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, 
 
 module.exports = {
     prepareMcpToolkit,
+    prewarmMcpServers,
     toolkitFor,
     renderResult,
     resetMcpCache,
@@ -493,6 +613,7 @@ module.exports = {
     // round's calls are fanned out the same way whichever one is running it.
     mapWithLimit,
     MAX_PARALLEL_TOOL_CALLS,
+    MAX_PARALLEL_PER_SERVER,
     MAX_TOOL_ROUNDS,
     MAX_TOOLS,
     MAX_TOOL_RESULT_CHARS,

@@ -50,6 +50,32 @@ function clamp(text, limit) {
     return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 }
 
+// How much of a server's own progress message is worth putting on a line that
+// already names two tools. Enough for "indexing repository", not for a path.
+const MAX_PROGRESS_NOTE = 24;
+
+/**
+ * A progress notification as the few characters that go beside a tool's name.
+ *
+ * A server that knows how much work there is gets a percentage, which is the
+ * one thing that answers "is this nearly done". One that only counts gets its
+ * own words if it sent any, and its count if it did not — because "47" moving
+ * is still the difference between a slow tool and a stuck one.
+ *
+ * The words go through `label` like every other string that arrives from a
+ * server and ends up in a message this bot posts. A progress note is no
+ * different from a tool name in that respect: it is text somebody else chose,
+ * rendered as display text in a channel, and a server that reports its progress
+ * as `@everyone` gets to say everyone.
+ */
+function progressNote({ progress, total, message }) {
+    if (typeof message === 'string' && message.trim()) {
+        return label(message, MAX_PROGRESS_NOTE);
+    }
+    if (total) return `${Math.min(100, Math.round((progress / total) * 100))}%`;
+    return Number.isFinite(progress) ? String(Math.round(progress)) : '';
+}
+
 /**
  * A per-turn record of MCP tool activity.
  *
@@ -86,6 +112,14 @@ function createToolActivity() {
                 attempted = true;
                 active.set(event.id, { server: event.server, tool: event.tool });
                 break;
+            // How far a long call has got, when the server says. Only the
+            // latest one is kept: the status line is repainted on a clock, so
+            // what matters is what is true at the next repaint.
+            case 'progress': {
+                const call = active.get(event.id);
+                if (call) call.note = progressNote(event);
+                break;
+            }
             case 'end': {
                 used = true;
                 const call = active.get(event.id);
@@ -151,7 +185,7 @@ function createToolActivity() {
 
         const names = calls
             .slice(0, MAX_LIVE_ENTRIES)
-            .map(call => `${label(call.server)} · ${label(call.tool)}`);
+            .map(call => `${label(call.server)} · ${label(call.tool)}${call.note ? ` ${call.note}` : ''}`);
         const more = calls.length - names.length;
         return clamp(`-# 🔧 ${names.join(', ')}${more > 0 ? ` +${more} more` : ''}…`, STATUS_RESERVE);
     }

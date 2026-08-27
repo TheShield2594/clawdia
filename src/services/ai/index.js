@@ -1,7 +1,7 @@
 const { DEFAULT_CONFIRM_MODE, DEFAULT_MCP_ROUTE } = require('../../config/mcpServers');
 const { providers, getProvider, DEFAULT_MODELS } = require('./providers');
 const { recordUsage } = require('./usage');
-const { enforceRateLimit } = require('./rateLimit');
+const { enforceRateLimit, toolCallBudget } = require('./rateLimit');
 
 // Core provider dispatch: resolve a guild's AI settings to a provider config
 // and route completions through the provider registry. Both the streaming and
@@ -64,7 +64,11 @@ function streamCompletion({ userId, channelId, rateLimit, ...args }) {
     // guildId stays in `args` as well — it is what the usage ledger records
     // under, and here it is what scopes the per-user window to one server.
     enforceRateLimit({ guildId: args.guildId, userId, channelId, rateLimit });
-    return streamProvider(args);
+    // The message is one slot; what it fans out into is bounded separately.
+    // Built here for the same reason the limit is enforced here — it is the one
+    // place every provider request passes through — and carried down to the MCP
+    // toolkit, which is what spends it.
+    return streamProvider({ ...args, toolBudget: toolCallBudget({ guildId: args.guildId, userId, rateLimit }) });
 }
 
 async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req }) {
@@ -77,7 +81,11 @@ async function* streamProvider({ provider, guildId, mcp = true, usageOut, ...req
 
 async function getCompletion({ provider, guildId, mcp = true, userId, channelId, rateLimit, ...req }) {
     enforceRateLimit({ guildId, userId, channelId, rateLimit });
-    const result = await getProvider(provider).complete({ ...req, useMcp: mcp });
+    const result = await getProvider(provider).complete({
+        ...req,
+        useMcp: mcp,
+        toolBudget: toolCallBudget({ guildId, userId, rateLimit })
+    });
     if (guildId && result.usage) {
         recordUsage(guildId, provider, req.model, result.usage).catch(err =>
             console.error('[AI usage] record error:', err.message));

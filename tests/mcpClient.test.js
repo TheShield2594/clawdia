@@ -10,7 +10,7 @@ jest.mock('axios');
 
 const { Readable } = require('stream');
 const axios = require('axios');
-const { McpHttpClient, McpError } = require('../src/services/ai/mcp/client');
+const { McpHttpClient, McpError, CALL_TIMEOUT_MS } = require('../src/services/ai/mcp/client');
 
 const URL = 'https://mcp.example.com/mcp';
 
@@ -177,6 +177,99 @@ describe('server-sent event responses', () => {
 
         const tools = await new McpHttpClient({ url: URL }).listTools();
         expect(tools).toEqual([{ name: 'search' }]);
+    });
+
+    test('forwards progress notifications to a caller that asked for them', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return sseResponse([
+                { jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: payload.params._meta.progressToken, progress: 3, total: 10, message: 'indexing' } },
+                { jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: payload.params._meta.progressToken, progress: 7, total: 10 } },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [{ type: 'text', text: 'done' }] } }
+            ]);
+        });
+
+        const seen = [];
+        const result = await new McpHttpClient({ url: URL })
+            .callTool('search', { q: 'x' }, { onProgress: update => seen.push(update) });
+
+        expect(seen).toEqual([
+            { progress: 3, total: 10, message: 'indexing' },
+            { progress: 7, total: 10, message: null }
+        ]);
+        expect(result.content).toEqual([{ type: 'text', text: 'done' }]);
+    });
+
+    test('asks for progress with a token, and only when somebody is listening', async () => {
+        // A server sends notifications for a request that carried a token and
+        // for no other, so a caller with nothing to show is not sent updates it
+        // would only throw away.
+        respondBy({ ...HANDSHAKE, 'tools/call': { result: { content: [] } } });
+
+        const client = new McpHttpClient({ url: URL });
+        await client.callTool('search', {});
+        expect(postsTo('tools/call')[0][1].params._meta).toBeUndefined();
+
+        await client.callTool('search', {}, { onProgress: () => {} });
+        const call = postsTo('tools/call')[1][1];
+        expect(call.params._meta.progressToken).toBe(call.id);
+        // The arguments still arrive intact beside it.
+        expect(call.params.name).toBe('search');
+    });
+
+    test('ignores progress for somebody else\'s request', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return sseResponse([
+                { jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: 'someone-else', progress: 1 } },
+                // A progress notification with no number in it says nothing.
+                { jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: payload.params._meta.progressToken } },
+                { jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info', data: 'hello' } },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [] } }
+            ]);
+        });
+
+        const seen = [];
+        await new McpHttpClient({ url: URL }).callTool('search', {}, { onProgress: u => seen.push(u) });
+        expect(seen).toEqual([]);
+    });
+
+    test('a listener that throws does not cost the tool result', async () => {
+        axios.post.mockImplementation(async (_url, payload) => {
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            if (payload.method === 'initialize') return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+            return sseResponse([
+                { jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: payload.params._meta.progressToken, progress: 1 } },
+                { jsonrpc: '2.0', id: payload.id, result: { content: [{ type: 'text', text: 'still here' }] } }
+            ]);
+        });
+
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const result = await new McpHttpClient({ url: URL }).callTool('search', {}, {
+            onProgress: () => { throw new Error('listener bug'); }
+        });
+
+        expect(result.content).toEqual([{ type: 'text', text: 'still here' }]);
+        expect(warn).toHaveBeenCalled();
+        warn.mockRestore();
+    });
+
+    test('a caller\'s deadline can shorten a tool call but never lengthen it', async () => {
+        respondBy({ ...HANDSHAKE, 'tools/call': { result: { content: [] } } });
+        const client = new McpHttpClient({ url: URL });
+
+        await client.callTool('search', {}, { timeout: 3000 });
+        expect(postsTo('tools/call')[0][2].timeout).toBe(3000);
+
+        // A caller asking for longer than the call timeout does not get it.
+        await client.callTool('search', {}, { timeout: 10 * 60 * 1000 });
+        expect(postsTo('tools/call')[1][2].timeout).toBe(CALL_TIMEOUT_MS);
+
+        // And no deadline at all is the timeout it always was.
+        await client.callTool('search', {});
+        expect(postsTo('tools/call')[2][2].timeout).toBe(CALL_TIMEOUT_MS);
     });
 
     test('reports a stream that ends without answering', async () => {

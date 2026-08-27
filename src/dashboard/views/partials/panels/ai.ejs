@@ -89,7 +89,7 @@
                             <span class="switch"><input type="checkbox" id="ai-streaming" <%= settings.ai.streaming !== false ? 'checked' : '' %>><span class="slider"></span></span>
                         </label>
                         <div class="field" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;">
-                            <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables</small></div>
+                            <div><label class="field-label" for="ai-rate-limit">Rate limit (requests / user)</label><input type="number" id="ai-rate-limit" min="0" value="<%= settings.ai.rateLimitPerUser ?? 20 %>"><small>0 disables. MCP tool calls share a per-window budget of 8 &times; this limit</small></div>
                             <div><label class="field-label" for="ai-rate-channel">Rate limit (requests / channel)</label><input type="number" id="ai-rate-channel" min="0" value="<%= settings.ai.rateLimitPerChannel ?? 0 %>"><small>0 disables</small></div>
                             <div><label class="field-label" for="ai-rate-window">Rate-limit window (minutes)</label><input type="number" id="ai-rate-window" min="1" value="<%= settings.ai.rateLimitWindowMin ?? 10 %>"></div>
                         </div>

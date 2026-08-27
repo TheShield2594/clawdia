@@ -262,7 +262,7 @@ describe('singleton work is gated, not merely documented', () => {
         const gateIndex = code.indexOf('if (!isPrimaryShard(client))');
         expect(gateIndex).toBeGreaterThan(-1);
         expect(code.indexOf('for (const job of JOBS)')).toBeGreaterThan(gateIndex);
-        expect(code.indexOf('for (const starter of STARTERS)')).toBeGreaterThan(gateIndex);
+        expect(code.indexOf('runStarters(STARTERS, client)')).toBeGreaterThan(gateIndex);
     });
 
     it('still sets presence on every shard', () => {
@@ -273,6 +273,17 @@ describe('singleton work is gated, not merely documented', () => {
         const gateIndex = code.indexOf('if (!isPrimaryShard(client))');
         expect(presenceIndex).toBeGreaterThan(-1);
         expect(presenceIndex).toBeLessThan(gateIndex);
+    });
+
+    it('warms this process\'s own caches on every shard', () => {
+        // Same reasoning as presence, applied to the MCP connection pool: it is
+        // per-process, so a shard behind the gate would serve every guild it
+        // owns a cold cache on the first message after a restart.
+        const code = read('services/scheduler/index.js');
+        const shardStarters = code.indexOf('runStarters(SHARD_STARTERS, client)');
+        const gateIndex = code.indexOf('if (!isPrimaryShard(client))');
+        expect(shardStarters).toBeGreaterThan(-1);
+        expect(shardStarters).toBeLessThan(gateIndex);
     });
 });
 

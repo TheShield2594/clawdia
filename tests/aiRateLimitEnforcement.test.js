@@ -66,6 +66,55 @@ describe('resolveProviderConfig', () => {
     });
 });
 
+describe('what a message becomes', () => {
+    // `rateLimitPerUser` counts messages, and one message with MCP servers
+    // configured is up to four provider rounds and every tool call inside them.
+    // The per-turn ceilings bound one message; nothing bounded the same user
+    // sending it ten times.
+    it('hands the provider a tool-call budget alongside the message limit', async () => {
+        const config = resolveProviderConfig(SETTINGS);
+        await getCompletion({ ...config, guildId: 'g1', userId: nextUser(), prompt: 'hi' });
+
+        const [req] = providersMock.__complete.mock.calls[0];
+        expect(typeof req.toolBudget).toBe('function');
+        // Not the message limit: a user allowed two messages should not lose
+        // both to one question that needed a lot of looking up.
+        for (let n = 0; n < SETTINGS.rateLimitPerUser; n++) expect(req.toolBudget()).toBe(true);
+        expect(req.toolBudget()).toBe(true);
+    });
+
+    it('runs out eventually, so a user cannot spend without bound across turns', async () => {
+        const config = resolveProviderConfig(SETTINGS);
+        await getCompletion({ ...config, guildId: 'g1', userId: nextUser(), prompt: 'hi' });
+
+        const [req] = providersMock.__complete.mock.calls[0];
+        let spent = 0;
+        while (req.toolBudget()) {
+            spent++;
+            expect(spent).toBeLessThan(1000);
+        }
+        expect(spent).toBeGreaterThan(SETTINGS.rateLimitPerUser);
+    });
+
+    it('leaves an unlimited guild unlimited, and an unattributed call alone', async () => {
+        const open = resolveProviderConfig({ provider: 'mock' });
+        await getCompletion({ ...open, guildId: 'g1', userId: nextUser(), prompt: 'hi' });
+        expect(providersMock.__complete.mock.calls[0][0].toolBudget).toBeNull();
+
+        // The scheduled digests and newspapers, which nobody sent.
+        const config = resolveProviderConfig(SETTINGS);
+        await getCompletion({ ...config, guildId: 'g1', prompt: 'hi' });
+        expect(providersMock.__complete.mock.calls[1][0].toolBudget).toBeNull();
+    });
+
+    it('carries it down the streaming path too', async () => {
+        const config = resolveProviderConfig(SETTINGS);
+        await drain(streamCompletion({ ...config, guildId: 'g1', userId: nextUser(), prompt: 'hi' }));
+
+        expect(typeof providersMock.__stream.mock.calls[0][0].toolBudget).toBe('function');
+    });
+});
+
 describe('getCompletion', () => {
     it('refuses once the per-user limit is spent, without calling the provider', async () => {
         const config = resolveProviderConfig(SETTINGS);

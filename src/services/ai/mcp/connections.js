@@ -25,6 +25,23 @@ const LIST_TTL_MS = 5 * 60 * 1000;
 // but it should recover on its own within a conversation.
 const FAILURE_TTL_MS = 60 * 1000;
 
+// How long past its TTL a list may still be served while a refresh runs behind
+// it. Expiry is not a statement that the cached list is wrong — it is a
+// reminder to go and check — so the message that happens to arrive on the
+// wrong side of five minutes should not be the one that pays for the round
+// trip. Past this the list is old enough that a caller waits for a fresh one.
+const STALE_TTL_MS = 30 * 60 * 1000;
+
+// How many requests one connection may have in flight at once.
+//
+// MAX_PARALLEL_TOOL_CALLS bounds a round globally, which is the wrong shape
+// when every call in the round is aimed at the same place: six at once is a
+// burst somebody else's server sees as one client misbehaving, and the servers
+// most likely to be configured here are shared ones that rate-limit. Six calls
+// spread across three servers still run three-wide each; six at one server
+// queue.
+const MAX_PARALLEL_PER_SERVER = 3;
+
 // Sessions cost the server memory. An idle one is closed rather than held open
 // for a guild that used a tool once this afternoon.
 const SESSION_IDLE_MS = 10 * 60 * 1000;
@@ -79,7 +96,7 @@ function entryFor(server) {
     const key = keyFor(server.connection);
     let entry = entries.get(key);
     if (!entry) {
-        entry = { client: null, lists: new Map(), lastUsed: 0 };
+        entry = { client: null, lists: new Map(), lastUsed: 0, inFlight: 0, waiters: [] };
         entries.set(key, entry);
     }
     entry.lastUsed = Date.now();
@@ -115,44 +132,76 @@ async function withSession(entry, server, fn) {
     }
 }
 
+/**
+ * At most MAX_PARALLEL_PER_SERVER of `fn` in flight against one connection.
+ *
+ * A finishing call hands its slot straight to the next waiter rather than
+ * releasing it and letting the waiter take it back: between those two steps is
+ * a microtask gap, and a caller arriving inside it would see a free slot that
+ * is already spoken for.
+ */
+async function withServerLimit(entry, fn) {
+    if (entry.inFlight >= MAX_PARALLEL_PER_SERVER) {
+        await new Promise(resolve => entry.waiters.push(resolve));
+    } else {
+        entry.inFlight++;
+    }
+    try {
+        return await fn();
+    } finally {
+        const next = entry.waiters.shift();
+        if (next) next();
+        else entry.inFlight--;
+    }
+}
+
 function slotFor(entry, kind) {
     let slot = entry.lists.get(kind);
     if (!slot) {
-        slot = { value: null, expires: 0, error: null, errorExpire: 0, pending: null };
+        slot = { value: null, expires: 0, staleUntil: 0, error: null, errorExpire: 0, pending: null };
         entry.lists.set(kind, slot);
     }
     return slot;
 }
 
-/**
- * One of a server's lists — tools, resources, prompts — cached per kind.
- *
- * A failure is cached alongside the value, so a server that is down is not
- * dialled again on every message. Per kind rather than per connection: a
- * server can refuse resources/list and answer tools/list perfectly well, and
- * one refused list should not take the tool loop down with it for a minute.
- */
-async function cachedList(entry, server, kind, fn) {
-    const now = Date.now();
+/** Record a list somebody else already fetched, as though this pool had. */
+function primeList(entry, kind, value) {
+    if (!value) return;
+    const slot = slotFor(entry, kind);
+    slot.value = value;
+    slot.expires = Date.now() + LIST_TTL_MS;
+    slot.staleUntil = slot.expires + STALE_TTL_MS;
+    slot.error = null;
+    slot.errorExpire = 0;
+}
+
+// The refresh half of cachedList: one request, its result written back to the
+// slot. Errors are recorded and rethrown; whether anybody is waiting on the
+// rejection is the caller's business.
+//
+// Through the same per-server gate as everything else: a list refresh is a
+// request that server has to answer, so three tool calls in flight and a
+// refresh starting behind them would be a fourth. Safe to queue precisely
+// because nothing nests inside it — and the caller it delays is usually
+// nobody, since an expired list is served stale while this runs.
+function refreshList(entry, server, kind, fn) {
     const slot = slotFor(entry, kind);
 
-    if (slot.value && slot.expires > now) return slot.value;
-    if (slot.error && slot.errorExpire > now) throw slot.error;
-    // A second message arriving mid-handshake waits for the first one's result
-    // instead of opening a competing session.
-    if (slot.pending) return slot.pending;
-
-    slot.pending = withSession(entry, server, fn)
+    slot.pending = withServerLimit(entry, () => withSession(entry, server, fn))
         .then(value => {
             slot.value = value;
             slot.expires = Date.now() + LIST_TTL_MS;
+            slot.staleUntil = slot.expires + STALE_TTL_MS;
             slot.error = null;
             slot.errorExpire = 0;
             return value;
         })
         .catch(err => {
-            slot.value = null;
-            slot.expires = 0;
+            // `value` is deliberately left alone: a refresh that failed has not
+            // shown the old list to be wrong, and serving it for a little
+            // longer beats telling a guild its server has no tools because one
+            // request timed out. `expires` is already past, so the next caller
+            // still tries to refresh.
             slot.error = err;
             slot.errorExpire = Date.now() + FAILURE_TTL_MS;
             // The client stays. One list refused is not a broken session, and
@@ -171,6 +220,41 @@ async function cachedList(entry, server, kind, fn) {
     return slot.pending;
 }
 
+/**
+ * One of a server's lists — tools, resources, prompts — cached per kind.
+ *
+ * A failure is cached alongside the value, so a server that is down is not
+ * dialled again on every message. Per kind rather than per connection: a
+ * server can refuse resources/list and answer tools/list perfectly well, and
+ * one refused list should not take the tool loop down with it for a minute.
+ *
+ * Expiry starts a refresh; it does not block on one. A list that has aged past
+ * its TTL is still almost certainly right — servers gain a tool about never —
+ * so the caller that happens to arrive first gets the old list and the new one
+ * lands behind it, which is the difference between one message in every five
+ * minutes paying a round trip and none of them doing.
+ */
+async function cachedList(entry, server, kind, fn) {
+    const now = Date.now();
+    const slot = slotFor(entry, kind);
+
+    if (slot.value && slot.expires > now) return slot.value;
+
+    const stale = slot.value && slot.staleUntil > now ? slot.value : null;
+    // A second message arriving mid-handshake waits for the first one's result
+    // instead of opening a competing session.
+    const inFlight = slot.pending
+        || (slot.error && slot.errorExpire > now ? null : refreshList(entry, server, kind, fn));
+
+    if (stale) {
+        // Nobody is awaiting this one, so its rejection needs a home.
+        if (inFlight) inFlight.catch(() => {});
+        return stale;
+    }
+    if (!inFlight) throw slot.error;
+    return inFlight;
+}
+
 // Only for tests, which must not inherit a session or a cached list from the
 // case before them.
 function resetMcpCache() {
@@ -182,12 +266,16 @@ module.exports = {
     entryFor,
     clientFor,
     withSession,
+    withServerLimit,
     cachedList,
+    primeList,
     closeQuietly,
     sweepIdleSessions,
     resetMcpCache,
     mapWithLimit,
     LIST_TTL_MS,
+    STALE_TTL_MS,
     FAILURE_TTL_MS,
-    SESSION_IDLE_MS
+    SESSION_IDLE_MS,
+    MAX_PARALLEL_PER_SERVER
 };

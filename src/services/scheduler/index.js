@@ -151,6 +151,29 @@ const STARTERS = [
     { name: 'rssService.dailyNews', start: client => require('../rssService').scheduleDailyNews(client) },
 ];
 
+// Per-shard start-once work, run before the primary-shard gate below.
+//
+// Same reasoning as presence: the MCP connection pool is a property of *this
+// process*, not of the deployment, so a shard that skipped this would serve
+// every one of its own guilds a cold cache. Nothing here writes to the
+// database, so running it on every shard duplicates no work.
+const SHARD_STARTERS = [
+    { name: 'mcpPrewarm', start: client => require('../ai/mcp/prewarm').startMcpPrewarm(client) },
+];
+
+function runStarters(starters, client) {
+    for (const starter of starters) {
+        try {
+            const result = starter.start(client);
+            if (result && typeof result.catch === 'function') {
+                result.catch(err => console.error(`[SCHEDULER] Starter ${starter.name} failed:`, err));
+            }
+        } catch (err) {
+            console.error(`[SCHEDULER] Starter ${starter.name} failed:`, err);
+        }
+    }
+}
+
 // Rotating rich presence — Clawdia's ancient, mysterious personality
 const PRESENCE_ACTIVITIES = [
     { type: ActivityType.Watching, name: 'over the server' },
@@ -196,6 +219,8 @@ function startScheduler(client) {
     setPresence(client);
     presenceInterval = setInterval(() => setPresence(client), PRESENCE_ROTATE_MS);
 
+    runStarters(SHARD_STARTERS, client);
+
     // ── The scheduler is singleton work, and runs on shard 0 only (#732) ─────
     //
     // Under sharding each shard is its own process, so an ungated scheduler
@@ -231,16 +256,7 @@ function startScheduler(client) {
         if (job.runOnStart) run();
     }
 
-    for (const starter of STARTERS) {
-        try {
-            const result = starter.start(client);
-            if (result && typeof result.catch === 'function') {
-                result.catch(err => console.error(`[SCHEDULER] Starter ${starter.name} failed:`, err));
-            }
-        } catch (err) {
-            console.error(`[SCHEDULER] Starter ${starter.name} failed:`, err);
-        }
-    }
+    runStarters(STARTERS, client);
 
     console.log(`${shardTag(client)}[SCHEDULER] Started ${JOBS.length} scheduled jobs and ${STARTERS.length} services`);
 }
@@ -258,4 +274,4 @@ function stopScheduler() {
     started = false;
 }
 
-module.exports = { startScheduler, stopScheduler, JOBS, STARTERS };
+module.exports = { startScheduler, stopScheduler, JOBS, STARTERS, SHARD_STARTERS };
