@@ -8,6 +8,16 @@ const { CORE_REGION_IDS, TOTAL_CORE_SECRETS } = require('./exploreData');
 // `check(user, guildSettings)` returns true when the achievement is earned.
 // `secret: true` hides name/description/progress until the achievement is earned.
 
+// Every unpurchasable pet, in the order petService defines them. Kept here as a
+// literal because src/data must not depend on a service; tests/petAchievements
+// asserts it still matches the unpurchasable set in PET_DEFINITIONS, so adding a
+// rare companion without widening Menagerie fails there rather than silently
+// leaving an achievement that claims to want all of them but checks a subset.
+// Widening it is safe for players who already earned it: achievementService
+// skips any achievement already in user.achievements, so an earned Menagerie is
+// never re-checked and never taken back.
+const RARE_COMPANION_IDS = ['eagle', 'shark', 'crystal_fox', 'lantern_owl'];
+
 const ACHIEVEMENTS = [
     // ── Economy ──────────────────────────────────────────────────────────────
     {
@@ -548,18 +558,18 @@ const ACHIEVEMENTS = [
     {
         id: 'menagerie',
         name: 'Menagerie',
-        description: 'Find all three rare companions: Eagle, Shark and Crystal Fox',
+        description: 'Find all four rare companions: Eagle, Shark, Crystal Fox and Lantern Owl',
         emoji: '💎',
         category: 'pets',
         xpReward: 1_000,
         coinReward: 15_000,
         check: (user) => {
             const owned = new Set((user.pets || []).map(p => p.petId));
-            return ['eagle', 'shark', 'crystal_fox'].every(id => owned.has(id));
+            return RARE_COMPANION_IDS.every(id => owned.has(id));
         },
         progress: (user) => {
             const owned = new Set((user.pets || []).map(p => p.petId));
-            return [['eagle', 'shark', 'crystal_fox'].filter(id => owned.has(id)).length, 3];
+            return [RARE_COMPANION_IDS.filter(id => owned.has(id)).length, RARE_COMPANION_IDS.length];
         }
     },
 
@@ -916,4 +926,4 @@ const CATEGORY_EMOJIS = {
     custom: '⚙️'
 };
 
-module.exports = { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS };
+module.exports = { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS, RARE_COMPANION_IDS };

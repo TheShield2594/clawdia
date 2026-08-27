@@ -1,6 +1,6 @@
 'use strict';
 
-const { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS } = require('../src/data/achievements');
+const { ACHIEVEMENTS, CATEGORY_LABELS, CATEGORY_EMOJIS, RARE_COMPANION_IDS } = require('../src/data/achievements');
 
 const petAchievements = ACHIEVEMENTS.filter(a => a.category === 'pets');
 const byId = id => petAchievements.find(a => a.id === id);
@@ -74,18 +74,42 @@ describe('pet achievements', () => {
         expect(byId('inseparable').check({ pets: [pet({ adoptedAt: new Date(Date.now() - 31 * DAY) })] })).toBe(true);
     });
 
-    test('Menagerie needs all three rare companions', () => {
+    test('Menagerie needs every rare companion', () => {
         const owned = ids => ({ pets: ids.map(petId => pet({ petId })) });
-        expect(byId('menagerie').check(owned(['eagle', 'shark']))).toBe(false);
-        expect(byId('menagerie').progress(owned(['eagle', 'shark']))).toEqual([2, 3]);
-        expect(byId('menagerie').check(owned(['eagle', 'shark', 'crystal_fox']))).toBe(true);
+        const all   = RARE_COMPANION_IDS;
+        const short = all.slice(0, -1);
+
+        expect(byId('menagerie').check(owned(short))).toBe(false);
+        expect(byId('menagerie').progress(owned(short))).toEqual([short.length, all.length]);
+        expect(byId('menagerie').check(owned(all))).toBe(true);
+        expect(byId('menagerie').progress(owned(all))).toEqual([all.length, all.length]);
+    });
+
+    // The Lantern Owl shipped (#753) while Menagerie still asked for three pets,
+    // so an achievement that says "every rare companion" checked a subset of
+    // them. Pinning the list to PET_DEFINITIONS makes the next one added fail
+    // here instead of quietly repeating that.
+    test('Menagerie tracks exactly the pets that cannot be bought', () => {
+        const { PET_DEFINITIONS } = require('../src/services/petService');
+        const unpurchasable = Object.values(PET_DEFINITIONS)
+            .filter(d => !d.purchasable)
+            .map(d => d.petId);
+        expect([...RARE_COMPANION_IDS].sort()).toEqual([...unpurchasable].sort());
     });
 
     test('Menagerie is reachable — every rare pet can actually drop', () => {
-        const { rarePetForSource } = require('../src/services/petService');
-        for (const petId of ['eagle', 'shark', 'crystal_fox']) {
-            const source = require('../src/services/petService').PET_DEFINITIONS[petId].materialSource;
+        const { rarePetForSource, PET_DEFINITIONS } = require('../src/services/petService');
+        for (const petId of RARE_COMPANION_IDS) {
+            const source = PET_DEFINITIONS[petId].materialSource;
             expect(rarePetForSource(source).petId).toBe(petId);
+        }
+    });
+
+    test('the Menagerie description names the companions it checks', () => {
+        const { PET_DEFINITIONS } = require('../src/services/petService');
+        const { description } = byId('menagerie');
+        for (const petId of RARE_COMPANION_IDS) {
+            expect(description).toContain(PET_DEFINITIONS[petId].name);
         }
     });
 });

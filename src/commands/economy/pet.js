@@ -1278,6 +1278,21 @@ async function pvpBattle(interaction, ctx) {
     });
 }
 
+// The rare companions and where they turn up, read off PET_DEFINITIONS rather
+// than spelled out: the footer named three pets and three grinds for as long as
+// there were three, and stayed that way when the Lantern Owl was added (#753) —
+// leaving the only in-game mention of a pet nobody can buy pointing at the
+// wrong set. Deriving it means the next one added lists itself.
+function rareCompanionFooter() {
+    const rare    = Object.values(PET_DEFINITIONS).filter(d => !d.purchasable);
+    const names   = rare.map(d => d.name);
+    const sources = [...new Set(rare.map(d => d.materialSource))];
+    const nameList = names.length > 1
+        ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+        : names[0];
+    return `${nameList} aren't sold — each has a ${Math.round(RARE_PET_DROP_CHANCE * 100)}% chance to appear on a legendary ${sources.join(' / ')}`;
+}
+
 async function executeList(interaction) {
     const lines = Object.values(PET_DEFINITIONS)
         .filter(d => d.purchasable)
@@ -1288,7 +1303,7 @@ async function executeList(interaction) {
         .setColor(COLORS.WARN)
         .setTitle('🐾 Pet Shop')
         .setDescription(`Pets level up from feeding and battling, and their passive grows with them.\n\n${lines.join('\n\n')}`)
-        .setFooter({ text: `Eagle, Shark and Crystal Fox aren't sold — each has a ${Math.round(RARE_PET_DROP_CHANCE * 100)}% chance to appear on a legendary hunt / fish / mine` })
+        .setFooter({ text: rareCompanionFooter() })
         .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
@@ -1468,3 +1483,5 @@ module.exports = {
         }
     }
 };
+
+module.exports.__test__ = { rareCompanionFooter };
