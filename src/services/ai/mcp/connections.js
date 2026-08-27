@@ -74,7 +74,15 @@ async function mapWithLimit(items, limit, fn) {
     return results;
 }
 
+// An OAuth connection's credential is not in the connection — it is a grant in
+// the database that rotates — so the identity of the grant goes in the key
+// instead (#796). Two guilds pointed at the same URL under different logins are
+// two connections; the same guild's grant refreshing its access token is still
+// one, which is the point of not keying on the token itself.
 function keyFor(connection) {
+    if (connection.oauth) {
+        return `${connection.url} oauth:${connection.oauth.guildId}/${connection.oauth.server}`;
+    }
     return `${connection.url} ${connection.authorizationToken || ''}`;
 }
 
@@ -105,10 +113,17 @@ function entryFor(server) {
 
 function clientFor(entry, server) {
     if (!entry.client) {
+        const grant = server.connection.oauth;
         entry.client = new McpHttpClient({
             url: server.connection.url,
             authorizationToken: server.connection.authorizationToken,
-            label: server.name
+            label: server.name,
+            // Required lazily: the store reaches the Guild model, and this
+            // module is loaded by the config layer the model's own schema sits
+            // under. A static token connection never touches it.
+            getAccessToken: grant
+                ? ({ force }) => require('./oauthStore').accessTokenFor(grant.guildId, grant.server, { force })
+                : null
         });
     }
     return entry.client;

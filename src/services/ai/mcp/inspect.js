@@ -54,10 +54,17 @@ function primeLists(server, lists) {
 async function inspectServer(server, { confirmMode } = {}) {
     let client = null;
     try {
+        const grant = server.connection.oauth;
         client = new McpHttpClient({
             url: server.connection.url,
             authorizationToken: server.connection.authorizationToken,
-            label: server.name
+            label: server.name,
+            // So a test of an OAuth connection tests the credential the chat
+            // path would actually use, refreshed if it is due (#796) — rather
+            // than reporting a 401 an admin would then go looking for.
+            getAccessToken: grant
+                ? ({ force }) => require('./oauthStore').accessTokenFor(grant.guildId, grant.server, { force })
+                : null
         });
 
         const tools = await client.listTools();
@@ -104,6 +111,8 @@ async function inspectServer(server, { confirmMode } = {}) {
 
         return {
             success: true,
+            needsOAuth: false,
+            wwwAuthenticate: null,
             message: `Connected${serverName ? ` to ${serverName}` : ''} — ${tools.length} tool${tools.length === 1 ? '' : 's'} offered, ` +
                 `${enabled.length} enabled by your filters` +
                 (confirming.length ? `, ${confirming.length} needing approval` : '') +
@@ -121,6 +130,14 @@ async function inspectServer(server, { confirmMode } = {}) {
         return {
             success: false,
             message: error?.message || 'Unknown error',
+            // A 401 carrying a Bearer challenge is not a wrong token, it is a
+            // server asking for an OAuth login (#796). Reported separately from
+            // the message so the dashboard can offer Connect rather than making
+            // an admin read the difference out of an error string, and the
+            // challenge itself comes along because `resource_metadata` on it is
+            // where discovery starts.
+            needsOAuth: error?.needsOAuth === true,
+            wwwAuthenticate: error?.wwwAuthenticate || null,
             toolCount: 0,
             resourceCount: 0,
             promptCount: 0,

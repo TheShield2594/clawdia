@@ -126,6 +126,26 @@ describe('which route a request takes', () => {
         expect(tookClientRoute()).toBe(false);
     });
 
+    // #796. Unlike the approval policy, this is not a preference being honoured
+    // but a fact about where the connection can work at all: the connector
+    // opens the socket on Anthropic's side with whatever static token it was
+    // handed, and an OAuth access token expires within the hour with only the
+    // bot able to refresh it.
+    test('the client for an OAuth connection, even when the guild insisted on the connector', async () => {
+        await collect(anthropic.stream({
+            ...REQ,
+            mcpRoute: 'connector',
+            mcpConfirm: 'off',
+            mcpServers: [{
+                ...GITHUB,
+                name: 'linear',
+                url: 'https://mcp.example.com/mcp',
+                oauth: { guildId: 'g1', clientId: 'cid', accessToken: 'enc:at', refreshToken: 'enc:rt' }
+            }]
+        }));
+        expect(tookClientRoute()).toBe(true);
+    });
+
     test('no route at all for a caller that switched MCP off', async () => {
         // /forge and /questgen parse the reply as JSON.
         await collect(anthropic.stream({ ...REQ, mcpRoute: 'client', useMcp: false }));

@@ -135,7 +135,7 @@ can be defined centrally and pointed at one guild's own credentials.
 
 The Service dropdown prefills the services with a documented hosted endpoint —
 GitHub, Fastmail (`https://api.fastmail.com/mcp`), DeepWiki, Context7, Hugging
-Face and Stripe.
+Face and Stripe, plus the four below that take a login instead of a token.
 
 **Gmail and Spotify** are in the list too, marked *your own endpoint*: neither
 Google nor Spotify publishes a hosted MCP endpoint, so the server is one you
@@ -145,9 +145,44 @@ a placeholder showing the shape of the address. Everything after that is
 identical.
 
 Anything else works the same way: choose **Custom server…** and paste the
-server's https endpoint and token. Services that only offer an OAuth login flow
-rather than a token are not usable here — the dashboard has one credential field
-and it holds a token.
+server's https endpoint and token.
+
+#### Servers that want a login rather than a token
+
+Linear, Notion, Sentry and Atlassian issue no static token at all. They answer
+the first request with a 401 naming their authorization server, and the
+connection is finished by signing in.
+
+1. Add the connection as above — pick the service, leave the token field empty,
+   and click **Add connection**.
+2. Click **Connect** on the row. A tab opens on the service's own sign-in page.
+3. Sign in and approve. The tab tells you it worked and can be closed.
+4. Reload the dashboard and click **Test**. The row now reads
+   *🔓 signed in to …* instead of *no token*.
+
+The row's **Sign out** button forgets the login and leaves the connection in
+place, which is what you want before reconnecting as a different account.
+
+A few things worth knowing:
+
+- **The login belongs to whoever performed it.** The bot acts as that account
+  for everything it does through the connection, in every channel of that
+  Discord server. Sign in as an account whose access you are happy to lend, and
+  fill in *Never these tools* before anyone uses it.
+- **The tokens are encrypted at rest** when `SECRET_ENCRYPTION_KEY` is set, the
+  same as the provider API keys — a refresh token is a long-lived credential for
+  somebody's mailbox or issue tracker. Set that variable before connecting one.
+- **Claude always uses the bot's own client** for these, whatever *Connection
+  route* is set to. An access token expires within the hour and only the bot can
+  refresh it, so Anthropic's connector — which opens the connection on their
+  side — cannot be given one that keeps working.
+- **Changing the URL, or setting a token, signs the connection out.** The login
+  was issued for one address and one way of authorizing; the dashboard says so
+  when it happens.
+- **The redirect URL is `<DASHBOARD_URL>/api/mcp/oauth/callback`.** Nothing has
+  to be registered anywhere for the four presets above — the bot registers
+  itself with the service automatically. A server that does not support that
+  reports the URL to register by hand.
 
 **Tool gating.** *Only these tools* is an allowlist — leave it empty to allow
 everything the server offers. *Never these tools* is a denylist and wins over
@@ -158,7 +193,8 @@ tool names, which is the easiest way to fill either list in.
 **Tokens are write-only.** A saved token is never sent back to the browser and
 never appears in the rendered page — the panel shows only that one exists. Edit
 a connection without retyping the token to keep it, or save an empty token field
-to clear it.
+to clear it. The same goes for a login: the panel shows which service it is
+with and when it was made, never the tokens behind it.
 
 #### Documents and prompts
 
@@ -236,6 +272,19 @@ file lives outside the repo checkout.
 | `blocked_tools` | No | Denylist of tool names. Wins over `allowed_tools`. |
 | `resources` | No | Set `true` to search this server's resources when somebody asks the AI something and put the relevant ones in the prompt. Off by default. |
 | `default_config` / `configs` | No | The API's raw toolset shape, if you need `defer_loading` or another setting the two lists above don't cover. |
+
+**The config file cannot hold a login.** Its secrets are `${ENV_VAR}`
+references, which the bot reads and never writes — and a refresh token rotates,
+so a login has to be written back somewhere every time it is used. A server that
+takes a login rather than a token is a dashboard connection, per Discord server.
+
+**`defer_loading`** decides whether a tool's full JSON Schema is sent to the
+model on every message or withheld until it asks for it by name. Left unset, the
+bot withholds everything past the first two dozen tools automatically, which is
+what keeps a server publishing ninety of them from costing more tokens per
+message than the reply is allowed. Set it to `false` on the handful you actually
+use and they stay loaded however long the list gets; set it to `true` to withhold
+one on a small server.
 
 **Keeping tokens out of the file.** Any `url` or `authorization_token` written
 as `${VAR_NAME}` is read from the environment at startup, so real credentials

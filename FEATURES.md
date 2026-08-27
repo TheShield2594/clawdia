@@ -40,6 +40,11 @@ Gemini, Ollama or OpenRouter, Clawdia is the MCP client — it lists the tools,
 offers them to the model as functions and runs the calls it asks for. The model
 has to support tool calling on that second route.
 
+Past two dozen enabled tools the bot stops sending full JSON Schemas on every
+message: the rest are catalogued as a name and one line each, and the model
+loads the ones it wants by name. A server publishing ninety tools is otherwise
+the largest single cost of a message, on a reply budget of 1,024 tokens.
+
 Add servers per-server in the dashboard under **AI → 🔌 Connections**, or
 operator-wide in `config/mcp-servers.json`; a dashboard entry overrides a file
 entry of the same name.
@@ -47,12 +52,16 @@ entry of the same name.
 Dashboard:
 - Presets for GitHub, Fastmail, DeepWiki, Context7, Hugging Face and Stripe, or
   any https MCP endpoint
+- Presets for Linear, Notion, Sentry and Atlassian, which take a login rather
+  than a token: **Connect** opens the service's own sign-in page, and the bot
+  registers itself, holds the grant and refreshes it as it expires
 - Gmail and Spotify are prefilled apart from the address: neither publishes a
   hosted endpoint, so the server is one you run and the URL is yours to supply
 - Allow/deny lists per tool, so a destructive tool can be switched off by name
 - **Test** button — connects to the server and lists the tools it offers, with
   no AI provider key and no tokens spent
-- Tokens are write-only: stored on the bot, never returned to the browser
+- Tokens are write-only: stored on the bot, never returned to the browser. A
+  login is the same — the panel shows which service it is with, never the tokens
 - **Use its documents as knowledge** — off by default, per connection. Switched
   on, the server's resources become a live knowledge base: the ones that match a
   question are read as it is asked and put in the prompt beside the curated

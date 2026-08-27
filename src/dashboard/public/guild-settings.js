@@ -1939,6 +1939,8 @@ document.addEventListener('click', function(e) {
     // The approval mode lives on this tab but is part of the ai document, so
     // it saves through the same section as everything else on the Chat tab.
     else if (d.action === 'mcp-save-confirm') saveSettings('ai');
+    else if (d.action === 'mcp-oauth-connect')    startMcpOAuth(d.serverName, el.closest('.list-item') && el.closest('.list-item').querySelector('.mcp-test-result'));
+    else if (d.action === 'mcp-oauth-disconnect') disconnectMcpOAuth(d.serverName);
     else if (d.action === 'mcp-edit')       editMcpServer(d.serverName);
     else if (d.action === 'mcp-remove')     removeMcpServer(d.serverName);
     else if (d.action === 'autorole-remove') removeAutoRole(d.roleId);
@@ -2978,7 +2980,15 @@ function renderMcpServers(provider) {
         container.innerHTML = '';
         _mcpServers.forEach(function(srv) {
             const bits = [];
-            bits.push(srv.hasToken ? '🔑 token stored' : 'no token');
+            // An OAuth grant (#796) replaces the token rather than sitting
+            // beside it, so it is the same slot in the summary line.
+            if (srv.oauth) {
+                let credential = '🔓 signed in to ' + shortHost(srv.oauth.issuer);
+                if (!srv.oauth.renewable) credential += ' (cannot renew — will need reconnecting)';
+                bits.push(credential);
+            } else {
+                bits.push(srv.hasToken ? '🔑 token stored' : 'no token');
+            }
             if (srv.allowedTools.length) bits.push('only ' + srv.allowedTools.length + ' tool(s)');
             if (srv.blockedTools.length) bits.push(srv.blockedTools.length + ' blocked');
             if ((srv.confirmTools || []).length) bits.push(srv.confirmTools.length + ' need approval');
@@ -2995,6 +3005,9 @@ function renderMcpServers(provider) {
                 '</div>' +
                 '<div style="display:flex;gap:.4rem;flex-wrap:wrap;">' +
                     '<button class="btn btn-sm" data-action="mcp-test" data-server-name="' + escHtml(srv.name) + '">Test</button>' +
+                    (srv.oauth
+                        ? '<button class="btn btn-sm" data-action="mcp-oauth-disconnect" data-server-name="' + escHtml(srv.name) + '">Sign out</button>'
+                        : '<button class="btn btn-sm" data-action="mcp-oauth-connect" data-server-name="' + escHtml(srv.name) + '">Connect</button>') +
                     '<button class="btn btn-sm" data-action="mcp-edit" data-server-name="' + escHtml(srv.name) + '">Edit</button>' +
                     '<button class="btn btn-danger btn-sm" data-action="mcp-remove" data-server-name="' + escHtml(srv.name) + '">Remove</button>' +
                 '</div>';
@@ -3166,6 +3179,14 @@ async function testMcpServer(name, out) {
             extra.textContent = 'Also publishes: ' + parts.join(' and ');
             out.appendChild(extra);
         }
+        // A 401 asking for a login rather than a bad token. The Connect button
+        // is already on the row; this says which button to press.
+        if (!okay && data.needsOAuth) {
+            const hint = document.createElement('small');
+            hint.className = 'mcp-test-tools';
+            hint.textContent = 'This server wants a login rather than a token — press Connect.';
+            out.appendChild(hint);
+        }
         if (okay && Array.isArray(data.tools) && data.tools.length) {
             const names = document.createElement('small');
             names.className = 'mcp-test-tools';
@@ -3177,6 +3198,85 @@ async function testMcpServer(name, out) {
     } catch (e) {
         console.error(e);
         if (out) { out.className = 'mcp-test-result bad'; out.textContent = '✗ Request failed'; }
+    }
+}
+
+/** An issuer URL as the host an admin would recognise, for the summary line. */
+function shortHost(issuer) {
+    try { return new URL(issuer).host; } catch (_err) { return issuer || 'the server'; }
+}
+
+/**
+ * Start the OAuth flow for one connection (#796).
+ *
+ * The authorization URL is opened in a new tab rather than followed here: the
+ * admin needs the dashboard still sitting where it was when they come back, and
+ * the callback closes its own tab with a message. A popup blocker is the one
+ * failure worth handling — the URL is offered as a link instead, since the
+ * flow's state is already stored and waiting.
+ */
+async function startMcpOAuth(name, out) {
+    const guildId = BOOT.guildId;
+    if (out) { out.className = 'mcp-test-result'; out.textContent = 'Finding this server\u2019s login…'; }
+    try {
+        const resp = await fetch(
+            '/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/oauth/start',
+            { method: 'POST' }
+        );
+        const data = await resp.json();
+
+        if (!resp.ok || !data.authorizationUrl) {
+            if (out) {
+                out.className = 'mcp-test-result bad';
+                out.textContent = '\u2717 ' + (data.error || 'Could not start the login');
+                if (data.redirectUri) {
+                    const hint = document.createElement('small');
+                    hint.className = 'mcp-test-tools';
+                    hint.textContent = 'Redirect URI to register: ' + data.redirectUri;
+                    out.appendChild(hint);
+                }
+            }
+            return;
+        }
+
+        const opened = window.open(data.authorizationUrl, '_blank', 'noopener');
+        if (out) {
+            out.className = 'mcp-test-result';
+            out.textContent = opened
+                ? 'Sign in to ' + shortHost(data.issuer) + ' in the new tab, then reload this page.'
+                : 'Your browser blocked the popup. Open this link to sign in:';
+            if (!opened) {
+                const link = document.createElement('a');
+                link.href = data.authorizationUrl;
+                link.target = '_blank';
+                link.rel = 'noopener';
+                link.className = 'mcp-test-tools';
+                link.textContent = 'Sign in to ' + shortHost(data.issuer);
+                out.appendChild(link);
+            }
+        }
+    } catch (e) {
+        console.error(e);
+        if (out) { out.className = 'mcp-test-result bad'; out.textContent = '\u2717 Request failed'; }
+    }
+}
+
+/** Forget a grant. The connection stays, unauthenticated, ready to reconnect. */
+async function disconnectMcpOAuth(name) {
+    if (!confirm('Sign out of "' + name + '"? The connection stays, but the bot will not be able to use it until you connect again.')) return;
+    const guildId = BOOT.guildId;
+    try {
+        const resp = await fetch(
+            '/api/v1/guild/' + guildId + '/mcp-servers/' + encodeURIComponent(name) + '/oauth',
+            { method: 'DELETE' }
+        );
+        const data = await resp.json();
+        if (!resp.ok) return toast(data.error || 'Could not sign out', 'error');
+        toast('Signed out of ' + name, 'success');
+        loadMcpServers(true);
+    } catch (e) {
+        console.error(e);
+        toast('Request failed', 'error');
     }
 }
 

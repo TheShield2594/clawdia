@@ -3,6 +3,7 @@ const { decryptSecret } = require('../../../config/secretBox');
 const {
     buildAnthropicMcpParams,
     requiresApproval,
+    usesOAuth,
     MCP_BETA,
     DEFAULT_MCP_ROUTE
 } = require('../../../config/mcpServers');
@@ -99,6 +100,15 @@ async function clientToolkit(req) {
     if (req.useMcp === false) return null;
 
     const route = req.mcpRoute || DEFAULT_MCP_ROUTE;
+    // An OAuth connection takes the client route whatever the setting says, and
+    // unlike the approval policy this is not a preference being honoured but a
+    // fact about where the connection can work at all (#796): the connector
+    // opens the socket on Anthropic's side with whatever static token it was
+    // handed, and an OAuth access token expires in an hour with only the bot
+    // able to refresh it. `connector` is a choice between two working routes,
+    // and for this connection there is only one.
+    if (usesOAuth(req.mcpServers)) return toolkitFor(req);
+
     // `auto` follows the approval policy: a guild that asked to be consulted
     // must not lose that by picking Claude in a dropdown on another tab.
     const client = route === 'client'

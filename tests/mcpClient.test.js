@@ -137,6 +137,129 @@ describe('authorization', () => {
     });
 });
 
+/**
+ * #796. An OAuth connection's credential is not a field on the client — it is a
+ * grant in the database that expires within the hour and rotates. So the token
+ * is asked for before every request rather than once at construction, and a 401
+ * is worth one forced refresh and one retry before it becomes an error somebody
+ * has to read.
+ */
+describe('an OAuth connection', () => {
+    /** A client whose token comes from a store, with the calls recorded. */
+    function oauthClient(tokens) {
+        const asked = [];
+        const client = new McpHttpClient({
+            url: URL,
+            label: 'linear',
+            getAccessToken: async ({ force }) => { asked.push(force); return tokens.shift() ?? null; }
+        });
+        return { client, asked };
+    }
+
+    // A pooled client can sit idle past its token's lifetime, and the store is
+    // what knows when to refresh — so it is asked every time rather than once.
+    test('asks the store for a token before every request', async () => {
+        respondBy(HANDSHAKE);
+        const { client, asked } = oauthClient(['at1', 'at1']);
+
+        await client.initialize();
+
+        expect(asked).toEqual([false, false]);
+        expect(postsTo('initialize')[0][2].headers.Authorization).toBe('Bearer at1');
+    });
+
+    test('refreshes once and retries when the server rejects the token', async () => {
+        let seen = 0;
+        axios.post.mockImplementation(async (_url, payload, options) => {
+            if (payload.method === 'initialize' && seen++ === 0) {
+                return textResponse('', 401);
+            }
+            expect(options.headers.Authorization).toBe('Bearer at2');
+            if (payload.method === 'notifications/initialized') return acceptedResponse();
+            return jsonResponse({ jsonrpc: '2.0', id: payload.id, result: INIT_RESULT });
+        });
+
+        const { client, asked } = oauthClient(['at1', 'at2', 'at2']);
+        await client.initialize();
+
+        // False for the ordinary pre-request fetch, then true for the forced
+        // one the 401 asked for.
+        expect(asked.slice(0, 2)).toEqual([false, true]);
+    });
+
+    // A second identical request buys nothing, and a second 401 after a fresh
+    // token is the server saying no rather than a clock problem.
+    test('does not retry twice, or with a token that did not change', async () => {
+        axios.post.mockResolvedValue(textResponse('', 401));
+        const { client } = oauthClient(['at1', 'at1', 'at1']);
+
+        await expect(client.initialize()).rejects.toThrow(/401/);
+        expect(axios.post).toHaveBeenCalledTimes(1);
+    });
+
+    // A 401 with a Bearer challenge is a server asking for a login, not a bad
+    // token, and the dashboard offers Connect on the difference.
+    test('carries the challenge on the error, so discovery knows where to start', async () => {
+        axios.post.mockResolvedValue({
+            status: 401,
+            headers: {
+                'content-type': 'text/plain',
+                'www-authenticate': 'Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"'
+            },
+            data: Readable.from([''])
+        });
+
+        const error = await new McpHttpClient({ url: URL }).initialize().catch(err => err);
+
+        expect(error.needsOAuth).toBe(true);
+        expect(error.wwwAuthenticate).toContain('resource_metadata');
+        expect(error.message).toMatch(/OAuth login/);
+    });
+
+    test('a 401 with no challenge is still just a rejected token', async () => {
+        axios.post.mockResolvedValue(textResponse('nope', 401));
+
+        const error = await new McpHttpClient({ url: URL, authorizationToken: 'x' }).initialize().catch(err => err);
+
+        expect(error.needsOAuth).toBe(false);
+        expect(error.message).toMatch(/rejected the authorization token/);
+    });
+
+    // A static-token connection has no store to ask, and must not gain a retry
+    // it never had.
+    test('leaves a static-token connection exactly as it was', async () => {
+        axios.post.mockResolvedValue(textResponse('nope', 401));
+
+        await expect(new McpHttpClient({ url: URL, authorizationToken: 'x' }).initialize()).rejects.toThrow();
+        expect(axios.post).toHaveBeenCalledTimes(1);
+    });
+
+    // A store that cannot produce a token is not an error: the request goes out
+    // unauthenticated and fails with the server's own message, which is more
+    // useful than one invented here.
+    test('carries on unauthenticated when the store has nothing', async () => {
+        respondBy(HANDSHAKE);
+        const { client } = oauthClient([null, null]);
+
+        await client.initialize();
+
+        expect(postsTo('initialize')[0][2].headers.Authorization).toBeUndefined();
+    });
+
+    test('and when the store throws', async () => {
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        respondBy(HANDSHAKE);
+        const client = new McpHttpClient({
+            url: URL, label: 'linear',
+            getAccessToken: async () => { throw new Error('mongo down'); }
+        });
+
+        await expect(client.initialize()).resolves.toBeDefined();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('mongo down'));
+        warn.mockRestore();
+    });
+});
+
 describe('SSRF guard', () => {
     // The URL is a dashboard field, so this is the check that stops a guild
     // admin pointing the bot at the metadata service or the Mongo host.
