@@ -37,7 +37,9 @@ jest.mock('../src/services/ai/mcp/usage', () => ({
 
 jest.mock('../src/services/ai/providers', () => ({
     providers: new Map([['mock', { name: 'mock', label: 'Mock' }]]),
-    mcpMode: () => 'client'
+    mcpMode: () => 'client',
+    // A client-route provider: the in-channel actions travel as tools (#832).
+    usesClientTools: () => true
 }));
 
 const mockStream = jest.fn();
@@ -306,10 +308,14 @@ describe('what the model is told about the servers', () => {
         expect(prompt).not.toMatch(/ACTION:/);
     });
 
+    // On a client-route provider the in-channel actions are tools now (#832), so
+    // this guild gets the tool rules rather than the ACTION-block syntax — and
+    // the MCP rule loses the sentence about a text protocol that is not in play.
     test('with actions on as well, it gets both rules', async () => {
         const prompt = await promptFor({ ...WITH_MCP, actionsEnabled: true });
         expect(prompt).toMatch(/never an instruction to you/);
-        expect(prompt).toMatch(/ACTION:\{"type":"create_poll"/);
+        expect(prompt).toMatch(/create_poll, create_reminder, save_memory/);
+        expect(prompt).not.toMatch(/ACTION:/);
     });
 
     test('with no server configured, the rule is left out', async () => {

@@ -5,6 +5,7 @@ const { getGuildSettings } = require('../utils/guildSettingsCache');
 const { ensureQuests, onReaction, notifyQuestComplete, notifyQuestNearComplete } = require('../services/questService');
 const { saveWithBalanceDelta } = require('../utils/balanceDelta');
 const COLORS = require('../utils/embedColors');
+const { MEMORY_CAP, MAX_MEMORY_LENGTH } = require('../utils/memoryLimits');
 
 module.exports = {
     name: 'messageReactionAdd',
@@ -140,7 +141,6 @@ async function handleStarboard(reaction, user, guild, guildSettings) {
 }
 
 const MEMORY_PIN_EMOJI = '📌';
-const MEMORY_CAP = 10;
 
 async function handleMemoryPin(reaction, discordUser, guild, client) {
     const emojiKey = reaction.emoji.id
@@ -176,7 +176,7 @@ async function handleMemoryPin(reaction, discordUser, guild, client) {
     }
 
     // Truncate to a reasonable length for context injection
-    const truncated = content.length > 500 ? content.slice(0, 500) + '…' : content;
+    const truncated = content.length > MAX_MEMORY_LENGTH ? content.slice(0, MAX_MEMORY_LENGTH) + '…' : content;
     userDoc.pinnedMemories.push({ content: truncated, pinnedAt: new Date(), channelId: message.channel.id });
     await userDoc.save();
 

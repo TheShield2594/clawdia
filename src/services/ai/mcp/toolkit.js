@@ -389,16 +389,24 @@ function renderResult({ content, structuredContent, isError }, { namePrefix = 'r
  * @param {Function} [options.toolBudget] spends one of the user's tool-call
  *        allowance and reports whether there was one to spend; a toolkit built
  *        without one is unbounded, which is what the unattributed callers are
+ * @param {Array} [options.botTools] tools the bot owns rather than a server —
+ *        the in-channel actions (#832). Each carries the same fields a
+ *        discovered tool does plus `run(args)`, which is called instead of a
+ *        session; they are always declared, never deferred, and a toolkit made
+ *        of nothing else is still a toolkit
  * @returns {Promise<null|{definitions: Array, servers: string[], call: Function}>}
  */
 async function prepareMcpToolkit(guildServers = [], {
     onToolEvent,
     confirmMode = DEFAULT_CONFIRM_MODE,
     confirmTool,
-    toolBudget
+    toolBudget,
+    botTools = []
 } = {}) {
     const servers = resolveMcpServers(guildServers);
-    if (!servers.length) return null;
+    // A guild with no servers but with in-channel actions on still has tools to
+    // offer; only a request with neither takes the plain path.
+    if (!servers.length && !botTools.length) return null;
 
     sweepIdleSessions(Date.now());
     const emit = notifier(onToolEvent);
@@ -433,6 +441,44 @@ async function prepareMcpToolkit(guildServers = [], {
     let counted = 0;
 
     used.add(LOAD_TOOL_NAME);
+
+    // The bot's own tools go first and are never deferred: there are a handful
+    // of them, their schemas are small, and they are the ones the user is most
+    // likely to be asking for. They also claim their names before any server's
+    // tool can, so a server offering a `create_reminder` is the one that gets
+    // renamed rather than shadowing the bot's.
+    for (const botTool of botTools) {
+        if (!botTool?.name || typeof botTool.run !== 'function') continue;
+        // Bare, like `load_tools`: a bot tool belongs to no server, and every
+        // discovered tool's name contains the `server__tool` double underscore,
+        // so the two sets cannot collide.
+        const name = used.has(botTool.name)
+            ? qualifyName(botTool.serverName || 'bot', botTool.name, used)
+            : botTool.name;
+        used.add(name);
+        const definition = {
+            name,
+            serverName: botTool.serverName || 'bot',
+            toolName: botTool.toolName || botTool.name,
+            description: String(botTool.description || botTool.name).slice(0, 1024),
+            inputSchema: schemaOf(botTool),
+            annotations: botTool.annotations || {},
+            confirm: Boolean(botTool.confirm)
+        };
+        definitions.push(definition);
+        index.set(name, {
+            server: { name: definition.serverName },
+            toolName: definition.toolName,
+            annotations: definition.annotations,
+            confirm: definition.confirm,
+            structured: false,
+            run: botTool.run
+        });
+    }
+
+    // The eager budget below counts discovered tools only: the handful the bot
+    // owns must not push a guild's own tools into the catalogue.
+    let declaredFromServers = 0;
 
     // Assembled in the configured order rather than the order the servers
     // answered in, so a server that happens to be slow this minute cannot
@@ -478,9 +524,10 @@ async function prepareMcpToolkit(guildServers = [], {
                 confirm
             };
 
-            if (deferralOf(server.toolset, tool.name, definitions.length)) {
+            if (deferralOf(server.toolset, tool.name, declaredFromServers)) {
                 deferred.push({ name, summary: summarize(tool, server.name), definition });
             } else {
+                declaredFromServers += 1;
                 definitions.push(definition);
             }
         }
@@ -699,6 +746,22 @@ async function prepareMcpToolkit(guildServers = [], {
 
         emit({ ...describe, type: 'start' });
 
+        // A tool the bot owns: no session, no server limit, no timeout to
+        // negotiate — the work is a database write and a Discord message. What
+        // it says comes back unlabelled, because the label exists to mark text a
+        // third party wrote and this is the bot answering itself (#832).
+        if (target.run) {
+            try {
+                const text = String(await target.run(args ?? {}) ?? '');
+                finish(true);
+                return withinBudget(text || 'The action ran but said nothing.');
+            } catch (err) {
+                console.warn(`[MCP] bot tool "${target.toolName}" failed: ${err.message}`);
+                finish(false, { error: err.message });
+                return `That action could not be completed: ${err.message}. Tell the user it did not happen.`;
+            }
+        }
+
         // How far a long call has got, when the server bothers to say. The
         // status line is already repainted on a clock, so this only has to
         // leave the latest number where the next repaint will find it.
@@ -801,10 +864,10 @@ async function prewarmMcpServers(guildServers = [], { concurrency = 4 } = {}) {
  * `useMcp` is the caller's switch — commands that parse the reply as JSON pass
  * it false — and is checked here so no provider has to remember to.
  */
-async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget } = {}) {
+async function toolkitFor({ useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools } = {}) {
     if (useMcp === false) return null;
     try {
-        return await prepareMcpToolkit(mcpServers, { onToolEvent, confirmMode: mcpConfirm, confirmTool, toolBudget });
+        return await prepareMcpToolkit(mcpServers, { onToolEvent, confirmMode: mcpConfirm, confirmTool, toolBudget, botTools });
     } catch (err) {
         // Discovery is best-effort in every direction: an unreadable config or
         // a bad stored record must not cost the user their answer.

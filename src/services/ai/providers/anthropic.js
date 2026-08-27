@@ -99,15 +99,17 @@ function buildMessages(history, prompt) {
 }
 
 /**
- * Which route this request takes, and the toolkit for it when that is client.
+ * Whether this request runs the bot's own tool loop rather than the connector.
  *
- * Returns null for the connector route and for a request with no servers to
- * reach, both of which fall through to the plain path below unchanged.
+ * Asked here and by the Discord transport, which needs the same answer before
+ * the request is built: the in-channel actions travel as tools on this route and
+ * as a trailing ACTION block on the other, and only one of the two may be
+ * offered to the model (#832).
  */
-async function clientToolkit(req) {
-    if (req.useMcp === false) return null;
+function usesClientRoute({ useMcp = true, mcpRoute, mcpConfirm, mcpServers, botTools } = {}) {
+    if (useMcp === false) return false;
 
-    const route = req.mcpRoute || DEFAULT_MCP_ROUTE;
+    const route = mcpRoute || DEFAULT_MCP_ROUTE;
     // An OAuth connection takes the client route whatever the setting says, and
     // unlike the approval policy this is not a preference being honoured but a
     // fact about where the connection can work at all (#796): the connector
@@ -115,14 +117,30 @@ async function clientToolkit(req) {
     // handed, and an OAuth access token expires in an hour with only the bot
     // able to refresh it. `connector` is a choice between two working routes,
     // and for this connection there is only one.
-    if (usesOAuth(req.mcpServers)) return toolkitFor(req);
+    if (usesOAuth(mcpServers)) return true;
+    if (route === 'client') return true;
+    // A guild that named the connector gets the connector, and its actions stay
+    // on the text protocol.
+    if (route === 'connector') return false;
 
-    // `auto` follows the approval policy: a guild that asked to be consulted
-    // must not lose that by picking Claude in a dropdown on another tab.
-    const client = route === 'client'
-        || (route !== 'connector' && requiresApproval(req.mcpConfirm, req.mcpServers));
+    // `auto` below. Bot tools with nothing for the connector to carry is not a
+    // choice between two routes: the connector would open no connections at all,
+    // and taking it would cost the actions their schemas for nothing.
+    if (botTools?.length && !buildAnthropicMcpParams(mcpServers)) return true;
 
-    return client ? toolkitFor(req) : null;
+    // Otherwise `auto` follows the approval policy: a guild that asked to be
+    // consulted must not lose that by picking Claude in a dropdown on another tab.
+    return requiresApproval(mcpConfirm, mcpServers);
+}
+
+/**
+ * The toolkit for this request, or null when it takes the connector route.
+ *
+ * Null also covers a client-route request with nothing to offer — no servers
+ * reachable and no bot tools — which falls through to the plain path unchanged.
+ */
+async function clientToolkit(req) {
+    return usesClientRoute(req) ? toolkitFor(req) : null;
 }
 
 // MCP tools as Anthropic tool definitions. The toolkit has already done
@@ -350,6 +368,10 @@ module.exports = {
     // can also be asked to work like the others — see clientToolkit above — so
     // this is what it does by default, not the only thing it does.
     mcp: 'native',
+    // Which of the two routes a given request takes. The registry asks this
+    // (see providers/index.js `usesClientTools`) so nothing else has to know
+    // that Anthropic is the provider with a choice to make.
+    usesClientRoute,
     resolveAuth: aiSettings => ({ apiKey: decryptSecret(aiSettings.anthropicKey) || process.env.ANTHROPIC_API_KEY }),
     stream,
     complete

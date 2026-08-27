@@ -47,4 +47,20 @@ function mcpMode(providerName) {
     return providers.get(providerName)?.mcp || false;
 }
 
-module.exports = { providers, getProvider, DEFAULT_MODELS, mcpMode };
+/**
+ * Whether this request will run the bot's own tool loop.
+ *
+ * The transport asks before it builds the request, because the in-channel
+ * actions are tools on that loop and a trailing ACTION block without it (#832),
+ * and offering both would let a model do the same thing twice. Every 'client'
+ * provider always does; Anthropic answers per request, since it is the one with
+ * a connector to take instead.
+ */
+function usesClientTools(providerName, req = {}) {
+    const provider = providers.get(providerName);
+    if (!provider) return false;
+    if (typeof provider.usesClientRoute === 'function') return provider.usesClientRoute(req);
+    return provider.mcp === 'client';
+}
+
+module.exports = { providers, getProvider, DEFAULT_MODELS, mcpMode, usesClientTools };
