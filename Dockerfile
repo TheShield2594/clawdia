@@ -8,7 +8,18 @@
 # ships a runtime nothing ever tested. tests/nodeVersionAlignment.test.js fails
 # the build if the three drift apart. 24 is the active LTS line; move all three
 # together when 26 reaches LTS.
-FROM node:24-alpine AS build
+#
+# The `@sha256:` suffix is what makes the build reproducible (#644). `node:24-alpine`
+# on its own is a moving target — it is re-published whenever the 24 line gets a
+# patch or Alpine gets a rebuild — so the same Dockerfile, the same commit and the
+# same `docker build` produce a different runtime depending on the day, and a
+# rebuild to roll back a regression can quietly carry a *newer* base than the
+# image it is replacing. The tag is kept alongside the digest because it is the
+# only human-readable half; the digest is what Docker actually resolves.
+# Dependabot's `docker` ecosystem (.github/dependabot.yml) raises the bump, and
+# tests/imagePinning.test.js fails if any reference here or in either stack file
+# loses its digest.
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
 
 RUN apk add --no-cache \
     cairo-dev \
@@ -31,7 +42,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 # ---- runtime stage -----------------------------------------------------------
 # Same major as the build stage and as .nvmrc — see the note above.
-FROM node:24-alpine
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf
 
 # Shared libraries canvas links against at runtime (the -dev headers and the
 # compiler are deliberately left behind in the build stage), plus the DejaVu

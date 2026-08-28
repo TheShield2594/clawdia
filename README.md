@@ -78,13 +78,28 @@ command sets put together.
 docker-compose up -d
 ```
 
+That is the whole deploy. In particular there is no separate command-registration
+step: the bot publishes its slash commands to Discord itself when it connects,
+and re-publishes only when the command set has actually changed — so a restart
+costs nothing and an upgrade that adds a command needs no extra action. Global
+commands can take up to an hour to appear in every server the first time.
+`DEPLOY_COMMANDS` below turns that off if you would rather drive it by hand.
+
+Schema migrations run on boot too, before the dashboard opens its port. Some are
+irreversible; see [Schema migrations](SETUP_GUIDE.md#schema-migrations) before
+the first upgrade of a deployment with data in it.
+
 ## Manual Installation
 
 ```bash
 npm install
-npm run deploy  # Deploy slash commands globally
+npm run deploy  # Optional: publish the slash commands now, without starting
 npm start
 ```
+
+`npm run deploy` is the manual path — useful while developing a command, or to
+re-publish after `DEPLOY_COMMANDS=never`. It is not a prerequisite for
+`npm start`, which registers them itself.
 
 ### Sharding
 
@@ -157,6 +172,15 @@ the files a change already touches.
 - `MCP_SERVERS_CONFIG` - (Optional) Path to the MCP server list (default: `config/mcp-servers.json`)
 - `MCP_ALLOW_GUILD_SERVERS` - (Optional) Set to `false` to disable dashboard-managed MCP servers
 - `IMGFLIP_USERNAME` / `IMGFLIP_PASSWORD` - (Optional) Imgflip credentials for `/meme` command
+- `LOG_LEVEL` - (Optional) `trace`, `debug`, `info` (default), `warn`, `error`, `fatal` or `silent`. See [Logging](#logging)
+- `LOG_FORMAT` - (Optional) `json` or `pretty`. Defaults to `json` when `NODE_ENV=production`, `pretty` otherwise
+- `ERROR_WEBHOOK_URL` - (Optional) Where to send an uncaught exception or unhandled rejection, on top of logging it. A Discord webhook URL is recognised and formatted for Discord; anything else receives a flat JSON event. Unset, nothing is sent and the crash path behaves exactly as before
+- `ERROR_REPORT_TIMEOUT_MS` - (Optional) How long the process waits for that POST before exiting anyway (default 2000)
+- `DEPLOY_COMMANDS` - (Optional) `auto` (default — publish the slash commands at startup, but only when the set changed), `always`, or `never`
+- `MIGRATION_TIMEOUT_MS` - (Optional) Per-migration wall-clock budget in milliseconds (default 30000)
+- `MIGRATION_BACKUP` - (Optional) `require` to abort startup rather than run an irreversible migration without a `mongodump` first; `skip` to not attempt one. Unset, it is attempted and a failure is a loud warning. See [Schema migrations](SETUP_GUIDE.md#schema-migrations)
+- `BACKUP_RETENTION_DAYS` - (Optional) Days of nightly `mongodump` archives to keep (default 30)
+- `SHARD_COUNT` - (Optional) Pin a shard count for `npm run start:sharded`; unset takes Discord's recommendation
 
 ## Commands
 
@@ -297,6 +321,7 @@ Configuration that previously lived behind slash commands (settings link, level 
 - MongoDB with Mongoose
 - Express.js
 - Passport (Discord OAuth2)
+- Pino (structured logging)
 - OpenAI API / Google Gemini API / Anthropic Claude API / Ollama (optional)
 - RSS Parser
 - Canvas (Image generation)
@@ -470,6 +495,47 @@ The Daily News feature compiles multiple RSS feeds into a single daily post.
 
 Use the **Send digest now** button in the dashboard's Daily News panel.
 
+## Logging
+
+Everything the bot writes goes through [pino](https://getpino.io): one line per
+event, carrying a level, an ISO timestamp, the subsystem it came from, and — for
+anything a dashboard request produced — a correlation id shared by every line of
+that request.
+
+```json
+{"level":"error","time":"2026-08-14T11:42:35.001Z","component":"RSS","requestId":"5f3c…","msg":"Feed fetch failed","err":{"type":"Error","message":"404"}}
+```
+
+| Variable | Default | Effect |
+|---|---|---|
+| `LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent`. Anything below the level is not written at all |
+| `LOG_FORMAT` | `json` under `NODE_ENV=production`, else `pretty` | `pretty` renders `11:42:35.001 ERROR [RSS] Feed fetch failed` instead |
+
+`component` is the `[TAG]` every log line in this codebase already carried —
+`READY`, `MIGRATIONS`, `RSS`, `DASHBOARD` — promoted to a field, so a log backend
+can filter on it rather than grepping text. Under sharding, `shard` is a field
+too. Credentials are redacted before a line is written: tokens, `Authorization`
+headers, cookies and provider keys come out as `[redacted]`.
+
+Everything goes to stdout, errors included — a change from the bare
+`console.error` this replaced, and the convention every JSON log shipper
+expects. The `json-file` driver in `docker-compose.yml` captures it either way
+(50 MB × 5 files per service). To read a production stream by hand:
+
+```bash
+docker logs clawdia -f | npx pino-pretty
+docker logs clawdia --since 1h | jq -c 'select(.level=="error")'
+```
+
+**`ERROR_WEBHOOK_URL` is the other half.** An uncaught exception or a burst of
+unhandled rejections exits the process, and until you set this the only record
+is a line in a rolling file nobody is watching — which is how a bot that
+crash-loops at 04:00 gets noticed days later, by a user. Set it to a Discord
+webhook (recognised and formatted as a Discord message) or to any endpoint that
+accepts a JSON POST, and the process reports the crash before it goes. It waits
+at most `ERROR_REPORT_TIMEOUT_MS` (2000) for that and exits either way; unset,
+the exit is synchronous and nothing is sent.
+
 ## Monitoring
 
 The bot serves `GET /health` on the dashboard port. It is unauthenticated and
@@ -536,7 +602,7 @@ is not a healthcheck failure: restarting the process does not fix a feed that is
 
 ## Troubleshooting
 
-- **Slash commands not appearing**: Run `npm run deploy` and ensure the bot has `applications.commands` scope.
+- **Slash commands not appearing**: The bot publishes them itself at startup — check the log for a `[READY] Deployed N slash commands` line, and that the invite used the `applications.commands` scope. Newly registered global commands can take up to an hour to appear. `npm run deploy` re-publishes them by hand; `DEPLOY_COMMANDS=always` makes the bot re-publish on every boot rather than only when the set changes.
 - **Portainer/Docker startup fails**: Verify `MONGODB_URI` is reachable from the container network and `.env` is properly mounted.
 - **AI commands timeout**: Check API key validity or Ollama endpoint accessibility from the bot container.
 

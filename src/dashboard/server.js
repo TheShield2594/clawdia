@@ -7,6 +7,7 @@ const passport = require('passport');
 const { Strategy: DiscordStrategy, DiscordScope } = require('./lib/discordStrategy');
 const path = require('path');
 const { getStatus, httpStatusFor } = require('../health');
+const { withContext: withLogContext, addContext: addLogContext } = require('../utils/logger');
 const { hasManagePermission } = require('./lib/permissions');
 const { jsonForScript } = require('./lib/jsonForScript');
 const { asset } = require('./lib/assets');
@@ -172,6 +173,24 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     // and the routers so it covers assets and rendered views alike.
     app.use(compression());
 
+    // A correlation id per request, carried on every log line the request
+    // produces however deep in a service it is written (#647). Without it, two
+    // concurrent dashboard saves interleave in the log and neither can be read
+    // back. The id is echoed as X-Request-Id so a report from a user can be
+    // matched to its lines, and an inbound X-Request-Id from a reverse proxy is
+    // adopted rather than replaced, so the two logs join up.
+    //
+    // Registered before the routers, and before the static handler is asked for
+    // anything expensive, so it covers everything below.
+    app.use((req, res, next) => {
+        const inbound = String(req.headers['x-request-id'] || '').trim();
+        // Bounded and character-restricted: this value ends up in a response
+        // header and in every log line, and it arrives from the network.
+        const requestId = /^[\w.-]{1,64}$/.test(inbound) ? inbound : crypto.randomUUID();
+        res.setHeader('X-Request-Id', requestId);
+        withLogContext({ requestId }, () => next());
+    });
+
     // Assets are requested through the asset() helper, which stamps each URL
     // with a hash of the file's contents — a deploy changes the URL, so a long
     // immutable cache never serves stale JavaScript or CSS.
@@ -274,6 +293,11 @@ function createApp({ client = null, bot: injectedBot, sessionStore, configurePas
     const bot = injectedBot ?? createBotGateway(client);
     app.use((req, res, next) => {
         req.bot = bot;
+        // Runs after passport has restored the session, so the correlation id
+        // set above can now name who it belongs to. Added to the context that
+        // is already in force rather than opening a new one, so the request id
+        // survives. Only the Discord user id — never a token or a display name.
+        if (req.user?.id) addLogContext({ userId: req.user.id });
         next();
     });
 

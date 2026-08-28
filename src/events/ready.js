@@ -1,4 +1,4 @@
-const { deployCommands } = require('../utils/commandDeployer');
+const { deployCommandsIfChanged } = require('../utils/commandDeployer');
 const { startScheduler } = require('../services/scheduler');
 const User = require('../models/User');
 const { logTransaction } = require('../utils/logTransaction');
@@ -11,12 +11,33 @@ module.exports = {
         console.log(`[READY] Serving ${client.guilds.cache.size} guilds`);
 
         try {
-            // Deploy the commands startup already loaded rather than walking and
-            // requiring src/commands a second time (#607). It is also what keeps
-            // the registered set and the running set the same set.
-            const count = await deployCommands(client.user.id, process.env.DISCORD_TOKEN, client.commands.values());
-            console.log(`[READY] Deployed ${count} slash commands`);
+            // Registering here, rather than in a separate step, is what makes
+            // the documented Docker quick-start produce a bot with commands:
+            // the image runs `node src/index.js` and neither stack file runs
+            // `npm run deploy`, so anything outside this process never runs
+            // (#643).
+            //
+            // Deploys the commands startup already loaded rather than walking
+            // and requiring src/commands a second time (#607) — which is also
+            // what keeps the registered set and the running set the same set —
+            // and only when that set differs from the one last published, so
+            // the ordinary restart costs one indexed read instead of a full PUT
+            // of ~98 commands, and N shards do not each publish the same set.
+            const { deployed, count, reason } = await deployCommandsIfChanged(
+                client.user.id,
+                process.env.DISCORD_TOKEN,
+                client.commands.values()
+            );
+            if (deployed) {
+                console.log(`[READY] Deployed ${count} slash commands (${reason})`);
+            } else {
+                console.log(`[READY] Slash command deploy skipped: ${reason} (${count} registered)`);
+            }
         } catch (error) {
+            // Logged, not fatal. The bot is already connected and every command
+            // Discord has registered from a previous boot still works; refusing
+            // to finish startup over a failed re-registration would take a
+            // working bot down to fix a stale command description.
             console.error('[READY] Failed to deploy slash commands:', error);
         }
 

@@ -20,6 +20,16 @@ require('./config/fileSecrets').loadFileSecrets();
 // call if any of them fail.
 require('./config/validateEnv').assertEnv({ label: 'STARTUP' });
 
+// Route every `console.*` in the process through the pino logger, so the ~660
+// existing call sites get levels, timestamps, a `component` taken from their
+// `[TAG]` prefix, and JSON output under NODE_ENV=production (#647). Installed
+// here rather than inside utils/logger.js so that requiring the logger — which
+// tests and `npm run deploy` do — never silently replaces the console. This is
+// the first thing after the environment is known and before anything below
+// logs, so no line escapes it. See LOG_LEVEL / LOG_FORMAT in the README.
+require('./utils/logger').installConsoleBridge();
+const { reportAndExit, reportError, isConfigured: errorSinkConfigured } = require('./utils/errorReporter');
+
 const health = require('./health');
 const { makeCache, sweepers } = require('./utils/cacheOptions');
 const { isPrimaryShard, shardTag } = require('./utils/sharding');
@@ -204,6 +214,10 @@ const REJECTION_WINDOW_MS = 60_000;
 const REJECTION_LIMIT = 10;
 const recentRejections = [];
 
+// Reported to ERROR_WEBHOOK_URL as well as logged, when one is set. A line in
+// a 250 MB rolling text stream that nothing watches is how a 04:00 crash-loop
+// stayed invisible for days (#647). With no sink configured every path below
+// behaves exactly as it did before, exit timing included.
 process.on('unhandledRejection', (error) => {
     health.incrementUnhandledRejections();
     console.error('[PROCESS] Unhandled promise rejection:', error);
@@ -216,15 +230,25 @@ process.on('unhandledRejection', (error) => {
     }
     if (recentRejections.length >= REJECTION_LIMIT) {
         console.error(`[PROCESS] ${REJECTION_LIMIT} unhandled rejections in ${REJECTION_WINDOW_MS / 1000}s — forcing exit.`);
-        process.exit(1);
+        reportAndExit('unhandledRejection', error, {
+            extra: { rejectionsInWindow: recentRejections.length, windowMs: REJECTION_WINDOW_MS },
+        });
+        return;
+    }
+    // Below the limit the process keeps running, so there is nothing to wait
+    // for — fire the report and let it finish on its own.
+    if (errorSinkConfigured()) {
+        reportError('unhandledRejection', error).catch(() => {});
     }
 });
 
 process.on('uncaughtException', (error) => {
     health.incrementUncaughtExceptions();
     console.error('[PROCESS] Uncaught exception:', error);
-    // uncaughtException leaves the process in an undefined state; always exit
-    process.exit(1);
+    // uncaughtException leaves the process in an undefined state; always exit.
+    // reportAndExit exits synchronously when no sink is configured, and is
+    // bounded by ERROR_REPORT_TIMEOUT_MS when one is.
+    reportAndExit('uncaughtException', error);
 });
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -649,6 +649,21 @@ docker-compose pull
 docker-compose up -d
 ```
 
+Two things happen on that first boot without being asked for, and both are worth
+knowing about before an upgrade rather than during one:
+
+- **Schema migrations run**, before the dashboard opens its port. Some are
+  irreversible. See [Schema migrations](#schema-migrations) — in particular
+  `MIGRATION_BACKUP=require`, which is the setting you want here.
+- **Slash commands re-register** if the command set changed, so a release that
+  adds or renames a command needs no separate step. Newly registered global
+  commands can take up to an hour to appear.
+
+`mongo:7` and the `node:24-alpine` base are pinned by `@sha256:` digest rather
+than by tag, so `docker-compose pull` fetches the exact images the release was
+tested against and a rebuild for a rollback cannot quietly pick up a newer base.
+Dependabot raises the bumps; there is nothing to do by hand.
+
 ### Viewing Logs
 
 **Portainer:** Stacks > clawdia > bot > Logs
@@ -658,6 +673,34 @@ docker-compose up -d
 ```bash
 docker logs clawdia -f
 ```
+
+Under `NODE_ENV=production` those lines are JSON, one object per event — a
+level, an ISO timestamp, the subsystem as `component`, and a `requestId` shared
+by every line a single dashboard request produced:
+
+```json
+{"level":"error","time":"2026-08-14T11:42:35.001Z","component":"RSS","msg":"Feed fetch failed","err":{"type":"Error","message":"404"}}
+```
+
+That is meant for a log backend, and it is legible by hand with a filter:
+
+```bash
+docker logs clawdia -f | npx pino-pretty                       # readable lines
+docker logs clawdia --since 1h | jq -c 'select(.level=="error")'
+docker logs clawdia --since 1h | jq -c 'select(.component=="MIGRATIONS")'
+```
+
+`LOG_LEVEL` (default `info`) drops anything below it before it is written —
+`LOG_LEVEL=warn` is the setting for a busy install whose 250 MB of retention is
+being spent on startup notices. `LOG_FORMAT=pretty` renders readable lines in
+the container itself, if you would rather not pipe. Tokens, `Authorization`
+headers, cookies and provider keys are replaced with `[redacted]` before a line
+is written.
+
+Nothing here reaches anyone on its own. `ERROR_WEBHOOK_URL` is what makes a
+crash arrive somewhere — set it to a Discord webhook (formatted as a Discord
+message) or any JSON endpoint, and an uncaught exception is reported before the
+process exits. README's **Logging** section has the full table.
 
 ### Health Monitoring
 
@@ -686,6 +729,87 @@ section covers the setup, and the optional `autoheal` service that restarts an
 ### MongoDB Connection
 
 The bot automatically creates the database and collections. No manual setup needed.
+
+### Schema migrations
+
+**Schema migrations run automatically on every boot.** There is no migrate step
+to invoke and no flag that skips them. `src/index.js` runs
+`src/migrations/runner.js` after the database connects and *before* the bot logs
+in or the dashboard opens its port, so a container that is accepting traffic is
+a container whose migrations have already finished. Under sharding only shard 0
+runs them.
+
+That matters more than it usually would, because of what these migrations do:
+
+- **They are forward-only in practice.** The runner never rolls back on its own.
+- **Several are irreversible.** Dropping a field or merging two documents cannot
+  be computed backwards, so those migrations declare `irreversible: true` and
+  have no `down()` at all. Six of the eighteen are: `005_grind_profiles`,
+  `006_drop_wheel_fields`, `008_pet_decay_cursor`,
+  `010_merge_duplicate_inventory_slots`, `011_clamp_negative_balances` and
+  `017_merge_slots_jackpot_pool`.
+- **A failed migration aborts startup.** Booting on a half-applied schema would
+  be worse than not booting, so the runner rethrows and the process exits — a
+  supervisor then restarts it and it tries again. The exception is a migration
+  marked `optional` (a performance index, not a schema change): that one is
+  logged, left unapplied, and retried next boot.
+
+**Before the first upgrade of a deployment that has data in it, set
+`MIGRATION_BACKUP=require`.** Immediately before any irreversible migration the
+runner takes a `mongodump` into `MIGRATION_BACKUP_DIR` (default `./backups`,
+which both stack files mount) named `pre-migration-<timestamp>.gz` — and with
+`MIGRATION_BACKUP` unset, a `mongodump` that is missing from `PATH` or fails is
+a loud warning and the destructive step runs anyway. `require` turns that into
+an aborted startup instead. `skip` does not attempt one.
+
+Restore it with `scripts/restore.sh`, the same as any nightly archive. These
+dumps are pruned on the same `BACKUP_RETENTION_DAYS` schedule as the rest.
+
+What it looks like in the log:
+
+```
+[MIGRATIONS] Already applied: 001_add_indexes
+[MIGRATIONS] Taking pre-migration backup → /app/backups/pre-migration-20260814T114235Z.gz
+[MIGRATIONS] Pre-migration backup complete.
+[MIGRATIONS] Applying: 018_encrypt_guild_ai_keys (budget 30000ms)
+[MIGRATIONS] Applied 018_encrypt_guild_ai_keys in 412ms
+[MIGRATIONS] Applied 1 migration(s).
+```
+
+Each migration records its name in the `migrationrecords` collection when it
+succeeds, and that record is the only thing that stops it running again:
+
+```bash
+docker exec -it clawdia-mongodb mongosh ultrabot --eval \
+  'db.migrationrecords.find({}, {name: 1, appliedAt: 1, durationMs: 1}).sort({name: 1})'
+```
+
+**If startup hangs or loops on a migration**, the budget is the usual cause. Each
+one gets 30 seconds of wall-clock by default, and `005_grind_profiles` rewrites
+every user document — on a large install that is a boot loop, since every
+restart hits the same wall. Raise it without shipping a code change:
+
+```bash
+MIGRATION_TIMEOUT_MS=300000
+```
+
+The log line names which migration ran out. A migration may also ask for more
+than the default on its own, in which case the larger of the two applies.
+
+**Rolling one back** is a deliberate, manual act, and only possible for a
+migration that has a `down()`:
+
+```bash
+npm run migrate:rollback -- 013_split_guild_analytics
+```
+
+It runs `down()` and deletes the `MigrationRecord`, which means the next boot
+re-applies it — so pair a rollback with deploying the code you are rolling back
+to. Only the most recently applied migration can be rolled back. For an
+irreversible one there is no rollback: restore the pre-migration dump and
+redeploy the old image, in that order. [docs/RELEASING.md](docs/RELEASING.md)
+covers the version-rollback case; [docs/EXTENDING.md](docs/EXTENDING.md#schema-migrations)
+covers writing a new migration.
 
 ### Enabling MongoDB authentication
 

@@ -175,10 +175,10 @@
             "lines": 15
         },
         "src/utils": {
-            "statements": 60,
-            "branches": 61,
-            "functions": 65,
-            "lines": 61
+            "statements": 62,
+            "branches": 64,
+            "functions": 67,
+            "lines": 63
         },
         "src/views": {
             "statements": 62,
