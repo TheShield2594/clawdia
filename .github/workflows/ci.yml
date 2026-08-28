@@ -72,7 +72,19 @@ jobs:
       # what applies the coverageThreshold ratchet in jest.config.js. Without
       # it the thresholds exist but nothing ever checks them, which is the
       # state this replaced (#635).
+      #
+      # `npm test` no longer passes `--forceExit` (#630), which is what makes a
+      # leaked handle — an undisconnected Mongoose client, a cron nobody
+      # `.unref()`d — visible instead of silently shot at the end of the run.
+      # The trade is that such a leak now hangs rather than exits, so this step
+      # is bounded on its own. Under the job's 20 so the hang fails *here*, with
+      # enough of the budget left for the three `always()` steps below to still
+      # report; without it they would be killed alongside it and the run would
+      # say nothing about coverage or lint at all. The suite takes about a
+      # minute, or a few on a cold cache while mongodb-memory-server fetches its
+      # binary for the integration suites, so ten is slack rather than a target.
       - name: Run tests
+        timeout-minutes: 10
         run: npm test -- --ci --coverage
 
       # The global ratchet is one number over the whole of src, so it cannot
