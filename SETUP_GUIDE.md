@@ -349,13 +349,23 @@ malformed config disables the connector, it never stops the bot from starting.
   run concurrently, up to six at a time. A round costs its slowest call rather
   than the sum, but a server on the far side sees several requests together.
 - **Approval** (Connections → Approval) decides which tool calls stop and wait
-  for someone to click **Run it** in the channel. `off` is the default and runs
-  everything straight away. `destructive` and `writes` both read the annotations
-  a server publishes about its own tools; they differ over a tool that publishes
-  none, which `destructive` lets through and `writes` asks about. `always` asks
-  about every call, reads included. A prompt can be answered by whoever asked or
-  by anyone with Manage Server, and expires unanswered after a minute — which
-  means the tool does not run.
+  for someone to click **Run it** in the channel. Adding your first connection
+  sets this to `writes`, because connecting a server is not by itself consent to
+  unattended writes on it; change it to `off` if you would rather everything ran
+  straight away. `destructive` and `writes` both read the annotations a server
+  publishes about its own tools; they differ over a tool that publishes none,
+  which `destructive` lets through and `writes` asks about. `always` asks about
+  every call, reads included. A prompt can be answered by whoever asked or by
+  anyone with Manage Server, and expires unanswered after a minute — which means
+  the tool does not run.
+- **Questions from a server** are the same idea in reverse. A tool that gets
+  halfway and needs one more fact — which environment, which of your three
+  organisations — can ask, and the question appears in the channel with an
+  **Answer** button that opens a form. Whoever asked, or anyone with Manage
+  Server, can fill it in; nobody answering means the server is told so and the
+  tool decides what to do about it. At most two questions per reply, and the
+  prompt says out loud that a real server will not ask for a password, an API
+  key or a login code — cancel if one does.
 - Tool annotations come from the server, so the two middle modes are worth what
   that server is honest about. *Never these tools* and the per-connection
   *Always ask before these tools* list ask the server nothing; use those where
