@@ -121,6 +121,67 @@ describe('what does not', () => {
     });
 });
 
+describe('what the model is told about a file the reply cannot carry', () => {
+    // The cap in renderResult is per result; the transport's is per reply. Two
+    // results carrying three pictures each used to claim six were sent when
+    // four arrived, and the model would then talk about media nobody could see.
+    test('the claim follows the answer of whoever is taking the files', () => {
+        const reserve = jest.fn(() => false);
+        const { text, attachments } = renderResult(result([image()]), { namePrefix: 'x', reserve });
+
+        expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ name: 'x-1.png' }));
+        expect(attachments).toEqual([]);
+        expect(text).toBe('[image not sent to the channel — this reply cannot carry any more files]');
+    });
+
+    test('one refusal does not cost the files after it their names', () => {
+        // The number in a file name is its place among the files that went, so
+        // a result whose first picture was refused still calls its second the
+        // first — the model is told a name the channel will actually show.
+        let offers = 0;
+        const reserve = jest.fn(() => offers++ > 0);
+        const { text, attachments } = renderResult(result([image(), image()]), { namePrefix: 'x', reserve });
+
+        expect(attachments.map(a => a.name)).toEqual(['x-1.png']);
+        expect(text).toContain('[image sent to the channel as x-1.png]');
+        expect(text).toContain('cannot carry any more files');
+    });
+
+    test('a caller with no answer to give takes them all, as before', () => {
+        const { attachments } = renderResult(result([image()]), { namePrefix: 'x' });
+        expect(attachments).toHaveLength(1);
+    });
+
+    test('the toolkit asks the turn, and reports what it says', async () => {
+        // Four files in, two results out: the second result's text has to say
+        // the pictures did not go, because the transport has already said no.
+        mockCallTool.mockResolvedValue(result([image(), image(), image()]));
+        const activity = createToolActivity();
+        const toolkit = await prepareMcpToolkit([GITHUB], { onToolEvent: activity.onEvent });
+
+        const first = await toolkit.call('github__render_chart', {});
+        const second = await toolkit.call('github__render_chart', {});
+
+        expect(activity.attachments).toHaveLength(MAX_ATTACHMENTS);
+        expect(first).not.toContain('cannot carry');
+        // Three claimed and three sent, then one sent and two refused — the
+        // count the model reads matches the count the channel gets.
+        expect(second.match(/sent to the channel as/g)).toHaveLength(1);
+        expect(second.match(/cannot carry any more files/g)).toHaveLength(2);
+    });
+
+    test('a listener that throws is not read as a refusal', async () => {
+        // A broken transport is a bug in the transport, not a reason to tell
+        // the model its picture went missing.
+        mockCallTool.mockResolvedValue(result([image()]));
+        const toolkit = await prepareMcpToolkit([GITHUB], {
+            onToolEvent: () => { throw new Error('listener down'); }
+        });
+
+        expect(await toolkit.call('github__render_chart', {})).toContain('sent to the channel');
+    });
+});
+
 describe('reaching the transport', () => {
     test('the toolkit reports each file to whoever is listening', async () => {
         mockCallTool.mockResolvedValue(result([image()]));

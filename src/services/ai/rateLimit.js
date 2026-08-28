@@ -134,6 +134,11 @@ function userRateLimitKey(guildId, userId) {
  * nobody to attribute it to (the scheduled digests and newspapers, which run on
  * a cadence the guild set rather than on demand). The toolkit treats a missing
  * budget as unbounded, which is what those callers were before.
+ *
+ * `peek` on the returned function answers the same question without spending
+ * anything. The toolkit uses it for a call that needs a person's approval: the
+ * refusal can still be given before the buttons go up, while the slot is only
+ * charged once somebody has said yes and the call is actually going to run.
  */
 function toolCallBudget({ guildId, userId, rateLimit }) {
     if (!rateLimit || !userId) return null;
@@ -144,7 +149,9 @@ function toolCallBudget({ guildId, userId, rateLimit }) {
     const limit = perUser * TOOL_CALLS_PER_MESSAGE;
     const windowMs = (windowMin || 10) * 60 * 1000;
 
-    return () => toolCallLimits.check(key, windowMs, limit);
+    const budget = () => toolCallLimits.check(key, windowMs, limit);
+    budget.peek = () => toolCallLimits.peek(key, windowMs, limit);
+    return budget;
 }
 
 module.exports = {
