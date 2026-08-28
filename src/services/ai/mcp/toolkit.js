@@ -9,6 +9,7 @@ const {
     DEFAULT_CONFIRM_MODE
 } = require('../../../config/mcpServers');
 const { MAX_RESPONSE_BYTES } = require('./client');
+const { trimResult } = require('./trim');
 const {
     entryFor,
     withSession,
@@ -433,9 +434,12 @@ function renderResult(
             ? 'The tool reported an error but sent no message.'
             : 'The tool returned no output.';
     }
-    if (text.length > MAX_TOOL_RESULT_CHARS) {
-        text = `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n[truncated: the tool returned more than ${MAX_TOOL_RESULT_CHARS} characters]`;
-    }
+    // Whole records rather than bytes (#838). A `slice` here landed in the
+    // middle of whatever JSON the tool returned, and the round after it read
+    // the half-written last field as though it were a value — a filename to
+    // call the next tool with, an id to look up — so the failure surfaced
+    // several steps downstream as an error about something that never existed.
+    text = trimResult(text, MAX_TOOL_RESULT_CHARS);
 
     return {
         text: isError ? `The tool reported an error: ${text}` : text,
@@ -798,7 +802,11 @@ async function prepareMcpToolkit(guildServers = [], {
             return text;
         }
         charsSpent = MAX_TOOL_RESULT_CHARS_PER_TURN;
-        return `${text.slice(0, remaining)}\n[truncated: the reply has taken in as much tool output as it can hold]`;
+        // Same reasoning as the per-result cap above, and the more important of
+        // the two: a result reaching this one is by definition in a turn that
+        // has already run other tools, which is exactly the multi-step chain a
+        // mid-JSON cut poisons.
+        return trimResult(text, remaining);
     }
 
     /**

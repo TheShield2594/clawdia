@@ -282,13 +282,34 @@ describe('calling a tool', () => {
             .toContain('The tool reported an error: no such repo');
     });
 
-    test('truncates a result too large to be worth sending to a model', async () => {
+    test('trims a result too large to be worth sending to a model', async () => {
         mockCallTool.mockResolvedValue(textResult('y'.repeat(MAX_TOOL_RESULT_CHARS * 2)));
         const toolkit = await prepareMcpToolkit([GITHUB]);
         const text = await toolkit.call('github__search_repositories', {});
 
         expect(text.length).toBeLessThan(MAX_TOOL_RESULT_CHARS + 300);
-        expect(text).toMatch(/truncated/);
+        expect(text).toMatch(/trimmed to fit/);
+    });
+
+    // #838. The whole point of the trimmer: a chain's next round reads the last
+    // field of what it was handed, so that field has to be a whole one.
+    test('a JSON result over the cap is still parseable JSON', async () => {
+        const rows = Array.from({ length: 400 }, (_, i) => ({
+            id: i, path: `src/services/module_${i}.js`, score: i / 400,
+        }));
+        mockCallTool.mockResolvedValue(textResult(JSON.stringify(rows)));
+        const toolkit = await prepareMcpToolkit([GITHUB]);
+        const text = await toolkit.call('github__search_repositories', {});
+
+        // Past the "[Result from …]" label line, and stopping at the note the
+        // trimmer appends after the document rather than inside it.
+        const body = text.slice(text.indexOf('\n') + 1);
+        const parsed = JSON.parse(body.slice(0, body.indexOf('\n[trimmed')));
+        expect(Array.isArray(parsed)).toBe(true);
+        expect(parsed.length).toBeLessThan(rows.length);
+        // Whole records, not a record ending mid-path.
+        for (const row of parsed) expect(row.path).toMatch(/^src\/services\/module_\d+\.js$/);
+        expect(text).toMatch(/of 400 items shown/);
     });
 
     // A failed call has to come back as something the model can read: losing the
