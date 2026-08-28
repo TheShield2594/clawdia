@@ -9,7 +9,13 @@
 // from the server and the arguments come from the model, and this message is
 // posted to a channel by a bot that can mention everyone.
 
-const { createToolConfirmer, renderArgs } = require('../src/services/ai/mcp/approval');
+const {
+    createToolConfirmer,
+    renderArgs,
+    argsAttachment,
+    MAX_ARGS_CHARS,
+    ARGS_FILE_NAME
+} = require('../src/services/ai/mcp/approval');
 
 const APPROVE = 'mcp-approve';
 const DENY = 'mcp-deny';
@@ -191,6 +197,81 @@ describe('rendering the arguments', () => {
         const rendered = renderArgs({ blob: 'x'.repeat(5000) });
         expect(rendered.length).toBeLessThan(700);
         expect(rendered).toContain('truncated');
+    });
+
+    test('says how much of the payload it is not showing', () => {
+        // "Truncated" alone says the preview stops, not that somebody is being
+        // asked to approve four thousand bytes they have not read — which is
+        // where a payload with something to hide would put it.
+        const rendered = renderArgs({ blob: 'x'.repeat(5000) });
+        const [, hidden, total] = rendered.match(/truncated — (\d+) of (\d+) bytes not shown/);
+
+        expect(Number(total)).toBeGreaterThan(5000);
+        expect(Number(hidden)).toBe(Number(total) - MAX_ARGS_CHARS);
+    });
+
+    test('counts what an emoji actually costs, not what it looks like', () => {
+        // The size limit on the attachment is in bytes, and for a payload that
+        // is not ASCII the two are nowhere near the same number: saying
+        // "5000 characters" of something three times that size understates the
+        // part going unread.
+        const rendered = renderArgs({ blob: '🎉'.repeat(2000) });
+        const [, , total] = rendered.match(/truncated — (\d+) of (\d+) bytes not shown/);
+
+        // Four bytes each, not the two UTF-16 units the string reports.
+        expect(Number(total)).toBeGreaterThan(8000);
+    });
+
+    test('never cuts an emoji in half at the boundary', () => {
+        // A lone surrogate renders as a replacement character sitting in the
+        // middle of the payload somebody is being asked to read.
+        for (let pad = 480; pad < 510; pad++) {
+            const rendered = renderArgs({ n: 'a'.repeat(pad) + '🎉' + 'b'.repeat(50) });
+            expect(rendered).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+            expect(rendered).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+        }
+    });
+});
+
+describe('the part the preview leaves out', () => {
+    test('goes up beside the buttons as a file', () => {
+        const file = argsAttachment({ body: 'y'.repeat(5000) });
+
+        expect(file.name).toBe(ARGS_FILE_NAME);
+        // The payload as the tool would receive it, not the fenced preview.
+        expect(JSON.parse(file.attachment.toString('utf8'))).toEqual({ body: 'y'.repeat(5000) });
+    });
+
+    test('is nothing at all when the preview was the whole thing', () => {
+        expect(argsAttachment({ q: 'clawdia' })).toBeNull();
+        expect(argsAttachment({})).toBeNull();
+        expect(argsAttachment(null)).toBeNull();
+    });
+
+    test('is left to the preview\'s own count when it is too big to post', () => {
+        expect(argsAttachment({ blob: 'z'.repeat(2 * 1024 * 1024) })).toBeNull();
+    });
+
+    test('reaches the channel with the prompt that asks about it', async () => {
+        const fake = fakeMessage();
+        fake.prompt.awaitMessageComponent.mockResolvedValue(click(APPROVE));
+
+        await createToolConfirmer(fake.message)({ ...CALL, args: { body: 'y'.repeat(5000) } });
+        const [sent] = fake.sends;
+
+        expect(sent.files).toHaveLength(1);
+        expect(sent.files[0].name).toBe(ARGS_FILE_NAME);
+        // And the message says the file is there, so a partial approval is at
+        // least a knowing one.
+        expect(sent.content).toContain(ARGS_FILE_NAME);
+    });
+
+    test('is not attached to a call whose arguments fit', async () => {
+        const fake = fakeMessage();
+        fake.prompt.awaitMessageComponent.mockResolvedValue(click(APPROVE));
+
+        await createToolConfirmer(fake.message)(CALL);
+        expect(fake.sends[0].files).toEqual([]);
     });
 
     test('drops arguments that cannot be serialised at all', () => {

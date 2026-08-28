@@ -150,9 +150,15 @@ function notifier(onToolEvent) {
     if (typeof onToolEvent !== 'function') return () => {};
     return event => {
         try {
-            onToolEvent(event);
+            // The listener's answer is passed back for the one event that has
+            // one: an attachment is offered to the transport, which may be full
+            // (#828). Every other event is announced rather than asked, and a
+            // listener that answers nothing — or that threw — reads as consent,
+            // which is what every listener before this did.
+            return onToolEvent(event);
         } catch (err) {
             console.warn(`[MCP] tool event listener failed: ${err.message}`);
+            return undefined;
         }
     };
 }
@@ -329,10 +335,25 @@ function asJson(structuredContent) {
  * arrives is usually both — and the JSON is the half a model can be relied on
  * to read the same way twice. Without a schema it stays what it always was: a
  * fallback for a result that carried no text at all.
+ *
+ * `reserve` is how the text stops lying about the files (#828). This cap is per
+ * result, and the transport has its own per *reply* — four files and eight
+ * megabytes for everything the turn produced — so two results carrying three
+ * pictures each used to be told six were sent when four arrived, and the model
+ * would then talk about media nobody could see. So each file is offered to the
+ * caller before it is claimed, and one that is turned away is reported as not
+ * sent rather than as sent. A caller that offers no `reserve` takes every file,
+ * which is what the unattributed callers and the tests were.
  */
-function renderResult({ content, structuredContent, isError }, { namePrefix = 'result', structured = false } = {}) {
+function renderResult(
+    { content, structuredContent, isError },
+    { namePrefix = 'result', structured = false, reserve = null } = {}
+) {
     const parts = [];
     const attachments = [];
+    // Files this result put forward, taken or not — what the per-result cap is
+    // counting. `attachments` is the ones that went.
+    let offered = 0;
     const json = structured ? asJson(structuredContent) : null;
     if (json !== null) parts.push(json);
 
@@ -351,16 +372,29 @@ function renderResult({ content, structuredContent, isError }, { namePrefix = 'r
         }
         if (!block.type) continue;
 
-        const file = attachments.length < MAX_ATTACHMENTS_PER_RESULT
+        // Counted against what this result offered, not against what was taken:
+        // a reply that is already full turns every file away, and counting
+        // those as free would decode a dozen base64 blobs to throw all of them
+        // out. The name still numbers the files that went, so a result whose
+        // first picture was refused calls its second the first.
+        const file = offered < MAX_ATTACHMENTS_PER_RESULT
             ? asAttachment(block, namePrefix, attachments.length)
             : null;
 
-        if (file) {
-            attachments.push(file);
-            parts.push(`[${block.type} sent to the channel as ${file.name}]`);
-        } else {
+        if (!file) {
             parts.push(`[${block.type} content omitted]`);
+            continue;
         }
+        offered++;
+
+        // The reply is already carrying as many files as it can. The bytes are
+        // dropped either way; the difference is whether the model knows.
+        if (typeof reserve === 'function' && reserve(file) === false) {
+            parts.push(`[${block.type} not sent to the channel — this reply cannot carry any more files]`);
+            continue;
+        }
+        attachments.push(file);
+        parts.push(`[${block.type} sent to the channel as ${file.name}]`);
     }
 
     if (!parts.length) {
@@ -400,7 +434,10 @@ function renderResult({ content, structuredContent, isError }, { namePrefix = 'r
  *        built without one refuses every call that would need it
  * @param {Function} [options.toolBudget] spends one of the user's tool-call
  *        allowance and reports whether there was one to spend; a toolkit built
- *        without one is unbounded, which is what the unattributed callers are
+ *        without one is unbounded, which is what the unattributed callers are.
+ *        An optional `toolBudget.peek()` reports the same without spending, so
+ *        a call waiting on a person's approval can be refused early and charged
+ *        late (#826)
  * @param {Array} [options.botTools] tools the bot owns rather than a server —
  *        the in-channel actions (#832). Each carries the same fields a
  *        discovered tool does plus `run(args)`, which is called instead of a
@@ -739,15 +776,24 @@ async function prepareMcpToolkit(guildServers = [], {
             return 'This turn has spent its time budget, so the tool was not run. Answer from what you have and offer to continue.';
         }
 
-        // And the same for the allowance this user has across turns, for the
-        // same reason: the limit is a refusal, so it is answered before anybody
-        // is asked to approve something that will not run either way.
-        if (typeof toolBudget === 'function' && !toolBudget()) {
+        const outOfBudget = () => {
             finish(false, { error: 'rate limit' });
             return 'This user has used up the tool calls they are allowed in this window, so the tool was not run. Answer from what you have, and say they can try again shortly.';
-        }
+        };
 
+        // And the same for the allowance this user has across turns, for the
+        // same reason: the limit is a refusal, so it is answered before anybody
+        // is asked to approve something that will not run either way — but with
+        // a peek, not a spend (#826). A call somebody declines, or that nobody
+        // answers, never happened, and charging for it lets a guild running
+        // confirm-mode empty an allowance without a single tool having run.
+        // Peeking is not a reservation: another call can take the last slot
+        // while the buttons are on screen, and the spend below is what actually
+        // decides. A budget that cannot be peeked is simply charged after the
+        // answer, which is the half of this that matters.
         if (target.confirm) {
+            if (typeof toolBudget?.peek === 'function' && !toolBudget.peek()) return outOfBudget();
+
             emit({ ...describe, type: 'confirm', annotations: target.annotations });
             const decision = await askApproval(describe, target, args);
             if (!decision.approved) {
@@ -755,6 +801,8 @@ async function prepareMcpToolkit(guildServers = [], {
                 return decision.message;
             }
         }
+
+        if (typeof toolBudget === 'function' && !toolBudget()) return outOfBudget();
 
         emit({ ...describe, type: 'start' });
 
@@ -832,11 +880,13 @@ async function prepareMcpToolkit(guildServers = [], {
 
             // The file name is the tool's, so a reply carrying two charts from
             // two tools says which came from where.
-            const { text, attachments } = renderResult(result, {
+            const { text } = renderResult(result, {
                 namePrefix: fileNameFor(target.toolName, id),
-                structured: target.structured
+                structured: target.structured,
+                // Offered as it is rendered rather than after, so the sentence
+                // the model reads is the one the transport agreed to (#828).
+                reserve: file => emit({ ...describe, type: 'attachment', ...file }) !== false
             });
-            for (const file of attachments) emit({ ...describe, type: 'attachment', ...file });
             // A tool that answers "no such repository" ran fine; it is the
             // model's problem, not something to flag to the channel.
             finish(!result.isError);

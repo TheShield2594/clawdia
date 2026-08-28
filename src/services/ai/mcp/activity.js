@@ -144,14 +144,19 @@ function createToolActivity() {
             // A chart, a screenshot, a rendered page: something the channel can
             // show and the model cannot use. Dropped past the cap rather than
             // queued — a reply that arrives is worth more than every file in it.
+            //
+            // The answer goes back to the toolkit, which is still writing the
+            // sentence that tells the model what happened to this block (#828):
+            // a file refused here has to read as "not sent" there, or the model
+            // narrates pictures that never reached the channel.
             case 'attachment': {
-                if (!Buffer.isBuffer(event.buffer) || !event.buffer.length) break;
-                if (files.length >= MAX_ATTACHMENTS) break;
-                if (fileBytes + event.buffer.length > MAX_ATTACHMENT_BYTES) break;
+                if (!Buffer.isBuffer(event.buffer) || !event.buffer.length) return false;
+                if (files.length >= MAX_ATTACHMENTS) return false;
+                if (fileBytes + event.buffer.length > MAX_ATTACHMENT_BYTES) return false;
                 used = true;
                 fileBytes += event.buffer.length;
                 files.push({ attachment: event.buffer, name: event.name });
-                break;
+                return true;
             }
         }
     }

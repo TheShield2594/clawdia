@@ -155,6 +155,17 @@ describe('what a user costs across turns', () => {
         expect(budget()).toBe(false);
     });
 
+    test('it can be asked without being spent', () => {
+        // What the toolkit uses to refuse a call before the approval buttons
+        // go up without charging for the answer nobody has given yet.
+        const budget = toolCallBudget({ guildId: 'g1', userId: 'peek', rateLimit });
+        const allowed = rateLimit.perUser * TOOL_CALLS_PER_MESSAGE;
+
+        for (let n = 0; n < allowed * 2; n++) expect(budget.peek()).toBe(true);
+        for (let n = 0; n < allowed; n++) expect(budget()).toBe(true);
+        expect(budget.peek()).toBe(false);
+    });
+
     test('the window is per guild, so one server does not eat another\'s allowance', () => {
         const here = toolCallBudget({ guildId: 'g1', userId: 'u1', rateLimit });
         const there = toolCallBudget({ guildId: 'g2', userId: 'u1', rateLimit });
@@ -186,14 +197,68 @@ describe('what a user costs across turns', () => {
 
     test('nobody is asked to approve a call the limit has already refused', async () => {
         const confirmTool = jest.fn(async () => ({ approved: true }));
-        const toolkit = await prepareMcpToolkit([GITHUB], {
+        // The real budget can be asked without being spent, which is what lets
+        // the refusal come before the buttons rather than instead of them.
+        const toolBudget = () => false;
+        toolBudget.peek = () => false;
+        const toolkit = await prepareMcpToolkit([GITHUB], { confirmMode: 'always', confirmTool, toolBudget });
+
+        expect(await toolkit.call('github__search', {})).toMatch(/tool calls they are allowed/);
+        expect(confirmTool).not.toHaveBeenCalled();
+    });
+
+    // A slot spent on a call nobody agreed to run is an allowance emptied by
+    // tools that never ran — the failure a guild with confirm-mode on hits
+    // first, and the one it would never think to look for.
+    describe('a call somebody has to approve', () => {
+        const peekable = spend => {
+            const budget = jest.fn(spend);
+            budget.peek = jest.fn(() => true);
+            return budget;
+        };
+
+        const confirming = (decision, toolBudget) => prepareMcpToolkit([GITHUB], {
             confirmMode: 'always',
-            confirmTool,
-            toolBudget: () => false
+            confirmTool: async () => decision,
+            toolBudget
         });
 
-        await toolkit.call('github__search', {});
-        expect(confirmTool).not.toHaveBeenCalled();
+        test('costs nothing when it is declined', async () => {
+            const toolBudget = peekable(() => true);
+            const toolkit = await confirming({ approved: false }, toolBudget);
+
+            expect(await toolkit.call('github__search', {})).toMatch(/declined/);
+            expect(toolBudget).not.toHaveBeenCalled();
+            // Asked, though: a call with no allowance left should not put
+            // buttons in front of somebody either way.
+            expect(toolBudget.peek).toHaveBeenCalled();
+        });
+
+        test('costs nothing when nobody answers', async () => {
+            const toolBudget = peekable(() => true);
+            const toolkit = await confirming({ approved: false, timedOut: true }, toolBudget);
+
+            expect(await toolkit.call('github__search', {})).toMatch(/in time/);
+            expect(toolBudget).not.toHaveBeenCalled();
+        });
+
+        test('costs a slot once it runs', async () => {
+            const toolBudget = peekable(() => true);
+            const toolkit = await confirming({ approved: true }, toolBudget);
+
+            expect(await toolkit.call('github__search', {})).toContain('ok');
+            expect(toolBudget).toHaveBeenCalledTimes(1);
+        });
+
+        test('is refused if the last slot went while the buttons were up', async () => {
+            // A peek is not a reservation: the calls of one round run together,
+            // and the spend is what decides.
+            const toolBudget = peekable(() => false);
+            const toolkit = await confirming({ approved: true }, toolBudget);
+
+            expect(await toolkit.call('github__search', {})).toMatch(/tool calls they are allowed/);
+            expect(mockCallTool).not.toHaveBeenCalled();
+        });
     });
 
     test('a toolkit built without a budget is unbounded, as the unattributed callers were', async () => {
