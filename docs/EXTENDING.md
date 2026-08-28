@@ -832,14 +832,156 @@ explained.
 
 ### Logging
 
-```javascript
-// Simple console logging
-console.log('[INFO]', 'Something happened');
-console.error('[ERROR]', 'Error occurred:', error);
+Everything the process writes goes through pino (`src/utils/logger.js`). The
+entry points install a bridge over `console.*`, so the ~660 call sites already
+in the tree get a level, an ISO timestamp and JSON output without being
+rewritten — which means the way to log in this codebase is still `console.*`,
+and it is not a stopgap:
 
-// With timestamps
-const timestamp = new Date().toISOString();
-console.log(`[${timestamp}] Event occurred`);
+```javascript
+// The [TAG] prefix is the convention, and it is load-bearing: the bridge lifts
+// it out and emits it as `component`, which is what a log backend filters on.
+console.log('[QUESTS] Rebuilt %d dailies', count);
+console.warn('[QUESTS] Skipping guild %s: no settings document', guildId);
+
+// Pass the Error itself rather than error.message. The bridge routes the first
+// Error argument into `err`, so the stack is a queryable field instead of text
+// flattened into the message.
+console.error('[QUESTS] Rebuild failed:', error);
+```
+
+Reach for the logger directly when you have structured fields worth keeping:
+
+```javascript
+const { logger } = require('../utils/logger');
+
+logger.info({ component: 'QUESTS', guildId, durationMs }, 'Rebuilt dailies');
+logger.debug({ component: 'QUESTS', questId }, 'Skipped, already complete');
+```
+
+`logger.debug` and `logger.trace` are free when `LOG_LEVEL` is above them — the
+call returns before it formats anything — so they are worth leaving in.
+
+**Correlation.** Dashboard requests run inside a context carrying a `requestId`,
+and every line written anywhere below them picks it up automatically. Open one
+around any other unit of work worth following end to end:
+
+```javascript
+const { withContext, addContext } = require('../utils/logger');
+
+await withContext({ jobId, component: 'RSS' }, async () => {
+    // every log line in here, however deep, carries jobId
+    await pollAllFeeds();
+});
+
+addContext({ guildId });   // extends the context already in force
+```
+
+**Do not log a credential.** `REDACT_PATHS` in `src/utils/logger.js` censors
+`token`, `authorization`, cookies and `apiKey` wherever they appear in a record,
+but that is a backstop, not permission — an interpolated string
+(`` `key=${apiKey}` ``) is text by the time it arrives and nothing can catch it.
+
+Two things are deliberately *not* wired into the logger. `console.*` is left
+alone in `scripts/` and in `src/deploy-commands.js`, which are terminal tools
+whose output is the point; and the bridge is installed by `src/index.js` and
+`src/shard.js` only, so a test that asserts on `console.error` still sees the
+real console. Tests that want the structured record should use
+`createLogger({ format: 'json', out })` — see `tests/structuredLogging.test.js`.
+
+## Schema Migrations
+
+`src/migrations/` holds the numbered files that reshape the database, and
+`src/migrations/runner.js` applies them. Two facts drive everything about
+writing one:
+
+- **They run at boot, automatically**, after the database connects and before
+  the bot logs in — see [Schema migrations](../SETUP_GUIDE.md#schema-migrations)
+  for the operator's side of that.
+- **A failure aborts startup.** Booting on a half-applied schema is worse than
+  not booting, so a migration that throws takes the process down with it.
+
+### Writing a migration
+
+Add a file named `NNN_short_description.js` — the number is the apply order, and
+it is the next one after the highest already there. It exports a `name` (which
+becomes the `MigrationRecord`, so it must never change once shipped), an `up()`,
+and a rollback story:
+
+```javascript
+// src/migrations/019_add_streak_field.js
+const User = require('../models/User');
+
+module.exports = {
+    name: '019_add_streak_field',
+
+    // `timeoutMs` receives the budget actually in force (the default 30s, or
+    // MIGRATION_TIMEOUT_MS if the operator raised it). Pass it to any query
+    // that could run long: the runner stops *waiting* at the budget, it cannot
+    // cancel work already sent to the server.
+    async up({ timeoutMs }) {
+        const result = await User.collection.updateMany(
+            { dailyStreak: { $exists: false } },
+            { $set: { dailyStreak: 0 } },
+            { maxTimeMS: timeoutMs }
+        );
+        console.log(`[MIGRATIONS] 019: set dailyStreak on ${result.modifiedCount} users`);
+    },
+
+    async down() {
+        await User.collection.updateMany({}, { $unset: { dailyStreak: '' } });
+    },
+};
+```
+
+Every migration must declare one of two rollback stories, and
+`tests/migrationRollback.test.js` fails the build if one does not:
+
+| Export | Use it when |
+|---|---|
+| `async down()` | The change can be computed backwards — an added field, a created index |
+| `irreversible: true` | It cannot: a dropped field, merged documents, a clamped value. Declaring it is what makes the runner take a `mongodump` first, which is then the only way back |
+
+Two optional exports:
+
+- `timeoutMs` — this migration is heavier than the 30s default. The larger of
+  this and `MIGRATION_TIMEOUT_MS` applies, so an operator raising the env var is
+  never overruled by a file.
+- `optional: true` — its failure should not stop the bot booting. Only for work
+  the bot is merely *faster* with, such as building an index: it is left
+  unrecorded and retried on the next boot, so re-running it later, out of order,
+  has to be harmless.
+
+### Rules that are not obvious
+
+- **Never edit a shipped migration.** Its `MigrationRecord` already exists on
+  every deployment that has run it, so an edit runs nowhere and the two halves
+  of the fleet diverge silently. Write the next number instead.
+- **Use `Model.collection`, not the Mongoose model, for bulk rewrites.** Schema
+  defaults, setters and validators are written against *today's* schema and will
+  quietly rewrite fields the migration is not about.
+- **Make it idempotent where you can.** A migration killed after the write but
+  before its record is written runs again on the next boot.
+- **Do not read from `src/services` or anything above `models`.** Migrations sit
+  in the lowest layer (see [Which way dependencies run](#which-way-dependencies-run)),
+  and the code above them is on its way to changing.
+
+### Testing a migration
+
+`tests/migrationRunner.test.js` and `tests/migrationRollback.test.js` cover the
+runner and the declarations; `tests/integration/migrations.test.js` applies the
+real files against a real mongod, which is where a migration's own behaviour
+belongs:
+
+```bash
+npx jest tests/migrationRollback.test.js
+npx jest tests/integration/migrations.test.js   # needs a downloadable mongod
+```
+
+Rolling back locally, to check that `down()` does what it says:
+
+```bash
+npm run migrate:rollback -- 019_add_streak_field
 ```
 
 ## Best Practices
@@ -939,9 +1081,24 @@ docker build -t clawdia:latest .
 
 ```bash
 npm install
-npm run deploy  # Deploy commands to Discord
-npm start       # Start the bot
+npm start       # Start the bot — it registers its own slash commands
 ```
+
+`npm start` publishes the command set to Discord on connect, and only when it
+differs from the set last published (the fingerprint lives in the
+`commanddeployments` collection). That is what makes the Docker deploy work at
+all: the image is `CMD ["node", "src/index.js"]` and nothing in either stack
+file runs a registration step.
+
+```bash
+npm run deploy               # publish now, without starting the bot
+DEPLOY_COMMANDS=always npm start   # re-publish on every boot
+DEPLOY_COMMANDS=never npm start    # never publish; you drive it by hand
+```
+
+While iterating on a command's *shape* — its name, description or options — the
+gate notices the change and re-publishes on the next restart. Only the handler
+body changes nothing Discord holds, so nothing is sent.
 
 ### Environment Variables
 

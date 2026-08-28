@@ -38,7 +38,11 @@
 
 services:
   mongodb:
-    image: mongo:7
+    # Digest-pinned so the same stack file always deploys the same mongod (#644);
+    # `mongo:7` alone is re-published on every 7.x patch. Bumped by Dependabot,
+    # held by tests/imagePinning.test.js. The tag stays for readability — Docker
+    # resolves the digest.
+    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
     container_name: clawdia-mongodb
     restart: unless-stopped
     # Authentication (#648). The internal-only network keeps the outside world
@@ -275,7 +279,7 @@ services:
   #     sh -c 'cp /b/clawdia-<timestamp>.gz /out/'
   # To restore one, see scripts/restore.sh and scripts/verify-backup.sh.
   backup:
-    image: mongo:7
+    image: mongo:7@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b
     container_name: clawdia-backup
     restart: unless-stopped
     environment:
@@ -358,7 +362,7 @@ services:
   # README's Monitoring section: it sees the same state over HTTP and pages a
   # human instead of restarting on its own.
   # autoheal:
-  #   image: willfarrell/autoheal:1.2.0
+  #   image: willfarrell/autoheal:1.2.0@sha256:31f580ef0279eaced5b38d631b08c474d70d8403c1c2fdd6ddcf2e879d5f3f7c
   #   container_name: clawdia-autoheal
   #   restart: unless-stopped
   #   environment:

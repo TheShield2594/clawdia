@@ -38,6 +38,10 @@ const { ShardingManager } = require('discord.js');
 // this process too.
 require('./config/validateEnv').assertEnv({ label: 'SHARD' });
 
+// Same bridge the children install (#647), so the manager's own lines are
+// structured too rather than being the one unparsed thing in the stream.
+require('./utils/logger').installConsoleBridge();
+
 function resolveShardCount() {
     const pinned = Number(process.env.SHARD_COUNT);
     if (Number.isInteger(pinned) && pinned > 0) return pinned;
