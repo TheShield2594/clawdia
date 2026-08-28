@@ -156,31 +156,46 @@ the files a change already touches.
 
 ## Environment Variables
 
-- `DISCORD_TOKEN` - Your Discord bot token
-- `CLIENT_ID` - Discord application client ID
-- `CLIENT_SECRET` - Discord OAuth2 client secret
-- `MONGODB_URI` - MongoDB connection string (required)
-- `DASHBOARD_PORT` - Web dashboard port (default: 3000)
-- `DASHBOARD_URL` - Public URL for the dashboard
-- `SESSION_SECRET` - Random string for session encryption
-- `SECRET_ENCRYPTION_KEY` - (Optional, recommended) Encrypts the per-server AI provider keys that admins enter in the dashboard, so database backups hold ciphertext rather than live credentials. Generate with `openssl rand -base64 32`; keep it, because the stored keys cannot be read back without it. See [SETUP_GUIDE.md](SETUP_GUIDE.md#encrypting-stored-provider-keys)
-- `OPENAI_API_KEY` - (Optional) OpenAI API key for AI features
-- `GEMINI_API_KEY` - (Optional) Google Gemini API key for AI features
-- `ANTHROPIC_API_KEY` - (Optional) Anthropic Claude API key for AI features
-- `OPENROUTER_API_KEY` - (Optional) OpenRouter API key for AI features
-- `OLLAMA_BASE_URL` - (Optional) Local Ollama endpoint (e.g., `http://localhost:11434`). This is the operator's endpoint: a base URL a server admin types into the dashboard is only allowed to reach a private or internal address if it matches this value (or the `localhost:11434` default), so set it when Ollama runs somewhere on your LAN or compose network
-- `MCP_SERVERS_CONFIG` - (Optional) Path to the MCP server list (default: `config/mcp-servers.json`)
-- `MCP_ALLOW_GUILD_SERVERS` - (Optional) Set to `false` to disable dashboard-managed MCP servers
-- `IMGFLIP_USERNAME` / `IMGFLIP_PASSWORD` - (Optional) Imgflip credentials for `/meme` command
-- `LOG_LEVEL` - (Optional) `trace`, `debug`, `info` (default), `warn`, `error`, `fatal` or `silent`. See [Logging](#logging)
-- `LOG_FORMAT` - (Optional) `json` or `pretty`. Defaults to `json` when `NODE_ENV=production`, `pretty` otherwise
-- `ERROR_WEBHOOK_URL` - (Optional) Where to send an uncaught exception or unhandled rejection, on top of logging it. Must be `https://`, or `http://` to loopback. A Discord webhook URL is recognised and formatted for Discord; anything else receives a flat JSON event. Unset, nothing is sent and the crash path behaves exactly as before
-- `ERROR_REPORT_TIMEOUT_MS` - (Optional) How long the process waits for that POST before exiting anyway (default 2000)
-- `DEPLOY_COMMANDS` - (Optional) `auto` (default — publish the slash commands at startup, but only when the set changed), `always`, or `never`
-- `MIGRATION_TIMEOUT_MS` - (Optional) Per-migration wall-clock budget in milliseconds (default 30000)
-- `MIGRATION_BACKUP` - (Optional) `require` to abort startup rather than run an irreversible migration without a `mongodump` first; `skip` to not attempt one. Unset, it is attempted and a failure is a loud warning. See [Schema migrations](SETUP_GUIDE.md#schema-migrations)
-- `BACKUP_RETENTION_DAYS` - (Optional) Days of nightly `mongodump` archives to keep (default 30)
-- `SHARD_COUNT` - (Optional) Pin a shard count for `npm run start:sharded`; unset takes Discord's recommendation
+[`.env.example`](.env.example) is the complete list, and the only one — every
+variable the bot reads is in it, annotated with what it does and what happens if
+you leave it alone. Copy it to `.env` and work through it; there is no second
+list to cross-check.
+
+It was not always the only one. README and SETUP_GUIDE each carried a
+hand-maintained copy, the two had dropped different variables, and
+`OPENROUTER_REFERER` was read by the OpenRouter provider and named in none of
+the three ([#707]). `tests/envExampleDrift.test.js` now fails the suite when a
+`process.env.SOMETHING` appears in `src/` that `.env.example` does not explain,
+so the file cannot fall behind the code again.
+
+These five are the ones `src/config/validateEnv.js` refuses to start without:
+
+| Variable | What it is |
+| --- | --- |
+| `DISCORD_TOKEN` | The bot token from the Discord Developer Portal |
+| `CLIENT_ID` | The Discord application's client id |
+| `CLIENT_SECRET` | The OAuth2 client secret, for dashboard login |
+| `MONGODB_URI` | MongoDB connection string |
+| `SESSION_SECRET` | Random string signing the dashboard session, 32 characters or more — `openssl rand -hex 32` |
+
+`DASHBOARD_URL` is the sixth to set in practice. It defaults to
+`http://localhost:$DASHBOARD_PORT`, which is right for development and wrong
+for anything else — and it *must* be `https://` whenever `NODE_ENV=production`,
+or startup aborts before the database is touched.
+
+Everything else is optional and defaulted. The ones most often wanted:
+`SECRET_ENCRYPTION_KEY` (encrypts the provider keys guild admins enter in the
+dashboard — see [SETUP_GUIDE.md](SETUP_GUIDE.md#encrypting-stored-provider-keys)),
+one of `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` /
+`OPENROUTER_API_KEY` / `OLLAMA_BASE_URL` for the AI features,
+`ERROR_WEBHOOK_URL` so a crash reaches you, and `LOG_LEVEL` / `LOG_FORMAT` (see
+[Logging](#logging)).
+
+Any secret can be delivered as a file instead of a value — set `<NAME>_FILE` to
+a path, which is what to use with Docker secrets, since a plain environment
+variable is readable via `docker inspect` and a path is not.
+
+[#707]: https://github.com/TheShield2594/clawdia/issues/707
 
 ## Commands
 

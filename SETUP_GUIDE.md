@@ -474,7 +474,14 @@ slash command for it.
 
 ### Environment Variables
 
-Create a `.env` file with these required variables:
+**Start from [`.env.example`](.env.example)** — `cp .env.example .env` — rather
+than from a list in a guide. It is the complete set, it is annotated variable by
+variable, and a test fails the build when the code reads something it does not
+explain. This guide used to carry its own copy of the list, which had already
+dropped `ANTHROPIC_API_KEY` and `OLLAMA_BASE_URL` ([#707]).
+
+What follows is the smallest `.env` that boots, to show the shape of the file
+and the one pairing that catches people out. It is not the whole set.
 
 ```env
 # Discord Configuration
@@ -496,26 +503,17 @@ DASHBOARD_PORT=3000
 DASHBOARD_URL=http://localhost:3000
 SESSION_SECRET=random_string_here_32_characters_min
 
-# Encrypts the per-server AI provider keys stored in MongoDB (Optional,
-# recommended). See "Encrypting stored provider keys" below.
-SECRET_ENCRYPTION_KEY=
-
-# AI (Optional - can also configure per-server in dashboard)
-OPENAI_API_KEY=sk-your_openai_key_here
-GEMINI_API_KEY=AIza_your_gemini_key_here
-
-# MCP servers, used by whichever AI provider is selected (Optional)
-# Defaults to config/mcp-servers.json; set this only to read it from elsewhere.
-# MCP_SERVERS_CONFIG=/opt/clawdia/config/mcp-servers.json
-
-# Meme Generation (Optional — required for /meme command)
-# Free account at https://imgflip.com/api
-IMGFLIP_USERNAME=your_imgflip_username
-IMGFLIP_PASSWORD=your_imgflip_password
-
 # Environment
 NODE_ENV=development
 ```
+
+Everything else is optional and defaulted, `.env.example` says what each one
+does, and the ones worth knowing about early are `SECRET_ENCRYPTION_KEY`
+("Encrypting stored provider keys" below), the AI provider keys —
+`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`,
+`OLLAMA_BASE_URL` — and `IMGFLIP_USERNAME` / `IMGFLIP_PASSWORD` for `/meme`.
+
+[#707]: https://github.com/TheShield2594/clawdia/issues/707
 
 The block above is a working local setup: `NODE_ENV=development` goes with the
 `http://localhost:3000` dashboard URL. Going to production means changing both
