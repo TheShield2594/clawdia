@@ -130,13 +130,18 @@ module.exports = {
                             const blocked = await handleAutoModeration(message, guildSettings);
                             if (blocked) return;
                         }
-                        // Strip bot mention tokens so NL reminder detection works on the real content
+                        // Strip bot mention tokens once, and use the result for
+                        // everything downstream. NL reminder detection needs the real
+                        // content, and so does the chat handler: it was reading
+                        // `message.content` itself, so `@Clawdia !reset` never matched
+                        // the reset command and the raw `<@id>` token went into the
+                        // model prompt on every mention-triggered message (#820).
                         const strippedContent = message.content
                             .replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '')
                             .trim();
                         const reminderHandled = await handleNLReminder(message, strippedContent);
                         if (!reminderHandled) {
-                            await handleAIChat(message, effectiveSettings);
+                            await handleAIChat(message, effectiveSettings, strippedContent);
                         }
                         return;
                     }

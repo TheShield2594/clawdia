@@ -22,6 +22,13 @@ jest.mock('../src/models/Guild', () => ({ findOne: jest.fn() }));
 jest.mock('../src/models/AiItem', () => ({ findOne: jest.fn(), create: jest.fn() }));
 jest.mock('../src/models/AiQuest', () => ({ findOne: jest.fn(), create: jest.fn(), deleteOne: jest.fn() }));
 jest.mock('../src/utils/inventoryGrant', () => ({ grantInventoryItem: jest.fn(async () => true) }));
+// The rarity cooldown is taken through the shared store rather than read off
+// the last AiItem, so /forge's own tests watch the store (#829). What the store
+// does with a claim is pinned in tests/commandCooldownPersistence.test.js.
+jest.mock('../src/utils/commandCooldowns', () => ({
+    claimIfAvailable: jest.fn(async () => 0),
+    release: jest.fn(async () => {}),
+}));
 
 const mockGetCompletion = jest.fn();
 jest.mock('../src/services/aiService', () => ({
@@ -33,6 +40,7 @@ const User = require('../src/models/User');
 const Guild = require('../src/models/Guild');
 const AiItem = require('../src/models/AiItem');
 const AiQuest = require('../src/models/AiQuest');
+const cooldownStore = require('../src/utils/commandCooldowns');
 
 const forge = require('../src/commands/economy/forge');
 const questgen = require('../src/commands/community/questgen');
@@ -46,6 +54,7 @@ function makeInteraction(options = {}) {
         guild: { id: GUILD_ID },
         channelId: 'c1',
         options: { getString: name => options[name] ?? null },
+        client: { cooldowns: new Map() },
         deferReply: jest.fn(async () => {}),
         editReply: jest.fn(async payload => payload),
     };
@@ -93,6 +102,10 @@ describe('/forge', () => {
         User.updateOne.mockResolvedValue({ modifiedCount: 1 });
         AiItem.findOne.mockReturnValue({ sort: () => ({ lean: async () => null }) });
         AiItem.create.mockResolvedValue({});
+        // `clearAllMocks` drops recorded calls, not implementations, so the
+        // default is restored here for the tests that override it.
+        cooldownStore.claimIfAvailable.mockResolvedValue(0);
+        cooldownStore.release.mockResolvedValue(undefined);
     });
 
     const run = () => {
@@ -181,6 +194,130 @@ describe('/forge', () => {
 
         expect(refunds()).toEqual([COMMON_COST]);
         expect(replyText(interaction)).toMatch(/failed to save/);
+    });
+
+    // The persistence path promised a refund whatever became of the write —
+    // its error was caught and dropped on the floor — so a user could pay
+    // 25,000 coins, receive no item, and be told their coins were back (#829).
+    // It answers to the same write the AI path does now.
+    test('and says so when that refund did not land either', async () => {
+        mockGetCompletion.mockResolvedValue('{"name":"Ember Fang"}');
+        AiItem.create.mockRejectedValue(new Error('write failed'));
+        User.updateOne.mockResolvedValue({ modifiedCount: 0 });
+
+        const interaction = await run();
+
+        expect(replyText(interaction)).toMatch(/contact a server admin/);
+        expect(replyText(interaction)).not.toMatch(/have been refunded/);
+    });
+
+    test('and when that refund write throws', async () => {
+        mockGetCompletion.mockResolvedValue('{"name":"Ember Fang"}');
+        AiItem.create.mockRejectedValue(new Error('write failed'));
+        User.updateOne.mockRejectedValue(new Error('mongo is down'));
+
+        const interaction = await run();
+
+        expect(replyText(interaction)).toMatch(/contact a server admin/);
+    });
+
+    // The model is told to send "a single emoji" and sends whatever it likes.
+    // Clamping it to eight characters only bounded how much of a sentence — or
+    // of an invented `<:name:id>` token — landed in the embed (#829).
+    describe('the emoji the model chose', () => {
+        const forged = () => AiItem.create.mock.calls.at(-1)?.[0];
+
+        const withEmoji = async emoji => {
+            mockGetCompletion.mockResolvedValue(JSON.stringify({ name: 'Ember Fang', emoji }));
+            await run();
+            return forged().emoji;
+        };
+
+        test.each([
+            ['🔥', '🔥'],
+            ['⚔️', '⚔️'],
+            ['🧙🏽‍♂️', '🧙🏽‍♂️'],
+        ])('keeps %s', async (given, kept) => {
+            expect(await withEmoji(given)).toBe(kept);
+        });
+
+        test.each([
+            ['a glowing sword'],
+            ['<:ember:12345>'],
+            ['@everyone'],
+            ['🔥🔥'],
+            [''],
+        ])('falls back to the rarity emoji for %p', async given => {
+            expect(await withEmoji(given)).toBe('⚪');
+        });
+    });
+
+    // The window used to be inferred from the timestamp on the last AiItem —
+    // read, then acted on, so two /forge calls a moment apart both read "long
+    // enough" before either had written anything (#829).
+    describe('the rarity cooldown', () => {
+        const runRare = () => {
+            const interaction = makeInteraction({ rarity: 'rare' });
+            return forge.execute(interaction).then(() => interaction);
+        };
+
+        beforeEach(() => mockGetCompletion.mockResolvedValue('{"name":"Ember Fang","emoji":"🔥"}'));
+
+        test('is taken in the same operation that checks it', async () => {
+            await runRare();
+
+            expect(cooldownStore.claimIfAvailable).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ bucket: 'forge:rare', userId: USER_ID, guildId: GUILD_ID, cooldownMs: 30 * 60 * 1000 }),
+            );
+            expect(cooldownStore.release).not.toHaveBeenCalled();
+        });
+
+        test('refuses without charging when the window is held', async () => {
+            cooldownStore.claimIfAvailable.mockResolvedValue(Date.now() + 20 * 60 * 1000);
+
+            const interaction = await runRare();
+
+            expect(replyText(interaction)).toMatch(/cooling down.*20m/s);
+            expect(User.findOneAndUpdate).not.toHaveBeenCalled();
+            expect(mockGetCompletion).not.toHaveBeenCalled();
+        });
+
+        // A forge that produced no item must not lock the rarity for the day.
+        test('goes back with the coins when the model never answers', async () => {
+            mockGetCompletion.mockRejectedValue(new Error('provider down'));
+
+            const interaction = await runRare();
+
+            expect(refunds()).toEqual([2500]);
+            expect(cooldownStore.release).toHaveBeenCalledWith(
+                expect.anything(), expect.objectContaining({ bucket: 'forge:rare' }),
+            );
+            expect(replyText(interaction)).toMatch(/refunded/);
+        });
+
+        test('goes back when the item cannot be saved', async () => {
+            AiItem.create.mockRejectedValue(new Error('write failed'));
+
+            await runRare();
+
+            expect(cooldownStore.release).toHaveBeenCalledWith(
+                expect.anything(), expect.objectContaining({ bucket: 'forge:rare' }),
+            );
+        });
+
+        // Claimed before the debit, which can still fail against a balance a
+        // concurrent command has already spent.
+        test('goes back when the debit finds the coins gone', async () => {
+            User.findOneAndUpdate.mockResolvedValue(null);
+
+            const interaction = await runRare();
+
+            expect(cooldownStore.release).toHaveBeenCalledWith(
+                expect.anything(), expect.objectContaining({ bucket: 'forge:rare' }),
+            );
+            expect(replyText(interaction)).toMatch(/You need/);
+        });
     });
 });
 

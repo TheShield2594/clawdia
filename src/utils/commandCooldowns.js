@@ -193,6 +193,32 @@ async function claim(client, { bucket, userId, guildId, cooldownMs }) {
     });
 }
 
+/**
+ * Gives a claimed window back.
+ *
+ * For the commands that have to claim *before* the work that justifies the
+ * cooldown, because claiming after it is a race — `/forge` charges, claims, and
+ * only then asks a model that may never answer. It refunds the coins when that
+ * happens, and this refunds the window with them: a user who got nothing for
+ * their 25,000 coins should not also be locked out of the forge for a day.
+ *
+ * Best-effort in the same shape as `claim`: the in-memory entry is what holds
+ * for this process, so a failed write costs the release only if the process
+ * restarts before the window would have ended anyway.
+ */
+async function release(client, { bucket, userId, guildId, cooldownMs }) {
+    bucketFor(client.cooldowns, keyFor(bucket, guildId)).delete(userId);
+
+    if (cooldownMs < PERSIST_THRESHOLD_MS || !guildId) return;
+
+    await User.updateOne(
+        { userId, guildId },
+        { $unset: { [`commandCooldowns.${bucket}`]: '' } },
+    ).catch(err => {
+        console.error(`[cooldown] could not release ${bucket} for ${userId}:`, err.message);
+    });
+}
+
 async function readPersisted(bucket, userId, guildId) {
     try {
         const doc = await User.findOne(
@@ -255,6 +281,7 @@ module.exports = {
     expiresAt,
     claimIfAvailable,
     claim,
+    release,
     sweep,
     startCooldownSweeper,
     PERSIST_THRESHOLD_MS,

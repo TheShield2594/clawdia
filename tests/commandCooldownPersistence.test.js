@@ -33,6 +33,49 @@ beforeEach(() => {
     User.findOne.mockReturnValue(leanDoc(null));
 });
 
+// #829: a command that has to claim its window *before* the work that justifies
+// it — /forge charges, claims, then asks a model that may never answer — needs a
+// way to hand the window back when that work comes to nothing.
+describe('giving a window back', () => {
+    test('a released short window is free again immediately, with no query', async () => {
+        const client = fakeClient();
+        await store.claim(client, scope({ cooldownMs: SHORT }));
+        expect(await store.expiresAt(client, scope({ cooldownMs: SHORT }))).toBeGreaterThan(0);
+
+        await store.release(client, scope({ cooldownMs: SHORT }));
+
+        expect(await store.expiresAt(client, scope({ cooldownMs: SHORT }))).toBe(0);
+        expect(User.updateOne).not.toHaveBeenCalled();
+    });
+
+    test('a released long window is unset on the document as well as in memory', async () => {
+        const client = fakeClient();
+        expect(await store.claimIfAvailable(client, scope({ cooldownMs: LONG }))).toBe(0);
+
+        await store.release(client, scope({ cooldownMs: LONG }));
+
+        const [filter, update] = User.updateOne.mock.calls.at(-1);
+        expect(filter).toEqual({ userId: 'u1', guildId: 'g1' });
+        expect(update).toEqual({ $unset: { 'commandCooldowns.daily': '' } });
+
+        // And the next claim takes it, rather than finding it held.
+        User.findOne.mockReturnValue(leanDoc(null));
+        expect(await store.claimIfAvailable(client, scope({ cooldownMs: LONG }))).toBe(0);
+    });
+
+    test('a failed unset is logged, not thrown at the caller mid-refund', async () => {
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        const client = fakeClient();
+        await store.claim(client, scope({ cooldownMs: LONG }));
+        User.updateOne.mockRejectedValue(new Error('mongo is down'));
+
+        await expect(store.release(client, scope({ cooldownMs: LONG }))).resolves.toBeUndefined();
+
+        expect(errorSpy).toHaveBeenCalled();
+        errorSpy.mockRestore();
+    });
+});
+
 describe('the threshold', () => {
     test('is 15 minutes', () => {
         expect(store.PERSIST_THRESHOLD_MS).toBe(15 * 60 * 1000);

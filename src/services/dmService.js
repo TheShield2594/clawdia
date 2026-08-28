@@ -279,11 +279,22 @@ async function takeAction(interaction) {
 
     await interaction.deferReply();
 
-    // Anchor history roles to global storyLog parity so slicing doesn't flip them
+    // Roles are counted back from the end of the log, never forward from its
+    // start. The log is written in exactly two places — `/dm begin` pushes the
+    // opening scene, and the action below pushes the player entry and the
+    // narration together in one atomic `$push` — so its last entry is always
+    // the DM's, whatever has been dropped off the front.
+    //
+    // Counting forward assumed index 0 was still the opening scene, and the
+    // `$slice: -MAX_STORY_LOG` trim on that same write breaks that assumption
+    // for good: the log grows 1, 3, 5, … entries, so the first trim (at 21)
+    // drops exactly one and shifts every stored index by one. From the 11th
+    // action on, every history message went to the model with the wrong role —
+    // player actions as `assistant`, narration as `user` — in precisely the
+    // long campaigns where the history matters most (#821).
     const recentLog = session.storyLog.slice(-8);
-    const startIndex = session.storyLog.length - recentLog.length;
     const history = recentLog.map((entry, i) => ({
-        role: (startIndex + i) % 2 === 0 ? 'assistant' : 'user',
+        role: (recentLog.length - 1 - i) % 2 === 0 ? 'assistant' : 'user',
         content: entry
     }));
 
