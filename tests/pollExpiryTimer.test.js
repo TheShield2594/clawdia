@@ -7,8 +7,9 @@
 jest.mock('../src/models/Poll', () => ({ findOne: jest.fn(), find: jest.fn(), create: jest.fn() }));
 jest.mock('../src/utils/jobRunner', () => ({ runJob: jest.fn() }));
 
+const Poll = require('../src/models/Poll');
 const { runJob } = require('../src/utils/jobRunner');
-const { scheduleExpiry } = require('../src/services/pollService');
+const { scheduleExpiry, scheduleActivePollExpirations } = require('../src/services/pollService');
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const msg = { id: 'msg1', guildId: 'g1', edit: jest.fn() };
@@ -57,5 +58,49 @@ describe('a poll that expires further out than a 32-bit timer reaches', () => {
 
         jest.advanceTimersByTime(0);
         expect(runJob).toHaveBeenCalledTimes(1);
+    });
+});
+
+// ── Picking unclosed polls back up at boot ──────────────────────────────────
+//
+// `/poll` without a duration is stored open with `endsAt: null` — that is the
+// feature, not a stalled poll. The startup sweep selected every unclosed poll
+// and handed each to scheduleExpiry, where `endsAt.getTime()` threw
+// "Cannot read properties of null (reading 'getTime')" once per no-expiry poll
+// on every boot, and counted them in the pickup line as if a timer had been
+// armed for them.
+describe('scheduleActivePollExpirations', () => {
+    function clientWith(msg) {
+        const channel = { messages: { fetch: jest.fn(async () => msg) } };
+        const guild = { channels: { cache: new Map([['c1', channel]]) } };
+        return { guilds: { cache: new Map([['g1', guild]]) } };
+    }
+
+    beforeEach(() => {
+        jest.spyOn(console, 'log').mockImplementation(() => {});
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    test('asks only for polls that actually carry a deadline', async () => {
+        Poll.find.mockResolvedValue([]);
+
+        await scheduleActivePollExpirations(clientWith(msg));
+
+        expect(Poll.find).toHaveBeenCalledWith({ closed: false, endsAt: { $ne: null } });
+    });
+
+    test('arms a timer for an overdue poll without logging a failure', async () => {
+        Poll.find.mockResolvedValue([{
+            messageId: 'msg1', guildId: 'g1', channelId: 'c1',
+            question: 'q', options: ['a', 'b'],
+            endsAt: new Date(Date.now() - 5_000), createdBy: 'someone',
+        }]);
+
+        await scheduleActivePollExpirations(clientWith(msg));
+
+        jest.advanceTimersByTime(0);
+        expect(runJob).toHaveBeenCalledTimes(1);
+        expect(console.error).not.toHaveBeenCalled();
     });
 });

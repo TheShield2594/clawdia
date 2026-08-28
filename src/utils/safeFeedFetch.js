@@ -19,6 +19,14 @@
 const SOCKET_IDLE_MS = 8000;
 const HOP_DEADLINE_MS = 8000;
 
+// Identifies the bot to the feed host. This module serves the scheduled poller
+// as much as the dashboard's validate button, so the old
+// "Clawdia-FeedValidator/1.0" both misdescribed most of its own traffic and
+// read to a bot filter as an unattributed scraper — and a feed that answers a
+// browser but 403s this string is a feed that silently stops posting. A name
+// and a URL is what a well-behaved reader sends.
+const FEED_USER_AGENT = 'Clawdia/1.0 (+https://github.com/TheShield2594/clawdia; Discord RSS reader)';
+
 const dns = require('dns');
 const net = require('net');
 const http = require('http');
@@ -137,8 +145,13 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
             const fail = finish(reject);
 
             const commonHeaders = {
-                'User-Agent': 'Clawdia-FeedValidator/1.0',
+                'User-Agent': FEED_USER_AGENT,
                 Accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*',
+                // Nothing here decompresses, and a server that gzips anyway
+                // would hand the parser binary and be reported as malformed
+                // XML. Asking for identity is the difference between a feed
+                // that fails for a stated reason and one that fails for none.
+                'Accept-Encoding': 'identity',
                 Host: current.hostname, // required when connecting directly to a pinned IP
             };
 
@@ -177,6 +190,19 @@ async function safeFetchFeed(urlStr, maxRedirects = 5) {
                     res.destroy();
                     return succeed({ redirect: loc });
                 }
+
+                // A non-2xx body is not a feed, and handing it to the parser
+                // anyway is how "the host is refusing us" was reported as
+                // "Feed not recognized as RSS 1 or 2". The status is the whole
+                // diagnosis — a 403 from a bot filter, a 404 for a feed that
+                // moved, a 429 to back off from — so it goes in the message
+                // rather than being replaced by a parser error downstream.
+                if (res.statusCode < 200 || res.statusCode > 299) {
+                    const status = res.statusCode;
+                    res.destroy();
+                    return fail(new Error(`Feed request failed with HTTP ${status}.`));
+                }
+
                 const chunks = [];
                 let totalBytes = 0;
                 res.on('data', c => {

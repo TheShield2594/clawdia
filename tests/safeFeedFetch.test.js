@@ -183,6 +183,42 @@ describe('safeFetchFeed', () => {
         await expect(safeFetchFeed('http://example.com/feed')).resolves.toBe('<rss>ok</rss>');
     });
 
+    it('reports the HTTP status instead of handing an error page to the parser', async () => {
+        // A 403 body is not a feed. Returning it anyway meant the poller's only
+        // trace of "this host is refusing us" was rss-parser's downstream
+        // "Feed not recognized as RSS 1 or 2", which names nothing.
+        allowPublicDns();
+        mockRequest((cb) => respond(cb, {
+            statusCode: 403,
+            chunks: ['<html><body>Forbidden</body></html>'],
+        }));
+
+        await expect(safeFetchFeed('http://example.com/feed')).rejects.toThrow(/HTTP 403/);
+    });
+
+    it('reports a 404 for a feed that has moved', async () => {
+        allowPublicDns();
+        mockRequest((cb) => respond(cb, { statusCode: 404, chunks: ['gone'] }));
+        await expect(safeFetchFeed('http://example.com/feed')).rejects.toThrow(/HTTP 404/);
+    });
+
+    it('asks for an uncompressed body, since nothing here decompresses one', async () => {
+        allowPublicDns();
+        let sentHeaders;
+        jest.spyOn(http, 'request').mockImplementation((opts, cb) => {
+            sentHeaders = opts.headers;
+            const req = new EventEmitter();
+            req.end = () => setImmediate(() => respond(cb, { chunks: ['<rss/>'] }));
+            req.destroy = jest.fn();
+            return req;
+        });
+
+        await safeFetchFeed('http://example.com/feed');
+
+        expect(sentHeaders['Accept-Encoding']).toBe('identity');
+        expect(sentHeaders['User-Agent']).toMatch(/^Clawdia\//);
+    });
+
     it('refuses a URL that resolves to a private address before connecting', async () => {
         jest.spyOn(dns, 'lookup').mockImplementation((host, opts, cb) =>
             cb(null, [{ address: '169.254.169.254' }]));
