@@ -444,3 +444,55 @@ describe('signing out', () => {
         expect(mockClearGrant).not.toHaveBeenCalled();
     });
 });
+
+/**
+ * #838. The redirect URI is registered with the authorization server *and*
+ * checked by it on the way back, so an unset `DASHBOARD_URL` in a deployment
+ * does not degrade — it produces a flow that either fails at registration or
+ * sends the admin's browser to a port on their own laptop carrying an
+ * authorization code, with an error that names nothing useful.
+ */
+describe('the redirect URI when DASHBOARD_URL is not set', () => {
+    const originalEnv = process.env.NODE_ENV;
+
+    afterEach(() => { process.env.NODE_ENV = originalEnv; });
+
+    test('is refused in production, naming the variable', async () => {
+        delete process.env.DASHBOARD_URL;
+        process.env.NODE_ENV = 'production';
+
+        const { status, body } = await api('POST', '/guild/g1/mcp-servers/linear/oauth/start');
+
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/DASHBOARD_URL/);
+    });
+
+    // A developer running the dashboard on their own machine is the one case
+    // the guess is right for, so it survives there and only there.
+    test('still falls back to localhost outside production', async () => {
+        delete process.env.DASHBOARD_URL;
+        process.env.NODE_ENV = 'test';
+
+        const { status } = await api('POST', '/guild/g1/mcp-servers/linear/oauth/start');
+
+        expect(status).toBe(200);
+        expect(mockRegister).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ redirectUri: expect.stringContaining('http://localhost:') }),
+        );
+    });
+
+    test('a configured URL is used whatever the environment', async () => {
+        process.env.DASHBOARD_URL = 'https://dash.example.com/';
+        process.env.NODE_ENV = 'production';
+
+        const { status } = await api('POST', '/guild/g1/mcp-servers/linear/oauth/start');
+
+        expect(status).toBe(200);
+        expect(mockRegister).toHaveBeenCalledWith(
+            expect.anything(),
+            // The trailing slash above is stripped rather than doubled.
+            expect.objectContaining({ redirectUri: 'https://dash.example.com/api/mcp/oauth/callback' }),
+        );
+    });
+});

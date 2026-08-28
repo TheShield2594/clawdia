@@ -36,13 +36,73 @@
 
 const Guild = require('../../../models/Guild');
 const { encryptSecret, decryptSecret } = require('../../../config/secretBox');
-const { refreshTokens, needsRefresh, OAuthError } = require('./oauth');
+const { refreshTokens, needsRefresh, OAuthError, REFRESH_SKEW_MS } = require('./oauth');
 
 // One in-flight refresh per grant, keyed by guild and server name. Concurrent
 // callers await the same promise rather than each spending the refresh token.
 const inFlight = new Map();
 
 const keyOf = (guildId, server) => `${guildId} ${server}`;
+
+/**
+ * The live access token per grant, so a request that needs one does not read
+ * Mongo to be told what it was told a second ago (#838).
+ *
+ * `accessTokenFor` is asked before *every* MCP request — the client re-asks
+ * rather than caching, because a pooled connection sits idle while its token
+ * expires — and a turn that runs six tool calls across two servers was six
+ * `findOne`s deep before a single byte went out. The token itself is what
+ * changes on a clock the process already knows about, so it is the thing worth
+ * holding.
+ *
+ * Held only while it is unambiguously live: `MEMO_SKEW_MS` short of the grant's
+ * own expiry, so a memo never outlives the refresh it should have triggered.
+ * A grant with no expiry is not memoized at all — a token of unknown lifetime
+ * is one the database is entitled to have changed.
+ *
+ * Dropped on every write to the grant (`saveGrant`, `clearGrant`, a refresh)
+ * and on the forced path, which is what a 401 takes: the server has just said
+ * the memoized token is no good, and re-offering it would spend the retry on
+ * the same credential. This is per process and deliberately so — another shard
+ * refreshing early is a token this one has not seen, which costs it one 401 and
+ * the forced refresh that already handles exactly that.
+ */
+const tokenMemo = new Map();
+
+// How far ahead of the grant's expiry the memo is dropped. Derived from the
+// refresh margin rather than written out again, and twice it, so the memo is
+// always the first of the two to lapse: a memo that outlived `needsRefresh`
+// would hand back a token in the window the store had already decided to
+// refresh, which is the one thing it must not do.
+const MEMO_SKEW_MS = REFRESH_SKEW_MS * 2;
+
+// `expiresAt` reaches here as whatever Mongo gave back — a Date, or the string
+// a `.lean()` read of a fresh write can carry — so it is normalised rather
+// than assumed. Anything unparseable is treated as no expiry at all, which
+// means no memo.
+function expiryMs(expiresAt) {
+    if (!expiresAt) return null;
+    const at = expiresAt instanceof Date ? expiresAt.getTime() : new Date(expiresAt).getTime();
+    return Number.isFinite(at) ? at : null;
+}
+
+function memoGet(key) {
+    const entry = tokenMemo.get(key);
+    if (!entry) return null;
+    if (entry.until <= Date.now()) {
+        tokenMemo.delete(key);
+        return null;
+    }
+    return entry.token;
+}
+
+function memoSet(key, token, expiresAt) {
+    const at = expiryMs(expiresAt);
+    if (!token || at === null) return;
+    const until = at - MEMO_SKEW_MS;
+    if (until <= Date.now()) return;
+    tokenMemo.set(key, { token, until });
+}
 
 /** The stored grant with its secrets decrypted, or null. */
 function openGrant(stored) {
@@ -99,6 +159,7 @@ async function readGrant(guildId, server) {
 
 /** Writes a grant, replacing whatever was there. Used by the dashboard callback. */
 async function saveGrant(guildId, server, grant) {
+    tokenMemo.delete(keyOf(guildId, server));
     const result = await Guild.updateOne(
         { guildId, 'ai.mcpServers.name': server },
         {
@@ -117,6 +178,7 @@ async function saveGrant(guildId, server, grant) {
 /** Drops a grant, so the connection goes back to being unauthenticated. */
 async function clearGrant(guildId, server) {
     inFlight.delete(keyOf(guildId, server));
+    tokenMemo.delete(keyOf(guildId, server));
     const result = await Guild.updateOne(
         { guildId, 'ai.mcpServers.name': server },
         { $set: { 'ai.mcpServers.$.oauth': null } },
@@ -157,6 +219,8 @@ async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
     const existing = inFlight.get(key);
     if (existing) return existing;
 
+    tokenMemo.delete(key);
+
     const attempt = (async () => {
         const fresh = await refreshTokens(grant.tokenEndpoint, {
             refreshToken: grant.refreshToken,
@@ -177,12 +241,17 @@ async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
         };
 
         const stored = await storeRefreshed(guildId, server, encryptedRefreshToken, updated);
-        if (stored) return updated;
+        if (stored) {
+            memoSet(key, updated.accessToken, updated.expiresAt);
+            return updated;
+        }
 
         // Somebody else got there first. Theirs is newer than this one by
         // definition, so it is the one to use.
         const other = await readGrant(guildId, server);
-        return other?.accessToken ? other : updated;
+        const winner = other?.accessToken ? other : updated;
+        memoSet(key, winner.accessToken, winner.expiresAt);
+        return winner;
     })().finally(() => inFlight.delete(key));
 
     inFlight.set(key, attempt);
@@ -206,6 +275,16 @@ async function refreshGrant(guildId, server, grant, { encryptedRefreshToken }) {
 async function accessTokenFor(guildId, server, { force = false } = {}) {
     if (!guildId || !server) return null;
 
+    const key = keyOf(guildId, server);
+    if (force) {
+        // The caller is here because the server rejected what it was last
+        // given, which may well be what is memoized.
+        tokenMemo.delete(key);
+    } else {
+        const memoized = memoGet(key);
+        if (memoized) return memoized;
+    }
+
     const doc = await Guild.findOne(
         { guildId, 'ai.mcpServers.name': server },
         { 'ai.mcpServers.$': 1 },
@@ -216,6 +295,7 @@ async function accessTokenFor(guildId, server, { force = false } = {}) {
     if (!grant?.accessToken && !grant?.refreshToken) return null;
 
     if (!force && grant.accessToken && !needsRefresh(grant.expiresAt)) {
+        memoSet(key, grant.accessToken, grant.expiresAt);
         return grant.accessToken;
     }
     if (!grant.refreshToken) {
@@ -246,9 +326,10 @@ async function accessTokenFor(guildId, server, { force = false } = {}) {
 /** Test seam: drops the in-flight refresh map. */
 function _resetOAuthStore() {
     inFlight.clear();
+    tokenMemo.clear();
 }
 
 module.exports = {
     readGrant, saveGrant, clearGrant, accessTokenFor,
-    openGrant, sealGrant, _resetOAuthStore,
+    openGrant, sealGrant, _resetOAuthStore, MEMO_SKEW_MS,
 };

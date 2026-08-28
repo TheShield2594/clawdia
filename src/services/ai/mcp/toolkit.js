@@ -260,23 +260,31 @@ function summarize(tool, serverName) {
  * trip re-sends the entire conversation. A catalogue line is about a tenth of a
  * schema; the round trip is the whole context again. The line wins.
  */
-function loadToolDefinition(deferred) {
-    const lines = deferred.map(entry => `- ${entry.name}: ${entry.summary}`).join('\n');
+function loadToolDefinition() {
     return {
         name: LOAD_TOOL_NAME,
         serverName: null,
         toolName: LOAD_TOOL_NAME,
+        // "Round", not "turn" (#838). A turn is the whole exchange — the user's
+        // message through to the reply — and a model told to wait for its next
+        // *turn* has been told to give up and wait for somebody to type again.
+        // What it actually has to do is finish this round, which it does by
+        // ending its message; the tool is declared on the request after that,
+        // several of which fit inside one turn.
         description:
             'Load the full definitions of tools that are available but not yet loaded. '
-            + 'Call this with the names you need, then call those tools on your next turn — '
-            + 'they cannot be called in the same turn they are loaded in.',
+            + 'Call this with the names you need, then call those tools in your next round — '
+            + 'they cannot be called in the same round they are loaded in.',
         inputSchema: {
             type: 'object',
             properties: {
                 names: {
                     type: 'array',
-                    items: { type: 'string', enum: deferred.map(entry => entry.name) },
-                    description: `The tools to load. Available:\n${lines}`
+                    // Rebuilt by `refreshCatalog` as tools are loaded, so the
+                    // enum offers what is still loadable rather than what was
+                    // loadable when the turn started.
+                    items: { type: 'string', enum: [] },
+                    description: ''
                 }
             },
             required: ['names']
@@ -615,7 +623,44 @@ async function prepareMcpToolkit(guildServers = [], {
     const byCatalogName = new Map(deferred.map(entry => [entry.name, entry]));
     const loaded = new Set();
 
-    if (deferred.length) definitions.push(loadToolDefinition(deferred));
+    // The meta-tool's own definition, kept so its catalogue can be rewritten
+    // (#838). It is one object living in `definitions`, and every round's
+    // request rebuilds its provider-side parameters from whatever is in there
+    // now — so editing it in place is how the model is told that a name it has
+    // already loaded is no longer something to load.
+    const loadDefinition = deferred.length ? loadToolDefinition() : null;
+
+    /**
+     * Point the meta-tool at the tools that are still deferred.
+     *
+     * An enum that keeps the names it has already handed over is an invitation
+     * to spend a round loading them again: the model reads the enum as the list
+     * of legal values, sees `create_issue` in it, and asks for it a second time
+     * because nothing in the schema says it already has it. Once the catalogue
+     * is empty the meta-tool is dropped from `definitions` altogether — a tool
+     * whose only legal argument list is the empty one is a round waiting to
+     * happen.
+     */
+    function refreshCatalog() {
+        if (!loadDefinition) return;
+
+        const remaining = deferred.filter(entry => !loaded.has(entry.name));
+        if (!remaining.length) {
+            const at = definitions.indexOf(loadDefinition);
+            if (at >= 0) definitions.splice(at, 1);
+            return;
+        }
+
+        const names = loadDefinition.inputSchema.properties.names;
+        names.items.enum = remaining.map(entry => entry.name);
+        names.description = 'The tools to load. Available:\n'
+            + remaining.map(entry => `- ${entry.name}: ${entry.summary}`).join('\n');
+    }
+
+    if (loadDefinition) {
+        definitions.push(loadDefinition);
+        refreshCatalog();
+    }
 
     /**
      * Declare the named tools from here on, and say what happened.
@@ -658,11 +703,16 @@ async function prepareMcpToolkit(guildServers = [], {
             added.push(name);
         }
 
+        // After the loop rather than per name: one rewrite for a request that
+        // loaded six tools, and the meta-tool is only dropped once the last of
+        // them has been taken.
+        if (added.length) refreshCatalog();
+
         const parts = [];
         if (added.length) {
             parts.push(
-                `Loaded: ${added.join(', ')}. These are available from your next turn onwards — `
-                + 'finish this turn, then call them.',
+                `Loaded: ${added.join(', ')}. These are available from your next round onwards — `
+                + 'finish this round, then call them.',
             );
         }
         if (already.length) parts.push(`Already available, call directly: ${already.join(', ')}.`);
@@ -941,13 +991,25 @@ async function prepareMcpToolkit(guildServers = [], {
  *
  * @returns {Promise<number>} how many connections now have a tool list
  */
-async function prewarmMcpServers(guildServers = [], { concurrency = 4 } = {}) {
+async function prewarmMcpServers(guildServers = [], { concurrency = 4, only = null } = {}) {
     let servers;
     try {
         servers = resolveMcpServers(guildServers);
     } catch (err) {
         console.warn(`[MCP] prewarm could not resolve servers: ${err.message}`);
         return 0;
+    }
+
+    // `only` narrows the warm-up to the servers named (#838). Resolution merges
+    // the operator's config file into whatever it is handed, which is right for
+    // the startup sweep and wrong for a dashboard save: an admin editing one
+    // server would dial every shared server in the config file as well, on
+    // every save, and a guild that has never used those pays their handshakes.
+    // The save still goes through resolution rather than around it, because
+    // that is what applies the file's defaults to the entry being saved.
+    if (only) {
+        const wanted = new Set(only);
+        servers = servers.filter(server => wanted.has(server.name));
     }
 
     const unique = new Map();

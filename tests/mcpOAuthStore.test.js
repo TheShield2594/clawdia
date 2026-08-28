@@ -318,3 +318,104 @@ describe('a grant that has gone', () => {
         await expect(accessTokenFor('g1', 'linear')).resolves.toBe('at2');
     });
 });
+
+/**
+ * #838. `accessTokenFor` is asked before *every* MCP request — the client
+ * re-asks rather than caching, because a pooled connection sits idle while its
+ * token expires — so a turn running six tool calls was six `findOne`s deep
+ * before a byte went out. The token is what expires on a clock this process
+ * already knows, so it is the thing worth holding.
+ */
+describe('the in-process token memo', () => {
+    test('answers a second request without reading the database again', async () => {
+        stubRead(storedGrant());
+
+        await expect(accessTokenFor('g1', 'linear')).resolves.toBe('at1');
+        await expect(accessTokenFor('g1', 'linear')).resolves.toBe('at1');
+
+        expect(Guild.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not answer for a different server, or a different guild', async () => {
+        stubRead(storedGrant());
+
+        await accessTokenFor('g1', 'linear');
+        await accessTokenFor('g1', 'github');
+        await accessTokenFor('g2', 'linear');
+
+        expect(Guild.findOne).toHaveBeenCalledTimes(3);
+    });
+
+    // The 401 path. The server has just said the memoized token is no good, so
+    // re-offering it would spend the one retry on the same credential.
+    test('is skipped and dropped by a forced refresh', async () => {
+        stubRead(storedGrant());
+        refreshTokens.mockResolvedValue({ accessToken: 'at2', refreshToken: 'rt2', expiresAt: null, scope: null });
+
+        await expect(accessTokenFor('g1', 'linear')).resolves.toBe('at1');
+        await expect(accessTokenFor('g1', 'linear', { force: true })).resolves.toBe('at2');
+
+        stubRead(storedGrant({ accessToken: 'enc:at3' }));
+        expect(await accessTokenFor('g1', 'linear')).not.toBe('at1');
+    });
+
+    // A memo that outlived `needsRefresh` would hand back a token in the very
+    // window the store had already decided to refresh.
+    test('lapses before the refresh it should have triggered is due', async () => {
+        const { MEMO_SKEW_MS } = require('../src/services/ai/mcp/oauthStore');
+        const { REFRESH_SKEW_MS } = require('../src/services/ai/mcp/oauth');
+
+        expect(MEMO_SKEW_MS).toBeGreaterThan(REFRESH_SKEW_MS);
+    });
+
+    test('holds nothing for a grant whose expiry is unknown', async () => {
+        stubRead(storedGrant({ expiresAt: null }));
+
+        await accessTokenFor('g1', 'linear');
+        await accessTokenFor('g1', 'linear');
+
+        expect(Guild.findOne).toHaveBeenCalledTimes(2);
+    });
+
+    test('holds nothing for a token already inside the refresh window', async () => {
+        stubRead(storedGrant({ expiresAt: new Date(Date.now() + 1000) }));
+        refreshTokens.mockResolvedValue({ accessToken: 'at2', refreshToken: 'rt2', expiresAt: null, scope: null });
+
+        await accessTokenFor('g1', 'linear');
+        await accessTokenFor('g1', 'linear');
+
+        expect(Guild.findOne).toHaveBeenCalledTimes(2);
+    });
+
+    test('is dropped when the grant is cleared', async () => {
+        stubRead(storedGrant());
+        await accessTokenFor('g1', 'linear');
+
+        await clearGrant('g1', 'linear');
+        stubRead(null);
+
+        await expect(accessTokenFor('g1', 'linear')).resolves.toBeNull();
+    });
+
+    test('is dropped when a new grant is written over it', async () => {
+        stubRead(storedGrant());
+        await accessTokenFor('g1', 'linear');
+
+        await saveGrant('g1', 'linear', { ...storedGrant(), accessToken: 'at9', refreshToken: 'rt9' });
+        stubRead(storedGrant({ accessToken: 'enc:at9' }));
+
+        await expect(accessTokenFor('g1', 'linear')).resolves.toBe('at9');
+    });
+
+    // A refresh that fails falls back to the token already held — which is by
+    // definition one the server may be about to reject, so it is not memoized.
+    test('holds nothing after a refresh that failed', async () => {
+        stubRead(storedGrant({ expiresAt: new Date(Date.now() - 1000) }));
+        refreshTokens.mockRejectedValue(new OAuthError('temporary', { status: 503 }));
+
+        await accessTokenFor('g1', 'linear');
+        await accessTokenFor('g1', 'linear');
+
+        expect(Guild.findOne).toHaveBeenCalledTimes(2);
+    });
+});

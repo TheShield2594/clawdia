@@ -84,6 +84,31 @@ describe('warming the tool list before anybody asks for it', () => {
         expect(await prewarmMcpServers([])).toBe(0);
         expect(mockListTools).not.toHaveBeenCalled();
     });
+
+    // #838. Resolution merges the operator's config file into whatever it is
+    // handed, which is right for the startup sweep and wrong for a dashboard
+    // save: an admin editing one server would dial every other one they have,
+    // on every save.
+    test('`only` warms the named server and leaves the rest cold', async () => {
+        expect(await prewarmMcpServers([GITHUB, WIKI], { only: ['github'] })).toBe(1);
+        expect(mockListTools).toHaveBeenCalledTimes(1);
+
+        // The one that was warmed is the one that was named.
+        await prepareMcpToolkit([GITHUB]);
+        expect(mockListTools).toHaveBeenCalledTimes(1);
+        await prepareMcpToolkit([WIKI]);
+        expect(mockListTools).toHaveBeenCalledTimes(2);
+    });
+
+    test('`only` naming nothing that resolves warms nothing', async () => {
+        expect(await prewarmMcpServers([GITHUB], { only: ['not-a-server'] })).toBe(0);
+        expect(mockListTools).not.toHaveBeenCalled();
+    });
+
+    test('no `only` still warms everything, which is what startup wants', async () => {
+        expect(await prewarmMcpServers([GITHUB, WIKI])).toBe(2);
+        expect(mockListTools).toHaveBeenCalledTimes(2);
+    });
 });
 
 describe('what one server sees at once', () => {
