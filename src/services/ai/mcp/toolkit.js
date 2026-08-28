@@ -351,6 +351,9 @@ function renderResult(
 ) {
     const parts = [];
     const attachments = [];
+    // Files this result put forward, taken or not — what the per-result cap is
+    // counting. `attachments` is the ones that went.
+    let offered = 0;
     const json = structured ? asJson(structuredContent) : null;
     if (json !== null) parts.push(json);
 
@@ -369,7 +372,12 @@ function renderResult(
         }
         if (!block.type) continue;
 
-        const file = attachments.length < MAX_ATTACHMENTS_PER_RESULT
+        // Counted against what this result offered, not against what was taken:
+        // a reply that is already full turns every file away, and counting
+        // those as free would decode a dozen base64 blobs to throw all of them
+        // out. The name still numbers the files that went, so a result whose
+        // first picture was refused calls its second the first.
+        const file = offered < MAX_ATTACHMENTS_PER_RESULT
             ? asAttachment(block, namePrefix, attachments.length)
             : null;
 
@@ -377,6 +385,8 @@ function renderResult(
             parts.push(`[${block.type} content omitted]`);
             continue;
         }
+        offered++;
+
         // The reply is already carrying as many files as it can. The bytes are
         // dropped either way; the difference is whether the model knows.
         if (typeof reserve === 'function' && reserve(file) === false) {

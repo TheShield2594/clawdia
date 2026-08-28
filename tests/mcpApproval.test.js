@@ -201,13 +201,35 @@ describe('rendering the arguments', () => {
 
     test('says how much of the payload it is not showing', () => {
         // "Truncated" alone says the preview stops, not that somebody is being
-        // asked to approve four thousand characters they have not read — which
-        // is where a payload with something to hide would put it.
+        // asked to approve four thousand bytes they have not read — which is
+        // where a payload with something to hide would put it.
         const rendered = renderArgs({ blob: 'x'.repeat(5000) });
-        const [, hidden, total] = rendered.match(/truncated — (\d+) of (\d+) characters not shown/);
+        const [, hidden, total] = rendered.match(/truncated — (\d+) of (\d+) bytes not shown/);
 
         expect(Number(total)).toBeGreaterThan(5000);
         expect(Number(hidden)).toBe(Number(total) - MAX_ARGS_CHARS);
+    });
+
+    test('counts what an emoji actually costs, not what it looks like', () => {
+        // The size limit on the attachment is in bytes, and for a payload that
+        // is not ASCII the two are nowhere near the same number: saying
+        // "5000 characters" of something three times that size understates the
+        // part going unread.
+        const rendered = renderArgs({ blob: '🎉'.repeat(2000) });
+        const [, , total] = rendered.match(/truncated — (\d+) of (\d+) bytes not shown/);
+
+        // Four bytes each, not the two UTF-16 units the string reports.
+        expect(Number(total)).toBeGreaterThan(8000);
+    });
+
+    test('never cuts an emoji in half at the boundary', () => {
+        // A lone surrogate renders as a replacement character sitting in the
+        // middle of the payload somebody is being asked to read.
+        for (let pad = 480; pad < 510; pad++) {
+            const rendered = renderArgs({ n: 'a'.repeat(pad) + '🎉' + 'b'.repeat(50) });
+            expect(rendered).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+            expect(rendered).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+        }
     });
 });
 

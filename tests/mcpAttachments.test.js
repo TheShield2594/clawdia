@@ -147,6 +147,22 @@ describe('what the model is told about a file the reply cannot carry', () => {
         expect(text).toContain('cannot carry any more files');
     });
 
+    test('a reply that takes nothing still only decodes what one result may send', () => {
+        // The cap counts what the result offered, not what was accepted:
+        // counting only the files that went would decode a dozen base64 blobs
+        // for a reply that was always going to refuse every one of them.
+        const reserve = jest.fn(() => false);
+        const many = Array.from({ length: MAX_ATTACHMENTS_PER_RESULT + 8 }, () => image());
+        const { text, attachments } = renderResult(result(many), { namePrefix: 'x', reserve });
+
+        expect(reserve).toHaveBeenCalledTimes(MAX_ATTACHMENTS_PER_RESULT);
+        expect(attachments).toEqual([]);
+        // The ones past the cap read as they always did; the refused ones say
+        // the reply could not carry them.
+        expect(text.match(/cannot carry any more files/g)).toHaveLength(MAX_ATTACHMENTS_PER_RESULT);
+        expect(text.match(/content omitted/g)).toHaveLength(8);
+    });
+
     test('a caller with no answer to give takes them all, as before', () => {
         const { attachments } = renderResult(result([image()]), { namePrefix: 'x' });
         expect(attachments).toHaveLength(1);

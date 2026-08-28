@@ -65,11 +65,26 @@ function renderArgs(args) {
     if (clean.length <= MAX_ARGS_CHARS) return `\n\`\`\`json\n${clean}\n\`\`\``;
 
     // The count is the point: "truncated" alone tells somebody the preview
-    // stops, not that they are approving four thousand characters they have
-    // not read.
-    const hidden = clean.length - MAX_ARGS_CHARS;
-    const body = `${clean.slice(0, MAX_ARGS_CHARS)}\n… (truncated — ${hidden} of ${clean.length} characters not shown)`;
+    // stops, not that they are approving four thousand bytes they have not
+    // read. Bytes rather than characters because that is the unit the size
+    // limit above is in — a payload of emoji or CJK is two to four times the
+    // size its character count suggests, and the number is here to say how much
+    // is going unread.
+    const shown = clip(clean, MAX_ARGS_CHARS);
+    const total = Buffer.byteLength(clean, 'utf8');
+    const hidden = total - Buffer.byteLength(shown, 'utf8');
+    const body = `${shown}\n… (truncated — ${hidden} of ${total} bytes not shown)`;
     return `\n\`\`\`json\n${body}\n\`\`\``;
+}
+
+// `text` cut to `limit` UTF-16 units without splitting a surrogate pair: half
+// an emoji is a replacement character sitting in the middle of the payload
+// somebody is being asked to read, which is the one thing this preview exists
+// to render faithfully.
+function clip(text, limit) {
+    if (text.length <= limit) return text;
+    const last = text.charCodeAt(limit - 1);
+    return text.slice(0, last >= 0xD800 && last <= 0xDBFF ? limit - 1 : limit);
 }
 
 // The arguments as JSON, or null when there is nothing to show — no arguments
