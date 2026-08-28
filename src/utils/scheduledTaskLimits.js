@@ -32,6 +32,22 @@ module.exports = {
     // costs tokens; the task is kept, disabled, with its last error on it.
     MAX_TASK_FAILURES: 3,
 
+    // How long one task's handler may run before the tick gives up on it.
+    //
+    // The tick runs its due tasks one after another, so anything that never
+    // returns does not just lose its own run — it holds the tick open, and
+    // jobRunner drops every later tick as an overlap. The whole scheduled-task
+    // system would then be stalled by one hung HTTP request.
+    //
+    // And such a request is reachable: of the four providers only Ollama sets a
+    // request timeout of its own, so a `getCompletion` on a provider whose
+    // socket goes quiet is bounded by that provider's SDK default, if it has
+    // one. Ten minutes is longer than any legitimate `ai_prompt` run — the MCP
+    // turn budget is a fraction of it — and short enough that the scheduler
+    // recovers on its own. The abandoned request is not cancelled; the point is
+    // that the tick stops waiting for it.
+    TASK_RUN_TIMEOUT_MS: 10 * 60 * 1000,
+
     // How many due tasks one tick will run. The tick is a minute and each
     // `ai_prompt` run is a provider call, so a backlog after long downtime is
     // drained over several ticks rather than fanned out all at once.

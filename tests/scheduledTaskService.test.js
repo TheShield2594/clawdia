@@ -34,8 +34,10 @@ const Guild = require('../src/models/Guild');
 const aiService = require('../src/services/aiService');
 const { runJob } = require('../src/utils/jobRunner');
 const { runDueTasks, createTask, __test__ } = require('../src/services/scheduledTaskService');
-const { MAX_TASK_FAILURES, MAX_TASKS_PER_GUILD, MAX_TASKS_PER_USER, MAX_TASK_PROMPT_LENGTH } =
-    require('../src/utils/scheduledTaskLimits');
+const {
+    MAX_TASK_FAILURES, MAX_TASKS_PER_GUILD, MAX_TASKS_PER_USER,
+    MAX_TASK_PROMPT_LENGTH, MAX_TASK_DELAY_MINUTES, TASK_RUN_TIMEOUT_MS
+} = require('../src/utils/scheduledTaskLimits');
 
 const NOW = new Date('2026-07-14T09:00:00Z');
 
@@ -106,8 +108,26 @@ describe('advancing a repeat', () => {
     });
 
     test('clamps a monthly task rather than walking it forward through the calendar', () => {
-        const next = nextOccurrence(new Date('2026-01-31T09:00:00Z'), 'monthly', 'Etc/UTC', new Date('2026-01-31T09:01:00Z'));
+        // Date.UTC(y, m, 31) on a thirty-day month is the 1st of the month
+        // after, which would march the task through the calendar a day a month.
+        const next = nextOccurrence(new Date('2026-01-31T09:00:00Z'), 'monthly', 'Etc/UTC', new Date('2026-01-31T09:01:00Z'), 31);
         expect(next.toISOString()).toBe('2026-02-28T09:00:00.000Z');
+    });
+
+    test('and comes back to the day it meant once the month is long enough', () => {
+        // Clamping alone is lossy: stepping from the clamped 28th of February
+        // gives the 28th of March, and the 31st is gone for good after one
+        // short month. Each step is measured from the day the task meant.
+        const fromFebruary = nextOccurrence(new Date('2026-02-28T09:00:00Z'), 'monthly', 'Etc/UTC', new Date('2026-02-28T09:01:00Z'), 31);
+        expect(fromFebruary.toISOString()).toBe('2026-03-31T09:00:00.000Z');
+
+        const fromMarch = nextOccurrence(new Date('2026-03-31T09:00:00Z'), 'monthly', 'Etc/UTC', new Date('2026-03-31T09:01:00Z'), 31);
+        expect(fromMarch.toISOString()).toBe('2026-04-30T09:00:00.000Z');
+    });
+
+    test('a task written before the anchor existed keeps the old clamping', () => {
+        const next = nextOccurrence(new Date('2026-02-28T09:00:00Z'), 'monthly', 'Etc/UTC', new Date('2026-02-28T09:01:00Z'), null);
+        expect(next.toISOString()).toBe('2026-03-28T09:00:00.000Z');
     });
 
     test('has no next occurrence for a one-shot', () => {
@@ -149,6 +169,22 @@ describe('claiming a due task', () => {
 
         expect(runJob).not.toHaveBeenCalled();
         expect(aiService.getCompletion).not.toHaveBeenCalled();
+    });
+
+    test('advances a monthly task from the day it meant, not the last clamp', async () => {
+        due([makeTask({
+            repeat: 'monthly', monthDay: 31,
+            fireAt: new Date('2026-02-28T09:00:00Z'), timezone: 'Etc/UTC',
+        })]);
+
+        await runDueTasks(makeClient(textChannel()));
+
+        // Months behind, so the claim skips forward to the next future
+        // occurrence — and the day the task meant survives every one of those
+        // steps rather than being lost to the first short month it crossed.
+        const [, update] = ScheduledTask.findOneAndUpdate.mock.calls[0];
+        expect(update.$set.fireAt.getUTCDate()).toBe(31);
+        expect(update.$set.fireAt.getTime()).toBeGreaterThan(Date.now());
     });
 
     test('runs each task inside its own job scope, so one guild cannot drop another', async () => {
@@ -239,6 +275,33 @@ describe('running an ai_prompt task', () => {
         expect(ScheduledTask.updateOne).toHaveBeenCalledWith({ _id: 'task-1' }, { $set: { enabled: false } });
     });
 
+    // The tick runs its tasks one after another, so a handler that never
+    // returns would hold the tick open and jobRunner would drop every later
+    // tick as an overlap — one hung request stalling the whole subsystem. Of
+    // the four providers only Ollama sets a request timeout of its own.
+    test('gives up on a run that never finishes, so the tick is not held open', async () => {
+        jest.useFakeTimers();
+        try {
+            due([makeTask()]);
+            aiService.getCompletion.mockImplementation(() => new Promise(() => {}));
+
+            const tick = runDueTasks(makeClient(textChannel()));
+            await Promise.resolve();
+            await jest.advanceTimersByTimeAsync(TASK_RUN_TIMEOUT_MS + 1);
+            await tick;
+        } finally {
+            jest.useRealTimers();
+        }
+
+        // Counted as a failure like any other, so a task that always hangs is
+        // switched off rather than hanging every tick for ever.
+        expect(ScheduledTask.findOneAndUpdate).toHaveBeenCalledWith(
+            { _id: 'task-1' },
+            expect.objectContaining({ $inc: { failureCount: 1 } }),
+            expect.anything()
+        );
+    });
+
     test('disables a task whose kind this version does not know', async () => {
         due([makeTask({ kind: 'from_the_future' })]);
 
@@ -316,5 +379,42 @@ describe('createTask, the one gate both routes go through', () => {
     test('refuses a time it cannot schedule', async () => {
         const { error } = await createTask({ ...BASE, fireAt: new Date('nonsense') });
         expect(error).toMatch(/not a time/);
+    });
+
+    test('refuses a first run in the past', async () => {
+        const { error } = await createTask({ ...BASE, fireAt: new Date(Date.now() - 60_000) });
+        expect(error).toMatch(/already passed/);
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+    });
+
+    test('holds the maximum delay here, not only at the slash command', async () => {
+        const tooFar = new Date(Date.now() + (MAX_TASK_DELAY_MINUTES + 60) * 60_000);
+        const { error } = await createTask({ ...BASE, fireAt: tooFar });
+        expect(error).toMatch(/at most a year/);
+    });
+
+    test('accepts the model tool\'s own minimum, which arrives a shade under a minute', async () => {
+        // The tool builds `now + 1 minute` and hands it over milliseconds
+        // later, so a strict minute floor would refuse its own minimum.
+        const { error } = await createTask({ ...BASE, fireAt: new Date(Date.now() + 59_900) });
+        expect(error).toBeUndefined();
+    });
+
+    test('refuses a timezone it cannot use', async () => {
+        // It decides where every later occurrence lands, and it arrives from
+        // guild settings somebody typed.
+        const { error } = await createTask({ ...BASE, timezone: 'Mars/Olympus_Mons' });
+        expect(error).toMatch(/not a timezone/);
+        expect(ScheduledTask.create).not.toHaveBeenCalled();
+    });
+
+    test('records the day a monthly task means', async () => {
+        await createTask({ ...BASE, repeat: 'monthly', timezone: 'Etc/UTC', fireAt: new Date('2027-01-31T09:00:00Z') });
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ monthDay: 31 }));
+    });
+
+    test('and leaves it unset for a cadence that has no day of the month', async () => {
+        await createTask({ ...BASE, repeat: 'weekly' });
+        expect(ScheduledTask.create).toHaveBeenCalledWith(expect.objectContaining({ monthDay: null }));
     });
 });

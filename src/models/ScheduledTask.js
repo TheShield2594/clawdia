@@ -57,6 +57,17 @@ const scheduledTaskSchema = new Schema({
     repeat: { type: String, enum: ['daily', 'weekly', 'monthly', null], default: null },
     timezone: { type: String, default: 'Etc/UTC' },
 
+    // The day of the month a monthly task actually means, snapshotted at
+    // creation from `fireAt` in the task's own timezone.
+    //
+    // Needed because clamping is lossy in one direction: a task on the 31st
+    // clamps to the 28th in February, and stepping from *that* gives the 28th
+    // of March — the 31st is gone after one short month. Each step is measured
+    // from this instead, so the run lands on the 31st again whenever the month
+    // has one. Null on a task written before the field existed, which reads as
+    // the old clamping behaviour rather than as an error.
+    monthDay: { type: Number, default: null, min: 1, max: 31 },
+
     // Off rather than deleted, so an admin can suspend a task and keep it, and
     // so a task that failed too many times leaves evidence of why.
     enabled: { type: Boolean, default: true },

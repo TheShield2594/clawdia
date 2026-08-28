@@ -18,7 +18,7 @@ const { retrieveKnowledge } = require('./ai/knowledge');
 const { buildActionsAddendum } = require('./ai/actions');
 const { buildMcpAddendum } = require('./ai/mcp/prompt');
 const { checkRateLimit, checkChannelRateLimit, peekRateLimit, peekChannelRateLimit, AiRateLimitError, AiBudgetError, monthlyBudgetState } = require('./ai/rateLimit');
-const { recordUsage, getUsageStats, estimateCost, loadMonthlyUsage } = require('./ai/usage');
+const { recordUsage, getUsageStats, estimateCost, loadMonthlyUsage, monthlyBudget } = require('./ai/usage');
 
 module.exports = {
     handleAIChat,
@@ -39,6 +39,7 @@ module.exports = {
     recordUsage,
     getUsageStats,
     loadMonthlyUsage,
+    monthlyBudget,
     estimateCost,
     DEFAULT_MODELS
 };

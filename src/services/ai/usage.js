@@ -47,9 +47,27 @@ const MONTHLY_CACHE_MAX = 5_000;
 const monthlyCache = new Map();
 const monthlyLoads = new Set();
 
-/** The month's totals, straight from the ledger. */
+/** The first day of the month after `month`, as the ledger's YYYY-MM-DD key. */
+function monthAfter(month) {
+    const [year, index] = month.split('-').map(Number);
+    const next = new Date(Date.UTC(year, index, 1));
+    return next.toISOString().slice(0, 10);
+}
+
+/**
+ * The month's totals, straight from the ledger.
+ *
+ * Bounded at both ends. For the current month the upper bound changes nothing —
+ * there are no rows dated after today — but `month` is a parameter, and an
+ * open-ended `$gte` would answer a question about March with March plus
+ * everything since. A total that quietly means something else than it says is
+ * the wrong thing to hand a spend limit.
+ */
 async function loadMonthlyUsage(guildId, month = utcMonthString()) {
-    const rows = await AIUsage.find({ guildId, day: { $gte: `${month}-01` } }).lean();
+    const rows = await AIUsage.find({
+        guildId,
+        day: { $gte: `${month}-01`, $lt: monthAfter(month) }
+    }).lean();
 
     let tokens = 0;
     let cost = 0;
@@ -118,6 +136,43 @@ function bumpMonthlyUsage(guildId, tokens, cost) {
     entry.tokens += tokens;
     if (cost == null) entry.costKnown = false;
     else entry.cost += cost;
+}
+
+/**
+ * A guild's monthly allowance as a pair of used/limit/remaining blocks, or null
+ * when it has no ceiling set.
+ *
+ * Shared between enforcement (which reads the cached total) and the dashboard
+ * (which reads the ledger directly, so a panel somebody opened does not answer
+ * "not loaded yet"). Two callers deriving the same numbers separately is two
+ * places for them to disagree, and the one thing worse than a budget panel is a
+ * budget panel that does not match what is refusing people.
+ *
+ * `complete` is false when some of the month's rows are on a model with no
+ * pricing row, which makes the cost a floor rather than the total. A ceiling
+ * enforced on a floor refuses late rather than early — the safe direction to be
+ * wrong in for a limit that stops people talking to the bot.
+ */
+function monthlyBudget(totals, { monthlyTokens = 0, monthlyCost = 0 } = {}) {
+    if (!totals || (monthlyTokens <= 0 && monthlyCost <= 0)) return null;
+
+    return {
+        tokens: monthlyTokens > 0
+            ? {
+                used: totals.tokens,
+                limit: monthlyTokens,
+                remaining: Math.max(0, monthlyTokens - totals.tokens)
+            }
+            : null,
+        cost: monthlyCost > 0
+            ? {
+                used: round4(totals.cost),
+                limit: monthlyCost,
+                remaining: round4(Math.max(0, monthlyCost - totals.cost)),
+                complete: totals.costKnown
+            }
+            : null
+    };
 }
 
 /** Test seam: drop everything cached, so one test's guild is not another's. */
@@ -251,6 +306,7 @@ module.exports = {
     recordUsage,
     getUsageStats,
     loadMonthlyUsage,
+    monthlyBudget,
     refreshMonthlyUsage,
     peekMonthlyUsage,
     bumpMonthlyUsage,

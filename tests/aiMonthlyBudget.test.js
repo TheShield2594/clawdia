@@ -97,6 +97,24 @@ describe('reading the ledger as a limit', () => {
         expect(state.cost.used).toBeCloseTo((1000 * 1000 + 1000 * 2000) / 1e6, 10);
     });
 
+    it('asks the ledger for that month only, not for everything since', async () => {
+        // `month` is a parameter, and an open-ended `$gte` would answer a
+        // question about March with March plus every month after it. A total
+        // that quietly means something else than it says is the wrong thing to
+        // hand a spend limit.
+        await usage.loadMonthlyUsage('g-bounded', '2026-03');
+
+        expect(AIUsage.find).toHaveBeenCalledWith({
+            guildId: 'g-bounded',
+            day: { $gte: '2026-03-01', $lt: '2026-04-01' }
+        });
+    });
+
+    it('rolls the upper bound into the next year in December', async () => {
+        await usage.loadMonthlyUsage('g-bounded', '2026-12');
+        expect(AIUsage.find.mock.calls[0][0].day).toEqual({ $gte: '2026-12-01', $lt: '2027-01-01' });
+    });
+
     it('answers nothing at all until the month has been loaded once', () => {
         // A cold cache allows the request through and starts the load, rather
         // than turning a synchronous check into a database round trip.
@@ -234,5 +252,43 @@ describe('keeping the cached total honest between refreshes', () => {
         // is populated by the read path, not by every guild that ever spent.
         await expect(usage.recordUsage(nextGuild(), 'mock', 'mock-1', { inputTokens: 1, outputTokens: 1 }))
             .resolves.toBeUndefined();
+    });
+});
+
+// The panel somebody opens to find out where they stand and the check that
+// refuses their message have to describe the same budget. They read the totals
+// from different places — the ledger and the cache — but the shape is one
+// function, so there is nowhere for them to disagree.
+describe('one description of a budget, two readers', () => {
+    const TOTALS = { tokens: 4_000, cost: 12.5, costKnown: true };
+
+    it('reports nothing when no ceiling is set', () => {
+        expect(usage.monthlyBudget(TOTALS, { monthlyTokens: 0, monthlyCost: 0 })).toBeNull();
+    });
+
+    it('reports nothing when the totals are not known yet', () => {
+        expect(usage.monthlyBudget(null, { monthlyTokens: 100 })).toBeNull();
+    });
+
+    it('fills in only the ceilings that were actually set', () => {
+        expect(usage.monthlyBudget(TOTALS, { monthlyTokens: 10_000 }))
+            .toEqual({ tokens: { used: 4_000, limit: 10_000, remaining: 6_000 }, cost: null });
+        expect(usage.monthlyBudget(TOTALS, { monthlyCost: 20 }))
+            .toEqual({ tokens: null, cost: { used: 12.5, limit: 20, remaining: 7.5, complete: true } });
+    });
+
+    it('never reports a negative remainder for a guild that overshot', () => {
+        const over = usage.monthlyBudget({ tokens: 12_000, cost: 30, costKnown: true }, { monthlyTokens: 10_000, monthlyCost: 20 });
+        expect(over.tokens.remaining).toBe(0);
+        expect(over.cost.remaining).toBe(0);
+    });
+
+    it('is what enforcement reads, so the panel cannot show a different number', async () => {
+        const guildId = nextGuild();
+        ledger([row(3_000, 1_000)]);
+        await prime(guildId);
+
+        expect(monthlyBudgetState(guildId, { monthlyTokens: 10_000 }))
+            .toEqual(usage.monthlyBudget({ tokens: 4_000, cost: expect.any(Number), costKnown: true }, { monthlyTokens: 10_000 }));
     });
 });

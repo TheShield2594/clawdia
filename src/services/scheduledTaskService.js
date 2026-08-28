@@ -1,13 +1,15 @@
 const ScheduledTask = require('../models/ScheduledTask');
 const Guild = require('../models/Guild');
 const { runJob } = require('../utils/jobRunner');
-const { addCalendarDays, addCalendarMonths } = require('../utils/timezones');
+const { addCalendarDays, addCalendarMonths, isValidTimezone, nowInTimezone } = require('../utils/timezones');
 const {
     MAX_TASK_FAILURES,
     MAX_TASKS_PER_TICK,
     MAX_TASKS_PER_GUILD,
     MAX_TASKS_PER_USER,
-    MAX_TASK_PROMPT_LENGTH
+    MAX_TASK_PROMPT_LENGTH,
+    MAX_TASK_DELAY_MINUTES,
+    TASK_RUN_TIMEOUT_MS
 } = require('../utils/scheduledTaskLimits');
 
 // The one runner behind every ScheduledTask (#834).
@@ -20,10 +22,14 @@ const {
 
 // How a repeat advances. Weekly is seven calendar days rather than a separate
 // unit, which keeps DST handling in one place.
+//
+// Monthly carries the task's own day of the month, because clamping is lossy:
+// the 31st becomes the 28th in February, and a step measured from there would
+// keep the task on the 28th for good. See ScheduledTask.monthDay.
 const REPEAT_STEP = {
     daily: (from, tz) => addCalendarDays(from, 1, tz),
     weekly: (from, tz) => addCalendarDays(from, 7, tz),
-    monthly: (from, tz) => addCalendarMonths(from, 1, tz)
+    monthly: (from, tz, anchorDay) => addCalendarMonths(from, 1, tz, { anchorDay })
 };
 
 /**
@@ -35,16 +41,16 @@ const REPEAT_STEP = {
  * skipped instead: one run now, then straight to the next future occurrence.
  * (The same fix reminders needed, #817.)
  */
-function nextOccurrence(from, repeat, timezone, now) {
+function nextOccurrence(from, repeat, timezone, now, anchorDay = null) {
     const step = REPEAT_STEP[repeat];
     if (!step) return null;
 
-    let next = step(from, timezone);
+    let next = step(from, timezone, anchorDay);
     // A cheap guard against a step that fails to advance for an unexpected
     // input: without it a non-advancing step spins here forever.
     let guard = 0;
     while (next.getTime() <= now.getTime() && guard++ < 1000) {
-        const after = step(next, timezone);
+        const after = step(next, timezone, anchorDay);
         if (after.getTime() <= next.getTime()) break;
         next = after;
     }
@@ -140,7 +146,7 @@ const HANDLERS = {
  */
 async function claim(task, now) {
     const nextFireAt = task.repeat
-        ? nextOccurrence(task.fireAt, task.repeat, task.timezone || 'Etc/UTC', now)
+        ? nextOccurrence(task.fireAt, task.repeat, task.timezone || 'Etc/UTC', now, task.monthDay)
         : null;
 
     return ScheduledTask.findOneAndUpdate(
@@ -154,6 +160,25 @@ async function claim(task, now) {
         },
         { new: true }
     );
+}
+
+/**
+ * `work`, or a rejection once `ms` has passed.
+ *
+ * The losing timer is cleared either way: a ten-minute one left behind would
+ * keep the event loop alive long after the run it was watching finished.
+ *
+ * This does not cancel the underlying request — nothing here can — and it does
+ * not need to. What matters is that the tick stops waiting: it runs its tasks
+ * one after another, so a call that never returns would hold the tick open and
+ * every later tick would be dropped by jobRunner as an overlap.
+ */
+function withTimeout(work, ms, message) {
+    let timer;
+    const expiry = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return Promise.race([work, expiry]).finally(() => clearTimeout(timer));
 }
 
 /** Run one claimed task, and record what came of it. */
@@ -172,7 +197,8 @@ async function runClaimed(client, task) {
     }
 
     try {
-        await handler(client, task);
+        await withTimeout(handler(client, task), TASK_RUN_TIMEOUT_MS,
+            `the run did not finish within ${Math.round(TASK_RUN_TIMEOUT_MS / 60000)} minutes`);
         await ScheduledTask.updateOne({ _id: task._id }, { $set: { failureCount: 0, lastError: null } });
     } catch (error) {
         // Counted rather than retried. Every attempt at an `ai_prompt` task is a
@@ -243,6 +269,25 @@ async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', p
         return { error: 'That is not a time I can schedule anything for.' };
     }
 
+    // Both ends of `fireAt`, here rather than at each caller. The floor is "in
+    // the future" rather than a strict MIN_TASK_DELAY_MINUTES: the model's tool
+    // builds `now + 1 minute` and hands it over a few milliseconds later, so a
+    // strict minute would refuse its own minimum. The scheduler's tick is what
+    // rounds the difference up anyway.
+    const ahead = fireAt.getTime() - Date.now();
+    if (ahead <= 0) return { error: 'That time has already passed — pick a future one.' };
+    if (ahead > MAX_TASK_DELAY_MINUTES * 60 * 1000) {
+        return { error: 'A task can be scheduled at most a year out.' };
+    }
+
+    // The timezone decides where every later occurrence lands, so an unusable
+    // one is a task that reschedules itself somewhere nobody chose. It arrives
+    // from guild settings a person typed, which is reason enough to check it
+    // here rather than trust each caller to.
+    if (!isValidTimezone(timezone)) {
+        return { error: `"${timezone}" is not a timezone I recognise.` };
+    }
+
     const text = typeof prompt === 'string' ? prompt.trim() : '';
     if (kind === 'ai_prompt' && !text) return { error: 'A scheduled task needs an instruction to run.' };
     if (text.length > MAX_TASK_PROMPT_LENGTH) {
@@ -267,7 +312,10 @@ async function createTask({ guildId, channelId, createdBy, kind = 'ai_prompt', p
 
     const task = await ScheduledTask.create({
         guildId, channelId, createdBy, kind,
-        prompt: text || null, config, fireAt, repeat, timezone
+        prompt: text || null, config, fireAt, repeat, timezone,
+        // The day a monthly task means, so a run on the 31st comes back to the
+        // 31st rather than being clamped down to February's for good.
+        monthDay: repeat === 'monthly' ? nowInTimezone(timezone, fireAt).day : null
     });
     return { task };
 }
@@ -276,5 +324,5 @@ module.exports = {
     runDueTasks,
     createTask,
     HANDLERS,
-    __test__: { nextOccurrence, claim, runClaimed, REPEAT_STEP }
+    __test__: { nextOccurrence, claim, runClaimed, withTimeout, REPEAT_STEP }
 };

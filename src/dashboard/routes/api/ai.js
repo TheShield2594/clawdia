@@ -76,7 +76,7 @@ router.get('/guild/:guildId/ai/usage', checkAuth, checkGuildAccess, async (req, 
     const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 14));
 
     try {
-        const { getUsageStats, loadMonthlyUsage } = require('../../../services/aiService');
+        const { getUsageStats, loadMonthlyUsage, monthlyBudget } = require('../../../services/aiService');
         const guildSettings = await Guild.findOne({ guildId }).lean();
         const stats = await getUsageStats(guildId, days);
 
@@ -87,24 +87,13 @@ router.get('/guild/:guildId/ai/usage', checkAuth, checkGuildAccess, async (req, 
         // Read from the ledger rather than from the enforcement cache: a panel
         // somebody opened to find out where they stand should not answer "not
         // loaded yet" on a process that has not served this guild recently.
-        // What it reports is what the next cache refresh will enforce on.
+        // What it reports is what the next cache refresh will enforce on — the
+        // same shaping function, so the two cannot describe the same budget
+        // differently.
         let budget = null;
         if (monthlyTokens > 0 || monthlyCost > 0) {
             const used = await loadMonthlyUsage(guildId);
-            budget = {
-                month: used.month,
-                tokens: monthlyTokens > 0
-                    ? { used: used.tokens, limit: monthlyTokens, remaining: Math.max(0, monthlyTokens - used.tokens) }
-                    : null,
-                cost: monthlyCost > 0
-                    ? {
-                        used: Math.round(used.cost * 10000) / 10000,
-                        limit: monthlyCost,
-                        remaining: Math.round(Math.max(0, monthlyCost - used.cost) * 10000) / 10000,
-                        complete: used.costKnown
-                    }
-                    : null
-            };
+            budget = { month: used.month, ...monthlyBudget(used, { monthlyTokens, monthlyCost }) };
         }
 
         res.json({

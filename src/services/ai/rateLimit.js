@@ -1,5 +1,5 @@
 const { BoundedRateLimiter } = require('../../utils/boundedRateLimiter');
-const { peekMonthlyUsage } = require('./usage');
+const { peekMonthlyUsage, monthlyBudget } = require('./usage');
 
 // Sliding-window AI rate limiting, per user and per channel.
 //
@@ -119,24 +119,13 @@ class AiBudgetError extends Error {
  * Exported so the dashboard's usage panel shows the same number enforcement
  * uses, rather than a second calculation that can disagree with it.
  */
-function monthlyBudgetState(guildId, { monthlyTokens = 0, monthlyCost = 0 } = {}) {
-    if (!guildId || (monthlyTokens <= 0 && monthlyCost <= 0)) return null;
-    const used = peekMonthlyUsage(guildId);
-    if (!used) return null;
-
-    return {
-        tokens: monthlyTokens > 0
-            ? { used: used.tokens, limit: monthlyTokens, remaining: Math.max(0, monthlyTokens - used.tokens) }
-            : null,
-        // `costKnown` is false when some of the month's rows are on a model with
-        // no pricing row, so the figure is a floor rather than the total. A
-        // ceiling enforced on a floor refuses late rather than early, which is
-        // the safe direction to be wrong in for a limit that stops people
-        // talking to the bot.
-        cost: monthlyCost > 0
-            ? { used: used.cost, limit: monthlyCost, remaining: Math.max(0, monthlyCost - used.cost), complete: used.costKnown }
-            : null
-    };
+function monthlyBudgetState(guildId, limits) {
+    if (!guildId) return null;
+    // The shape is `usage.monthlyBudget`'s, shared with the dashboard panel so
+    // the number on screen and the number doing the refusing cannot drift
+    // apart. What differs is only where the totals come from: enforcement reads
+    // the cache, because this call sits on a synchronous path.
+    return monthlyBudget(peekMonthlyUsage(guildId), limits);
 }
 
 /**

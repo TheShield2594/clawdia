@@ -108,6 +108,10 @@ function reminderTool(message) {
  * watching. So it asks first, the way `save_memory` does and for the stronger
  * version of the same reason: this is the only tool here whose effect is a
  * recurring cost.
+ *
+ * And it is offered only to a member with Manage Server, matching the slash
+ * command. Approval is not a substitute for that: the prompt can be answered by
+ * whoever asked for the call.
  */
 function scheduleTaskTool(message) {
     return tool({
@@ -242,13 +246,19 @@ async function saveMemory(args, message) {
 function buildBotTools(message, { enabled = true } = {}) {
     if (!enabled) return [];
 
-    const tools = [pollTool(message), reminderTool(message), memoryTool(message), scheduleTaskTool(message)];
+    const tools = [pollTool(message), reminderTool(message), memoryTool(message)];
 
-    // Offered only to someone who could act on it. The executor checks the same
+    // Offered only to someone who could act on it. The executors check the same
     // permissions again — this is about not putting a tool in front of a model
     // that will always refuse it.
-    const canModerate = message.member?.permissions?.has('ModerateMembers')
-        || message.member?.permissions?.has('ManageGuild');
+    const canManage = message.member?.permissions?.has('ManageGuild');
+    const canModerate = canManage || message.member?.permissions?.has('ModerateMembers');
+
+    // Scheduling is gated the way `/ai schedule add` is gated, and for the same
+    // reason: a standing task spends the server's budget on a cadence. The
+    // approval buttons do not stand in for the permission — whoever asked for
+    // the call can click them themselves.
+    if (canManage) tools.push(scheduleTaskTool(message));
     if (canModerate) tools.push(modSuggestionTool(message));
 
     return tools;
