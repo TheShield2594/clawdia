@@ -132,7 +132,10 @@ npm run docs:api               # Regenerate API_REFERENCE's endpoint tables from
 ```
 
 CI runs the tests and the lint, and the Docker image is only published when
-both pass.
+both pass. [CONTRIBUTING.md](CONTRIBUTING.md) covers the rest: getting set up,
+the coverage ratchets, and the things about this codebase that surprise people
+— migrations that run themselves on every boot, a bot that registers its own
+slash commands, and a lint rule that decides which module may require which.
 
 `npm run docs:commands` rewrites the **Commands** block below from the command
 set the bot loads — the same catalog `/help` renders. A test compares the two,

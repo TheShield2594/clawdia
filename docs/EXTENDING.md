@@ -829,9 +829,12 @@ npx jest -t "leap day"              # every test whose name matches
 npx jest --watch                    # re-run the affected files on save
 ```
 
-`--forceExit` is in the npm script rather than in a config: a few suites leave a
-mongoose connection or a timer handle open, and without it Jest waits on them
-after the last assertion has already passed.
+`npm test` deliberately does **not** pass `--forceExit`. It used to (#630), and
+that made a leaked handle — an undisconnected mongoose client, a cron nobody
+`.unref()`d — invisible: Jest shot it at the end of the run and reported a pass.
+Without the flag such a leak hangs after the last assertion instead, which is
+the signal. If a suite you wrote hangs the run, something it opened is still
+open; CI bounds the step so the hang fails there rather than sitting for hours.
 
 ### How the suite is laid out
 
@@ -1275,13 +1278,9 @@ Never hardcode tokens or API keys!
 
 ## Contributing
 
-When adding new features:
-
-1. Create commands in appropriate category folder
-2. Use existing patterns and conventions
-3. Add proper error handling
-4. Test thoroughly before committing
-5. Update documentation
-6. Consider dashboard integration
+This file is the *how* — how to add a command, a model, a route, a migration.
+[CONTRIBUTING.md](../CONTRIBUTING.md) is the *process*: getting set up, what has
+to be green before a pull request is worth opening, the coverage ratchets, and
+the handful of things about this codebase that surprise people.
 
 Happy coding! 🚀
