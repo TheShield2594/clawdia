@@ -61,7 +61,7 @@ const { SEASONAL_EVENTS } = require('../../data/seasonalEvents');
 const { buildCooldownEmbed } = require('../../utils/cooldownEmbed');
 const { logTransaction } = require('../../utils/logTransaction');
 const { logBigWin } = require('../../utils/bigWinLogger');
-const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../utils/hourlyWinner');
+const { addWeeklyChampionProgress, getWeeklyChampionLeader } = require('../../utils/weeklyChampion');
 const { progressBar } = require('../../utils/progressBar');
 const { getDailyFeatured, FEATURED_PAYOUT_BONUS } = require('../../data/featuredRotation');
 const COLORS = require('../../utils/embedColors');
@@ -590,11 +590,11 @@ async function handleGo(interaction) {
             logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.payout, source: 'explore', details: result.secret?.name ?? `${region.name} legendary treasure` });
         }
 
-        // Hourly micro-competition: richest expedition of the hour, same shape as
-        // the biggest dig and the largest haul. Only a paying run can compete —
+        // Weekly champion race: coins recovered across the week, same shape as
+        // the mining and hunting tallies. Only a paying run can compete —
         // a trap or a quiet walk has nothing to enter.
         if (result.payout > 0) {
-            await tryUpdateHourlyWinner({
+            await addWeeklyChampionProgress({
                 guildId:  interaction.guild.id,
                 category: 'explore',
                 userId:   interaction.user.id,
@@ -603,10 +603,10 @@ async function handleGo(interaction) {
                 details:  `${region.emoji} ${summarizeResult(result, currency)}`,
             }).catch(() => null);
         }
-        const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'explore').catch(() => null);
+        const weeklyLeader = await getWeeklyChampionLeader(interaction.guild.id, 'explore').catch(() => null);
 
         // ── Result embed ──────────────────────────────────────────────────────────
-        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, hourlyLeader);
+        const embed = buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, weeklyLeader);
 
         if (rarePetDrop) {
             embed.addFields({
@@ -718,7 +718,7 @@ function buildSecretPityField(user, region, guildSettings) {
     };
 }
 
-function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, hourlyLeader = null) {
+function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, firstVisit, guildSettings, weeklyLeader = null) {
     const e = user.exploration;
     // The "Setting out — <region>" embed is edited away by this one, so without
     // an author line the message a player scrolls back to never says where any
@@ -879,8 +879,8 @@ function buildResultEmbed(result, region, user, currency, eventDrop, mainXp, fir
     }
 
     const staminaNote = result.staminaSpared ? ' *(a blank walk costs no stamina)*' : '';
-    const leaderNote = hourlyLeader
-        ? `🏆 Richest this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? `${currency}${hourlyLeader.value.toLocaleString()}`}`
+    const leaderNote = weeklyLeader
+        ? `👑 Explorer of the Week so far: ${weeklyLeader.username} — ${currency}${(weeklyLeader.total ?? 0).toLocaleString()} recovered`
         : randomFrom(FOOTER_LINES);
     embed.setFooter({ text: `⚡ ${e.stamina}/${getMaxStamina(user)} stamina${staminaNote} · ${nextExpeditionNote(user)} · ${leaderNote}` });
     return embed;

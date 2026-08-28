@@ -84,10 +84,14 @@ const JOBS = [
         fn: client => require('../schedulerService').applyBankInterest(client),
     },
     {
-        name: 'announceHourlyWinners',
+        // Monday 00:05 UTC — five minutes into the new week, so the sweep is
+        // reading a week that has certainly closed rather than racing the
+        // boundary it is keyed on.
+        name: 'announceWeeklyChampions',
         service: 'schedulerService',
-        schedule: '0 * * * *',
-        fn: client => require('../schedulerService').announceHourlyWinners(client),
+        schedule: '5 0 * * 1',
+        timezone: 'Etc/UTC',
+        fn: client => require('../schedulerService').announceWeeklyChampions(client),
     },
     {
         name: 'recalcShopPrices',

@@ -449,7 +449,7 @@ async function executeRecords(interaction) {
     const embed = new EmbedBuilder()
         .setColor(COLORS.ERROR)
         .setTitle('🏹 Server Hunting Records')
-        .setDescription('The all-time boards. The hourly leader resets every hour — these never do.')
+        .setDescription('The all-time boards. The weekly champion race resets every Monday — these never do.')
         .setFooter({ text: 'Records never reset · Your own numbers live in /hunt profile' })
         .setTimestamp();
 

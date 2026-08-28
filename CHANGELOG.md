@@ -14,6 +14,40 @@ whose schema predates a migration that has already run.
 `npm test` fails if the newest entry below does not name both the current
 `package.json` version and the highest-numbered migration on disk.
 
+## [4.5.0] - 2026-08-28
+
+Migrations through `019_drop_hourly_winners`.
+
+The hourly micro-competition is now a weekly one. Hunt, mine, fish and explore each
+crowned a winner every hour and paid them 500 coins, which meant up to four
+announcements an hour, 96 a day, in a channel that in a small server is naming the
+same two people every time — enough noise that the announcement channel becomes
+something members mute, and the competition stops being read at all.
+
+It is one announcement a week now, on Monday at 00:05 UTC, and the metric changed
+with the cadence. An hour-long race decided by a single best result is a fair
+enough coin flip; a week-long one decided the same way is over on Monday afternoon
+and dead for six days. So `WeeklyChampion` accumulates: one row per player per
+category per week, `total` summing every qualifying run, and the champion is
+whoever tops it when the week closes. Each takes 10,000 coins — a prize sized to a
+week rather than 168 hour-sized ones, and deliberately not 500 × 168, because the
+old payout scaled with how often people played rather than how well. The
+in-command footers show the running race instead of the hour's leader, and name
+the week's best single run alongside the total in the announcement.
+
+Weeks are ISO-8601, UTC, Monday-start, keyed on the ISO week-numbering year rather
+than the calendar year — the two disagree either side of New Year, and keying on
+the wrong one would give two competitions the same bucket and pay the second out
+of the first's row. The payout key moved with it (`weekly:2026-W35:fish`), and the
+retired `hourly:` key constructor stays behind because owed payouts outlive the job
+that owed them: a credit that failed on the last hourly sweep before the upgrade is
+still in the queue, and `npm run payouts:replay` has to rebuild the key it was
+guarded with or pay it twice. `019` drops the `hourlywinners` collection, which no
+longer has anything reading it; nothing is migrated into the new one, because a
+best-single-result row and a running total are not the same measurement and a
+part-week seeded from one would hand the first champion a lead with no visible
+origin.
+
 ## [4.4.0] - 2026-08-27
 
 Migrations through `018_encrypt_guild_ai_keys`.

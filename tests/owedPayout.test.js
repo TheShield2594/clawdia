@@ -44,7 +44,7 @@ describe('recordOwedPayout', () => {
 
         await expect(recordOwedPayout({
             service: 'schedulerService',
-            jobName: 'announceHourlyWinners',
+            jobName: 'announceWeeklyChampions',
             guildId: 'g1',
             payload: { kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500 },
             error,
@@ -81,7 +81,7 @@ describe('recordOwedPayout', () => {
         FailedJob.create.mockRejectedValue(new Error('also down'));
 
         await expect(recordOwedPayout({
-            service: 'schedulerService', jobName: 'announceHourlyWinners',
+            service: 'schedulerService', jobName: 'announceWeeklyChampions',
             payload: { kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500 },
             error: new Error('mongo down'),
         })).resolves.toBe(false);
@@ -160,9 +160,9 @@ describe('replayOwedPayout', () => {
 // already paid, no document — have to stay distinguishable, because one is done
 // and the other is still owed.
 describe('replayOwedPayout with a payout key', () => {
-    const hourly = {
-        kind: 'coins', userId: 'u1', guildId: 'g1', amount: 500,
-        hour: '2026-08-27T01', category: 'fish', payoutKey: 'hourly:2026-08-27T01:fish',
+    const weekly = {
+        kind: 'coins', userId: 'u1', guildId: 'g1', amount: 10_000,
+        week: '2026-W35', category: 'fish', payoutKey: 'weekly:2026-W35:fish',
     };
     const listing = {
         kind: 'items', userId: 'u1', guildId: 'g1', itemId: 'sword', quantity: 2,
@@ -180,20 +180,20 @@ describe('replayOwedPayout with a payout key', () => {
     });
 
     test('guards the credit with the key the original attempt used', async () => {
-        await replayOwedPayout(hourly);
+        await replayOwedPayout(weekly);
 
         const [filter, update] = User.findOneAndUpdate.mock.calls[0];
-        expect(filter['paidPayouts.key']).toEqual({ $ne: 'hourly:2026-08-27T01:fish' });
-        expect(update[0].$set.balance).toEqual({ $add: [{ $ifNull: ['$balance', 0] }, 500] });
+        expect(filter['paidPayouts.key']).toEqual({ $ne: 'weekly:2026-W35:fish' });
+        expect(update[0].$set.balance).toEqual({ $add: [{ $ifNull: ['$balance', 0] }, 10_000] });
     });
 
     test('a payout already applied moves no coins and is not still owed', async () => {
         User.findOneAndUpdate.mockResolvedValue(null);
-        stubRead({ paidPayouts: [{ key: 'hourly:2026-08-27T01:fish' }] });
+        stubRead({ paidPayouts: [{ key: 'weekly:2026-W35:fish' }] });
 
         // retryJob reads a return as "paid" and marks the record resolved, which
         // is right: the winner has the coins.
-        await expect(replayOwedPayout(hourly)).resolves.toBeUndefined();
+        await expect(replayOwedPayout(weekly)).resolves.toBeUndefined();
     });
 
     // The other half of the same `null`. Reporting this as paid is exactly the
@@ -202,14 +202,14 @@ describe('replayOwedPayout with a payout key', () => {
         User.findOneAndUpdate.mockResolvedValue(null);
         stubRead(null);
 
-        await expect(replayOwedPayout(hourly)).rejects.toThrow('no user document for u1 in g1');
+        await expect(replayOwedPayout(weekly)).rejects.toThrow('no user document for u1 in g1');
     });
 
     test('a document without the key is retried rather than declared paid', async () => {
         User.findOneAndUpdate.mockResolvedValue(null);
         stubRead({ paidPayouts: [] });
 
-        await expect(replayOwedPayout(hourly)).rejects.toThrow('matched nothing');
+        await expect(replayOwedPayout(weekly)).rejects.toThrow('matched nothing');
     });
 
     test('an item return already applied grants nothing', async () => {
@@ -231,10 +231,18 @@ describe('replayOwedPayout with a payout key', () => {
     // made of, so they replay guarded too rather than staying at-least-once
     // forever.
     test('derives the key for a record written before payoutKey was stored', () => {
-        expect(payoutKeyForPayload({ kind: 'coins', hour: '2026-08-27T01', category: 'fish' }))
-            .toBe('hourly:2026-08-27T01:fish');
+        expect(payoutKeyForPayload({ kind: 'coins', week: '2026-W35', category: 'fish' }))
+            .toBe('weekly:2026-W35:fish');
         expect(payoutKeyForPayload({ kind: 'items', listingId: 'l1' }))
             .toBe('listing:l1');
+    });
+
+    // The hourly competition the weekly one replaced is gone, but a payout it
+    // owed can still be sitting in the queue. Dropping its derivation would not
+    // fail loudly — it would replay unguarded and pay a second time.
+    test('still derives the retired hourly key for a payout it left owed', () => {
+        expect(payoutKeyForPayload({ kind: 'coins', hour: '2026-08-27T01', category: 'fish' }))
+            .toBe('hourly:2026-08-27T01:fish');
     });
 
     test('an explicit key wins over anything derivable', () => {

@@ -3,7 +3,7 @@
 /**
  * A durable record of a payout that was claimed but never delivered (#804).
  *
- * Two scheduled jobs claim a record before paying out — `announceHourlyWinners`
+ * Two scheduled jobs claim a record before paying out — `announceWeeklyChampions`
  * flips a winner to `rewarded: true`, `returnExpiredMarketListings` deletes the
  * listing — and the claim is what makes them safe to run twice. It is also
  * one-way: once it is spent, the job's next tick finds nothing, so a credit that
@@ -24,7 +24,7 @@
  */
 
 const FailedJob = require('../models/FailedJob');
-const { creditCoinsOnce, grantItemOnce, hourlyPayoutKey, listingPayoutKey } = require('./payoutKey');
+const { creditCoinsOnce, grantItemOnce, weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey } = require('./payoutKey');
 
 // `jobName` on these records is the job that owed the payout, suffixed. runJob
 // files its own entry under the bare job name when the sweep throws, and the two
@@ -83,8 +83,8 @@ async function recordOwedPayout({ service, jobName, guildId = null, payload, err
  * `payoutKey` is written into the payload by everything that records one now, so
  * the replay applies the same key the original credit tried to. The derivations
  * below are for records written before the key existed: their payloads already
- * carry `hour`/`category` and `listingId`, which is exactly what the key is made
- * of, so those replay guarded too.
+ * carry `week`/`hour` plus `category`, or `listingId`, which is exactly what the
+ * key is made of, so those replay guarded too.
  *
  * `null` for anything with neither — a payload from a caller that never supplied
  * a key. That replay stays at-least-once, which is what it was before, and
@@ -92,6 +92,11 @@ async function recordOwedPayout({ service, jobName, guildId = null, payload, err
  */
 function payoutKeyForPayload(payload) {
     if (typeof payload?.payoutKey === 'string' && payload.payoutKey) return payload.payoutKey;
+    if (payload?.kind === 'coins' && payload.week && payload.category) {
+        return weeklyChampionPayoutKey(payload.week, payload.category);
+    }
+    // The hourly competition is gone, but a payout it owed can still be sitting
+    // in the queue, and it has to replay under the key it was written with.
     if (payload?.kind === 'coins' && payload.hour && payload.category) {
         return hourlyPayoutKey(payload.hour, payload.category);
     }

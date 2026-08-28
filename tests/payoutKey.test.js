@@ -21,7 +21,7 @@ const User = require('../src/models/User');
 const { grantInventoryItem } = require('../src/utils/inventoryGrant');
 const {
     payoutKeyAppendExpr, classifyUnmatchedPayout,
-    creditCoinsOnce, grantItemOnce, hourlyPayoutKey, listingPayoutKey,
+    creditCoinsOnce, grantItemOnce, weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     RETENTION_MS, KEY_CAP,
 } = require('../src/utils/payoutKey');
 
@@ -269,7 +269,13 @@ describe('grantItemOnce', () => {
 // The job that pays and the replay that re-pays have to build the same string,
 // or the guard never fires and the double payment is silent.
 describe('key construction', () => {
-    test('an hourly reward is keyed by the hour and the competition', () => {
+    test('a weekly reward is keyed by the week and the competition', () => {
+        expect(weeklyChampionPayoutKey('2026-W35', 'fish')).toBe('weekly:2026-W35:fish');
+    });
+
+    // The hourly competition is gone, but payouts it owed can still be in the
+    // queue and have to replay under the key they were guarded with.
+    test('the retired hourly key is still built the way it was written', () => {
         expect(hourlyPayoutKey('2026-08-27T01', 'fish')).toBe('hourly:2026-08-27T01:fish');
     });
 

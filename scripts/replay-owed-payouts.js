@@ -6,7 +6,7 @@
 //   npm run payouts:replay             # list what is owed, pay nothing
 //   npm run payouts:replay -- --pay    # attempt every pending owed payout
 //
-// `announceHourlyWinners` and `returnExpiredMarketListings` both claim a record
+// `announceWeeklyChampions` and `returnExpiredMarketListings` both claim a record
 // before paying out — the winner is flipped to `rewarded`, the listing is
 // deleted — so a credit that fails afterwards cannot be retried by re-running
 // the job: the next tick finds nothing. Instead each one is written down as a

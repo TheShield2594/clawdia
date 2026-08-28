@@ -34,7 +34,7 @@ const { recordMissionProgress } = require('../../../services/seasonMissionServic
 const { checkAndAward, announceAchievements } = require('../../../services/achievementService');
 const { isVersionError } = require('../../../utils/versionRetry');
 const { submitCatch: submitTournamentCatch } = require('../../../services/tournamentService');
-const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../../utils/hourlyWinner');
+const { addWeeklyChampionProgress, getWeeklyChampionLeader } = require('../../../utils/weeklyChampion');
 const { MATERIAL_NAMES: HUNT_MATERIAL_NAMES } = require('../../../data/huntData');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { LOCATIONS } = require('../../../data/fishData');
@@ -350,14 +350,14 @@ async function handleCast(interaction) {
             }).catch(() => null);
         }
 
-        // Await hourly winner update then re-fetch for accurate footer
+        // Await the weekly tally update then re-fetch for accurate footer
         if (result.success) {
             const tierScore = FISH_TIER_SCORE[result.tier] ?? 0;
             if (tierScore > 0 && result.fish) {
-                await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'fish', userId: interaction.user.id, username: interaction.user.username, value: tierScore, details: `${result.fish.emoji ?? ''} ${result.fish.name} (${result.tier})`.trim() }).catch(() => null);
+                await addWeeklyChampionProgress({ guildId: interaction.guild.id, category: 'fish', userId: interaction.user.id, username: interaction.user.username, value: tierScore, details: `${result.fish.emoji ?? ''} ${result.fish.name} (${result.tier})`.trim() }).catch(() => null);
             }
         }
-        const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'fish').catch(() => null);
+        const weeklyLeader = await getWeeklyChampionLeader(interaction.guild.id, 'fish').catch(() => null);
 
         // Fish escaped — already showed escape embed; just save stamina/cooldown and return
         if (result.escaped) {
@@ -388,12 +388,13 @@ async function handleCast(interaction) {
             embed.addFields({ name: '❄️ Winter Hunt Event', value: `+1 ${matName} (hunt material found in icy waters!)`, inline: true });
         }
 
-        // Hourly leader footer
+        // Weekly champion race footer. Fish accumulates rarity tiers rather
+        // than coins, so the number is a score and is named as one.
         let leaderNote;
-        if (hourlyLeader) {
-            leaderNote = `🏆 Rarest this hour: ${hourlyLeader.username} — ${hourlyLeader.details ?? 'N/A'}`;
+        if (weeklyLeader) {
+            leaderNote = `👑 Angler of the Week so far: ${weeklyLeader.username} — ${(weeklyLeader.total ?? 0).toLocaleString()} rarity score`;
         } else {
-            leaderNote = '🏆 No hourly leader yet — be the first!';
+            leaderNote = '👑 No Angler of the Week yet — be the first!';
         }
         const existingFooter = embed.data.footer?.text ?? '';
         embed.setFooter({ text: existingFooter ? `${existingFooter} · ${timeBand.emoji} ${timeBand.label} · ${leaderNote}` : `${timeBand.emoji} ${timeBand.label} · ${leaderNote}` });

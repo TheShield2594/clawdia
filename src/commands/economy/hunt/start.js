@@ -34,7 +34,7 @@ const { recordMissionProgress } = require('../../../services/seasonMissionServic
 const { checkAndAward, announceAchievements } = require('../../../services/achievementService');
 const { isVersionError } = require('../../../utils/versionRetry');
 const { logBigWin } = require('../../../utils/bigWinLogger');
-const { tryUpdateHourlyWinner, getCurrentHourlyLeader } = require('../../../utils/hourlyWinner');
+const { addWeeklyChampionProgress, getWeeklyChampionLeader } = require('../../../utils/weeklyChampion');
 const { getTimeBand } = require('../../../utils/timeBand');
 const { attachGrind } = require('../../../utils/grindProfile');
 const { ZONES } = require('../../../data/huntData');
@@ -340,15 +340,15 @@ async function executeStart(interaction) {
             return interaction.editReply({ content: 'Something went wrong saving your hunt. Please try again.' });
         }
 
-        // Log big win, then await hourly leader update and re-fetch for accurate footer
+        // Log big win, then await the weekly tally update and re-fetch for accurate footer
         if (result.success && result.finalPayout > 0) {
             const bigWinThreshold = guildSettings?.economy?.bigWinThreshold ?? 50000;
             if (result.finalPayout >= bigWinThreshold || ['legendary', 'event'].includes(result.tier)) {
                 logBigWin({ guildId: interaction.guild.id, userId: interaction.user.id, username: interaction.user.username, amount: result.finalPayout, source: 'hunt', details: { itemName: result.animal?.name, rarity: result.tier }, client: interaction.client });
             }
-            await tryUpdateHourlyWinner({ guildId: interaction.guild.id, category: 'hunt', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.animal ? `${result.animal.emoji} ${result.animal.name} (${currency}${result.finalPayout.toLocaleString()})` : null }).catch(() => null);
+            await addWeeklyChampionProgress({ guildId: interaction.guild.id, category: 'hunt', userId: interaction.user.id, username: interaction.user.username, value: result.finalPayout, details: result.animal ? `${result.animal.emoji} ${result.animal.name} (${currency}${result.finalPayout.toLocaleString()})` : null }).catch(() => null);
         }
-        const hourlyLeader = await getCurrentHourlyLeader(interaction.guild.id, 'hunt').catch(() => null);
+        const weeklyLeader = await getWeeklyChampionLeader(interaction.guild.id, 'hunt').catch(() => null);
 
         const timeBand = getTimeBand();
         const embed = buildHuntEmbed(result, user, zone, weapon, currency, interaction.user);
@@ -379,10 +379,10 @@ async function executeStart(interaction) {
             embed.addFields({ name: '✨ Bonuses', value: bonusLines.join('\n'), inline: false });
         }
 
-        // Hourly leader footer
-        const leaderNote = hourlyLeader
-            ? `🏆 Hourly leader: ${hourlyLeader.username} — ${hourlyLeader.details ?? hourlyLeader.value.toLocaleString() + ' coins'}`
-            : '🏆 No hourly leader yet — be the first!';
+        // Weekly champion race footer
+        const leaderNote = weeklyLeader
+            ? `👑 Hunter of the Week so far: ${weeklyLeader.username} — ${(weeklyLeader.total ?? 0).toLocaleString()} coins hunted`
+            : '👑 No Hunter of the Week yet — be the first!';
         const footerBase = `${timeBand.emoji} ${timeBand.label}`;
         const currentFooter = embed.data.footer?.text ?? '';
         embed.setFooter({ text: currentFooter ? `${currentFooter} · ${footerBase} · ${leaderNote}` : `${footerBase} · ${leaderNote}` });

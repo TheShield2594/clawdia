@@ -232,10 +232,22 @@ async function grantItemOnce(filter, itemId, quantity, key, options = {}) {
  * pays and the replay that re-pays have to agree on the string exactly — a
  * mismatch is a guard that never fires and a double payment nobody notices.
  *
- * `hour` is the hour bucket from src/utils/hourlyWinner.js, which is already the
- * unit the winner record is keyed by; `category` because an hour has one winner
- * per competition. `listingId` is the market listing's `_id`, which the job has
- * already deleted by the time a credit can fail, so it is unique for good.
+ * `week` is the ISO week bucket from src/utils/weeklyChampion.js, which is
+ * already the unit the champion record is keyed by; `category` because a week
+ * has one champion per competition. `listingId` is the market listing's `_id`,
+ * which the job has already deleted by the time a credit can fail, so it is
+ * unique for good.
+ */
+function weeklyChampionPayoutKey(week, category) {
+    return `weekly:${week}:${category}`;
+}
+
+/**
+ * The hourly competition this replaced is gone, and nothing builds one of these
+ * any more. It stays because owed payouts outlive the job that owed them: a
+ * credit that failed on the last hourly sweep before the switch is still in the
+ * queue, and `npm run payouts:replay` has to rebuild the same key it was
+ * originally guarded with or the replay pays a second time.
  */
 function hourlyPayoutKey(hour, category) {
     return `hourly:${hour}:${category}`;
@@ -246,7 +258,7 @@ function listingPayoutKey(listingId) {
 }
 
 module.exports = {
-    hourlyPayoutKey, listingPayoutKey,
+    weeklyChampionPayoutKey, hourlyPayoutKey, listingPayoutKey,
     payoutKeyGuard, payoutKeyAppendExpr, classifyUnmatchedPayout,
     creditCoinsOnce, grantItemOnce, isDuplicateKeyError,
     RETENTION_DAYS, RETENTION_MS, KEY_CAP,
