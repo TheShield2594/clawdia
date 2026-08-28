@@ -57,6 +57,10 @@ and `eslint.config.js`.
 
 ## Creating a New Command
 
+A command is one file under `src/commands/<category>/`, or a folder with an
+`index.js` when it has outgrown one file. The category comes from the
+directory; nothing else registers a command.
+
 ### Basic Command Template
 
 ```javascript
@@ -73,6 +77,138 @@ module.exports = {
     }
 };
 ```
+
+That is the smallest working command, not the whole contract — see
+[The full module contract](#the-full-module-contract) below for the four
+optional keys the interaction handler also looks for.
+
+### The full module contract
+
+A command module is a plain object. Two keys are required and the loader
+refuses to start without them; the rest are optional hooks
+`events/interactionCreate.js` looks for by name.
+
+| Key | Required | Shape | What reads it |
+| --- | --- | --- | --- |
+| `data` | yes | a `SlashCommandBuilder` (anything with `toJSON()`) | the loader, for `client.commands`; the deploy, for what it publishes to Discord |
+| `execute` | yes | `async (interaction, client) => void` | run on every chat-input use |
+| `cooldown` | no | seconds, number — defaults to `3` | the per-user cooldown gate |
+| `cooldownAmount` | no | `(interaction) => seconds` | same gate, when the window depends on which subcommand or option was used |
+| `cooldownKey` | no | `(interaction) => string` — defaults to the command name | which bucket the cooldown is charged to |
+| `autocomplete` | no | `async (interaction, client) => void` | autocomplete interactions for this command |
+| `requiredPermissions` | no | an array of `PermissionFlagsBits` | checked before `execute`, and before the cooldown is claimed |
+| `category` | never set this | string | stamped by the loader from the directory the file is in |
+
+#### The two required keys
+
+`isCommandModule` in `utils/commandLoader.js` checks that `execute` is callable
+and that `data` has a callable `toJSON`. Both, not merely present: a module
+whose `execute` holds a string is caught at startup rather than the moment
+someone runs the command. A file that fails the check is fatal — startup
+refuses to come up with an incomplete set, because the deploy publishes exactly
+the collection startup builds, and a command that quietly failed to load would
+otherwise *unregister* itself from Discord on the next boot.
+
+#### A typo in an optional key fails silently
+
+Nothing validates the optional keys. They are read as `command.cooldownKey`,
+`command.autocomplete` and so on, so `cooldownkey` or `autoComplete` is not an
+error — it is a key nobody reads. The command loads, deploys and runs, and the
+hook you wrote never fires. `requiredPermissions` is the one where that is a
+security bug rather than an annoyance, so grep an existing user of the key and
+copy the spelling:
+
+```
+cooldownAmount   cooldownKey   autocomplete   requiredPermissions
+```
+
+#### Cooldowns
+
+`cooldown` is one number for the whole command. That is wrong for a command
+whose subcommands cost different amounts, and it is wrong for a command whose
+window should not be shared across its subcommands — which is why the two
+function forms exist. `casino.js`, `heist.js`, `syndicate.js` and
+`newspaper.js` use them today:
+
+```javascript
+module.exports = {
+    data: /* … a builder with blackjack / roulette / slots subcommands */,
+
+    // Per-subcommand window: a slots pull is not a blackjack hand.
+    cooldownAmount: interaction =>
+        interaction.options.getSubcommand() === 'blackjack' ? 10 : 3,
+
+    // Per-subcommand bucket: being on cooldown for slots must not lock
+    // roulette. Without this, every subcommand shares the key `casino`.
+    cooldownKey: interaction => `casino:${interaction.options.getSubcommand()}`,
+
+    async execute(interaction) { /* … */ },
+};
+```
+
+`cooldownAmount` overrides `cooldown` when both are present. Whatever it
+returns is coerced: a non-finite or negative value falls back to 3 seconds, and
+the value is clamped to `2^31-1` milliseconds, because Node's `setTimeout`
+treats a longer delay as 1 ms and would hand the window straight back. A guild
+can also set per-role cooldown overrides for a command from the dashboard; the
+lowest override matching the caller's roles replaces whatever these return.
+
+None of this is what *enforces* an economy cooldown. Anything that pays out
+claims its own window atomically in Mongo — see the cooldown note in
+`src/index.js` and `tests/economyCooldownClaims.test.js`.
+
+#### Autocomplete
+
+Discord sends autocomplete as its own interaction type, not through `execute`.
+Declare a sibling method and it is called with the same arguments:
+
+```javascript
+async autocomplete(interaction) {
+    const query = interaction.options.getFocused().toLowerCase();
+    const matches = ITEMS.filter(i => i.name.toLowerCase().includes(query));
+    // Discord accepts at most 25, and rejects the whole response over that.
+    await interaction.respond(
+        matches.slice(0, 25).map(i => ({ name: i.name, value: i.id })),
+    );
+}
+```
+
+The option itself also has to be built with `.setAutocomplete(true)`, or
+Discord never sends the interaction. A command with an autocompleting option
+and no `autocomplete` method answers with an empty list rather than failing,
+and a method that throws is logged and answers empty too — the user sees no
+suggestions, not an error. `ai.js`, `pet.js`, `shop.js`, `craft.js` and
+`use.js` implement it.
+
+#### Permissions
+
+`requiredPermissions` is the gate that actually holds:
+
+```javascript
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('ban')
+        .setDescription('Ban a member')
+        .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+    requiredPermissions: [PermissionFlagsBits.BanMembers],
+    async execute(interaction) { /* … */ },
+};
+```
+
+Both lines, and they are not redundant. `setDefaultMemberPermissions` is a
+*default* Discord hands the server on install: a guild admin can reassign the
+command to any role from Server Settings, and Discord then delivers it without
+the bot being told anything changed. On its own it is a suggestion.
+`requiredPermissions` is re-checked against `interaction.memberPermissions` on
+every call, in one place, ahead of the cooldown claim — rather than in fifteen
+handlers where the sixteenth forgets. Administrators and the guild owner
+satisfy any bit, because Discord folds that into the permissions it sends.
+
+A member missing a bit gets an ephemeral list of what they need and the
+interaction is recorded as `missing_permissions`. Keep the builder line too:
+it keeps the command out of the picker for people who cannot run it.
 
 ### Command with Options
 
@@ -110,12 +246,17 @@ module.exports = {
         .setName('announce')
         .setDescription('Make an announcement')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+    requiredPermissions: [PermissionFlagsBits.ManageMessages],
     async execute(interaction) {
         // Only users with Manage Messages can use this
         await interaction.reply('Announcement!');
     }
 };
 ```
+
+The builder line alone does not gate anything the server cannot undo — see
+[Permissions](#permissions) under the module contract for why both lines are
+there.
 
 ### Command with Embeds
 
