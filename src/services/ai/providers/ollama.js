@@ -50,11 +50,39 @@ function resolveEndpoint(baseUrl) {
     return { url, agents: guardedAgents() };
 }
 
-function buildMessages({ systemPrompt, history, prompt }) {
+/**
+ * Which locally-served models can be shown an image (#839).
+ *
+ * Unlike the hosted providers there is no list to check against: Ollama serves
+ * whatever the operator pulled, under whatever tag they pulled it as. So this
+ * is a name match against the multimodal families — a model without vision
+ * given an image does not ignore it, it fails the request or answers about
+ * nothing — and anything unrecognised is asked in text alone, which is what
+ * every Ollama guild had before this existed.
+ */
+const VISION_MODELS = /(llava|bakllava|moondream|minicpm-v|internvl|pixtral|vision|[-:]vl\b|qwen2\.?5?-?vl|llama-?4|gemma-?3|mistral-small3)/i;
+
+// `gemma3:1b` is the one member of an otherwise multimodal family that ships
+// without the vision tower.
+const TEXT_ONLY_TAGS = /gemma-?3[.:]?\d*:?1b/i;
+
+function supportsVision(model) {
+    const name = String(model || '');
+    return VISION_MODELS.test(name) && !TEXT_ONLY_TAGS.test(name);
+}
+
+function buildMessages({ systemPrompt, history, prompt, images, model }) {
+    // Ollama takes images as a sibling array of base64 strings rather than as
+    // content blocks — no data URL, no mime type, just the bytes.
+    const usable = supportsVision(model) ? (images || []) : [];
     return [
         { role: 'system', content: systemPrompt },
         ...history,
-        { role: 'user', content: prompt }
+        {
+            role: 'user',
+            content: prompt,
+            ...(usable.length ? { images: usable.map(image => image.base64) } : {})
+        }
     ];
 }
 
@@ -190,11 +218,11 @@ async function* separated(pieces) {
     }
 }
 
-async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+async function* stream({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const { url, agents } = resolveEndpoint(baseUrl);
-    const messages = buildMessages({ systemPrompt, history, prompt });
+    const messages = buildMessages({ systemPrompt, history, prompt, images, model });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -229,11 +257,11 @@ async function* stream({ baseUrl, model, systemPrompt, history, prompt, temperat
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ baseUrl, model, systemPrompt, history, prompt, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+async function complete({ baseUrl, model, systemPrompt, history, prompt, images, temperature, maxTokens, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const { url, agents } = resolveEndpoint(baseUrl);
-    const messages = buildMessages({ systemPrompt, history, prompt });
+    const messages = buildMessages({ systemPrompt, history, prompt, images, model });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -294,6 +322,7 @@ module.exports = {
     // Tools are offered through the bot's own MCP client. Models without tool
     // support simply never call one.
     mcp: 'client',
+    supportsVision,
     resolveAuth: aiSettings => ({
         baseUrl: aiSettings.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || OPERATOR_DEFAULT
     }),

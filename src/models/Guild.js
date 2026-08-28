@@ -319,6 +319,12 @@ const guildSchema = new Schema({
         temperature: { type: Number, default: 0.7, min: 0, max: 2 },
         maxTokens: { type: Number, default: 1024, min: 32, max: 8192 },
         maxHistory: { type: Number, default: 20, min: 0, max: 100 },
+        // What this model's context window actually is, when the name cannot
+        // say (#840). A self-hosted Ollama serves whatever `num_ctx` the
+        // operator loaded the model with, and the table in services/ai/budget.js
+        // has to assume the server's small default. Null means "use the table";
+        // the bounds are what a token budget can sensibly mean.
+        contextTokens: { type: Number, default: null, min: 1024, max: 2000000 },
         streaming: { type: Boolean, default: true },
         rateLimitPerUser: { type: Number, default: 20 },
         rateLimitPerChannel: { type: Number, default: 0 },
