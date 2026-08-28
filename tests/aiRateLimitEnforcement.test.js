@@ -27,6 +27,22 @@ jest.mock('../src/services/ai/providers', () => {
     };
 });
 
+// The ledger, which this file is not about but does reach. `getCompletion`
+// consults the guild's monthly totals, and `usage.js` refreshes them in the
+// background without awaiting the result. With no Mongoose connection that
+// `AIUsage.find()` is not an error — it is *buffered*, against a 10s
+// `bufferTimeoutMS` timer nobody ever settles, which outlives the suite and
+// keeps the Jest worker alive ("A worker process has failed to exit
+// gracefully"). `--forceExit` used to hide that; it no longer does (#630).
+//
+// tests/aiMonthlyBudget.test.js mocks this model for the same reason. Empty
+// rows here rather than a fixture, because every assertion below is about the
+// per-user and per-channel windows, not about spend.
+jest.mock('../src/models/AIUsage', () => ({
+    find: () => ({ lean: async () => [] }),
+    updateOne: async () => ({}),
+}));
+
 const providersMock = require('../src/services/ai/providers');
 const { resolveProviderConfig, getCompletion, streamCompletion } = require('../src/services/ai');
 const { SCHEDULED_TOOL_CALLS_PER_HOUR } = require('../src/services/ai/rateLimit');
