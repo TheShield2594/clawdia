@@ -29,6 +29,7 @@ jest.mock('../src/services/ai/providers', () => {
 
 const providersMock = require('../src/services/ai/providers');
 const { resolveProviderConfig, getCompletion, streamCompletion } = require('../src/services/ai');
+const { SCHEDULED_TOOL_CALLS_PER_HOUR } = require('../src/services/ai/rateLimit');
 
 const SETTINGS = {
     provider: 'mock',
@@ -57,12 +58,17 @@ beforeEach(() => {
 describe('resolveProviderConfig', () => {
     it('carries the guild\'s limits with the provider config', () => {
         expect(resolveProviderConfig(SETTINGS).rateLimit)
-            .toEqual({ perUser: 2, perChannel: 3, windowMin: 10 });
+            .toEqual({ perUser: 2, perChannel: 3, windowMin: 10, monthlyTokens: 0, monthlyCost: 0 });
     });
 
     it('defaults to no limit rather than to an accidental one', () => {
         expect(resolveProviderConfig({ provider: 'mock' }).rateLimit)
-            .toEqual({ perUser: 0, perChannel: 0, windowMin: 10 });
+            .toEqual({ perUser: 0, perChannel: 0, windowMin: 10, monthlyTokens: 0, monthlyCost: 0 });
+    });
+
+    it('carries the monthly ceilings too, so the dispatch layer can enforce them', () => {
+        expect(resolveProviderConfig({ ...SETTINGS, monthlyTokenLimit: 500_000, monthlyCostLimit: 25 }).rateLimit)
+            .toMatchObject({ monthlyTokens: 500_000, monthlyCost: 25 });
     });
 });
 
@@ -96,15 +102,34 @@ describe('what a message becomes', () => {
         expect(spent).toBeGreaterThan(SETTINGS.rateLimitPerUser);
     });
 
-    it('leaves an unlimited guild unlimited, and an unattributed call alone', async () => {
+    it('leaves a guild that configured no per-user limit unlimited', async () => {
         const open = resolveProviderConfig({ provider: 'mock' });
         await getCompletion({ ...open, guildId: 'g1', userId: nextUser(), prompt: 'hi' });
         expect(providersMock.__complete.mock.calls[0][0].toolBudget).toBeNull();
+    });
 
-        // The scheduled digests and newspapers, which nobody sent.
+    it('still bounds the calls nobody sent — the scheduled digests and newspapers', async () => {
+        // This used to be null, which the toolkit reads as unbounded: the one
+        // class of request that runs on a timer with nobody watching was the
+        // only one that could fan out without limit (#831). It is now bounded
+        // per guild, since the guild is what pays for it.
         const config = resolveProviderConfig(SETTINGS);
-        await getCompletion({ ...config, guildId: 'g1', prompt: 'hi' });
-        expect(providersMock.__complete.mock.calls[1][0].toolBudget).toBeNull();
+        await getCompletion({ ...config, guildId: `guild-${++seq}`, prompt: 'hi' });
+
+        const [req] = providersMock.__complete.mock.calls[0];
+        expect(typeof req.toolBudget).toBe('function');
+        let spent = 0;
+        while (req.toolBudget()) {
+            spent++;
+            expect(spent).toBeLessThan(1000);
+        }
+        expect(spent).toBe(SCHEDULED_TOOL_CALLS_PER_HOUR);
+    });
+
+    it('has nothing to key a scheduled budget on without a guild', async () => {
+        const config = resolveProviderConfig(SETTINGS);
+        await getCompletion({ ...config, prompt: 'hi' });
+        expect(providersMock.__complete.mock.calls[0][0].toolBudget).toBeNull();
     });
 
     it('carries it down the streaming path too', async () => {

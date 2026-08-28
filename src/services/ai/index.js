@@ -31,10 +31,15 @@ function resolveProviderConfig(aiSettings) {
     // getCompletion/streamCompletion can enforce them centrally, instead of
     // each call site remembering to ask. A caller only has to say *who* the
     // request is for (userId/channelId); the numbers come from here.
+    // The monthly ceilings ride in the same block for the same reason, and are
+    // the one limit here that also binds a call nobody sent: the scheduled
+    // digests and newspapers spend this guild's money too (#831).
     const rateLimit = {
         perUser: aiSettings.rateLimitPerUser ?? 0,
         perChannel: aiSettings.rateLimitPerChannel ?? 0,
-        windowMin: aiSettings.rateLimitWindowMin ?? 10
+        windowMin: aiSettings.rateLimitWindowMin ?? 10,
+        monthlyTokens: aiSettings.monthlyTokenLimit ?? 0,
+        monthlyCost: aiSettings.monthlyCostLimit ?? 0
     };
 
     return {

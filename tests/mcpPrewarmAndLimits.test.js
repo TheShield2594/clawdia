@@ -34,7 +34,7 @@ const {
     resetMcpCache,
     MAX_PARALLEL_PER_SERVER
 } = require('../src/services/ai/mcp/toolkit');
-const { toolCallBudget, TOOL_CALLS_PER_MESSAGE } = require('../src/services/ai/rateLimit');
+const { toolCallBudget, TOOL_CALLS_PER_MESSAGE, SCHEDULED_TOOL_CALLS_PER_HOUR } = require('../src/services/ai/rateLimit');
 
 const GITHUB = { name: 'github', url: 'https://api.githubcopilot.com/mcp/', enabled: true };
 const WIKI = { name: 'wiki', url: 'https://wiki.example.com/mcp', enabled: true };
@@ -175,11 +175,26 @@ describe('what a user costs across turns', () => {
         expect(there()).toBe(true);
     });
 
-    test('no configured limit and no user to attribute to are both unbounded', () => {
+    test('a guild that configured no limit is unbounded', () => {
         expect(toolCallBudget({ guildId: 'g1', userId: 'u1', rateLimit: { perUser: 0, windowMin: 10 } })).toBeNull();
-        // The scheduled digests and newspapers, which nobody asked for on demand.
-        expect(toolCallBudget({ guildId: 'g1', userId: null, rateLimit })).toBeNull();
         expect(toolCallBudget({ guildId: 'g1', userId: 'u1', rateLimit: null })).toBeNull();
+        // Nothing to key a per-guild scheduled budget on either.
+        expect(toolCallBudget({ userId: null, rateLimit })).toBeNull();
+    });
+
+    test('a call nobody sent is bounded per guild rather than not at all', () => {
+        // The scheduled digests and newspapers used to come back null here,
+        // which this toolkit reads as unbounded — so the one class of request
+        // that runs on a timer with nobody watching was the only one that could
+        // fan out without limit (#831).
+        const budget = toolCallBudget({ guildId: 'g-scheduled-1', userId: null, rateLimit });
+        expect(typeof budget).toBe('function');
+
+        for (let n = 0; n < SCHEDULED_TOOL_CALLS_PER_HOUR; n++) expect(budget()).toBe(true);
+        expect(budget()).toBe(false);
+
+        // And per guild, so one server's hourly job cannot spend another's.
+        expect(toolCallBudget({ guildId: 'g-scheduled-2', userId: null, rateLimit })()).toBe(true);
     });
 
     test('a call past the allowance is refused in words the model can answer around', async () => {

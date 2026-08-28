@@ -1006,6 +1006,26 @@ textarea.auto-resize {
 }
 .ai-usage-card-head h3 { font-size: 1rem; font-weight: 700; margin: 0; }
 .ai-usage-card-head .muted { font-size: .8rem; color: var(--text-mute); }
+/* Two fields side by side inside one .field row. The rows around it still
+   carry their grid inline; this is here because the row it styles is new, and
+   a new inline style is what tests/dashboardInlineAttributes.test.js exists to
+   stop accumulating. */
+.field-pair {
+    display: grid; grid-template-columns: 1fr 1fr; gap: .75rem;
+}
+/* What is left of the guild's monthly AI budget, when one is set (#831). */
+.ai-usage-budget-row { margin-top: .6rem; }
+.ai-usage-budget-head {
+    display: flex; justify-content: space-between; font-size: .8rem;
+}
+.ai-usage-budget-left { opacity: .75; }
+.ai-usage-budget-track {
+    height: 6px; border-radius: 3px; margin-top: .25rem; overflow: hidden;
+    background: rgba(127, 127, 127, .25);
+}
+.ai-usage-budget-fill { height: 100%; background: var(--accent, #7aa7ff); }
+.ai-usage-budget-fill.near { background: var(--warning, #e0a052); }
+.ai-usage-budget-fill.spent { background: var(--danger, #e05260); }
 .ai-usage-stats {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem;
     margin-bottom: 1rem;

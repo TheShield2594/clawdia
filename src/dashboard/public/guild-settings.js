@@ -989,6 +989,8 @@ async function saveSettings(section) {
             'ai.rateLimitPerUser': parseInt(document.getElementById('ai-rate-limit').value, 10),
             'ai.rateLimitPerChannel': parseInt(document.getElementById('ai-rate-channel').value, 10),
             'ai.rateLimitWindowMin': parseInt(document.getElementById('ai-rate-window').value, 10),
+            'ai.monthlyTokenLimit': parseInt(document.getElementById('ai-monthly-tokens').value, 10) || 0,
+            'ai.monthlyCostLimit': parseFloat(document.getElementById('ai-monthly-cost').value) || 0,
             'ai.actionsEnabled': document.getElementById('ai-actions-enabled').checked,
             // These live on the Connections tab but belong to the same ai
             // document, so they save with everything else rather than needing
@@ -3505,6 +3507,46 @@ function renderUsageBreakdown(byModel) {
             '<th style="text-align:right;">Est. cost</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table>';
 }
+// What is left of the monthly ceiling, when one is set.
+//
+// The same numbers enforcement reads — a panel that showed a different figure
+// from the one refusing people's messages would be worse than showing none.
+function renderUsageBudget(budget) {
+    const el = document.getElementById('ai-usage-budget');
+    if (!el) return;
+    if (!budget || (!budget.tokens && !budget.cost)) { el.innerHTML = ''; return; }
+
+    const bars = [];
+    if (budget.tokens) {
+        bars.push(budgetBar('Monthly tokens',
+            formatTokens(budget.tokens.used) + ' of ' + formatTokens(budget.tokens.limit),
+            formatTokens(budget.tokens.remaining) + ' left',
+            budget.tokens.used / budget.tokens.limit));
+    }
+    if (budget.cost) {
+        bars.push(budgetBar('Monthly cost',
+            '$' + budget.cost.used.toFixed(2) + ' of $' + budget.cost.limit.toFixed(2)
+                + (budget.cost.complete ? '' : ' (partial — some models have no pricing)'),
+            '$' + budget.cost.remaining.toFixed(2) + ' left',
+            budget.cost.used / budget.cost.limit));
+    }
+    el.innerHTML = bars.join('');
+}
+
+function budgetBar(label, usedStr, leftStr, ratio) {
+    const pct = Math.min(100, Math.max(0, ratio * 100));
+    const spent = pct >= 100;
+    const fill = 'ai-usage-budget-fill' + (spent ? ' spent' : pct >= 80 ? ' near' : '');
+    return '<div class="ai-usage-budget-row">' +
+        '<div class="ai-usage-budget-head">' +
+            '<span>' + escHtml(label) + ': ' + escHtml(usedStr) + '</span>' +
+            '<span class="ai-usage-budget-left">' + escHtml(spent ? 'budget reached' : leftStr) + '</span>' +
+        '</div>' +
+        '<div class="ai-usage-budget-track">' +
+            '<div class="' + fill + '" style="width:' + pct.toFixed(1) + '%"></div>' +
+        '</div></div>';
+}
+
 async function loadAiUsage() {
     const guildId = BOOT.guildId;
     const statusEl = document.getElementById('ai-usage-status');
@@ -3520,6 +3562,7 @@ async function loadAiUsage() {
         document.getElementById('ai-usage-month-cost').textContent = formatCost(data.month.cost, data.costKnown);
         renderSparkline(data.daily || []);
         renderUsageBreakdown(data.byModel || []);
+        renderUsageBudget(data.budget);
 
         const rl = data.rateLimit || {};
         const rlParts = [];
