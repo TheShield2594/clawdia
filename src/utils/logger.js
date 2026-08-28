@@ -74,6 +74,11 @@ function addContext(fields) {
     return true;
 }
 
+/**
+ * @param {unknown} raw the LOG_LEVEL value, as the environment gave it.
+ * @param {(msg: string) => void} [warn] where to report a value that was ignored.
+ * @returns {string} a level pino accepts.
+ */
 function resolveLevel(raw, warn = () => {}) {
     const value = String(raw ?? '').trim().toLowerCase();
     if (value === '') return DEFAULT_LEVEL;
@@ -84,6 +89,11 @@ function resolveLevel(raw, warn = () => {}) {
     return DEFAULT_LEVEL;
 }
 
+/**
+ * @param {unknown} raw the LOG_FORMAT value.
+ * @returns {'json'|'pretty'} explicit setting if it names one, else the default
+ *   for this NODE_ENV.
+ */
 function resolveFormat(raw) {
     const value = String(raw ?? '').trim().toLowerCase();
     if (value === 'json' || value === 'pretty') return value;
@@ -122,6 +132,12 @@ function prettyLine(record, colour = false) {
     return `${line}\n`;
 }
 
+/**
+ * @param {'json'|'pretty'} format
+ * @param {NodeJS.WritableStream} out
+ * @returns {object} what pino writes to: the stream itself for JSON, or a
+ *   renderer wrapping it for pretty.
+ */
 function createDestination(format, out) {
     if (format === 'json') return out;
     const colour = Boolean(out.isTTY) && !process.env.NO_COLOR;
@@ -139,6 +155,17 @@ function createDestination(format, out) {
     };
 }
 
+/**
+ * Build a logger. The module's own `logger` is one of these over stdout; tests
+ * make their own over a collector so they can assert on the records.
+ *
+ * @param {object} [options]
+ * @param {string} [options.level] overrides LOG_LEVEL.
+ * @param {string} [options.format] overrides LOG_FORMAT.
+ * @param {NodeJS.WritableStream} [options.out] where lines go.
+ * @param {(msg: string) => void} [options.warn] where a rejected LOG_LEVEL is reported.
+ * @returns {import('pino').Logger}
+ */
 function createLogger({
     level = process.env.LOG_LEVEL,
     format = process.env.LOG_FORMAT,
@@ -169,6 +196,11 @@ const TAG = /^\[([A-Za-z0-9 _/:.-]{1,32})\]\s*/;
 // is one of several.
 const SHARD_TAG = /^\[shard (\d+)\/(\d+)\]\s*/;
 
+/**
+ * @param {unknown[]} args
+ * @returns {{err: Error|null, rest: unknown[]}} the first Error, and everything
+ *   else in the order it was passed.
+ */
 function splitArgs(args) {
     // The first Error becomes `err`, so pino serializes its stack into a field
     // instead of `util.format` flattening it into the message text. The rest is
@@ -182,13 +214,65 @@ function splitArgs(args) {
     return { err, rest };
 }
 
+// Keys whose value is a credential, whatever the object around them is called.
+// Matched as a substring so `discordToken`, `X-Api-Key` and `sessionSecret` are
+// all caught alongside the bare names.
+const SECRET_KEY = /token|secret|password|passwd|api[-_]?key|apikey|authorization|cookie|credential/i;
+
+// Deep enough for the shapes that actually turn up (an axios error's
+// `config.headers`, a Mongo command document); past that the value is
+// truncated by `formatWithOptions` anyway.
+const SCRUB_DEPTH = 4;
+
+/**
+ * Replace credential-valued keys in a console argument with `[redacted]`,
+ * returning a copy — the original object belongs to the caller and is very
+ * often the live config or request that is about to be retried.
+ *
+ * pino's own `redact` covers `logger.x({ ... })` calls, but it only sees
+ * structured fields, and a bridged `console.error('[X] failed', err.config)`
+ * has been through `util.format` into a message string long before pino is
+ * handed it. Scrubbing the argument first is what makes the two paths agree,
+ * and it works at any nesting depth rather than needing a redact path
+ * enumerated per shape.
+ *
+ * @param {unknown} value
+ * @param {number} [depth] recursion budget remaining.
+ * @param {WeakSet} [seen] guards the cycles that `util.format` prints as
+ *   `[Circular]` and a naive walk would follow forever.
+ * @returns {unknown} the value, or a scrubbed copy of it.
+ */
+function scrubSecrets(value, depth = SCRUB_DEPTH, seen = new WeakSet()) {
+    if (value === null || typeof value !== 'object' || depth <= 0) return value;
+    // An Error's own enumerable properties can carry a request config; the
+    // stack is handled separately, so leave the instance itself alone rather
+    // than copying it into a plain object and losing that.
+    if (value instanceof Error) return value;
+    if (seen.has(value)) return value;
+    seen.add(value);
+
+    if (Array.isArray(value)) return value.map(v => scrubSecrets(v, depth - 1, seen));
+
+    const out = {};
+    for (const [key, v] of Object.entries(value)) {
+        out[key] = SECRET_KEY.test(key) ? '[redacted]' : scrubSecrets(v, depth - 1, seen);
+    }
+    return out;
+}
+
 /**
  * Turn a `console.*` argument list into the `(fields, message)` pair pino
  * takes. Exported so tests can pin the parsing without capturing output.
+ *
+ * @param {unknown[]} args exactly what was passed to `console.*`.
+ * @returns {{fields: object, msg: string}}
  */
 function toRecord(args) {
     const { err, rest } = splitArgs(args);
-    let msg = rest.length ? formatWithOptions({ colors: false, depth: 4 }, ...rest) : '';
+    // The format string itself is never an object, so scrubbing the whole list
+    // cannot disturb the specifiers in it.
+    const safe = rest.map(arg => scrubSecrets(arg));
+    let msg = safe.length ? formatWithOptions({ colors: false, depth: 4 }, ...safe) : '';
 
     let shard;
     const shardMatch = SHARD_TAG.exec(msg);
@@ -219,6 +303,12 @@ function toRecord(args) {
  * Returns a function that puts the originals back, which is what tests use.
  * Idempotent: installing twice does not stack two bridges, and the restore
  * still returns the real console.
+ */
+/**
+ * @param {object} [options]
+ * @param {object} [options.target] the console to replace; defaults to the real one.
+ * @param {import('pino').Logger} [options.log] where the calls are routed.
+ * @returns {() => void} restores the original methods.
  */
 function installConsoleBridge({ target = console, log = logger } = {}) {
     if (target.__clawdiaConsoleBridge) return target.__clawdiaConsoleBridge;
@@ -254,6 +344,7 @@ module.exports = {
     // Exported for the tests that pin the parsing, the rendering and the
     // environment handling.
     toRecord,
+    scrubSecrets,
     prettyLine,
     resolveLevel,
     resolveFormat,

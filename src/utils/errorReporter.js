@@ -25,16 +25,78 @@ const DISCORD_WEBHOOK = /^https:\/\/(?:\w+\.)?discord(?:app)?\.com\/api\/(?:v\d+
 // be cut somewhere; short enough to leave room for the frame around it.
 const DISCORD_LIMIT = 1800;
 
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * Parse and vet the configured sink.
+ *
+ * The report carries a stack trace and whatever failure context the caller
+ * attached, so where it goes and how it gets there both matter: over cleartext
+ * it is readable on the wire, and a sink that answers 3xx could otherwise walk
+ * the report to a host the operator never configured.
+ *
+ * https is always allowed. Plain http is allowed only to loopback, which is the
+ * legitimate case — a collector sidecar on the same host — and is the one place
+ * cleartext costs nothing. Anything else is refused rather than downgraded.
+ *
+ * @param {string} raw the ERROR_WEBHOOK_URL value.
+ * @returns {URL|null} the parsed URL, or null if it must not be used.
+ */
+function parseSink(raw) {
+    let url;
+    try {
+        url = new URL(raw);
+    } catch {
+        return null;
+    }
+    if (url.protocol === 'https:') return url;
+    if (url.protocol === 'http:' && LOOPBACK.has(url.hostname)) return url;
+    return null;
+}
+
+// Refusing a misconfigured sink silently would leave an operator believing
+// crashes were being reported. Said once per process, not once per crash.
+let warnedAboutSink = false;
+/**
+ * @param {string} raw the rejected value, used only for its scheme.
+ */
+function warnOnce(raw) {
+    if (warnedAboutSink) return;
+    warnedAboutSink = true;
+    // Deliberately does not echo the URL — it is a credential.
+    console.warn(
+        `[ERRORS] Ignoring ERROR_WEBHOOK_URL: expected an https:// URL (or http:// to loopback), got ${
+            raw.split(':')[0] || 'an unparseable value'
+        }://… — crash reports are NOT being sent.`
+    );
+}
+
+/**
+ * @returns {number} the wait budget for one report, in milliseconds — the
+ *   ERROR_REPORT_TIMEOUT_MS override when it is a positive number, else 2000.
+ */
 function timeoutMs() {
     const raw = Number(process.env.ERROR_REPORT_TIMEOUT_MS);
     return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
 }
 
-/** Whether anything is configured. Callers use this to decide to wait at all. */
+/**
+ * Whether a usable sink is configured. Callers use this to decide whether to
+ * wait before exiting at all — a URL that will be refused must not buy the
+ * crash path an extra two seconds.
+ */
 function isConfigured() {
-    return Boolean(String(process.env.ERROR_WEBHOOK_URL || '').trim());
+    const raw = String(process.env.ERROR_WEBHOOK_URL || '').trim();
+    return raw !== '' && parseSink(raw) !== null;
 }
 
+/**
+ * Reduce a thrown value to something JSON-serializable.
+ *
+ * @param {unknown} error anything at all — an unhandled rejection can carry a
+ *   string, or nothing.
+ * @returns {{name: string, message: string, stack: string|null}}
+ */
 function describe(error) {
     if (error instanceof Error) {
         return { name: error.name, message: error.message, stack: error.stack || null };
@@ -44,6 +106,13 @@ function describe(error) {
     return { name: typeof error, message: String(error), stack: null };
 }
 
+/**
+ * Shape the event for the sink it is going to.
+ *
+ * @param {string} url the destination, which is what decides the shape.
+ * @param {object} event the flat crash event.
+ * @returns {object} a Discord message for a Discord webhook, else `event` itself.
+ */
 function buildBody(url, event) {
     if (!DISCORD_WEBHOOK.test(url)) return event;
     const stack = event.error.stack || event.error.message;
@@ -62,8 +131,14 @@ function buildBody(url, event) {
  * @returns {Promise<boolean>} whether the sink accepted it.
  */
 async function reportError(kind, error, extra = {}) {
-    const url = String(process.env.ERROR_WEBHOOK_URL || '').trim();
-    if (!url) return false;
+    const raw = String(process.env.ERROR_WEBHOOK_URL || '').trim();
+    if (!raw) return false;
+
+    const url = parseSink(raw);
+    if (!url) {
+        warnOnce(raw);
+        return false;
+    }
 
     const event = {
         kind,
@@ -79,7 +154,10 @@ async function reportError(kind, error, extra = {}) {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(buildBody(url, event)),
+            body: JSON.stringify(buildBody(url.href, event)),
+            // A 3xx would otherwise carry the stack trace to whatever host the
+            // Location header names. The report is not worth following one for.
+            redirect: 'error',
             // Bounds the wait rather than the delivery: the exit below happens
             // either way, and a sink that is itself down is the likeliest thing
             // to be down at the same moment as the bot.
@@ -123,4 +201,4 @@ function reportAndExit(kind, error, { code = 1, exit = c => process.exit(c), ext
     );
 }
 
-module.exports = { reportError, reportAndExit, isConfigured, describe, buildBody };
+module.exports = { reportError, reportAndExit, isConfigured, describe, buildBody, parseSink };

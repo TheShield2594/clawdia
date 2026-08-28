@@ -174,7 +174,7 @@ the files a change already touches.
 - `IMGFLIP_USERNAME` / `IMGFLIP_PASSWORD` - (Optional) Imgflip credentials for `/meme` command
 - `LOG_LEVEL` - (Optional) `trace`, `debug`, `info` (default), `warn`, `error`, `fatal` or `silent`. See [Logging](#logging)
 - `LOG_FORMAT` - (Optional) `json` or `pretty`. Defaults to `json` when `NODE_ENV=production`, `pretty` otherwise
-- `ERROR_WEBHOOK_URL` - (Optional) Where to send an uncaught exception or unhandled rejection, on top of logging it. A Discord webhook URL is recognised and formatted for Discord; anything else receives a flat JSON event. Unset, nothing is sent and the crash path behaves exactly as before
+- `ERROR_WEBHOOK_URL` - (Optional) Where to send an uncaught exception or unhandled rejection, on top of logging it. Must be `https://`, or `http://` to loopback. A Discord webhook URL is recognised and formatted for Discord; anything else receives a flat JSON event. Unset, nothing is sent and the crash path behaves exactly as before
 - `ERROR_REPORT_TIMEOUT_MS` - (Optional) How long the process waits for that POST before exiting anyway (default 2000)
 - `DEPLOY_COMMANDS` - (Optional) `auto` (default — publish the slash commands at startup, but only when the set changed), `always`, or `never`
 - `MIGRATION_TIMEOUT_MS` - (Optional) Per-migration wall-clock budget in milliseconds (default 30000)
@@ -535,6 +535,12 @@ webhook (recognised and formatted as a Discord message) or to any endpoint that
 accepts a JSON POST, and the process reports the crash before it goes. It waits
 at most `ERROR_REPORT_TIMEOUT_MS` (2000) for that and exits either way; unset,
 the exit is synchronous and nothing is sent.
+
+The report carries a stack trace, so the URL must be `https://` — or `http://`
+to loopback, for a collector on the same host, where there is no wire to read.
+Anything else is refused with a warning rather than sent in cleartext, and a
+redirect is never followed, so a `3xx` cannot walk the report to a host you did
+not configure.
 
 ## Monitoring
 
