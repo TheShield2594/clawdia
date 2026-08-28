@@ -169,6 +169,83 @@ describe('the DM campaign reading HP back out of the story', () => {
     });
 });
 
+// #821: the roles the campaign history goes to the model with.
+//
+// The storyLog is a flat array of strings — the opening scene, then a player
+// entry and a narration per action — and the role of each entry used to be its
+// index's parity, on the assumption that index 0 was still the opening scene.
+// The same write that appends the pair trims the log with `$slice: -20`, and a
+// log that grows 1, 3, 5, … entries first overflows at 21: exactly one entry is
+// dropped and every index shifts by one, permanently. From the 11th action on,
+// the model was handed the player's actions as its own words and its own
+// narration as the player's.
+describe('the DM campaign history roles', () => {
+    const PLAYER = { userId: 'u1', name: 'Aric', characterClass: 'Warrior', hp: 120, inventory: ['Longsword'] };
+
+    function interaction() {
+        return {
+            user: { id: 'u1' },
+            guild: { id: 'g1' },
+            channel: { id: 'c1', send: jest.fn(async () => ({ id: 'm1' })), messages: { fetch: jest.fn() } },
+            channelId: 'c1',
+            options: { getString: () => 'push on' },
+            deferReply: jest.fn(async () => {}),
+            editReply: jest.fn(async payload => payload),
+            reply: jest.fn(async payload => payload),
+        };
+    }
+
+    // The history the model was handed for this action.
+    async function historyFor(storyLog) {
+        const doc = { sessionId: 'g1:c1', guildId: 'g1', channelId: 'c1', hostId: 'u1', players: [PLAYER], storyLog, active: true };
+        DmSession.findOne.mockResolvedValue(doc);
+        DmSession.findOneAndUpdate.mockResolvedValue(doc);
+        mockGetCompletion.mockResolvedValue('The corridor narrows.');
+
+        await takeAction(interaction());
+        return mockGetCompletion.mock.calls.at(-1)[0].history;
+    }
+
+    // An untrimmed log: the opening scene, then (player, narration) pairs.
+    const untrimmed = actions => [
+        'The gate stands open.',
+        ...Array.from({ length: actions }, (_, i) => [`Aric: action ${i}`, `Narration ${i}`]).flat(),
+    ];
+
+    test('the narration the player is answering is the assistant, the action is the user', async () => {
+        const history = await historyFor(untrimmed(2));
+
+        expect(history.map(m => m.role)).toEqual(['assistant', 'user', 'assistant', 'user', 'assistant']);
+        expect(history.at(-1)).toEqual({ role: 'assistant', content: 'Narration 1' });
+        expect(history.at(-2)).toEqual({ role: 'user', content: 'Aric: action 1' });
+    });
+
+    // The state the trim leaves behind: the opening scene is gone, so the log
+    // now *starts* with a player entry and every forward index is off by one.
+    test('and still does once the trim has dropped the opening scene', async () => {
+        const history = await historyFor(untrimmed(10).slice(1));
+
+        for (const entry of history) {
+            expect(entry.role).toBe(entry.content.startsWith('Aric:') ? 'user' : 'assistant');
+        }
+        expect(history.map(m => m.role)).toContain('user');
+    });
+
+    // Every log the campaign can be in, at the depth the model actually sees.
+    test('no length of log ever inverts them', async () => {
+        for (let actions = 0; actions <= 12; actions++) {
+            const full = untrimmed(actions);
+            // What Mongo would hold after `$slice: -20` on each write.
+            const stored = full.slice(-20);
+            const history = await historyFor(stored);
+
+            for (const entry of history) {
+                expect(entry.role).toBe(entry.content.startsWith('Aric:') ? 'user' : 'assistant');
+            }
+        }
+    });
+});
+
 describe('the newspaper when the model does not deliver', () => {
     const guildDoc = (overrides = {}) => ({
         guildId: 'g1',

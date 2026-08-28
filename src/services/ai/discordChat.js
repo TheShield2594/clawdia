@@ -140,7 +140,16 @@ function chunkText(text, size = DISCORD_MAX_LEN) {
     return chunks;
 }
 
-async function handleAIChat(message, aiSettings) {
+/**
+ * `promptContent` is the message text with the bot's own mention tokens already
+ * removed (src/events/messageCreate.js). Everything here that reads what the
+ * user actually said — the `!reset` match, knowledge retrieval, the prompt sent
+ * to the provider, the history entry — reads it rather than `message.content`,
+ * which on a mention-triggered message still carries the raw `<@id>` token
+ * (#820). Callers that have no stripped form to hand fall back to the raw
+ * content, which is the right answer for the reply-to-bot trigger.
+ */
+async function handleAIChat(message, aiSettings, promptContent) {
     const { provider, model, temperature, maxTokens, apiKey, baseUrl, mcpServers, mcpConfirm, mcpRoute, rateLimit } = resolveProviderConfig(aiSettings);
     const providerDef = providers.get(provider);
     const providerLabel = providerDef?.label || provider;
@@ -154,10 +163,17 @@ async function handleAIChat(message, aiSettings) {
         return reply(message, modelError);
     }
 
-    const content = message.content.trim();
+    const content = (promptContent ?? message.content).trim();
     if (content.toLowerCase() === '!reset') {
         await clearHistory(message.guild.id, message.channel.id, message.author.id);
         return reply(message, 'Conversation history cleared.');
+    }
+
+    // A bare `@Clawdia` is all mention and no question. Before the token was
+    // stripped this reached the provider as the literal `<@id>`; now it would
+    // reach it as an empty prompt, which some providers reject outright.
+    if (!content) {
+        return reply(message, 'You mentioned me but did not ask anything — what can I help with?');
     }
 
     // A peek, not a consuming check: the slot is spent inside getCompletion /

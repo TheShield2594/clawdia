@@ -7,6 +7,7 @@ const AiItem  = require('../../models/AiItem');
 const { resolveProviderConfig, getCompletion } = require('../../services/aiService');
 const { grantInventoryItem } = require('../../utils/inventoryGrant');
 const { requestModelJson } = require('../../utils/modelJson');
+const cooldownStore = require('../../utils/commandCooldowns');
 
 const RARITY_CONFIG = {
     common:    { label: 'Common',    emoji: '⚪', color: 0xAAAAAA, cost: 500,   xpReward: 25  },
@@ -25,6 +26,48 @@ const COOLDOWNS_MS = {
     mythic:    6 * 60 * 60 * 1000,   // 6h
     legendary: 24 * 60 * 60 * 1000,  // 24h
 };
+
+// A single pictographic grapheme: one base emoji, its skin-tone and
+// presentation modifiers, and any ZWJ-joined parts. The model is *asked* for
+// one emoji and will hand back whatever it likes — a word, a sentence, a
+// `<:name:id>` token it invented — and clamping that to eight characters only
+// ever bounded how much of it landed in the embed. This is the check that was
+// missing; anything failing it falls back to the rarity's own emoji (#829).
+const SINGLE_EMOJI = /^\p{Extended_Pictographic}(?:[\u{1F3FB}-\u{1F3FF}]|\uFE0F|\u20E3)*(?:\u200D\p{Extended_Pictographic}(?:[\u{1F3FB}-\u{1F3FF}]|\uFE0F|\u20E3)*)*$/u;
+
+function pickEmoji(raw, fallback) {
+    const candidate = String(raw ?? '').trim();
+    return SINGLE_EMOJI.test(candidate) ? candidate : fallback;
+}
+
+/**
+ * Put the forge's cost back, and say whether it actually went back.
+ *
+ * Both failure paths below tell the user their coins have been returned, so
+ * both have to know whether that is true. The AI-failure path already checked;
+ * the persistence-failure path swallowed the refund's own error and promised a
+ * refund regardless, which is how a user could pay 25,000 coins for nothing and
+ * be told otherwise (#829). One helper, so the two cannot drift apart again.
+ *
+ * The claimed cooldown window goes back with the coins: a forge that produced
+ * no item should not lock its rarity for the next day either.
+ */
+async function refundForge(interaction, cost, cooldownScope, context) {
+    const refunded = await User.updateOne(
+        { userId: interaction.user.id, guildId: interaction.guild.id },
+        { $inc: { balance: cost } },
+    ).then(res => res.modifiedCount > 0)
+     .catch(err => { console.error(`[FORGE] Refund failed after ${context}:`, err); return false; });
+
+    if (cooldownScope) {
+        await cooldownStore.release(interaction.client, cooldownScope).catch(err =>
+            console.error('[FORGE] Cooldown release failed:', err));
+    }
+
+    return refunded;
+}
+
+const REFUND_FAILED = 'The refund failed to process — please contact a server admin, your coins were not returned automatically.';
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -66,26 +109,34 @@ module.exports = {
             });
         }
 
-        // Cooldown check per rarity (only for rare+)
+        // Cooldown per rarity (only for rare+). Taken, not just read: the old
+        // check asked the most recent AiItem how long ago the last forge was and
+        // then acted on the answer, and two `/forge legendary` calls a moment
+        // apart both read "long enough" before either had written an item (#829).
+        // utils/commandCooldowns takes the window in the same operation that
+        // checks it — the same store and the same lock the dispatcher uses. It
+        // is a different record of the same thing, so the deploy that moves to
+        // it hands back whatever windows were open at the time, once.
         const cooldownMs = COOLDOWNS_MS[rarityKey] ?? 0;
-        if (cooldownMs > 0) {
-            const lastForge = await AiItem.findOne({
-                createdBy: interaction.user.id,
+        const cooldownScope = cooldownMs > 0
+            ? {
+                bucket: `forge:${rarityKey}`,
+                userId: interaction.user.id,
                 guildId: interaction.guild.id,
-                rarity: cfg.label,
-            }).sort({ createdAt: -1 }).lean();
+                cooldownMs,
+            }
+            : null;
 
-            if (lastForge) {
-                const elapsed = Date.now() - new Date(lastForge.createdAt).getTime();
-                if (elapsed < cooldownMs) {
-                    const remaining = cooldownMs - elapsed;
-                    const h = Math.floor(remaining / 3_600_000);
-                    const m = Math.floor((remaining % 3_600_000) / 60_000);
-                    const timeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
-                    return interaction.editReply({
-                        content: `The ${cfg.emoji} ${cfg.label} forge is cooling down. Try again in **${timeStr}**.`,
-                    });
-                }
+        if (cooldownScope) {
+            const expiry = await cooldownStore.claimIfAvailable(interaction.client, cooldownScope);
+            if (expiry) {
+                const remaining = expiry - Date.now();
+                const h = Math.floor(remaining / 3_600_000);
+                const m = Math.floor((remaining % 3_600_000) / 60_000);
+                const timeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+                return interaction.editReply({
+                    content: `The ${cfg.emoji} ${cfg.label} forge is cooling down. Try again in **${timeStr}**.`,
+                });
             }
         }
 
@@ -96,6 +147,13 @@ module.exports = {
             { new: true }
         );
         if (!chargedUser) {
+            // The window was claimed a moment ago and nothing was forged with
+            // it, so it goes straight back — a user who could not afford the
+            // item must not be locked out of the rarity for a day over it.
+            if (cooldownScope) {
+                await cooldownStore.release(interaction.client, cooldownScope).catch(err =>
+                    console.error('[FORGE] Cooldown release failed:', err));
+            }
             const currency = guildSettings?.economy?.currency ?? '💰';
             return interaction.editReply({
                 content: `You need **${currency}${cfg.cost.toLocaleString()}** to forge a ${cfg.emoji} ${cfg.label} item. Your balance: **${currency}${(user?.balance ?? 0).toLocaleString()}**`,
@@ -146,24 +204,20 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
             // decides what the message says. A swallowed write error used to
             // leave the user told they had been refunded when they had not,
             // with nothing but the log to say otherwise.
-            const refunded = await User.updateOne(
-                { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: cfg.cost } }
-            ).then(res => res.modifiedCount > 0)
-             .catch(refundErr => { console.error('[FORGE] Refund failed after AI failure:', refundErr); return false; });
+            const refunded = await refundForge(interaction, cfg.cost, cooldownScope, 'AI failure');
             const failure = err?.rateLimited
                 ? `This server's AI limit has been reached (${err.limit} per ${err.windowMin}m).`
                 : 'The forge misfired!';
             return interaction.editReply({
                 content: refunded
                     ? `${failure} Your coins have been refunded. Try again in a moment.`
-                    : `${failure} The refund failed to process — please contact a server admin, your coins were not returned automatically.`,
+                    : `${failure} ${REFUND_FAILED}`,
             });
         }
 
         // Sanitize
         const name        = String(parsed.name        || 'Mysterious Relic').slice(0, 60);
-        const emoji       = String(parsed.emoji       || cfg.emoji).slice(0, 8);
+        const emoji       = pickEmoji(parsed.emoji, cfg.emoji);
         const description = String(parsed.description || '').slice(0, 200);
         const lore        = String(parsed.lore        || '').slice(0, 300);
 
@@ -186,11 +240,12 @@ Respond with ONLY the JSON object. No markdown, no extra text.`;
             if (!granted) throw new Error('user document not found');
         } catch (err) {
             console.error('[FORGE] Persistence failed:', err?.message || err);
-            await User.updateOne(
-                { userId: interaction.user.id, guildId: interaction.guild.id },
-                { $inc: { balance: cfg.cost } }
-            ).catch(() => {});
-            return interaction.editReply({ content: 'The forge failed to save your item! Your coins have been refunded. Try again in a moment.' });
+            const refunded = await refundForge(interaction, cfg.cost, cooldownScope, 'persistence failure');
+            return interaction.editReply({
+                content: refunded
+                    ? 'The forge failed to save your item! Your coins have been refunded. Try again in a moment.'
+                    : `The forge failed to save your item! ${REFUND_FAILED}`,
+            });
         }
 
         const embed = new EmbedBuilder()
