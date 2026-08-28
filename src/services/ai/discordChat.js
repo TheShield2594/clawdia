@@ -375,6 +375,23 @@ async function handleAIChat(message, aiSettings, promptContent) {
                 + `${report.historyDropped} history message(s)${report.promptTruncated ? ', message truncated' : ''}).`);
         }
 
+        // Everything trimmable is gone and it still does not fit. What is left
+        // is what nobody here may drop — the system prompt and the tool rules —
+        // plus the fixed costs: the pinned memories, the rolling summary, the
+        // images. Sending it anyway is a request that has already failed: a 400
+        // from the hosted APIs, or Ollama quietly cutting the instructions and
+        // answering as somebody else. So it is refused here, where the refusal
+        // can name the knob to turn, rather than spent for a reply nobody can
+        // use.
+        if (!report.fits) {
+            console.warn(`[AI:${provider}] ~${report.estimatedAfter} tokens will not fit ${model}'s `
+                + `${report.budget}-token budget with nothing left to trim (~${report.fixedTokens} of it fixed).`);
+            return reply(message, `That does not fit in ${providerLabel}'s context window for \`${model}\``
+                + `${vision.images.length ? ' along with the attached image(s)' : ''}. `
+                + 'Try sending fewer images, clearing saved context with `/ai memories`, or ask an admin to '
+                + 'shorten the system prompt or raise the model context window in the dashboard.');
+        }
+
         const usageOut = {};
         // Collects what the MCP tools did across every round of this turn, so
         // the reply can say what the bot is waiting on while it waits, and what

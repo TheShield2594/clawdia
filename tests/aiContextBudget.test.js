@@ -70,9 +70,25 @@ describe('the input budget', () => {
             .toBe(inputBudget({ provider: 'ollama', model: 'x' }));
     });
 
+    // `ai.maxTokens` and `ai.contextTokens` are separate settings validated
+    // apart, so a guild can ask for a reply as large as the whole window. What
+    // must never come back is a budget the window cannot hold: a limit that
+    // permits more than the model has is not a limit.
+    test('never returns more than the window has room for', () => {
+        for (const [contextTokens, maxTokens] of [[1024, 1024], [1024, 8192], [8192, 999_999], [1024, 32]]) {
+            const budget = inputBudget({ provider: 'ollama', model: 'llama3.2', contextTokens, maxTokens });
+
+            expect(budget).toBeGreaterThan(0);
+            expect(budget).toBeLessThanOrEqual(contextTokens);
+            // And room is still kept for a reply: the reservation is capped at
+            // half the window, so the budget can never take more than the rest.
+            expect(budget).toBeLessThanOrEqual(contextTokens - Math.min(maxTokens, contextTokens / 2));
+        }
+    });
+
     test('never returns nothing, however large the reply budget', () => {
         expect(inputBudget({ provider: 'ollama', model: 'llama3.2', maxTokens: 999_999 }))
-            .toBe(MIN_INPUT_TOKENS);
+            .toBeGreaterThanOrEqual(MIN_INPUT_TOKENS);
     });
 });
 
@@ -234,6 +250,52 @@ describe('the message itself', () => {
 
         expect(fitted.report.promptTruncated).toBe(false);
         expect(fitted.prompt).toBe('a short question');
+    });
+});
+
+describe('a request that cannot be made at all', () => {
+    // Everything droppable is gone and it still does not fit. Only the fixed
+    // costs and the sections nothing may drop can get it there.
+    test('says so rather than handing back an oversized prompt', () => {
+        const fitted = fitPrompt({
+            historyPrefix: [{ role: 'user', content: chars(8000) }],
+            prompt: 'hi',
+            budget: 500
+        });
+
+        expect(fitted.report.fits).toBe(false);
+        expect(fitted.report.fixedTokens).toBeGreaterThan(500);
+    });
+
+    test('images alone can be what does it', () => {
+        const fitted = fitPrompt({ prompt: 'hi', images: 3, budget: 1000 });
+
+        expect(fitted.report.fits).toBe(false);
+    });
+
+    test('a required section too large for the window is not sendable either', () => {
+        const fitted = fitPrompt({
+            sections: [{ id: 'base', text: chars(8000), required: true }],
+            prompt: 'hi',
+            budget: 500
+        });
+
+        expect(fitted.report.fits).toBe(false);
+    });
+
+    test('and an ordinary turn is sendable', () => {
+        expect(fitPrompt({ prompt: 'a short question', budget: 10_000 }).report.fits).toBe(true);
+    });
+
+    // The marker is part of what gets sent. Appending it after slicing to the
+    // full budget put the result back over the line it had just been cut to.
+    test('a truncated message ends up inside the budget, marker included', () => {
+        const fitted = fitPrompt({ prompt: chars(40_000), budget: 600 });
+
+        expect(fitted.report.promptTruncated).toBe(true);
+        expect(fitted.report.estimatedAfter).toBeLessThanOrEqual(600);
+        expect(fitted.report.fits).toBe(true);
+        expect(estimateTokens(fitted.prompt)).toBeLessThanOrEqual(600);
     });
 });
 

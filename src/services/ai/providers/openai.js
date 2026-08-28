@@ -64,14 +64,25 @@ function userContent(prompt, images) {
     ];
 }
 
-function buildMessages({ systemPrompt, history, prompt, images, model }) {
+/**
+ * Whether images may ride on this request.
+ *
+ * The model name decides, and this module is the one that knows what OpenAI's
+ * names mean — so a caller cannot send an image to a model that would refuse
+ * it. `visionCapable` is the exception, and it is not a caller overriding the
+ * check: OpenRouter routes another vendor's model through this same request
+ * path, and `anthropic/claude-…` is a name only that provider can judge. Where
+ * it is given, it is the answer from whoever owns the id.
+ */
+function canSee({ model, visionCapable }) {
+    return visionCapable ?? supportsVision(model);
+}
+
+function buildMessages({ systemPrompt, history, prompt, images, model, visionCapable }) {
     return [
         { role: 'system', content: systemPrompt },
         ...history,
-        // Filtered here rather than trusted from the caller: this is the one
-        // place that knows which OpenAI models can see, so a caller cannot send
-        // an image to a model that will refuse it.
-        { role: 'user', content: userContent(prompt, supportsVision(model) ? images : null) }
+        { role: 'user', content: userContent(prompt, canSee({ model, visionCapable }) ? images : null) }
     ];
 }
 
@@ -166,11 +177,11 @@ async function runToolCalls({ toolkit, messages, calls, content }) {
     });
 }
 
-async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+async function* stream({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, usageOut, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
-    const messages = buildMessages({ systemPrompt, history, prompt, images, model });
+    const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;
@@ -225,11 +236,11 @@ async function* stream({ apiKey, model, systemPrompt, history, prompt, images, t
     if (usageOut && sawUsage) usageOut.usage = totals;
 }
 
-async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
+async function complete({ apiKey, model, systemPrompt, history, prompt, images, temperature, maxTokens, visionCapable, baseURL, defaultHeaders, useMcp = true, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs }) {
     const toolkit = await toolkitFor({ useMcp, mcpServers, onToolEvent, mcpConfirm, confirmTool, toolBudget, botTools, maxRounds, turnBudgetMs });
     const rounds = roundsFor(toolkit);
     const client = new OpenAI({ apiKey, baseURL, defaultHeaders });
-    const messages = buildMessages({ systemPrompt, history, prompt, images, model });
+    const messages = buildMessages({ systemPrompt, history, prompt, images, model, visionCapable });
 
     const totals = { inputTokens: 0, outputTokens: 0 };
     let sawUsage = false;

@@ -41,6 +41,7 @@ const openai = require('../src/services/ai/providers/openai');
 const anthropic = require('../src/services/ai/providers/anthropic');
 const gemini = require('../src/services/ai/providers/gemini');
 const ollama = require('../src/services/ai/providers/ollama');
+const openrouter = require('../src/services/ai/providers/openrouter');
 
 const IMAGE = { mimeType: 'image/png', base64: 'QUJD', name: 'shot.png', url: 'https://cdn.discordapp.com/x.png' };
 
@@ -118,6 +119,39 @@ describe('Gemini', () => {
         });
 
         expect(mockGeminiSend.mock.calls[0][0].message).toBe("what's wrong with this?");
+    });
+});
+
+// OpenRouter routes another vendor's model through the OpenAI request path, so
+// the two have to agree about whether the image goes. They did not: OpenRouter
+// accepted `openai/gpt-4o-mini`, and the OpenAI adapter matched that id against
+// its own model list, failed, and dropped the image — leaving the user a
+// confident answer about a picture nothing had been shown.
+describe('OpenRouter', () => {
+    test('a routed OpenAI model keeps its image', async () => {
+        await openrouter.complete({ ...baseReq, model: 'openai/gpt-4o-mini' });
+
+        const content = mockOpenAiCreate.mock.calls[0][0].messages.at(-1).content;
+        expect(content[1]).toEqual({ type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } });
+    });
+
+    // The id the OpenAI adapter could never judge for itself.
+    test('and so does a routed model from another vendor entirely', async () => {
+        await openrouter.complete({ ...baseReq, model: 'anthropic/claude-haiku-4-5' });
+
+        expect(mockOpenAiCreate.mock.calls[0][0].messages.at(-1).content).toHaveLength(2);
+    });
+
+    test('a routed model with no vision is still sent the plain string', async () => {
+        await openrouter.complete({ ...baseReq, model: 'meta-llama/llama-3.1-8b-instruct' });
+
+        expect(mockOpenAiCreate.mock.calls[0][0].messages.at(-1).content).toBe("what's wrong with this?");
+    });
+
+    test('the model id itself is untouched — only the capability travels', async () => {
+        await openrouter.complete({ ...baseReq, model: 'openai/gpt-4o-mini' });
+
+        expect(mockOpenAiCreate.mock.calls[0][0].model).toBe('openai/gpt-4o-mini');
     });
 });
 

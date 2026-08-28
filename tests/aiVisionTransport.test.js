@@ -199,6 +199,33 @@ describe('the assembled prompt', () => {
     });
 });
 
+describe('a turn that cannot be made to fit', () => {
+    // Nothing left to trim and still over: sending it is a request that has
+    // already failed — a 400, or Ollama cutting the instructions and answering
+    // as somebody else.
+    test('is refused in the channel instead of spent at the provider', async () => {
+        mockProviderConfig.contextTokens = 1024;
+        mockProviderConfig.maxTokens = 512;
+        require('../src/models/User').findOne.mockReturnValueOnce({
+            lean: async () => ({ pinnedMemories: [{ content: 'z'.repeat(20_000) }] })
+        });
+
+        const message = chatMessage('and now?');
+        await handleAIChat(message, settings);
+
+        expect(mockStream).not.toHaveBeenCalled();
+        const said = message.reply.mock.calls[0][0].content;
+        expect(said).toContain('context window');
+        expect(said).toContain('/ai memories');
+    });
+
+    test('and an ordinary turn is still sent', async () => {
+        await handleAIChat(chatMessage('and now?'), settings);
+
+        expect(mockStream).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('the sources footer', () => {
     const entry = (title, content = 'body') => ({ _id: title, title, content });
 

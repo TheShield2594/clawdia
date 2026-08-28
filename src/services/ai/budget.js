@@ -52,6 +52,10 @@ const MIN_INPUT_TOKENS = 512;
 // this leaves the budget with slack, which is the safe direction.
 const IMAGE_TOKENS = 1500;
 
+// Left on a message the budget had to cut. Counted against the room the message
+// is given rather than appended once it has been spent.
+const TRUNCATION_MARKER = '\n[message truncated to fit the model\'s context]';
+
 // Model context windows, longest-match-first per provider. Unknown models fall
 // to the provider's default, which is the smallest window that provider still
 // ships — guessing small costs some knowledge, guessing large costs the reply.
@@ -116,9 +120,20 @@ function contextWindow(provider, model) {
  * than assumed to be free — the failure this prevents is a prompt that fits
  * exactly and leaves the model no room to answer.
  *
- * `contextTokens` is the guild's own number (`ai.contextTokens`), for the
- * operator who knows what their Ollama is loaded with. Clamped, because it is
- * a settings field and a settings field is somebody's input.
+ * `ai.maxTokens` and `ai.contextTokens` are separate settings validated apart,
+ * so nothing stops a guild asking for a 1024-token reply out of a 1024-token
+ * window. Subtracting one from the other there leaves nothing, and the floor
+ * below would then hand back a budget the window cannot hold — a limit that
+ * permits more than the model has. So the reply's *reservation* is capped at
+ * half the window, and the returned budget can never exceed what is left after
+ * it: the numbers this hands out always fit, whatever the settings say. The
+ * request itself will still fail at the provider, which is the right place for
+ * an impossible configuration to be refused; what it must not do is fail
+ * because this said the prompt would fit.
+ *
+ * `contextTokens` is the guild's own number, for the operator who knows what
+ * their Ollama is loaded with. Clamped, because it is a settings field and a
+ * settings field is somebody's input.
  */
 function inputBudget({ provider, model, maxTokens = 1024, contextTokens = null }) {
     const configured = Number(contextTokens);
@@ -126,8 +141,16 @@ function inputBudget({ provider, model, maxTokens = 1024, contextTokens = null }
         ? Math.min(Math.max(Math.floor(configured), 1024), 2_000_000)
         : contextWindow(provider, model);
 
-    const reply = Number.isFinite(Number(maxTokens)) ? Math.max(Number(maxTokens), 0) : 1024;
-    return Math.max(window - reply - HEADROOM_TOKENS, MIN_INPUT_TOKENS);
+    const asked = Number.isFinite(Number(maxTokens)) ? Math.max(Number(maxTokens), 0) : 1024;
+    const reply = Math.min(asked, Math.floor(window / 2));
+    // Scaled for a small window too, for the same reason: a fixed 1024 of
+    // overhead against a 1024-token window is the whole of it.
+    const headroom = Math.min(HEADROOM_TOKENS, Math.floor(window / 8));
+
+    // `window - reply` is at least half the window, which the schema's own
+    // 1024 floor keeps at or above MIN_INPUT_TOKENS — so this is never zero
+    // and never negative.
+    return Math.min(Math.max(window - reply - headroom, MIN_INPUT_TOKENS), window - reply);
 }
 
 /** One section as it will appear in the system prompt, or '' when it is empty. */
@@ -255,15 +278,29 @@ function fitPrompt({
     // itself is cut. Only reachable for a genuinely enormous message against a
     // tiny window, and a truncated question the model can see beats a request
     // the provider refuses.
+    //
+    // The marker is part of what gets sent, so it comes out of the room the
+    // message has rather than being added on top of it — appending it after
+    // slicing to the full budget put the result back over the line it had just
+    // been cut to.
     let promptTruncated = false;
     if (total() > budget) {
-        const room = Math.max(budget - (total() - estimateTokens(promptText)), MIN_INPUT_TOKENS);
+        const room = budget - (total() - estimateTokens(promptText)) - estimateTokens(TRUNCATION_MARKER);
         const chars = room * CHARS_PER_TOKEN;
-        if (promptText.length > chars) {
-            promptText = `${promptText.slice(0, chars)}\n[message truncated to fit the model's context]`;
+        if (room > 0 && promptText.length > chars) {
+            promptText = promptText.slice(0, chars) + TRUNCATION_MARKER;
             promptTruncated = true;
         }
     }
+
+    // What is left after everything droppable has gone. It can still be over
+    // budget, and only two things get it there: the sections nothing may drop,
+    // and the fixed costs — the pinned memories, the rolling summary, the
+    // images. A guild can arrange all three larger than its model's window, and
+    // the honest answer then is that this request cannot be sent, not a prompt
+    // handed to the provider in the hope it disagrees. `fits` is that answer;
+    // the caller says so in the channel rather than spending the call.
+    const estimatedAfter = total();
 
     return {
         systemPrompt: sectionsText(live),
@@ -272,7 +309,11 @@ function fitPrompt({
         report: {
             budget,
             estimatedBefore: before,
-            estimatedAfter: total(),
+            estimatedAfter,
+            fits: estimatedAfter <= budget,
+            // What of the overflow is not this module's to trim, so the caller
+            // can say which knob the person on the other end has to turn.
+            fixedTokens: fixed,
             dropped,
             historyDropped,
             promptTruncated

@@ -5,9 +5,19 @@ const { decryptSecret } = require('../../../config/secretBox');
 
 // OpenRouter is OpenAI-compatible: same wire protocol, different base URL and
 // attribution headers.
+//
+// `visionCapable` is the one thing the OpenAI request path cannot work out for
+// itself here. It decides whether to attach an image by matching the model name
+// against OpenAI's own list, and an OpenRouter id is `anthropic/claude-…` or
+// `google/gemini-…` as often as it is `openai/…` — none of which that list
+// knows. Left to it, an image accepted here was silently dropped there, and the
+// user got a confident answer about a picture the model was never shown. The
+// answer is settled once, by `supportsVision` below, and travels with the
+// request rather than being re-derived from an id that means something else.
 function withOpenRouter(req) {
     return {
         ...req,
+        visionCapable: supportsVision(req.model),
         baseURL: 'https://openrouter.ai/api/v1',
         defaultHeaders: {
             'HTTP-Referer': process.env.OPENROUTER_REFERER || 'https://github.com/TheShield2594/clawdia',

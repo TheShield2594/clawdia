@@ -32,7 +32,8 @@ OLLAMA_BASE_URL=http://localhost:11434
 - Dedicated AI chat channel
 - **Model context window** — leave empty and it is derived from the model name.
   Set it for a self-hosted model whose window only you know: Ollama serves
-  whatever `num_ctx` it was loaded with, and the name does not say
+  whatever `num_ctx` the model was loaded with, and nothing in the model name
+  declares that value — `llama3.2` is the same name at 4k and at 128k
 
 **Images**:
 
